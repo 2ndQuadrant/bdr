@@ -835,7 +835,7 @@ PostmasterMain(int argc, char *argv[])
 				(errmsg("WAL archival (archive_mode=on) requires wal_level \"archive\" or \"hot_standby\"")));
 	if (max_wal_senders > 0 && wal_level == WAL_LEVEL_MINIMAL)
 		ereport(ERROR,
-				(errmsg("WAL streaming (max_wal_senders > 0) requires wal_level \"archive\" or \"hot_standby\"")));
+				(errmsg("WAL streaming (max_wal_senders > 0) requires wal_level \"archive\", \"logical\" or \"hot_standby\"")));
 
 	/*
 	 * Other one-time internal sanity checks can go here, if they are fast.
@@ -1956,9 +1956,8 @@ retry1:
 	/* Generic Walsender is not related to a particular database */
 	if (am_walsender && strcmp(port->database_name, "replication") == 0)
 		port->database_name[0] = '\0';
-
-	if (am_walsender)
-		elog(WARNING, "connecting to %s", port->database_name);
+	else if (am_walsender)
+		elog(DEBUG1, "WAL sender attaching to database %s", port->database_name);
 
 	/*
 	 * Done putting stuff in TopMemoryContext.

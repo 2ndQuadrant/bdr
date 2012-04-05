@@ -160,7 +160,7 @@
 
 # - Settings -
 
-#wal_level = minimal			# minimal, archive, or hot_standby
+#wal_level = minimal			# minimal, archive, logical or hot_standby
 					# (change requires restart)
 #fsync = on				# turns forced synchronization on or off
 #synchronous_commit = on		# synchronization level;
@@ -207,10 +207,17 @@
 
 # Set these on the master and on any standby that will send replication data.
 
-#max_wal_senders = 0		# max number of walsender processes
+#max_wal_senders = 0		# max number of walsender processes, including
+				# both physical and logical replication senders.
 				# (change requires restart)
 #wal_keep_segments = 0		# in logfile segments, 16MB each; 0 disables
 #wal_sender_timeout = 60s	# in milliseconds; 0 disables
+
+#max_logical_slots = 0		# max number of logical replication sender
+				# and receiver processes. Logical senders
+				# (but not receivers) also consume a
+				# max_wal_senders slot.
+				# (change requires restart)
 
 # - Master Server -
 

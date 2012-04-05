@@ -2619,6 +2619,8 @@ DATA(insert OID = 2022 (  pg_stat_get_activity			PGNSP PGUID 12 1 100 0 0 f f f 
 DESCR("statistics: information about currently active backends");
 DATA(insert OID = 3099 (  pg_stat_get_wal_senders	PGNSP PGUID 12 1 10 0 0 f f f f f t s 0 0 2249 "" "{23,25,25,25,25,25,23,25}" "{o,o,o,o,o,o,o,o}" "{pid,state,sent_location,write_location,flush_location,replay_location,sync_priority,sync_state}" _null_ pg_stat_get_wal_senders _null_ _null_ _null_ ));
 DESCR("statistics: information about currently active replication");
+DATA(insert OID = 3457 (  pg_stat_get_logical_decoding_slots	PGNSP PGUID 12 1 10 0 0 f f f f f t s 0 0 2249 "" "{25,25,26,16,28,25}" "{o,o,o,o,o,o}" "{slot_name,plugin,database,active,xmin,last_required_checkpoint}" _null_ pg_stat_get_logical_decoding_slots _null_ _null_ _null_ ));
+DESCR("statistics: information about logical replication slots currently in use");
 DATA(insert OID = 2026 (  pg_backend_pid				PGNSP PGUID 12 1 0 0 0 f f f f t f s 0 0 23 "" _null_ _null_ _null_ _null_ pg_backend_pid _null_ _null_ _null_ ));
 DESCR("statistics: current backend PID");
 DATA(insert OID = 1937 (  pg_stat_get_backend_pid		PGNSP PGUID 12 1 0 0 0 f f f f t f s 1 0 23 "23" _null_ _null_ _null_ _null_ pg_stat_get_backend_pid _null_ _null_ _null_ ));
@@ -4723,6 +4725,10 @@ DESCR("SP-GiST support for quad tree over range");
 DATA(insert OID = 3473 (  spg_range_quad_leaf_consistent	PGNSP PGUID 12 1 0 0 0 f f f f t f i 2 0 16 "2281 2281" _null_ _null_ _null_ _null_  spg_range_quad_leaf_consistent _null_ _null_ _null_ ));
 DESCR("SP-GiST support for quad tree over range");
 
+DATA(insert OID = 3779 (  init_logical_replication PGNSP PGUID 12 1 0 0 0 f f f f f f v 2 0 2249 "19 19" "{19,19,25,25}" "{i,i,o,o}" "{slotname,plugin,slotname,xlog_position}" _null_ init_logical_replication _null_ _null_ _null_ ));
+DESCR("set up a logical replication slot");
+DATA(insert OID = 3780 (  stop_logical_replication PGNSP PGUID 12 1 0 0 0 f f f f f f v 1 0 23 "19" _null_ _null_ _null_ _null_ stop_logical_replication _null_ _null_ _null_ ));
+DESCR("stop logical replication");
 
 DATA(insert OID = 3781 (  pg_xlog_wait_remote_apply PGNSP PGUID 12 1 0 0 0 f f f f f f v 2 0 2278 "25 23" _null_ _null_ _null_ _null_ pg_xlog_wait_remote_apply _null_ _null_ _null_ ));
 DESCR("wait for an lsn to be applied by a remote node");

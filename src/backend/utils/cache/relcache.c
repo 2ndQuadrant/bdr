@@ -3553,7 +3553,10 @@ RelationGetIndexList(Relation relation)
 					Form_pg_attribute attr;
 					/* internal column, like oid */
 					if (attno <= 0)
-						continue;
+					{
+						found = false;
+						break;
+					}
 
 					attr = relation->rd_att->attrs[attno - 1];
 					if (!attr->attnotnull)
@@ -3841,17 +3844,26 @@ RelationGetIndexPredicate(Relation relation)
  * be bms_free'd when not needed anymore.
  */
 Bitmapset *
-RelationGetIndexAttrBitmap(Relation relation, bool keyAttrs)
+RelationGetIndexAttrBitmap(Relation relation, IndexAttrBitmapKind attrKind)
 {
 	Bitmapset  *indexattrs;
-	Bitmapset  *uindexattrs;
+	Bitmapset  *uindexattrs; /* unique keys */
+	Bitmapset  *cindexattrs; /* best candidate key */
 	List	   *indexoidlist;
 	ListCell   *l;
 	MemoryContext oldcxt;
 
 	/* Quick exit if we already computed the result. */
 	if (relation->rd_indexattr != NULL)
-		return bms_copy(keyAttrs ? relation->rd_keyattr : relation->rd_indexattr);
+		switch(attrKind)
+		{
+			case INDEX_ATTR_BITMAP_CANDIDATE_KEY:
+				return bms_copy(relation->rd_ckeyattr);
+			case INDEX_ATTR_BITMAP_KEY:
+				return bms_copy(relation->rd_keyattr);
+			case INDEX_ATTR_BITMAP_ALL:
+				return bms_copy(relation->rd_indexattr);
+		}
 
 	/* Fast path if definitely no indexes */
 	if (!RelationGetForm(relation)->relhasindex)
@@ -3878,13 +3890,16 @@ RelationGetIndexAttrBitmap(Relation relation, bool keyAttrs)
 	 */
 	indexattrs = NULL;
 	uindexattrs = NULL;
+	cindexattrs = NULL;
 	foreach(l, indexoidlist)
 	{
 		Oid			indexOid = lfirst_oid(l);
 		Relation	indexDesc;
 		IndexInfo  *indexInfo;
 		int			i;
-		bool		isKey;
+		bool		isCKey;/* candidate or primary key */
+		bool		isKey;/* key member */
+
 
 		indexDesc = index_open(indexOid, AccessShareLock);
 
@@ -3896,6 +3911,8 @@ RelationGetIndexAttrBitmap(Relation relation, bool keyAttrs)
 				indexInfo->ii_Expressions == NIL &&
 				indexInfo->ii_Predicate == NIL;
 
+		isCKey = indexOid == relation->rd_primary;
+
 		/* Collect simple attribute references */
 		for (i = 0; i < indexInfo->ii_NumIndexAttrs; i++)
 		{
@@ -3905,6 +3922,11 @@ RelationGetIndexAttrBitmap(Relation relation, bool keyAttrs)
 			{
 				indexattrs = bms_add_member(indexattrs,
 							   attrnum - FirstLowInvalidHeapAttributeNumber);
+
+				if (isCKey)
+					cindexattrs = bms_add_member(cindexattrs,
+												 attrnum - FirstLowInvalidHeapAttributeNumber);
+
 				if (isKey)
 					uindexattrs = bms_add_member(uindexattrs,
 												 attrnum - FirstLowInvalidHeapAttributeNumber);
@@ -3926,10 +3948,21 @@ RelationGetIndexAttrBitmap(Relation relation, bool keyAttrs)
 	oldcxt = MemoryContextSwitchTo(CacheMemoryContext);
 	relation->rd_indexattr = bms_copy(indexattrs);
 	relation->rd_keyattr = bms_copy(uindexattrs);
+	relation->rd_ckeyattr = bms_copy(cindexattrs);
 	MemoryContextSwitchTo(oldcxt);
 
 	/* We return our original working copy for caller to play with */
-	return keyAttrs ? uindexattrs : indexattrs;
+	switch(attrKind)
+	{
+		case INDEX_ATTR_BITMAP_CANDIDATE_KEY:
+			return cindexattrs;
+		case INDEX_ATTR_BITMAP_KEY:
+			return uindexattrs;
+		case INDEX_ATTR_BITMAP_ALL:
+			return indexattrs;
+		default:
+			elog(ERROR, "unknown attrKind %u", attrKind);
+	}
 }
 
 /*
@@ -4903,4 +4936,50 @@ unlink_initfile(const char *initfilename)
 		if (errno != ENOENT)
 			elog(LOG, "could not remove cache file \"%s\": %m", initfilename);
 	}
+}
+
+bool
+RelationIsDoingTimetravelInternal(Relation relation)
+{
+	Assert(wal_level >= WAL_LEVEL_LOGICAL);
+
+	if (!RelationNeedsWAL(relation))
+		return false;
+
+	/*
+	 * XXX: Doing this test instead of using IsSystemNamespace has the
+	 * advantage of classifying a catalog relation's toast tables as a
+	 * timetravel relation as well. This is safe since even a oid wraparound
+	 * will preserve this property (c.f. GetNewObjectId()).
+	 */
+	if (RelationGetRelid(relation) < FirstNormalObjectId)
+		return true;
+
+	/*
+	 * Also log relevant data if we want the table to behave as a catalog
+	 * table, although its not a system provided one.
+	 * XXX: we need to make sure both the relation and its toast relation have
+	 * the flag set!
+	 */
+	if (RelationIsTreatedAsCatalogTable(relation))
+	    return true;
+
+	return false;
+}
+
+bool
+RelationIsLogicallyLoggedInternal(Relation relation)
+{
+	Assert(wal_level >= WAL_LEVEL_LOGICAL);
+	if (!RelationNeedsWAL(relation))
+		return false;
+	/*
+	 * XXX: In addition to the above comment, we could decide to always log
+	 * data even for real system catalogs, although the benefits of that seem
+	 * unclear.
+	 */
+	if (RelationGetRelid(relation) < FirstNormalObjectId)
+		return false;
+
+	return true;
 }
