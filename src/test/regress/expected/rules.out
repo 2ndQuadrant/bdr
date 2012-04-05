@@ -1678,6 +1678,13 @@ SELECT viewname, definition FROM pg_views WHERE schemaname <> 'information_schem
                                  |     pg_stat_get_db_conflict_bufferpin(d.oid) AS confl_bufferpin,                                                                                                                                               +
                                  |     pg_stat_get_db_conflict_startup_deadlock(d.oid) AS confl_deadlock                                                                                                                                          +
                                  |    FROM pg_database d;
+ pg_stat_logical_replication     |  SELECT l.slot_name,                                                                                                                                                                                           +
+                                 |     l.plugin,                                                                                                                                                                                                  +
+                                 |     l.database,                                                                                                                                                                                                +
+                                 |     l.active,                                                                                                                                                                                                  +
+                                 |     l.xmin,                                                                                                                                                                                                    +
+                                 |     l.last_required_checkpoint                                                                                                                                                                                 +
+                                 |    FROM pg_stat_get_logical_replication_slots() l(slot_name, plugin, database, active, xmin, last_required_checkpoint);
  pg_stat_replication             |  SELECT s.pid,                                                                                                                                                                                                 +
                                  |     s.usesysid,                                                                                                                                                                                                +
                                  |     u.rolname AS usename,                                                                                                                                                                                      +
@@ -2139,7 +2146,7 @@ SELECT viewname, definition FROM pg_views WHERE schemaname <> 'information_schem
                                  |    FROM tv;
  tvvmv                           |  SELECT tvvm.grandtot                                                                                                                                                                                          +
                                  |    FROM tvvm;
-(64 rows)
+(65 rows)
 
 SELECT tablename, rulename, definition FROM pg_rules
 	ORDER BY tablename, rulename;
