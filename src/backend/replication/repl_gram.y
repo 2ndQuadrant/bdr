@@ -65,7 +65,7 @@ Node *replication_parse_result;
 }
 
 /* Non-keyword tokens */
-%token <str> SCONST
+%token <str> SCONST IDENT
 %token <intval> ICONST
 %token <recptr> RECPTR
 
@@ -73,6 +73,9 @@ Node *replication_parse_result;
 %token K_BASE_BACKUP
 %token K_IDENTIFY_SYSTEM
 %token K_START_REPLICATION
+%token K_INIT_LOGICAL_REPLICATION
+%token K_START_LOGICAL_REPLICATION
+%token K_FREE_LOGICAL_REPLICATION
 %token K_TIMELINE_HISTORY
 %token K_LABEL
 %token K_PROGRESS
@@ -82,10 +85,13 @@ Node *replication_parse_result;
 %token K_TIMELINE
 
 %type <node>	command
-%type <node>	base_backup start_replication identify_system timeline_history
+%type <node>	base_backup start_replication start_logical_replication init_logical_replication free_logical_replication identify_system timeline_history
 %type <list>	base_backup_opt_list
 %type <defelt>	base_backup_opt
 %type <intval>	opt_timeline
+%type <list>	plugin_options plugin_opt_list
+%type <defelt>	plugin_opt_elem
+%type <node>	plugin_opt_arg
 %%
 
 firstcmd: command opt_semicolon
@@ -102,6 +108,9 @@ command:
 			identify_system
 			| base_backup
 			| start_replication
+			| init_logical_replication
+			| start_logical_replication
+			| free_logical_replication
 			| timeline_history
 			;
 
@@ -186,6 +195,67 @@ opt_timeline:
 				| /* nothing */			{ $$ = 0; }
 			;
 
+init_logical_replication:
+			K_INIT_LOGICAL_REPLICATION IDENT IDENT
+				{
+					InitLogicalReplicationCmd *cmd;
+					cmd = makeNode(InitLogicalReplicationCmd);
+					cmd->name = $2;
+					cmd->plugin = $3;
+					$$ = (Node *) cmd;
+				}
+			;
+
+start_logical_replication:
+			K_START_LOGICAL_REPLICATION IDENT RECPTR plugin_options
+				{
+					StartLogicalReplicationCmd *cmd;
+					cmd = makeNode(StartLogicalReplicationCmd);
+					cmd->name = $2;
+					cmd->startpoint = $3;
+					cmd->options = $4;
+					$$ = (Node *) cmd;
+				}
+			;
+
+plugin_options:
+			'(' plugin_opt_list ')'			{ $$ = $2; }
+			| /* EMPTY */					{ $$ = NIL; }
+		;
+
+plugin_opt_list:
+			plugin_opt_elem
+				{
+					$$ = list_make1($1);
+				}
+			| plugin_opt_list ',' plugin_opt_elem
+				{
+					$$ = lappend($1, $3);
+				}
+		;
+
+plugin_opt_elem:
+			IDENT plugin_opt_arg
+				{
+					$$ = makeDefElem($1, $2);
+				}
+		;
+
+plugin_opt_arg:
+			SCONST							{ $$ = (Node *) makeString($1); }
+			| /* EMPTY */					{ $$ = NULL; }
+		;
+
+free_logical_replication:
+			K_FREE_LOGICAL_REPLICATION IDENT
+				{
+					FreeLogicalReplicationCmd *cmd;
+					cmd = makeNode(FreeLogicalReplicationCmd);
+					cmd->name = $2;
+					$$ = (Node *) cmd;
+				}
+			;
+
 /*
  * TIMELINE_HISTORY %d
  */
@@ -205,6 +275,7 @@ timeline_history:
 					$$ = (Node *) cmd;
 				}
 			;
+
 %%
 
 #include "repl_scanner.c"

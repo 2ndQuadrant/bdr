@@ -39,7 +39,8 @@ extern PGDLLIMPORT SnapshotData SnapshotToastData;
 
 /* This macro encodes the knowledge of which snapshots are MVCC-safe */
 #define IsMVCCSnapshot(snapshot)  \
-	((snapshot)->satisfies == HeapTupleSatisfiesMVCC)
+	((snapshot)->satisfies == HeapTupleSatisfiesMVCC || \
+	 (snapshot)->satisfies == HeapTupleSatisfiesMVCCDuringDecoding)
 
 /*
  * HeapTupleSatisfiesVisibility
@@ -89,5 +90,33 @@ extern bool HeapTupleIsSurelyDead(HeapTuple htup,
 extern void HeapTupleSetHintBits(HeapTupleHeader tuple, Buffer buffer,
 					 uint16 infomask, TransactionId xid);
 extern bool HeapTupleHeaderIsOnlyLocked(HeapTupleHeader tuple);
+
+/*
+ * Special "satisfies" routines used during decoding xlog from a different
+ * point of lsn. Also used for timetravel SnapshotNow's.
+ */
+extern bool HeapTupleSatisfiesMVCCDuringDecoding(HeapTuple htup,
+                                                 Snapshot snapshot, Buffer buffer);
+
+/*
+ * install the 'snapshot_now' snapshot as a timetravelling snapshot replacing
+ * the normal SnapshotNow behaviour. This snapshot needs to have been created
+ * by snapbuild.c otherwise you will see crashes!
+ *
+ * FIXME: We need something resembling the real SnapshotNow to handle things
+ * like enum lookups from indices correctly.
+ */
+extern void SetupDecodingSnapshots(Snapshot snapshot_now, HTAB *tuplecids);
+extern void RevertFromDecodingSnapshots(void);
+
+/*
+ * resolve combocids and overwritten cmin values
+ *
+ * To avoid leaking to much knowledge about the reorderbuffer this is
+ * implemented in reorderbuffer.c not tqual.c.
+ */
+extern bool ResolveCminCmaxDuringDecoding(HTAB *tuplecid_data, HeapTuple htup,
+										  Buffer buffer,
+										  CommandId *cmin, CommandId *cmax);
 
 #endif   /* TQUAL_H */

@@ -19,6 +19,7 @@
 #ifndef XLOGREADER_H
 #define XLOGREADER_H
 
+#include "access/xlog.h"
 #include "access/xlog_internal.h"
 
 typedef struct XLogReaderState XLogReaderState;
@@ -108,9 +109,18 @@ struct XLogReaderState
 	char	   *errormsg_buf;
 };
 
-/* Get a new XLogReader */
+
 extern XLogReaderState *XLogReaderAllocate(XLogPageReadCB pagereadfunc,
 				   void *private_data);
+
+
+typedef struct XLogRecordBuffer
+{
+	XLogRecPtr origptr;
+	XLogRecord record;
+	char *record_data;
+} XLogRecordBuffer;
+
 
 /* Free an XLogReader */
 extern void XLogReaderFree(XLogReaderState *state);

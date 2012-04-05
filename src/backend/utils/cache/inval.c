@@ -475,7 +475,7 @@ RegisterRelcacheInvalidation(Oid dbId, Oid relId)
  * Only the local caches are flushed; this does not transmit the message
  * to other backends.
  */
-static void
+void
 LocalExecuteInvalidationMessage(SharedInvalidationMessage *msg)
 {
 	if (msg->id >= 0)

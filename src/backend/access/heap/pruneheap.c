@@ -75,6 +75,8 @@ heap_page_prune_opt(Relation relation, Buffer buffer, TransactionId OldestXmin)
 	Page		page = BufferGetPage(buffer);
 	Size		minfree;
 
+	Assert(TransactionIdIsValid(OldestXmin));
+
 	/*
 	 * Let's see if we really need pruning.
 	 *

@@ -51,6 +51,9 @@
 #include "access/xact.h"
 #include "access/twophase.h"
 #include "miscadmin.h"
+#include "replication/logical.h"
+#include "replication/walsender.h"
+#include "replication/walsender_private.h"
 #include "storage/proc.h"
 #include "storage/procarray.h"
 #include "storage/spin.h"
@@ -1157,6 +1160,14 @@ GetOldestXmin(bool allDbs, bool ignoreVacuum, bool alreadyLocked)
 		}
 	}
 
+	if (max_logical_slots > 0 &&
+		TransactionIdIsValid(LogicalDecodingCtl->xmin) &&
+		NormalTransactionIdPrecedes(LogicalDecodingCtl->xmin, result))
+	{
+		result = LogicalDecodingCtl->xmin;
+	}
+
+
 	if (RecoveryInProgress())
 	{
 		/*
@@ -1265,6 +1276,7 @@ GetSnapshotData(Snapshot snapshot)
 	int			count = 0;
 	int			subcount = 0;
 	bool		suboverflowed = false;
+	volatile TransactionId logical_xmin = InvalidTransactionId;
 
 	Assert(snapshot != NULL);
 
@@ -1442,8 +1454,14 @@ GetSnapshotData(Snapshot snapshot)
 			suboverflowed = true;
 	}
 
+
+	/* fetch into volatile var while ProcArrayLock is held */
+	if (max_logical_slots > 0)
+		logical_xmin = LogicalDecodingCtl->xmin;
+
 	if (!TransactionIdIsValid(MyPgXact->xmin))
 		MyPgXact->xmin = TransactionXmin = xmin;
+
 	LWLockRelease(ProcArrayLock);
 
 	/*
@@ -1458,6 +1476,17 @@ GetSnapshotData(Snapshot snapshot)
 	RecentGlobalXmin = globalxmin - vacuum_defer_cleanup_age;
 	if (!TransactionIdIsNormal(RecentGlobalXmin))
 		RecentGlobalXmin = FirstNormalTransactionId;
+
+	/* Non-catalog tables can be vacuumed if older than this xid */
+	RecentGlobalDataXmin = RecentGlobalXmin;
+
+	/*
+	 * peg the global xmin to the one required for logical decoding if required
+	 */
+	if (TransactionIdIsNormal(logical_xmin) &&
+		NormalTransactionIdPrecedes(logical_xmin, RecentGlobalXmin))
+		RecentGlobalXmin = logical_xmin;
+
 	RecentXmin = xmin;
 
 	snapshot->xmin = xmin;
@@ -1558,9 +1587,11 @@ ProcArrayInstallImportedXmin(TransactionId xmin, TransactionId sourcexid)
  * Similar to GetSnapshotData but returns more information. We include
  * all PGXACTs with an assigned TransactionId, even VACUUM processes.
  *
- * We acquire XidGenLock, but the caller is responsible for releasing it.
- * This ensures that no new XIDs enter the proc array until the caller has
- * WAL-logged this snapshot, and releases the lock.
+ * We acquire XidGenLock and ProcArrayLock, but the caller is responsible for
+ * releasing them. Acquiring XidGenLock ensures that no new XIDs enter the proc
+ * array until the caller has WAL-logged this snapshot, and releases the
+ * lock. Acquiring ProcArrayLock ensures that no transactions commit until the
+ * lock is released.
  *
  * The returned data structure is statically allocated; caller should not
  * modify it, and must not assume it is valid past the next call.
@@ -1695,6 +1726,12 @@ GetRunningTransactionData(void)
 		}
 	}
 
+	/*
+	 * Its important *not* to track decoding tasks here because snapbuild.c
+	 * uses ->oldestRunningXid to manage its xmin. If it were to be included
+	 * here the initial value could never increase.
+	 */
+
 	CurrentRunningXacts->xcnt = count - subcount;
 	CurrentRunningXacts->subxcnt = subcount;
 	CurrentRunningXacts->subxid_overflow = suboverflowed;
@@ -1702,12 +1739,11 @@ GetRunningTransactionData(void)
 	CurrentRunningXacts->oldestRunningXid = oldestRunningXid;
 	CurrentRunningXacts->latestCompletedXid = latestCompletedXid;
 
-	/* We don't release XidGenLock here, the caller is responsible for that */
-	LWLockRelease(ProcArrayLock);
-
 	Assert(TransactionIdIsValid(CurrentRunningXacts->nextXid));
 	Assert(TransactionIdIsValid(CurrentRunningXacts->oldestRunningXid));
 	Assert(TransactionIdIsNormal(CurrentRunningXacts->latestCompletedXid));
+
+	/* We don't release the locks here, the caller is responsible for that */
 
 	return CurrentRunningXacts;
 }

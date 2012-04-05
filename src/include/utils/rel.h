@@ -116,6 +116,7 @@ typedef struct RelationData
 	List	   *rd_indexlist;	/* list of OIDs of indexes on relation */
 	Bitmapset  *rd_indexattr;	/* identifies columns used in indexes */
 	Bitmapset  *rd_keyattr;		/* cols that can be ref'd by foreign keys */
+	Bitmapset  *rd_ckeyattr;	/* cols that are included ref'd by pkey */
 	Oid			rd_oidindex;	/* OID of unique index on OID, if any */
 	LockInfoData rd_lockInfo;	/* lock mgr's info for locking relation */
 	RuleLock   *rd_rules;		/* rewrite rules */
@@ -232,6 +233,7 @@ typedef struct StdRdOptions
 	int			fillfactor;		/* page fill factor in percent (0..100) */
 	AutoVacOpts autovacuum;		/* autovacuum-related options */
 	bool		security_barrier;		/* for views */
+	bool        treat_as_catalog_table; /* treat as timetraveleable table */
 } StdRdOptions;
 
 #define HEAP_MIN_FILLFACTOR			10
@@ -266,6 +268,14 @@ typedef struct StdRdOptions
 #define RelationIsSecurityView(relation)	\
 	((relation)->rd_options ?				\
 	 ((StdRdOptions *) (relation)->rd_options)->security_barrier : false)
+
+/*
+ * RelationIsTreatedAsCatalogTable
+ *		Returns whether the relation is security view, or not
+ */
+#define RelationIsTreatedAsCatalogTable(relation)	\
+	((relation)->rd_options ?				\
+	 ((StdRdOptions *) (relation)->rd_options)->treat_as_catalog_table : false)
 
 /*
  * RelationIsValid
@@ -418,6 +428,25 @@ typedef struct StdRdOptions
 #define RELATION_IS_OTHER_TEMP(relation) \
 	((relation)->rd_rel->relpersistence == RELPERSISTENCE_TEMP && \
 	 !(relation)->rd_islocaltemp)
+
+/*
+ * RelationIsDoingTimetravel
+ *		True if we need to log enough information to provide timetravel access
+ */
+#define RelationIsDoingTimetravel(relation) \
+	(wal_level >= WAL_LEVEL_LOGICAL && \
+	 RelationIsDoingTimetravelInternal(relation))
+
+/*
+ * RelationIsLogicallyLogged
+ *		True if we need to log enough information to provide timetravel access
+ */
+#define RelationIsLogicallyLogged(relation) \
+	(wal_level >= WAL_LEVEL_LOGICAL && \
+	 RelationIsLogicallyLoggedInternal(relation))
+
+extern bool RelationIsDoingTimetravelInternal(Relation relation);
+extern bool RelationIsLogicallyLoggedInternal(Relation relation);
 
 /* routines in utils/cache/relcache.c */
 extern void RelationIncrementReferenceCount(Relation rel);

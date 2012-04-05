@@ -55,6 +55,18 @@
 #define XLOG_HEAP2_VISIBLE		0x40
 #define XLOG_HEAP2_MULTI_INSERT 0x50
 #define XLOG_HEAP2_LOCK_UPDATED 0x60
+#define XLOG_HEAP2_NEW_CID		0x70
+
+/*
+ * xl_heap_* ->flag values
+ */
+/* PD_ALL_VISIBLE was cleared */
+#define XLOG_HEAP_ALL_VISIBLE_CLEARED		(1<<0)
+/* PD_ALL_VISIBLE was cleared in the 2nd page */
+#define XLOG_HEAP_NEW_ALL_VISIBLE_CLEARED	(1<<1)
+#define XLOG_HEAP_CONTAINS_OLD_TUPLE		(1<<2)
+#define XLOG_HEAP_CONTAINS_OLD_KEY			(1<<3)
+#define XLOG_HEAP_CONTAINS_NEW_TUPLE		(1<<4)
 
 /*
  * All what we need to find changed tuple
@@ -78,10 +90,10 @@ typedef struct xl_heap_delete
 	xl_heaptid	target;			/* deleted tuple id */
 	TransactionId xmax;			/* xmax of the deleted tuple */
 	uint8		infobits_set;	/* infomask bits */
-	bool		all_visible_cleared;	/* PD_ALL_VISIBLE was cleared */
+	uint8		flags;
 } xl_heap_delete;
 
-#define SizeOfHeapDelete	(offsetof(xl_heap_delete, all_visible_cleared) + sizeof(bool))
+#define SizeOfHeapDelete	(offsetof(xl_heap_delete, flags) + sizeof(uint8))
 
 /*
  * We don't store the whole fixed part (HeapTupleHeaderData) of an inserted
@@ -100,15 +112,23 @@ typedef struct xl_heap_header
 
 #define SizeOfHeapHeader	(offsetof(xl_heap_header, t_hoff) + sizeof(uint8))
 
+typedef struct xl_heap_header_len
+{
+	uint16      t_len;
+	xl_heap_header header;
+} xl_heap_header_len;
+
+#define SizeOfHeapHeaderLen	(offsetof(xl_heap_header_len, header) + SizeOfHeapHeader)
+
 /* This is what we need to know about insert */
 typedef struct xl_heap_insert
 {
 	xl_heaptid	target;			/* inserted tuple id */
-	bool		all_visible_cleared;	/* PD_ALL_VISIBLE was cleared */
+	uint8		flags;
 	/* xl_heap_header & TUPLE DATA FOLLOWS AT END OF STRUCT */
 } xl_heap_insert;
 
-#define SizeOfHeapInsert	(offsetof(xl_heap_insert, all_visible_cleared) + sizeof(bool))
+#define SizeOfHeapInsert	(offsetof(xl_heap_insert, flags) + sizeof(uint8))
 
 /*
  * This is what we need to know about a multi-insert. The record consists of
@@ -120,7 +140,7 @@ typedef struct xl_heap_multi_insert
 {
 	RelFileNode node;
 	BlockNumber blkno;
-	bool		all_visible_cleared;
+	uint8		flags;
 	uint16		ntuples;
 	OffsetNumber offsets[1];
 
@@ -148,12 +168,11 @@ typedef struct xl_heap_update
 	TransactionId new_xmax;		/* xmax of the new tuple */
 	ItemPointerData newtid;		/* new inserted tuple id */
 	uint8		old_infobits_set;	/* infomask bits to set on old tuple */
-	bool		all_visible_cleared;	/* PD_ALL_VISIBLE was cleared */
-	bool		new_all_visible_cleared;		/* same for the page of newtid */
+	uint8		flags;
 	/* NEW TUPLE xl_heap_header AND TUPLE DATA FOLLOWS AT END OF STRUCT */
 } xl_heap_update;
 
-#define SizeOfHeapUpdate	(offsetof(xl_heap_update, new_all_visible_cleared) + sizeof(bool))
+#define SizeOfHeapUpdate	(offsetof(xl_heap_update, flags) + sizeof(uint8))
 
 /*
  * This is what we need to know about vacuum page cleanup/redirect
@@ -260,6 +279,28 @@ typedef struct xl_heap_visible
 } xl_heap_visible;
 
 #define SizeOfHeapVisible (offsetof(xl_heap_visible, cutoff_xid) + sizeof(TransactionId))
+
+typedef struct xl_heap_new_cid
+{
+	/*
+	 * store toplevel xid so we don't have to merge cids from different
+	 * transactions
+	 */
+	TransactionId top_xid;
+	CommandId cmin;
+	CommandId cmax;
+	/*
+	 * don't really need the combocid but the padding makes it free and its
+	 * useful for debugging.
+	 */
+	CommandId combocid;
+	/*
+	 * Store the relfilenode/ctid pair to facilitate lookups.
+	 */
+	xl_heaptid target;
+} xl_heap_new_cid;
+
+#define SizeOfHeapNewCid (offsetof(xl_heap_new_cid, target) + SizeOfHeapTid)
 
 extern void HeapTupleHeaderAdvanceLatestRemovedXid(HeapTupleHeader tuple,
 									   TransactionId *latestRemovedXid);

@@ -66,6 +66,7 @@ typedef struct WalSnd
 
 extern WalSnd *MyWalSnd;
 
+
 /* There is one WalSndCtl struct for the whole database cluster */
 typedef struct
 {
@@ -93,7 +94,6 @@ typedef struct
 
 extern WalSndCtlData *WalSndCtl;
 
-
 extern void WalSndSetState(WalSndState state);
 
 /*
@@ -107,5 +107,9 @@ extern void replication_scanner_init(const char *query_string);
 extern void replication_scanner_finish(void);
 
 extern Node *replication_parse_result;
+
+/* logical wal sender data gathering functions */
+extern XLogRecPtr WalSndWaitForWal(XLogRecPtr loc);
+
 
 #endif   /* _WALSENDER_PRIVATE_H */

@@ -431,6 +431,7 @@ AssignTransactionId(TransactionState s)
 {
 	bool		isSubXact = (s->parent != NULL);
 	ResourceOwner currentOwner;
+	bool log_unknown_top = false;
 
 	/* Assert that caller didn't screw up */
 	Assert(!TransactionIdIsValid(s->transactionId));
@@ -438,7 +439,7 @@ AssignTransactionId(TransactionState s)
 
 	/*
 	 * Ensure parent(s) have XIDs, so that a child always has an XID later
-	 * than its parent.  Musn't recurse here, or we might get a stack overflow
+	 * than its parent.  May not recurse here, or we might get a stack overflow
 	 * if we're at the bottom of a huge stack of subtransactions none of which
 	 * have XIDs yet.
 	 */
@@ -453,6 +454,17 @@ AssignTransactionId(TransactionState s)
 		{
 			parents[parentOffset++] = p;
 			p = p->parent;
+		}
+
+		/*
+		 * Force the toplevel xid to be logged before suxact's are logged. If
+		 * the uppermost level already has an xid that precondition already is
+		 * fulfilled.
+		 */
+		Assert(parentOffset);
+		if (XLogLogicalInfoActive() && parents[parentOffset - 1]->parent == NULL)
+		{
+			log_unknown_top = true;
 		}
 
 		/*
@@ -519,6 +531,9 @@ AssignTransactionId(TransactionState s)
 	 * top-level transaction that each subxact belongs to. This is correct in
 	 * recovery only because aborted subtransactions are separately WAL
 	 * logged.
+	 *
+	 * This is correct even for the case where several levels above us didn't
+	 * have an xid assigned as we recursed up to them beforehand.
 	 */
 	if (isSubXact && XLogStandbyInfoActive())
 	{
@@ -529,7 +544,8 @@ AssignTransactionId(TransactionState s)
 		 * ensure this test matches similar one in
 		 * RecoverPreparedTransactions()
 		 */
-		if (nUnreportedXids >= PGPROC_MAX_CACHED_SUBXIDS)
+		if (nUnreportedXids >= PGPROC_MAX_CACHED_SUBXIDS ||
+		    log_unknown_top)
 		{
 			XLogRecData rdata[2];
 			xl_xact_assignment xlrec;
@@ -548,7 +564,7 @@ AssignTransactionId(TransactionState s)
 			rdata[0].next = &rdata[1];
 
 			rdata[1].data = (char *) unreportedXids;
-			rdata[1].len = PGPROC_MAX_CACHED_SUBXIDS * sizeof(TransactionId);
+			rdata[1].len = nUnreportedXids * sizeof(TransactionId);
 			rdata[1].buffer = InvalidBuffer;
 			rdata[1].next = NULL;
 
