@@ -591,6 +591,17 @@ static const struct cachedesc cacheinfo[] = {
 		},
 		64
 	},
+	{RelationRelationId,		/* RELFILENODE */
+		ClassTblspcRelfilenodeIndexId,
+		2,
+		{
+			Anum_pg_class_reltablespace,
+			Anum_pg_class_relfilenode,
+			0,
+			0
+		},
+		1024
+	},
 	{RelationRelationId,		/* RELNAMENSP */
 		ClassNameNspIndexId,
 		2,
