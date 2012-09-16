@@ -180,6 +180,59 @@ RelationMapOidToFilenode(Oid relationId, bool shared)
 	return InvalidOid;
 }
 
+/* RelationMapFilenodeToOid
+ *
+ * Do the reverse of the normal direction of mapping done in
+ * RelationMapOidToFilenode.
+ *
+ * This is not supposed to be used during normal running but rather for
+ * information purposes when looking at the filesystem or the xlog.
+ *
+ * Returns InvalidOid if the OID is not know which can easily happen if the
+ * filenode is not of a relation that is nailed or shared or if it simply
+ * doesn't exists anywhere.
+ */
+Oid
+RelationMapFilenodeToOid(Oid filenode, bool shared)
+{
+	const RelMapFile *map;
+	int32		i;
+
+	/* If there are active updates, believe those over the main maps */
+	if (shared)
+	{
+		map = &active_shared_updates;
+		for (i = 0; i < map->num_mappings; i++)
+		{
+			if (filenode == map->mappings[i].mapfilenode)
+				return map->mappings[i].mapoid;
+		}
+		map = &shared_map;
+		for (i = 0; i < map->num_mappings; i++)
+		{
+			if (filenode == map->mappings[i].mapfilenode)
+				return map->mappings[i].mapoid;
+		}
+	}
+	else
+	{
+		map = &active_local_updates;
+		for (i = 0; i < map->num_mappings; i++)
+		{
+			if (filenode == map->mappings[i].mapfilenode)
+				return map->mappings[i].mapoid;
+		}
+		map = &local_map;
+		for (i = 0; i < map->num_mappings; i++)
+		{
+			if (filenode == map->mappings[i].mapfilenode)
+				return map->mappings[i].mapoid;
+		}
+	}
+
+	return InvalidOid;
+}
+
 /*
  * RelationMapUpdateMap
  *
