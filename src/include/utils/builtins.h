@@ -459,8 +459,10 @@ extern Datum pg_size_pretty(PG_FUNCTION_ARGS);
 extern Datum pg_size_pretty_numeric(PG_FUNCTION_ARGS);
 extern Datum pg_table_size(PG_FUNCTION_ARGS);
 extern Datum pg_indexes_size(PG_FUNCTION_ARGS);
+extern Datum pg_relation_by_filenode(PG_FUNCTION_ARGS);
 extern Datum pg_relation_filenode(PG_FUNCTION_ARGS);
 extern Datum pg_relation_filepath(PG_FUNCTION_ARGS);
+extern Datum pg_relation_is_scannable(PG_FUNCTION_ARGS);
 
 /* genfile.c */
 extern bytea *read_binary_file(const char *filename,
