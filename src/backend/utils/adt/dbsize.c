@@ -746,6 +746,85 @@ pg_relation_filenode(PG_FUNCTION_ARGS)
 }
 
 /*
+ * Get the relation via (reltablespace, relfilenode)
+ *
+ * This is expected to be used when somebody wants to match an individual file
+ * on the filesystem back to its table. Thats not trivially possible via
+ * pg_class because that doesn't contain the relfilenodes of shared and nailed
+ * tables.
+ *
+ * We don't fail but return NULL if we cannot find a mapping.
+ *
+ * Instead of knowing DEFAULTTABLESPACE_OID you can pass 0.
+ */
+Datum
+pg_relation_by_filenode(PG_FUNCTION_ARGS)
+{
+	Oid			reltablespace = PG_GETARG_OID(0);
+	Oid			relfilenode = PG_GETARG_OID(1);
+	Oid			lookup_tablespace = reltablespace;
+	Oid         result = InvalidOid;
+	HeapTuple	tuple;
+
+	if (reltablespace == 0)
+		reltablespace = DEFAULTTABLESPACE_OID;
+
+	/* pg_class stores 0 instead of DEFAULTTABLESPACE_OID */
+	if (reltablespace == DEFAULTTABLESPACE_OID)
+		lookup_tablespace = 0;
+
+	tuple = SearchSysCache2(RELFILENODE,
+							lookup_tablespace,
+							relfilenode);
+
+	/* found it in the system catalog, not be a shared/nailed table */
+	if (HeapTupleIsValid(tuple))
+	{
+		result = HeapTupleHeaderGetOid(tuple->t_data);
+		ReleaseSysCache(tuple);
+	}
+	else
+	{
+		if (reltablespace == GLOBALTABLESPACE_OID)
+		{
+			result = RelationMapFilenodeToOid(relfilenode, true);
+		}
+		else
+		{
+			Form_pg_class relform;
+
+			result = RelationMapFilenodeToOid(relfilenode, false);
+
+			if (result != InvalidOid)
+			{
+				/* check that we found the correct relation */
+				tuple = SearchSysCache1(RELOID,
+									result);
+
+				if (!HeapTupleIsValid(tuple))
+				{
+					elog(ERROR, "Couldn't refind previously looked up relation with oid %u",
+						 result);
+				}
+
+				relform = (Form_pg_class) GETSTRUCT(tuple);
+
+				if (relform->reltablespace != reltablespace &&
+					relform->reltablespace != lookup_tablespace)
+					result = InvalidOid;
+
+				ReleaseSysCache(tuple);
+			}
+		}
+	}
+
+	if (!OidIsValid(result))
+		PG_RETURN_NULL();
+	else
+		PG_RETURN_OID(result);
+}
+
+/*
  * Get the pathname (relative to $PGDATA) of a relation
  *
  * See comments for pg_relation_filenode.
