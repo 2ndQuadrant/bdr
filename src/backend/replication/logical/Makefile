@@ -17,3 +17,9 @@ override CPPFLAGS := -I$(srcdir) $(CPPFLAGS)
 OBJS = decode.o logical.o logicalfuncs.o reorderbuffer.o snapbuild.o
 
 include $(top_srcdir)/src/backend/common.mk
+
+DESIGN.pdf: DESIGN.txt
+	a2x -v --fop -f pdf -D $(shell pwd) $<
+
+README.SNAPBUILD.pdf: README.SNAPBUILD.txt
+	a2x -v --fop -f pdf -D $(shell pwd) $<
