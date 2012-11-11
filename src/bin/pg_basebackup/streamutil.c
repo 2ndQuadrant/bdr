@@ -22,6 +22,7 @@ char	   *connection_string = NULL;
 char	   *dbhost = NULL;
 char	   *dbuser = NULL;
 char	   *dbport = NULL;
+char	   *dbname = NULL;
 int			dbgetpassword = 0;	/* 0=auto, -1=never, 1=always */
 static char *dbpassword = NULL;
 PGconn	   *conn = NULL;
@@ -87,7 +88,7 @@ GetConnection(void)
 	}
 
 	keywords[i] = "dbname";
-	values[i] = "replication";
+	values[i] = dbname == NULL ? "replication" : dbname;
 	i++;
 	keywords[i] = "replication";
 	values[i] = "true";
