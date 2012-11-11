@@ -5,6 +5,7 @@ extern char *connection_string;
 extern char *dbhost;
 extern char *dbuser;
 extern char *dbport;
+extern char *dbname;
 extern int	dbgetpassword;
 
 /* Connection kept global so we can disconnect easily */
