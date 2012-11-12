@@ -151,7 +151,7 @@ static void lazy_record_dead_tuple(LVRelStats *vacrelstats,
 					   ItemPointer itemptr);
 static bool lazy_tid_reaped(ItemPointer itemptr, void *state);
 static int	vac_cmp_itemptr(const void *left, const void *right);
-static bool heap_page_is_all_visible(Buffer buf,
+static bool heap_page_is_all_visible(Relation rel, Buffer buf,
 						 TransactionId *visibility_cutoff_xid);
 
 
@@ -745,10 +745,11 @@ lazy_scan_heap(Relation onerel, LVRelStats *vacrelstats,
 
 			tuple.t_data = (HeapTupleHeader) PageGetItem(page, itemid);
 			tuple.t_len = ItemIdGetLength(itemid);
+			tuple.t_tableOid = RelationGetRelid(onerel);
 
 			tupgone = false;
 
-			switch (HeapTupleSatisfiesVacuum(tuple.t_data, OldestXmin, buf))
+			switch (HeapTupleSatisfiesVacuum(&tuple, OldestXmin, buf))
 			{
 				case HEAPTUPLE_DEAD:
 
@@ -1151,7 +1152,7 @@ lazy_vacuum_page(Relation onerel, BlockNumber blkno, Buffer buffer,
 	 * if the page has become all-visible.
 	 */
 	if (!visibilitymap_test(onerel, blkno, vmbuffer) &&
-		heap_page_is_all_visible(buffer, &visibility_cutoff_xid))
+		heap_page_is_all_visible(onerel, buffer, &visibility_cutoff_xid))
 	{
 		Assert(BufferIsValid(*vmbuffer));
 		PageSetAllVisible(page);
@@ -1669,7 +1670,7 @@ vac_cmp_itemptr(const void *left, const void *right)
  * xmin amongst the visible tuples.
  */
 static bool
-heap_page_is_all_visible(Buffer buf, TransactionId *visibility_cutoff_xid)
+heap_page_is_all_visible(Relation rel, Buffer buf, TransactionId *visibility_cutoff_xid)
 {
 	Page		 page = BufferGetPage(buf);
 	OffsetNumber offnum,
@@ -1712,6 +1713,8 @@ heap_page_is_all_visible(Buffer buf, TransactionId *visibility_cutoff_xid)
 		Assert(ItemIdIsNormal(itemid));
 
 		tuple.t_data = (HeapTupleHeader) PageGetItem(page, itemid);
+		tuple.t_len = ItemIdGetLength(itemid);
+		tuple.t_tableOid = RelationGetRelid(rel);
 
 		switch (HeapTupleSatisfiesVacuum(tuple.t_data, OldestXmin, buf))
 		{
