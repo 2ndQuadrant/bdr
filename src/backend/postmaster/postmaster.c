@@ -1953,9 +1953,12 @@ retry1:
 	if (strlen(port->user_name) >= NAMEDATALEN)
 		port->user_name[NAMEDATALEN - 1] = '\0';
 
-	/* Walsender is not related to a particular database */
-	if (am_walsender)
+	/* Generic Walsender is not related to a particular database */
+	if (am_walsender && strcmp(port->database_name, "replication") == 0)
 		port->database_name[0] = '\0';
+
+	if (am_walsender)
+		elog(WARNING, "connecting to %s", port->database_name);
 
 	/*
 	 * Done putting stuff in TopMemoryContext.
