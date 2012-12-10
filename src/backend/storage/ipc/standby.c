@@ -42,7 +42,7 @@ static void ResolveRecoveryConflictWithVirtualXIDs(VirtualTransactionId *waitlis
 									   ProcSignalReason reason);
 static void ResolveRecoveryConflictWithLock(Oid dbOid, Oid relOid);
 static void SendRecoveryConflictWithBufferPin(ProcSignalReason reason);
-static void LogCurrentRunningXacts(RunningTransactions CurrRunningXacts);
+static XLogRecPtr LogCurrentRunningXacts(RunningTransactions CurrRunningXacts);
 static void LogAccessExclusiveLocks(int nlocks, xl_standby_lock *locks);
 
 
@@ -846,10 +846,13 @@ standby_redo(XLogRecPtr lsn, XLogRecord *record)
  * currently running xids, performed by StandbyReleaseOldLocks().
  * Zero xids should no longer be possible, but we may be replaying WAL
  * from a time when they were possible.
+ *
+ * Returns the RecPtr of the last inserted record.
  */
-void
+XLogRecPtr
 LogStandbySnapshot(void)
 {
+	XLogRecPtr recptr;
 	RunningTransactions running;
 	xl_standby_lock *locks;
 	int			nlocks;
@@ -875,8 +878,11 @@ LogStandbySnapshot(void)
 	 */
 	running = GetRunningTransactionData();
 	LogCurrentRunningXacts(running);
+
 	/* GetRunningTransactionData() acquired XidGenLock, we must release it */
 	LWLockRelease(XidGenLock);
+
+	return recptr;
 }
 
 /*
@@ -887,7 +893,7 @@ LogStandbySnapshot(void)
  * is a contiguous chunk of memory and never exists fully until it is
  * assembled in WAL.
  */
-static void
+static XLogRecPtr
 LogCurrentRunningXacts(RunningTransactions CurrRunningXacts)
 {
 	xl_running_xacts xlrec;
@@ -937,6 +943,16 @@ LogCurrentRunningXacts(RunningTransactions CurrRunningXacts)
 			 CurrRunningXacts->oldestRunningXid,
 			 CurrRunningXacts->latestCompletedXid,
 			 CurrRunningXacts->nextXid);
+
+	/*
+	 * Ensure running xact information is synced to disk not too far in the
+	 * future, logical standby's need this soon after initialization. We don't
+	 * want to stall anything though, so we let the wal writer do it during
+	 * normal operation.
+	 */
+	XLogSetAsyncXactLSN(recptr);
+
+	return recptr;
 }
 
 /*

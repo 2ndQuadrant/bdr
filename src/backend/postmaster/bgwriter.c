@@ -54,9 +54,11 @@
 #include "storage/shmem.h"
 #include "storage/smgr.h"
 #include "storage/spin.h"
+#include "storage/standby.h"
 #include "utils/guc.h"
 #include "utils/memutils.h"
 #include "utils/resowner.h"
+#include "utils/timestamp.h"
 
 
 /*
@@ -75,6 +77,10 @@ int			BgWriterDelay = 200;
  */
 static volatile sig_atomic_t got_SIGHUP = false;
 static volatile sig_atomic_t shutdown_requested = false;
+
+static TimestampTz last_logged_snap_ts;
+static XLogRecPtr last_logged_snap_recptr = InvalidXLogRecPtr;
+static uint32 log_snap_interval_ms = 15000;
 
 /* Signal handlers */
 
@@ -140,6 +146,12 @@ BackgroundWriterMain(void)
 	 * buffer pins).
 	 */
 	CurrentResourceOwner = ResourceOwnerCreate(NULL, "Background Writer");
+
+	/*
+	 * We just started, assume there has been either a shutdown or
+	 * end-of-recovery snapshot.
+	 */
+	last_logged_snap_ts = GetCurrentTimestamp();
 
 	/*
 	 * Create a memory context that we will do all our work in.  We do this so
@@ -273,6 +285,41 @@ BackgroundWriterMain(void)
 			 * won't hang onto smgr references to deleted files indefinitely.
 			 */
 			smgrcloseall();
+		}
+
+		/*
+		 * Log a new xl_running_xacts every now and then so replication can get
+		 * into a consistent state faster and clean up resources more
+		 * frequently. The costs of this are relatively low, so doing it 4
+		 * times a minute seems fine.
+		 *
+		 * We assume the interval for writing xl_running_xacts is significantly
+		 * bigger than BgWriterDelay, so we don't complicate the overall
+		 * timeout handling but just assume we're going to get called often
+		 * enough even if hibernation mode is active. It's not that important
+		 * that log_snap_interval_ms is met strictly.
+		 *
+		 * We do this logging in the bgwriter as its the only process thats run
+		 * regularly and returns to its mainloop all the
+		 * time. E.g. Checkpointer, when active, is barely every in its
+		 * mainloop.
+		 */
+		if (XLogStandbyInfoActive() && !RecoveryInProgress())
+		{
+			TimestampTz timeout = 0;
+			timeout = TimestampTzPlusMilliseconds(last_logged_snap_ts,
+												  log_snap_interval_ms);
+
+			/*
+			 * only log if enough time has passed and some xlog record has been
+			 * inserted.
+			 */
+			if (GetCurrentTimestamp() >= timeout &&
+				last_logged_snap_recptr != GetXLogInsertRecPtr())
+			{
+				last_logged_snap_recptr = LogStandbySnapshot();
+				last_logged_snap_ts = GetCurrentTimestamp();
+			}
 		}
 
 		/*
