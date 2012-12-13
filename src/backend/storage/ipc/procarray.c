@@ -1100,7 +1100,7 @@ TransactionIdIsActive(TransactionId xid)
  * GetOldestXmin() move backwards, with no consequences for data integrity.
  */
 TransactionId
-GetOldestXmin(bool allDbs, bool ignoreVacuum)
+GetOldestXmin(bool allDbs, bool ignoreVacuum, bool alreadyLocked)
 {
 	ProcArrayStruct *arrayP = procArray;
 	TransactionId result;
@@ -1109,7 +1109,8 @@ GetOldestXmin(bool allDbs, bool ignoreVacuum)
 	/* Cannot look for individual databases during recovery */
 	Assert(allDbs || !RecoveryInProgress());
 
-	LWLockAcquire(ProcArrayLock, LW_SHARED);
+	if (!alreadyLocked)
+		LWLockAcquire(ProcArrayLock, LW_SHARED);
 
 	/*
 	 * We initialize the MIN() calculation with latestCompletedXid + 1. This
@@ -1164,7 +1165,8 @@ GetOldestXmin(bool allDbs, bool ignoreVacuum)
 		 */
 		TransactionId kaxmin = KnownAssignedXidsGetOldestXmin();
 
-		LWLockRelease(ProcArrayLock);
+		if (!alreadyLocked)
+			LWLockRelease(ProcArrayLock);
 
 		if (TransactionIdIsNormal(kaxmin) &&
 			TransactionIdPrecedes(kaxmin, result))
@@ -1172,10 +1174,8 @@ GetOldestXmin(bool allDbs, bool ignoreVacuum)
 	}
 	else
 	{
-		/*
-		 * No other information needed, so release the lock immediately.
-		 */
-		LWLockRelease(ProcArrayLock);
+		if (!alreadyLocked)
+			LWLockRelease(ProcArrayLock);
 
 		/*
 		 * Compute the cutoff XID by subtracting vacuum_defer_cleanup_age,
@@ -1249,7 +1249,7 @@ GetMaxSnapshotSubxidCount(void)
  *			older than this are known not running any more.
  *		RecentGlobalXmin: the global xmin (oldest TransactionXmin across all
  *			running transactions, except those running LAZY VACUUM).  This is
- *			the same computation done by GetOldestXmin(true, true).
+ *			the same computation done by GetOldestXmin(true, true, ...).
  *
  * Note: this function should probably not be called with an argument that's
  * not statically allocated (see xip allocation below).
