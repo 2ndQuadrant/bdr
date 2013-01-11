@@ -1,0 +1,5 @@
+# test_logical_decoding extension
+comment = 'test logical decoding'
+default_version = '1.0'
+module_pathname = '$libdir/test_logical_decoding'
+relocatable = true
