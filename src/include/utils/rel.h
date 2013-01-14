@@ -123,6 +123,18 @@ typedef struct RelationData
 	TriggerDesc *trigdesc;		/* Trigger info, or NULL if rel has none */
 
 	/*
+	 * The 'best' primary or candidate key that has been found, only set
+	 * correctly if RelationGetIndexList has been called/rd_indexvalid > 0.
+	 *
+	 * Indexes are chosen in the following order:
+	 * * Primary Key
+	 * * oid index
+	 * * the first (OID order) unique, immediate, non-partial and
+	 *   non-expression index over one or more NOT NULL'ed columns
+	 */
+	Oid rd_primary;
+
+	/*
 	 * rd_options is set whenever rd_rel is loaded into the relcache entry.
 	 * Note that you can NOT look into rd_rel for this data.  NULL means "use
 	 * defaults".

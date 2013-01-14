@@ -3475,7 +3475,9 @@ RelationGetIndexList(Relation relation)
 	ScanKeyData skey;
 	HeapTuple	htup;
 	List	   *result;
-	Oid			oidIndex;
+	Oid			oidIndex = InvalidOid;
+	Oid			pkeyIndex = InvalidOid;
+	Oid			candidateIndex = InvalidOid;
 	MemoryContext oldcxt;
 
 	/* Quick exit if we already computed the list. */
@@ -3532,17 +3534,61 @@ RelationGetIndexList(Relation relation)
 		Assert(!isnull);
 		indclass = (oidvector *) DatumGetPointer(indclassDatum);
 
+		if (!IndexIsValid(index))
+			continue;
+
 		/* Check to see if it is a unique, non-partial btree index on OID */
-		if (IndexIsValid(index) &&
-			index->indnatts == 1 &&
+		if (index->indnatts == 1 &&
 			index->indisunique && index->indimmediate &&
 			index->indkey.values[0] == ObjectIdAttributeNumber &&
 			indclass->values[0] == OID_BTREE_OPS_OID &&
 			heap_attisnull(htup, Anum_pg_index_indpred))
 			oidIndex = index->indexrelid;
+
+		if (index->indisunique &&
+			index->indimmediate &&
+			heap_attisnull(htup, Anum_pg_index_indpred))
+		{
+			/* always prefer primary keys */
+			if (index->indisprimary)
+				pkeyIndex = index->indexrelid;
+			else if (!OidIsValid(pkeyIndex)
+					&& !OidIsValid(oidIndex)
+					&& !OidIsValid(candidateIndex))
+			{
+				int key;
+				bool found = true;
+				for (key = 0; key < index->indnatts; key++)
+				{
+					int16 attno = index->indkey.values[key];
+					Form_pg_attribute attr;
+					/* internal column, like oid */
+					if (attno <= 0)
+						continue;
+
+					attr = relation->rd_att->attrs[attno - 1];
+					if (!attr->attnotnull)
+					{
+						found = false;
+						break;
+					}
+				}
+				if (found)
+					candidateIndex = index->indexrelid;
+			}
+		}
 	}
 
 	systable_endscan(indscan);
+
+	if (OidIsValid(pkeyIndex))
+		relation->rd_primary = pkeyIndex;
+	/* prefer oid indexes over normal candidate ones */
+	else if (OidIsValid(oidIndex))
+		relation->rd_primary = oidIndex;
+	else if (OidIsValid(candidateIndex))
+		relation->rd_primary = candidateIndex;
+
 	heap_close(indrel, AccessShareLock);
 
 	/* Now save a copy of the completed list in the relcache entry. */
