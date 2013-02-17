@@ -44,9 +44,6 @@
 
 #undef TOAST_DEBUG
 
-/* Size of an EXTERNAL datum that contains a standard TOAST pointer */
-#define TOAST_POINTER_SIZE (VARHDRSZ_EXTERNAL + sizeof(struct varatt_external))
-
 /*
  * Testing whether an externally-stored value is compressed now requires
  * comparing extsize (the actual length of the external data) to rawsize
@@ -130,6 +127,7 @@ heap_tuple_untoast_attr(struct varlena * attr)
 {
 	if (VARATT_IS_EXTERNAL(attr))
 	{
+		struct varlena *orig_attr = attr;
 		/*
 		 * This is an externally stored datum --- fetch it back from there
 		 */
@@ -142,7 +140,9 @@ heap_tuple_untoast_attr(struct varlena * attr)
 			attr = (struct varlena *) palloc(PGLZ_RAW_SIZE(tmp) + VARHDRSZ);
 			SET_VARSIZE(attr, PGLZ_RAW_SIZE(tmp) + VARHDRSZ);
 			pglz_decompress(tmp, VARDATA(attr));
-			pfree(tmp);
+			/* don't free tuple if its coming from memory, not disk */
+			if (!VARATT_IS_EXTERNAL_INDIRECT(orig_attr))
+				pfree(tmp);
 		}
 	}
 	else if (VARATT_IS_COMPRESSED(attr))
@@ -191,7 +191,7 @@ heap_tuple_untoast_attr_slice(struct varlena * attr,
 	char	   *attrdata;
 	int32		attrsize;
 
-	if (VARATT_IS_EXTERNAL(attr))
+	if (VARATT_IS_EXTERNAL_TOAST(attr))
 	{
 		struct varatt_external toast_pointer;
 
@@ -203,6 +203,13 @@ heap_tuple_untoast_attr_slice(struct varlena * attr,
 
 		/* fetch it back (compressed marker will get set automatically) */
 		preslice = toast_fetch_datum(attr);
+	}
+	else if (VARATT_IS_EXTERNAL_INDIRECT(attr))
+	{
+		struct varatt_indirect redirect;
+		VARATT_EXTERNAL_GET_POINTER(redirect, attr);
+		return heap_tuple_untoast_attr_slice(redirect.pointer,
+											 sliceoffset, slicelength);
 	}
 	else
 		preslice = attr;
@@ -267,13 +274,20 @@ toast_raw_datum_size(Datum value)
 	struct varlena *attr = (struct varlena *) DatumGetPointer(value);
 	Size		result;
 
-	if (VARATT_IS_EXTERNAL(attr))
+	if (VARATT_IS_EXTERNAL_TOAST(attr))
 	{
 		/* va_rawsize is the size of the original datum -- including header */
 		struct varatt_external toast_pointer;
 
 		VARATT_EXTERNAL_GET_POINTER(toast_pointer, attr);
 		result = toast_pointer.va_rawsize;
+	}
+	else if (VARATT_IS_EXTERNAL_INDIRECT(attr))
+	{
+		struct varatt_indirect toast_pointer;
+
+		VARATT_EXTERNAL_GET_POINTER(toast_pointer, attr);
+		return toast_raw_datum_size(PointerGetDatum(toast_pointer.pointer));
 	}
 	else if (VARATT_IS_COMPRESSED(attr))
 	{
@@ -308,7 +322,7 @@ toast_datum_size(Datum value)
 	struct varlena *attr = (struct varlena *) DatumGetPointer(value);
 	Size		result;
 
-	if (VARATT_IS_EXTERNAL(attr))
+	if (VARATT_IS_EXTERNAL_TOAST(attr))
 	{
 		/*
 		 * Attribute is stored externally - return the extsize whether
@@ -319,6 +333,13 @@ toast_datum_size(Datum value)
 
 		VARATT_EXTERNAL_GET_POINTER(toast_pointer, attr);
 		result = toast_pointer.va_extsize;
+	}
+	else if (VARATT_IS_EXTERNAL_INDIRECT(attr))
+	{
+		struct varatt_indirect toast_pointer;
+
+		VARATT_EXTERNAL_GET_POINTER(toast_pointer, attr);
+		return toast_datum_size(PointerGetDatum(toast_pointer.pointer));
 	}
 	else if (VARATT_IS_SHORT(attr))
 	{
@@ -387,12 +408,56 @@ toast_delete(Relation rel, HeapTuple oldtup)
 		{
 			Datum		value = toast_values[i];
 
-			if (!toast_isnull[i] && VARATT_IS_EXTERNAL(PointerGetDatum(value)))
+			if (toast_isnull[i])
+				continue;
+			else if (VARATT_IS_EXTERNAL_TOAST(PointerGetDatum(value)))
 				toast_delete_datum(rel, value);
+			else if (VARATT_IS_EXTERNAL_INDIRECT(PointerGetDatum(value)))
+				elog(ERROR, "cannot delete tuples with indirect toast tuples for now");
 		}
 	}
 }
 
+/* ----------
+ * toast_datum_differs -
+ *
+ *  Determine whether two toasted datums are the same and don't have to be
+ *  stored again.
+ * ----------
+ */
+static bool
+toast_datum_differs(struct varlena *old_value, struct varlena *new_value)
+{
+	Assert(VARATT_IS_EXTERNAL(old_value));
+	Assert(VARATT_IS_EXTERNAL(new_value));
+
+	/* fast path for the common case where we have the toast oid available */
+	if (VARATT_IS_EXTERNAL_TOAST(old_value) &&
+		VARATT_IS_EXTERNAL_TOAST(new_value))
+		return memcmp((char *) old_value, (char *) new_value,
+					  VARSIZE_EXTERNAL(old_value)) != 0;
+
+	/*
+	 * compare size of tuples, so we don't uselessly detoast/decompress tuples
+	 * if they can't be the same anyway.
+	 */
+	if (toast_raw_datum_size(PointerGetDatum(old_value)) !=
+		toast_raw_datum_size(PointerGetDatum(new_value)))
+		return false;
+
+	old_value = heap_tuple_untoast_attr(old_value);
+	new_value = heap_tuple_untoast_attr(new_value);
+
+	Assert(!VARATT_IS_EXTERNAL(old_value));
+	Assert(!VARATT_IS_EXTERNAL(new_value));
+	Assert(!VARATT_IS_COMPRESSED(old_value));
+	Assert(!VARATT_IS_COMPRESSED(new_value));
+	Assert(VARSIZE_ANY_EXHDR(old_value) == VARSIZE_ANY_EXHDR(new_value));
+
+	/* compare payload, we're fine with unaligned data */
+	return memcmp(VARDATA_ANY(old_value), VARDATA_ANY(new_value),
+				  VARSIZE_ANY_EXHDR(old_value)) != 0;
+}
 
 /* ----------
  * toast_insert_or_update -
@@ -497,8 +562,7 @@ toast_insert_or_update(Relation rel, HeapTuple newtup, HeapTuple oldtup,
 				VARATT_IS_EXTERNAL(old_value))
 			{
 				if (toast_isnull[i] || !VARATT_IS_EXTERNAL(new_value) ||
-					memcmp((char *) old_value, (char *) new_value,
-						   VARSIZE_EXTERNAL(old_value)) != 0)
+					toast_datum_differs(old_value, new_value))
 				{
 					/*
 					 * The old external stored value isn't needed any more
@@ -1258,6 +1322,8 @@ toast_save_datum(Relation rel, Datum value,
 	int32		data_todo;
 	Pointer		dval = DatumGetPointer(value);
 
+	Assert(!VARATT_IS_EXTERNAL(value));
+
 	/*
 	 * Open the toast relation and its index.  We can use the index to check
 	 * uniqueness of the OID we assign to the toasted item, even though it has
@@ -1341,7 +1407,7 @@ toast_save_datum(Relation rel, Datum value,
 		{
 			struct varatt_external old_toast_pointer;
 
-			Assert(VARATT_IS_EXTERNAL(oldexternal));
+			Assert(VARATT_IS_EXTERNAL_TOAST(oldexternal));
 			/* Must copy to access aligned fields */
 			VARATT_EXTERNAL_GET_POINTER(old_toast_pointer, oldexternal);
 			if (old_toast_pointer.va_toastrelid == rel->rd_toastoid)
@@ -1483,6 +1549,8 @@ toast_delete_datum(Relation rel, Datum value)
 	if (!VARATT_IS_EXTERNAL(attr))
 		return;
 
+	Assert(!VARATT_IS_EXTERNAL_INDIRECT(attr));
+
 	/* Must copy to access aligned fields */
 	VARATT_EXTERNAL_GET_POINTER(toast_pointer, attr);
 
@@ -1607,6 +1675,16 @@ toast_fetch_datum(struct varlena * attr)
 	bool		isnull;
 	char	   *chunkdata;
 	int32		chunksize;
+
+	StaticAssertStmt(sizeof(varatt_indirect) != sizeof(varatt_external),
+					 "indiscernible external/indirect toast tuples");
+
+	if (VARATT_IS_EXTERNAL_INDIRECT(attr))
+	{
+		struct varatt_indirect redirect;
+		VARATT_EXTERNAL_GET_POINTER(redirect, attr);
+		return (struct varlena *)redirect.pointer;
+	}
 
 	/* Must copy to access aligned fields */
 	VARATT_EXTERNAL_GET_POINTER(toast_pointer, attr);
@@ -1775,7 +1853,7 @@ toast_fetch_datum_slice(struct varlena * attr, int32 sliceoffset, int32 length)
 	int32		chcpystrt;
 	int32		chcpyend;
 
-	Assert(VARATT_IS_EXTERNAL(attr));
+	Assert(VARATT_IS_EXTERNAL_TOAST(attr));
 
 	/* Must copy to access aligned fields */
 	VARATT_EXTERNAL_GET_POINTER(toast_pointer, attr);
