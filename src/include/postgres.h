@@ -54,23 +54,36 @@
  */
 
 /*
- * struct varatt_external is a "TOAST pointer", that is, the information
- * needed to fetch a stored-out-of-line Datum.	The data is compressed
- * if and only if va_extsize < va_rawsize - VARHDRSZ.  This struct must not
- * contain any padding, because we sometimes compare pointers using memcmp.
+ * struct varatt_external is a "TOAST pointer", that is, the information needed
+ * to fetch a Datum stored in an out-of-line on-disk Datum. The data is
+ * compressed if and only if va_extsize < va_rawsize - VARHDRSZ.  This struct
+ * must not contain any padding, because we sometimes compare pointers using
+ * memcmp.
  *
  * Note that this information is stored unaligned within actual tuples, so
  * you need to memcpy from the tuple into a local struct variable before
  * you can look at these fields!  (The reason we use memcmp is to avoid
  * having to do that just to detect equality of two TOAST pointers...)
  */
-struct varatt_external
+typedef struct varatt_external
 {
 	int32		va_rawsize;		/* Original data size (includes header) */
 	int32		va_extsize;		/* External saved size (doesn't) */
 	Oid			va_valueid;		/* Unique ID of value within TOAST table */
 	Oid			va_toastrelid;	/* RelID of TOAST table containing it */
-};
+} varatt_external;
+
+/*
+ * Out-of-line Datum thats stored in memory in contrast to varatt_external
+ * pointers which points to data in an external toast relation.
+ *
+ * Note that just as varatt_external's this is stored unaligned within the
+ * tuple.
+ */
+typedef struct varatt_indirect
+{
+	struct varlena *pointer;	/* Pointer to in-memory varlena */
+} varatt_indirect;
 
 /*
  * These structs describe the header of a varlena object that may have been
@@ -106,7 +119,7 @@ typedef struct
 {
 	uint8		va_header;		/* Always 0x80 or 0x01 */
 	uint8		va_len_1be;		/* Physical length of datum */
-	char		va_data[1];		/* Data (for now always a TOAST pointer) */
+	char		va_data[1];		/* Data (pointer to either TOAST or memory) */
 } varattrib_1b_e;
 
 /*
@@ -130,6 +143,9 @@ typedef struct
  * first byte.	Also, it is not possible for a 1-byte length word to be zero;
  * this lets us disambiguate alignment padding bytes from the start of an
  * unaligned datum.  (We now *require* pad bytes to be filled with zero!)
+ *
+ * In TOAST datums the length field in varattrib_1b_e is used to discern
+ * whether its an indirection pointer or more commonly a on-disk tuple.
  */
 
 /*
@@ -217,6 +233,12 @@ typedef struct
 
 #define VARHDRSZ_EXTERNAL		2
 
+/* Size of an EXTERNAL datum that contains a standard TOAST pointer */
+#define TOAST_POINTER_SIZE (VARHDRSZ_EXTERNAL + sizeof(struct varatt_external))
+
+/* Size of an EXTERNAL datum that contains a in-memory TOAST pointer */
+#define INDIRECT_POINTER_SIZE (VARHDRSZ_EXTERNAL + sizeof(struct varatt_indirect))
+
 #define VARDATA_4B(PTR)		(((varattrib_4b *) (PTR))->va_4byte.va_data)
 #define VARDATA_4B_C(PTR)	(((varattrib_4b *) (PTR))->va_compressed.va_data)
 #define VARDATA_1B(PTR)		(((varattrib_1b *) (PTR))->va_data)
@@ -254,6 +276,10 @@ typedef struct
 
 #define VARATT_IS_COMPRESSED(PTR)			VARATT_IS_4B_C(PTR)
 #define VARATT_IS_EXTERNAL(PTR)				VARATT_IS_1B_E(PTR)
+#define VARATT_IS_EXTERNAL_TOAST(PTR) \
+	(VARATT_IS_EXTERNAL(PTR) && VARSIZE_EXTERNAL(PTR) == TOAST_POINTER_SIZE)
+#define VARATT_IS_EXTERNAL_INDIRECT(PTR) \
+	(VARATT_IS_EXTERNAL(PTR) && VARSIZE_EXTERNAL(PTR) == INDIRECT_POINTER_SIZE)
 #define VARATT_IS_SHORT(PTR)				VARATT_IS_1B(PTR)
 #define VARATT_IS_EXTENDED(PTR)				(!VARATT_IS_4B_U(PTR))
 
