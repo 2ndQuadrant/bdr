@@ -10,6 +10,8 @@
 # interferes with crash-recovery testing.
 test: tablespace
 
+test: logical
+
 # ----------
 # The first group of parallel tests
 # ----------
