@@ -120,6 +120,7 @@ pg_opfamily|t
 pg_pltemplate|t
 pg_proc|t
 pg_range|t
+pg_replication_identifier|t
 pg_rewrite|t
 pg_seclabel|t
 pg_shdepend|t
