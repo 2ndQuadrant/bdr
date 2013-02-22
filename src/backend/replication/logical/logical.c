@@ -51,8 +51,12 @@ LogicalDecodingCtlData *LogicalDecodingCtl = NULL;
 /* My slot for logical rep in the shared memory array */
 LogicalDecodingSlot *MyLogicalDecodingSlot = NULL;
 
-/* user settable parameters */
 int			max_logical_slots = 0;		/* the maximum number of logical slots */
+RepNodeId	guc_replication_node_id = InvalidRepNodeId; /* local node id */
+RepNodeId	guc_replication_origin_id = InvalidRepNodeId; /* assumed identity */
+
+XLogRecPtr replication_origin_lsn;
+TimestampTz replication_origin_timestamp;
 
 static void LogicalSlotKill(int code, Datum arg);
 
@@ -598,6 +602,9 @@ StartupLogicalReplication(XLogRecPtr checkPointRedo)
 
 		/* one of our own directories */
 		if (strcmp(logical_de->d_name, "snapshots") == 0)
+			continue;
+
+		if (strcmp(logical_de->d_name, "checkpoints") == 0)
 			continue;
 
 		/* we crashed while a slot was being setup or deleted, clean up */

@@ -161,6 +161,13 @@ typedef struct LogicalDecodingContext
 /* GUCs */
 extern PGDLLIMPORT int max_logical_slots;
 
+#define InvalidRepNodeId 0
+extern PGDLLIMPORT RepNodeId guc_replication_node_id;
+extern PGDLLIMPORT RepNodeId guc_replication_origin_id;
+extern PGDLLIMPORT XLogRecPtr replication_origin_lsn;
+extern PGDLLIMPORT TimestampTz replication_origin_timestamp;
+
+
 extern Size LogicalDecodingShmemSize(void);
 extern void LogicalDecodingShmemInit(void);
 

@@ -37,8 +37,10 @@
 #include "libpq/be-fsstubs.h"
 #include "miscadmin.h"
 #include "pgstat.h"
+#include "replication/logical.h"
 #include "replication/walsender.h"
 #include "replication/syncrep.h"
+#include "replication/replication_identifier.h"
 #include "storage/fd.h"
 #include "storage/lmgr.h"
 #include "storage/predicate.h"
@@ -1052,11 +1054,13 @@ RecordTransactionCommit(void)
 		/*
 		 * Do we need the long commit record? If not, use the compact format.
 		 */
-		if (nrels > 0 || nmsgs > 0 || RelcacheInitFileInval || forceSyncCommit)
+		if (nrels > 0 || nmsgs > 0 || RelcacheInitFileInval || forceSyncCommit
+			|| wal_level >= WAL_LEVEL_LOGICAL)
 		{
-			XLogRecData rdata[4];
+			XLogRecData rdata[5];
 			int			lastrdata = 0;
 			xl_xact_commit xlrec;
+			xl_xact_origin origin;
 
 			/*
 			 * Set flags required for recovery processing of commits.
@@ -1104,6 +1108,22 @@ RecordTransactionCommit(void)
 				rdata[3].buffer = InvalidBuffer;
 				lastrdata = 3;
 			}
+			/* dump transaction origin information */
+			if (guc_replication_origin_id != InvalidRepNodeId)
+			{
+				Assert(replication_origin_lsn != InvalidXLogRecPtr);
+				elog(LOG, "logging origin id");
+				xlrec.xinfo |= XACT_CONTAINS_ORIGIN;
+				origin.origin_node_id = guc_replication_origin_id;
+				origin.origin_lsn = replication_origin_lsn;
+				origin.origin_timestamp = replication_origin_timestamp;
+
+				rdata[lastrdata].next = &(rdata[4]);
+				rdata[4].data = (char *) &origin;
+				rdata[4].len = sizeof(xl_xact_origin);
+				rdata[4].buffer = InvalidBuffer;
+				lastrdata = 4;
+			}
 			rdata[lastrdata].next = NULL;
 
 			(void) XLogInsert(RM_XACT_ID, XLOG_XACT_COMMIT, rdata);
@@ -1134,13 +1154,19 @@ RecordTransactionCommit(void)
 		}
 	}
 
+	/* record plain commit ts if not replaying remote actions */
+	if (guc_replication_origin_id == InvalidRepNodeId)
+		replication_origin_timestamp = xactStopTimestamp;
+
 	/*
 	 * We don't need to log the commit timestamp separately since the commit
 	 * record logged above has all the necessary action to set the timestamp
 	 * again.
 	 */
 	TransactionTreeSetCommitTimestamp(xid, nchildren, children,
-									  xactStopTimestamp, 0, false);
+									  replication_origin_timestamp,
+									  guc_replication_origin_id,
+									  false);
 
 	/*
 	 * Check if we want to commit asynchronously.  We can allow the XLOG flush
@@ -1222,9 +1248,11 @@ RecordTransactionCommit(void)
 	if (wrote_xlog)
 		SyncRepWaitForLSN(XactLastRecEnd);
 
+	/* remember end of last commit record */
+	XactLastCommitEnd = XactLastRecEnd;
+
 	/* Reset XactLastRecEnd until the next transaction writes something */
 	XactLastRecEnd = 0;
-
 cleanup:
 	/* Clean up local data */
 	if (rels)
@@ -4593,10 +4621,12 @@ xact_redo_commit_internal(TransactionId xid, XLogRecPtr lsn,
 						  SharedInvalidationMessage *inval_msgs, int nmsgs,
 						  RelFileNode *xnodes, int nrels,
 						  Oid dbId, Oid tsId,
-						  uint32 xinfo)
+						  uint32 xinfo,
+						  xl_xact_origin *origin)
 {
 	TransactionId max_xid;
 	int			i;
+	RepNodeId	origin_node_id = InvalidRepNodeId;
 
 	max_xid = TransactionIdLatest(xid, nsubxacts, sub_xids);
 
@@ -4616,9 +4646,29 @@ xact_redo_commit_internal(TransactionId xid, XLogRecPtr lsn,
 		LWLockRelease(XidGenLock);
 	}
 
+	Assert(!!(xinfo & XACT_CONTAINS_ORIGIN) == (origin != NULL));
+
+	if (xinfo & XACT_CONTAINS_ORIGIN)
+	{
+		origin_node_id = origin->origin_node_id;
+		commit_time = origin->origin_timestamp;
+	}
+
 	/* Set the transaction commit time */
 	TransactionTreeSetCommitTimestamp(xid, nsubxacts, sub_xids,
-									  commit_time, 0, false);
+									  commit_time,
+									  origin_node_id, false);
+
+	if (xinfo & XACT_CONTAINS_ORIGIN)
+	{
+		elog(LOG, "restoring origin of node %u to %X/%X",
+			 origin->origin_node_id,
+			 (uint32)(origin->origin_lsn >> 32),
+			 (uint32)origin->origin_lsn);
+		AdvanceReplicationIdentifier(origin->origin_node_id,
+									 origin->origin_lsn,
+									 lsn);
+	}
 
 	if (standbyState == STANDBY_DISABLED)
 	{
@@ -4734,11 +4784,16 @@ xact_redo_commit(xl_xact_commit *xlrec,
 {
 	TransactionId *subxacts;
 	SharedInvalidationMessage *inval_msgs;
-
+	xl_xact_origin *origin = NULL;
 	/* subxid array follows relfilenodes */
 	subxacts = (TransactionId *) &(xlrec->xnodes[xlrec->nrels]);
 	/* invalidation messages array follows subxids */
 	inval_msgs = (SharedInvalidationMessage *) &(subxacts[xlrec->nsubxacts]);
+
+	if (xlrec->xinfo & XACT_CONTAINS_ORIGIN)
+	{
+		origin = (xl_xact_origin *) &(inval_msgs[xlrec->nmsgs]);
+	}
 
 	xact_redo_commit_internal(xid, lsn, xlrec->xact_time,
 							  subxacts, xlrec->nsubxacts,
@@ -4746,7 +4801,8 @@ xact_redo_commit(xl_xact_commit *xlrec,
 							  xlrec->xnodes, xlrec->nrels,
 							  xlrec->dbId,
 							  xlrec->tsId,
-							  xlrec->xinfo);
+							  xlrec->xinfo,
+							  origin);
 }
 
 /*
@@ -4762,7 +4818,8 @@ xact_redo_commit_compact(xl_xact_commit_compact *xlrec,
 							  NULL, 0,	/* relfilenodes */
 							  InvalidOid,		/* dbId */
 							  InvalidOid,		/* tsId */
-							  0);		/* xinfo */
+							  0,		/* xinfo */
+							  NULL		/* origin */);
 }
 
 /*
