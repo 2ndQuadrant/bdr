@@ -736,6 +736,13 @@ CREATE VIEW pg_user_mappings AS
 
 REVOKE ALL on pg_user_mapping FROM public;
 
+
+CREATE VIEW pg_replication_identifier_progress AS
+    SELECT *
+    FROM pg_get_replication_identifier_progress();
+
+REVOKE ALL on pg_user_mapping FROM public;
+
 --
 -- We have a few function definitions in here, too.
 -- At some point there might be enough to justify breaking them out into
