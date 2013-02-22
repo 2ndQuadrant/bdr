@@ -55,6 +55,7 @@
 #include "catalog/catversion.h"
 #include "catalog/pg_control.h"
 #include "common/fe_memutils.h"
+#include "replication/logical.h"
 
 extern int	optind;
 extern char *optarg;
@@ -965,6 +966,7 @@ WriteEmptyXLOG(void)
 	record->xl_len = sizeof(CheckPoint);
 	record->xl_info = XLOG_CHECKPOINT_SHUTDOWN;
 	record->xl_rmid = RM_XLOG_ID;
+	record->xl_origin_id = InvalidRepNodeId;
 	memcpy(XLogRecGetData(record), &ControlFile.checkPointCopy,
 		   sizeof(CheckPoint));
 

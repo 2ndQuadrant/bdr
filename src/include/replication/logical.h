@@ -170,6 +170,12 @@ typedef struct LogicalDecodingCheckpointData
 	LogicalDecodingSlot slot;
 } LogicalDecodingCheckpointData;
 
+#define InvalidRepNodeId 0
+extern RepNodeId guc_replication_node_id;
+extern RepNodeId guc_replication_origin_id;
+extern XLogRecPtr replication_origin_lsn;
+
+
 extern Size LogicalDecodingShmemSize(void);
 extern void LogicalDecodingShmemInit(void);
 

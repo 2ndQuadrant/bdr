@@ -197,6 +197,8 @@ static bool check_application_name(char **newval, void **extra, GucSource source
 static void assign_application_name(const char *newval, void *extra);
 static const char *show_unix_socket_permissions(void);
 static const char *show_log_file_mode(void);
+static void assign_replication_node_id(int newval, void *extra);
+static void assign_replication_origin_id(int newval, void *extra);
 
 static char *config_enum_get_options(struct config_enum * record,
 						const char *prefix, const char *suffix,
@@ -469,7 +471,8 @@ static int	wal_block_size;
 static int	wal_segment_size;
 static bool integer_datetimes;
 static int	effective_io_concurrency;
-
+static int	phony_replication_node_id;
+static int	phony_replication_origin_id;
 /* should be static, but commands/variable.c needs to get at this */
 char	   *role_string;
 
@@ -2040,6 +2043,26 @@ static struct config_int ConfigureNamesInt[] =
 		&wal_sender_timeout,
 		60 * 1000, 0, INT_MAX,
 		NULL, NULL, NULL
+	},
+
+	{
+		{"replication_node_id", PGC_POSTMASTER, REPLICATION_MASTER,
+		 gettext_noop("node id for replication."),
+		 NULL
+		},
+		&phony_replication_node_id,
+		InvalidRepNodeId, InvalidRepNodeId, INT_MAX,
+		NULL, assign_replication_node_id, NULL
+	},
+
+	{
+		{"replication_origin_id", PGC_USERSET, REPLICATION_MASTER,
+		 gettext_noop("current node id for replication."),
+		 NULL
+		},
+		&phony_replication_origin_id,
+		InvalidRepNodeId, InvalidRepNodeId, INT_MAX,
+		NULL, assign_replication_origin_id, NULL
 	},
 
 	{
@@ -8781,5 +8804,27 @@ show_log_file_mode(void)
 	snprintf(buf, sizeof(buf), "%04o", Log_file_mode);
 	return buf;
 }
+
+static void
+assign_replication_node_id(int newval, void *extra)
+{
+	guc_replication_node_id = newval;
+	/* set default to local node */
+	guc_replication_origin_id = newval;
+	phony_replication_origin_id = newval;
+}
+
+
+static void
+assign_replication_origin_id(int newval, void *extra)
+{
+	/*
+	 * FIXME: add error checking hook that check wal_level and
+	 * replication_node_id.
+	 */
+	guc_replication_origin_id = newval;
+}
+
+
 
 #include "guc-file.c"

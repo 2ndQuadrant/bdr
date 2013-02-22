@@ -43,6 +43,7 @@
 #include "replication/walreceiver.h"
 #include "replication/walsender.h"
 #include "replication/logical.h"
+#include "replication/replication_identifier.h"
 #include "storage/bufmgr.h"
 #include "storage/fd.h"
 #include "storage/ipc.h"
@@ -274,6 +275,8 @@ static TimeLineID curFileTLI;
 static XLogRecPtr ProcLastRecPtr = InvalidXLogRecPtr;
 
 XLogRecPtr	XactLastRecEnd = InvalidXLogRecPtr;
+
+XLogRecPtr	XactLastCommitEnd = InvalidXLogRecPtr;
 
 /*
  * RedoRecPtr is this backend's local copy of the REDO record pointer
@@ -936,6 +939,7 @@ begin:;
 	rechdr->xl_len = len;		/* doesn't include backup blocks */
 	rechdr->xl_info = info;
 	rechdr->xl_rmid = rmid;
+	rechdr->xl_origin_id = guc_replication_origin_id;
 
 	hdr_rdt.next = rdata;
 	hdr_rdt.data = (char *) rechdr;
@@ -5176,6 +5180,11 @@ StartupXLOG(void)
 	StartupLogicalReplication(checkPoint.redo);
 
 	/*
+	 * Recover knowledge about replay progress of known replication partners.
+	 */
+	StartupReplicationIdentifier(checkPoint.redo);
+
+	/*
 	 * Initialize unlogged LSN. On a clean shutdown, it's restored from the
 	 * control file. On recovery, all unlogged relations are blown away, so
 	 * the unlogged LSN counter can be reset too.
@@ -6841,7 +6850,7 @@ CreateCheckPoint(int flags)
 		XLogRecPtr	curInsert;
 
 		INSERT_RECPTR(curInsert, Insert, Insert->curridx);
-		if (curInsert == ControlFile->checkPoint + 
+		if (curInsert == ControlFile->checkPoint +
 			MAXALIGN(SizeOfXLogRecord + sizeof(CheckPoint)) &&
 			ControlFile->checkPoint == ControlFile->checkPointCopy.redo)
 		{
@@ -7217,6 +7226,7 @@ CheckPointGuts(XLogRecPtr checkPointRedo, int flags)
 	CheckPointPredicate();
 	CheckPointRelationMap();
 	CheckPointBuffers(flags);	/* performs all required fsyncs */
+	CheckPointReplicationIdentifier(checkPointRedo);
 	/* We deliberately delay 2PC checkpointing as long as possible */
 	CheckPointTwoPhase(checkPointRedo);
 }
