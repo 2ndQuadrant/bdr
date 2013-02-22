@@ -59,7 +59,7 @@ CATALOG(pg_replication_identifier,3458) BKI_WITHOUT_OIDS
 	/* remote database */
 	Oid		riremotedb;
 
-	/* optional name, zero */
+	/* optional name, zero length string */
 	NameData riname;
 #ifdef CATALOG_VARLEN		/* variable-length fields start here */
 #endif
