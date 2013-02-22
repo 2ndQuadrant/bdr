@@ -43,6 +43,7 @@
 #include "postmaster/startup.h"
 #include "replication/logical.h"
 #include "replication/slot.h"
+#include "replication/replication_identifier.h"
 #include "replication/snapbuild.h"
 #include "replication/walreceiver.h"
 #include "replication/walsender.h"
@@ -288,6 +289,8 @@ static TimeLineID curFileTLI;
 static XLogRecPtr ProcLastRecPtr = InvalidXLogRecPtr;
 
 XLogRecPtr	XactLastRecEnd = InvalidXLogRecPtr;
+
+XLogRecPtr	XactLastCommitEnd = InvalidXLogRecPtr;
 
 /*
  * RedoRecPtr is this backend's local copy of the REDO record pointer
@@ -1064,6 +1067,7 @@ begin:;
 	rechdr->xl_len = len;		/* doesn't include backup blocks */
 	rechdr->xl_info = info;
 	rechdr->xl_rmid = rmid;
+	rechdr->xl_origin_id = replication_origin_id;
 	rechdr->xl_prev = InvalidXLogRecPtr;
 	COMP_CRC32(rdata_crc, ((char *) rechdr), offsetof(XLogRecord, xl_prev));
 
@@ -6345,6 +6349,11 @@ StartupXLOG(void)
 	StartupMultiXact();
 
 	/*
+	 * Recover knowledge about replay progress of known replication partners.
+	 */
+	StartupReplicationIdentifier(checkPoint.redo);
+
+	/*
 	 * Initialize unlogged LSN. On a clean shutdown, it's restored from the
 	 * control file. On recovery, all unlogged relations are blown away, so
 	 * the unlogged LSN counter can be reset too.
@@ -7977,6 +7986,7 @@ CreateCheckPoint(int flags)
 	XLogCtlInsert *Insert = &XLogCtl->Insert;
 	XLogRecData rdata;
 	uint32		freespace;
+	XLogRecPtr	oldRedoPtr;
 	XLogSegNo	_logSegNo;
 	XLogRecPtr	curInsert;
 	VirtualTransactionId *vxids;
@@ -8285,10 +8295,10 @@ CreateCheckPoint(int flags)
 				(errmsg("concurrent transaction log activity while database system is shutting down")));
 
 	/*
-	 * Select point at which we can truncate the log, which we base on the
-	 * prior checkpoint's earliest info.
+	 * Select point at which we can truncate the log (and other resources
+	 * related to it), which we base on the prior checkpoint's earliest info.
 	 */
-	XLByteToSeg(ControlFile->checkPointCopy.redo, _logSegNo);
+	oldRedoPtr = ControlFile->checkPointCopy.redo;
 
 	/*
 	 * Update the control file.
@@ -8348,6 +8358,7 @@ CreateCheckPoint(int flags)
 	 * Delete old log files (those no longer needed even for previous
 	 * checkpoint or the standbys in XLOG streaming).
 	 */
+	XLByteToSeg(oldRedoPtr, _logSegNo);
 	if (_logSegNo)
 	{
 		KeepLogSeg(recptr, &_logSegNo);
@@ -8376,6 +8387,13 @@ CreateCheckPoint(int flags)
 	 * Truncate pg_multixact too.
 	 */
 	TruncateMultiXact();
+
+	/*
+	 * Remove old replication identifier checkpoints. We're using the previous
+	 * checkpoint's redo ptr as a cutoff - even if we were to use that
+	 * checkpoint to startup we're not going to need anything older.
+	 */
+	TruncateReplicationIdentifier(oldRedoPtr);
 
 	/* Real work is done, but log and update stats before releasing lock. */
 	LogCheckpointEnd(false);
@@ -8464,6 +8482,7 @@ CheckPointGuts(XLogRecPtr checkPointRedo, int flags)
 	CheckPointSnapBuild();
 	CheckPointLogicalRewriteHeap();
 	CheckPointBuffers(flags);	/* performs all required fsyncs */
+	CheckPointReplicationIdentifier(checkPointRedo);
 	/* We deliberately delay 2PC checkpointing as long as possible */
 	CheckPointTwoPhase(checkPointRedo);
 }
@@ -8527,6 +8546,7 @@ CreateRestartPoint(int flags)
 {
 	XLogRecPtr	lastCheckPointRecPtr;
 	CheckPoint	lastCheckPoint;
+	XLogRecPtr	oldRedoPtr;
 	XLogSegNo	_logSegNo;
 	TimestampTz xtime;
 
@@ -8629,7 +8649,7 @@ CreateRestartPoint(int flags)
 	 * Select point at which we can truncate the xlog, which we base on the
 	 * prior checkpoint's earliest info.
 	 */
-	XLByteToSeg(ControlFile->checkPointCopy.redo, _logSegNo);
+	oldRedoPtr = ControlFile->checkPointCopy.redo;
 
 	/*
 	 * Update pg_control, using current time.  Check that it still shows
@@ -8656,6 +8676,7 @@ CreateRestartPoint(int flags)
 	 * checkpoint/restartpoint) to prevent the disk holding the xlog from
 	 * growing full.
 	 */
+	XLByteToSeg(oldRedoPtr, _logSegNo);
 	if (_logSegNo)
 	{
 		XLogRecPtr	receivePtr;
@@ -8723,6 +8744,12 @@ CreateRestartPoint(int flags)
 	 * It's probably worth improving this.
 	 */
 	TruncateMultiXact();
+
+	/*
+	 * Also truncate replication identifiers. c.f. CreateCheckPoint()'s
+	 * comment.
+	 */
+	TruncateReplicationIdentifier(oldRedoPtr);
 
 	/*
 	 * Truncate pg_subtrans if possible.  We can throw away all data before

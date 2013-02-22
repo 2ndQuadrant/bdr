@@ -54,6 +54,7 @@
 #include "common/fe_memutils.h"
 #include "storage/large_object.h"
 #include "pg_getopt.h"
+#include "replication/logical.h"
 
 
 static ControlFileData ControlFile;		/* pg_control values */
@@ -1050,6 +1051,7 @@ WriteEmptyXLOG(void)
 	record->xl_len = sizeof(CheckPoint);
 	record->xl_info = XLOG_CHECKPOINT_SHUTDOWN;
 	record->xl_rmid = RM_XLOG_ID;
+	record->xl_origin_id = InvalidRepNodeId;
 	memcpy(XLogRecGetData(record), &ControlFile.checkPointCopy,
 		   sizeof(CheckPoint));
 

@@ -5047,6 +5047,34 @@ DESCR("rank of hypothetical row without gaps");
 DATA(insert OID = 3993 ( dense_rank_final	PGNSP PGUID 12 1 0 2276 0 f f f f f f i 2 0 20 "2281 2276" "{2281,2276}" "{i,v}" _null_ _null_	hypothetical_dense_rank_final _null_ _null_ _null_ ));
 DESCR("aggregate final function");
 
+/* replication_identifier.h */
+DATA(insert OID = 6003 (  pg_replication_identifier_create PGNSP PGUID 12 1 0 0 0 f f f f t f v 1 0 26 "25" _null_ _null_ _null_ _null_ pg_replication_identifier_create _null_ _null_ _null_ ));
+DESCR("create local replication identifier for the passed external one");
+
+DATA(insert OID = 6004 (  pg_replication_identifier_get PGNSP PGUID 12 1 0 0 0 f f f f t f s 1 0 26 "25" _null_ _null_ _null_ _null_ pg_replication_identifier_get _null_ _null_ _null_ ));
+DESCR("translate the external node identifier to a local one");
+
+DATA(insert OID = 6005 (  pg_replication_identifier_setup_replaying_from PGNSP PGUID 12 1 0 0 0 f f f f t f v 1 0 2278 "25" _null_ _null_ _null_ _null_ pg_replication_identifier_setup_replaying_from _null_ _null_ _null_ ));
+DESCR("setup from which node we are replaying transactions from currently");
+
+DATA(insert OID = 6006 (  pg_replication_identifier_reset_replaying_from PGNSP PGUID 12 1 0 0 0 f f f f t f v 0 0 2278 "" _null_ _null_ _null_ _null_ pg_replication_identifier_reset_replaying_from _null_ _null_ _null_ ));
+DESCR("reset replay mode");
+
+DATA(insert OID = 6007 (  pg_replication_identifier_setup_tx_origin PGNSP PGUID 12 1 0 0 0 f f f f t f v 2 0 2278 "25 1184" _null_ _null_ _null_ _null_ pg_replication_identifier_setup_tx_origin _null_ _null_ _null_ ));
+DESCR("setup transaction timestamp and origin lsn");
+
+DATA(insert OID = 6008 (  pg_get_replication_identifier_progress PGNSP PGUID 12 1 100 0 0 f f f f f t v 0 0 2249 "" "{26,25,25,25}" "{o,o,o,o}" "{local_id, external_id, remote_lsn, local_lsn}" _null_ pg_get_replication_identifier_progress _null_ _null_ _null_ ));
+DESCR("replication identifier progress");
+
+DATA(insert OID = 6009 (  pg_replication_identifier_is_replaying PGNSP PGUID 12 1 0 0 0 f f f f t f v 0 0 16 "" _null_ _null_ _null_ _null_ pg_replication_identifier_is_replaying _null_ _null_ _null_ ));
+DESCR("is a replication identifier setup");
+
+DATA(insert OID = 6010 (  pg_replication_identifier_advance PGNSP PGUID 12 1 0 0 0 f f f f t f v 3 0 2278 "25 25 25" _null_ _null_ _null_ _null_ pg_replication_identifier_advance _null_ _null_ _null_ ));
+DESCR("advance replication itentifier to specific location");
+
+DATA(insert OID = 6011 (  pg_replication_identifier_drop PGNSP PGUID 12 1 0 0 0 f f f f t f v 1 0 2278 "25" _null_ _null_ _null_ _null_ pg_replication_identifier_drop _null_ _null_ _null_ ));
+DESCR("drop existing replication identifier");
+
 
 /*
  * Symbolic values for provolatile column: these indicate whether the result

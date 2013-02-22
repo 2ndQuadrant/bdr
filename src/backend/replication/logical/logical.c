@@ -45,6 +45,10 @@
 
 #include "utils/memutils.h"
 
+RepNodeId	replication_origin_id = InvalidRepNodeId; /* assumed identity */
+XLogRecPtr	replication_origin_lsn;
+TimestampTz	replication_origin_timestamp;
+
 /* data for errcontext callback */
 typedef struct LogicalErrorCallbackState
 {
