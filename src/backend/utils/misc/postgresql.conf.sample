@@ -240,7 +240,7 @@
 #wal_receiver_timeout = 60s		# time that receiver waits for
 					# communication from master
 					# in milliseconds; 0 disables
-
+#replication_node_id = 0		#invalid node id
 
 #------------------------------------------------------------------------------
 # QUERY TUNING

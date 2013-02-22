@@ -146,6 +146,12 @@ typedef struct xl_xact_commit
 	/* ARRAY OF SHARED INVALIDATION MESSAGES FOLLOWS */
 } xl_xact_commit;
 
+typedef struct xl_xact_origin
+{
+	XLogRecPtr	origin_lsn;
+	RepNodeId	origin_node_id;
+} xl_xact_origin;
+
 #define MinSizeOfXactCommit offsetof(xl_xact_commit, xnodes)
 
 /*
@@ -158,7 +164,7 @@ typedef struct xl_xact_commit
  */
 #define XACT_COMPLETION_UPDATE_RELCACHE_FILE	0x01
 #define XACT_COMPLETION_FORCE_SYNC_COMMIT		0x02
-
+#define XACT_CONTAINS_ORIGIN					0x04
 /* Access macros for above flags */
 #define XactCompletionRelcacheInitFileInval(xinfo)	(xinfo & XACT_COMPLETION_UPDATE_RELCACHE_FILE)
 #define XactCompletionForceSyncCommit(xinfo)		(xinfo & XACT_COMPLETION_FORCE_SYNC_COMMIT)

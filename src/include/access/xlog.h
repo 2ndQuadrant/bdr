@@ -48,6 +48,7 @@ typedef struct XLogRecord
 	/* 2 bytes of padding here, initialize to zero */
 	XLogRecPtr	xl_prev;		/* ptr to previous record in log */
 	pg_crc32	xl_crc;			/* CRC for this record */
+	RepNodeId   xl_origin_id;   /* what node did originally cause this record to be written */
 
 	/* If MAXALIGN==8, there are 4 wasted bytes here */
 
@@ -177,6 +178,7 @@ typedef enum
 } RecoveryTargetType;
 
 extern XLogRecPtr XactLastRecEnd;
+extern XLogRecPtr XactLastCommitEnd;
 
 extern bool reachedConsistency;
 

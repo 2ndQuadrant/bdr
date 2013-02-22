@@ -1086,7 +1086,7 @@ ReorderBufferFreeSnap(ReorderBuffer *cache, Snapshot snap)
  * assigned via ReorderBufferCommitChild.
  */
 void
-ReorderBufferCommit(ReorderBuffer *cache, TransactionId xid, XLogRecPtr lsn)
+ReorderBufferCommit(ReorderBuffer *cache, TransactionId xid, XLogRecPtr lsn, RepNodeId origin)
 {
 	ReorderBufferTXN *txn = ReorderBufferTXNByXid(cache, xid, false, NULL);
 	ReorderBufferIterTXNState *iterstate = NULL;
@@ -1101,6 +1101,7 @@ ReorderBufferCommit(ReorderBuffer *cache, TransactionId xid, XLogRecPtr lsn)
 		return;
 
 	txn->last_lsn = lsn;
+	txn->origin_id = origin;
 
 	/* serialize the last bunch of changes if we need start earlier anyway */
 	if (txn->nentries_mem != txn->nentries)

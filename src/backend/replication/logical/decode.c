@@ -292,7 +292,8 @@ DecodeCommit(LogicalDecodingContext *ctx, XLogRecordBuffer *buf, TransactionId x
 	}
 
 	/* replay actions of all transaction + subtransactions in order */
-	ReorderBufferCommit(ctx->reorder, xid, buf->origptr);
+	ReorderBufferCommit(ctx->reorder, xid, buf->origptr,
+						buf->record.xl_origin_id);
 }
 
 static void
@@ -324,6 +325,7 @@ DecodeInsert(ReorderBuffer *reorder, XLogRecordBuffer *buf)
 
 	change = ReorderBufferGetChange(reorder);
 	change->action = REORDER_BUFFER_CHANGE_INSERT;
+	change->origin_id = r->xl_origin_id;
 	memcpy(&change->relnode, &xlrec->target.node, sizeof(RelFileNode));
 
 	if (xlrec->flags & XLOG_HEAP_CONTAINS_NEW_TUPLE)
@@ -356,6 +358,7 @@ DecodeUpdate(ReorderBuffer *reorder, XLogRecordBuffer *buf)
 
 	change = ReorderBufferGetChange(reorder);
 	change->action = REORDER_BUFFER_CHANGE_UPDATE;
+	change->origin_id = r->xl_origin_id;
 	memcpy(&change->relnode, &xlrec->target.node, sizeof(RelFileNode));
 
 	data = (char *) &xlhdr->header;
@@ -411,6 +414,7 @@ DecodeDelete(ReorderBuffer *reorder, XLogRecordBuffer *buf)
 
 	change = ReorderBufferGetChange(reorder);
 	change->action = REORDER_BUFFER_CHANGE_DELETE;
+	change->origin_id = r->xl_origin_id;
 
 	memcpy(&change->relnode, &xlrec->target.node, sizeof(RelFileNode));
 
@@ -462,6 +466,8 @@ DecodeMultiInsert(ReorderBuffer *reorder, XLogRecordBuffer *buf)
 
 		change = ReorderBufferGetChange(reorder);
 		change->action = REORDER_BUFFER_CHANGE_INSERT;
+		change->origin_id = r->xl_origin_id;
+
 		memcpy(&change->relnode, &xlrec->node, sizeof(RelFileNode));
 
 		/*
