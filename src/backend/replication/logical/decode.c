@@ -66,7 +66,8 @@ static void DecodeCommit(LogicalDecodingContext *ctx, XLogRecordBuffer *buf,
 						 TransactionId xid, Oid dboid,
 						 TimestampTz commit_time,
 						 int nsubxacts, TransactionId *sub_xids,
-						 int ninval_msgs, SharedInvalidationMessage *msg);
+						 int ninval_msgs, SharedInvalidationMessage *msg,
+						 xl_xact_origin *origin);
 static void DecodeAbort(LogicalDecodingContext *ctx, XLogRecPtr lsn,
 			TransactionId xid, TransactionId *sub_xids, int nsubxacts);
 
@@ -198,16 +199,20 @@ DecodeXactOp(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				xl_xact_commit *xlrec;
 				TransactionId *subxacts = NULL;
 				SharedInvalidationMessage *invals = NULL;
+				xl_xact_origin *origin = NULL;
 
 				xlrec = (xl_xact_commit *) buf->record_data;
 
 				subxacts = (TransactionId *) &(xlrec->xnodes[xlrec->nrels]);
 				invals = (SharedInvalidationMessage *) &(subxacts[xlrec->nsubxacts]);
 
+				if (xlrec->xinfo & XACT_CONTAINS_ORIGIN)
+					origin = (xl_xact_origin *) &(invals[xlrec->nmsgs]);
+
 				DecodeCommit(ctx, buf, r->xl_xid, xlrec->dbId,
 							 xlrec->xact_time,
 							 xlrec->nsubxacts, subxacts,
-							 xlrec->nmsgs, invals);
+							 xlrec->nmsgs, invals, origin);
 
 				break;
 			}
@@ -217,6 +222,7 @@ DecodeXactOp(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				xl_xact_commit *xlrec;
 				TransactionId *subxacts;
 				SharedInvalidationMessage *invals = NULL;
+				xl_xact_origin *origin = NULL;
 
 				/* Prepared commits contain a normal commit record... */
 				prec = (xl_xact_commit_prepared *) buf->record_data;
@@ -225,10 +231,13 @@ DecodeXactOp(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				subxacts = (TransactionId *) &(xlrec->xnodes[xlrec->nrels]);
 				invals = (SharedInvalidationMessage *) &(subxacts[xlrec->nsubxacts]);
 
+				if (xlrec->xinfo & XACT_CONTAINS_ORIGIN)
+					origin = (xl_xact_origin *) &(invals[xlrec->nmsgs]);
+
 				DecodeCommit(ctx, buf, r->xl_xid, xlrec->dbId,
 							 xlrec->xact_time,
 							 xlrec->nsubxacts, subxacts,
-							 xlrec->nmsgs, invals);
+							 xlrec->nmsgs, invals, origin);
 
 				break;
 			}
@@ -241,7 +250,7 @@ DecodeXactOp(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				DecodeCommit(ctx, buf, r->xl_xid, InvalidOid,
 							 xlrec->xact_time,
 							 xlrec->nsubxacts, xlrec->subxacts,
-							 0, NULL);
+							 0, NULL, NULL);
 				break;
 			}
 		case XLOG_XACT_ABORT:
@@ -477,8 +486,11 @@ DecodeCommit(LogicalDecodingContext *ctx, XLogRecordBuffer *buf,
 			 TransactionId xid, Oid dboid,
 			 TimestampTz commit_time,
 			 int nsubxacts, TransactionId *sub_xids,
-			 int ninval_msgs, SharedInvalidationMessage *msgs)
+			 int ninval_msgs, SharedInvalidationMessage *msgs,
+			 xl_xact_origin *origin)
 {
+	RepNodeId	origin_id = InvalidRepNodeId;
+	XLogRecPtr	origin_lsn = InvalidXLogRecPtr;
 	int			i;
 
 	/*
@@ -541,9 +553,15 @@ DecodeCommit(LogicalDecodingContext *ctx, XLogRecordBuffer *buf,
 		sub_xids++;
 	}
 
+	if (origin != NULL)
+	{
+		origin_id = origin->origin_node_id;
+		origin_lsn = origin->origin_lsn;
+	}
+
 	/* replay actions of all transaction + subtransactions in order */
 	ReorderBufferCommit(ctx->reorder, xid, buf->origptr, buf->endptr,
-						commit_time);
+						commit_time, origin_id, origin_lsn);
 }
 
 /*
@@ -587,6 +605,7 @@ DecodeInsert(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 	change = ReorderBufferGetChange(ctx->reorder);
 	change->action = REORDER_BUFFER_CHANGE_INSERT;
+	change->origin_id = r->xl_origin_id;
 	memcpy(&change->data.tp.relnode, &xlrec->target.node, sizeof(RelFileNode));
 
 	if (xlrec->flags & XLOG_HEAP_CONTAINS_NEW_TUPLE)
@@ -627,6 +646,7 @@ DecodeUpdate(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 	change = ReorderBufferGetChange(ctx->reorder);
 	change->action = REORDER_BUFFER_CHANGE_UPDATE;
+	change->origin_id = r->xl_origin_id;
 	memcpy(&change->data.tp.relnode, &xlrec->target.node, sizeof(RelFileNode));
 
 	data = (char *) &xlhdr->header;
@@ -681,6 +701,7 @@ DecodeDelete(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 	change = ReorderBufferGetChange(ctx->reorder);
 	change->action = REORDER_BUFFER_CHANGE_DELETE;
+	change->origin_id = r->xl_origin_id;
 
 	memcpy(&change->data.tp.relnode, &xlrec->target.node, sizeof(RelFileNode));
 
@@ -736,6 +757,7 @@ DecodeMultiInsert(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 		change = ReorderBufferGetChange(ctx->reorder);
 		change->action = REORDER_BUFFER_CHANGE_INSERT;
+		change->origin_id = r->xl_origin_id;
 		memcpy(&change->data.tp.relnode, &xlrec->node, sizeof(RelFileNode));
 
 		/*
