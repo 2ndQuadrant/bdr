@@ -25,8 +25,11 @@ xact_desc_commit(StringInfo buf, xl_xact_commit *xlrec)
 {
 	int			i;
 	TransactionId *subxacts;
+	SharedInvalidationMessage *msgs;
 
 	subxacts = (TransactionId *) &xlrec->xnodes[xlrec->nrels];
+
+	msgs = (SharedInvalidationMessage *) &subxacts[xlrec->nsubxacts];
 
 	appendStringInfoString(buf, timestamptz_to_str(xlrec->xact_time));
 
@@ -49,9 +52,6 @@ xact_desc_commit(StringInfo buf, xl_xact_commit *xlrec)
 	}
 	if (xlrec->nmsgs > 0)
 	{
-		SharedInvalidationMessage *msgs;
-
-		msgs = (SharedInvalidationMessage *) &subxacts[xlrec->nsubxacts];
 
 		if (XactCompletionRelcacheInitFileInval(xlrec->xinfo))
 			appendStringInfo(buf, "; relcache init file inval dbid %u tsid %u",
@@ -80,6 +80,17 @@ xact_desc_commit(StringInfo buf, xl_xact_commit *xlrec)
 				appendStringInfo(buf, " unknown id %d", msg->id);
 		}
 	}
+	if (xlrec->xinfo & XACT_CONTAINS_ORIGIN)
+	{
+		xl_xact_origin *origin = (xl_xact_origin *) &(msgs[xlrec->nmsgs]);
+
+		appendStringInfo(buf, " origin %u, lsn %X/%X, at %s",
+						 origin->origin_node_id,
+						 (uint32)(origin->origin_lsn >> 32),
+						 (uint32)origin->origin_lsn,
+						 timestamptz_to_str(origin->origin_timestamp));
+	}
+
 }
 
 static void
