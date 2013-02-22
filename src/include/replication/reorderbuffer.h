@@ -59,6 +59,8 @@ typedef struct ReorderBufferChange
 		int			action_internal;
 	};
 
+	RepNodeId origin_id;
+
 	/*
 	 * Context data for the change, which part of the union is valid depends
 	 * on action/action_internal.
@@ -146,6 +148,12 @@ typedef struct ReorderBufferTXN
 	 * WAL.
 	 */
 	XLogRecPtr	restart_decoding_lsn;
+
+	/* origin of the change that caused this transaction */
+	RepNodeId origin_id;
+
+	/* did the TX have catalog changes */
+	bool		does_timetravel;
 
 	/*
 	 * Commit time, only known when we read the actual commit record.
@@ -320,7 +328,7 @@ void		ReorderBufferReturnChange(ReorderBuffer *, ReorderBufferChange *);
 void		ReorderBufferQueueChange(ReorderBuffer *, TransactionId, XLogRecPtr lsn, ReorderBufferChange *);
 void		ReorderBufferCommit(ReorderBuffer *, TransactionId,
 							XLogRecPtr commit_lsn, XLogRecPtr end_lsn,
-							TimestampTz commit_time);
+							TimestampTz commit_time, RepNodeId origin_id);
 void		ReorderBufferAssignChild(ReorderBuffer *, TransactionId, TransactionId, XLogRecPtr commit_lsn);
 void		ReorderBufferCommitChild(ReorderBuffer *, TransactionId, TransactionId,
 									 XLogRecPtr commit_lsn, XLogRecPtr end_lsn);

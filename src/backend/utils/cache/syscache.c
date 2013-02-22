@@ -54,6 +54,7 @@
 #include "catalog/pg_shdepend.h"
 #include "catalog/pg_shdescription.h"
 #include "catalog/pg_shseclabel.h"
+#include "catalog/pg_replication_identifier.h"
 #include "catalog/pg_statistic.h"
 #include "catalog/pg_tablespace.h"
 #include "catalog/pg_ts_config.h"
@@ -619,6 +620,28 @@ static const struct cachedesc cacheinfo[] = {
 			0
 		},
 		128
+	},
+	{ReplicationIdentifierRelationId,		/* REPLIDIDENT */
+		ReplicationLocalIdentIndex,
+		1,
+		{
+			Anum_pg_replication_riident,
+			0,
+			0,
+			0
+		},
+		16
+	},
+	{ReplicationIdentifierRelationId,		/* REPLIDREMOTE */
+		ReplicationExternalIdentIndex,
+		1,
+		{
+			Anum_pg_replication_riname,
+			0,
+			0,
+			0
+		},
+		16
 	},
 	{RewriteRelationId,			/* RULERELNAME */
 		RewriteRelRulenameIndexId,
