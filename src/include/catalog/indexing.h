@@ -313,6 +313,13 @@ DECLARE_UNIQUE_INDEX(pg_extension_name_index, 3081, on pg_extension using btree(
 DECLARE_UNIQUE_INDEX(pg_range_rngtypid_index, 3542, on pg_range using btree(rngtypid oid_ops));
 #define RangeTypidIndexId					3542
 
+
+DECLARE_UNIQUE_INDEX(pg_replication_identifier_riiident_index, 3206, on pg_replication_identifier using btree(riident oid_ops));
+#define ReplicationLocalIdentIndex 3206
+
+DECLARE_UNIQUE_INDEX(pg_replication_identifier_riname_index, 3207, on pg_replication_identifier using btree(riname varchar_pattern_ops));
+#define ReplicationExternalIdentIndex 3207
+
 /* last step of initialization script: build the indexes declared above */
 BUILD_INDICES
 

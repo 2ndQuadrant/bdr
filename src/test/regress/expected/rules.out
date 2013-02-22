@@ -1367,6 +1367,11 @@ pg_prepared_xacts| SELECT p.transaction,
    FROM ((pg_prepared_xact() p(transaction, gid, prepared, ownerid, dbid)
    LEFT JOIN pg_authid u ON ((p.ownerid = u.oid)))
    LEFT JOIN pg_database d ON ((p.dbid = d.oid)));
+pg_replication_identifier_progress| SELECT pg_get_replication_identifier_progress.local_id,
+    pg_get_replication_identifier_progress.external_id,
+    pg_get_replication_identifier_progress.remote_lsn,
+    pg_get_replication_identifier_progress.local_lsn
+   FROM pg_get_replication_identifier_progress() pg_get_replication_identifier_progress(local_id, external_id, remote_lsn, local_lsn);
 pg_replication_slots| SELECT l.slot_name,
     l.plugin,
     l.slot_type,
