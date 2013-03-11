@@ -46,6 +46,7 @@
 #include <signal.h>
 
 #include "access/clog.h"
+#include "access/committs.h"
 #include "access/subtrans.h"
 #include "access/transam.h"
 #include "access/xact.h"
@@ -2689,6 +2690,7 @@ RecordKnownAssignedTransactionIds(TransactionId xid)
 		while (TransactionIdPrecedesOrEquals(next_expected_xid, xid))
 		{
 			ExtendCLOG(next_expected_xid);
+			ExtendCommitTs(next_expected_xid);
 			ExtendSUBTRANS(next_expected_xid);
 
 			TransactionIdAdvance(next_expected_xid);

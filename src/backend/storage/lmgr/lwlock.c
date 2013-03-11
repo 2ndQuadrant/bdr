@@ -22,6 +22,7 @@
 #include "postgres.h"
 
 #include "access/clog.h"
+#include "access/committs.h"
 #include "access/multixact.h"
 #include "access/subtrans.h"
 #include "commands/async.h"
@@ -190,6 +191,9 @@ NumLWLocks(void)
 
 	/* clog.c needs one per CLOG buffer */
 	numLocks += CLOGShmemBuffers();
+
+	/* committs.c needs one per CommitTs buffer */
+	numLocks += CommitTsShmemBuffers();
 
 	/* subtrans.c needs one per SubTrans buffer */
 	numLocks += NUM_SUBTRANS_BUFFERS;

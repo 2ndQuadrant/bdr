@@ -217,6 +217,7 @@
 				# and receiver processes. Logical senders
 				# (but not receivers) also consume a
 				# max_wal_senders slot.
+#track_commit_timestamp = off	# collect timestamp of transaction commit
 				# (change requires restart)
 
 # - Master Server -
