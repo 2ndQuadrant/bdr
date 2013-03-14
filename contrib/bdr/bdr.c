@@ -62,7 +62,6 @@ typedef struct BDRCon
 {
 	char *dbname;
 	char *con;
-	char *slot;
 } BDRCon;
 
 PG_MODULE_MAGIC;
@@ -531,9 +530,9 @@ bdr_main(void *main_arg)
 	NameData	replication_name;
 	Oid			replication_identifier;
 	XLogRecPtr  start_from;
+	NameData	slot_name;
 
 	NameStr(replication_name)[0] = '\0';
-	/*StringInfoData	buf;*/
 
 	/* We're now ready to receive signals */
 	BackgroundWorkerUnblockSignals();
@@ -555,7 +554,6 @@ bdr_main(void *main_arg)
 
 	elog(LOG, "%s initialized on %s, remote %s",
 		 MyBgworkerEntry->bgw_name, con->dbname, conninfo_repl);
-
 
 	streamConn = PQconnectdb(conninfo_repl);
 	if (PQstatus(streamConn) != CONNECTION_OK)
@@ -606,6 +604,17 @@ bdr_main(void *main_arg)
 		elog(LOG, "local sysid %s, remote: %s",
 			 local_sysid, remote_sysid);
 
+	/*
+	 * build slot name.
+	 *
+	 * FIXME: This might truncate the identifier if replication_name is
+	 * somewhat longer...
+	 */
+	snprintf(NameStr(slot_name), NAMEDATALEN, "bdr: %u:%s-%u-%u:%s",
+	         remote_dboid_i, local_sysid, ThisTimeLineID,
+	         MyDatabaseId, NameStr(replication_name));
+	NameStr(slot_name)[NAMEDATALEN-1] = '\0';
+
 	replication_identifier =
 		GetReplicationIdentifier(remote_sysid_i, remote_tlid_i, remote_dboid_i,
 								 &replication_name, MyDatabaseId);
@@ -618,6 +627,7 @@ bdr_main(void *main_arg)
 	/* create local replication identifier and a remote slot */
 	else
 	{
+		elog(LOG, "lookup failed, create new identifier");
 		/* doing this really safely would require 2pc... */
 		StartTransactionCommand();
 
@@ -626,12 +636,12 @@ bdr_main(void *main_arg)
 
 		/* acquire new local identifier, but don't commit */
 		replication_identifier =
-			CreateReplicationIdentifier(remote_sysid_i,remote_tlid_i, 12043 /* postgres */,
+			CreateReplicationIdentifier(remote_sysid_i,remote_tlid_i, remote_dboid_i,
 										&replication_name, MyDatabaseId);
 
 		/* acquire remote decoding slot */
 		snprintf(query, sizeof(query), "INIT_LOGICAL_REPLICATION \"%s\" %s",
-		         con->slot, "bdr_output");
+		         NameStr(slot_name), "bdr_output");
 		res = PQexec(streamConn, query);
 
 		if (PQresultStatus(res) != PGRES_TUPLES_OK)
@@ -664,7 +674,7 @@ bdr_main(void *main_arg)
 		 (uint32) (start_from >> 32), (uint32) start_from);
 
 	snprintf(query, sizeof(query), "START_LOGICAL_REPLICATION \"%s\" %X/%X",
-			 con->slot, (uint32) (start_from >> 32), (uint32) start_from);
+			 NameStr(slot_name), (uint32) (start_from >> 32), (uint32) start_from);
 	res = PQexec(streamConn, query);
 
 	sqlstate = PQresultErrorField(res, PG_DIAG_SQLSTATE);
@@ -820,7 +830,6 @@ _PG_init(void)
 		PQconninfoOption *cur_option;
 		/* don't free! */
 		char *optname_dsn = palloc(strlen(name) + 30);
-		char *optname_slot = palloc(strlen(name) + 30);
 
 		/* Values for the second worker */
 		con = palloc(sizeof(BDRCon));
@@ -836,24 +845,9 @@ _PG_init(void)
 								   GUC_NOT_IN_SAMPLE,
 								   NULL, NULL, NULL);
 
-		sprintf(optname_slot, "bdr.%s.slot", name);
-		DefineCustomStringVariable(optname_slot,
-								   optname_slot,
-								   NULL,
-								   &con->slot,
-								   NULL, PGC_POSTMASTER,
-								   GUC_NOT_IN_SAMPLE,
-								   NULL, NULL, NULL);
-
 		if (!con->con)
 		{
 			elog(WARNING, "no connection information for %s", name);
-			continue;
-		}
-
-		if (!con->slot)
-		{
-			elog(WARNING, "no slot information for %s", name);
 			continue;
 		}
 
