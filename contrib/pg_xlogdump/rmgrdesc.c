@@ -11,6 +11,7 @@
 #include "access/clog.h"
 #include "access/gin.h"
 #include "access/gist_private.h"
+#include "access/committs.h"
 #include "access/hash.h"
 #include "access/heapam_xlog.h"
 #include "access/multixact.h"

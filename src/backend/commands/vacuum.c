@@ -23,6 +23,7 @@
 #include <math.h>
 
 #include "access/clog.h"
+#include "access/committs.h"
 #include "access/genam.h"
 #include "access/heapam.h"
 #include "access/htup_details.h"
@@ -896,6 +897,7 @@ vac_truncate_clog(TransactionId frozenXID, MultiXactId frozenMulti)
 
 	/* Truncate CLOG and Multi to the oldest computed value */
 	TruncateCLOG(frozenXID);
+	TruncateCommitTs(frozenXID);
 	TruncateMultiXact(frozenMulti);
 
 	/*

@@ -2272,6 +2272,21 @@ include 'filename'
       </listitem>
      </varlistentry>
 
+     <varlistentry id="guc-enable-commit-timestamp" xreflabel="enable_commit_timestamp">
+      <term><varname>enable_commit_timestamp</varname> (<type>bool</type>)</term>
+      <indexterm>
+       <primary><varname>enable_commit_timestamp</> configuration parameter</primary>
+      </indexterm>
+      <listitem>
+       <para>
+        Record commit time of transactions.  This parameter
+        can only be set in
+        the <filename>postgresql.conf</> file or on the server command line.
+        The default value is off.
+       </para>
+      </listitem>
+     </varlistentry>
+
      </variablelist>
     </sect2>
 
