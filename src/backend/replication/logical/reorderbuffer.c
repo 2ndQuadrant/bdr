@@ -1143,7 +1143,10 @@ ReorderBufferCommit(ReorderBuffer *cache, TransactionId xid, XLogRecPtr lsn)
 					if (RelationIsLogicallyLogged(relation))
 					{
 						/* user-triggered change */
-						if (!IsToastRelation(relation))
+						if (relation->rd_rel->relkind == RELKIND_SEQUENCE)
+						{
+						}
+						else if (!IsToastRelation(relation))
 						{
 							ReorderBufferToastReplace(cache, txn, relation, change);
 							cache->apply_change(cache, txn, relation, change);
