@@ -793,11 +793,11 @@ static struct config_bool ConfigureNamesBool[] =
 		check_bonjour, NULL, NULL
 	},
 	{
-		{"enable_commit_timestamp", PGC_POSTMASTER, REPLICATION,
+		{"track_commit_timestamp", PGC_POSTMASTER, REPLICATION,
 			gettext_noop("Enables recording of transaction commit time."),
 			NULL
 		},
-		&commit_ts_enabled,
+		&track_commit_ts,
 		false,
 		NULL, NULL, NULL
 	},

@@ -59,7 +59,7 @@ static SlruCtlData CommitTsCtlData;
 #define CommitTsCtl (&CommitTsCtlData)
 
 /* GUC variables */
-bool	commit_ts_enabled;
+bool	track_commit_ts;
 
 static void SetXidCommitTsInPage(TransactionId xid, int nsubxids,
 					 TransactionId *subxids, TimestampTz committs, int pageno);
@@ -89,7 +89,7 @@ TransactionTreeSetCommitTimestamp(TransactionId xid, int nsubxids,
 	int			i = 0;
 	TransactionId headxid = xid;
 
-	if (!commit_ts_enabled)
+	if (!track_commit_ts)
 		return;
 
 	/*
@@ -179,7 +179,7 @@ TransactionIdGetCommitTimestamp(TransactionId xid)
 	TimestampTz *timeptr;
 	TimestampTz	committs;
 
-	if (!commit_ts_enabled)
+	if (!track_commit_ts)
 		return 0;
 
 	/*
@@ -317,7 +317,7 @@ StartupCommitTs(void)
 
 	LWLockRelease(CommitTsControlLock);
 
-	if (!commit_ts_enabled)
+	if (!track_commit_ts)
 		return;
 
 	if (!SimpleLruDoesPhysicalPageExist(ctl, pageno))
