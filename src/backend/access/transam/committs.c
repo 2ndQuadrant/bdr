@@ -178,6 +178,7 @@ TransactionIdGetCommitTimestamp(TransactionId xid)
 	int			slotno;
 	TimestampTz *timeptr;
 	TimestampTz	committs;
+	TransactionId limit = RecentGlobalXmin;
 
 	if (!track_commit_ts)
 		return 0;
@@ -188,8 +189,15 @@ TransactionIdGetCommitTimestamp(TransactionId xid)
 	 * be set to FirstNormalTransactionId if no snapshot has been taken by this
 	 * session, so avoid that).
 	 */
-	if (!TransactionIdIsValid(RecentGlobalXmin) ||
-		TransactionIdPrecedes(xid, RecentGlobalXmin))
+	if (!TransactionIdIsValid(limit))
+		return 0;
+
+	/* keep a bit more history */
+	limit -= 500000;
+	if (!TransactionIdIsNormal(limit))
+		limit = FirstNormalTransactionId;
+
+	if (TransactionIdPrecedes(xid, limit))
 		return 0;
 
 	/* lock is acquired by SimpleLruReadPage_ReadOnly */
