@@ -458,13 +458,12 @@ static void
 WriteTruncateXlogRec(int pageno)
 {
 	XLogRecData rdata;
-	XLogRecPtr	recptr;
 
 	rdata.data = (char *) (&pageno);
 	rdata.len = sizeof(int);
 	rdata.buffer = InvalidBuffer;
 	rdata.next = NULL;
-	recptr = XLogInsert(RM_COMMITTS_ID, COMMITTS_TRUNCATE, &rdata);
+	XLogInsert(RM_COMMITTS_ID, COMMITTS_TRUNCATE, &rdata);
 }
 
 /*
