@@ -11,8 +11,10 @@
 #define REORDERBUFFER_H
 
 #include "access/htup_details.h"
+
 #include "utils/hsearch.h"
 #include "utils/rel.h"
+#include "utils/timestamp.h"
 
 #include "lib/ilist.h"
 
@@ -195,6 +197,10 @@ typedef struct ReorderBufferTXN
 	 */
 	SharedInvalidationMessage *invalidations;
 
+	/*
+	 * Original commit time of a top level transaction if known.
+	 */
+	TimestampTz commit_time;
 } ReorderBufferTXN;
 
 
@@ -290,7 +296,7 @@ ReorderBufferChange *ReorderBufferGetChange(ReorderBuffer *);
 void ReorderBufferReturnChange(ReorderBuffer *, ReorderBufferChange *);
 
 void ReorderBufferAddChange(ReorderBuffer *, TransactionId, XLogRecPtr lsn, ReorderBufferChange *);
-void ReorderBufferCommit(ReorderBuffer *, TransactionId, XLogRecPtr lsn, RepNodeId origin_id);
+void ReorderBufferCommit(ReorderBuffer *, TransactionId, XLogRecPtr lsn, RepNodeId origin_id, TimestampTz commit_time);
 void ReorderBufferAssignChild(ReorderBuffer *, TransactionId, TransactionId, XLogRecPtr lsn);
 void ReorderBufferCommitChild(ReorderBuffer *, TransactionId, TransactionId, XLogRecPtr lsn);
 void ReorderBufferAbort(ReorderBuffer *, TransactionId, XLogRecPtr lsn);
