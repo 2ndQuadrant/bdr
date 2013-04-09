@@ -150,6 +150,7 @@ typedef struct xl_xact_origin
 {
 	XLogRecPtr	origin_lsn;
 	RepNodeId	origin_node_id;
+	TimestampTz origin_timestamp;
 } xl_xact_origin;
 
 #define MinSizeOfXactCommit offsetof(xl_xact_commit, xnodes)

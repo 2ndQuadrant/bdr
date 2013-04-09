@@ -45,6 +45,7 @@ RepNodeId	guc_replication_node_id = InvalidRepNodeId; /* local node id */
 RepNodeId	guc_replication_origin_id = InvalidRepNodeId; /* assumed identity */
 
 XLogRecPtr replication_origin_lsn;
+TimestampTz replication_origin_timestamp;
 
 static void LogicalSlotKill(int code, Datum arg);
 

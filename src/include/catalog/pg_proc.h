@@ -2918,6 +2918,8 @@ DESCR("view members of a multixactid");
 
 DATA(insert OID = 3461 ( pg_get_transaction_committime PGNSP PGUID 12 1 0 0 0 f f f f t f s 1 0 1184 "28" _null_ _null_ _null_ _null_ pg_get_transaction_committime _null_ _null_ _null_ ));
 DESCR("get commit time of transaction");
+DATA(insert OID = 3462 ( pg_get_transaction_origin PGNSP PGUID 12 1 0 0 0 f f f f t f s 1 0 26 "28" _null_ _null_ _null_ _null_ pg_get_transaction_origin _null_ _null_ _null_ ));
+DESCR("get commit origin of transaction");
 
 DATA(insert OID = 3537 (  pg_describe_object		PGNSP PGUID 12 1 0 0 0 f f f f t f s 3 0 25 "26 26 23" _null_ _null_ _null_ _null_ pg_describe_object _null_ _null_ _null_ ));
 DESCR("get identification of SQL object");

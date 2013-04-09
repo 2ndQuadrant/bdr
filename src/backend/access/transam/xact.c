@@ -1116,6 +1116,8 @@ RecordTransactionCommit(void)
 				xlrec.xinfo |= XACT_CONTAINS_ORIGIN;
 				origin.origin_node_id = guc_replication_origin_id;
 				origin.origin_lsn = replication_origin_lsn;
+				origin.origin_timestamp = replication_origin_timestamp;
+
 				rdata[lastrdata].next = &(rdata[4]);
 				rdata[4].data = (char *) &origin;
 				rdata[4].len = sizeof(xl_xact_origin);
@@ -1152,8 +1154,12 @@ RecordTransactionCommit(void)
 		}
 	}
 
+	/* record plain ts if not replaying */
+	if (guc_replication_origin_id == InvalidRepNodeId)
+		replication_origin_timestamp = xactStopTimestamp;
+
 	TransactionTreeSetCommitTimestamp(xid, nchildren, children,
-									  xactStopTimestamp);
+									  replication_origin_timestamp, guc_replication_origin_id);
 
 	/*
 	 * Check if we want to commit asynchronously.  We can allow the XLOG flush
@@ -4613,6 +4619,7 @@ xact_redo_commit_internal(TransactionId xid, XLogRecPtr lsn,
 {
 	TransactionId max_xid;
 	int			i;
+	RepNodeId	origin_node_id = InvalidRepNodeId;
 
 	max_xid = TransactionIdLatest(xid, nsubxacts, sub_xids);
 
@@ -4632,9 +4639,29 @@ xact_redo_commit_internal(TransactionId xid, XLogRecPtr lsn,
 		LWLockRelease(XidGenLock);
 	}
 
+	Assert(!!(xinfo & XACT_CONTAINS_ORIGIN) == (origin != NULL));
+
+	if (xinfo & XACT_CONTAINS_ORIGIN)
+	{
+		origin_node_id = origin->origin_node_id;
+		commit_time = origin->origin_timestamp;
+	}
+
 	/* Set the transaction commit time */
 	TransactionTreeSetCommitTimestamp(xid, nsubxacts, sub_xids,
-									  commit_time);
+									  commit_time,
+									  origin_node_id);
+
+	if (xinfo & XACT_CONTAINS_ORIGIN)
+	{
+		elog(LOG, "restoring origin of node %u to %X/%X",
+			 origin->origin_node_id,
+			 (uint32)(origin->origin_lsn >> 32),
+			 (uint32)origin->origin_lsn);
+		AdvanceReplicationIdentifier(origin->origin_node_id,
+									 origin->origin_lsn,
+									 lsn);
+	}
 
 	if (standbyState == STANDBY_DISABLED)
 	{
@@ -4721,19 +4748,6 @@ xact_redo_commit_internal(TransactionId xid, XLogRecPtr lsn,
 			smgrdounlink(srel, true);
 			smgrclose(srel);
 		}
-	}
-
-	Assert(!!(xinfo & XACT_CONTAINS_ORIGIN) == (origin != NULL));
-
-	if (xinfo & XACT_CONTAINS_ORIGIN)
-	{
-		elog(LOG, "restoring origin of node %u to %X/%X",
-			 origin->origin_node_id,
-			 (uint32)(origin->origin_lsn >> 32),
-			 (uint32)origin->origin_lsn);
-		AdvanceReplicationIdentifier(origin->origin_node_id,
-									 origin->origin_lsn,
-									 lsn);
 	}
 
 	/*

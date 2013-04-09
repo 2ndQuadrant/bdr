@@ -44,7 +44,13 @@
  */
 
 /* We need eight bytes per xact */
-#define COMMITTS_XACTS_PER_PAGE (BLCKSZ / sizeof(TimestampTz))
+typedef struct CommittsEntry
+{
+	TimestampTz timestamp;
+	RepNodeId origin;
+} CommittsEntry;
+
+#define COMMITTS_XACTS_PER_PAGE (BLCKSZ / sizeof(CommittsEntry))
 
 #define TransactionIdToCTsPage(xid)	\
 	((xid) / (TransactionId) COMMITTS_XACTS_PER_PAGE)
@@ -62,9 +68,10 @@ static SlruCtlData CommitTsCtlData;
 bool	track_commit_ts;
 
 static void SetXidCommitTsInPage(TransactionId xid, int nsubxids,
-					 TransactionId *subxids, TimestampTz committs, int pageno);
+								 TransactionId *subxids, TimestampTz committs,
+								 RepNodeId origin, int pageno);
 static void TransactionIdSetCommitTs(TransactionId xid, TimestampTz committs,
-						  int slotno);
+									 RepNodeId origin, int slotno);
 static int	ZeroCommitTsPage(int pageno, bool writeXlog);
 static bool CommitTsPagePrecedes(int page1, int page2);
 static void WriteZeroPageXlogRec(int pageno);
@@ -84,7 +91,8 @@ static void WriteTruncateXlogRec(int pageno);
  */
 void
 TransactionTreeSetCommitTimestamp(TransactionId xid, int nsubxids,
-								  TransactionId *subxids, TimestampTz timestamp)
+								  TransactionId *subxids, TimestampTz timestamp,
+								  RepNodeId origin)
 {
 	int			i = 0;
 	TransactionId headxid = xid;
@@ -111,7 +119,8 @@ TransactionTreeSetCommitTimestamp(TransactionId xid, int nsubxids,
 		}
 		/* subxids[i..j] are on the same page as the head */
 
-		SetXidCommitTsInPage(headxid, j - i, subxids + i, timestamp, pageno);
+		SetXidCommitTsInPage(headxid, j - i, subxids + i,
+							 timestamp, origin, pageno);
 
 		/* if we wrote out all subxids, we're done. */
 		if (j + 1 >= nsubxids)
@@ -132,7 +141,8 @@ TransactionTreeSetCommitTimestamp(TransactionId xid, int nsubxids,
  */
 static void
 SetXidCommitTsInPage(TransactionId xid, int nsubxids,
-					 TransactionId *subxids, TimestampTz committs, int pageno)
+					 TransactionId *subxids, TimestampTz committs, RepNodeId origin,
+					 int pageno)
 {
 	int			slotno;
 	int			i;
@@ -141,9 +151,9 @@ SetXidCommitTsInPage(TransactionId xid, int nsubxids,
 
 	slotno = SimpleLruReadPage(CommitTsCtl, pageno, true, xid);
 
-	TransactionIdSetCommitTs(xid, committs, slotno);
+	TransactionIdSetCommitTs(xid, committs, origin, slotno);
 	for (i = 0; i < nsubxids; i++)
-		TransactionIdSetCommitTs(subxids[i], committs, slotno);
+		TransactionIdSetCommitTs(subxids[i], committs, origin, slotno);
 
 	CommitTsCtl->shared->page_dirty[slotno] = true;
 
@@ -156,15 +166,17 @@ SetXidCommitTsInPage(TransactionId xid, int nsubxids,
  * Must be called with CommitTsControlLock held
  */
 static void
-TransactionIdSetCommitTs(TransactionId xid, TimestampTz committs, int slotno)
+TransactionIdSetCommitTs(TransactionId xid, TimestampTz committs,
+						 RepNodeId origin, int slotno)
 {
 	int			entryno = TransactionIdToCTsEntry(xid);
-	TimestampTz *timeptr;
+	CommittsEntry *entry;
 
-	timeptr = (TimestampTz *) CommitTsCtl->shared->page_buffer[slotno];
-	timeptr += entryno;
+	entry = (CommittsEntry *) CommitTsCtl->shared->page_buffer[slotno];
+	entry += entryno;
 
-	*timeptr = committs;
+	entry->timestamp = committs;
+	entry->origin = origin;
 }
 
 /*
@@ -173,15 +185,35 @@ TransactionIdSetCommitTs(TransactionId xid, TimestampTz committs, int slotno)
 TimestampTz
 TransactionIdGetCommitTimestamp(TransactionId xid)
 {
+	TimestampTz ts;
+	RepNodeId origin;
+
+	TransactionIdGetCommitTimestampAndOrigin(xid, &ts, &origin);
+	return ts;
+}
+
+/*
+ * Interrogate the commit timestamp and origin of a transaction.
+ */
+void
+TransactionIdGetCommitTimestampAndOrigin(TransactionId xid,
+										 TimestampTz *ts,
+										 RepNodeId *origin)
+{
+
+
 	int			pageno = TransactionIdToCTsPage(xid);
 	int			entryno = TransactionIdToCTsEntry(xid);
 	int			slotno;
-	TimestampTz *timeptr;
-	TimestampTz	committs;
+	CommittsEntry *entry;
 	TransactionId limit = RecentGlobalXmin;
 
+	/* so we can return early */
+	*ts = 0;
+	*origin = InvalidRepNodeId;
+
 	if (!track_commit_ts)
-		return 0;
+		return;
 
 	/*
 	 * FIXME -- we need a more useful lower bound here.  For now, we use
@@ -190,7 +222,7 @@ TransactionIdGetCommitTimestamp(TransactionId xid)
 	 * session, so avoid that).
 	 */
 	if (!TransactionIdIsValid(limit))
-		return 0;
+		return;
 
 	/* keep a bit more history */
 	limit -= 500000;
@@ -198,18 +230,20 @@ TransactionIdGetCommitTimestamp(TransactionId xid)
 		limit = FirstNormalTransactionId;
 
 	if (TransactionIdPrecedes(xid, limit))
-		return 0;
+		return;
 
 	/* lock is acquired by SimpleLruReadPage_ReadOnly */
 
 	slotno = SimpleLruReadPage_ReadOnly(CommitTsCtl, pageno, xid);
-	timeptr = (TimestampTz *) CommitTsCtl->shared->page_buffer[slotno];
-	timeptr += entryno;
-	committs = *timeptr;
+	entry = (CommittsEntry *) CommitTsCtl->shared->page_buffer[slotno];
+	entry += entryno;
+
+	*ts = entry->timestamp;
+	*origin = entry->origin;
 
 	LWLockRelease(CommitTsControlLock);
 
-	return committs;
+	return;
 }
 
 /*
@@ -226,6 +260,23 @@ pg_get_transaction_committime(PG_FUNCTION_ARGS)
 
 	PG_RETURN_TIMESTAMPTZ(committs);
 }
+
+/*
+ * SQL-callable wrapper to obtain commit time of a transaction
+ */
+PG_FUNCTION_INFO_V1(pg_get_transaction_origin);
+Datum
+pg_get_transaction_origin(PG_FUNCTION_ARGS)
+{
+	TransactionId	xid = PG_GETARG_UINT32(0);
+	TimestampTz		committs;
+	RepNodeId		origin;
+
+	TransactionIdGetCommitTimestampAndOrigin(xid, &committs, &origin);
+
+	PG_RETURN_TIMESTAMPTZ(origin);
+}
+
 
 /*
  * Number of shared CommitTS buffers.

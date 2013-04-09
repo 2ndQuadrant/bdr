@@ -13,15 +13,20 @@
 
 #include "access/xlog.h"
 #include "datatype/timestamp.h"
+#include "replication/logical.h"
 
 
 extern bool	track_commit_ts;
 
 
 extern void TransactionTreeSetCommitTimestamp(TransactionId xid, int nsubxids,
-								  TransactionId *subxids,
-								  TimestampTz timestamp);
+											  TransactionId *subxids,
+											  TimestampTz timestamp,
+											  RepNodeId origin);
 extern TimestampTz TransactionIdGetCommitTimestamp(TransactionId xid);
+extern void TransactionIdGetCommitTimestampAndOrigin(TransactionId xid,
+													 TimestampTz *ts,
+													 RepNodeId *origin);
 
 extern Size CommitTsShmemBuffers(void);
 extern Size CommitTsShmemSize(void);

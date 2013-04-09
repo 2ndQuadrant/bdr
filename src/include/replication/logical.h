@@ -174,6 +174,7 @@ typedef struct LogicalDecodingCheckpointData
 extern RepNodeId guc_replication_node_id;
 extern RepNodeId guc_replication_origin_id;
 extern XLogRecPtr replication_origin_lsn;
+extern TimestampTz replication_origin_timestamp;
 
 
 extern Size LogicalDecodingShmemSize(void);
