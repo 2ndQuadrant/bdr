@@ -128,7 +128,9 @@ process_remote_commit(char *data, size_t r)
 void
 process_remote_insert(char *data, size_t r)
 {
+#ifdef VERBOSE_INSERT
 	StringInfoData s;
+#endif
 	char action;
 	HeapTupleData tup;
 	Oid reloid;
@@ -153,10 +155,12 @@ process_remote_insert(char *data, size_t r)
 	UserTableUpdateIndexes(rel, &tup);
 
 	/* debug output */
+#if VERBOSE_INSERT
 	initStringInfo(&s);
 	tuple_to_stringinfo(&s, RelationGetDescr(rel), &tup);
 	elog(LOG, "INSERT: %s", s.data);
 	resetStringInfo(&s);
+#endif
 
 	heap_close(rel, NoLock);
 }
@@ -413,7 +417,9 @@ err:
 void
 process_remote_delete(char *data, size_t r)
 {
+#ifdef VERBOSE_DELETE
 	StringInfoData s;
+#endif
 	char action;
 
 	Oid idxoid;
@@ -466,10 +472,12 @@ process_remote_delete(char *data, size_t r)
 		resetStringInfo(&s_key);
 	}
 
+#if VERBOSE_DELETE
 	initStringInfo(&s);
 	tuple_to_stringinfo(&s, RelationGetDescr(idxrel), &old_key);
 	elog(LOG, "DELETE old-key: %s", s.data);
 	resetStringInfo(&s);
+#endif
 
 	index_close(idxrel, NoLock);
 	heap_close(rel, NoLock);
