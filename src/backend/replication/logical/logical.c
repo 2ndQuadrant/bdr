@@ -369,7 +369,9 @@ void LogicalDecodingAcquireFreeSlot(const char *name, const char *plugin)
 
 	Assert(slot->effective_xmin <= GetOldestXmin(true, true, false));
 
+	LWLockAcquire(LogicalReplicationCtlLock, LW_EXCLUSIVE);
 	CreateLogicalSlot(slot);
+	LWLockRelease(LogicalReplicationCtlLock);
 }
 
 /*
