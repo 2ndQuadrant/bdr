@@ -251,7 +251,7 @@ process_remote_update(char *data, size_t r)
 
 		if (!OidIsValid(idxoid))
 		{
-			elog(WARNING, "Could not find primary key for table with oid %u",
+			elog(ERROR, "Could not find primary key for table with oid %u",
 			     RelationGetRelid(rel));
 			return;
 		}
@@ -397,7 +397,7 @@ process_remote_update(char *data, size_t r)
 		initStringInfo(&s_key);
 		tuple_to_stringinfo(&s_key, RelationGetDescr(idxrel), &old_key);
 
-		ereport(WARNING,
+		ereport(ERROR,
 				(errcode(ERRCODE_INTEGRITY_CONSTRAINT_VIOLATION),
 				 errmsg("CONFLICT: could not find existing tuple for pkey %s", s_key.data)
 				 ));
@@ -465,7 +465,7 @@ process_remote_delete(char *data, size_t r)
 		initStringInfo(&s_key);
 		tuple_to_stringinfo(&s_key, RelationGetDescr(idxrel), &old_key);
 
-		ereport(WARNING,
+		ereport(ERROR,
 				(errcode(ERRCODE_INTEGRITY_CONSTRAINT_VIOLATION),
 				 errmsg("CONFLICT: DELETE could not find existing tuple for pkey %s", s_key.data)
 				 ));
