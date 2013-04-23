@@ -1,0 +1,501 @@
+/* -------------------------------------------------------------------------
+ *
+ * bdr_count.c
+ *		Replication replication stats
+ *
+ * Copyright (C) 2013, PostgreSQL Global Development Group
+ *
+ * IDENTIFICATION
+ *		contrib/bdr/bdr_count.c
+ *
+ * -------------------------------------------------------------------------
+ */
+#include "postgres.h"
+
+#include <unistd.h>
+#include <sys/stat.h>
+
+#include "bdr.h"
+
+#include "fmgr.h"
+#include "funcapi.h"
+#include "miscadmin.h"
+
+#include "nodes/execnodes.h"
+
+#include "replication/replication_identifier.h"
+
+#include "storage/fd.h"
+#include "storage/ipc.h"
+#include "storage/spin.h"
+#include "storage/lwlock.h"
+
+#include "utils/builtins.h"
+#include "utils/syscache.h"
+
+#ifdef EXEC_BACKEND
+#error "EXEC_BACKEND is not supported"
+#endif
+
+/*
+ * Statistics about logical replication
+ *
+ * whenever this struct is changed, bdr_count_version needs to be increased so
+ * on-disk values aren't reused
+ */
+typedef struct BdrCountSlot
+{
+	RepNodeId node_id;
+
+	/* we use int64 to make sure we can export to sql, there is uint64 there */
+	int64 nr_commit;
+	int64 nr_rollback;
+
+	int64 nr_insert;
+	int64 nr_insert_conflict;
+	int64 nr_update;
+	int64 nr_update_conflict;
+	int64 nr_delete;
+	int64 nr_delete_conflict;
+
+	int64 nr_disconnect;
+} BdrCountSlot;
+
+/*
+ * Shared memory header for the stats module.
+ */
+typedef struct BdrCountControl
+{
+	LWLockId	lock;
+	BdrCountSlot slots[FLEXIBLE_ARRAY_MEMBER];
+} BdrCountControl;
+
+/*
+ * Header of a stats disk serialization, used to detect old files, changed
+ * parameters and such.
+ */
+typedef struct BdrCountSerialize
+{
+	uint32 magic;
+	uint32 version;
+	uint32 nr_slots;
+} BdrCountSerialize;
+
+/* magic number of the stats file, don't change */
+static const uint32 bdr_count_magic = 0x5e51A7;
+
+/* everytime the stored data format changes, increase */
+static const uint32 bdr_count_version = 2;
+
+/* shortcut for the finding BdrCountControl in memory */
+static BdrCountControl *bdr_count_shmem_ctl = NULL;
+
+/* how many nodes have we built shmem for */
+static size_t bdr_count_nnodes = 0;
+
+/* offset in the BdrCountControl->slots "our" backend is in */
+static int bdr_count_current_offset = -1;
+
+static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
+
+static void bdr_count_shmem_startup(void);
+static void bdr_count_shmem_shutdown(int code, Datum arg);
+static Size bdr_count_shmem_size(void);
+
+static void bdr_count_serialize(void);
+static void bdr_count_unserialize(void);
+
+#define BDR_COUNT_STAT_COLS 13
+
+extern Datum pg_stat_bdr(PG_FUNCTION_ARGS);
+PG_FUNCTION_INFO_V1(pg_stat_bdr);
+
+static Size bdr_count_shmem_size(void)
+{
+	Size		size = 0;
+
+	size = add_size(size, sizeof(BdrCountControl));
+	size = add_size(size, mul_size(bdr_count_nnodes, sizeof(BdrCountSlot)));
+
+	return size;
+}
+
+void bdr_count_shmem_init(size_t nnodes)
+{
+	Assert(process_shared_preload_libraries_in_progress);
+
+	bdr_count_nnodes = nnodes;
+
+	RequestAddinShmemSpace(bdr_count_shmem_size());
+	/* lock for slot acquiration */
+	RequestAddinLWLocks(1);
+
+	prev_shmem_startup_hook = shmem_startup_hook;
+	shmem_startup_hook = bdr_count_shmem_startup;
+}
+
+static void
+bdr_count_shmem_startup(void)
+{
+	bool found;
+
+	if (prev_shmem_startup_hook)
+		prev_shmem_startup_hook();
+
+	LWLockAcquire(AddinShmemInitLock, LW_EXCLUSIVE);
+	bdr_count_shmem_ctl = ShmemInitStruct("bdr_count",
+										  bdr_count_shmem_size(),
+										  &found);
+	if (!found)
+	{
+		/* initialize */
+		memset(bdr_count_shmem_ctl, 0, bdr_count_shmem_size());
+		bdr_count_shmem_ctl->lock = LWLockAssign();
+		bdr_count_unserialize();
+	}
+	LWLockRelease(AddinShmemInitLock);
+
+	/*
+	 * If we're in the postmaster (or a standalone backend...), set up a shmem
+	 * exit hook to dump the statistics to disk.
+	 */
+	if (!IsUnderPostmaster)
+		on_shmem_exit(bdr_count_shmem_shutdown, (Datum) 0);
+}
+
+static void
+bdr_count_shmem_shutdown(int code, Datum arg)
+{
+	/*
+	 * To avoid doing the same everywhere, we only write in postmaster itself
+	 * (or in a single node postgres)
+	 */
+	if (IsUnderPostmaster)
+		return;
+
+	/* persist the file */
+	bdr_count_serialize();
+}
+
+/*
+ * Find a statistics slot for a given RepNodeId and setup a local variable
+ * pointing to it so we can quickly find it for the actual statistics
+ * manipulation.
+ */
+void
+bdr_count_set_current_node(RepNodeId node_id)
+{
+	size_t i;
+	bdr_count_current_offset = -1;
+
+	LWLockAcquire(bdr_count_shmem_ctl->lock, LW_EXCLUSIVE);
+
+	/* check whether stats already are counted for this node */
+	for (i = 0; i < bdr_count_nnodes; i++)
+	{
+		if (bdr_count_shmem_ctl->slots[i].node_id == node_id)
+		{
+			bdr_count_current_offset = i;
+			break;
+		}
+	}
+
+	if (bdr_count_current_offset != -1)
+		goto out;
+
+	/* ok, get a new slot */
+	for (i = 0; i < bdr_count_nnodes; i++)
+	{
+		if (bdr_count_shmem_ctl->slots[i].node_id == InvalidRepNodeId)
+		{
+			bdr_count_current_offset = i;
+			bdr_count_shmem_ctl->slots[i].node_id = node_id;
+			break;
+		}
+	}
+
+	if (bdr_count_current_offset == -1)
+		elog(PANIC, "could not find a bdr count slot for %u", node_id);
+out:
+	LWLockRelease(bdr_count_shmem_ctl->lock);
+}
+
+/*
+ * Statistic manipulation functions.
+ *
+ * We assume we don't have to do any locking for *our* slot since only one
+ * backend will do writing there.
+ */
+void
+bdr_count_commit(void)
+{
+	Assert(bdr_count_current_offset != -1);
+	bdr_count_shmem_ctl->slots[bdr_count_current_offset].nr_commit++;
+}
+
+void
+bdr_count_rollback(void)
+{
+	Assert(bdr_count_current_offset != -1);
+	bdr_count_shmem_ctl->slots[bdr_count_current_offset].nr_rollback++;
+}
+
+void
+bdr_count_insert(void)
+{
+	Assert(bdr_count_current_offset != -1);
+	bdr_count_shmem_ctl->slots[bdr_count_current_offset].nr_insert++;
+}
+
+void
+bdr_count_insert_conflict(void)
+{
+	Assert(bdr_count_current_offset != -1);
+	bdr_count_shmem_ctl->slots[bdr_count_current_offset].nr_insert_conflict++;
+}
+
+void
+bdr_count_update(void)
+{
+	Assert(bdr_count_current_offset != -1);
+	bdr_count_shmem_ctl->slots[bdr_count_current_offset].nr_update++;
+}
+
+void
+bdr_count_update_conflict(void)
+{
+	Assert(bdr_count_current_offset != -1);
+	bdr_count_shmem_ctl->slots[bdr_count_current_offset].nr_update_conflict++;
+}
+
+void
+bdr_count_delete(void)
+{
+	Assert(bdr_count_current_offset != -1);
+	bdr_count_shmem_ctl->slots[bdr_count_current_offset].nr_delete++;
+}
+
+void
+bdr_count_delete_conflict(void)
+{
+	Assert(bdr_count_current_offset != -1);
+	bdr_count_shmem_ctl->slots[bdr_count_current_offset].nr_delete_conflict++;
+}
+
+Datum
+pg_stat_bdr(PG_FUNCTION_ARGS)
+{
+	ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+	TupleDesc	tupdesc;
+	Tuplestorestate *tupstore;
+	MemoryContext per_query_ctx;
+	MemoryContext oldcontext;
+	int current_offset;
+
+	if (!superuser())
+		elog(ERROR, "blarg");
+
+	if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo))
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("set-valued function called in context that cannot accept a set")));
+	if (!(rsinfo->allowedModes & SFRM_Materialize))
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("materialize mode required, but it is not " \
+						"allowed in this context")));
+	if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
+		elog(ERROR, "return type must be a row type");
+
+	per_query_ctx = rsinfo->econtext->ecxt_per_query_memory;
+	oldcontext = MemoryContextSwitchTo(per_query_ctx);
+
+	tupstore = tuplestore_begin_heap(true, false, work_mem);
+	rsinfo->returnMode = SFRM_Materialize;
+	rsinfo->setResult = tupstore;
+	rsinfo->setDesc = tupdesc;
+
+	if (tupdesc->natts != BDR_COUNT_STAT_COLS)
+		elog(ERROR, "wrong function definition");
+
+	MemoryContextSwitchTo(oldcontext);
+
+	/* don't let a node get created/vanish below us */
+	LWLockAcquire(bdr_count_shmem_ctl->lock, LW_SHARED);
+
+	for (current_offset = 0; current_offset < bdr_count_nnodes;
+		 current_offset++)
+	{
+		HeapTuple repTup;
+		Form_pg_replication_identifier repClass;
+		BdrCountSlot *slot;
+		Datum		values[12];
+		bool		nulls[12];
+
+		slot = &bdr_count_shmem_ctl->slots[current_offset];
+
+		/* no stats here */
+	    if (slot->node_id == InvalidRepNodeId)
+			continue;
+
+		memset(values, 0, sizeof(values));
+		memset(nulls, 0, sizeof(nulls));
+
+		repTup = GetReplicationInfoByIdentifier(slot->node_id);
+		repClass = (Form_pg_replication_identifier) GETSTRUCT(repTup);
+
+		values[ 0] = ObjectIdGetDatum(slot->node_id);
+		values[ 1] = NameGetDatum(&repClass->riremotesysid);
+		values[ 2] = ObjectIdGetDatum(repClass->rilocaldb);
+		values[ 3] = ObjectIdGetDatum(repClass->riremotedb);
+		values[ 4] = Int64GetDatumFast(slot->nr_commit);
+		values[ 5] = Int64GetDatumFast(slot->nr_rollback);
+		values[ 6] = Int64GetDatumFast(slot->nr_insert);
+		values[ 7] = Int64GetDatumFast(slot->nr_insert_conflict);
+		values[ 8] = Int64GetDatumFast(slot->nr_update);
+		values[ 9] = Int64GetDatumFast(slot->nr_update_conflict);
+		values[10] = Int64GetDatumFast(slot->nr_delete);
+		values[11] = Int64GetDatumFast(slot->nr_delete_conflict);
+		values[12] = Int64GetDatumFast(slot->nr_disconnect);
+
+		tuplestore_putvalues(tupstore, tupdesc, values, nulls);
+		ReleaseSysCache(repTup);
+	}
+	LWLockRelease(bdr_count_shmem_ctl->lock);
+
+	tuplestore_donestoring(tupstore);
+
+	return (Datum) 0;
+}
+
+static void
+bdr_count_serialize(void)
+{
+	int fd;
+	const char* tpath = "global/bdr.stat.tmp";
+	const char* path = "global/bdr.stat";
+	BdrCountSerialize serial;
+	Size write_size;
+
+	LWLockAcquire(bdr_count_shmem_ctl->lock, LW_EXCLUSIVE);
+
+	if (unlink(tpath) < 0 && errno != ENOENT)
+		ereport(ERROR, (errcode_for_file_access(),
+						errmsg("failed while unlinking %s",  tpath)));
+
+	fd = OpenTransientFile((char *) tpath,
+						   O_WRONLY | O_CREAT | O_EXCL | PG_BINARY,
+						   S_IRUSR | S_IWUSR);
+	if (fd < 0)
+		ereport(ERROR, (errcode_for_file_access(),
+						errmsg("%s cannot be opened: %m", tpath)));
+
+	serial.magic = bdr_count_magic;
+	serial.version = 1;
+	serial.nr_slots = bdr_count_nnodes;
+
+	/* write header */
+	write_size = sizeof(serial);
+	if ((write(fd, &serial, write_size)) != write_size)
+	{
+		CloseTransientFile(fd);
+		ereport(ERROR,
+				(errcode_for_file_access(),
+				 errmsg("could not write bdr stat file data \"%s\": %m",
+						tpath)));
+	}
+
+	/* write data */
+	write_size = sizeof(BdrCountSlot) * bdr_count_nnodes;
+	if ((write(fd, &bdr_count_shmem_ctl->slots, write_size)) != write_size)
+	{
+		CloseTransientFile(fd);
+		ereport(ERROR,
+				(errcode_for_file_access(),
+				 errmsg("could not write bdr stat file data \"%s\": %m",
+						tpath)));
+	}
+
+	/* rename into place */
+	if (rename(tpath, path) != 0)
+		ereport(ERROR,
+				(errcode_for_file_access(),
+				 errmsg("could not rename bdr stat file \"%s\" to \"%s\": %m",
+						tpath, path)));
+	LWLockRelease(bdr_count_shmem_ctl->lock);
+}
+
+static void
+bdr_count_unserialize(void)
+{
+	int fd;
+	const char* path = "global/bdr.stat";
+	BdrCountSerialize serial;
+	Size read_size;
+
+	LWLockAcquire(bdr_count_shmem_ctl->lock, LW_EXCLUSIVE);
+
+	fd = OpenTransientFile((char *) path,
+						   O_RDONLY | PG_BINARY, 0);
+	if (fd < 0 && errno == ENOENT)
+		goto out;
+
+	if (fd < 0)
+	{
+		LWLockRelease(bdr_count_shmem_ctl->lock);
+		ereport(ERROR, (errcode_for_file_access(),
+						errmsg("%s cannot be opened: %m", path)));
+	}
+
+	read_size = sizeof(serial);
+	if (read(fd, &serial, read_size) != read_size)
+	{
+		LWLockRelease(bdr_count_shmem_ctl->lock);
+		CloseTransientFile(fd);
+		ereport(ERROR,
+				(errcode_for_file_access(),
+				 errmsg("could not read bdr stat file data \"%s\": %m",
+						path)));
+	}
+
+	if (serial.magic != bdr_count_magic)
+	{
+		LWLockRelease(bdr_count_shmem_ctl->lock);
+		CloseTransientFile(fd);
+		elog(ERROR, "expected magic %u doesn't match read magic %u",
+			 bdr_count_magic, serial.magic);
+	}
+
+	if (serial.version != bdr_count_version)
+	{
+		elog(NOTICE, "version of stat file changed, zeroing");
+		goto zero_file;
+	}
+
+	if (serial.nr_slots > bdr_count_nnodes)
+	{
+		elog(NOTICE, "stat file has more stats than we need, zeroing");
+		goto zero_file;
+	}
+
+	/* read actual data, directly into shmem */
+	read_size = sizeof(BdrCountSlot) * bdr_count_nnodes;
+	if (read(fd, &bdr_count_shmem_ctl->slots, read_size) != read_size)
+	{
+		CloseTransientFile(fd);
+		ereport(ERROR,
+				(errcode_for_file_access(),
+				 errmsg("could not read bdr stat file data \"%s\": %m",
+						path)));
+	}
+
+out:
+	CloseTransientFile(fd);
+	LWLockRelease(bdr_count_shmem_ctl->lock);
+	return;
+zero_file:
+	CloseTransientFile(fd);
+	LWLockRelease(bdr_count_shmem_ctl->lock);
+	/* write out a new file without data in it */
+	bdr_count_serialize();
+}

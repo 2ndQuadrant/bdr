@@ -122,6 +122,8 @@ process_remote_commit(char *data, size_t r)
 	AdvanceCachedReplicationIdentifier(*origlsn, XactLastCommitEnd);
 
 	CurrentResourceOwner = bdr_saved_resowner;
+
+	bdr_count_commit();
 }
 
 
@@ -153,6 +155,7 @@ process_remote_insert(char *data, size_t r)
 
 	simple_heap_insert(rel, &tup);
 	UserTableUpdateIndexes(rel, &tup);
+	bdr_count_insert();
 
 	/* debug output */
 #if VERBOSE_INSERT
@@ -390,12 +393,16 @@ process_remote_update(char *data, size_t r)
 			simple_heap_update(rel, &oldtid, &new_tuple);
 			/* FIXME: HOT support */
 			UserTableUpdateIndexes(rel, &new_tuple);
+			bdr_count_update();
 		}
+		else
+			bdr_count_update_conflict();
 	}
 	else
 	{
 		initStringInfo(&s_key);
 		tuple_to_stringinfo(&s_key, RelationGetDescr(idxrel), &old_key);
+		bdr_count_update_conflict();
 
 		ereport(ERROR,
 				(errcode(ERRCODE_INTEGRITY_CONSTRAINT_VIOLATION),
@@ -458,10 +465,16 @@ process_remote_delete(char *data, size_t r)
 	found_old = find_pkey_tuple(skey, rel, idxrel, &oldtid);
 
 	if (found_old)
+	{
 		simple_heap_delete(rel, &oldtid);
+		bdr_count_delete();
+
+	}
 	else
 	{
 		StringInfoData s_key;
+		bdr_count_delete_conflict();
+
 		initStringInfo(&s_key);
 		tuple_to_stringinfo(&s_key, RelationGetDescr(idxrel), &old_key);
 

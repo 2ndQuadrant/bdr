@@ -14,6 +14,8 @@
  */
 #include "postgres.h"
 
+#include "bdr.h"
+
 /* These are always necessary for a bgworker */
 #include "miscadmin.h"
 #include "postmaster/bgworker.h"
@@ -24,7 +26,6 @@
 #include "storage/shmem.h"
 
 /* these headers are used by this particular worker's code */
-#include "bdr.h"
 
 #include "access/xact.h"
 #include "catalog/pg_index.h"
@@ -346,6 +347,9 @@ bdr_main(void *main_arg)
 	bdr_connection->sysid = remote_sysid_i;
 	bdr_connection->timeline = remote_tlid_i;
 
+	/* initialize stat subsystem, our id won't change further */
+	bdr_count_set_current_node(replication_identifier);
+
 	/*
 	 * tell replication_identifier.c about our identifier so it can cache the
 	 * search in shared memory.
@@ -472,6 +476,7 @@ _PG_init(void)
 	List *cons;
 	ListCell   *c;
 	MemoryContext old_context;
+	Size nregistered = 0;
 
 	/* guc's et al need to survive this */
 	old_context = MemoryContextSwitchTo(TopMemoryContext);
@@ -587,9 +592,15 @@ _PG_init(void)
 		worker.bgw_name = pstrdup(name);
 		worker.bgw_main_arg = (void *) con;
 		RegisterBackgroundWorker(&worker);
-	}
 
+		nregistered++;
+	}
 	EmitWarningsOnPlaceholders("bdr");
+
+	/* initialize other modules that need shared memory */
+
+	/* register a slot for every remote node */
+	bdr_count_shmem_init(nregistered);
 
 out:
 	MemoryContextSwitchTo(old_context);
