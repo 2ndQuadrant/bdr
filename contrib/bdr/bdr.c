@@ -427,7 +427,6 @@ bdr_main(void *main_arg)
 				break;
 			else
 			{
-				elog(LOG, "got %d bytes of data, type %c", r, copybuf[0]);
 				if (copybuf[0] == 'w')
 				{
 					int hdr_len = 0;
