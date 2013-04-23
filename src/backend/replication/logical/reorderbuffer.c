@@ -2018,7 +2018,7 @@ ReorderBufferToastAppendChunk(ReorderBuffer *cache, ReorderBufferTXN *txn,
 	if (txn->toast_hash == NULL)
 		ReorderBufferToastInitHash(cache, txn);
 
-	IsToastRelation(relation);
+	Assert(IsToastRelation(relation));
 
 	chunk_id = DatumGetObjectId(fastgetattr(&change->newtuple->tuple, 1, desc, &isnull));
 	Assert(!isnull);
