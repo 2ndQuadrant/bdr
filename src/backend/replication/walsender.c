@@ -298,6 +298,7 @@ IdentifySystem(void)
 	char		xpos[MAXFNAMELEN];
 	XLogRecPtr	logptr;
 	char	   *dbname = NULL;
+	char		dboid[10];
 
 	/*
 	 * Reply with a result set with one row, four columns. First col is system
@@ -330,6 +331,7 @@ IdentifySystem(void)
 		/* make dbname live outside TX context */
 		MemoryContextSwitchTo(cur);
 		dbname = get_database_name(MyDatabaseId);
+		sprintf(dboid, "%u", MyDatabaseId);
 		CommitTransactionCommand();
 		/* CommitTransactionCommand switches to TopMemoryContext */
 		MemoryContextSwitchTo(cur);
@@ -337,7 +339,7 @@ IdentifySystem(void)
 
 	/* Send a RowDescription message */
 	pq_beginmessage(&buf, 'T');
-	pq_sendint(&buf, 4, 2);		/* 4 fields */
+	pq_sendint(&buf, 5, 2);		/* 5 fields */
 
 	/* first field */
 	pq_sendstring(&buf, "systemid");	/* col name */
@@ -374,11 +376,21 @@ IdentifySystem(void)
 	pq_sendint(&buf, -1, 2);        /* typlen */
 	pq_sendint(&buf, 0, 4);     /* typmod */
 	pq_sendint(&buf, 0, 2);     /* format code */
+
+	/* fifth field */
+	pq_sendstring(&buf, "dboid");	/* col name */
+	pq_sendint(&buf, 0, 4);		/* table oid */
+	pq_sendint(&buf, 0, 2);		/* attnum */
+	pq_sendint(&buf, INT4OID, 4);		/* type oid */
+	pq_sendint(&buf, 4, 2);		/* typlen */
+	pq_sendint(&buf, 0, 4);		/* typmod */
+	pq_sendint(&buf, 0, 2);		/* format code */
+
 	pq_endmessage(&buf);
 
 	/* Send a DataRow message */
 	pq_beginmessage(&buf, 'D');
-	pq_sendint(&buf, 4, 2);		/* # of columns */
+	pq_sendint(&buf, 5, 2);		/* # of columns */
 	pq_sendint(&buf, strlen(sysid), 4); /* col1 len */
 	pq_sendbytes(&buf, (char *) &sysid, strlen(sysid));
 	pq_sendint(&buf, strlen(tli), 4);	/* col2 len */
@@ -390,10 +402,14 @@ IdentifySystem(void)
 	{
 		pq_sendint(&buf, strlen(dbname), 4);    /* col4 len */
 		pq_sendbytes(&buf, (char *) dbname, strlen(dbname));
+
+		pq_sendint(&buf, strlen(dboid), 4);		/* col5 len */
+		pq_sendbytes(&buf, dboid, strlen(dboid));
 	}
 	else
 	{
 		pq_sendint(&buf, -1, 4);    /* col4 len, NULL */
+		pq_sendint(&buf, -1, 4);	/* col5 len, NULL */
 	}
 
 	pq_endmessage(&buf);
