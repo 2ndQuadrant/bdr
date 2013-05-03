@@ -531,11 +531,11 @@ ReceiveXlogStream(PGconn *conn, XLogRecPtr startpos, uint32 timeline,
 			PQclear(res);
 			return false;
 		}
-		if (PQnfields(res) != 4 || PQntuples(res) != 1)
+		if (PQnfields(res) != 5 || PQntuples(res) != 1)
 		{
 			fprintf(stderr,
 					_("%s: could not identify system: got %d rows and %d fields, expected %d rows and %d fields\n"),
-					progname, PQntuples(res), PQnfields(res), 1, 4);
+					progname, PQntuples(res), PQnfields(res), 1, 5);
 			PQclear(res);
 			return false;
 		}

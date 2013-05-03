@@ -754,11 +754,11 @@ main(int argc, char **argv)
 			disconnect_and_exit(1);
 		}
 
-		if (PQntuples(res) != 1 || PQnfields(res) != 4)
+		if (PQntuples(res) != 1 || PQnfields(res) != 5)
 		{
 			fprintf(stderr,
 					_("%s: could not identify system: got %d rows and %d fields, expected %d rows and %d fields\n"),
-					progname, PQntuples(res), PQnfields(res), 1, 4);
+					progname, PQntuples(res), PQnfields(res), 1, 5);
 			disconnect_and_exit(1);
 		}
 		PQclear(res);
