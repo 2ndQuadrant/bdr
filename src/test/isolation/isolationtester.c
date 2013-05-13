@@ -24,12 +24,14 @@
 #define PREP_WAITING "isolationtester_waiting"
 
 /*
- * conns[0] is the global setup, teardown, and watchdog connection.  Additional
- * connections represent spec-defined sessions.
+ * conns[0..testspec->nconninfos] are the global connections, and
+ * sconns[0..testspec->nsessions] are per-session connections.
  */
+
 static PGconn **conns = NULL;
-static const char **backend_pids = NULL;
-static int	nconns = 0;
+static PGconn **sconns = NULL;
+static int nconns = 0;
+static int nsconns = 0;
 
 /* In dry run only output permutations to be run by the tester. */
 static int	dry_run = false;
@@ -43,7 +45,7 @@ static void run_permutation(TestSpec *testspec, int nsteps, Step **steps);
 
 #define STEP_NONBLOCK	0x1		/* return 0 as soon as cmd waits for a lock */
 #define STEP_RETRY		0x2		/* this is a retry of a previously-waiting cmd */
-static bool try_complete_step(Step *step, int flags);
+static bool try_complete_step(TestSpec * testspec, Step * step, int flags);
 
 static int	step_qsort_cmp(const void *a, const void *b);
 static int	step_bsearch_cmp(const void *a, const void *b);
@@ -58,6 +60,8 @@ exit_nicely(void)
 
 	for (i = 0; i < nconns; i++)
 		PQfinish(conns[i]);
+	for (i = 0; i < nsconns; i++)
+		PQfinish(sconns[i]);
 	exit(1);
 }
 
@@ -65,10 +69,10 @@ int
 main(int argc, char **argv)
 {
 	const char *conninfo;
+	const char *wait_query;
 	TestSpec   *testspec;
 	int			i;
 	PGresult   *res;
-	PQExpBufferData wait_query;
 	int			opt;
 
 	while ((opt = getopt(argc, argv, "nV")) != -1)
@@ -94,25 +98,11 @@ main(int argc, char **argv)
 	setbuf(stdout, NULL);
 	setbuf(stderr, NULL);
 
-	/*
-	 * If the user supplies a non-option parameter on the command line, use it
-	 * as the conninfo string; otherwise default to setting dbname=postgres
-	 * and using environment variables or defaults for all other connection
-	 * parameters.
-	 */
-	if (argc > optind)
-		conninfo = argv[optind];
-	else
-		conninfo = "dbname = postgres";
-
 	/* Read the test spec from stdin */
 	spec_yyparse();
 	testspec = &parseresult;
 
-	/*
-	 * In dry-run mode, just print the permutations that would be run, and
-	 * exit.
-	 */
+	/* In dry-run mode, just print the permutations that would be run. */
 	if (dry_run)
 	{
 		run_testspec(testspec);
@@ -122,19 +112,95 @@ main(int argc, char **argv)
 	printf("Parsed test spec with %d sessions\n", testspec->nsessions);
 
 	/*
-	 * Establish connections to the database, one for each session and an
-	 * extra for lock wait detection and global work.
+	 * If anything follows the options on the command line, it must be a
+	 * conninfo string. If not, set dbname=postgres and use environment
+	 * variables and defaults for all other connection parameters.
 	 */
-	nconns = 1 + testspec->nsessions;
+
+	if (argc > optind)
+		conninfo = argv[optind];
+	else
+		conninfo = "dbname = postgres";
+
+	/*
+	 * If the spec file doesn't define any conninfos, pretend that it
+	 * defined the one derived above.
+	 */
+
+	if (testspec->nconninfos == 0)
+	{
+		testspec->conninfos = malloc(sizeof(Connection *));
+		testspec->conninfos[0] = malloc(sizeof(Connection));
+		testspec->conninfos[0]->name = "default";
+		testspec->conninfos[0]->conninfo = conninfo;
+		testspec->conninfos[0]->pids = NULL;
+		testspec->conninfos[0]->npids = 0;
+		testspec->conninfos[0]->pidlist = NULL;
+		testspec->nconninfos++;
+	}
+
+	/*
+	 * We now have one or more conninfos, each with a name.
+	 *
+	 * A session may name a conninfo to use (which must be defined), or
+	 * it uses the first (and perhaps only) conninfo by default.
+	 *
+	 * We set session->connidx for every session, so that we can look up
+	 * testspec->conninfos[connidx] and conns[connidx] later.
+	 */
+
+	for (i = 0; i < testspec->nsessions; i++)
+	{
+		Session *s = testspec->sessions[i];
+		int j;
+
+		s->connidx = -1;
+		for (j = 0; j < testspec->nconninfos; j++)
+		{
+			Connection *c = testspec->conninfos[j];
+
+			if (s->connection && strcmp(s->connection, c->name) == 0)
+			{
+				s->connidx = j;
+				c->npids++;
+				break;
+			}
+		}
+
+		if (s->connidx < 0)
+		{
+			if (s->connection)
+			{
+				fprintf(stderr, "Session %s wants to use undefined connection %s\n",
+						s->name, s->connection);
+				return EXIT_FAILURE;
+			}
+			else
+			{
+				s->connidx = 0;
+				testspec->conninfos[0]->npids++;
+			}
+		}
+	}
+
+	/*
+	 * For each defined conninfos[i], we store a connection in conns[i].
+	 * These connections are used to execute lock wait checking queries.
+	 * The first connection is also used to execute global setup and
+	 * teardown commands.
+	 */
+
+	nconns = testspec->nconninfos;
 	conns = calloc(nconns, sizeof(PGconn *));
-	backend_pids = calloc(nconns, sizeof(*backend_pids));
 	for (i = 0; i < nconns; i++)
 	{
-		conns[i] = PQconnectdb(conninfo);
+		Connection *c = testspec->conninfos[i];
+
+		conns[i] = PQconnectdb(c->conninfo);
 		if (PQstatus(conns[i]) != CONNECTION_OK)
 		{
-			fprintf(stderr, "Connection %d to database failed: %s",
-					i, PQerrorMessage(conns[i]));
+			fprintf(stderr, "Couldn't connect to %s ('%s'): %s",
+					c->name, c->conninfo, PQerrorMessage(conns[i]));
 			exit_nicely();
 		}
 
@@ -145,34 +211,111 @@ main(int argc, char **argv)
 		res = PQexec(conns[i], "SET client_min_messages = warning;");
 		if (PQresultStatus(res) != PGRES_COMMAND_OK)
 		{
-			fprintf(stderr, "message level setup failed: %s", PQerrorMessage(conns[i]));
+			fprintf(stderr, "Couldn't set client_min_messages: %s", PQerrorMessage(conns[i]));
+			exit_nicely();
+		}
+		PQclear(res);
+
+		/*
+		 * c->npids is the number of sessions that use this conninfo.
+		 */
+
+		if (c->npids)
+			c->pids = calloc(c->npids, sizeof(char *));
+	}
+
+	/*
+	 * For each defined session, we store a connection in sconns[i].
+	 * These connections are used to execute per-session setup and
+	 * teardown commands, as well as the individual steps for each
+	 * session.
+	 */
+
+	nsconns = testspec->nsessions;
+	sconns = calloc(nsconns, sizeof(PGconn *));
+	for (i = 0; i < nsconns; i++)
+	{
+		Session *s = testspec->sessions[i];
+		Connection *c = testspec->conninfos[s->connidx];
+
+		sconns[i] = PQconnectdb(c->conninfo);
+		if (PQstatus(sconns[i]) != CONNECTION_OK)
+		{
+			fprintf(stderr, "Couldn't connect to %s ('%s') for session %s: %s",
+					c->name, c->conninfo, s->name, PQerrorMessage(sconns[i]));
+			exit_nicely();
+		}
+
+		/* Suppress NOTIFY messages again. */
+		res = PQexec(sconns[i], "SET client_min_messages = warning;");
+		if (PQresultStatus(res) != PGRES_COMMAND_OK)
+		{
+			fprintf(stderr, "Couldn't set client_min_messages: %s", PQerrorMessage(sconns[i]));
 			exit_nicely();
 		}
 		PQclear(res);
 
 		/* Get the backend pid for lock wait checking. */
-		res = PQexec(conns[i], "SELECT pg_backend_pid()");
+		res = PQexec(sconns[i], "SELECT pg_backend_pid()");
 		if (PQresultStatus(res) == PGRES_TUPLES_OK)
 		{
 			if (PQntuples(res) == 1 && PQnfields(res) == 1)
-				backend_pids[i] = strdup(PQgetvalue(res, 0, 0));
+			{
+				int j = 0;
+				while (c->pids[j] != 0)
+					j++;
+				c->pids[j] = strdup(PQgetvalue(res, 0, 0));
+				s->backend_pid = c->pids[j];
+			}
 			else
 			{
-				fprintf(stderr, "backend pid query returned %d rows and %d columns, expected 1 row and 1 column",
+				fprintf(stderr, "pg_backend_pid() returned %d rows and %d columns, expected 1 row and 1 column",
 						PQntuples(res), PQnfields(res));
 				exit_nicely();
 			}
 		}
 		else
 		{
-			fprintf(stderr, "backend pid query failed: %s",
-					PQerrorMessage(conns[i]));
+			fprintf(stderr, "Couldn't get pg_backend_pid(): %s",
+					PQerrorMessage(sconns[i]));
 			exit_nicely();
 		}
 		PQclear(res);
 	}
 
-	/* Set the session index fields in steps. */
+	/*
+	 * We now have an array of the pids of the backends corresponding to
+	 * each conninfo, which we transform into array format ({a,b,c}) for
+	 * use in later queries.
+	 */
+
+	for (i = 0; i < nconns; i++)
+	{
+		Connection *c = testspec->conninfos[i];
+		if (c->npids)
+		{
+			int j;
+			int n = 2;
+
+			for (j = 0; j < c->npids; j++)
+				n += strlen(c->pids[j]) + 1;
+
+			c->pidlist = malloc(n);
+			*c->pidlist = '\0';
+			strcat(c->pidlist, "{");
+			for (j = 0; j < c->npids; j++)
+			{
+				strcat(c->pidlist, c->pids[j]);
+				strcat(c->pidlist, ",");
+			}
+			c->pidlist[strlen(c->pidlist)-1] = '}';
+		}
+	}
+
+	/*
+	 * For each step, set the index of the session that contains it.
+	 */
+
 	for (i = 0; i < testspec->nsessions; i++)
 	{
 		Session    *session = testspec->sessions[i];
@@ -183,104 +326,111 @@ main(int argc, char **argv)
 	}
 
 	/*
+<<<<<<< HEAD
 	 * Build the query we'll use to detect lock contention among sessions in
 	 * the test specification.  Most of the time, we could get away with
 	 * simply checking whether a session is waiting for *any* lock: we don't
 	 * exactly expect concurrent use of test tables.  However, autovacuum will
 	 * occasionally take AccessExclusiveLock to truncate a table, and we must
 	 * ignore that transient wait.
+=======
+	 * "Is this session waiting for a lock held by another session?"
+	 *
+	 * The following query answers that question. "This session" is
+	 * identified by s->backend_pid. The pids of other sessions using
+	 * the same conninfo are enumerated in c->pidlist. For a session
+	 * using conninfo[i], this query is executed on conns[i].
+	 *
+	 * We must assume that different conninfos refer to different
+	 * servers, such that a session using connection A cannot be
+	 * waiting for a lock held by a session using connection B.
+	 *
+	 * Most of the time, we could get away with checking whether a
+	 * session is waiting for *any* lock: we don't exactly expect
+	 * concurrent use of test tables. However, autovacuum will
+	 * occasionally take AccessExclusiveLock to truncate a table,
+	 * and we must ignore that transient wait.
+>>>>>>> 6d9ee0a... bdr: isolationtester: Isolationtester with multi-server support
 	 */
-	initPQExpBuffer(&wait_query);
-	appendPQExpBufferStr(&wait_query,
-						 "SELECT 1 FROM pg_locks holder, pg_locks waiter "
-						 "WHERE NOT waiter.granted AND waiter.pid = $1 "
-						 "AND holder.granted "
-						 "AND holder.pid <> $1 AND holder.pid IN (");
-	/* The spec syntax requires at least one session; assume that here. */
-	appendPQExpBufferStr(&wait_query, backend_pids[1]);
-	for (i = 2; i < nconns; i++)
-		appendPQExpBuffer(&wait_query, ", %s", backend_pids[i]);
-	appendPQExpBufferStr(&wait_query,
-						 ") "
 
-						 "AND holder.mode = ANY (CASE waiter.mode "
-						 "WHEN 'AccessShareLock' THEN ARRAY["
-						 "'AccessExclusiveLock'] "
-						 "WHEN 'RowShareLock' THEN ARRAY["
-						 "'ExclusiveLock',"
-						 "'AccessExclusiveLock'] "
-						 "WHEN 'RowExclusiveLock' THEN ARRAY["
-						 "'ShareLock',"
-						 "'ShareRowExclusiveLock',"
-						 "'ExclusiveLock',"
-						 "'AccessExclusiveLock'] "
-						 "WHEN 'ShareUpdateExclusiveLock' THEN ARRAY["
-						 "'ShareUpdateExclusiveLock',"
-						 "'ShareLock',"
-						 "'ShareRowExclusiveLock',"
-						 "'ExclusiveLock',"
-						 "'AccessExclusiveLock'] "
-						 "WHEN 'ShareLock' THEN ARRAY["
-						 "'RowExclusiveLock',"
-						 "'ShareUpdateExclusiveLock',"
-						 "'ShareRowExclusiveLock',"
-						 "'ExclusiveLock',"
-						 "'AccessExclusiveLock'] "
-						 "WHEN 'ShareRowExclusiveLock' THEN ARRAY["
-						 "'RowExclusiveLock',"
-						 "'ShareUpdateExclusiveLock',"
-						 "'ShareLock',"
-						 "'ShareRowExclusiveLock',"
-						 "'ExclusiveLock',"
-						 "'AccessExclusiveLock'] "
-						 "WHEN 'ExclusiveLock' THEN ARRAY["
-						 "'RowShareLock',"
-						 "'RowExclusiveLock',"
-						 "'ShareUpdateExclusiveLock',"
-						 "'ShareLock',"
-						 "'ShareRowExclusiveLock',"
-						 "'ExclusiveLock',"
-						 "'AccessExclusiveLock'] "
-						 "WHEN 'AccessExclusiveLock' THEN ARRAY["
-						 "'AccessShareLock',"
-						 "'RowShareLock',"
-						 "'RowExclusiveLock',"
-						 "'ShareUpdateExclusiveLock',"
-						 "'ShareLock',"
-						 "'ShareRowExclusiveLock',"
-						 "'ExclusiveLock',"
-						 "'AccessExclusiveLock'] END) "
-
-				  "AND holder.locktype IS NOT DISTINCT FROM waiter.locktype "
-				  "AND holder.database IS NOT DISTINCT FROM waiter.database "
-				  "AND holder.relation IS NOT DISTINCT FROM waiter.relation "
-						 "AND holder.page IS NOT DISTINCT FROM waiter.page "
-						 "AND holder.tuple IS NOT DISTINCT FROM waiter.tuple "
-			  "AND holder.virtualxid IS NOT DISTINCT FROM waiter.virtualxid "
+	wait_query =
+		"select 1 from pg_locks holder, pg_locks waiter where "
+		"NOT waiter.granted AND waiter.pid = $1 "
+		"AND holder.granted AND holder.pid <> $1 "
+		"AND holder.pid = ANY($2) "
+		"AND holder.mode = ANY( "
+		" CASE waiter.mode "
+		"  WHEN 'AccessShareLock' "
+		"   THEN ARRAY['AccessExclusiveLock'] "
+		"  WHEN 'RowShareLock' "
+		"   THEN ARRAY['ExclusiveLock','AccessExclusiveLock'] "
+		"  WHEN 'RowExclusiveLock' "
+		"   THEN ARRAY['ShareLock','ShareRowExclusiveLock', "
+		"    'ExclusiveLock','AccessExclusiveLock'] "
+		"  WHEN 'ShareUpdateExclusiveLock' "
+		"   THEN ARRAY['ShareUpdateExclusiveLock','ShareLock', "
+		"    'ShareRowExclusiveLock','ExclusiveLock','AccessExclusiveLock'] "
+		"  WHEN 'ShareLock' "
+		"   THEN ARRAY['RowExclusiveLock','ShareUpdateExclusiveLock', "
+		"    'ShareRowExclusiveLock','ExclusiveLock','AccessExclusiveLock'] "
+		"  WHEN 'ShareRowExclusiveLock' "
+		"   THEN ARRAY['RowExclusiveLock','ShareUpdateExclusiveLock', "
+		"    'ShareLock','ShareRowExclusiveLock','ExclusiveLock', "
+		"    'AccessExclusiveLock'] "
+		"  WHEN 'ExclusiveLock' "
+		"   THEN ARRAY['RowShareLock','RowExclusiveLock', "
+		"    'ShareUpdateExclusiveLock','ShareLock','ShareRowExclusiveLock', "
+		"    'ExclusiveLock','AccessExclusiveLock'] "
+		"  WHEN 'AccessExclusiveLock' "
+		"   THEN ARRAY['AccessShareLock','RowShareLock','RowExclusiveLock', "
+		"    'ShareUpdateExclusiveLock','ShareLock','ShareRowExclusiveLock', "
+		"    'ExclusiveLock','AccessExclusiveLock'] "
+		" END) "
+		"AND holder.locktype IS NOT DISTINCT FROM waiter.locktype "
+		"AND holder.database IS NOT DISTINCT FROM waiter.database "
+		"AND holder.relation IS NOT DISTINCT FROM waiter.relation "
+		"AND holder.page IS NOT DISTINCT FROM waiter.page "
+		"AND holder.tuple IS NOT DISTINCT FROM waiter.tuple "
+		"AND holder.virtualxid IS NOT DISTINCT FROM waiter.virtualxid "
 		"AND holder.transactionid IS NOT DISTINCT FROM waiter.transactionid "
-					"AND holder.classid IS NOT DISTINCT FROM waiter.classid "
-						 "AND holder.objid IS NOT DISTINCT FROM waiter.objid "
-				"AND holder.objsubid IS NOT DISTINCT FROM waiter.objsubid ");
+		"AND holder.classid IS NOT DISTINCT FROM waiter.classid "
+		"AND holder.objid IS NOT DISTINCT FROM waiter.objid "
+		"AND holder.objsubid IS NOT DISTINCT FROM waiter.objsubid";
 
-	res = PQprepare(conns[0], PREP_WAITING, wait_query.data, 0, NULL);
-	if (PQresultStatus(res) != PGRES_COMMAND_OK)
+	/*
+	 * PREPARE this query for later execution on each of the global
+	 * connections.
+	 */
+
+	for (i = 0; i < nconns; i++)
 	{
-		fprintf(stderr, "prepare of lock wait query failed: %s",
-				PQerrorMessage(conns[0]));
-		exit_nicely();
+		res = PQprepare(conns[i], PREP_WAITING, wait_query, 0, NULL);
+		if (PQresultStatus(res) != PGRES_COMMAND_OK)
+		{
+			fprintf(stderr, "prepare of lock wait query failed: %s",
+					PQerrorMessage(conns[i]));
+			exit_nicely();
+		}
+		PQclear(res);
 	}
-	PQclear(res);
-	termPQExpBuffer(&wait_query);
 
 	/*
 	 * Run the permutations specified in the spec, or all if none were
 	 * explicitly specified.
 	 */
+
 	run_testspec(testspec);
 
-	/* Clean up and exit */
+	/*
+	 * Clean up and exit.
+	 */
+
 	for (i = 0; i < nconns; i++)
 		PQfinish(conns[i]);
+
+	for (i = 0; i < nsconns; i++)
+		PQfinish(sconns[i]);
+
 	return 0;
 }
 
@@ -508,7 +658,7 @@ run_permutation(TestSpec *testspec, int nsteps, Step **steps)
 		printf(" %s", steps[i]->name);
 	printf("\n");
 
-	/* Perform setup */
+	/* Perform global setup */
 	for (i = 0; i < testspec->nsetupsqls; i++)
 	{
 		res = PQexec(conns[0], testspec->setupsqls[i]);
@@ -529,7 +679,7 @@ run_permutation(TestSpec *testspec, int nsteps, Step **steps)
 	{
 		if (testspec->sessions[i]->setupsql)
 		{
-			res = PQexec(conns[i + 1], testspec->sessions[i]->setupsql);
+			res = PQexec(sconns[i], testspec->sessions[i]->setupsql);
 			if (PQresultStatus(res) == PGRES_TUPLES_OK)
 			{
 				printResultSet(res);
@@ -538,7 +688,7 @@ run_permutation(TestSpec *testspec, int nsteps, Step **steps)
 			{
 				fprintf(stderr, "setup of session %s failed: %s",
 						testspec->sessions[i]->name,
-						PQerrorMessage(conns[i + 1]));
+						PQerrorMessage(sconns[i]));
 				exit_nicely();
 			}
 			PQclear(res);
@@ -549,7 +699,7 @@ run_permutation(TestSpec *testspec, int nsteps, Step **steps)
 	for (i = 0; i < nsteps; i++)
 	{
 		Step	   *step = steps[i];
-		PGconn	   *conn = conns[1 + step->session];
+		PGconn	   *conn = sconns[step->session];
 
 		if (waiting != NULL && step->session == waiting->session)
 		{
@@ -587,9 +737,9 @@ run_permutation(TestSpec *testspec, int nsteps, Step **steps)
 			 * Now we really have to complete all the running transactions to
 			 * make sure teardown doesn't block.
 			 */
-			for (j = 1; j < nconns; j++)
+			for (j = 0; j < nsconns; j++)
 			{
-				res = PQexec(conns[j], "ROLLBACK");
+				res = PQexec(sconns[j], "ROLLBACK");
 				if (res != NULL)
 					PQclear(res);
 			}
@@ -600,20 +750,20 @@ run_permutation(TestSpec *testspec, int nsteps, Step **steps)
 		if (!PQsendQuery(conn, step->sql))
 		{
 			fprintf(stdout, "failed to send query for step %s: %s\n",
-					step->name, PQerrorMessage(conns[1 + step->session]));
+					step->name, PQerrorMessage(conn));
 			exit_nicely();
 		}
 
 		if (waiting != NULL)
 		{
 			/* Some other step is already waiting: just block. */
-			try_complete_step(step, 0);
+			try_complete_step(testspec, step, 0);
 
 			/*
 			 * See if this step unblocked the waiting step; report both error
 			 * messages together if so.
 			 */
-			if (!try_complete_step(waiting, STEP_NONBLOCK | STEP_RETRY))
+			if (!try_complete_step(testspec, waiting, STEP_NONBLOCK | STEP_RETRY))
 			{
 				report_two_error_messages(step, waiting);
 				waiting = NULL;
@@ -623,7 +773,7 @@ run_permutation(TestSpec *testspec, int nsteps, Step **steps)
 		}
 		else
 		{
-			if (try_complete_step(step, STEP_NONBLOCK))
+			if (try_complete_step(testspec, step, STEP_NONBLOCK))
 				waiting = step;
 			report_error_message(step);
 		}
@@ -632,7 +782,7 @@ run_permutation(TestSpec *testspec, int nsteps, Step **steps)
 	/* Finish any waiting query. */
 	if (waiting != NULL)
 	{
-		try_complete_step(waiting, STEP_RETRY);
+		try_complete_step(testspec, waiting, STEP_RETRY);
 		report_error_message(waiting);
 	}
 
@@ -642,7 +792,7 @@ teardown:
 	{
 		if (testspec->sessions[i]->teardownsql)
 		{
-			res = PQexec(conns[i + 1], testspec->sessions[i]->teardownsql);
+			res = PQexec(sconns[i], testspec->sessions[i]->teardownsql);
 			if (PQresultStatus(res) == PGRES_TUPLES_OK)
 			{
 				printResultSet(res);
@@ -651,14 +801,14 @@ teardown:
 			{
 				fprintf(stderr, "teardown of session %s failed: %s",
 						testspec->sessions[i]->name,
-						PQerrorMessage(conns[i + 1]));
+						PQerrorMessage(sconns[i]));
 				/* don't exit on teardown failure */
 			}
 			PQclear(res);
 		}
 	}
 
-	/* Perform teardown */
+	/* Perform global teardown */
 	if (testspec->teardownsql)
 	{
 		res = PQexec(conns[0], testspec->teardownsql);
@@ -693,9 +843,9 @@ teardown:
  * a lock, returns true.  Otherwise, returns false.
  */
 static bool
-try_complete_step(Step *step, int flags)
+try_complete_step(TestSpec * testspec, Step * step, int flags)
 {
-	PGconn	   *conn = conns[1 + step->session];
+	PGconn	   *conn = sconns[step->session];
 	fd_set		read_set;
 	struct timeval timeout;
 	int			sock = PQsocket(conn);
@@ -721,9 +871,14 @@ try_complete_step(Step *step, int flags)
 		else if (ret == 0)		/* select() timeout: check for lock wait */
 		{
 			int			ntuples;
+			Session *s = testspec->sessions[step->session];
+			char **params = malloc(2*sizeof(char *));
 
-			res = PQexecPrepared(conns[0], PREP_WAITING, 1,
-								 &backend_pids[step->session + 1],
+			params[0] = s->backend_pid;
+			params[1] = testspec->conninfos[s->connidx]->pidlist;
+
+			res = PQexecPrepared(conns[s->connidx], PREP_WAITING,
+								 2, (const char * const *)params,
 								 NULL, NULL, 0);
 			if (PQresultStatus(res) != PGRES_TUPLES_OK)
 			{

@@ -1,0 +1,27 @@
+commit a609878880d396d144c4b34d99f8a47078d74a3c
+Author: Abhijit Menon-Sen <ams@2ndQuadrant.com>
+Date:   Mon May 13 14:43:41 2013 +0530
+
+    bdr,core: isolationtester: Isolationtester with multi-server support
+    
+    The spec file can now start with declarations like this:
+    
+        conninfo "cname1" "port=NNNN dbname=XYZ"
+        conninfo "cname2" "port=MMMM dbname=PQR"
+    
+    And sessions may include connection declarations like this:
+    
+        session "s1"
+        connection "cname1"
+    
+    Both are optional. If no connection information is explicitly specified,
+    then the earlier behaviour (use conninfo from commandline or fall back
+    to "dbname=postgres") is retained.
+    
+    If connection information is specified, we open one "global" connection
+    per conninfo (for lock checking) and one connection per session. Setup
+    SQL is executed only on conns[0], as before (but perhaps it would help
+    to execute it on all until DDL replication is implemented?).
+    
+    Includes the rudimentary tests from before, including some failing ones.
+
