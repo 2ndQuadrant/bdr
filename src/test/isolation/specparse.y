@@ -25,6 +25,7 @@ TestSpec		parseresult;			/* result of parsing is left here */
 %union
 {
 	char	   *str;
+	Connection *connection;
 	Session	   *session;
 	Step	   *step;
 	Permutation *permutation;
@@ -35,33 +36,61 @@ TestSpec		parseresult;			/* result of parsing is left here */
 	}			ptr_list;
 }
 
-%type <ptr_list> setup_list
-%type <str>  opt_setup opt_teardown
-%type <str> setup
+%type <ptr_list> setup_list conninfo_list
+%type <str> opt_setup opt_teardown opt_connection
+%type <str> setup connection
 %type <ptr_list> step_list session_list permutation_list opt_permutation_list
 %type <ptr_list> string_list
 %type <session> session
 %type <step> step
 %type <permutation> permutation
+%type <connection> conninfo
 
 %token <str> sqlblock string
-%token PERMUTATION SESSION SETUP STEP TEARDOWN TEST
+%token CONNINFO PERMUTATION SESSION CONNECTION SETUP STEP TEARDOWN TEST
 
 %%
 
 TestSpec:
+			conninfo_list
 			setup_list
 			opt_teardown
 			session_list
 			opt_permutation_list
 			{
-				parseresult.setupsqls = (char **) $1.elements;
-				parseresult.nsetupsqls = $1.nelements;
-				parseresult.teardownsql = $2;
-				parseresult.sessions = (Session **) $3.elements;
-				parseresult.nsessions = $3.nelements;
-				parseresult.permutations = (Permutation **) $4.elements;
-				parseresult.npermutations = $4.nelements;
+				parseresult.conninfos = (char **) $1.elements;
+				parseresult.nconninfos = $1.nelements;
+				parseresult.setupsqls = (char **) $2.elements;
+				parseresult.nsetupsqls = $2.nelements;
+				parseresult.teardownsql = $3;
+				parseresult.sessions = (Session **) $4.elements;
+				parseresult.nsessions = $4.nelements;
+				parseresult.permutations = (Permutation **) $5.elements;
+				parseresult.npermutations = $5.nelements;
+			}
+		;
+
+conninfo_list:
+			/* EMPTY */
+			{
+				$$.elements = NULL;
+				$$.nelements = 0;
+			}
+			| conninfo_list conninfo
+			{
+				$$.elements = realloc($1.elements,
+									  ($1.nelements + 1) * sizeof(void *));
+				$$.elements[$1.nelements] = $2;
+				$$.nelements = $1.nelements + 1;
+			}
+		;
+
+conninfo:
+			CONNINFO string string
+			{
+				$$ = malloc(sizeof(Connection));
+				$$->name = $2;
+				$$->conninfo = $3;
 			}
 		;
 
@@ -110,15 +139,25 @@ session_list:
 			}
 		;
 
+opt_connection:
+			/* EMPTY */         { $$ = NULL; }
+			| connection        { $$ = $1; }
+		;
+
+connection:
+			CONNECTION string   { $$ = $2; }
+		;
+
 session:
-			SESSION string opt_setup step_list opt_teardown
+			SESSION string opt_connection opt_setup step_list opt_teardown
 			{
 				$$ = malloc(sizeof(Session));
 				$$->name = $2;
-				$$->setupsql = $3;
-				$$->steps = (Step **) $4.elements;
-				$$->nsteps = $4.nelements;
-				$$->teardownsql = $5;
+				$$->connection = $3;
+				$$->setupsql = $4;
+				$$->steps = (Step **) $5.elements;
+				$$->nsteps = $5.nelements;
+				$$->teardownsql = $6;
 			}
 		;
 
