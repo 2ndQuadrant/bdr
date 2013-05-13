@@ -1,0 +1,23 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s1a s2a s1b s2b s1c s2c
+step s1a: INSERT INTO x(a,b) values (1,'foo');
+step s2a: INSERT INTO x(a,b) values (2,'bar');
+step s1b: SELECT wait_for(2);
+wait_for       
+
+               
+step s2b: SELECT wait_for(1);
+wait_for       
+
+               
+step s1c: SELECT * from x order by a;
+a              b              
+
+1              foo            
+2              bar            
+step s2c: SELECT * from x order by a;
+a              b              
+
+1              foo            
+2              bar            
