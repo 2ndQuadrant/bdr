@@ -39,8 +39,10 @@ comment			("#"{non_newline}*)
 
 %%
 
+conninfo		{ return(CONNINFO); }
 permutation		{ return(PERMUTATION); }
 session			{ return(SESSION); }
+connection		{ return(CONNECTION); }
 setup			{ return(SETUP); }
 step			{ return(STEP); }
 teardown		{ return(TEARDOWN); }
