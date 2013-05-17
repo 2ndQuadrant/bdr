@@ -609,13 +609,12 @@ static void
 WriteTruncateXlogRec(int pageno)
 {
 	XLogRecData rdata;
-	XLogRecPtr	recptr;
 
 	rdata.data = (char *) (&pageno);
 	rdata.len = sizeof(int);
 	rdata.buffer = InvalidBuffer;
 	rdata.next = NULL;
-	recptr = XLogInsert(RM_COMMITTS_ID, COMMITTS_TRUNCATE, &rdata);
+	XLogInsert(RM_COMMITTS_ID, COMMITTS_TRUNCATE, &rdata);
 }
 
 /*
@@ -627,7 +626,6 @@ WriteSetTimestampXlogRec(TransactionId mainxid, int nsubxids,
 						 CommitExtraData data)
 {
 	XLogRecData	rdata;
-	XLogRecPtr	recptr;
 	xl_committs_set	record;
 
 	record.timestamp = timestamp;
@@ -641,7 +639,7 @@ WriteSetTimestampXlogRec(TransactionId mainxid, int nsubxids,
 		nsubxids * sizeof(TransactionId);
 	rdata.buffer = InvalidBuffer;
 	rdata.next = NULL;
-	recptr = XLogInsert(RM_COMMITTS_ID, COMMITTS_SETTS, &rdata);
+	XLogInsert(RM_COMMITTS_ID, COMMITTS_SETTS, &rdata);
 }
 
 
