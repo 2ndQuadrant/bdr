@@ -28,7 +28,8 @@ submake-test_decoding:
 	$(MAKE) -C $(top_builddir)/contrib/test_decoding
 
 check: all | submake-regress submake-test_decoding
-	$(pg_regress_check) --temp-config $(top_srcdir)/contrib/test_logical_decoding/logical.conf \
+	$(pg_regress_check) \
+	    --temp-config $(top_srcdir)/contrib/test_logical_decoding/logical.conf \
 	    --temp-install=./tmp_check \
 	    --extra-install=contrib/test_decoding \
 	    --extra-install=contrib/test_logical_decoding \

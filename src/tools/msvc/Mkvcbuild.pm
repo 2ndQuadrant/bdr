@@ -51,7 +51,7 @@ my $contrib_extrasource = {
 	'cube' => [ 'cubescan.l', 'cubeparse.y' ],
 	'seg'  => [ 'segscan.l',  'segparse.y' ], 
 	};
-my @contrib_excludes = ('pgcrypto', 'intagg', 'sepgsql');
+my @contrib_excludes = ('pgcrypto', 'intagg', 'sepgsql', 'bdr');
 
 sub mkvcbuild
 {
@@ -503,6 +503,20 @@ sub mkvcbuild
 	$pgcrypto->AddLibrary('wsock32.lib');
 	my $mf = Project::read_file('contrib/pgcrypto/Makefile');
 	GenerateContribSqlFiles('pgcrypto', $mf);
+
+	# so is bdr
+	my $bdr_output = $solution->AddProject('bdr_output', 'dll', 'misc');
+	$bdr_output->AddFiles('contrib\bdr', 'bdr_output.c');
+	$bdr_output->AddReference($postgres);
+	$bdr_output->AddLibrary('wsock32.lib');
+
+	my $bdr_apply = $solution->AddProject('bdr_apply', 'dll', 'misc');
+	$bdr_apply->AddFiles('contrib\bdr', 'bdr.c', 'bdr_apply.c',
+			     'bdr_count.c');
+	$bdr_apply->AddReference($postgres);
+	$bdr_apply->AddLibrary('wsock32.lib');
+	$bdr_apply->AddIncludeDir('src\interfaces\libpq');
+	$bdr_apply->AddReference($libpq);
 
 	my $D;
 	opendir($D, 'contrib') || croak "Could not opendir on contrib!\n";

@@ -1,0 +1,18 @@
+-- check extension creation works
+CREATE EXTENSION bdr;
+SELECT * FROM pg_stat_bdr;
+ rep_node_id | riremotesysid | riremotedb | rilocaldb | nr_commit | nr_rollback | nr_insert | nr_insert_conflict | nr_update | nr_update_conflict | nr_delete | nr_delete_conflict | nr_disconnect 
+-------------+---------------+------------+-----------+-----------+-------------+-----------+--------------------+-----------+--------------------+-----------+--------------------+---------------
+(0 rows)
+
+-- check that only superusers can do this
+CREATE ROLE no_special_perms;
+SET ROLE no_special_perms;
+SELECT * FROM pg_stat_bdr;
+ERROR:  permission denied for relation pg_stat_bdr
+SELECT * FROM pg_stat_bdr();
+ERROR:  permission denied for function pg_stat_bdr
+-- reacquire permissions, drop extension, role
+RESET role;
+DROP EXTENSION bdr;
+DROP ROLE no_special_perms;

@@ -1,0 +1,5 @@
+# bdr extension
+comment = 'bdr support functions'
+default_version = '0.1'
+module_pathname = '$libdir/bdr'
+relocatable = false
