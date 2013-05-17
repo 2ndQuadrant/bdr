@@ -1134,6 +1134,11 @@ RecordTransactionCommit(void)
 		}
 	}
 
+	/*
+	 * We don't need to log the commit timestamp separately since the commit
+	 * record logged above has all the necessary action to set the timestamp
+	 * again.
+	 */
 	TransactionTreeSetCommitTimestamp(xid, nchildren, children,
 									  xactStopTimestamp, 0, false);
 
