@@ -473,7 +473,7 @@ bdr_apply_main(void *main_arg)
 
 					process_remote_action(data, r);
 				}
-				/* other message types are purposely ignored */
+				/* other message types are purposefully ignored */
 			}
 		}
 
