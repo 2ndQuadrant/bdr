@@ -11,8 +11,10 @@
 #define REORDERBUFFER_H
 
 #include "access/htup_details.h"
+
 #include "utils/hsearch.h"
 #include "utils/rel.h"
+#include "utils/timestamp.h"
 
 #include "lib/ilist.h"
 
@@ -62,7 +64,7 @@ typedef struct ReorderBufferChange
 		int			action_internal;
 	};
 
-	RepNodeId origin_id;
+	RepNodeId	origin_id;
 
 	/*
 	 * Context data for the change, which part of the union is valid depends
@@ -130,7 +132,7 @@ typedef struct ReorderBufferTXN
 	XLogRecPtr	restart_decoding_lsn;
 
 	/* origin of the change that caused this transaction */
-	RepNodeId origin_id;
+	RepNodeId	origin_id;
 
 	/* did the TX have catalog changes */
 	bool		does_timetravel;
@@ -204,6 +206,10 @@ typedef struct ReorderBufferTXN
 	SharedInvalidationMessage *invalidations;
 	size_t		ninvalidations;
 
+	/*
+	 * Original commit time of a top level transaction if known.
+	 */
+	TimestampTz commit_time;
 }	ReorderBufferTXN;
 
 
@@ -301,7 +307,7 @@ ReorderBufferChange *ReorderBufferGetChange(ReorderBuffer *);
 void		ReorderBufferReturnChange(ReorderBuffer *, ReorderBufferChange *);
 
 void		ReorderBufferAddChange(ReorderBuffer *, TransactionId, XLogRecPtr lsn, ReorderBufferChange *);
-void		ReorderBufferCommit(ReorderBuffer *, TransactionId, XLogRecPtr lsn, RepNodeId origin_id);
+void		ReorderBufferCommit(ReorderBuffer *, TransactionId, XLogRecPtr lsn, RepNodeId origin_id, TimestampTz commit_time);
 void		ReorderBufferAssignChild(ReorderBuffer *, TransactionId, TransactionId, XLogRecPtr lsn);
 void		ReorderBufferCommitChild(ReorderBuffer *, TransactionId, TransactionId, XLogRecPtr lsn);
 void		ReorderBufferAbort(ReorderBuffer *, TransactionId, XLogRecPtr lsn);

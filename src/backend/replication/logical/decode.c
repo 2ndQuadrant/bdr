@@ -49,7 +49,8 @@ static void DecodeDelete(ReorderBuffer * cache, XLogRecordBuffer * buf);
 static void DecodeMultiInsert(ReorderBuffer * cache, XLogRecordBuffer * buf);
 
 static void DecodeCommit(LogicalDecodingContext * ctx, XLogRecordBuffer * buf, TransactionId xid,
-			 TransactionId *sub_xids, int nsubxacts);
+			 TransactionId *sub_xids, int nsubxacts, TimestampTz commit_time);
+
 
 static void DecodeAbort(ReorderBuffer * cache, XLogRecPtr lsn, TransactionId xid,
 			TransactionId *sub_xids, int nsubxacts);
@@ -161,8 +162,8 @@ DecodeRecordIntoReorderBuffer(LogicalDecodingContext * ctx,
 							sub_xids = (TransactionId *) &(
 												xlrec->xnodes[xlrec->nrels]);
 
-							DecodeCommit(ctx, buf, r->xl_xid,
-										 sub_xids, xlrec->nsubxacts);
+							DecodeCommit(ctx, buf, r->xl_xid, sub_xids,
+										 xlrec->nsubxacts, xlrec->xact_time);
 
 
 							break;
@@ -178,7 +179,8 @@ DecodeRecordIntoReorderBuffer(LogicalDecodingContext * ctx,
 
 							/* r->xl_xid is committed in a separate record */
 							DecodeCommit(ctx, buf, xlrec->xid, sub_xids,
-										 xlrec->crec.nsubxacts);
+										 xlrec->crec.nsubxacts,
+										 xlrec->crec.xact_time);
 
 							break;
 						}
@@ -187,8 +189,8 @@ DecodeRecordIntoReorderBuffer(LogicalDecodingContext * ctx,
 							xl_xact_commit_compact *xlrec =
 							(xl_xact_commit_compact *) buf->record_data;
 
-							DecodeCommit(ctx, buf, r->xl_xid,
-										 xlrec->subxacts, xlrec->nsubxacts);
+							DecodeCommit(ctx, buf, r->xl_xid, xlrec->subxacts,
+										 xlrec->nsubxacts, 0);
 							break;
 						}
 					case XLOG_XACT_ABORT:
@@ -273,7 +275,7 @@ DecodeRecordIntoReorderBuffer(LogicalDecodingContext * ctx,
 
 static void
 DecodeCommit(LogicalDecodingContext * ctx, XLogRecordBuffer * buf, TransactionId xid,
-			 TransactionId *sub_xids, int nsubxacts)
+			 TransactionId *sub_xids, int nsubxacts, TimestampTz commit_time)
 {
 	int			i;
 
@@ -299,7 +301,7 @@ DecodeCommit(LogicalDecodingContext * ctx, XLogRecordBuffer * buf, TransactionId
 
 	/* replay actions of all transaction + subtransactions in order */
 	ReorderBufferCommit(ctx->reorder, xid, buf->origptr,
-						buf->record.xl_origin_id);
+						buf->record.xl_origin_id, commit_time);
 }
 
 static void
