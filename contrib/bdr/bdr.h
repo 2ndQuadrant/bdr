@@ -79,6 +79,7 @@ extern void bdr_count_update(void);
 extern void bdr_count_update_conflict(void);
 extern void bdr_count_delete(void);
 extern void bdr_count_delete_conflict(void);
+extern void bdr_count_disconnect(void);
 
 
 #endif	/* BDR_H */

@@ -423,7 +423,10 @@ bdr_apply_main(void *main_arg)
 			proc_exit(1);
 
 		if (PQstatus(streamConn) == CONNECTION_BAD)
+		{
+			bdr_count_disconnect();
 			elog(ERROR, "connection to other side has died");
+		}
 
 		if (rc & WL_SOCKET_READABLE)
 			PQconsumeInput(streamConn);

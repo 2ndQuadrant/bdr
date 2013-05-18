@@ -283,6 +283,13 @@ bdr_count_delete_conflict(void)
 	BdrCountCtl->slots[MyCountOffsetIdx].nr_delete_conflict++;
 }
 
+void
+bdr_count_disconnect(void)
+{
+	Assert(MyCountOffsetIdx != -1);
+	BdrCountCtl->slots[MyCountOffsetIdx].nr_disconnect++;
+}
+
 Datum
 pg_stat_bdr(PG_FUNCTION_ARGS)
 {
