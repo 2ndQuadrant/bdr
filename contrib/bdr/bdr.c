@@ -483,7 +483,7 @@ bdr_apply_main(void *main_arg)
 void
 _PG_init(void)
 {
-	BackgroundWorker worker;
+	BackgroundWorker apply_worker;
 	BDRCon	   *con;
 	List	   *cons;
 	ListCell   *c;
@@ -531,13 +531,13 @@ _PG_init(void)
 	}
 
 	/* register the worker processes.  These values are common for all of them */
-	worker.bgw_flags = BGWORKER_SHMEM_ACCESS |
+	apply_worker.bgw_flags = BGWORKER_SHMEM_ACCESS |
 		BGWORKER_BACKEND_DATABASE_CONNECTION;
-	worker.bgw_start_time = BgWorkerStart_RecoveryFinished;
-	worker.bgw_main = bdr_apply_main;
-	worker.bgw_sighup = bdr_sighup;
-	worker.bgw_sigterm = bdr_sigterm;
-	worker.bgw_restart_time = 5;
+	apply_worker.bgw_start_time = BgWorkerStart_RecoveryFinished;
+	apply_worker.bgw_main = bdr_apply_main;
+	apply_worker.bgw_sighup = bdr_sighup;
+	apply_worker.bgw_sigterm = bdr_sigterm;
+	apply_worker.bgw_restart_time = 5;
 
 	foreach(c, cons)
 	{
@@ -614,9 +614,9 @@ _PG_init(void)
 
 		snprintf(fullname, sizeof(fullname) - 1,
 				 "bdr apply: %s", name);
-		worker.bgw_name = fullname;
-		worker.bgw_main_arg = (void *) con;
-		RegisterBackgroundWorker(&worker);
+		apply_worker.bgw_name = fullname;
+		apply_worker.bgw_main_arg = (void *) con;
+		RegisterBackgroundWorker(&apply_worker);
 
 		nregistered++;
 	}
