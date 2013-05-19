@@ -192,7 +192,7 @@ process_remote_action(char *data, size_t r)
 }
 
 static void
-bdr_main(void *main_arg)
+bdr_apply_main(void *main_arg)
 {
 	PGconn	   *streamConn;
 	PGresult   *res;
@@ -534,7 +534,7 @@ _PG_init(void)
 	worker.bgw_flags = BGWORKER_SHMEM_ACCESS |
 		BGWORKER_BACKEND_DATABASE_CONNECTION;
 	worker.bgw_start_time = BgWorkerStart_RecoveryFinished;
-	worker.bgw_main = bdr_main;
+	worker.bgw_main = bdr_apply_main;
 	worker.bgw_sighup = bdr_sighup;
 	worker.bgw_sigterm = bdr_sigterm;
 	worker.bgw_restart_time = 5;
@@ -545,6 +545,7 @@ _PG_init(void)
 		char	   *errmsg = NULL;
 		PQconninfoOption *options;
 		PQconninfoOption *cur_option;
+		char		fullname[128];
 
 		/* don't free, referenced by the guc machinery! */
 		char	   *optname_dsn = palloc(strlen(name) + 30);
@@ -611,7 +612,9 @@ _PG_init(void)
 
 		PQconninfoFree(options);
 
-		worker.bgw_name = pstrdup(name);
+		snprintf(fullname, sizeof(fullname) - 1,
+				 "bdr apply: %s", name);
+		worker.bgw_name = fullname;
 		worker.bgw_main_arg = (void *) con;
 		RegisterBackgroundWorker(&worker);
 
