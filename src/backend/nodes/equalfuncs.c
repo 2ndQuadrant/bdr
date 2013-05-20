@@ -1532,7 +1532,9 @@ _equalCreateSeqStmt(const CreateSeqStmt *a, const CreateSeqStmt *b)
 {
 	COMPARE_NODE_FIELD(sequence);
 	COMPARE_NODE_FIELD(options);
+	COMPARE_NODE_FIELD(amoptions);
 	COMPARE_SCALAR_FIELD(ownerId);
+	COMPARE_STRING_FIELD(accessMethod);
 
 	return true;
 }
@@ -1542,7 +1544,9 @@ _equalAlterSeqStmt(const AlterSeqStmt *a, const AlterSeqStmt *b)
 {
 	COMPARE_NODE_FIELD(sequence);
 	COMPARE_NODE_FIELD(options);
+	COMPARE_NODE_FIELD(amoptions);
 	COMPARE_SCALAR_FIELD(missing_ok);
+	COMPARE_STRING_FIELD(accessMethod);
 
 	return true;
 }

@@ -119,6 +119,7 @@ SELECT table_name, column_name, is_updatable
  ro_view20  | log_cnt       | NO
  ro_view20  | is_cycled     | NO
  ro_view20  | is_called     | NO
+ ro_view20  | amdata        | NO
  ro_view3   | ?column?      | NO
  ro_view4   | count         | NO
  ro_view5   | a             | NO
@@ -131,7 +132,7 @@ SELECT table_name, column_name, is_updatable
  ro_view8   | b             | NO
  ro_view9   | a             | NO
  ro_view9   | b             | NO
-(43 rows)
+(44 rows)
 
 DELETE FROM ro_view1;
 ERROR:  cannot delete from view "ro_view1"

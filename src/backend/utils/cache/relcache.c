@@ -50,6 +50,7 @@
 #include "catalog/pg_opclass.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_rewrite.h"
+#include "catalog/pg_seqam.h"
 #include "catalog/pg_tablespace.h"
 #include "catalog/pg_trigger.h"
 #include "catalog/pg_type.h"
@@ -241,6 +242,7 @@ static void RelationParseRelOptions(Relation relation, HeapTuple tuple);
 static void RelationBuildTupleDesc(Relation relation);
 static Relation RelationBuildDesc(Oid targetRelId, bool insertIt);
 static void RelationInitPhysicalAddr(Relation relation);
+static void RelationInitSequenceAccessInfo(Relation relation);
 static void load_critical_index(Oid indexoid, Oid heapoid);
 static TupleDesc GetPgClassDescriptor(void);
 static TupleDesc GetPgIndexDescriptor(void);
@@ -933,11 +935,14 @@ RelationBuildDesc(Oid targetRelId, bool insertIt)
 	else
 		relation->trigdesc = NULL;
 
-	/*
-	 * if it's an index, initialize index-related information
-	 */
-	if (OidIsValid(relation->rd_rel->relam))
+	/* if it's an index, initialize index-related information */
+	if (relation->rd_rel->relkind == RELKIND_INDEX &&
+		OidIsValid(relation->rd_rel->relam))
 		RelationInitIndexAccessInfo(relation);
+	/* same for sequences */
+	else if (relation->rd_rel->relkind == RELKIND_SEQUENCE &&
+			 OidIsValid(relation->rd_rel->relam))
+		RelationInitSequenceAccessInfo(relation);
 
 	/* extract reloptions if any */
 	RelationParseRelOptions(relation, pg_class_tuple);
@@ -1371,6 +1376,39 @@ LookupOpclassInfo(Oid operatorClassOid,
 	return opcentry;
 }
 
+/*
+ * Initialize sequence-access-method support data for an index relation
+ */
+static void
+RelationInitSequenceAccessInfo(Relation rel)
+{
+	HeapTuple		amtuple;
+	MemoryContext	indexcxt;
+	Form_pg_seqam	amform;
+
+	indexcxt = AllocSetContextCreate(CacheMemoryContext,
+									 RelationGetRelationName(rel),
+									 ALLOCSET_SMALL_MINSIZE,
+									 ALLOCSET_SMALL_INITSIZE,
+									 ALLOCSET_SMALL_MAXSIZE);
+	rel->rd_indexcxt = indexcxt;
+
+	rel->rd_aminfo = (RelationAmInfo *)
+		MemoryContextAllocZero(rel->rd_indexcxt,
+							   sizeof(RelationAmInfo));
+
+	/*
+	 * Make a copy of the pg_am entry for the index's access method
+	 */
+	amtuple = SearchSysCache1(SEQAMOID, ObjectIdGetDatum(rel->rd_rel->relam));
+	if (!HeapTupleIsValid(amtuple))
+		elog(ERROR, "cache lookup failed for access method %u",
+			 rel->rd_rel->relam);
+	amform = (Form_pg_seqam) MemoryContextAlloc(rel->rd_indexcxt, sizeof(*amform));
+	memcpy(amform, GETSTRUCT(amtuple), sizeof(*amform));
+	ReleaseSysCache(amtuple);
+	rel->rd_seqam = amform;
+}
 
 /*
  *		formrdesc
@@ -4455,6 +4493,22 @@ load_relcache_init_file(bool shared)
 			nsupport = relform->relnatts * am->amsupport;
 			rel->rd_supportinfo = (FmgrInfo *)
 				MemoryContextAllocZero(indexcxt, nsupport * sizeof(FmgrInfo));
+		}
+		else if (rel->rd_rel->relkind == RELKIND_SEQUENCE)
+		{
+			MemoryContext indexcxt;
+			Assert(!rel->rd_isnailed);
+			Assert(false);
+
+			indexcxt = AllocSetContextCreate(CacheMemoryContext,
+											 RelationGetRelationName(rel),
+											 ALLOCSET_SMALL_MINSIZE,
+											 ALLOCSET_SMALL_INITSIZE,
+											 ALLOCSET_SMALL_MAXSIZE);
+			rel->rd_indexcxt = indexcxt;
+			/* set up zeroed fmgr-info vectors */
+			rel->rd_aminfo = (RelationAmInfo *)
+				MemoryContextAllocZero(indexcxt, sizeof(RelationAmInfo));
 		}
 		else
 		{

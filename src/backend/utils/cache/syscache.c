@@ -48,6 +48,7 @@
 #include "catalog/pg_range.h"
 #include "catalog/pg_rewrite.h"
 #include "catalog/pg_replication_identifier.h"
+#include "catalog/pg_seqam.h"
 #include "catalog/pg_statistic.h"
 #include "catalog/pg_tablespace.h"
 #include "catalog/pg_ts_config.h"
@@ -657,6 +658,28 @@ static const struct cachedesc cacheinfo[] = {
 			0
 		},
 		1024
+	},
+	{SeqAccessMethodRelationId,	/* SEQAMNAME */
+		SeqAmNameIndexId,
+		1,
+		{
+			Anum_pg_seqam_amname,
+			0,
+			0,
+			0
+		},
+		4
+	},
+	{SeqAccessMethodRelationId,	/* SEQAMOID */
+		SeqAmOidIndexId,
+		1,
+		{
+			ObjectIdAttributeNumber,
+			0,
+			0,
+			0
+		},
+		4
 	},
 	{StatisticRelationId,		/* STATRELATTINH */
 		StatisticRelidAttnumInhIndexId,

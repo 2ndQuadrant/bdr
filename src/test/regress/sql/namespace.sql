@@ -1,7 +1,6 @@
 --
 -- Regression tests for schemas (namespaces)
 --
-
 CREATE SCHEMA test_schema_1
        CREATE UNIQUE INDEX abc_a_idx ON abc (a)
 

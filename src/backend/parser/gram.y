@@ -51,6 +51,7 @@
 
 #include "catalog/index.h"
 #include "catalog/namespace.h"
+#include "catalog/pg_seqam.h"
 #include "catalog/pg_trigger.h"
 #include "commands/defrem.h"
 #include "commands/trigger.h"
@@ -3307,7 +3308,33 @@ CreateSeqStmt:
 					CreateSeqStmt *n = makeNode(CreateSeqStmt);
 					$4->relpersistence = $2;
 					n->sequence = $4;
+					n->accessMethod = DEFAULT_SEQAM;
 					n->options = $5;
+					n->amoptions = NIL;
+					n->ownerId = InvalidOid;
+					$$ = (Node *)n;
+				}
+			| CREATE OptTemp SEQUENCE qualified_name OptSeqOptList
+				USING access_method
+				{
+					CreateSeqStmt *n = makeNode(CreateSeqStmt);
+					$4->relpersistence = $2;
+					n->sequence = $4;
+					n->accessMethod = $7;
+					n->options = $5;
+					n->amoptions = NIL;
+					n->ownerId = InvalidOid;
+					$$ = (Node *)n;
+				}
+			| CREATE OptTemp SEQUENCE qualified_name OptSeqOptList
+				USING access_method WITH reloptions
+				{
+					CreateSeqStmt *n = makeNode(CreateSeqStmt);
+					$4->relpersistence = $2;
+					n->sequence = $4;
+					n->accessMethod = $7;
+					n->options = $5;
+					n->amoptions = $9;
 					n->ownerId = InvalidOid;
 					$$ = (Node *)n;
 				}
@@ -3318,7 +3345,31 @@ AlterSeqStmt:
 				{
 					AlterSeqStmt *n = makeNode(AlterSeqStmt);
 					n->sequence = $3;
+					n->accessMethod = DEFAULT_SEQAM;
 					n->options = $4;
+					n->amoptions = NIL;
+					n->missing_ok = false;
+					$$ = (Node *)n;
+				}
+			| ALTER SEQUENCE qualified_name SeqOptList
+				USING access_method
+				{
+					AlterSeqStmt *n = makeNode(AlterSeqStmt);
+					n->sequence = $3;
+					n->accessMethod = $6;
+					n->options = $4;
+					n->amoptions = NIL;
+					n->missing_ok = false;
+					$$ = (Node *)n;
+				}
+			| ALTER SEQUENCE qualified_name SeqOptList
+				USING access_method WITH reloptions
+				{
+					AlterSeqStmt *n = makeNode(AlterSeqStmt);
+					n->sequence = $3;
+					n->accessMethod = $6;
+					n->options = $4;
+					n->amoptions = $8;
 					n->missing_ok = false;
 					$$ = (Node *)n;
 				}
@@ -3326,11 +3377,34 @@ AlterSeqStmt:
 				{
 					AlterSeqStmt *n = makeNode(AlterSeqStmt);
 					n->sequence = $5;
+					n->accessMethod = DEFAULT_SEQAM;
 					n->options = $6;
+					n->amoptions = NIL;
 					n->missing_ok = true;
 					$$ = (Node *)n;
 				}
-
+			| ALTER SEQUENCE IF_P EXISTS qualified_name SeqOptList
+				USING access_method
+				{
+					AlterSeqStmt *n = makeNode(AlterSeqStmt);
+					n->sequence = $5;
+					n->accessMethod = $8;
+					n->options = $6;
+					n->amoptions = NIL;
+					n->missing_ok = true;
+					$$ = (Node *)n;
+				}
+			| ALTER SEQUENCE IF_P EXISTS qualified_name SeqOptList
+				USING access_method WITH reloptions
+				{
+					AlterSeqStmt *n = makeNode(AlterSeqStmt);
+					n->sequence = $5;
+					n->accessMethod = $8;
+					n->options = $6;
+					n->amoptions = $10;
+					n->missing_ok = true;
+					$$ = (Node *)n;
+				}
 		;
 
 OptSeqOptList: SeqOptList							{ $$ = $1; }
@@ -3389,7 +3463,7 @@ SeqOptElem: CACHE NumericOnly
 				{
 					$$ = makeDefElem("restart", (Node *)$3);
 				}
-		;
+			;
 
 opt_by:		BY				{}
 			| /* empty */	{}

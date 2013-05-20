@@ -270,6 +270,7 @@ static bool need_initialization = true;
 static void initialize_reloptions(void);
 static void parse_one_reloption(relopt_value *option, char *text_str,
 					int text_len, bool validate);
+static bytea *common_am_reloptions(RegProcedure amoptions, Datum reloptions, bool validate);
 
 /*
  * initialize_reloptions
@@ -805,6 +806,9 @@ extractRelOptions(HeapTuple tuple, TupleDesc tupdesc, Oid amoptions)
 		case RELKIND_INDEX:
 			options = index_reloptions(amoptions, datum, false);
 			break;
+		case RELKIND_SEQUENCE:
+			options = sequence_reloptions(amoptions, datum, false);
+			break;
 		case RELKIND_FOREIGN_TABLE:
 			options = NULL;
 			break;
@@ -1215,13 +1219,31 @@ heap_reloptions(char relkind, Datum reloptions, bool validate)
 
 /*
  * Parse options for indexes.
+ */
+bytea *
+index_reloptions(RegProcedure amoptions, Datum reloptions, bool validate)
+{
+	return common_am_reloptions(amoptions, reloptions, validate);
+}
+
+/*
+ * Parse options for sequences.
+ */
+bytea *
+sequence_reloptions(RegProcedure amoptions, Datum reloptions, bool validate)
+{
+	return common_am_reloptions(amoptions, reloptions, validate);
+}
+
+/*
+ * Parse options for indexes or sequences.
  *
  *	amoptions	Oid of option parser
  *	reloptions	options as text[] datum
  *	validate	error flag
  */
-bytea *
-index_reloptions(RegProcedure amoptions, Datum reloptions, bool validate)
+static bytea *
+common_am_reloptions(RegProcedure amoptions, Datum reloptions, bool validate)
 {
 	FmgrInfo	flinfo;
 	FunctionCallInfoData fcinfo;

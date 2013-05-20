@@ -28,6 +28,7 @@
 
 #include "access/committs.h"
 #include "access/gin.h"
+#include "access/seqam.h"
 #include "access/transam.h"
 #include "access/twophase.h"
 #include "access/xact.h"
@@ -2667,6 +2668,17 @@ static struct config_string ConfigureNamesString[] =
 		&default_tablespace,
 		"",
 		check_default_tablespace, NULL, NULL
+	},
+
+	{
+		{"default_sequenceam", PGC_USERSET, CLIENT_CONN_STATEMENT,
+			gettext_noop("Sets the default sequence am for any new sequences."),
+			gettext_noop("An empty string selects the 'local' sequence am."),
+			GUC_IS_NAME | GUC_NOT_IN_SAMPLE
+		},
+		&default_seqam,
+		"",
+		check_default_seqam, NULL, NULL
 	},
 
 	{
