@@ -610,7 +610,7 @@ AdvanceCachedReplicationIdentifier(XLogRecPtr remote_commit,
 
 /*
  * Ask the machinery about the point up to which we successfully replayed
- * changes from a already setup & chaced replication identifier.
+ * changes from a already setup & cached replication identifier.
  */
 XLogRecPtr RemoteCommitFromCachedReplicationIdentifier(void)
 {
