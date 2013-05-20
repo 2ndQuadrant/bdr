@@ -53,9 +53,11 @@ WHERE p1.prolang = 0 OR p1.prorettype = 0 OR
        0::oid = ANY (p1.proargtypes) OR
        procost <= 0 OR
        CASE WHEN proretset THEN prorows <= 0 ELSE prorows != 0 END;
- oid | proname 
------+---------
-(0 rows)
+ oid  |        proname        
+------+-----------------------
+ 3208 | sequence_local_alloc
+ 3209 | sequence_local_setval
+(2 rows)
 
 -- prosrc should never be null or empty
 SELECT p1.oid, p1.proname

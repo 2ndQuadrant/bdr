@@ -400,6 +400,7 @@ transformColumnDefinition(CreateStmtContext *cxt, ColumnDef *column)
 		seqstmt = makeNode(CreateSeqStmt);
 		seqstmt->sequence = makeRangeVar(snamespace, sname, -1);
 		seqstmt->options = NIL;
+		seqstmt->amoptions = NIL;
 
 		/*
 		 * If this is ALTER ADD COLUMN, make sure the sequence will be owned

@@ -123,6 +123,7 @@ pg_range|t
 pg_replication_identifier|t
 pg_rewrite|t
 pg_seclabel|t
+pg_seqam|t
 pg_shdepend|t
 pg_shdescription|t
 pg_shseclabel|t
