@@ -8992,6 +8992,9 @@ ATExecSetRelOptions(Relation rel, List *defList, AlterTableType operation,
 		case RELKIND_INDEX:
 			(void) index_reloptions(rel->rd_am->amoptions, newOptions, true);
 			break;
+		case RELKIND_SEQUENCE:
+			(void) sequence_reloptions(rel->rd_am->amoptions, newOptions, true);
+			break;
 		default:
 			ereport(ERROR,
 					(errcode(ERRCODE_WRONG_OBJECT_TYPE),

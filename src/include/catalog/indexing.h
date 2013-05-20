@@ -213,6 +213,11 @@ DECLARE_UNIQUE_INDEX(pg_rewrite_oid_index, 2692, on pg_rewrite using btree(oid o
 DECLARE_UNIQUE_INDEX(pg_rewrite_rel_rulename_index, 2693, on pg_rewrite using btree(ev_class oid_ops, rulename name_ops));
 #define RewriteRelRulenameIndexId  2693
 
+DECLARE_UNIQUE_INDEX(pg_seqam_name_index, 6020, on pg_seqam using btree(seqamname name_ops));
+#define SeqAmNameIndexId  6020
+DECLARE_UNIQUE_INDEX(pg_seqam_oid_index, 6021, on pg_seqam using btree(oid oid_ops));
+#define SeqAmOidIndexId  6021
+
 /* This following index is not used for a cache and is not unique */
 DECLARE_INDEX(pg_shdepend_depender_index, 1232, on pg_shdepend using btree(dbid oid_ops, classid oid_ops, objid oid_ops, objsubid int4_ops));
 #define SharedDependDependerIndexId		1232
