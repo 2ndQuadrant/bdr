@@ -17,9 +17,9 @@
 #include "utils/resowner.h"
 
 
-typedef struct BDRCon
+typedef struct BDRWorkerCon
 {
-	/* remote database name */
+	/* local & remote database name */
 	char *dbname;
 	/* dsn to connect to the remote database */
 	char *dsn;
@@ -29,10 +29,16 @@ typedef struct BDRCon
 	RepNodeId origin_id;
 	uint64 sysid;
 	TimeLineID timeline;
-} BDRCon;
+} BDRWorkerCon;
+
+typedef struct BDRSequencerCon
+{
+	/* local database name */
+	char *dbname;
+} BDRSequencerCon;
 
 extern ResourceOwner bdr_saved_resowner;
-extern BDRCon *bdr_connection;
+extern BDRWorkerCon *bdr_connection;
 
 /* apply support */
 extern void process_remote_begin(char *data, size_t r);
@@ -40,6 +46,11 @@ extern void process_remote_commit(char *data, size_t r);
 extern void process_remote_insert(char *data, size_t r);
 extern void process_remote_update(char *data, size_t r);
 extern void process_remote_delete(char *data, size_t r);
+
+/* sequence support */
+extern void bdr_sequencer_vote(void);
+extern void bdr_sequencer_tally(void);
+extern void bdr_sequencer_start_elections(void);
 
 /* statistic functions */
 extern void bdr_count_shmem_init(size_t nnodes);

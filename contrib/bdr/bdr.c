@@ -37,6 +37,10 @@
 #include "utils/memutils.h"
 #include "utils/timestamp.h"
 
+/* sequencer */
+#include "commands/extension.h"
+
+/* apply */
 #include "libpq-fe.h"
 
 #define MAXCONNINFO		1024
@@ -45,7 +49,7 @@ static bool got_sigterm = false;
 ResourceOwner bdr_saved_resowner;
 static char *connections = NULL;
 static char *bdr_synchronous_commit = NULL;
-BDRCon	   *bdr_connection;
+BDRWorkerCon *bdr_connection;
 
 PG_MODULE_MAGIC;
 
@@ -217,7 +221,7 @@ bdr_apply_main(void *main_arg)
 	XLogRecPtr	start_from;
 	NameData	slot_name;
 
-	bdr_connection = (BDRCon *) main_arg;
+	bdr_connection = (BDRWorkerCon *) main_arg;
 
 	NameStr(replication_name)[0] = '\0';
 
@@ -232,7 +236,7 @@ bdr_apply_main(void *main_arg)
 	/* Connect to our database */
 	BackgroundWorkerInitializeConnection(bdr_connection->dbname, NULL);
 
-	CurrentResourceOwner = ResourceOwnerCreate(NULL, "bdr top-level resource owner");
+	CurrentResourceOwner = ResourceOwnerCreate(NULL, "bdr apply top-level resource owner");
 	bdr_saved_resowner = CurrentResourceOwner;
 
 	snprintf(conninfo_repl, sizeof(conninfo_repl),
@@ -477,6 +481,75 @@ bdr_apply_main(void *main_arg)
 	proc_exit(0);
 }
 
+static void
+bdr_sequencer_main(void *main_arg)
+{
+	BDRSequencerCon *con = (BDRSequencerCon *) main_arg;
+	int rc;
+
+	/* We're now ready to receive signals */
+	BackgroundWorkerUnblockSignals();
+
+	/* Connect to our database */
+	BackgroundWorkerInitializeConnection(con->dbname, NULL);
+
+	CurrentResourceOwner = ResourceOwnerCreate(NULL, "bdr seq top-level resource owner");
+	bdr_saved_resowner = CurrentResourceOwner;
+
+	elog(WARNING, "starting sequencer %s", con->dbname);
+
+	/* make sure BDR extension exists */
+	{
+		CreateExtensionStmt create_stmt;
+		AlterExtensionStmt alter_stmt;
+
+		create_stmt.extname = (char *)"bdr";
+		create_stmt.if_not_exists = true;
+		create_stmt.options = NIL;
+
+		alter_stmt.extname = (char *)"bdr";
+		alter_stmt.options = NIL;
+
+		StartTransactionCommand();
+		/* create extension if not exists */
+		CreateExtension(&create_stmt);
+		/* update extension otherwise */
+		ExecAlterExtensionStmt(&alter_stmt);
+		CommitTransactionCommand();
+	}
+
+	while (!got_sigterm)
+	{
+		/*
+		 * Background workers mustn't call usleep() or any direct equivalent:
+		 * instead, they may wait on their process latch, which sleeps as
+		 * necessary, but is awakened if postmaster dies.  That way the
+		 * background process goes away immediately in an emergency.
+		 */
+		rc = WaitLatch(&MyProc->procLatch,
+					   WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
+					   10000L);
+
+		ResetLatch(&MyProc->procLatch);
+
+		/* emergency bailout if postmaster has died */
+		if (rc & WL_POSTMASTER_DEATH)
+			proc_exit(1);
+
+		/* check whether we need to vote */
+		bdr_sequencer_vote();
+
+		/* check whether any of our elections needs to be tallied */
+		bdr_sequencer_tally();
+
+		/* check whether we need to start new elections */
+		bdr_sequencer_start_elections();
+
+	}
+
+	proc_exit(0);
+}
+
 /*
  * Entrypoint of this module.
  */
@@ -484,11 +557,18 @@ void
 _PG_init(void)
 {
 	BackgroundWorker apply_worker;
-	BDRCon	   *con;
+	BackgroundWorker sequencer_worker;
 	List	   *cons;
 	ListCell   *c;
 	MemoryContext old_context;
 	Size		nregistered = 0;
+
+	char	  **used_databases;
+	Size		num_used_databases;
+
+	size_t		off;
+	bool		found;
+	char		fullname[128];
 
 	if (!process_shared_preload_libraries_in_progress)
 		elog(ERROR, "bdr can only be loaded via shared_preload_libraries");
@@ -530,7 +610,10 @@ _PG_init(void)
 				 errmsg("invalid list syntax for \"bdr.connections\"")));
 	}
 
-	/* register the worker processes.  These values are common for all of them */
+	used_databases = malloc(sizeof(char *) * list_length(cons));
+	num_used_databases = 0;
+
+	/* Common apply worker values */
 	apply_worker.bgw_flags = BGWORKER_SHMEM_ACCESS |
 		BGWORKER_BACKEND_DATABASE_CONNECTION;
 	apply_worker.bgw_start_time = BgWorkerStart_RecoveryFinished;
@@ -539,19 +622,28 @@ _PG_init(void)
 	apply_worker.bgw_sigterm = bdr_sigterm;
 	apply_worker.bgw_restart_time = 5;
 
+	/* Common sequence worker values */
+	sequencer_worker.bgw_flags = BGWORKER_SHMEM_ACCESS |
+		BGWORKER_BACKEND_DATABASE_CONNECTION;
+	sequencer_worker.bgw_start_time = BgWorkerStart_RecoveryFinished;
+	sequencer_worker.bgw_main = bdr_sequencer_main;
+	sequencer_worker.bgw_sighup = bdr_sighup;
+	sequencer_worker.bgw_sigterm = bdr_sigterm;
+	sequencer_worker.bgw_restart_time = 5;
+
 	foreach(c, cons)
 	{
 		const char *name = (char *) lfirst(c);
 		char	   *errmsg = NULL;
 		PQconninfoOption *options;
 		PQconninfoOption *cur_option;
-		char		fullname[128];
 
 		/* don't free, referenced by the guc machinery! */
 		char	   *optname_dsn = palloc(strlen(name) + 30);
 		char	   *optname_delay = palloc(strlen(name) + 30);
+		BDRWorkerCon *con;
 
-		con = palloc(sizeof(BDRCon));
+		con = palloc(sizeof(BDRWorkerCon));
 		con->dsn = (char *) lfirst(c);
 		con->apply_delay = 0;
 
@@ -610,18 +702,61 @@ _PG_init(void)
 			cur_option++;
 		}
 
-		PQconninfoFree(options);
 
 		snprintf(fullname, sizeof(fullname) - 1,
 				 "bdr apply: %s", name);
 		apply_worker.bgw_name = fullname;
 		apply_worker.bgw_main_arg = (void *) con;
+
 		RegisterBackgroundWorker(&apply_worker);
-
 		nregistered++;
-	}
-	EmitWarningsOnPlaceholders("bdr");
 
+		/* keep track of the databases used */
+		/* check whether we already have a connection in this db */
+		for (off = 0; off < num_used_databases; off++)
+		{
+			if (strcmp(con->dbname , used_databases[off]) == 0)
+			{
+				found = true;
+				break;
+			}
+		}
+
+		if (!found)
+		{
+			used_databases[num_used_databases++] = pstrdup(con->dbname);
+		}
+
+		/* cleanup */
+		PQconninfoFree(options);
+	}
+
+	Assert(num_used_databases <= nregistered);
+
+	/*
+	 * start sequence coordination process if necessary. One process per
+	 * database, *not* one per configured connection.
+	 */
+	for (off = 0; off < num_used_databases; off++)
+	{
+		const char *name = used_databases[off];
+		BDRSequencerCon *con;
+
+		con = palloc(sizeof(BDRSequencerCon));
+		con->dbname = pstrdup(name);
+
+		elog(LOG, "starting seq on %s", name);
+
+		snprintf(fullname, sizeof(fullname) - 1,
+				 "bdr sequencer: %s", name);
+		sequencer_worker.bgw_name = fullname;
+		sequencer_worker.bgw_main_arg = con;
+
+		RegisterBackgroundWorker(&sequencer_worker);
+
+	}
+
+	EmitWarningsOnPlaceholders("bdr");
 out:
 
 	/*
