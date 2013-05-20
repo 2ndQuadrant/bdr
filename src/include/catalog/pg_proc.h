@@ -4985,6 +4985,13 @@ DESCR("peek at changes from replication slot");
 DATA(insert OID = 3785 (  pg_logical_slot_peek_binary_changes PGNSP PGUID 12 1000 1000 25 0 f f f f f t v 4 0 2249 "19 3220 23 1009" "{19,3220,23,1009,3220,28,17}" "{i,i,i,v,o,o,o}" "{slotname,upto_lsn,upto_nchanges,options,location,xid,data}" _null_ pg_logical_slot_peek_binary_changes _null_ _null_ _null_ ));
 DESCR("peek at binary changes from replication slot");
 
+DATA(insert OID = 6022 (  sequence_local_alloc	   PGNSP PGUID 12 1 0 0 0 f f f f t f s 4 0 2281 "2281 2281 2281 2281" _null_ _null_ _null_ _null_ sequence_local_alloc _null_ _null_ _null_ ));
+DESCR("Local SequenceAM allocation");
+DATA(insert OID = 6023 (  sequence_local_setval	   PGNSP PGUID 12 1 0 0 0 f f f f t f s 5 0 2281 "2281 2281 2281 20 16" _null_ _null_ _null_ _null_ sequence_local_setval _null_ _null_ _null_ ));
+DESCR("Local SequenceAM setval");
+DATA(insert OID = 6024 (  sequence_local_options	   PGNSP PGUID 12 1 0 0 0 f f f f t f s 2 0 2281 "2281 16" _null_ _null_ _null_ _null_ sequence_local_options _null_ _null_ _null_ ));
+DESCR("Local SequenceAM options");
+
 /* event triggers */
 DATA(insert OID = 3566 (  pg_event_trigger_dropped_objects		PGNSP PGUID 12 10 100 0 0 f f f f t t s 0 0 2249 "" "{26,26,23,16,16,25,25,25,25,1009,1009}" "{o,o,o,o,o,o,o,o,o,o,o}" "{classid, objid, objsubid, original, normal, object_type, schema_name, object_name, object_identity, address_names, address_args}" _null_ pg_event_trigger_dropped_objects _null_ _null_ _null_ ));
 DESCR("list objects dropped by the current command");

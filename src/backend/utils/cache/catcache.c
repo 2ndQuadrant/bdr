@@ -1045,10 +1045,12 @@ IndexScanOK(CatCache *cache, ScanKey cur_skey)
 
 		case AMOID:
 		case AMNAME:
+		case SEQAMOID:
+		case SEQAMNAME:
 
 			/*
-			 * Always do heap scans in pg_am, because it's so small there's
-			 * not much point in an indexscan anyway.  We *must* do this when
+			 * Always do heap scans in pg_am and pg_seqam, because they are
+			 * too small to benefit from an indexscan.  We *must* do this when
 			 * initially building critical relcache entries, but we might as
 			 * well just always do it.
 			 */
