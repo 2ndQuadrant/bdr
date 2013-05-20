@@ -14262,7 +14262,8 @@ dumpSequence(Archive *fout, TableInfo *tbinfo)
 			   *incby,
 			   *maxv = NULL,
 			   *minv = NULL,
-			   *cache;
+			   *cache,
+			   *amname = "local";
 	char		bufm[100],
 				bufx[100];
 	bool		cycled;
@@ -14332,14 +14333,39 @@ dumpSequence(Archive *fout, TableInfo *tbinfo)
 	}
 #endif
 
-	startv = PQgetvalue(res, 0, 1);
-	incby = PQgetvalue(res, 0, 2);
+	startv = pg_strdup(PQgetvalue(res, 0, 1));
+	incby = pg_strdup(PQgetvalue(res, 0, 2));
 	if (!PQgetisnull(res, 0, 3))
-		maxv = PQgetvalue(res, 0, 3);
+		maxv = pg_strdup(PQgetvalue(res, 0, 3));
 	if (!PQgetisnull(res, 0, 4))
-		minv = PQgetvalue(res, 0, 4);
-	cache = PQgetvalue(res, 0, 5);
+		minv = pg_strdup(PQgetvalue(res, 0, 4));
+	cache = pg_strdup(PQgetvalue(res, 0, 5));
 	cycled = (strcmp(PQgetvalue(res, 0, 6), "t") == 0);
+
+	PQclear(res);
+
+	res = ExecuteSqlQuery(fout, "SELECT EXISTS(SELECT 1 "
+								"FROM pg_catalog.pg_class c, "
+								"pg_catalog.pg_namespace n "
+								"WHERE n.oid = c.relnamespace "
+								"AND c.relname = 'pg_seqam' "
+								"AND c.relkind = 'r');",
+						  PGRES_TUPLES_OK);
+	if (strcmp(PQgetvalue(res, 0, 0), "t") == 0)
+	{
+		PQclear(res);
+
+		printfPQExpBuffer(query, "SELECT a.seqamname\n"
+								 "FROM pg_catalog.pg_seqam a, pg_catalog.pg_class c\n"
+								 "WHERE c.relam = a.oid AND c.oid = %u",
+						  tbinfo->dobj.catId.oid);
+
+		res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
+
+		amname = pg_strdup(PQgetvalue(res, 0, 0));
+	}
+
+	PQclear(res);
 
 	/*
 	 * DROP must be fully qualified in case same name appears in pg_catalog
@@ -14382,6 +14408,7 @@ dumpSequence(Archive *fout, TableInfo *tbinfo)
 					  "    CACHE %s%s",
 					  cache, (cycled ? "\n    CYCLE" : ""));
 
+	appendPQExpBuffer(query, "\n    USING %s", fmtId(amname));
 	appendPQExpBufferStr(query, ";\n");
 
 	appendPQExpBuffer(labelq, "SEQUENCE %s", fmtId(tbinfo->dobj.name));
@@ -14447,8 +14474,6 @@ dumpSequence(Archive *fout, TableInfo *tbinfo)
 	dumpSecLabel(fout, labelq->data,
 				 tbinfo->dobj.namespace->dobj.name, tbinfo->rolname,
 				 tbinfo->dobj.catId, 0, tbinfo->dobj.dumpId);
-
-	PQclear(res);
 
 	destroyPQExpBuffer(query);
 	destroyPQExpBuffer(delqry);
