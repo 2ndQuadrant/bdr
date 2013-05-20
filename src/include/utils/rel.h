@@ -18,6 +18,7 @@
 #include "catalog/pg_am.h"
 #include "catalog/pg_class.h"
 #include "catalog/pg_index.h"
+#include "catalog/pg_seqam.h"
 #include "fmgr.h"
 #include "nodes/bitmapset.h"
 #include "rewrite/prs2lock.h"
@@ -48,10 +49,12 @@ typedef LockInfoData *LockInfo;
 
 /*
  * Cached lookup information for the frequently used index access method
- * functions, defined by the pg_am row associated with an index relation.
+ * functions, defined by the pg_am row associated with an index relation, or the pg_seqam
+ * row associated with a sequence relation.
  */
 typedef struct RelationAmInfo
 {
+	/* pg_am only */
 	FmgrInfo	aminsert;
 	FmgrInfo	ambeginscan;
 	FmgrInfo	amgettuple;
@@ -61,6 +64,14 @@ typedef struct RelationAmInfo
 	FmgrInfo	ammarkpos;
 	FmgrInfo	amrestrpos;
 	FmgrInfo	amcanreturn;
+	FmgrInfo	amcostestimate;
+
+	/* pg_seqam only */
+	FmgrInfo	seqamalloc;
+	FmgrInfo	seqamsetval;
+
+	/* Common */
+	FmgrInfo	amoptions;
 } RelationAmInfo;
 
 
@@ -129,23 +140,25 @@ typedef struct RelationData
 	struct HeapTupleData *rd_indextuple;		/* all of pg_index tuple */
 	Form_pg_am	rd_am;			/* pg_am tuple for index's AM */
 
+	Form_pg_seqam rd_seqam;		/* pg_seqam tuple for sequence's AM */
+
 	/*
-	 * index access support info (used only for an index relation)
+	 * Access support info (used only for index or sequence relations)
 	 *
 	 * Note: only default support procs for each opclass are cached, namely
 	 * those with lefttype and righttype equal to the opclass's opcintype. The
 	 * arrays are indexed by support function number, which is a sufficient
 	 * identifier given that restriction.
 	 *
-	 * Note: rd_amcache is available for index AMs to cache private data about
-	 * an index.  This must be just a cache since it may get reset at any time
+	 * Note: rd_amcache is available for AMs to cache private data about
+	 * an object.  This must be just a cache since it may get reset at any time
 	 * (in particular, it will get reset by a relcache inval message for the
 	 * index).  If used, it must point to a single memory chunk palloc'd in
 	 * rd_indexcxt.  A relcache reset will include freeing that chunk and
 	 * setting rd_amcache = NULL.
 	 */
 	MemoryContext rd_indexcxt;	/* private memory cxt for this stuff */
-	RelationAmInfo *rd_aminfo;	/* lookup info for funcs found in pg_am */
+	RelationAmInfo *rd_aminfo;	/* lookup info for funcs found in pg_am or pg_seqam */
 	Oid		   *rd_opfamily;	/* OIDs of op families for each index col */
 	Oid		   *rd_opcintype;	/* OIDs of opclass declared input data types */
 	RegProcedure *rd_support;	/* OIDs of support procedures */
@@ -156,7 +169,7 @@ typedef struct RelationData
 	Oid		   *rd_exclops;		/* OIDs of exclusion operators, if any */
 	Oid		   *rd_exclprocs;	/* OIDs of exclusion ops' procs, if any */
 	uint16	   *rd_exclstrats;	/* exclusion ops' strategy numbers, if any */
-	void	   *rd_amcache;		/* available for use by index AM */
+	void	   *rd_amcache;		/* available for use by AM */
 	Oid		   *rd_indcollation;	/* OIDs of index collations */
 
 	/*

@@ -31,6 +31,7 @@ typedef struct FormData_pg_sequence
 	int64		log_cnt;
 	bool		is_cycled;
 	bool		is_called;
+	bytea		amdata;
 } FormData_pg_sequence;
 
 typedef FormData_pg_sequence *Form_pg_sequence;
@@ -49,9 +50,10 @@ typedef FormData_pg_sequence *Form_pg_sequence;
 #define SEQ_COL_LOG				8
 #define SEQ_COL_CYCLE			9
 #define SEQ_COL_CALLED			10
+#define SEQ_COL_AMDATA			11
 
 #define SEQ_COL_FIRSTCOL		SEQ_COL_NAME
-#define SEQ_COL_LASTCOL			SEQ_COL_CALLED
+#define SEQ_COL_LASTCOL			SEQ_COL_AMDATA
 
 /* XLOG stuff */
 #define XLOG_SEQ_LOG			0x00
