@@ -512,7 +512,7 @@ sub mkvcbuild
 
 	my $bdr_apply = $solution->AddProject('bdr_apply', 'dll', 'misc');
 	$bdr_apply->AddFiles('contrib\bdr', 'bdr.c', 'bdr_apply.c',
-			     'bdr_count.c');
+			     'bdr_count.c', 'bdr_seq.c');
 	$bdr_apply->AddReference($postgres);
 	$bdr_apply->AddLibrary('wsock32.lib');
 	$bdr_apply->AddIncludeDir('src\interfaces\libpq');
