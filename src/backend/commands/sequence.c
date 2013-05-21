@@ -1645,8 +1645,6 @@ sequence_local_alloc(PG_FUNCTION_ARGS)
 		log_sequence_tuple(seqrel, seqtuple, page);
 	}
 
-	last_used_seq = elm;
-
 	/* Now update sequence tuple to the intended final state */
 	seq->last_value = elm->last; /* last fetched number */
 	seq->is_called = true;
