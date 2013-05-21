@@ -3,3 +3,4 @@ comment = 'bdr support functions'
 default_version = '0.2'
 module_pathname = '$libdir/bdr'
 relocatable = false
+requires = btree_gist

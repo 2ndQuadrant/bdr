@@ -16,6 +16,8 @@
 
 #include "bdr.h"
 
+#include "pgstat.h"
+
 #include "access/committs.h"
 #include "access/heapam.h"
 #include "access/htup_details.h"
@@ -48,14 +50,18 @@ static void UserTableUpdateIndexes(Relation rel, HeapTuple tuple);
 static char *read_tuple(char *data, size_t len, HeapTuple tuple, Oid *reloid);
 static void tuple_to_stringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple);
 
+static void check_sequencer_wakeup(Relation rel);
+
+bool request_sequencer_wakeup = false;
+
 void
 process_remote_begin(char *data, size_t r)
 {
 	XLogRecPtr *origlsn;
 	TimestampTz *committime;
 	TimestampTz current;
-
-	Assert(bdr_connection != NULL);
+	char	    statbuf[100];
+	Assert(bdr_apply_con != NULL);
 
 	origlsn = (XLogRecPtr *) data;
 	data += sizeof(XLogRecPtr);
@@ -67,12 +73,18 @@ process_remote_begin(char *data, size_t r)
 	replication_origin_lsn = *origlsn;
 	replication_origin_timestamp = *committime;
 
-	elog(LOG, "BEGIN origin(lsn, timestamp): %X/%X, %s",
-		 (uint32) (*origlsn >> 32), (uint32) *origlsn,
-		 timestamptz_to_str(*committime));
+	snprintf(statbuf, sizeof(statbuf),
+			"bdr_apply: BEGIN origin(source, orig_lsn, timestamp): %s, %X/%X, %s",
+			 bdr_apply_con->name,
+			(uint32) (*origlsn >> 32), (uint32) *origlsn,
+			timestamptz_to_str(*committime));
+
+	elog(LOG, "%s", statbuf);
+
+	pgstat_report_activity(STATE_RUNNING, statbuf);
 
 	/* don't want the overhead otherwise */
-	if (bdr_connection->apply_delay > 0)
+	if (bdr_apply_con->apply_delay > 0)
 	{
 		current = GetCurrentTimestamp();
 #ifndef HAVE_INT64_TIMESTAMP
@@ -84,7 +96,7 @@ process_remote_begin(char *data, size_t r)
 			long		sec;
 			int			usec;
 
-			current = TimestampTzPlusMilliseconds(current, -bdr_connection->apply_delay);
+			current = TimestampTzPlusMilliseconds(current, -bdr_apply_con->apply_delay);
 
 			TimestampDifference(current, replication_origin_timestamp,
 								&sec, &usec);
@@ -92,6 +104,8 @@ process_remote_begin(char *data, size_t r)
 			pg_usleep(usec + (sec * USECS_PER_SEC));
 		}
 	}
+
+	request_sequencer_wakeup = false;
 
 	StartTransactionCommand();
 	PushActiveSnapshot(GetTransactionSnapshot());
@@ -119,11 +133,19 @@ process_remote_commit(char *data, size_t r)
 	PopActiveSnapshot();
 	CommitTransactionCommand();
 
+	pgstat_report_activity(STATE_IDLE, NULL);
+
 	AdvanceCachedReplicationIdentifier(*origlsn, XactLastCommitEnd);
 
 	CurrentResourceOwner = bdr_saved_resowner;
 
 	bdr_count_commit();
+
+	if (request_sequencer_wakeup)
+	{
+		request_sequencer_wakeup = false;
+		bdr_sequencer_wakeup();
+	}
 }
 
 
@@ -157,6 +179,8 @@ process_remote_insert(char *data, size_t r)
 	UserTableUpdateIndexes(rel, &tup);
 	bdr_count_insert();
 
+	check_sequencer_wakeup(rel);
+
 	/* debug output */
 #if VERBOSE_INSERT
 	initStringInfo(&s);
@@ -183,7 +207,10 @@ fetch_sysid_via_node_id(RepNodeId node_id, uint64 *sysid, TimeLineID *tli)
 
 		node = GetReplicationInfoByIdentifier(node_id);
 		if (!HeapTupleIsValid(node))
+		{
+			Assert(false);
 			elog(ERROR, "could not find replication identifier %u?", node_id);
+		}
 
 		node_class = (Form_pg_replication_identifier) GETSTRUCT(node);
 
@@ -323,7 +350,7 @@ process_remote_update(char *data, size_t r)
 		TransactionIdGetCommitTsData(xmin, &ts, &local_node_id_raw);
 		local_node_id = local_node_id_raw;
 
-		if (local_node_id == bdr_connection->origin_id)
+		if (local_node_id == bdr_apply_con->origin_id)
 		{
 			/*
 			 * If the row got updated twice within a single node, just apply
@@ -357,7 +384,7 @@ process_remote_update(char *data, size_t r)
 
 				fetch_sysid_via_node_id(local_node_id,
 										&local_sysid, &local_tli);
-				fetch_sysid_via_node_id(bdr_connection->origin_id,
+				fetch_sysid_via_node_id(bdr_apply_con->origin_id,
 										&remote_sysid, &remote_tli);
 
 				if (local_sysid < remote_sysid)
@@ -386,10 +413,10 @@ process_remote_update(char *data, size_t r)
 
 			fetch_sysid_via_node_id(local_node_id,
 									&local_sysid, &local_tli);
-			fetch_sysid_via_node_id(bdr_connection->origin_id,
+			fetch_sysid_via_node_id(bdr_apply_con->origin_id,
 									&remote_sysid, &remote_tli);
-			Assert(remote_sysid == bdr_connection->sysid);
-			Assert(remote_tli == bdr_connection->timeline);
+			Assert(remote_sysid == bdr_apply_con->sysid);
+			Assert(remote_tli == bdr_apply_con->timeline);
 
 			memcpy(remote_ts, timestamptz_to_str(replication_origin_timestamp),
 				   MAXDATELEN);
@@ -436,6 +463,8 @@ process_remote_update(char *data, size_t r)
 err:
 	if (!primary_key_changed && generated_key != NULL)
 		heap_freetuple(generated_key);
+
+	check_sequencer_wakeup(rel);
 
 	/* release locks upon commit */
 	index_close(idxrel, NoLock);
@@ -513,10 +542,20 @@ process_remote_delete(char *data, size_t r)
 	resetStringInfo(&s);
 #endif
 
+	check_sequencer_wakeup(rel);
+
 	index_close(idxrel, NoLock);
 	heap_close(rel, NoLock);
 }
 
+static void
+check_sequencer_wakeup(Relation rel)
+{
+	if (strcmp(RelationGetRelationName(rel), "bdr_sequence_values") == 0 ||
+		strcmp(RelationGetRelationName(rel), "bdr_sequence_elections") == 0 ||
+		strcmp(RelationGetRelationName(rel), "bdr_votes") == 0)
+		request_sequencer_wakeup = true;
+}
 
 /*
  * Converts an int64 from network byte order to native format.
@@ -779,14 +818,21 @@ build_scan_key(ScanKey skey, Relation rel, Relation idxrel, HeapTuple key)
 {
 	int			attoff;
 	Datum		indclassDatum;
+	Datum		indkeyDatum;
 	bool		isnull;
 	oidvector  *opclass;
+	int2vector  *indkey;
 
 	indclassDatum = SysCacheGetAttr(INDEXRELID, idxrel->rd_indextuple,
 									Anum_pg_index_indclass, &isnull);
+	Assert(!isnull);
 	opclass = (oidvector *) DatumGetPointer(indclassDatum);
 
+	indkeyDatum = SysCacheGetAttr(INDEXRELID, idxrel->rd_indextuple,
+									Anum_pg_index_indkey, &isnull);
 	Assert(!isnull);
+	indkey = (int2vector *) DatumGetPointer(indkeyDatum);
+
 
 	for (attoff = 0; attoff < RelationGetNumberOfAttributes(idxrel); attoff++)
 	{
@@ -794,12 +840,20 @@ build_scan_key(ScanKey skey, Relation rel, Relation idxrel, HeapTuple key)
 		Oid			opfamily;
 		RegProcedure regop;
 		int			pkattno = attoff + 1;
+		int			mainattno = indkey->values[attoff];
+		Oid			atttype = attnumTypeId(rel, mainattno);
+		Oid			optype = get_opclass_input_type(opclass->values[attoff]);
 
 		opfamily = get_opclass_family(opclass->values[attoff]);
 
-		operator = get_opfamily_member(opfamily, attnumTypeId(idxrel, pkattno),
-									   attnumTypeId(idxrel, pkattno),
+
+		operator = get_opfamily_member(opfamily, optype,
+									   optype,
 									   BTEqualStrategyNumber);
+
+		if (!OidIsValid(operator))
+			elog(ERROR, "could not lookup equality operator for type %u, optype %u in opfamily %u",
+				 atttype, optype, opfamily);
 
 		regop = get_opcode(operator);
 

@@ -49,7 +49,9 @@ static bool got_sigterm = false;
 ResourceOwner bdr_saved_resowner;
 static char *connections = NULL;
 static char *bdr_synchronous_commit = NULL;
-BDRWorkerCon *bdr_connection;
+
+BDRWorkerCon *bdr_apply_con = NULL;
+BDRSequencerCon *bdr_sequencer_con = NULL;
 
 PG_MODULE_MAGIC;
 
@@ -221,7 +223,7 @@ bdr_apply_main(void *main_arg)
 	XLogRecPtr	start_from;
 	NameData	slot_name;
 
-	bdr_connection = (BDRWorkerCon *) main_arg;
+	bdr_apply_con = (BDRWorkerCon *) main_arg;
 
 	NameStr(replication_name)[0] = '\0';
 
@@ -234,17 +236,17 @@ bdr_apply_main(void *main_arg)
 						PGC_BACKEND, PGC_S_OVERRIDE);	/* other context? */
 
 	/* Connect to our database */
-	BackgroundWorkerInitializeConnection(bdr_connection->dbname, NULL);
+	BackgroundWorkerInitializeConnection(bdr_apply_con->dbname, NULL);
 
 	CurrentResourceOwner = ResourceOwnerCreate(NULL, "bdr apply top-level resource owner");
 	bdr_saved_resowner = CurrentResourceOwner;
 
 	snprintf(conninfo_repl, sizeof(conninfo_repl),
 			 "%s replication=true fallback_application_name=bdr",
-			 bdr_connection->dsn);
+			 bdr_apply_con->dsn);
 
 	elog(LOG, "%s initialized on %s, remote %s",
-		 MyBgworkerEntry->bgw_name, bdr_connection->dbname, conninfo_repl);
+		 MyBgworkerEntry->bgw_name, bdr_apply_con->dbname, conninfo_repl);
 
 	streamConn = PQconnectdb(conninfo_repl);
 	if (PQstatus(streamConn) != CONNECTION_OK)
@@ -350,9 +352,9 @@ bdr_apply_main(void *main_arg)
 		elog(LOG, "created replication identifier %u", replication_identifier);
 	}
 
-	bdr_connection->origin_id = replication_identifier;
-	bdr_connection->sysid = remote_sysid_i;
-	bdr_connection->timeline = remote_tlid_i;
+	bdr_apply_con->origin_id = replication_identifier;
+	bdr_apply_con->sysid = remote_sysid_i;
+	bdr_apply_con->timeline = remote_tlid_i;
 
 	/* initialize stat subsystem, our id won't change further */
 	bdr_count_set_current_node(replication_identifier);
@@ -484,39 +486,23 @@ bdr_apply_main(void *main_arg)
 static void
 bdr_sequencer_main(void *main_arg)
 {
-	BDRSequencerCon *con = (BDRSequencerCon *) main_arg;
 	int rc;
+
+	bdr_sequencer_con = (BDRSequencerCon *) main_arg;
 
 	/* We're now ready to receive signals */
 	BackgroundWorkerUnblockSignals();
 
 	/* Connect to our database */
-	BackgroundWorkerInitializeConnection(con->dbname, NULL);
+	BackgroundWorkerInitializeConnection(bdr_sequencer_con->dbname, NULL);
 
 	CurrentResourceOwner = ResourceOwnerCreate(NULL, "bdr seq top-level resource owner");
 	bdr_saved_resowner = CurrentResourceOwner;
 
-	elog(WARNING, "starting sequencer %s", con->dbname);
+	elog(WARNING, "starting sequencer on db \"%s\"", bdr_sequencer_con->dbname);
 
 	/* make sure BDR extension exists */
-	{
-		CreateExtensionStmt create_stmt;
-		AlterExtensionStmt alter_stmt;
-
-		create_stmt.extname = (char *)"bdr";
-		create_stmt.if_not_exists = true;
-		create_stmt.options = NIL;
-
-		alter_stmt.extname = (char *)"bdr";
-		alter_stmt.options = NIL;
-
-		StartTransactionCommand();
-		/* create extension if not exists */
-		CreateExtension(&create_stmt);
-		/* update extension otherwise */
-		ExecAlterExtensionStmt(&alter_stmt);
-		CommitTransactionCommand();
-	}
+	bdr_sequencer_init();
 
 	while (!got_sigterm)
 	{
@@ -645,6 +631,7 @@ _PG_init(void)
 
 		con = palloc(sizeof(BDRWorkerCon));
 		con->dsn = (char *) lfirst(c);
+		con->name = pstrdup(name);
 		con->apply_delay = 0;
 
 		sprintf(optname_dsn, "bdr.%s.dsn", name);
@@ -744,6 +731,8 @@ _PG_init(void)
 
 		con = palloc(sizeof(BDRSequencerCon));
 		con->dbname = pstrdup(name);
+		con->num_nodes = nregistered;
+		con->slot = off;
 
 		elog(LOG, "starting seq on %s", name);
 
@@ -768,6 +757,7 @@ out:
 
 	/* register a slot for every remote node */
 	bdr_count_shmem_init(nregistered);
+	bdr_sequencer_shmem_init(nregistered, num_used_databases);
 
 	MemoryContextSwitchTo(old_context);
 }
