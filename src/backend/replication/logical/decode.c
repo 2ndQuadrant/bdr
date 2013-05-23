@@ -23,42 +23,38 @@
 #include "access/heapam.h"
 #include "access/heapam_xlog.h"
 #include "access/transam.h"
-#include "access/xlog_internal.h"
 #include "access/xact.h"
+#include "access/xlog_internal.h"
 #include "access/xlogreader.h"
-
 #include "catalog/pg_control.h"
-
-#include "replication/reorderbuffer.h"
 #include "replication/decode.h"
-#include "replication/snapbuild.h"
 #include "replication/logical.h"
-
+#include "replication/reorderbuffer.h"
+#include "replication/snapbuild.h"
+#include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/syscache.h"
-#include "utils/lsyscache.h"
 
-static void DecodeXLogTuple(char *data, Size len, ReorderBufferTupleBuf * tuple);
-
-static void DecodeInsert(ReorderBuffer * cache, XLogRecordBuffer * buf);
-
-static void DecodeUpdate(ReorderBuffer * cache, XLogRecordBuffer * buf);
-
-static void DecodeDelete(ReorderBuffer * cache, XLogRecordBuffer * buf);
-
-static void DecodeMultiInsert(ReorderBuffer * cache, XLogRecordBuffer * buf);
-
-static void DecodeCommit(LogicalDecodingContext * ctx, XLogRecordBuffer * buf, TransactionId xid,
-			 TransactionId *sub_xids, int nsubxacts, TimestampTz commit_time);
-
-
-static void DecodeAbort(ReorderBuffer * cache, XLogRecPtr lsn, TransactionId xid,
-			TransactionId *sub_xids, int nsubxacts);
+static void DecodeHeapOp(ReorderBuffer *reorder, XLogRecordBuffer *buf,
+			 RmgrId rmgr, uint8 info);
+static void DecodeTransactionOp(LogicalDecodingContext *ctx,
+					XLogRecordBuffer *buf);
+static void DecodeXLogTuple(char *data, Size len,
+				ReorderBufferTupleBuf *tuple);
+static void DecodeInsert(ReorderBuffer *reorder, XLogRecordBuffer *buf);
+static void DecodeUpdate(ReorderBuffer *reorder, XLogRecordBuffer *buf);
+static void DecodeDelete(ReorderBuffer *reorder, XLogRecordBuffer *buf);
+static void DecodeMultiInsert(ReorderBuffer *reorder, XLogRecordBuffer *buf);
+static void DecodeCommit(LogicalDecodingContext *ctx, XLogRecordBuffer *buf,
+			 TransactionId xid, TransactionId *sub_xids, int nsubxacts,
+			 TimestampTz commit_time);
+static void DecodeAbort(ReorderBuffer *reorder, XLogRecPtr lsn,
+			TransactionId xid, TransactionId *sub_xids, int nsubxacts);
 
 
 void
-DecodeRecordIntoReorderBuffer(LogicalDecodingContext * ctx,
-							  XLogRecordBuffer * buf)
+DecodeRecordIntoReorderBuffer(LogicalDecodingContext *ctx,
+							  XLogRecordBuffer *buf)
 {
 	XLogRecord *r = &buf->record;
 	uint8		info = r->xl_info & ~XLR_INFO_MASK;
@@ -78,7 +74,8 @@ DecodeRecordIntoReorderBuffer(LogicalDecodingContext * ctx,
 	 */
 	action = SnapBuildDecodeCallback(reorder, ctx->snapshot_builder, buf);
 
-	if (ctx->stop_after_consistent && ctx->snapshot_builder->state == SNAPBUILD_CONSISTENT)
+	if (ctx->stop_after_consistent &&
+		ctx->snapshot_builder->state == SNAPBUILD_CONSISTENT)
 	{
 		elog(LOG, "decoding found the initial consistent point, stopping!");
 		return;
@@ -90,183 +87,30 @@ DecodeRecordIntoReorderBuffer(LogicalDecodingContext * ctx,
 	switch (r->xl_rmid)
 	{
 		case RM_HEAP_ID:
-			{
-				info &= XLOG_HEAP_OPMASK;
-				switch (info)
-				{
-					case XLOG_HEAP_INSERT:
-						DecodeInsert(reorder, buf);
-						break;
-
-						/*
-						 * no guarantee that we get an HOT update again, so
-						 * handle it as a normal update
-						 */
-					case XLOG_HEAP_HOT_UPDATE:
-					case XLOG_HEAP_UPDATE:
-						DecodeUpdate(reorder, buf);
-						break;
-
-					case XLOG_HEAP_NEWPAGE:
-
-						/*
-						 * XXX: There doesn't seem to be a usecase for
-						 * decoding HEAP_NEWPAGE's. Its only used in various
-						 * indexam's and CLUSTER, neither of which should be
-						 * relevant for the logical changestream.
-						 */
-						break;
-
-					case XLOG_HEAP_DELETE:
-						DecodeDelete(reorder, buf);
-						break;
-					default:
-						break;
-				}
-				break;
-			}
 		case RM_HEAP2_ID:
-			{
-				info &= XLOG_HEAP_OPMASK;
-				switch (info)
-				{
-					case XLOG_HEAP2_MULTI_INSERT:
-						DecodeMultiInsert(reorder, buf);
-						break;
-					default:
-
-						/*
-						 * everything else here is just physical stuff were
-						 * not interested in
-						 */
-						break;
-				}
-				break;
-			}
+			DecodeHeapOp(reorder, buf, r->xl_rmid,
+						 r->xl_rmid & XLOG_HEAP_OPMASK);
+			break;
 
 		case RM_XACT_ID:
-			{
-				switch (info)
-				{
-					case XLOG_XACT_COMMIT:
-						{
-							TransactionId *sub_xids;
-							xl_xact_commit *xlrec =
-							(xl_xact_commit *) buf->record_data;
+			DecodeTransactionOp(ctx, buf);
+			break;
 
-							/*
-							 * FIXME: theoretically computing this address is
-							 * not really allowed if there are no
-							 * subtransactions
-							 */
-							sub_xids = (TransactionId *) &(
-												xlrec->xnodes[xlrec->nrels]);
-
-							DecodeCommit(ctx, buf, r->xl_xid, sub_xids,
-										 xlrec->nsubxacts, xlrec->xact_time);
-
-
-							break;
-						}
-					case XLOG_XACT_COMMIT_PREPARED:
-						{
-							TransactionId *sub_xids;
-							xl_xact_commit_prepared *xlrec =
-							(xl_xact_commit_prepared *) buf->record_data;
-
-							sub_xids = (TransactionId *) &(
-									  xlrec->crec.xnodes[xlrec->crec.nrels]);
-
-							/* r->xl_xid is committed in a separate record */
-							DecodeCommit(ctx, buf, xlrec->xid, sub_xids,
-										 xlrec->crec.nsubxacts,
-										 xlrec->crec.xact_time);
-
-							break;
-						}
-					case XLOG_XACT_COMMIT_COMPACT:
-						{
-							xl_xact_commit_compact *xlrec =
-							(xl_xact_commit_compact *) buf->record_data;
-
-							DecodeCommit(ctx, buf, r->xl_xid, xlrec->subxacts,
-										 xlrec->nsubxacts, 0);
-							break;
-						}
-					case XLOG_XACT_ABORT:
-						{
-							TransactionId *sub_xids;
-							xl_xact_abort *xlrec =
-							(xl_xact_abort *) buf->record_data;
-
-							sub_xids = (TransactionId *) &(
-												xlrec->xnodes[xlrec->nrels]);
-
-							DecodeAbort(reorder, buf->origptr, r->xl_xid,
-										sub_xids, xlrec->nsubxacts);
-							break;
-						}
-					case XLOG_XACT_ABORT_PREPARED:
-						{
-							TransactionId *sub_xids;
-							xl_xact_abort_prepared *xlrec =
-							(xl_xact_abort_prepared *) buf->record_data;
-							xl_xact_abort *arec = &xlrec->arec;
-
-							sub_xids = (TransactionId *) &(
-												  arec->xnodes[arec->nrels]);
-							/* r->xl_xid is committed in a separate record */
-							DecodeAbort(reorder, buf->origptr, xlrec->xid,
-										sub_xids, arec->nsubxacts);
-							break;
-						}
-
-					case XLOG_XACT_ASSIGNMENT:
-						{
-							int			i;
-							TransactionId *sub_xid;
-							xl_xact_assignment *xlrec =
-							(xl_xact_assignment *) buf->record_data;
-
-							sub_xid = &xlrec->xsub[0];
-
-							for (i = 0; i < xlrec->nsubxacts; i++)
-							{
-								ReorderBufferAssignChild(reorder, r->xl_xid,
-												 *(sub_xid++), buf->origptr);
-							}
-							break;
-						}
-					case XLOG_XACT_PREPARE:
-
-						/*
-						 * XXX: we could replay the transaction and prepare it
-						 * as well.
-						 */
-						break;
-					default:
-						break;
-						;
-				}
-				break;
-			}
 		case RM_XLOG_ID:
+			switch (info)
 			{
-				switch (info)
-				{
-						/* this is also used in END_OF_RECOVERY checkpoints */
-					case XLOG_CHECKPOINT_SHUTDOWN:
+				/* this is also used in END_OF_RECOVERY checkpoints */
+				case XLOG_CHECKPOINT_SHUTDOWN:
 
-						/*
-						 * abort all transactions that still are in progress,
-						 * they aren't in progress anymore.  do not abort
-						 * prepared transactions that have been prepared for
-						 * commit.
-						 *
-						 * FIXME: implement.
-						 */
-						break;
-				}
+					/*
+					 * abort all transactions that still are in progress,
+					 * they aren't in progress anymore.  do not abort
+					 * prepared transactions that have been prepared for
+					 * commit.
+					 *
+					 * FIXME: implement.
+					 */
+					break;
 			}
 		default:
 			break;
@@ -274,8 +118,174 @@ DecodeRecordIntoReorderBuffer(LogicalDecodingContext * ctx,
 }
 
 static void
-DecodeCommit(LogicalDecodingContext * ctx, XLogRecordBuffer * buf, TransactionId xid,
-			 TransactionId *sub_xids, int nsubxacts, TimestampTz commit_time)
+DecodeHeapOp(ReorderBuffer *reorder, XLogRecordBuffer *buf, RmgrId rmgr,
+			 uint8 info)
+{
+	switch (rmgr)
+	{
+		case RM_HEAP_ID:
+			switch (info)
+			{
+				case XLOG_HEAP_INSERT:
+					DecodeInsert(reorder, buf);
+					break;
+
+					/*
+					 * no guarantee that we get an HOT update again, so
+					 * handle it as a normal update
+					 */
+				case XLOG_HEAP_HOT_UPDATE:
+				case XLOG_HEAP_UPDATE:
+					DecodeUpdate(reorder, buf);
+					break;
+
+				case XLOG_HEAP_NEWPAGE:
+
+					/*
+					 * XXX: There doesn't seem to be a usecase for
+					 * decoding HEAP_NEWPAGE's. Its only used in various
+					 * indexam's and CLUSTER, neither of which should be
+					 * relevant for the logical changestream.
+					 */
+					break;
+
+				case XLOG_HEAP_DELETE:
+					DecodeDelete(reorder, buf);
+					break;
+				default:
+					break;
+			}
+			break;
+		case RM_HEAP2_ID:
+			switch (info)
+			{
+				case XLOG_HEAP2_MULTI_INSERT:
+					DecodeMultiInsert(reorder, buf);
+					break;
+
+				default:
+
+					/*
+					 * everything else here is just physical stuff were
+					 * not interested in
+					 */
+					break;
+			}
+			break;
+	}
+}
+
+static void
+DecodeTransactionOp(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
+{
+	ReorderBuffer  *reorder = ctx->reorder;
+	XLogRecord	   *r = &buf->record;
+
+	switch (r->xl_info & ~XLR_INFO_MASK)
+	{
+		case XLOG_XACT_COMMIT:
+			{
+				TransactionId *sub_xids = NULL;
+				xl_xact_commit *xlrec;
+
+				xlrec = (xl_xact_commit *) buf->record_data;
+
+				if (xlrec->nsubxacts > 0)
+					sub_xids = (TransactionId *)
+						&(xlrec->xnodes[xlrec->nrels]);
+
+				DecodeCommit(ctx, buf, r->xl_xid, sub_xids,
+							 xlrec->nsubxacts, xlrec->xact_time);
+
+				break;
+			}
+		case XLOG_XACT_COMMIT_PREPARED:
+			{
+				TransactionId *sub_xids;
+				xl_xact_commit_prepared *xlrec;
+
+				xlrec = (xl_xact_commit_prepared *) buf->record_data;
+				sub_xids = (TransactionId *)
+					&(xlrec->crec.xnodes[xlrec->crec.nrels]);
+
+				/* r->xl_xid is committed in a separate record */
+				DecodeCommit(ctx, buf, xlrec->xid, sub_xids,
+							 xlrec->crec.nsubxacts,
+							 xlrec->crec.xact_time);
+
+				break;
+			}
+		case XLOG_XACT_COMMIT_COMPACT:
+			{
+				xl_xact_commit_compact *xlrec;
+
+				xlrec = (xl_xact_commit_compact *) buf->record_data;
+
+				DecodeCommit(ctx, buf, r->xl_xid, xlrec->subxacts,
+							 xlrec->nsubxacts, 0);
+				break;
+			}
+		case XLOG_XACT_ABORT:
+			{
+				TransactionId *sub_xids;
+				xl_xact_abort *xlrec;
+
+				xlrec = (xl_xact_abort *) buf->record_data;
+
+				sub_xids = (TransactionId *) &(xlrec->xnodes[xlrec->nrels]);
+
+				DecodeAbort(reorder, buf->origptr, r->xl_xid,
+							sub_xids, xlrec->nsubxacts);
+				break;
+			}
+		case XLOG_XACT_ABORT_PREPARED:
+			{
+				TransactionId *sub_xids;
+				xl_xact_abort_prepared *xlrec;
+				xl_xact_abort *arec;
+
+				xlrec = (xl_xact_abort_prepared *) buf->record_data;
+				arec = &xlrec->arec;
+
+				sub_xids = (TransactionId *) &(arec->xnodes[arec->nrels]);
+				/* r->xl_xid is committed in a separate record */
+				DecodeAbort(reorder, buf->origptr, xlrec->xid,
+							sub_xids, arec->nsubxacts);
+				break;
+			}
+
+		case XLOG_XACT_ASSIGNMENT:
+			{
+				int			i;
+				TransactionId *sub_xid;
+				xl_xact_assignment *xlrec =
+					(xl_xact_assignment *) buf->record_data;
+
+				sub_xid = &xlrec->xsub[0];
+
+				for (i = 0; i < xlrec->nsubxacts; i++)
+				{
+					ReorderBufferAssignChild(reorder, r->xl_xid,
+											 *(sub_xid++), buf->origptr);
+				}
+				break;
+			}
+		case XLOG_XACT_PREPARE:
+
+			/*
+			 * XXX: we could replay the transaction and prepare it
+			 * as well.
+			 */
+			break;
+		default:
+			break;
+	}
+}
+
+static void
+DecodeCommit(LogicalDecodingContext * ctx, XLogRecordBuffer * buf,
+			 TransactionId xid, TransactionId *sub_xids, int nsubxacts,
+			 TimestampTz commit_time)
 {
 	int			i;
 
@@ -323,9 +333,10 @@ static void
 DecodeInsert(ReorderBuffer * reorder, XLogRecordBuffer * buf)
 {
 	XLogRecord *r = &buf->record;
-	xl_heap_insert *xlrec = (xl_heap_insert *) buf->record_data;
-
+	xl_heap_insert *xlrec;
 	ReorderBufferChange *change;
+
+	xlrec = (xl_heap_insert *) buf->record_data;
 
 	/* XXX: nicer */
 	if (xlrec->target.node.dbNode != MyDatabaseId)
@@ -354,11 +365,13 @@ static void
 DecodeUpdate(ReorderBuffer * reorder, XLogRecordBuffer * buf)
 {
 	XLogRecord *r = &buf->record;
-	xl_heap_update *xlrec = (xl_heap_update *) buf->record_data;
-	xl_heap_header_len *xlhdr = (xl_heap_header_len *)
-	(buf->record_data + SizeOfHeapUpdate);
+	xl_heap_update *xlrec;
+	xl_heap_header_len *xlhdr;
 	ReorderBufferChange *change;
 	char	   *data;
+
+	xlrec = (xl_heap_update *) buf->record_data;
+	xlhdr = (xl_heap_header_len *) (buf->record_data + SizeOfHeapUpdate);
 
 	/* XXX: nicer */
 	if (xlrec->target.node.dbNode != MyDatabaseId)
@@ -412,10 +425,10 @@ static void
 DecodeDelete(ReorderBuffer * reorder, XLogRecordBuffer * buf)
 {
 	XLogRecord *r = &buf->record;
-
-	xl_heap_delete *xlrec = (xl_heap_delete *) buf->record_data;
-
+	xl_heap_delete *xlrec;
 	ReorderBufferChange *change;
+
+	xlrec = (xl_heap_delete *) buf->record_data;
 
 	/* XXX: nicer */
 	if (xlrec->target.node.dbNode != MyDatabaseId)
@@ -443,26 +456,28 @@ DecodeDelete(ReorderBuffer * reorder, XLogRecordBuffer * buf)
 
 /*
  * Decode xl_heap_multi_insert record into multiple changes.
- *
- * Due to slightly different layout we can't reuse DecodeXLogTuple without
- * making that even harder to understand than already is.
  */
 static void
 DecodeMultiInsert(ReorderBuffer * reorder, XLogRecordBuffer * buf)
 {
 	XLogRecord *r = &buf->record;
-	xl_heap_multi_insert *xlrec = (xl_heap_multi_insert *) buf->record_data;
+	xl_heap_multi_insert *xlrec;
 	int			i;
-	char	   *data = buf->record_data;
+	char	   *data;
 	bool		isinit = (r->xl_info & XLOG_HEAP_INIT_PAGE) != 0;
+
+	xlrec = (xl_heap_multi_insert *) buf->record_data;
 
 	/* XXX: nicer */
 	if (xlrec->node.dbNode != MyDatabaseId)
 		return;
 
-	data += SizeOfHeapMultiInsert;
+	data = buf->record_data + SizeOfHeapMultiInsert;
 
-	/* OffsetNumber's are only stored if its not a HEAP_INIT_PAGE record */
+	/*
+	 * OffsetNumbers (which are not of interest to us) are stored when
+	 * XLOG_HEAP_INIT_PAGE is not set -- skip over them.
+	 */
 	if (!isinit)
 		data += sizeof(OffsetNumber) * xlrec->ntuples;
 
@@ -480,8 +495,11 @@ DecodeMultiInsert(ReorderBuffer * reorder, XLogRecordBuffer * buf)
 		memcpy(&change->relnode, &xlrec->node, sizeof(RelFileNode));
 
 		/*
-		 * will always be set currently as multi_insert isn't used for
-		 * catalogs, but better be future proof.
+		 * CONTAINS_NEW_TUPLE will always be set currently as multi_insert
+		 * isn't used for catalogs, but better be future proof.
+		 *
+		 * We decode the tuple in pretty much the same way as DecodeXLogTuple,
+		 * but since the layout is slightly different, we can't use it here.
 		 */
 		if (xlrec->flags & XLOG_HEAP_CONTAINS_NEW_TUPLE)
 		{
@@ -511,11 +529,14 @@ DecodeMultiInsert(ReorderBuffer * reorder, XLogRecordBuffer * buf)
 			tuple->header.t_infomask2 = xlhdr->t_infomask2;
 			tuple->header.t_hoff = xlhdr->t_hoff;
 		}
+
 		ReorderBufferAddChange(reorder, r->xl_xid, buf->origptr, change);
 	}
 }
 
-
+/*
+ * Read a tuple of size 'len' from 'data' into 'tuple'.
+ */
 static void
 DecodeXLogTuple(char *data, Size len, ReorderBufferTupleBuf * tuple)
 {
