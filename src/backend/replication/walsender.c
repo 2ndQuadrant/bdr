@@ -745,6 +745,7 @@ InitLogicalReplication(InitLogicalReplicationCmd *cmd)
 	sendTimeLineIsHistoric = false;
 	sendTimeLine = ThisTimeLineID;
 
+	initStringInfo(&output_message);
 	ctx = CreateLogicalDecodingContext(MyLogicalDecodingSlot, false, NIL,
 						replay_read_page, WalSndPrepareWrite, WalSndWriteData);
 
@@ -1001,9 +1002,6 @@ WalSndPrepareWrite(LogicalDecodingContext *ctx, XLogRecPtr lsn, TransactionId xi
 static void
 WalSndWriteData(LogicalDecodingContext *ctx, XLogRecPtr lsn, TransactionId xid)
 {
-	long		sleeptime = 10000;		/* 10 s */
-	int			wakeEvents;
-
 	AssertVariableIsOfType(&WalSndWriteData, LogicalOutputPluginWriterWrite);
 
 	/* output previously gathered data in a CopyData packet */
@@ -1019,6 +1017,9 @@ WalSndWriteData(LogicalDecodingContext *ctx, XLogRecPtr lsn, TransactionId xid)
 
 	for (;;)
 	{
+		int			wakeEvents;
+		long		sleeptime = 10000;		/* 10s */
+
 		/*
 		 * Emergency bailout if postmaster has died.  This is to avoid the
 		 * necessity for manual cleanup of all postmaster children.
@@ -1050,7 +1051,11 @@ WalSndWriteData(LogicalDecodingContext *ctx, XLogRecPtr lsn, TransactionId xid)
 		if (!pq_is_send_pending())
 			break;
 
-		/* FIXME: wal_sender_timeout integration */
+		/*
+		 * Note we don't set a timeout here.  It would be pointless, because
+		 * if the socket is not writable there's not much we can do elsewhere
+		 * anyway.
+		 */
 		wakeEvents = WL_LATCH_SET | WL_POSTMASTER_DEATH |
 			WL_SOCKET_WRITEABLE | WL_SOCKET_READABLE | WL_TIMEOUT;
 
@@ -1071,7 +1076,6 @@ WalSndWriteData(LogicalDecodingContext *ctx, XLogRecPtr lsn, TransactionId xid)
 XLogRecPtr
 WalSndWaitForWal(XLogRecPtr loc)
 {
-	long		sleeptime = 10000;		/* 10 s */
 	int			wakeEvents;
 	XLogRecPtr  flushptr;
 
@@ -1086,6 +1090,8 @@ WalSndWaitForWal(XLogRecPtr loc)
 
 	for (;;)
 	{
+		long		sleeptime = 10000;		/* 10 s */
+
 		/*
 		 * Emergency bailout if postmaster has died.  This is to avoid the
 		 * necessity for manual cleanup of all postmaster children.
@@ -1120,7 +1126,33 @@ WalSndWaitForWal(XLogRecPtr loc)
 		if (loc <= flushptr)
 			break;
 
-		/* FIXME: wal_sender_timeout integration */
+		/* Determine time until replication timeout */
+		if (wal_sender_timeout > 0)
+		{
+			if (!ping_sent)
+			{
+				TimestampTz timeout;
+
+				/*
+				 * If half of wal_sender_timeout has lapsed without receiving
+				 * any reply from standby, send a keep-alive message to standby
+				 * requesting an immediate reply.
+				 */
+				timeout = TimestampTzPlusMilliseconds(last_reply_timestamp,
+													  wal_sender_timeout / 2);
+				if (GetCurrentTimestamp() >= timeout)
+				{
+					WalSndKeepalive(true);
+					ping_sent = true;
+					/* Try to flush pending output to the client */
+					if (pq_flush_if_writable() != 0)
+						break;
+				}
+			}
+
+			sleeptime = 1 + (wal_sender_timeout / 10);
+		}
+
 		wakeEvents = WL_LATCH_SET | WL_POSTMASTER_DEATH |
 			WL_SOCKET_READABLE | WL_TIMEOUT;
 
@@ -1129,6 +1161,12 @@ WalSndWaitForWal(XLogRecPtr loc)
 		WaitLatchOrSocket(&MyWalSnd->latch, wakeEvents,
 						  MyProcPort->sock, sleeptime);
 		ImmediateInterruptOK = false;
+
+		/*
+		 * The equivalent code in WalSndLoop checks here that replication
+		 * timeout hasn't been exceeded.  We don't do that here.   XXX explain
+		 * why.
+		 */
 	}
 
 	/* reactivate latch so WalSndLoop knows to continue */
