@@ -430,6 +430,8 @@ bdr_count_serialize(void)
 						tpath)));
 	}
 
+	CloseTransientFile(fd);
+
 	/* rename into place */
 	if (rename(tpath, path) != 0)
 		ereport(ERROR,
@@ -490,13 +492,13 @@ bdr_count_unserialize(void)
 
 	if (serial.version != bdr_count_version)
 	{
-		elog(NOTICE, "version of stat file changed, zeroing");
+		elog(WARNING, "version of stat file changed, zeroing");
 		goto zero_file;
 	}
 
 	if (serial.nr_slots > bdr_count_nnodes)
 	{
-		elog(NOTICE, "stat file has more stats than we need, zeroing");
+		elog(WARNING, "stat file has more stats than we need, zeroing");
 		goto zero_file;
 	}
 
@@ -516,6 +518,7 @@ out:
 		CloseTransientFile(fd);
 	LWLockRelease(BdrCountCtl->lock);
 	return;
+
 zero_file:
 	CloseTransientFile(fd);
 	LWLockRelease(BdrCountCtl->lock);

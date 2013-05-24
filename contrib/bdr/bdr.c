@@ -413,7 +413,8 @@ bdr_apply_main(void *main_arg)
 		 * background process goes away immediately in an emergency.
 		 */
 		rc = WaitLatchOrSocket(&MyProc->procLatch,
-		WL_SOCKET_READABLE | WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
+							   WL_SOCKET_READABLE | WL_LATCH_SET |
+							   WL_TIMEOUT | WL_POSTMASTER_DEATH,
 							   fd, 1000L);
 
 		ResetLatch(&MyProc->procLatch);
