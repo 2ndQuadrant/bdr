@@ -104,13 +104,14 @@ recvint64(char *buf)
  * Send a Standby Status Update message to server.
  */
 static bool
-sendFeedback(PGconn *conn, XLogRecPtr blockpos, int64 now, bool replyRequested)
+sendFeedback(PGconn *conn, XLogRecPtr blockpos, int64 now, bool replyRequested,
+			 bool force)
 {
 	char		replybuf[1 + 8 + 8 + 8 + 8 + 1];
 	int			len = 0;
 	static XLogRecPtr lastpos = InvalidXLogRecPtr;
 
-	if (blockpos == lastpos)
+	if (!force && (blockpos == lastpos))
 		return true;
 
 	replybuf[len] = 'r';
@@ -473,6 +474,11 @@ bdr_apply_main(void *main_arg)
 
 					process_remote_action(data, r);
 				}
+				else if (copybuf[0] == 'k')
+				{
+					sendFeedback(streamConn, last_received,
+								 GetCurrentTimestamp(), false, true);
+				}
 				/* other message types are purposefully ignored */
 			}
 		}
@@ -483,7 +489,7 @@ bdr_apply_main(void *main_arg)
 		 */
 		if (last_received != InvalidXLogRecPtr)
 			sendFeedback(streamConn, last_received,
-						 GetCurrentTimestamp(), false);
+						 GetCurrentTimestamp(), false, false);
 	}
 
 	proc_exit(0);
