@@ -175,8 +175,8 @@ IncreaseRestartDecodingForSlot(XLogRecPtr current_lsn, XLogRecPtr restart_lsn)
 	{
 		MyLogicalDecodingSlot->candidate_lsn = current_lsn;
 		MyLogicalDecodingSlot->candidate_restart_decoding = restart_lsn;
-		/* FIXME: log level */
-		elog(LOG, "got new restart lsn %X/%X at %X/%X",
+
+		elog(DEBUG1, "got new restart lsn %X/%X at %X/%X",
 			 (uint32) (restart_lsn >> 32), (uint32) restart_lsn,
 			 (uint32) (current_lsn >> 32), (uint32) current_lsn);
 
@@ -297,7 +297,7 @@ ComputeLogicalXmin(void)
 	LogicalDecodingCtl->xmin = xmin;
 	LWLockRelease(ProcArrayLock);
 
-	elog(LOG, "computed new global xmin for decoding: %u", xmin);
+	elog(DEBUG1, "computed new global xmin for decoding: %u", xmin);
 }
 
 /*
@@ -786,7 +786,7 @@ RestoreLogicalSlot(const char *name)
 
 	sprintf(path, "pg_llog/%s/state", name);
 
-	elog(LOG, "restoring logical slot at %s", path);
+	elog(DEBUG2, "restoring logical slot at %s", path);
 
 	fd = OpenTransientFile(path, O_RDONLY | PG_BINARY, 0);
 
