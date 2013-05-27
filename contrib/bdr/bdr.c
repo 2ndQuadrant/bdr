@@ -284,7 +284,7 @@ bdr_apply_main(void *main_arg)
 		elog(ERROR, "could not parse remote tlid %s", remote_tlid);
 
 	if (sscanf(remote_dboid, "%u", &remote_dboid_i) != 1)
-		elog(ERROR, "could not parse remote tlid %s", remote_tlid);
+		elog(ERROR, "could not parse remote database OID %s", remote_dboid);
 
 	snprintf(local_sysid, sizeof(local_sysid), UINT64_FORMAT,
 			 GetSystemIdentifier());
@@ -292,9 +292,8 @@ bdr_apply_main(void *main_arg)
 	if (strcmp(remote_sysid, local_sysid) == 0)
 	{
 		ereport(FATAL,
-				(errmsg("database system identifier have to differ between the nodes"),
-				 errdetail("The remotes's identifier is %s, the local identifier is %s.",
-						   remote_sysid, local_sysid)));
+				(errmsg("system identifiers must differ between the nodes"),
+				 errdetail("Both system identifiers are %s.", remote_sysid)));
 	}
 	else
 		elog(LOG, "local sysid %s, remote: %s",
@@ -327,7 +326,7 @@ bdr_apply_main(void *main_arg)
 		/* doing this really safely would require 2pc... */
 		StartTransactionCommand();
 
-		/* we wan't the new identifier on stable storage immediately */
+		/* we want the new identifier on stable storage immediately */
 		ForceSyncCommit();
 
 		/* acquire new local identifier, but don't commit */
@@ -342,8 +341,8 @@ bdr_apply_main(void *main_arg)
 
 		if (PQresultStatus(res) != PGRES_TUPLES_OK)
 		{
-			elog(FATAL, "could not send replication command \"%s\": %s: %d\n",
-				 query, PQresultErrorMessage(res), PQresultStatus(res));
+			elog(FATAL, "could not send replication command \"%s\": status %s: %s\n",
+				 query, PQresStatus(PQresultStatus(res)), PQresultErrorMessage(res));
 		}
 		PQclear(res);
 
@@ -373,7 +372,7 @@ bdr_apply_main(void *main_arg)
 	SetupCachedReplicationIdentifier(replication_identifier);
 
 	/*
-	 * Chck whether we already replayed something so we don't replay it
+	 * Check whether we already replayed something so we don't replay it
 	 * multiple times.
 	 */
 	start_from = RemoteCommitFromCachedReplicationIdentifier();

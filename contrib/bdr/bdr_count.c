@@ -396,7 +396,7 @@ bdr_count_serialize(void)
 	if (fd < 0)
 		ereport(ERROR,
 				(errcode_for_file_access(),
-	 			 errmsg("could not open \"%s\": %m", tpath)));
+				 errmsg("could not open \"%s\": %m", tpath)));
 
 	serial.magic = bdr_count_magic;
 	serial.version = 1;

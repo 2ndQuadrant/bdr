@@ -7,13 +7,11 @@
  *
  * contrib/bdr/bdr.h
  */
-#ifndef BDR_APPLY_H
-#define BDR_APPLY_H
+#ifndef BDR_H
+#define BDR_H
 
 #include "replication/logical.h"
-
 #include "access/xlogdefs.h"
-
 #include "utils/resowner.h"
 
 
@@ -83,4 +81,4 @@ extern void bdr_count_delete(void);
 extern void bdr_count_delete_conflict(void);
 
 
-#endif
+#endif	/* BDR_H */
