@@ -350,6 +350,12 @@ bdr_apply_main(void *main_arg)
 		CommitTransactionCommand();
 		CurrentResourceOwner = bdr_saved_resowner;
 		elog(LOG, "created replication identifier %u", replication_identifier);
+
+		/*
+		 * FIXME: set current replication progress from upstream IFF it has not
+		 * been set yet. Another worker might have cloned from upstream and set
+		 * the progress for all nodes.
+		 */
 	}
 
 	bdr_apply_con->origin_id = replication_identifier;
@@ -527,6 +533,9 @@ bdr_sequencer_main(void *main_arg)
 
 		/* check whether any of our elections needs to be tallied */
 		bdr_sequencer_tally();
+
+		/* check all bdr sequences for used up chunks */
+		bdr_sequencer_fill_sequences();
 
 		/* check whether we need to start new elections */
 		bdr_sequencer_start_elections();

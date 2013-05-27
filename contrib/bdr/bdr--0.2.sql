@@ -33,9 +33,17 @@ CREATE TABLE bdr_sequence_values
     seqname text NOT NULL,
     seqrange int8range NOT NULL,
 
+    -- could not acquire chunk
     failed bool NOT NULL DEFAULT false,
+
+    -- voting successfull
     confirmed bool NOT NULL,
+
+    -- empty, not referenced
     emptied bool NOT NULL CHECK(NOT emptied OR confirmed),
+
+    -- used in sequence
+    in_use bool NOT NULL CHECK(NOT in_use OR confirmed),
 
     EXCLUDE USING gist(seqschema WITH =, seqname WITH =, seqrange WITH &&) WHERE (confirmed),
     PRIMARY KEY(owning_sysid, owning_tlid, owning_dboid, owning_riname, seqschema, seqname, seqrange)

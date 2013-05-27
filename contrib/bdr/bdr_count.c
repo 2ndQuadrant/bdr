@@ -426,6 +426,7 @@ bdr_count_serialize(void)
 				 errmsg("could not rename bdr stat file \"%s\" to \"%s\": %m",
 						tpath, path)));
 	LWLockRelease(BdrCountCtl->lock);
+	CloseTransientFile(fd);
 }
 
 static void

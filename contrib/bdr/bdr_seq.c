@@ -20,14 +20,19 @@
 #include "miscadmin.h"
 #include "pgstat.h"
 
+#include "access/reloptions.h"
+#include "access/transam.h"
+#include "access/seqam.h"
 #include "access/xact.h"
 #include "catalog/pg_type.h"
 #include "catalog/namespace.h"
 #include "commands/extension.h"
+#include "commands/sequence.h"
 #include "executor/spi.h"
 #include "utils/builtins.h"
 #include "utils/snapmgr.h"
 #include "utils/lsyscache.h"
+#include "storage/bufmgr.h"
 #include "storage/ipc.h"
 #include "storage/latch.h"
 #include "storage/lmgr.h"
@@ -45,6 +50,12 @@ typedef struct BdrSequencerControl
 	size_t slot;
 	BdrSequencerSlot slots[FLEXIBLE_ARRAY_MEMBER];
 } BdrSequencerControl;
+
+typedef struct BdrSequenceValues {
+	int64		start_value;
+	int64		next_value;
+	int64		end_value;
+} BdrSequenceValues;
 
 static BdrSequencerControl *BdrSequencerCtl = NULL;
 
@@ -157,6 +168,7 @@ const char *start_elections_sql =
 "            bdr_sequence_values.seqschema = pg_namespace.nspname\n"
 "            AND bdr_sequence_values.seqname = pg_class.relname\n"
 "            AND bdr_sequence_values.emptied = false\n"
+"            AND bdr_sequence_values.in_use = false\n"
 "            AND bdr_sequence_values.failed = false\n"
 "            AND bdr_sequence_values.owning_sysid = $1\n"
 "            AND bdr_sequence_values.owning_tlid = $2\n"
@@ -231,6 +243,7 @@ const char *start_elections_sql =
 "    seqschema,\n"
 "    seqname,\n"
 "    confirmed,\n"
+"    in_use,\n"
 "    emptied,\n"
 "    seqrange\n"
 ")\n"
@@ -242,6 +255,7 @@ const char *start_elections_sql =
 "    seqschema,\n"
 "    seqname,\n"
 "    false AS confirmed,\n"
+"    false AS in_use,\n"
 "    false AS emptied,\n"
 "    int8range(chunk_start, chunk_start + 1000)\n"
 "FROM to_be_inserted_chunks\n"
@@ -376,6 +390,64 @@ const char *tally_elections_sql =
 "    'pending'::text\n"
 "FROM tallied_votes\n"
 "WHERE NOT sufficient\n"
+;
+
+const char *fill_sequences_sql =
+"SELECT\n"
+"    pg_class.oid seqoid,\n"
+"    pg_namespace.nspname seqschema,\n"
+"    pg_class.relname seqname\n"
+"FROM pg_class\n"
+"    JOIN pg_seqam ON (pg_seqam.oid = pg_class.relam)\n"
+"    JOIN pg_namespace ON (pg_class.relnamespace = pg_namespace.oid)\n"
+"WHERE\n"
+"    relkind = 'S'\n"
+"    AND seqamname = 'bdr'\n"
+"ORDER BY pg_class.oid\n"
+;
+
+
+const char *get_chunk_sql =
+"UPDATE bdr_sequence_values\n"
+"   SET in_use = true\n"
+"WHERE\n"
+"    (\n"
+"        owning_sysid,\n"
+"        owning_tlid,\n"
+"        owning_dboid,\n"
+"        owning_riname,\n"
+"        seqname,\n"
+"        seqschema,\n"
+"        seqrange\n"
+"    )\n"
+"    IN\n"
+"    (\n"
+"        SELECT\n"
+"            newval.owning_sysid,\n"
+"            newval.owning_tlid,\n"
+"            newval.owning_dboid,\n"
+"            newval.owning_riname,\n"
+"            newval.seqname,\n"
+"            newval.seqschema,\n"
+"            newval.seqrange\n"
+"        FROM bdr_sequence_values newval\n"
+"        WHERE\n"
+"           newval.confirmed\n"
+"           AND NOT newval.emptied\n"
+"           AND NOT newval.in_use\n"
+"           AND newval.owning_sysid = $1\n"
+"           AND newval.owning_tlid = $2\n"
+"           AND newval.owning_dboid = $3\n"
+"           AND newval.owning_riname = $4\n"
+"           AND newval.seqschema = $5\n"
+"           AND newval.seqname = $6\n"
+"        ORDER BY newval.seqrange ASC\n"
+"        LIMIT 1\n"
+"        FOR UPDATE\n"
+"    )\n"
+"RETURNING\n"
+"    lower(seqrange),\n"
+"    upper(seqrange)\n"
 ;
 
 static Size
@@ -579,6 +651,10 @@ again:
 		goto again;
 }
 
+/*
+ * Check whether we need to initiate a voting procedure for getting new
+ * sequence chunks.
+ */
 void
 bdr_sequencer_start_elections(void)
 {
@@ -628,6 +704,10 @@ bdr_sequencer_start_elections(void)
 	CommitTransactionCommand();
 }
 
+/*
+ * Check whether enough votes have come in for any of *our* in progress
+ * elections.
+ */
 void
 bdr_sequencer_tally(void)
 {
@@ -682,20 +762,448 @@ bdr_sequencer_tally(void)
 }
 
 
+static int
+bdr_sequence_value_cmp(const void *a, const void *b)
+{
+	const BdrSequenceValues *left = a;
+	const BdrSequenceValues *right = b;
+
+	if (left->start_value < right->start_value)
+		return -1;
+	if (left->start_value == right->start_value)
+		return 0;
+	return 1;
+}
+
+/*
+ * Replace a single (uninitialized or used up) chunk by a free one. Mark the
+ * new chunk from bdr_sequence_values as in_use.
+ *
+ * Returns whether we could find a chunk or not.
+ */
+static bool
+bdr_sequencer_fill_chunk(Oid seqoid, char *seqschema, char *seqname,
+						 BdrSequenceValues *curval)
+{
+	Oid			argtypes[6];
+	Datum		values[6];
+	bool		nulls[6];
+	char		local_sysid[32];
+	int			ret;
+	int64		lower, upper;
+	bool		success;
+
+	SPI_push();
+	SPI_connect();
+
+	snprintf(local_sysid, sizeof(local_sysid), UINT64_FORMAT,
+			 GetSystemIdentifier());
+
+	argtypes[0] = TEXTOID;
+	nulls[0] = false;
+	values[0] = CStringGetTextDatum(local_sysid);
+
+	argtypes[1] = OIDOID;
+	nulls[1] = false;
+	values[1] = ObjectIdGetDatum(ThisTimeLineID);
+
+	argtypes[2] = OIDOID;
+	values[2] = ObjectIdGetDatum(MyDatabaseId);
+	nulls[2] = false;
+
+	argtypes[3] = TEXTOID;
+	values[3] = CStringGetTextDatum("");
+	nulls[3] = false;
+
+	argtypes[4] = TEXTOID;
+	values[4] = CStringGetTextDatum(seqschema);
+	nulls[4] = false;
+
+	argtypes[5] = TEXTOID;
+	values[5] = CStringGetTextDatum(seqname);
+	nulls[5] = false;
+
+	SetCurrentStatementStartTimestamp();
+	pgstat_report_activity(STATE_RUNNING, get_chunk_sql);
+
+	ret = SPI_execute_with_args(get_chunk_sql, 6, argtypes,
+								values, nulls, false, 0);
+	if (ret != SPI_OK_UPDATE_RETURNING)
+		elog(ERROR, "blart");
+
+	if (SPI_processed != 1)
+	{
+		elog(NOTICE, "no free chunks for sequence %s.%s",
+			 seqschema, seqname);
+		success = false;
+	}
+	else
+	{
+		HeapTuple   tup = SPI_tuptable->vals[0];
+		bool		isnull;
+
+		lower = DatumGetInt64(SPI_getbinval(tup, SPI_tuptable->tupdesc, 1, &isnull));
+		Assert(!isnull);
+		upper = DatumGetInt64(SPI_getbinval(tup, SPI_tuptable->tupdesc, 2, &isnull));
+		Assert(!isnull);
+
+		elog(NOTICE, "got chunk [%zu, %zu) for sequence %s.%s",
+			 lower, upper, seqschema, seqname);
+		curval->start_value = lower;
+		curval->next_value = lower;
+		curval->end_value = upper;
+
+		success = true;
+	}
+	SPI_finish();
+	SPI_pop();
+
+	return success;
+}
+
+/*
+ * Search for used up chunks in one bdr sequence.
+ */
+static void
+bdr_sequencer_fill_sequence(Oid seqoid, char *seqschema, char *seqname)
+{
+	Buffer		buf;
+	SeqTable	elm;
+	Relation	rel;
+	HeapTupleData seqtuple;
+	Datum		values[SEQ_COL_LASTCOL];
+	bool		nulls[SEQ_COL_LASTCOL];
+	HeapTuple	newtup;
+	Page		page, temppage;
+	BdrSequenceValues *curval, *firstval;
+	int i;
+	bool acquired_new = false;
+
+	elog(LOG, "checking sequence %u: %s.%s",
+		 seqoid, seqschema, seqname);
+
+	/* lock page, fill heaptup */
+	init_sequence(seqoid, &elm, &rel);
+	(void) read_seq_tuple(elm, rel, &buf, &seqtuple);
+
+	/* get values */
+	heap_deform_tuple(&seqtuple, RelationGetDescr(rel),
+					  values, nulls);
+
+	/* now make sure we have space for our own data */
+	if (nulls[SEQ_COL_AMDATA - 1])
+	{
+		struct varlena *vl = palloc0(VARHDRSZ + sizeof(BdrSequenceValues) * 10);
+		SET_VARSIZE(vl, VARHDRSZ + sizeof(BdrSequenceValues) * 10);
+		nulls[SEQ_COL_AMDATA - 1] = false;
+		values[SEQ_COL_AMDATA - 1] = PointerGetDatum(vl);
+	}
+
+	firstval = (BdrSequenceValues *)
+		VARDATA_ANY(DatumGetByteaP(values[SEQ_COL_AMDATA - 1]));
+	curval = firstval;
+
+	START_CRIT_SECTION();
+
+	MarkBufferDirty(buf);
+
+	for (i = 0; i < 10; i ++)
+	{
+		if (curval->next_value == curval->end_value)
+		{
+			if (curval->end_value > 0)
+				elog(LOG, "used up old chunk");
+
+			elog(LOG, "need new batch %i", i);
+			if (bdr_sequencer_fill_chunk(seqoid, seqschema, seqname, curval))
+				acquired_new = true;
+			else
+				break;
+		}
+		curval++;
+	}
+
+	if (!acquired_new)
+		goto done_with_sequence;
+
+	/* sort chunks, so we always use the smallest one first */
+	qsort(firstval, 10, sizeof(BdrSequenceValues), bdr_sequence_value_cmp);
+
+	newtup = heap_form_tuple(RelationGetDescr(rel), values, nulls);
+
+	/* special requirements for sequence tuples */
+	HeapTupleHeaderSetXmin(newtup->t_data, FrozenTransactionId);
+	newtup->t_data->t_infomask |= HEAP_XMIN_COMMITTED;
+	newtup->t_data->t_infomask |= HEAP_XMAX_INVALID;
+
+	page = BufferGetPage(buf);
+	temppage = PageGetTempPage(page);
+
+	/* replace page contents, the direct way */
+	PageInit(temppage, BufferGetPageSize(buf), PageGetSpecialSize(page));
+	memcpy(PageGetSpecialPointer(temppage),
+		   PageGetSpecialPointer(page),
+		   PageGetSpecialSize(page));
+
+	if (PageAddItem(temppage, (Item) newtup->t_data, newtup->t_len,
+					FirstOffsetNumber, false, false) == InvalidOffsetNumber)
+		elog(PANIC, "fill_sequence: failed to add item to page");
+
+	PageSetLSN(temppage, PageGetLSN(page));
+
+	memcpy(page, temppage, BufferGetPageSize(buf));
+
+	seqtuple.t_len = newtup->t_len;
+
+	log_sequence_tuple(rel, &seqtuple, page);
+
+	END_CRIT_SECTION();
+
+done_with_sequence:
+	UnlockReleaseBuffer(buf);
+	heap_close(rel, NoLock);
+}
+
+/*
+ * Check whether all BDR sequences have enough values inline. If not, add
+ * some. This should be called after tallying (so we have a better chance to
+ * have enough chunks) but before starting new elections since we might use up
+ * existing chunks.
+ */
+void
+bdr_sequencer_fill_sequences(void)
+{
+	SPIPlanPtr  plan;
+	Portal		cursor;
+
+	StartTransactionCommand();
+	SPI_connect();
+
+	bdr_sequencer_lock();
+	PushActiveSnapshot(GetTransactionSnapshot());
+
+	plan = SPI_prepare(fill_sequences_sql, 0, NULL);
+	cursor = SPI_cursor_open("seq", plan, NULL, NULL, 0);
+
+	SetCurrentStatementStartTimestamp();
+	pgstat_report_activity(STATE_RUNNING, fill_sequences_sql);
+
+	SPI_cursor_fetch(cursor, true, 1);
+
+	while (SPI_processed > 0)
+	{
+		HeapTuple   tup = SPI_tuptable->vals[0];
+		bool		isnull;
+		Datum		seqoid;
+		Datum		seqschema;
+		Datum		seqname;
+
+		seqoid = SPI_getbinval(tup, SPI_tuptable->tupdesc, 1, &isnull);
+		Assert(!isnull);
+		seqschema = SPI_getbinval(tup, SPI_tuptable->tupdesc, 2, &isnull);
+		Assert(!isnull);
+		seqname = SPI_getbinval(tup, SPI_tuptable->tupdesc, 3, &isnull);
+		Assert(!isnull);
+
+		bdr_sequencer_fill_sequence(DatumGetObjectId(seqoid),
+									NameStr(*DatumGetName(seqschema)),
+									NameStr(*DatumGetName(seqname)));
+
+		SPI_cursor_fetch(cursor, true, 1);
+	}
+
+	PopActiveSnapshot();
+	SPI_finish();
+	CommitTransactionCommand();
+}
+
+
+/* check sequence.c */
+#define SEQ_LOG_VALS	32
+
+PG_FUNCTION_INFO_V1(bdr_sequence_alloc);
 void
 bdr_sequence_alloc(PG_FUNCTION_ARGS)
 {
+	Relation	seqrel = (Relation) PG_GETARG_POINTER(0);
+	SeqTable	elm = (SeqTable) PG_GETARG_POINTER(1);
+	Buffer		buf = (Buffer) PG_GETARG_INT32(2);
+	HeapTuple	seqtuple = (HeapTuple) PG_GETARG_POINTER(3);
+	Page		page;
+	Form_pg_sequence seq;
+	bool		logit = false;
+	int64		cache,
+				log,
+				fetch,
+				last;
+	int64		result = 0;
+	int64		next;
+	Datum	    values;
+	bool		isnull;
+	BdrSequenceValues *curval;
+	int			i;
+	bool		wakeup = false;
 
+	page = BufferGetPage(buf);
+	seq = (Form_pg_sequence) GETSTRUCT(seqtuple);
+
+	values = fastgetattr(seqtuple, 11, RelationGetDescr(seqrel), &isnull);
+	if (isnull)
+		elog(ERROR, "uninitialized sequence");
+
+	curval = (BdrSequenceValues *) VARDATA_ANY(DatumGetByteaP(values));
+
+	Assert(seq->increment_by == 1);
+	/* XXX: check min/max */
+
+	last = next = seq->last_value;
+
+	fetch = cache = seq->cache_value;
+	log = seq->log_cnt;
+
+	/* check whether value can be satisfied without logging again */
+	if (log < fetch || !seq->is_called || PageGetLSN(page) <= GetRedoRecPtr())
+	{
+		/* forced log to satisfy local demand for values */
+		fetch = log = fetch + SEQ_LOG_VALS;
+		logit = true;
+	}
+
+	/*
+	 * try to fetch cache [+ log ] numbers, check all 10 possible chunks
+	 */
+	for (i = 0; i < 10; i ++)
+	{
+		/* redo recovered after crash*/
+		if (seq->last_value >= curval->next_value &&
+			seq->last_value < curval->end_value)
+		{
+			curval->next_value = seq->last_value + 1;
+		}
+
+		/* chunk empty */
+		if (curval->next_value >= curval->end_value)
+		{
+			curval++;
+			continue;
+		}
+
+
+		/* there's space in current chunk, use it */
+		result = curval->next_value;
+
+		/* but not enough for all ..log values */
+		if (result + log >= curval->end_value)
+		{
+			log = curval->end_value - curval->next_value;
+			wakeup = true;
+			logit = true;
+		}
+
+		/* but not enough for all ..cached values */
+		last = result + cache - 1;
+		if (last >= curval->end_value)
+		{
+			last = curval->end_value - 1;
+			wakeup = true;
+			logit = true;
+		}
+
+		curval->next_value = last;
+		break;
+	}
+
+	if (result == 0)
+	{
+		bdr_sequencer_wakeup();
+		ereport(ERROR,
+				(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+				 errmsg("could not find sequence value")));
+	}
+
+	if (wakeup)
+		bdr_sequencer_wakeup();
+
+	elm->last = result;
+	elm->cached = result;
+	elm->last_valid = true;
+
+	/* ready to change the on-disk (or really, in-buffer) tuple */
+	START_CRIT_SECTION();
+
+	/*
+	 * We must mark the buffer dirty before doing XLogInsert(); see notes in
+	 * SyncOneBuffer().  However, we don't apply the desired changes just yet.
+	 * This looks like a violation of the buffer update protocol, but it is
+	 * in fact safe because we hold exclusive lock on the buffer.  Any other
+	 * process, including a checkpoint, that tries to examine the buffer
+	 * contents will block until we release the lock, and then will see the
+	 * final state that we install below.
+	 */
+	MarkBufferDirty(buf);
+
+	if (logit)
+	{
+		/*
+		 * We don't log the current state of the tuple, but rather the state
+		 * as it would appear after "log" more fetches.  This lets us skip
+		 * that many future WAL records, at the cost that we lose those
+		 * sequence values if we crash.
+		 */
+		seq->last_value = next;
+		seq->is_called = true;
+		seq->log_cnt = 0;
+		log_sequence_tuple(seqrel, seqtuple, page);
+	}
+
+	/* Now update sequence tuple to the intended final state */
+	seq->last_value = elm->last; /* last fetched number */
+	seq->is_called = true;
+	seq->log_cnt = log; /* how much is logged */
+
+	result = elm->last;
+
+	END_CRIT_SECTION();
 }
 
+PG_FUNCTION_INFO_V1(bdr_sequence_setval);
 void
 bdr_sequence_setval(PG_FUNCTION_ARGS)
 {
+	Relation	seqrel = (Relation) PG_GETARG_POINTER(0);
+	Buffer		buf = (Buffer) PG_GETARG_INT32(2);
+	HeapTuple	seqtuple = (HeapTuple) PG_GETARG_POINTER(3);
+	int64		next = PG_GETARG_INT64(4);
+	bool		iscalled = PG_GETARG_BOOL(5);
+	Page		page = BufferGetPage(buf);
+	Form_pg_sequence seq = (Form_pg_sequence) GETSTRUCT(seqtuple);
 
+	/* ready to change the on-disk (or really, in-buffer) tuple */
+	START_CRIT_SECTION();
+
+	/* set is_called, all AMs should need to do this */
+	seq->is_called = iscalled;
+	seq->last_value = next;		/* last fetched number */
+	seq->log_cnt = 0;
+
+	MarkBufferDirty(buf);
+
+	log_sequence_tuple(seqrel, seqtuple, page);
+
+	END_CRIT_SECTION();
 }
 
+PG_FUNCTION_INFO_V1(bdr_sequence_options);
 Datum
 bdr_sequence_options(PG_FUNCTION_ARGS)
 {
+	Datum       reloptions = PG_GETARG_DATUM(0);
+	bool        validate = PG_GETARG_BOOL(1);
+	bytea      *result;
 
+	result = default_reloptions(reloptions, validate, RELOPT_KIND_SEQUENCE);
+	if (result)
+		PG_RETURN_BYTEA_P(result);
+
+	PG_RETURN_NULL();
 }

@@ -62,6 +62,7 @@ extern void bdr_sequencer_init(void);
 extern void bdr_sequencer_vote(void);
 extern void bdr_sequencer_tally(void);
 extern void bdr_sequencer_start_elections(void);
+extern void bdr_sequencer_fill_sequences(void);
 
 extern void bdr_sequencer_wakeup(void);
 
