@@ -89,7 +89,7 @@ DecodeRecordIntoReorderBuffer(LogicalDecodingContext *ctx,
 		case RM_HEAP_ID:
 		case RM_HEAP2_ID:
 			DecodeHeapOp(reorder, buf, r->xl_rmid,
-						 r->xl_rmid & XLOG_HEAP_OPMASK);
+						 r->xl_info & XLOG_HEAP_OPMASK);
 			break;
 
 		case RM_XACT_ID:
