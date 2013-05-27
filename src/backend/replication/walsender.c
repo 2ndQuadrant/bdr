@@ -2721,7 +2721,8 @@ wait_for_remote_lsn(int32 pid, XLogRecPtr ptr, bool wait_for_apply)
 	int i;
 	bool done;
 
-	do {
+	do
+	{
 		done = true;
 
 		for (i = 0; i < max_wal_senders; i++)
@@ -2732,7 +2733,9 @@ wait_for_remote_lsn(int32 pid, XLogRecPtr ptr, bool wait_for_apply)
 
 			if (walsnd->pid != 0 && (pid == 0 || pid == walsnd->pid))
 			{
-				XLogRecPtr rptr = wait_for_apply ? walsnd->apply : walsnd->flush;
+				XLogRecPtr rptr;
+
+				rptr = wait_for_apply ? walsnd->apply : walsnd->flush;
 				if (rptr < ptr)
 					done = false;
 			}
@@ -2744,7 +2747,7 @@ wait_for_remote_lsn(int32 pid, XLogRecPtr ptr, bool wait_for_apply)
 		}
 
 		if (!done)
-			pg_usleep(10*1000);
+			pg_usleep(10 * 1000);
 	}
 	while (!done);
 }
