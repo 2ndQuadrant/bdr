@@ -17,6 +17,7 @@
 #include "fmgr.h"
 
 #include "access/htup.h"
+#include "commands/sequence.h"
 #include "utils/relcache.h"
 #include "storage/buf.h"
 #include "storage/bufpage.h"
@@ -63,4 +64,7 @@ extern Datum sequence_local_options(PG_FUNCTION_ARGS);
 extern Oid get_seqam_oid(const char *sequencename, bool missing_ok);
 
 extern void log_sequence_tuple(Relation seqrel, HeapTuple tup, Page page);
+extern void init_sequence(Oid relid, SeqTable *p_elm, Relation *p_rel);
+extern Form_pg_sequence read_seq_tuple(SeqTable elm, Relation rel,
+			   Buffer *buf, HeapTuple seqtuple);
 #endif   /* SEQAM_H */

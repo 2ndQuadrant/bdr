@@ -72,9 +72,6 @@ static SeqTableData *last_used_seq = NULL;
 static void fill_seq_with_data(Relation rel, HeapTuple tuple);
 static int64 nextval_internal(Oid relid);
 static Relation open_share_lock(SeqTable seq);
-static void init_sequence(Oid relid, SeqTable *p_elm, Relation *p_rel);
-static Form_pg_sequence read_seq_tuple(SeqTable elm, Relation rel,
-			   Buffer *buf, HeapTuple seqtuple);
 static void init_params(List *params, bool isInit,
 			Form_pg_sequence new, List **owned_by);
 static void do_setval(Oid relid, int64 next, bool iscalled);
@@ -233,7 +230,7 @@ DefineSequence(CreateSeqStmt *seq)
 
 	/*
 	 * reopen relation, read sequence for the benfit of the AM. It would be
-	 * nicer to do this with less repetitive work.
+	 * nice to do this with less repetitive work.
 	 */
 	init_sequence(seqoid, &elm, &rel);
 	(void) read_seq_tuple(elm, rel, &buf, &seqtuple);
@@ -794,7 +791,7 @@ open_share_lock(SeqTable seq)
  * Given a relation OID, open and lock the sequence.  p_elm and p_rel are
  * output parameters.
  */
-static void
+void
 init_sequence(Oid relid, SeqTable *p_elm, Relation *p_rel)
 {
 	SeqTable	elm;
@@ -872,7 +869,7 @@ init_sequence(Oid relid, SeqTable *p_elm, Relation *p_rel)
  *
  * Function's return value points to the data payload of the tuple
  */
-static Form_pg_sequence
+Form_pg_sequence
 read_seq_tuple(SeqTable elm, Relation rel, Buffer *buf, HeapTuple seqtuple)
 {
 	Page		page;
@@ -1438,25 +1435,28 @@ init_options(char *accessMethod, List *options)
 	Datum       reloptions;
 	Form_pg_seqam seqamForm;
 	HeapTuple   tuple = NULL;
-
-     /*
-	  *  Parse AM-specific options, convert to text array form,
-	  *  retrieve the AM-option function and then validate.
-	  */
-	reloptions = transformRelOptions((Datum) NULL, options,
-									 NULL, NULL, false, false);
+	char	   *validnsps[] = {NULL, NULL};
 
 	if (accessMethod == NULL || strcmp(accessMethod, DEFAULT_SEQAM) == 0)
 		seqamid = GetDefaultSeqAM();
 	else
 		seqamid = get_seqam_oid(accessMethod, false);
 
-
 	tuple = SearchSysCache1(SEQAMOID, ObjectIdGetDatum(seqamid));
 	if (!HeapTupleIsValid(tuple))
 		elog(ERROR, "cache lookup failed for relation %u", seqamid);
 
 	seqamForm = (Form_pg_seqam) GETSTRUCT(tuple);
+
+	/* allow am specific options */
+	validnsps[0] = NameStr(seqamForm->seqamname);
+
+     /*
+	  *  Parse AM-specific options, convert to text array form,
+	  *  retrieve the AM-option function and then validate.
+	  */
+	reloptions = transformRelOptions((Datum) NULL, options,
+									 NULL, validnsps, false, false);
 
 	(void) sequence_reloptions(seqamForm->seqamoptions, reloptions, true);
 
