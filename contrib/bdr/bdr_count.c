@@ -371,6 +371,9 @@ pg_stat_bdr(PG_FUNCTION_ARGS)
 	return (Datum) 0;
 }
 
+/*
+ * Write the BDR stats from shared memory to a file
+ */
 static void
 bdr_count_serialize(void)
 {
@@ -383,15 +386,17 @@ bdr_count_serialize(void)
 	LWLockAcquire(BdrCountCtl->lock, LW_EXCLUSIVE);
 
 	if (unlink(tpath) < 0 && errno != ENOENT)
-		ereport(ERROR, (errcode_for_file_access(),
-						errmsg("failed while unlinking %s", tpath)));
+		ereport(ERROR,
+				(errcode_for_file_access(),
+				 errmsg("could not unlink \"%s\": %m", tpath)));
 
 	fd = OpenTransientFile((char *) tpath,
 						   O_WRONLY | O_CREAT | O_EXCL | PG_BINARY,
 						   S_IRUSR | S_IWUSR);
 	if (fd < 0)
-		ereport(ERROR, (errcode_for_file_access(),
-						errmsg("%s cannot be opened: %m", tpath)));
+		ereport(ERROR,
+				(errcode_for_file_access(),
+	 			 errmsg("could not open \"%s\": %m", tpath)));
 
 	serial.magic = bdr_count_magic;
 	serial.version = 1;
@@ -401,7 +406,10 @@ bdr_count_serialize(void)
 	write_size = sizeof(serial);
 	if ((write(fd, &serial, write_size)) != write_size)
 	{
+		int		save_errno = errno;
+
 		CloseTransientFile(fd);
+		errno = save_errno;
 		ereport(ERROR,
 				(errcode_for_file_access(),
 				 errmsg("could not write bdr stat file data \"%s\": %m",
@@ -412,7 +420,10 @@ bdr_count_serialize(void)
 	write_size = sizeof(BdrCountSlot) * bdr_count_nnodes;
 	if ((write(fd, &BdrCountCtl->slots, write_size)) != write_size)
 	{
+		int		save_errno = errno;
+
 		CloseTransientFile(fd);
+		errno = save_errno;
 		ereport(ERROR,
 				(errcode_for_file_access(),
 				 errmsg("could not write bdr stat file data \"%s\": %m",
@@ -429,6 +440,9 @@ bdr_count_serialize(void)
 	CloseTransientFile(fd);
 }
 
+/*
+ * Load BDR stats from file into shared memory
+ */
 static void
 bdr_count_unserialize(void)
 {
