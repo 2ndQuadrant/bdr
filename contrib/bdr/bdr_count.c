@@ -399,7 +399,7 @@ bdr_count_serialize(void)
 				 errmsg("could not open \"%s\": %m", tpath)));
 
 	serial.magic = bdr_count_magic;
-	serial.version = 1;
+	serial.version = bdr_count_version;
 	serial.nr_slots = bdr_count_nnodes;
 
 	/* write header */
@@ -439,7 +439,6 @@ bdr_count_serialize(void)
 				 errmsg("could not rename bdr stat file \"%s\" to \"%s\": %m",
 						tpath, path)));
 	LWLockRelease(BdrCountCtl->lock);
-	CloseTransientFile(fd);
 }
 
 /*
@@ -468,7 +467,7 @@ bdr_count_unserialize(void)
 		LWLockRelease(BdrCountCtl->lock);
 		ereport(ERROR,
 				(errcode_for_file_access(),
-				 errmsg("%s cannot be opened: %m", path)));
+				 errmsg("could not open bdr stat file \"%s\": %m", path)));
 	}
 
 	read_size = sizeof(serial);
@@ -492,7 +491,8 @@ bdr_count_unserialize(void)
 
 	if (serial.version != bdr_count_version)
 	{
-		elog(WARNING, "version of stat file changed, zeroing");
+		elog(WARNING, "version of stat file changed (file %u, current %u), zeroing",
+			 serial.version, bdr_count_version);
 		goto zero_file;
 	}
 
@@ -522,6 +522,10 @@ out:
 zero_file:
 	CloseTransientFile(fd);
 	LWLockRelease(BdrCountCtl->lock);
-	/* write out a new file without data in it */
+
+	/*
+	 * Overwrite the existing file.  Note our struct was zeroed in
+	 * bdr_count_shmem_startup, so we're writing empty data.
+	 */
 	bdr_count_serialize();
 }
