@@ -480,9 +480,11 @@ bdr_count_unserialize(void)
 	read_size = sizeof(serial);
 	if (read(fd, &serial, read_size) != read_size)
 	{
+		int saved_errno = errno;
 		LWLockRelease(BdrCountCtl->lock);
 		CloseTransientFile(fd);
-		ereport(ERROR,
+		errno = saved_errno;
+		ereport(PANIC,
 				(errcode_for_file_access(),
 				 errmsg("could not read bdr stat file data \"%s\": %m",
 						path)));
@@ -510,10 +512,12 @@ bdr_count_unserialize(void)
 	}
 
 	/* read actual data, directly into shmem */
-	read_size = sizeof(BdrCountSlot) * bdr_count_nnodes;
+	read_size = sizeof(BdrCountSlot) * serial.nr_slots;
 	if (read(fd, &BdrCountCtl->slots, read_size) != read_size)
 	{
+		int saved_errno = errno;
 		CloseTransientFile(fd);
+		errno = saved_errno;
 		ereport(ERROR,
 				(errcode_for_file_access(),
 				 errmsg("could not read bdr stat file data \"%s\": %m",
