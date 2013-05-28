@@ -290,7 +290,7 @@ const char *tally_elections_sql =
 "    SUM(COALESCE((vote.vote = false)::int, 0)) AS nays,\n"
 "    COUNT(vote.vote) AS nr_votes,\n"
 "    /* majority of others */\n"
-"    COUNT(vote.vote) >= ceil(($5 - 1)/ 2.0) AS sufficient\n"
+"    COUNT(vote.vote) >= ceil($5/ 2.0) AS sufficient\n"
 "FROM\n"
 "    bdr_sequence_elections election\n"
 "    LEFT JOIN bdr_votes vote ON (\n"
