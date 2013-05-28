@@ -609,12 +609,6 @@ bdr_sequencer_vote(void)
 
 	snprintf(local_sysid, sizeof(local_sysid), UINT64_FORMAT,
 			 GetSystemIdentifier());
-again:
-	StartTransactionCommand();
-	SPI_connect();
-
-	bdr_sequencer_lock();
-	PushActiveSnapshot(GetTransactionSnapshot());
 
 	argtypes[0] = TEXTOID;
 	nulls[0] = false;
@@ -632,6 +626,13 @@ again:
 	values[3] = CStringGetTextDatum("");
 	nulls[3] = false;
 
+	StartTransactionCommand();
+	SPI_connect();
+
+	bdr_sequencer_lock();
+	PushActiveSnapshot(GetTransactionSnapshot());
+
+again:
 	SetCurrentStatementStartTimestamp();
 	pgstat_report_activity(STATE_RUNNING, vote_sql);
 	ret = SPI_execute_with_args(vote_sql, 4, argtypes,
@@ -642,12 +643,13 @@ again:
 	my_processed = SPI_processed;
 	elog(LOG, "started %d votes", my_processed);
 
+	if (my_processed > 0)
+		goto again;
+
 	PopActiveSnapshot();
 	SPI_finish();
 	CommitTransactionCommand();
 
-	if (my_processed > 0)
-		goto again;
 }
 
 /*
