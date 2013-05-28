@@ -100,7 +100,7 @@ const char* vote_sql =
 "        	 AND val.owning_dboid = $3\n"
 "        	 AND val.owning_riname = $4\n"
 "    )\n"
-"    -- and we haven't allowe anybody else to use it\n"
+"    -- and we haven't allowed anybody else to use it\n"
 "    AND NOT EXISTS(\n"
 "        SELECT *\n"
 "        FROM bdr_votes vote\n"
@@ -116,6 +116,8 @@ const char* vote_sql =
 "        	 AND vote.voter_tlid = $2\n"
 "        	 AND vote.voter_dboid = $3\n"
 "        	 AND vote.voter_riname = $4\n"
+"            AND other_election.seqname =  election.seqname\n"
+"            AND other_election.seqschema =  election.seqschema\n"
 "            AND other_election.seqrange && election.seqrange \n"
 "    )\n"
 "\n"
@@ -271,8 +273,6 @@ const char *start_elections_sql =
 "    confirmed,\n"
 "    emptied,\n"
 "    seqrange\n"
-
-
 ;
 
 const char *tally_elections_sql =
