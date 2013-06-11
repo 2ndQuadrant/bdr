@@ -4844,6 +4844,11 @@ DESCR("Local SequenceAM setval");
 DATA(insert OID = 3210 (  sequence_local_options	   PGNSP PGUID 12 1 0 0 0 f f f f t f s 2 0 2281 "2281 16" _null_ _null_ _null_ _null_ sequence_local_options _null_ _null_ _null_ ));
 DESCR("Local SequenceAM options");
 
+DATA(insert OID = 3217 (  pg_xlog_wait_remote_apply PGNSP PGUID 12 1 0 0 0 f f f f f f v 2 0 2278 "25 23" _null_ _null_ _null_ _null_ pg_xlog_wait_remote_apply _null_ _null_ _null_ ));
+DESCR("wait for an lsn to be applied by a remote node");
+DATA(insert OID = 3218 (  pg_xlog_wait_remote_receive PGNSP PGUID 12 1 0 0 0 f f f f f f v 2 0 2278 "25 23" _null_ _null_ _null_ _null_ pg_xlog_wait_remote_receive _null_ _null_ _null_ ));
+DESCR("wait for an lsn to be received by a remote node");
+
 /* event triggers */
 DATA(insert OID = 3566 (  pg_event_trigger_dropped_objects		PGNSP PGUID 12 10 100 0 0 f f f f t t s 0 0 2249 "" "{26,26,23,25,25,25,25}" "{o,o,o,o,o,o,o}" "{classid, objid, objsubid, object_type, schema_name, object_name, object_identity}" _null_ pg_event_trigger_dropped_objects _null_ _null_ _null_ ));
 DESCR("list objects dropped by the current command");
