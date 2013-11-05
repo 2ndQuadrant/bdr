@@ -31,10 +31,12 @@
 #include "pgstat.h"
 #include "lib/ilist.h"
 #include "miscadmin.h"
+#include "tcop/deparse_utility.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
 #include "utils/evtcache.h"
 #include "utils/fmgroids.h"
+#include "utils/json.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
@@ -48,6 +50,7 @@ typedef struct EventTriggerQueryState
 	slist_head	SQLDropList;
 	bool		in_sql_drop;
 	MemoryContext cxt;
+	List	   *stash;
 	struct EventTriggerQueryState *previous;
 } EventTriggerQueryState;
 
@@ -920,6 +923,7 @@ EventTriggerSupportsObjectType(ObjectType obtype)
 		case OBJECT_ATTRIBUTE:
 		case OBJECT_CAST:
 		case OBJECT_COLUMN:
+		case OBJECT_COMPOSITE:
 		case OBJECT_CONSTRAINT:
 		case OBJECT_COLLATION:
 		case OBJECT_CONVERSION:
@@ -946,6 +950,7 @@ EventTriggerSupportsObjectType(ObjectType obtype)
 		case OBJECT_TSPARSER:
 		case OBJECT_TSTEMPLATE:
 		case OBJECT_TYPE:
+		case OBJECT_USER_MAPPING:
 		case OBJECT_VIEW:
 			return true;
 	}
@@ -1022,13 +1027,6 @@ EventTriggerBeginCompleteQuery(void)
 	EventTriggerQueryState *state;
 	MemoryContext cxt;
 
-	/*
-	 * Currently, sql_drop events are the only reason to have event trigger
-	 * state at all; so if there are none, don't install one.
-	 */
-	if (!trackDroppedObjectsNeeded())
-		return false;
-
 	cxt = AllocSetContextCreate(TopMemoryContext,
 								"event trigger state",
 								ALLOCSET_DEFAULT_MINSIZE,
@@ -1036,8 +1034,10 @@ EventTriggerBeginCompleteQuery(void)
 								ALLOCSET_DEFAULT_MAXSIZE);
 	state = MemoryContextAlloc(cxt, sizeof(EventTriggerQueryState));
 	state->cxt = cxt;
-	slist_init(&(state->SQLDropList));
+	if (trackDroppedObjectsNeeded())
+		slist_init(&(state->SQLDropList));
 	state->in_sql_drop = false;
+	state->stash = NIL;
 
 	state->previous = currentEventTriggerState;
 	currentEventTriggerState = state;
@@ -1293,4 +1293,817 @@ pg_event_trigger_dropped_objects(PG_FUNCTION_ARGS)
 	tuplestore_donestoring(tupstore);
 
 	return (Datum) 0;
+}
+
+/*
+ * Support for tracking of objects created during command run.
+ *
+ * When a command is run that creates some SQL objects, we collect the
+ * classid/objid of the objects being created, as well as the parsetree of the
+ * creation command; later, when event triggers are run for that command, they
+ * can use pg_event_trigger_get_creation_commands which computes and returns a
+ * usable representation of the creation commands for the objects.
+ */
+typedef struct stashedObject
+{
+	Oid			objectId;
+	ObjectType	objtype;
+	Node	   *parsetree;
+} stashedObject;
+
+void
+EventTriggerStashCommand(Oid objectId, ObjectType objtype, Node *parsetree)
+{
+	MemoryContext oldcxt;
+	stashedObject *stashed;
+
+	oldcxt = MemoryContextSwitchTo(currentEventTriggerState->cxt);
+
+	stashed = palloc(sizeof(stashedObject));
+
+	stashed->objectId = objectId;
+	stashed->objtype = objtype;
+	stashed->parsetree = copyObject(parsetree);
+
+	currentEventTriggerState->stash = lappend(currentEventTriggerState->stash,
+											  stashed);
+
+	MemoryContextSwitchTo(oldcxt);
+}
+
+Datum
+pg_event_trigger_get_creation_commands(PG_FUNCTION_ARGS)
+{
+	ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+	TupleDesc	tupdesc;
+	Tuplestorestate *tupstore;
+	MemoryContext per_query_ctx;
+	MemoryContext oldcontext;
+	ListCell   *lc;
+
+	/*
+	 * Protect this function from being called out of context
+	 */
+	if (!currentEventTriggerState)
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("%s can only be called in an event trigger function",
+						"pg_event_trigger_normalized_command")));
+
+	/* check to see if caller supports us returning a tuplestore */
+	if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo))
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("set-valued function called in context that cannot accept a set")));
+	if (!(rsinfo->allowedModes & SFRM_Materialize))
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("materialize mode required, but it is not allowed in this context")));
+
+	/* Build a tuple descriptor for our result type */
+	if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
+		elog(ERROR, "return type must be a row type");
+
+	/* Build tuplestore to hold the result rows */
+	per_query_ctx = rsinfo->econtext->ecxt_per_query_memory;
+	oldcontext = MemoryContextSwitchTo(per_query_ctx);
+
+	tupstore = tuplestore_begin_heap(true, false, work_mem);
+	rsinfo->returnMode = SFRM_Materialize;
+	rsinfo->setResult = tupstore;
+	rsinfo->setDesc = tupdesc;
+
+	MemoryContextSwitchTo(oldcontext);
+
+	foreach(lc, currentEventTriggerState->stash)
+	{
+		stashedObject *obj = lfirst(lc);
+		char	   *command;
+
+		command = deparse_utility_command(obj->objectId, obj->parsetree);
+
+		/*
+		 * Some parse trees return NULL when deparse is attempted; we don't
+		 * emit anything for them.
+		 */
+		if (command != NULL)
+		{
+			Datum		values[6];
+			bool		nulls[6];
+			ObjectAddress addr;
+			char	   *identity;
+			char	   *type;
+			int			i = 0;
+
+			addr.classId = get_objtype_catalog_oid(obj->objtype);
+			addr.objectId = obj->objectId;
+			addr.objectSubId = 0;
+			type = getObjectTypeDescription(&addr);
+			identity = getObjectIdentity(&addr);
+
+			MemSet(nulls, 0, sizeof(nulls));
+
+			/* classid */
+			values[i++] = ObjectIdGetDatum(addr.classId);
+			/* objid */
+			values[i++] = ObjectIdGetDatum(addr.objectId);
+			/* objsubid */
+			values[i++] = Int32GetDatum(addr.objectSubId);
+			/* object_type */
+			values[i++] = CStringGetTextDatum(type);
+			/* identity */
+			values[i++] = CStringGetTextDatum(identity);
+			/* command */
+			values[i++] = CStringGetTextDatum(command);
+
+			tuplestore_putvalues(tupstore, tupdesc, values, nulls);
+			pfree(identity);
+		}
+	}
+
+	/* clean up and return the tuplestore */
+	tuplestore_donestoring(tupstore);
+
+	PG_RETURN_VOID();
+}
+
+/* ************************* JSON STUFF FROM HERE ************************* *
+ *	Code below is used to decode blobs returned by deparse_utility_command	*
+ *																			*/
+
+/*
+ * Note we only support types that are valid in command representation from
+ * deparse_utility_command.
+ */
+typedef enum
+{
+	JsonIsArray,
+	JsonIsObject,
+	JsonIsString
+} JsonType;
+
+typedef enum
+{
+	SpecTypename,
+	SpecOperatorname,
+	SpecDottedName,
+	SpecString,
+	SpecStringLiteral,
+	SpecIdentifier
+} convSpecifier;
+
+/*
+ * Extract the named json field, which must be of type string, from the given
+ * JSON datum, which must be of type object.  If the field doesn't exist,
+ * NULL is returned.  Otherwise the string value is returned.
+ */
+static char *
+expand_get_strval(Datum json, char *field_name)
+{
+	FunctionCallInfoData fcinfo;
+	Datum		result;
+	char	   *value_str;
+
+	InitFunctionCallInfoData(fcinfo, NULL, 2, InvalidOid, NULL, NULL);
+
+	fcinfo.arg[0] = json;
+	fcinfo.argnull[0] = false;
+	fcinfo.arg[1] = CStringGetTextDatum(field_name);
+	fcinfo.argnull[1] = false;
+
+	result = (*json_object_field_text) (&fcinfo);
+
+	if (fcinfo.isnull)
+		return NULL;
+
+	value_str = TextDatumGetCString(result);
+
+	pfree(DatumGetPointer(result));
+
+	return value_str;
+}
+
+/*
+ * Extract the named json field, which must be of type boolean, from the given
+ * JSON datum, which must be of type object.  If the field doesn't exist,
+ * isnull is set to TRUE and the return value should not be consulted.
+ * Otherwise the boolean value is returned.
+ */
+static bool
+expand_get_boolval(Datum json, char *field_name, bool *isnull)
+{
+	FunctionCallInfoData fcinfo;
+	Datum		result;
+	char	   *value_str;
+
+	InitFunctionCallInfoData(fcinfo, NULL, 2, InvalidOid, NULL, NULL);
+
+	fcinfo.arg[0] = json;
+	fcinfo.argnull[0] = false;
+	fcinfo.arg[1] = CStringGetTextDatum(field_name);
+	fcinfo.argnull[1] = false;
+
+	result = (*json_object_field_text) (&fcinfo);
+
+	if (fcinfo.isnull)
+	{
+		*isnull = true;
+		return false;
+	}
+
+	value_str = TextDatumGetCString(result);
+
+	if (strcmp(value_str, "true") == 0)
+		return true;
+
+	Assert(strcmp(value_str, "false") == 0);
+	return false;
+}
+
+/*
+ * Given a JSON value, return its type.
+ *
+ * We return both a JsonType (for easy control flow), and a string name (for
+ * error reporting).
+ */
+static JsonType
+jsonval_get_type(Datum jsonval, char **typename)
+{
+	JsonType	json_elt_type;
+	Datum		paramtype_datum;
+	char	   *paramtype;
+
+	paramtype_datum = DirectFunctionCall1(json_typeof, jsonval);
+	paramtype = TextDatumGetCString(paramtype_datum);
+
+	if (strcmp(paramtype, "array") == 0)
+		json_elt_type = JsonIsArray;
+	else if (strcmp(paramtype, "object") == 0)
+		json_elt_type = JsonIsObject;
+	else if (strcmp(paramtype, "string") == 0)
+		json_elt_type = JsonIsString;
+	else
+		/* XXX improve this; need to specify array index or param name */
+		elog(ERROR, "unexpected JSON element type %s",
+			 paramtype);
+
+	if (typename)
+		*typename = pstrdup(paramtype);
+
+	return json_elt_type;
+}
+
+/*
+ * dequote_jsonval
+ *		Take a string value extracted from a JSON object, and return a copy of it
+ *		with the quoting removed.
+ *
+ * Another alternative to this would be to run the extraction routine again,
+ * using the "_text" variant which returns the value without quotes; but this
+ * is expensive, and moreover it complicates the logic a lot because not all
+ * values are extracted in the same way (some are extracted using
+ * json_object_field, others using json_array_element).  Dequoting the object
+ * already at hand is a lot easier.
+ */
+static char *
+dequote_jsonval(char *jsonval)
+{
+	char	   *result;
+	int			inputlen = strlen(jsonval);
+	int			i;
+	int			j = 0;
+
+	result = palloc(strlen(jsonval) + 1);
+
+	/* skip the start and end quotes right away */
+	for (i = 1; i < inputlen - 1; i++)
+	{
+		/*
+		 * XXX this skips the \ in a \" sequence but leaves other escaped
+		 * sequences in place.	Are there other cases we need to handle
+		 * specially?
+		 */
+		if (jsonval[i] == '\\' &&
+			jsonval[i + 1] == '"')
+		{
+			i++;
+			continue;
+		}
+
+		result[j++] = jsonval[i];
+	}
+	result[j] = '\0';
+
+	return result;
+}
+
+/*
+ * Expand a json value as an identifier.  The value must be of type string.
+ */
+static void
+expand_jsonval_identifier(StringInfo buf, Datum jsonval)
+{
+	char	   *unquoted;
+
+	unquoted = dequote_jsonval(TextDatumGetCString(jsonval));
+	appendStringInfo(buf, "%s", quote_identifier(unquoted));
+
+	pfree(unquoted);
+}
+
+/*
+ * Expand a json value as a dotted-name.  The value must be of type object
+ * and must contain elements "schemaname" (optional), "objname" (mandatory),
+ * "attrname" (optional).
+ *
+ * XXX do we need a "catalogname" as well?
+ */
+static void
+expand_jsonval_dottedname(StringInfo buf, Datum jsonval)
+{
+	char	   *schema;
+	char	   *objname;
+	char	   *attrname;
+	const char *qschema;
+	const char *qname;
+
+	schema = expand_get_strval(jsonval, "schemaname");
+	objname = expand_get_strval(jsonval, "objname");
+	if (objname == NULL)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("invalid NULL object name in %%D element")));
+	qname = quote_identifier(objname);
+	if (schema == NULL)
+	{
+		appendStringInfo(buf, "%s", qname);
+	}
+	else
+	{
+		qschema = quote_identifier(schema);
+		appendStringInfo(buf, "%s.%s",
+						 qschema, qname);
+		if (qschema != schema)
+			pfree((char *) qschema);
+		pfree(schema);
+	}
+
+	attrname = expand_get_strval(jsonval, "attrname");
+	if (attrname)
+	{
+		const char *qattr;
+
+		qattr = quote_identifier(attrname);
+		appendStringInfo(buf, ".%s", qattr);
+		if (qattr != attrname)
+			pfree((char *) qattr);
+		pfree(attrname);
+	}
+
+	if (qname != objname)
+		pfree((char *) qname);
+	pfree(objname);
+}
+
+/*
+ * expand a json value as a type name.
+ */
+static void
+expand_jsonval_typename(StringInfo buf, Datum jsonval)
+{
+	char	   *schema = NULL;
+	char	   *typename;
+	char	   *typmodstr;
+	bool		array_isnull;
+	bool		is_array;
+
+	typename = expand_get_strval(jsonval, "typename");
+	if (typename == NULL)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("invalid NULL type name in %%T element")));
+	typmodstr = expand_get_strval(jsonval, "typmod");	/* OK if null */
+	is_array = expand_get_boolval(jsonval, "is_array", &array_isnull);
+	schema = expand_get_strval(jsonval, "schemaname");
+
+	/* schema might be NULL or empty here, beware */
+	if (schema == NULL || schema[0] == '\0')
+		appendStringInfo(buf, "%s%s%s",
+						 quote_identifier(typename),
+						 typmodstr ? typmodstr : "",
+						 is_array ? "[]" : "");
+	else
+		appendStringInfo(buf, "%s.%s%s%s",
+						 quote_identifier(schema),
+						 quote_identifier(typename),
+						 typmodstr ? typmodstr : "",
+						 is_array ? "[]" : "");
+}
+
+/*
+ * Expand a json value as an operator name
+ */
+static void
+expand_jsonval_operator(StringInfo buf, Datum jsonval)
+{
+	char	   *schema = NULL;
+	char	   *operator;
+
+	operator = expand_get_strval(jsonval, "objname");
+	if (operator == NULL)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("invalid NULL operator name in %%O element")));
+	schema = expand_get_strval(jsonval, "schemaname");
+
+	/* schema might be NULL or empty */
+	if (schema == NULL || schema[0] == '\0')
+		appendStringInfo(buf, "%s", operator);
+	else
+		appendStringInfo(buf, "%s.%s",
+						 quote_identifier(schema),
+						 operator);
+}
+
+/*
+ * Expand a json value as a string.  The value must be of type string or of
+ * type object, in which case it must contain a "fmt" element which will be
+ * recursively expanded; also, if the object contains an element "present"
+ * and it is set to false, the expansion is the empty string.
+ */
+static void
+expand_jsonval_string(StringInfo buf, Datum jsonval, JsonType json_elt_type)
+{
+	if (json_elt_type == JsonIsString)
+	{
+		char	   *str;
+		char	   *unquoted;
+
+		str = TextDatumGetCString(jsonval);
+		unquoted = dequote_jsonval(str);
+		appendStringInfo(buf, "%s", unquoted);
+		pfree(str);
+		pfree(unquoted);
+	}
+	else if (json_elt_type == JsonIsObject)
+	{
+		bool		present;
+		bool		isnull;
+
+		present = expand_get_boolval(jsonval, "present", &isnull);
+
+		if (isnull || present)
+		{
+			Datum		inner;
+			char	   *str;
+
+			inner = DirectFunctionCall1(pg_event_trigger_expand_command,
+										jsonval);
+			str = TextDatumGetCString(inner);
+
+			appendStringInfoString(buf, str);
+			pfree(DatumGetPointer(inner));
+			pfree(str);
+		}
+	}
+}
+
+/*
+ * Expand a json value as a string literal
+ */
+static void
+expand_jsonval_strlit(StringInfo buf, Datum jsonval)
+{
+	char   *str;
+	char   *unquoted;
+
+	str = TextDatumGetCString(jsonval);
+	unquoted = dequote_jsonval(str);
+	appendStringInfo(buf, "'%s'", unquoted);
+	pfree(str);
+	pfree(unquoted);
+}
+
+/*
+ * Expand one json element according to rules.
+ */
+static void
+expand_one_element(StringInfo buf, char *param,
+				   Datum jsonval, char *valtype, JsonType json_elt_type,
+				   convSpecifier specifier)
+{
+	/*
+	 * Validate the parameter type.  If dotted-name was specified, then a JSON
+	 * object element is expected; if an identifier was specified, then a JSON
+	 * string is expected.	If a string was specified, then either a JSON
+	 * object or a string is expected.
+	 */
+	if (specifier == SpecDottedName && json_elt_type != JsonIsObject)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("expected JSON object for %%D element \"%s\", got %s",
+						param, valtype)));
+	if (specifier == SpecTypename && json_elt_type != JsonIsObject)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("expected JSON object for %%T element \"%s\", got %s",
+						param, valtype)));
+	if (specifier == SpecOperatorname && json_elt_type != JsonIsObject)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("expected JSON object for %%O element \"%s\", got %s",
+						param, valtype)));
+	if (specifier == SpecIdentifier && json_elt_type != JsonIsString)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("expected JSON string for %%I element \"%s\", got %s",
+						param, valtype)));
+	if (specifier == SpecStringLiteral && json_elt_type != JsonIsString)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("expected JSON string for %%L element \"%s\", got %s",
+						param, valtype)));
+	if (specifier == SpecString &&
+		json_elt_type != JsonIsString && json_elt_type != JsonIsObject)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("expected JSON string or object for %%s element \"%s\", got %s",
+						param, valtype)));
+
+	switch (specifier)
+	{
+		case SpecIdentifier:
+			expand_jsonval_identifier(buf, jsonval);
+			break;
+
+		case SpecDottedName:
+			expand_jsonval_dottedname(buf, jsonval);
+			break;
+
+		case SpecString:
+			expand_jsonval_string(buf, jsonval, json_elt_type);
+			break;
+
+		case SpecStringLiteral:
+			expand_jsonval_strlit(buf, jsonval);
+			break;
+
+		case SpecTypename:
+			expand_jsonval_typename(buf, jsonval);
+			break;
+
+		case SpecOperatorname:
+			expand_jsonval_operator(buf, jsonval);
+			break;
+	}
+}
+
+/*
+ * Expand one JSON array element according to rules.
+ */
+static void
+expand_one_array_element(StringInfo buf, Datum array, int idx, char *param,
+						 convSpecifier specifier)
+{
+	Datum		elemval;
+	JsonType	json_elt_type;
+	char	   *elemtype;
+
+	elemval = DirectFunctionCall2(json_array_element,
+								  PointerGetDatum(array),
+								  Int32GetDatum(idx));
+	json_elt_type = jsonval_get_type(elemval, &elemtype);
+
+	expand_one_element(buf, param,
+					   elemval, elemtype, json_elt_type,
+					   specifier);
+}
+
+#define ADVANCE_PARSE_POINTER(ptr,end_ptr) \
+	do { \
+		if (++(ptr) >= (end_ptr)) \
+			ereport(ERROR, \
+					(errcode(ERRCODE_INVALID_PARAMETER_VALUE), \
+					 errmsg("unterminated format specifier"))); \
+	} while (0)
+
+/*------
+ * Returns a formatted string from a JSON object.
+ *
+ * The starting point is the element named "fmt" (which must be a string).
+ * This format string may contain zero or more %-escapes, which consist of an
+ * element name enclosed in { }, possibly followed by a conversion modifier,
+ * followed by a conversion specifier.	Possible conversion specifiers are:
+ *
+ * %		expand to a literal %.
+ * I		expand as a single, non-qualified identifier
+ * D		expand as a possibly-qualified identifier
+ * T		expand as a type name
+ * O		expand as an operator name
+ * L		expand as a string literal (quote using single quotes)
+ * s		expand as a simple string (no quoting)
+ *
+ * The element name may have an optional separator specification preceded
+ * by a colon.	Its presence indicates that the element is expected to be
+ * an array; the specified separator is used to join the array elements.
+ *
+ * XXX the current implementation works fine, but is likely to be slow: for
+ * each element found in the fmt string we parse the JSON object once.	It
+ * might be better to use jsonapi.h directly so that we build a hash or tree of
+ * elements and their values once before parsing the fmt string, and later scan
+ * fmt using the tree.
+ *------
+ */
+Datum
+pg_event_trigger_expand_command(PG_FUNCTION_ARGS)
+{
+	text	   *json = PG_GETARG_TEXT_P(0);
+	char	   *fmt_str;
+	int			fmt_len;
+	const char *cp;
+	const char *start_ptr;
+	const char *end_ptr;
+	StringInfoData str;
+
+	fmt_str = expand_get_strval(PointerGetDatum(json), "fmt");
+	if (fmt_str == NULL)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("invalid NULL format string")));
+	fmt_len = strlen(fmt_str);
+
+	start_ptr = fmt_str;
+	end_ptr = start_ptr + fmt_len;
+	initStringInfo(&str);
+
+	for (cp = start_ptr; cp < end_ptr; cp++)
+	{
+		convSpecifier specifier;
+		bool		is_array;
+		char	   *param = NULL;
+		char	   *arraysep = NULL;
+		Datum		paramval;
+		char	   *paramtype;
+		JsonType	json_elt_type;
+
+		if (*cp != '%')
+		{
+			appendStringInfoCharMacro(&str, *cp);
+			continue;
+		}
+
+		is_array = false;
+
+		ADVANCE_PARSE_POINTER(cp, end_ptr);
+
+		/* Easy case: %% outputs a single % */
+		if (*cp == '%')
+		{
+			appendStringInfoCharMacro(&str, *cp);
+			continue;
+		}
+
+		/*
+		 * Scan the mandatory element name.  Allow for an array separator
+		 * (which may be the empty string) to be specified after colon.
+		 */
+		if (*cp == '{')
+		{
+			StringInfoData parbuf;
+			StringInfoData arraysepbuf;
+			StringInfo	appendTo;
+
+			initStringInfo(&parbuf);
+			appendTo = &parbuf;
+
+			ADVANCE_PARSE_POINTER(cp, end_ptr);
+			for (; cp < end_ptr;)
+			{
+				if (*cp == ':')
+				{
+					/*
+					 * found array separator delimiter; element name is now
+					 * complete, start filling the separator.
+					 */
+					initStringInfo(&arraysepbuf);
+					appendTo = &arraysepbuf;
+					is_array = true;
+					ADVANCE_PARSE_POINTER(cp, end_ptr);
+					continue;
+				}
+
+				if (*cp == '}')
+				{
+					ADVANCE_PARSE_POINTER(cp, end_ptr);
+					break;
+				}
+				appendStringInfoCharMacro(appendTo, *cp);
+				ADVANCE_PARSE_POINTER(cp, end_ptr);
+			}
+			param = parbuf.data;
+			if (is_array)
+				arraysep = arraysepbuf.data;
+		}
+		if (param == NULL)
+			ereport(ERROR,
+					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("missing conversion name in conversion specifier")));
+
+		/*------
+		 * The following conversion specifiers are currently recognized:
+		 * 'I' -- expand as an identifier, adding quotes if necessary
+		 * 'D' -- expand as a dotted-name, for qualified names; each element is
+		 *		  quoted if necessary
+		 * 'O' -- expand as an operator name. Same as 'D', but the objname
+		 *		  element is not quoted.
+		 * 's' -- expand as a simple string; no quoting.
+		 * 'T' -- expand as a typename, with ad-hoc rules
+		 */
+		switch (*cp)
+		{
+			case 'I':
+				specifier = SpecIdentifier;
+				break;
+			case 'D':
+				specifier = SpecDottedName;
+				break;
+			case 's':
+				specifier = SpecString;
+				break;
+			case 'L':
+				specifier = SpecStringLiteral;
+				break;
+			case 'T':
+				specifier = SpecTypename;
+				break;
+			case 'O':
+				specifier = SpecOperatorname;
+				break;
+			default:
+				ereport(ERROR,
+						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						 errmsg("invalid conversion specifier \"%c\"", *cp)));
+		}
+
+		/*
+		 * Obtain the element to be expanded.  Note we cannot use
+		 * DirectFunctionCall here, because the element might not exist.
+		 */
+		{
+			FunctionCallInfoData fcinfo;
+
+			InitFunctionCallInfoData(fcinfo, NULL, 2, InvalidOid, NULL, NULL);
+
+			fcinfo.arg[0] = PointerGetDatum(json);
+			fcinfo.argnull[0] = false;
+			fcinfo.arg[1] = CStringGetTextDatum(param);
+			fcinfo.argnull[1] = false;
+
+			paramval = (*json_object_field) (&fcinfo);
+
+			if (fcinfo.isnull)
+			{
+				ereport(ERROR,
+						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						 errmsg("non-existant element \"%s\" in JSON formatting object",
+								param)));
+			}
+		}
+
+		/* figure out its type */
+		json_elt_type = jsonval_get_type(paramval, &paramtype);
+
+		/* Validate that we got an array if the format string specified one. */
+		if (is_array && json_elt_type != JsonIsArray)
+			ereport(ERROR,
+					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+					 errmsg("expected JSON array for element \"%s\", got %s",
+							param, paramtype)));
+
+		/* And finally print out the data */
+		if (is_array)
+		{
+			int			count;
+			bool		putsep = false;
+			int			i;
+
+			count = DatumGetInt32(DirectFunctionCall1(json_array_length,
+													  paramval));
+			for (i = 0; i < count; i++)
+			{
+				if (putsep)
+					appendStringInfoString(&str, arraysep);
+				putsep = true;
+
+				expand_one_array_element(&str, paramval, i, param, specifier);
+			}
+		}
+		else
+		{
+			expand_one_element(&str, param, paramval, paramtype, json_elt_type,
+							   specifier);
+		}
+	}
+
+	PG_RETURN_TEXT_P(CStringGetTextDatum(str.data));
 }
