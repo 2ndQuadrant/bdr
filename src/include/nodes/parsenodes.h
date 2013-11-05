@@ -1192,6 +1192,7 @@ typedef enum ObjectType
 	OBJECT_ATTRIBUTE,			/* type's attribute, when distinct from column */
 	OBJECT_CAST,
 	OBJECT_COLUMN,
+	OBJECT_COMPOSITE,
 	OBJECT_CONSTRAINT,
 	OBJECT_COLLATION,
 	OBJECT_CONVERSION,
@@ -1222,6 +1223,7 @@ typedef enum ObjectType
 	OBJECT_TSPARSER,
 	OBJECT_TSTEMPLATE,
 	OBJECT_TYPE,
+	OBJECT_USER_MAPPING,
 	OBJECT_VIEW
 } ObjectType;
 

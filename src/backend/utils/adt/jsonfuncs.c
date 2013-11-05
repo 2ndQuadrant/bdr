@@ -1932,7 +1932,7 @@ elements_array_element_end(void *state, bool isnull)
 	text	   *val;
 	HeapTuple	tuple;
 	Datum		values[1];
-	bool nulls[1] = {false};
+	bool		nulls[1] = {false};
 
 	/* skip over nested objects */
 	if (_state->lex->lex_level != 1)
