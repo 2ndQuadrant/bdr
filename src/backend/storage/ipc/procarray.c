@@ -46,6 +46,7 @@
 #include <signal.h>
 
 #include "access/clog.h"
+#include "access/committs.h"
 #include "access/subtrans.h"
 #include "access/transam.h"
 #include "access/xact.h"
