@@ -152,8 +152,7 @@ TransactionIdSetTreeStatus(TransactionId xid, int nsubxids,
 		   status == TRANSACTION_STATUS_ABORTED);
 
 	/*
-	 * See how many subxids, if any, are on the same page as the parent, if
-	 * any.
+	 * See how many subxids, if any, are on the same page as the parent.
 	 */
 	for (i = 0; i < nsubxids; i++)
 	{
