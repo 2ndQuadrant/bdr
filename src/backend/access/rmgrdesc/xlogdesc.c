@@ -45,7 +45,7 @@ xlog_desc(StringInfo buf, uint8 xl_info, char *rec)
 		appendStringInfo(buf, "checkpoint: redo %X/%X; "
 						 "tli %u; prev tli %u; fpw %s; xid %u/%u; oid %u; multi %u; offset %u; "
 						 "oldest xid %u in DB %u; oldest multi %u in DB %u; "
-						 "oldest running xid %u; %s",
+						 "oldest CommitTs xid: %u; oldest running xid %u; %s",
 				(uint32) (checkpoint->redo >> 32), (uint32) checkpoint->redo,
 						 checkpoint->ThisTimeLineID,
 						 checkpoint->PrevTimeLineID,
@@ -58,6 +58,7 @@ xlog_desc(StringInfo buf, uint8 xl_info, char *rec)
 						 checkpoint->oldestXidDB,
 						 checkpoint->oldestMulti,
 						 checkpoint->oldestMultiDB,
+						 checkpoint->oldestCommitTs,
 						 checkpoint->oldestActiveXid,
 				 (info == XLOG_CHECKPOINT_SHUTDOWN) ? "shutdown" : "online");
 	}
