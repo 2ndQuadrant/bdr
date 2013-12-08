@@ -23,6 +23,7 @@
 #include <math.h>
 
 #include "access/clog.h"
+#include "access/committs.h"
 #include "access/genam.h"
 #include "access/heapam.h"
 #include "access/htup_details.h"
@@ -970,8 +971,9 @@ vac_truncate_clog(TransactionId frozenXID, MultiXactId minMulti)
 		return;
 	}
 
-	/* Truncate CLOG and Multi to the oldest computed value */
+	/* Truncate CLOG, CommitTS and Multi to the oldest computed values */
 	TruncateCLOG(frozenXID);
+	TruncateCommitTs(frozenXID);
 	TruncateMultiXact(minMulti);
 
 	/*
@@ -982,6 +984,7 @@ vac_truncate_clog(TransactionId frozenXID, MultiXactId minMulti)
 	 */
 	SetTransactionIdLimit(frozenXID, oldestxid_datoid);
 	MultiXactAdvanceOldest(minMulti, minmulti_datoid);
+	SetCommitTsLimit(frozenXID);
 }
 
 

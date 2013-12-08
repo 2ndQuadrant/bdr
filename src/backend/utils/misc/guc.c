@@ -26,6 +26,7 @@
 #include <syslog.h>
 #endif
 
+#include "access/committs.h"
 #include "access/gin.h"
 #include "access/transam.h"
 #include "access/twophase.h"
@@ -822,6 +823,15 @@ static struct config_bool ConfigureNamesBool[] =
 		&enable_bonjour,
 		false,
 		check_bonjour, NULL, NULL
+	},
+	{
+		{"track_commit_timestamp", PGC_POSTMASTER, REPLICATION,
+			gettext_noop("Collects transaction commit time."),
+			NULL
+		},
+		&commit_ts_enabled,
+		false,
+		NULL, NULL, NULL
 	},
 	{
 		{"ssl", PGC_POSTMASTER, CONN_AUTH_SECURITY,

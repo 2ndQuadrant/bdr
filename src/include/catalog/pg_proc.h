@@ -2931,6 +2931,18 @@ DESCR("view two-phase transactions");
 DATA(insert OID = 3819 (  pg_get_multixact_members PGNSP PGUID 12 1 1000 0 0 f f f f t t v 1 0 2249 "28" "{28,28,25}" "{i,o,o}" "{multixid,xid,mode}" _null_ pg_get_multixact_members _null_ _null_ _null_ ));
 DESCR("view members of a multixactid");
 
+DATA(insert OID = 3461 ( pg_get_transaction_committime PGNSP PGUID 12 1 0 0 0 f f f f t f s 1 0 1184 "28" _null_ _null_ _null_ _null_ pg_get_transaction_committime _null_ _null_ _null_ ));
+DESCR("get commit time of transaction");
+
+DATA(insert OID = 3462 ( pg_get_transaction_extradata PGNSP PGUID 12 1 0 0 0 f f f f t f s 1 0 23 "28" _null_ _null_ _null_ _null_ pg_get_transaction_extradata _null_ _null_ _null_ ));
+DESCR("get additional data from transaction commit timestamp record");
+
+DATA(insert OID = 3463 ( pg_get_transaction_committime_data PGNSP PGUID 12 1 0 0 0 f f f f t f s 1 0 2249 "28" "{28,1184,23}" "{i,o,o}" "{xid,committime,extradata}" _null_ pg_get_transaction_committime_data _null_ _null_ _null_ ));
+DESCR("get commit time and additional data from transaction commit timestamp record");
+
+DATA(insert OID = 3464 ( pg_get_latest_transaction_committime_data PGNSP PGUID 12 1 0 0 0 f f f f t f s 0 0 2249 "" "{28,1184,23}" "{o,o,o}" "{xid,committime,extradata}" _null_ pg_get_latest_transaction_committime_data _null_ _null_ _null_ ));
+DESCR("get transaction Id, commit timestamp and additional data of latest transaction commit");
+
 DATA(insert OID = 3537 (  pg_describe_object		PGNSP PGUID 12 1 0 0 0 f f f f t f s 3 0 25 "26 26 23" _null_ _null_ _null_ _null_ pg_describe_object _null_ _null_ _null_ ));
 DESCR("get identification of SQL object");
 
