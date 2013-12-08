@@ -226,6 +226,7 @@
 #wal_sender_timeout = 60s	# in milliseconds; 0 disables
 
 #max_replication_slots = 0	# max number of replication slots
+#track_commit_timestamp = off	# collect timestamp of transaction commit
 				# (change requires restart)
 
 # - Master Server -
