@@ -1694,7 +1694,7 @@ init(bool is_no_vacuum)
 	fprintf(stderr, "creating tables...\n");
 
 	executeStatement(con, "begin");
-	executeStatement(con, "truncate pgbench_accounts");
+	executeStatement(con, "delete from pgbench_accounts");
 
 	res = PQexec(con, "copy pgbench_accounts from stdin");
 	if (PQresultStatus(res) != PGRES_COPY_IN)
