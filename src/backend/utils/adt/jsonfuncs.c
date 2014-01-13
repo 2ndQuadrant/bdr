@@ -226,13 +226,13 @@ typedef struct PopulateRecordsetState
 } PopulateRecordsetState;
 
 /*
- * SQL function json_object-keys
+ * SQL function json_object_keys
  *
  * Returns the set of keys for the object argument.
  *
  * This SRF operates in value-per-call mode. It processes the
  * object during the first call, and the keys are simply stashed
- * in an array, whise size is expanded as necessary. This is probably
+ * in an array, whose size is expanded as necessary. This is probably
  * safe enough for a list of keys of a single object, since they are
  * limited in size to NAMEDATALEN and the number of keys is unlikely to
  * be so huge that it has major memory implications.
