@@ -1301,24 +1301,48 @@
 <title>Streaming Replication Protocol</title>
 
 <para>
-To initiate streaming replication, the frontend sends the
-<literal>replication</> parameter in the startup message. A boolean value
-of <literal>true</> tells the backend to go into walsender mode, wherein a
-small set of replication commands can be issued instead of SQL statements. Only
-the simple query protocol can be used in walsender mode.
-Passing a <literal>database</> as the value instructs walsender to connect to
-the database specified in the <literal>dbname</> paramter which will in future
-allow some additional commands to the ones specified below to be run.
+ To initiate streaming replication, the frontend sends the
+ <literal>replication</> parameter in the startup message. This accepts the
+ values <literal>true</literal>, <literal>false</literal> (and their 1/0
+ numeric equivalents) or in 9.4 and above, <literal>database</literal>.
+</para>
+<para>
+ Any valid non-false value tells the backend to go into walsender mode, wherein
+ the small set of replication commands documented below can be issued instead
+ of SQL statements.  Only the simple query protocol can be used in walsender
+ mode.
+</para>
+<para>
+ If <literal>replication</literal> is <literal>true</literal>, no specific
+ database is connected to. In this mode only a subset of walsender subcommands
+ are available. To use database-specific walsender commands like the logical
+ replication commands, <literal>replication</> must be set to
+ <literal>database</> and the name of a database to connect to must be
+ specified in the <literal>database</> startup packet field.
+</para>
+<para>
+ For the purpose of testing replication commands, you can make a replication
+ connection via <application>psql</application> or any other <literal>libpq</literal>-using
+ tool with a connection string including the <literal>replication</literal> option,
+ e.g.:
+ <programlisting>
+  psql "dbname=postgres replication=database" -c "IDENTIFY_SYSTEM;"
+ </programlisting>
+ However it is usually more useful to use
+ <application>pg_receivexlog</application> (for physical replication) or
+ <application>pg_recvlogical</application> (for logical replication).
+</para>
 
+<para>
 The commands accepted in walsender mode are:
-
 <variablelist>
   <varlistentry>
     <term>IDENTIFY_SYSTEM</term>
     <listitem>
      <para>
-      Requests the server to identify itself. Server replies with a result
-      set of a single row, containing four fields:
+      Requests the server to identify itself. Does not require a database name
+      to be specified for the connection. Server replies with a result set of a
+      single row, containing four fields:
      </para>
 
      <para>
@@ -1381,7 +1405,8 @@ The commands accepted in walsender mode are:
     <listitem>
      <para>
       Requests the server to send over the timeline history file for timeline
-      <replaceable class="parameter">tli</replaceable>.  Server replies with a
+      <replaceable class="parameter">tli</replaceable>. Does not require a database
+      name to be specified for the connection. Server replies with a
       result set of a single row, containing two fields:
      </para>
 
@@ -1764,17 +1789,55 @@ The commands accepted in walsender mode are:
      </para>
     </listitem>
   </varlistentry>
-
   <varlistentry>
-    <term><literal>DROP_REPLICATION_SLOT</literal> <replaceable class="parameter">slotname</></term>
+    <term><literal>START_REPLICATION</literal> <literal>SLOT</literal> <replaceable class="parameter">slotname</> <literal>LOGICAL</literal> <replaceable class="parameter">XXX/XXX</></term>
     <listitem>
      <para>
-      Drops a replication slot, freeing any reserved server-side resources. If
-      the slot is currently in use by an active connection, this command fails.
+      Instructs server to start streaming WAL for logical replication, starting
+      at WAL position <replaceable class="parameter">XXX/XXX</>. The server can
+      reply with an error, e.g. if the requested section of WAL has already
+      been recycled. On success, server responds with a CopyBothResponse
+      message, and then starts to stream WAL to the frontend.
+     </para>
+     <para>
+      The output plugin associated with the selected slot is used
+      to process the output for streaming.
      </para>
      <variablelist>
       <varlistentry>
-       <term><replaceable class="parameter">slotname</></term>
+       <term><literal>SLOT</literal> <replaceable class="parameter">slotname</></term>
+       <listitem>
+         <para>
+          The name of the slot to stream changes from. This parameter is required,
+          and must correspond to an existing logical replication slot created
+          with <literal>CREATE_REPLICATION_SLOT</literal> in
+          <literal>LOGICAL</literal> mode.
+         </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term><replaceable class="parameter">XXX/XXX</></term>
+       <listitem>
+        <para>
+         The WAL position to begin streaming at.
+        </para>
+       </listitem>
+      </varlistentry>
+     </variablelist>
+    </listitem>
+  </varlistentry>
+
+  <varlistentry>
+    <term><literal>DROP_REPLICATION_SLOT</literal> <literal>SLOT</literal> <replaceable class="parameter">slotname</></term>
+    <listitem>
+     <para>
+     Drops a physical or logical replication slot, freeing any reserved server-side
+     resources. If the slot is currently in use by an active connection this command
+     fails.
+     </para>
+     <variablelist>
+      <varlistentry>
+       <term><literal>SLOT</literal> <replaceable class="parameter">slotname</></term>
        <listitem>
          <para>
           The name of the slot to drop.

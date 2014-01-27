@@ -219,6 +219,7 @@
 
   &spi;
   &bgworker;
+  &changesetextraction;
 
  </part>
 
