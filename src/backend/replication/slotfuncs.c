@@ -91,7 +91,7 @@ pg_drop_replication_slot(PG_FUNCTION_ARGS)
 Datum
 pg_get_replication_slots(PG_FUNCTION_ARGS)
 {
-#define PG_STAT_GET_REPLICATION_SLOTS_COLS 6
+#define PG_GET_REPLICATION_SLOTS_COLS 8
 	ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
 	TupleDesc	tupdesc;
 	Tuplestorestate *tupstore;
@@ -133,14 +133,16 @@ pg_get_replication_slots(PG_FUNCTION_ARGS)
 	for (slotno = 0; slotno < max_replication_slots; slotno++)
 	{
 		ReplicationSlot *slot = &ReplicationSlotCtl->replication_slots[slotno];
-		Datum		values[PG_STAT_GET_REPLICATION_SLOTS_COLS];
-		bool		nulls[PG_STAT_GET_REPLICATION_SLOTS_COLS];
+		Datum		values[PG_GET_REPLICATION_SLOTS_COLS];
+		bool		nulls[PG_GET_REPLICATION_SLOTS_COLS];
 
 		TransactionId xmin;
+		TransactionId catalog_xmin;
 		XLogRecPtr	restart_lsn;
 		bool		active;
 		Oid			database;
 		const char *slot_name;
+		const char *plugin;
 
 		char		restart_lsn_s[MAXFNAMELEN];
 		int			i;
@@ -154,9 +156,11 @@ pg_get_replication_slots(PG_FUNCTION_ARGS)
 		else
 		{
 			xmin = slot->data.xmin;
+			catalog_xmin = slot->data.catalog_xmin;
 			database = slot->data.database;
 			restart_lsn = slot->data.restart_lsn;
 			slot_name = pstrdup(NameStr(slot->data.name));
+			plugin = pstrdup(NameStr(slot->data.plugin));
 
 			active = slot->active;
 		}
@@ -169,16 +173,24 @@ pg_get_replication_slots(PG_FUNCTION_ARGS)
 
 		i = 0;
 		values[i++] = CStringGetTextDatum(slot_name);
+		values[i++] = CStringGetTextDatum(plugin);
 		if (database == InvalidOid)
 			values[i++] = CStringGetTextDatum("physical");
 		else
 			values[i++] = CStringGetTextDatum("logical");
 		values[i++] = database;
 		values[i++] = BoolGetDatum(active);
+
 		if (xmin != InvalidTransactionId)
 			values[i++] = TransactionIdGetDatum(xmin);
 		else
 			nulls[i++] = true;
+
+		if (catalog_xmin != InvalidTransactionId)
+			values[i++] = TransactionIdGetDatum(catalog_xmin);
+		else
+			nulls[i++] = true;
+
 		if (restart_lsn != InvalidTransactionId)
 			values[i++] = CStringGetTextDatum(restart_lsn_s);
 		else

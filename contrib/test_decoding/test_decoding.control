@@ -1,0 +1,5 @@
+# test_decoding extension
+comment = 'test output plugin for changeset extraction / logical replication'
+default_version = '1.0'
+module_pathname = '$libdir/test_decoding'
+relocatable = true

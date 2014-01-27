@@ -32,9 +32,22 @@ typedef struct ReplicationSlotPersistentData
 	 */
 	TransactionId xmin;
 
+	/*
+	 * xmin horizon for catalog tuples
+	 *
+	 * NB: This may represent a value that hasn't been written to disk yet;
+	 * see notes for effective_xmin, below.
+	 */
+	TransactionId catalog_xmin;
+
 	/* oldest LSN that might be required by this replication slot */
 	XLogRecPtr	restart_lsn;
 
+	/* oldest LSN that the client has acked receipt for */
+	XLogRecPtr	confirmed_flush;
+
+	/* plugin name */
+	NameData	plugin;
 } ReplicationSlotPersistentData;
 
 /*
@@ -67,12 +80,26 @@ typedef struct ReplicationSlot
 	 * same as the persistent value (data.xmin).
 	 */
 	TransactionId effective_xmin;
+	TransactionId effective_catalog_xmin;
 
 	/* data surviving shutdowns and crashes */
 	ReplicationSlotPersistentData data;
 
 	/* is somebody performing io on this slot? */
 	LWLock	   *io_in_progress_lock;
+
+	/* all the remaining data is only used for logical slots */
+
+	/* ----
+	 * When the client has confirmed flushes >= candidate_xmin_after we can
+	 * a) advance the pegged xmin
+	 * b) advance restart_decoding_from so we have to read/keep less WAL
+	 * ----
+	 */
+	TransactionId candidate_catalog_xmin;
+	XLogRecPtr	candidate_xmin_lsn;
+	XLogRecPtr	candidate_restart_valid;
+	XLogRecPtr	candidate_restart_lsn;
 } ReplicationSlot;
 
 /*
@@ -106,8 +133,11 @@ extern void ReplicationSlotMarkDirty(void);
 
 /* misc stuff */
 extern bool ReplicationSlotValidateName(const char *name, int elevel);
-extern void ReplicationSlotsComputeRequiredXmin(void);
+extern void ReplicationSlotsComputeRequiredXmin(bool already_locked);
 extern void ReplicationSlotsComputeRequiredLSN(void);
+extern XLogRecPtr ReplicationSlotsComputeLogicalRestartLSN(void);
+extern bool ReplicationSlotsCountDBSlots(Oid dboid, int *nslots, int *nactive);
+
 extern void StartupReplicationSlots(XLogRecPtr checkPointRedo);
 extern void CheckPointReplicationSlots(void);
 

@@ -69,7 +69,7 @@
  */
 static SnapshotData CurrentSnapshotData = {HeapTupleSatisfiesMVCC};
 static SnapshotData SecondarySnapshotData = {HeapTupleSatisfiesMVCC};
-static SnapshotData CatalogSnapshotData = {HeapTupleSatisfiesMVCC};
+SnapshotData CatalogSnapshotData = {HeapTupleSatisfiesMVCC};
 
 /* Pointers to valid snapshots */
 static Snapshot CurrentSnapshot = NULL;
@@ -86,13 +86,15 @@ static bool CatalogSnapshotStale = true;
  * for the convenience of TransactionIdIsInProgress: even in bootstrap
  * mode, we don't want it to say that BootstrapTransactionId is in progress.
  *
- * RecentGlobalXmin is initialized to InvalidTransactionId, to ensure that no
- * one tries to use a stale value.	Readers should ensure that it has been set
- * to something else before using it.
+ * RecentGlobalXmin and RecentGlobalDataXmin are initialized to
+ * InvalidTransactionId, to ensure that no one tries to use a stale
+ * value. Readers should ensure that it has been set to something else
+ * before using it.
  */
 TransactionId TransactionXmin = FirstNormalTransactionId;
 TransactionId RecentXmin = FirstNormalTransactionId;
 TransactionId RecentGlobalXmin = InvalidTransactionId;
+TransactionId RecentGlobalDataXmin = InvalidTransactionId;
 
 /*
  * Elements of the active snapshot stack.
@@ -796,7 +798,7 @@ AtEOXact_Snapshot(bool isCommit)
  *		Returns the token (the file name) that can be used to import this
  *		snapshot.
  */
-static char *
+char *
 ExportSnapshot(Snapshot snapshot)
 {
 	TransactionId topXid;

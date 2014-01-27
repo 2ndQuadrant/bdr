@@ -2154,9 +2154,19 @@ IndexBuildHeapScan(Relation heapRelation,
 	}
 	else
 	{
+		/*
+		 * We can ignore a) pegged xmins b) shared relations if we don't scan
+		 * something acting as a catalog.
+		 */
+		bool include_systables =
+			IsSystemRelation(heapRelation) ||
+			RelationIsAccessibleInLogicalDecoding(heapRelation);
+
 		snapshot = SnapshotAny;
 		/* okay to ignore lazy VACUUMs here */
-		OldestXmin = GetOldestXmin(heapRelation->rd_rel->relisshared, true);
+		OldestXmin = GetOldestXmin(heapRelation->rd_rel->relisshared,
+								   true,
+								   include_systables);
 	}
 
 	scan = heap_beginscan_strat(heapRelation,	/* relation */

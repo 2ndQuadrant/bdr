@@ -55,6 +55,7 @@
 #include "replication/basebackup.h"
 #include "replication/slot.h"
 #include "replication/syncrep.h"
+#include "replication/slot.h"
 #include "replication/walreceiver.h"
 #include "replication/walsender.h"
 #include "replication/walsender_private.h"
@@ -1049,7 +1050,7 @@ PhysicalReplicationSlotNewXmin(TransactionId feedbackXmin)
 	if (changed)
 	{
 		ReplicationSlotMarkDirty();
-		ReplicationSlotsComputeRequiredXmin();
+		ReplicationSlotsComputeRequiredXmin(false);
 	}
 }
 

@@ -616,11 +616,13 @@ CREATE VIEW pg_stat_replication AS
 CREATE VIEW pg_replication_slots AS
     SELECT
             L.slot_name,
+            L.plugin,
             L.slot_type,
             L.datoid,
             D.datname AS database,
             L.active,
             L.xmin,
+            L.catalog_xmin,
             L.restart_lsn
     FROM pg_get_replication_slots() AS L
             LEFT JOIN pg_database D ON (L.datoid = D.oid);

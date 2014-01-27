@@ -1,0 +1,178 @@
+CREATE FUNCTION pg_catalog.pg_td_mkdir(text)
+RETURNS void
+AS '$libdir/test_decoding_regsupport', 'pg_td_mkdir'
+LANGUAGE C VOLATILE STRICT;
+CREATE FUNCTION pg_catalog.pg_td_rmdir(text)
+RETURNS void
+AS '$libdir/test_decoding_regsupport', 'pg_td_rmdir'
+LANGUAGE C VOLATILE STRICT;
+CREATE FUNCTION pg_catalog.pg_td_unlink(text)
+RETURNS void
+AS '$libdir/test_decoding_regsupport', 'pg_td_unlink'
+LANGUAGE C VOLATILE STRICT;
+CREATE FUNCTION pg_catalog.pg_td_chmod(text, text)
+RETURNS void
+AS '$libdir/test_decoding_regsupport', 'pg_td_chmod'
+LANGUAGE C VOLATILE STRICT;
+-- drop all slots
+SELECT pg_drop_replication_slot(slot_name)
+FROM pg_replication_slots
+WHERE slot_name LIKE 'slottest_%';
+ pg_drop_replication_slot 
+--------------------------
+(0 rows)
+
+-- succeed
+SELECT * FROM pg_create_physical_replication_slot('slottest_1');
+  slotname  | xlog_position 
+------------+---------------
+ slottest_1 | 
+(1 row)
+
+SELECT * FROM pg_create_physical_replication_slot('slottest_2');
+  slotname  | xlog_position 
+------------+---------------
+ slottest_2 | 
+(1 row)
+
+-- fail, duplicate
+SELECT * FROM pg_create_physical_replication_slot('slottest_1');
+ERROR:  replication slot "slottest_1" already exists
+-- succeed
+SELECT pg_drop_replication_slot('slottest_1');
+ pg_drop_replication_slot 
+--------------------------
+ 
+(1 row)
+
+SELECT pg_td_chmod('pg_replslot', '0');
+ pg_td_chmod 
+-------------
+ 
+(1 row)
+
+-- fail, no permissions on entire pg_replslot director
+SELECT * FROM pg_create_physical_replication_slot('slottest_3');
+ERROR:  could not create directory "pg_replslot/slottest_3.tmp": Permission denied
+SELECT * FROM pg_drop_replication_slot('slottest_2');
+ERROR:  could not rename "pg_replslot/slottest_2" to "pg_replslot/slottest_2.tmp": Permission denied
+SELECT pg_td_chmod('pg_replslot', '700');
+ pg_td_chmod 
+-------------
+ 
+(1 row)
+
+-- succeed, we have permissions again
+SELECT * FROM pg_drop_replication_slot('slottest_2');
+ pg_drop_replication_slot 
+--------------------------
+ 
+(1 row)
+
+SELECT * FROM pg_create_physical_replication_slot('slottest_4');
+  slotname  | xlog_position 
+------------+---------------
+ slottest_4 | 
+(1 row)
+
+SELECT pg_td_chmod('pg_replslot/slottest_4', '000');
+ pg_td_chmod 
+-------------
+ 
+(1 row)
+
+-- succeed as the rename works, with WARNINGs
+SELECT * FROM pg_drop_replication_slot('slottest_4');
+WARNING:  could not open directory "pg_replslot/slottest_4.tmp": Permission denied
+WARNING:  could not remove directory "pg_replslot/slottest_4.tmp"
+ pg_drop_replication_slot 
+--------------------------
+ 
+(1 row)
+
+-- fail, temp director exists
+SELECT * FROM pg_create_physical_replication_slot('slottest_4');
+WARNING:  could not open directory "pg_replslot/slottest_4.tmp": Permission denied
+ERROR:  could not create directory "pg_replslot/slottest_4.tmp": File exists
+-- cleanup half-deleted slot
+SELECT pg_td_chmod('pg_replslot/slottest_4.tmp', '700');
+ pg_td_chmod 
+-------------
+ 
+(1 row)
+
+SELECT pg_td_unlink('pg_replslot/slottest_4.tmp/state');
+ pg_td_unlink 
+--------------
+ 
+(1 row)
+
+SELECT pg_td_rmdir('pg_replslot/slottest_4.tmp');
+ pg_td_rmdir 
+-------------
+ 
+(1 row)
+
+-- check cleanup
+SELECT * FROM pg_create_physical_replication_slot('slottest_4');
+  slotname  | xlog_position 
+------------+---------------
+ slottest_4 | 
+(1 row)
+
+SELECT * FROM pg_drop_replication_slot('slottest_4');
+ pg_drop_replication_slot 
+--------------------------
+ 
+(1 row)
+
+-- fail, slot directory exists
+SELECT pg_td_mkdir('pg_replslot/slottest_5');
+ pg_td_mkdir 
+-------------
+ 
+(1 row)
+
+SELECT * FROM pg_drop_replication_slot('slottest_5');
+ERROR:  replication slot "slottest_5" does not exist
+SELECT pg_td_rmdir('pg_replslot/slottest_5');
+ pg_td_rmdir 
+-------------
+ 
+(1 row)
+
+SELECT pg_td_mkdir('pg_replslot/slottest_6.tmp');
+ pg_td_mkdir 
+-------------
+ 
+(1 row)
+
+SELECT pg_td_mkdir('pg_replslot/slottest_6.tmp/blub');
+ pg_td_mkdir 
+-------------
+ 
+(1 row)
+
+-- suceed, temp directory exists, but we remove it
+SELECT * FROM pg_create_physical_replication_slot('slottest_6');
+  slotname  | xlog_position 
+------------+---------------
+ slottest_6 | 
+(1 row)
+
+-- succeed, temp directory removed
+SELECT * FROM pg_create_physical_replication_slot('slottest_6');
+ERROR:  replication slot "slottest_6" already exists
+SELECT * FROM pg_drop_replication_slot('slottest_6');
+ pg_drop_replication_slot 
+--------------------------
+ 
+(1 row)
+
+SELECT pg_drop_replication_slot(slot_name)
+FROM pg_replication_slots
+WHERE slot_name LIKE 'slottest_%';
+ pg_drop_replication_slot 
+--------------------------
+(0 rows)
+

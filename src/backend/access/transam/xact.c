@@ -1075,7 +1075,8 @@ RecordTransactionCommit(void)
 		/*
 		 * Do we need the long commit record? If not, use the compact format.
 		 */
-		if (nrels > 0 || nmsgs > 0 || RelcacheInitFileInval || forceSyncCommit)
+		if (nrels > 0 || nmsgs > 0 || RelcacheInitFileInval || forceSyncCommit ||
+			XLogLogicalInfoActive())
 		{
 			XLogRecData rdata[4];
 			int			lastrdata = 0;

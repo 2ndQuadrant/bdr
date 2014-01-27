@@ -879,7 +879,22 @@ LogStandbySnapshot(void)
 	 * record we write, because standby will open up when it sees this.
 	 */
 	running = GetRunningTransactionData();
+
+	/*
+	 * GetRunningTransactionData() acquired ProcArrayLock, we must release
+	 * it. We can do that before inserting the WAL record because
+	 * ProcArrayApplyRecoveryInfo can recheck the commit status using the
+	 * clog. If we're doing logical replication we can't do that though, so
+	 * hold the lock for a moment longer.
+	 */
+	if (wal_level < WAL_LEVEL_LOGICAL)
+		LWLockRelease(ProcArrayLock);
+
 	recptr = LogCurrentRunningXacts(running);
+
+	/* Release lock if we kept it longer ... */
+	if (wal_level >= WAL_LEVEL_LOGICAL)
+		LWLockRelease(ProcArrayLock);
 
 	/* GetRunningTransactionData() acquired XidGenLock, we must release it */
 	LWLockRelease(XidGenLock);

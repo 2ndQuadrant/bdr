@@ -22,6 +22,7 @@
 #include "access/tuptoaster.h"
 #include "access/visibilitymap.h"
 #include "access/xact.h"
+#include "catalog/catalog.h"
 #include "catalog/index.h"
 #include "catalog/indexing.h"
 #include "catalog/pg_collation.h"
@@ -1081,7 +1082,9 @@ acquire_sample_rows(Relation onerel, int elevel,
 	totalblocks = RelationGetNumberOfBlocks(onerel);
 
 	/* Need a cutoff xmin for HeapTupleSatisfiesVacuum */
-	OldestXmin = GetOldestXmin(onerel->rd_rel->relisshared, true);
+	OldestXmin = GetOldestXmin(onerel->rd_rel->relisshared, true,
+							   IsSystemRelation(onerel) ||
+							   RelationIsAccessibleInLogicalDecoding(onerel));
 
 	/* Prepare for sampling block numbers */
 	BlockSampler_Init(&bs, totalblocks, targrows);

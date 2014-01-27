@@ -1,0 +1,95 @@
+CREATE EXTENSION test_decoding;
+-- predictability
+SET synchronous_commit = on;
+DROP TABLE IF EXISTS xpto;
+NOTICE:  table "xpto" does not exist, skipping
+SELECT 'init' FROM pg_create_decoding_replication_slot('regression_slot', 'test_decoding');
+ ?column? 
+----------
+ init
+(1 row)
+
+SELECT setseed(0);
+ setseed 
+---------
+ 
+(1 row)
+
+CREATE TABLE xpto (
+    id serial primary key,
+    toasted_col1 text,
+    rand1 float8 DEFAULT random(),
+    toasted_col2 text,
+    rand2 float8 DEFAULT random()
+);
+-- uncompressed external toast data
+INSERT INTO xpto (toasted_col1, toasted_col2) SELECT string_agg(g.i::text, ''), string_agg((g.i*2)::text, '') FROM generate_series(1, 2000) g(i);
+-- compressed external toast data
+INSERT INTO xpto (toasted_col2) SELECT repeat(string_agg(to_char(g.i, 'FM0000'), ''), 50) FROM generate_series(1, 500) g(i);
+-- update of existing column
+UPDATE xpto SET toasted_col1 = (SELECT string_agg(g.i::text, '') FROM generate_series(1, 2000) g(i)) WHERE id = 1;
+UPDATE xpto SET rand1 = 123.456 WHERE id = 1;
+DELETE FROM xpto WHERE id = 1;
+DROP TABLE IF EXISTS toasted_key;
+NOTICE:  table "toasted_key" does not exist, skipping
+CREATE TABLE toasted_key (
+    id serial,
+    toasted_key text PRIMARY KEY,
+    toasted_col1 text,
+    toasted_col2 text
+);
+ALTER TABLE toasted_key ALTER COLUMN toasted_key SET STORAGE EXTERNAL;
+ALTER TABLE toasted_key ALTER COLUMN toasted_col1 SET STORAGE EXTERNAL;
+INSERT INTO toasted_key(toasted_key, toasted_col1) VALUES(repeat('1234567890', 200), repeat('9876543210', 200));
+-- test update of a toasted key without changing it
+UPDATE toasted_key SET toasted_col2 = toasted_col1;
+-- test update of a toasted key, changing it
+UPDATE toasted_key SET toasted_key = toasted_key || '1';
+DELETE FROM toasted_key;
+SELECT substr(data, 1, 200) FROM pg_decoding_slot_get_changes('regression_slot', 'now', 'include-xids', '0');
+                                                                                                  substr                                                                                                  
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ BEGIN
+ COMMIT
+ BEGIN
+ table "xpto": INSERT: id[int4]:1 toasted_col1[text]:1234567891011121314151617181920212223242526272829303132333435363738394041424344454647484950515253545556575859606162636465666768697071727374757677787
+ COMMIT
+ BEGIN
+ table "xpto": INSERT: id[int4]:2 toasted_col1[text]:(null) rand1[float8]:0.783099223393947 toasted_col2[text]:000100020003000400050006000700080009001000110012001300140015001600170018001900200021002200
+ COMMIT
+ BEGIN
+ table "xpto": UPDATE: id[int4]:1 toasted_col1[text]:1234567891011121314151617181920212223242526272829303132333435363738394041424344454647484950515253545556575859606162636465666768697071727374757677787
+ COMMIT
+ BEGIN
+ table "xpto": UPDATE: id[int4]:1 toasted_col1[text]:(unchanged-toast-datum) rand1[float8]:123.456 toasted_col2[text]:(unchanged-toast-datum) rand2[float8]:0.394382926635444
+ COMMIT
+ BEGIN
+ table "xpto": DELETE: id[int4]:1
+ COMMIT
+ BEGIN
+ COMMIT
+ BEGIN
+ COMMIT
+ BEGIN
+ COMMIT
+ BEGIN
+ table "toasted_key": INSERT: id[int4]:1 toasted_key[text]:1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012
+ COMMIT
+ BEGIN
+ table "toasted_key": UPDATE: id[int4]:1 toasted_key[text]:(unchanged-toast-datum) toasted_col1[text]:(unchanged-toast-datum) toasted_col2[text]:98765432109876543210987654321098765432109876543210987654
+ COMMIT
+ BEGIN
+ table "toasted_key": UPDATE: old-key: toasted_key[text]:123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234
+ COMMIT
+ BEGIN
+ table "toasted_key": DELETE: toasted_key[text]:123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123
+ COMMIT
+(35 rows)
+
+SELECT pg_drop_replication_slot('regression_slot');
+ pg_drop_replication_slot 
+--------------------------
+ 
+(1 row)
+
+DROP EXTENSION test_decoding;

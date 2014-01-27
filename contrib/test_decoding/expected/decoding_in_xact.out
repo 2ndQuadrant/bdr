@@ -1,0 +1,64 @@
+CREATE EXTENSION test_decoding;
+ERROR:  extension "test_decoding" already exists
+-- predictability
+SET synchronous_commit = on;
+BEGIN;
+SELECT txid_current() = 0;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT 'init' FROM pg_create_decoding_replication_slot('regression_slot', 'test_decoding');
+ERROR:  cannot perform changeset extraction in transaction that has performed writes
+ROLLBACK;
+SELECT 'init' FROM pg_create_decoding_replication_slot('regression_slot', 'test_decoding');
+ ?column? 
+----------
+ init
+(1 row)
+
+BEGIN;
+SELECT txid_current() = 0;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT data FROM pg_decoding_slot_get_changes('regression_slot', 'now', 'include-xids', '0');
+ERROR:  cannot perform changeset extraction in transaction that has performed writes
+ROLLBACK;
+BEGIN;
+SELECT data FROM pg_decoding_slot_get_changes('regression_slot', 'now', 'include-xids', '0');
+ data 
+------
+(0 rows)
+
+COMMIT;
+BEGIN;
+COMMIT;
+SELECT data FROM pg_decoding_slot_get_changes('regression_slot', 'now', 'include-xids', '0');
+ data 
+------
+(0 rows)
+
+SELECT 'stop' FROM pg_drop_replication_slot('regression_slot');
+ ?column? 
+----------
+ stop
+(1 row)
+
+BEGIN;
+SELECT 'init' FROM pg_create_decoding_replication_slot('regression_slot', 'test_decoding');
+ ?column? 
+----------
+ init
+(1 row)
+
+COMMIT;
+SELECT 'stop' FROM pg_drop_replication_slot('regression_slot');
+ ?column? 
+----------
+ stop
+(1 row)
+

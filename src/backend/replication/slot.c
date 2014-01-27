@@ -43,6 +43,7 @@
 #include "miscadmin.h"
 #include "replication/slot.h"
 #include "storage/fd.h"
+#include "storage/proc.h"
 #include "storage/procarray.h"
 
 /*
@@ -356,6 +357,11 @@ ReplicationSlotRelease(void)
 		SpinLockRelease(&slot->mutex);
 		MyReplicationSlot = NULL;
 	}
+
+	/* might not have been set when we've been a plain slot */
+	LWLockAcquire(ProcArrayLock, LW_EXCLUSIVE);
+	MyPgXact->vacuumFlags &= ~PROC_IN_LOGICAL_DECODING;
+	LWLockRelease(ProcArrayLock);
 }
 
 /*
@@ -461,7 +467,7 @@ ReplicationSlotDrop(const char *name)
 	 * Slot is dead and doesn't prevent resource removal anymore, recompute
 	 * limits.
 	 */
-	ReplicationSlotsComputeRequiredXmin();
+	ReplicationSlotsComputeRequiredXmin(false);
 	ReplicationSlotsComputeRequiredLSN();
 
 	/*
@@ -522,18 +528,22 @@ ReplicationSlotMarkDirty(void)
  * Compute the oldest xmin across all slots and store it in the ProcArray.
  */
 void
-ReplicationSlotsComputeRequiredXmin(void)
+ReplicationSlotsComputeRequiredXmin(bool already_locked)
 {
 	int			i;
 	TransactionId agg_xmin = InvalidTransactionId;
+	TransactionId agg_catalog_xmin = InvalidTransactionId;
 
 	Assert(ReplicationSlotCtl != NULL);
 
-	LWLockAcquire(ReplicationSlotControlLock, LW_SHARED);
+	if (!already_locked)
+		LWLockAcquire(ReplicationSlotControlLock, LW_SHARED);
+
 	for (i = 0; i < max_replication_slots; i++)
 	{
 		ReplicationSlot *s = &ReplicationSlotCtl->replication_slots[i];
 		TransactionId	effective_xmin;
+		TransactionId	effective_catalog_xmin;
 
 		if (!s->in_use)
 			continue;
@@ -543,6 +553,7 @@ ReplicationSlotsComputeRequiredXmin(void)
 
 			SpinLockAcquire(&s->mutex);
 			effective_xmin = vslot->effective_xmin;
+			effective_catalog_xmin = vslot->effective_catalog_xmin;
 			SpinLockRelease(&s->mutex);
 		}
 
@@ -551,10 +562,18 @@ ReplicationSlotsComputeRequiredXmin(void)
 			(!TransactionIdIsValid(agg_xmin) ||
 			 TransactionIdPrecedes(effective_xmin, agg_xmin)))
 			agg_xmin = effective_xmin;
-	}
-	LWLockRelease(ReplicationSlotControlLock);
 
-	ProcArraySetReplicationSlotXmin(agg_xmin);
+		/* check the catalog xmin */
+		if (TransactionIdIsValid(effective_catalog_xmin) &&
+			(!TransactionIdIsValid(agg_catalog_xmin) ||
+			 TransactionIdPrecedes(effective_catalog_xmin, agg_catalog_xmin)))
+			agg_catalog_xmin = effective_catalog_xmin;
+	}
+
+	if (!already_locked)
+		LWLockRelease(ReplicationSlotControlLock);
+
+	ProcArraySetReplicationSlotXmin(agg_xmin, agg_catalog_xmin, already_locked);
 }
 
 /*
@@ -596,6 +615,110 @@ ReplicationSlotsComputeRequiredLSN(void)
 }
 
 /*
+ * Compute the oldest WAL LSN required by *logical* decoding slots..
+ *
+ * Returns InvalidXLogRecPtr if logical decoding is disabled or no logicals
+ * slots exist.
+ *
+ * NB: this returns a value >= ReplicationSlotsComputeRequiredLSN(), since it
+ * ignores physical replication slots.
+ *
+ * The results aren't required frequently, so we don't maintain a precomputed
+ * value like we do for ComputeRequiredLSN() and ComputeRequiredXmin().
+ */
+XLogRecPtr
+ReplicationSlotsComputeLogicalRestartLSN(void)
+{
+	XLogRecPtr	result = InvalidXLogRecPtr;
+	int			i;
+
+	if (max_replication_slots <= 0)
+		return InvalidXLogRecPtr;
+
+	LWLockAcquire(ReplicationSlotControlLock, LW_SHARED);
+
+	for (i = 0; i < max_replication_slots; i++)
+	{
+		volatile ReplicationSlot *s;
+		XLogRecPtr		restart_lsn;
+
+		s = &ReplicationSlotCtl->replication_slots[i];
+
+		/* cannot change while ReplicationSlotCtlLock is held */
+		if (!s->in_use)
+			continue;
+
+		/* we're only interested in logical slots */
+		if (s->data.database == InvalidOid)
+			continue;
+
+		/* read once, it's ok if it increases while we're checking */
+		SpinLockAcquire(&s->mutex);
+		restart_lsn = s->data.restart_lsn;
+		SpinLockRelease(&s->mutex);
+
+		if (result == InvalidXLogRecPtr ||
+			restart_lsn < result)
+			result = restart_lsn;
+	}
+
+	LWLockRelease(ReplicationSlotControlLock);
+
+	return result;
+}
+
+/*
+ * ReplicationSlotsCountDBSlots -- count the number of slots that refer to the
+ * passed database oid.
+ *
+ * Returns true if there are any slots referencing the database. *nslots will
+ * be set to the absolute number of slots in the database, *nactive to ones
+ * currently active.
+ */
+bool
+ReplicationSlotsCountDBSlots(Oid dboid, int *nslots, int *nactive)
+{
+	int			i;
+
+	*nslots = *nactive = 0;
+
+	if (max_replication_slots <= 0)
+		return false;
+
+	LWLockAcquire(ReplicationSlotControlLock, LW_SHARED);
+	for (i = 0; i < max_replication_slots; i++)
+	{
+		volatile ReplicationSlot *s;
+
+		s = &ReplicationSlotCtl->replication_slots[i];
+
+		/* cannot change while ReplicationSlotCtlLock is held */
+		if (!s->in_use)
+			continue;
+
+		/* not database specific, skip */
+		if (s->data.database == InvalidOid)
+
+		/* not our database, skip */
+		if (s->data.database != dboid)
+			continue;
+
+		/* count slots with spinlock held */
+		SpinLockAcquire(&s->mutex);
+		(*nslots)++;
+		if (s->active)
+			(*nactive)++;
+		SpinLockRelease(&s->mutex);
+	}
+	LWLockRelease(ReplicationSlotControlLock);
+
+	if (*nslots > 0)
+		return true;
+	return false;
+}
+
+
+/*
  * Check whether the server's configuration supports using replication
  * slots.
  */
@@ -611,6 +734,31 @@ CheckSlotRequirements(void)
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("replication slots can only be used if wal_level >= archive")));
+}
+
+/*
+ * Make sure this backend hasn't acquired a replication slot when exiting.
+ */
+void
+ReplicationSlotAtProcExit(void)
+{
+	if (MyReplicationSlot && MyReplicationSlot->active)
+	{
+		/*
+		 * Acquire spinlock so other backends are guaranteed to see this in
+		 * time - we cannot generally acquire the lwlock here since we might
+		 * be still holding it in an error path.
+		 */
+		SpinLockAcquire(&MyReplicationSlot->mutex);
+		MyReplicationSlot->active = false;
+		SpinLockRelease(&MyReplicationSlot->mutex);
+
+		/* might not have been set when we've been a plain slot */
+		LWLockAcquire(ProcArrayLock, LW_EXCLUSIVE);
+		MyPgXact->vacuumFlags &= ~PROC_IN_LOGICAL_DECODING;
+		LWLockRelease(ProcArrayLock);
+	}
+	MyReplicationSlot = NULL;
 }
 
 /*
@@ -723,7 +871,7 @@ StartupReplicationSlots(XLogRecPtr checkPointRedo)
 		return;
 
 	/* Now that we have recovered all the data, compute replication xmin */
-	ReplicationSlotsComputeRequiredXmin();
+	ReplicationSlotsComputeRequiredXmin(false);
 	ReplicationSlotsComputeRequiredLSN();
 }
 
@@ -1052,6 +1200,13 @@ RestoreSlotFromDisk(const char *name)
 
 		/* initialize in memory state */
 		slot->effective_xmin = cp.slotdata.xmin;
+		slot->effective_catalog_xmin = cp.slotdata.catalog_xmin;
+
+		slot->candidate_catalog_xmin = InvalidTransactionId;
+		slot->candidate_xmin_lsn = InvalidXLogRecPtr;
+		slot->candidate_restart_lsn = InvalidXLogRecPtr;
+		slot->candidate_restart_valid = InvalidXLogRecPtr;
+
 		slot->in_use = true;
 		slot->active = false;
 

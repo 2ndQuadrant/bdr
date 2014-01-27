@@ -22,6 +22,7 @@
 extern PGDLLIMPORT SnapshotData SnapshotSelfData;
 extern PGDLLIMPORT SnapshotData SnapshotAnyData;
 extern PGDLLIMPORT SnapshotData SnapshotToastData;
+extern PGDLLIMPORT SnapshotData CatalogSnapshotData;
 
 #define SnapshotSelf		(&SnapshotSelfData)
 #define SnapshotAny			(&SnapshotAnyData)
@@ -37,7 +38,8 @@ extern PGDLLIMPORT SnapshotData SnapshotToastData;
 
 /* This macro encodes the knowledge of which snapshots are MVCC-safe */
 #define IsMVCCSnapshot(snapshot)  \
-	((snapshot)->satisfies == HeapTupleSatisfiesMVCC)
+	((snapshot)->satisfies == HeapTupleSatisfiesMVCC || \
+	 (snapshot)->satisfies == HeapTupleSatisfiesMVCCDuringDecoding)
 
 /*
  * HeapTupleSatisfiesVisibility
@@ -86,4 +88,23 @@ extern void HeapTupleSetHintBits(HeapTupleHeader tuple, Buffer buffer,
 					 uint16 infomask, TransactionId xid);
 extern bool HeapTupleHeaderIsOnlyLocked(HeapTupleHeader tuple);
 
+/* Support for catalog timetravel */
+struct HTAB;
+extern bool HeapTupleSatisfiesMVCCDuringDecoding(HeapTuple htup,
+												 Snapshot snapshot, Buffer buffer);
+extern void SetupDecodingSnapshots(Snapshot snapshot_now, struct HTAB *tuplecids);
+extern void RevertFromDecodingSnapshots(bool is_error);
+extern void SuspendDecodingSnapshots(void);
+extern void UnSuspendDecodingSnapshots(void);
+extern bool DecodingSnapshotsActive(void);
+
+/*
+ * To avoid leaking to much knowledge about reorderbuffer implementation
+ * details this is implemented in reorderbuffer.c not tqual.c.
+ */
+extern bool ResolveCminCmaxDuringDecoding(struct HTAB *tuplecid_data,
+										  Snapshot snapshot,
+										  HeapTuple htup,
+										  Buffer buffer,
+										  CommandId *cmin, CommandId *cmax);
 #endif   /* TQUAL_H */

@@ -44,6 +44,7 @@
 #include "access/multixact.h"
 #include "access/transam.h"
 #include "access/visibilitymap.h"
+#include "catalog/catalog.h"
 #include "catalog/storage.h"
 #include "commands/dbcommands.h"
 #include "commands/vacuum.h"
@@ -208,6 +209,8 @@ lazy_vacuum_rel(Relation onerel, VacuumStmt *vacstmt,
 						  vacstmt->multixact_freeze_min_age,
 						  vacstmt->multixact_freeze_table_age,
 						  onerel->rd_rel->relisshared,
+						  IsSystemRelation(onerel)
+						  || RelationIsAccessibleInLogicalDecoding(onerel),
 						  &OldestXmin, &FreezeLimit, &xidFullScanLimit,
 						  &MultiXactCutoff, &mxactFullScanLimit);
 

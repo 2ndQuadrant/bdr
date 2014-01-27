@@ -1,0 +1,3 @@
+The test_decoding extension is a plug-in for changeset extraction / logical
+replication in PostgreSQL. See the main changeset extraction documentation,
+source comments, and the contrib docs entry for this module.
