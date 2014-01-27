@@ -1884,10 +1884,21 @@ retry1:
 				port->cmdline_options = pstrdup(valptr);
 			else if (strcmp(nameptr, "replication") == 0)
 			{
-				if (!parse_bool(valptr, &am_walsender))
+				/*
+				 * Due to backward compatibility concerns replication is a
+				 * bybrid beast which allows the value to be either a boolean
+				 * or the string 'database'. The latter connects to a specific
+				 * database which is e.g. required for changeset extraction.
+				 */
+				if (strcmp(valptr, "database") == 0)
+				{
+					am_walsender = true;
+					am_db_walsender = true;
+				}
+				else if (!parse_bool(valptr, &am_walsender))
 					ereport(FATAL,
 							(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-							 errmsg("invalid value for boolean option \"replication\"")));
+							 errmsg("invalid value for option \"replication\", legal values are false, 0, true, 1 or database")));
 			}
 			else
 			{
@@ -1968,8 +1979,12 @@ retry1:
 	if (strlen(port->user_name) >= NAMEDATALEN)
 		port->user_name[NAMEDATALEN - 1] = '\0';
 
-	/* Walsender is not related to a particular database */
-	if (am_walsender)
+	/*
+	 * Generic walsender, e.g. for streaming replication, is not connected to a
+	 * particular database. But walsenders used for logical replication need to
+	 * connect to a specific database.
+	 */
+	if (am_walsender && !am_db_walsender)
 		port->database_name[0] = '\0';
 
 	/*

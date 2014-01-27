@@ -275,11 +275,11 @@ StreamLog(void)
 				progname, "IDENTIFY_SYSTEM", PQerrorMessage(conn));
 		disconnect_and_exit(1);
 	}
-	if (PQntuples(res) != 1 || PQnfields(res) != 3)
+	if (PQntuples(res) != 1 || PQnfields(res) < 3)
 	{
 		fprintf(stderr,
-				_("%s: could not identify system: got %d rows and %d fields, expected %d rows and %d fields\n"),
-				progname, PQntuples(res), PQnfields(res), 1, 3);
+				_("%s: could not identify system: got %d rows and %d fields, expected 1 row and 3 or more fields\n"),
+				progname, PQntuples(res), PQnfields(res));
 		disconnect_and_exit(1);
 	}
 	servertli = atoi(PQgetvalue(res, 0, 1));

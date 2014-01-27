@@ -108,4 +108,7 @@ extern void replication_scanner_finish(void);
 
 extern Node *replication_parse_result;
 
+/* logical wal sender data gathering functions */
+extern XLogRecPtr WalSndWaitForWal(XLogRecPtr loc);
+
 #endif   /* _WALSENDER_PRIVATE_H */
