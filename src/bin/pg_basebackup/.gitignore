@@ -1,2 +1,4 @@
 /pg_basebackup
 /pg_receivexlog
+/pg_receivellog
+/pg_recvlogical
