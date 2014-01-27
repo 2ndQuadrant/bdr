@@ -1,0 +1,4 @@
+\copy (SELECT data FROM pg_decoding_slot_get_changes('regression_slot', 'now', 'include-xids', '0')) TO '/tmp/testresult';
+ERROR:  replication slots can only be used if max_replication_slots > 0
+SELECT pg_drop_replication_slot('regression_slot');
+ERROR:  replication slots can only be used if max_replication_slots > 0

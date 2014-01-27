@@ -1,0 +1,7 @@
+-- will fail if wal_level < logical, separate expected file
+SELECT 'stop' FROM pg_drop_replication_slot('regression_slot');
+ERROR:  replication slots can only be used if max_replication_slots > 0
+SELECT 'init' FROM pg_create_decoding_replication_slot('regression_slot', 'test_decoding');
+ERROR:  replication slots can only be used if max_replication_slots > 0
+COPY (SELECT data FROM pg_decoding_slot_get_changes('regression_slot', 'now', 'include-xids', '0')) TO STDOUT;
+ERROR:  replication slots can only be used if max_replication_slots > 0

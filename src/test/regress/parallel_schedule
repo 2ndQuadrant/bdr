@@ -8,6 +8,8 @@
 # run tablespace by itself, and first, because it forces a checkpoint;
 # we'd prefer not to have checkpoints later in the tests because that
 # interferes with crash-recovery testing.
+test: init_logical
+
 test: tablespace
 
 # ----------
@@ -109,3 +111,5 @@ test: plancache limit plpgsql copy2 temp domain rangefuncs prepare without_oid c
 
 # run stats by itself because its delay may be insufficient under heavy load
 test: stats
+
+test: end_logical
