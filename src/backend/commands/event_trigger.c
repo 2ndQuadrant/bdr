@@ -1217,7 +1217,7 @@ pg_event_trigger_dropped_objects(PG_FUNCTION_ARGS)
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 		 errmsg("%s can only be called in a sql_drop event trigger function",
-				"pg_event_trigger_dropped_objects()")));
+				PG_FUNCNAME_MACRO)));
 
 	/* check to see if caller supports us returning a tuplestore */
 	if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo))
@@ -1348,7 +1348,7 @@ pg_event_trigger_get_creation_commands(PG_FUNCTION_ARGS)
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 				 errmsg("%s can only be called in an event trigger function",
-						"pg_event_trigger_normalized_command")));
+						PG_FUNCNAME_MACRO)));
 
 	/* check to see if caller supports us returning a tuplestore */
 	if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo))
