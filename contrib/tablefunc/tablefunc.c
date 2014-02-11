@@ -41,6 +41,7 @@
 #include "lib/stringinfo.h"
 #include "miscadmin.h"
 #include "utils/builtins.h"
+#include "utils/ruleutils.h"
 
 #include "tablefunc.h"
 

@@ -22,6 +22,7 @@
 #include "parser/scanner.h"
 #include "parser/scansup.h"
 #include "utils/builtins.h"
+#include "utils/ruleutils.h"
 
 
 /* Location tracking support --- simpler than bison's default */
