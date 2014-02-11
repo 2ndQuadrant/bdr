@@ -13,6 +13,7 @@
 #ifndef RULEUTILS_H
 #define RULEUTILS_H
 
+#include "catalog/pg_trigger.h"
 #include "nodes/nodes.h"
 #include "nodes/parsenodes.h"
 #include "nodes/pg_list.h"
@@ -29,6 +30,9 @@ extern void pg_get_indexdef_detailed(Oid indexrelid,
 						 char **reloptions,
 						 char **tablespace,
 						 char **whereClause);
+extern char *pg_get_trigger_whenclause(Form_pg_trigger trigrec,
+						  Node *whenClause, bool pretty);
+
 
 extern char *pg_get_constraintdef_string(Oid constraintId, bool fullCommand);
 extern char *pg_get_viewstmt_definition(Query *viewParse);

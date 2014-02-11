@@ -142,7 +142,4 @@ typedef FormData_pg_trigger *Form_pg_trigger;
 #define TRIGGER_TYPE_MATCHES(type, level, timing, event) \
 	(((type) & (TRIGGER_TYPE_LEVEL_MASK | TRIGGER_TYPE_TIMING_MASK | (event))) == ((level) | (timing) | (event)))
 
-/* XXX misplaced */
-extern char *pg_get_trigger_whenclause(Form_pg_trigger trigrec, Node *whenClause, bool pretty);
-
 #endif   /* PG_TRIGGER_H */
