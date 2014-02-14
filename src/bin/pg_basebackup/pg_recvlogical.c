@@ -285,13 +285,6 @@ StreamLog(void)
 			struct timeval timeout;
 			struct timeval *timeoutptr;
 
-
-			{
-				now = feGetCurrentTimestamp();
-				if (!sendFeedback(conn, logoff, now, false, false))
-					goto error;
-			}
-
 			FD_ZERO(&input_mask);
 			FD_SET(PQsocket(conn), &input_mask);
 			if (standby_message_timeout)
@@ -384,7 +377,7 @@ StreamLog(void)
 			if (replyRequested)
 			{
 				now = feGetCurrentTimestamp();
-				if (!sendFeedback(conn, logoff, now, false, false))
+				if (!sendFeedback(conn, logoff, now, true, false))
 					goto error;
 				last_status = now;
 			}
