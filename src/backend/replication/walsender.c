@@ -191,6 +191,7 @@ typedef void (*WalSndSendData)(void);
 static void WalSndLoop(WalSndSendData send_data);
 static void InitWalSenderSlot(void);
 static void WalSndKill(int code, Datum arg);
+static void WalSndShutdown(void);
 static void XLogSendPhysical(void);
 static void XLogSendLogical(void);
 static void WalSndDone(WalSndSendData send_data);
@@ -205,6 +206,7 @@ static void ProcessStandbyReplyMessage(void);
 static void ProcessStandbyHSFeedbackMessage(void);
 static void ProcessRepliesIfAny(void);
 static void WalSndKeepalive(bool requestReply);
+static void WalSndCheckTimeOut(void);
 static void WalSndPrepareWrite(LogicalDecodingContext *ctx, XLogRecPtr lsn, TransactionId xid, bool last_write);
 static void WalSndWriteData(LogicalDecodingContext *ctx, XLogRecPtr lsn, TransactionId xid, bool last_write);
 static void XLogRead(char *buf, XLogRecPtr startptr, Size count);
@@ -260,6 +262,22 @@ WalSndErrorCleanup()
 
 	/* Revert back to startup state */
 	WalSndSetState(WALSNDSTATE_STARTUP);
+}
+
+static void
+WalSndShutdown(void)
+{
+	/*
+	 * Get here on send failure.  Clean up and exit.
+	 *
+	 * Reset whereToSendOutput to prevent ereport from attempting to send any
+	 * more messages to the standby.
+	 */
+	if (whereToSendOutput == DestRemote)
+		whereToSendOutput = DestNone;
+
+	proc_exit(0);
+	abort();					/* keep the compiler quiet */
 }
 
 /*
@@ -992,12 +1010,13 @@ WalSndPrepareWrite(LogicalDecodingContext *ctx, XLogRecPtr lsn, TransactionId xi
 /*
  * LogicalDecodingContext 'write' callback.
  *
- * Actually write out data previously prepared by WalSndPrepareWrite out to the
- * network, take as long as needed but process replies from the other side
+ * Actually write out data previously prepared by WalSndPrepareWrite out to
+ * the network, take as long as needed but process replies from the other side
  * during that.
  */
 static void
-WalSndWriteData(LogicalDecodingContext *ctx, XLogRecPtr lsn, TransactionId xid, bool last_write)
+WalSndWriteData(LogicalDecodingContext *ctx, XLogRecPtr lsn, TransactionId xid,
+				bool last_write)
 {
 	/* output previously gathered data in a CopyData packet */
 	pq_putmessage_noblock('d', ctx->out->data, ctx->out->len);
@@ -1032,11 +1051,11 @@ WalSndWriteData(LogicalDecodingContext *ctx, XLogRecPtr lsn, TransactionId xid, 
 
 		CHECK_FOR_INTERRUPTS();
 
-		/* Check for input from the client */
-		ProcessRepliesIfAny();
-
 		/* Clear any already-pending wakeups */
 		ResetLatch(&MyWalSnd->latch);
+
+		/* Check for input from the client */
+		ProcessRepliesIfAny();
 
 		/* Try to flush pending output to the client */
 		if (pq_flush_if_writable() != 0)
@@ -1046,11 +1065,6 @@ WalSndWriteData(LogicalDecodingContext *ctx, XLogRecPtr lsn, TransactionId xid, 
 		if (!pq_is_send_pending())
 			break;
 
-		/*
-		 * Note we don't set a timeout here.  It would be pointless, because
-		 * if the socket is not writable there's not much we can do elsewhere
-		 * anyway.
-		 */
 		wakeEvents = WL_LATCH_SET | WL_POSTMASTER_DEATH |
 			WL_SOCKET_WRITEABLE | WL_SOCKET_READABLE | WL_TIMEOUT;
 
@@ -1059,6 +1073,9 @@ WalSndWriteData(LogicalDecodingContext *ctx, XLogRecPtr lsn, TransactionId xid, 
 		WaitLatchOrSocket(&MyWalSnd->latch, wakeEvents,
 						  MyProcPort->sock, sleeptime);
 		ImmediateInterruptOK = false;
+
+		/* die if timeout was reached */
+		WalSndCheckTimeOut();
 	}
 
 	/* reactivate latch so WalSndLoop knows to continue */
@@ -1077,7 +1094,8 @@ WalSndWaitForWal(XLogRecPtr loc)
 
 	/*
 	 * Fast path to avoid acquiring the spinlock in the we already know we
-	 * have enough WAL available.
+	 * have enough WAL available, particularly interesting if we're far
+	 * behind.
 	 */
 	if (RecentFlushPtr != InvalidXLogRecPtr &&
 		loc <= RecentFlushPtr)
@@ -1090,11 +1108,6 @@ WalSndWaitForWal(XLogRecPtr loc)
 		RecentFlushPtr = GetFlushRecPtr();
 	else
 		RecentFlushPtr = GetXLogReplayRecPtr(NULL);
-
-	/*
-	 * Waiting for new WAL. Since we need to wait, we're now caught up.
-	 */
-	WalSndCaughtUp = true;
 
 	for (;;)
 	{
@@ -1152,6 +1165,9 @@ WalSndWaitForWal(XLogRecPtr loc)
 		if (loc <= RecentFlushPtr)
 			break;
 
+		/* Waiting for new WAL. Since we need to wait, we're now caught up. */
+		WalSndCaughtUp = true;
+
 		/*
 		 * Try to flush pending output to the client and also wait for the
 		 * socket becoming writable, if there's still pending output after an
@@ -1199,11 +1215,8 @@ WalSndWaitForWal(XLogRecPtr loc)
 						  MyProcPort->sock, sleeptime);
 		ImmediateInterruptOK = false;
 
-		/*
-		 * The equivalent code in WalSndLoop checks here that replication
-		 * timeout hasn't been exceeded.  We don't do that here.   XXX explain
-		 * why.
-		 */
+		/* die if timeout was reached */
+		WalSndCheckTimeOut();
 	}
 
 	/* reactivate latch so WalSndLoop knows to continue */
@@ -1650,6 +1663,28 @@ ProcessStandbyHSFeedbackMessage(void)
 		MyPgXact->xmin = feedbackXmin;
 }
 
+static void
+WalSndCheckTimeOut(void)
+{
+	TimestampTz timeout;
+
+	timeout = TimestampTzPlusMilliseconds(last_reply_timestamp,
+										  wal_sender_timeout);
+
+	if (wal_sender_timeout > 0 && GetCurrentTimestamp() >= timeout)
+	{
+		/*
+		 * Since typically expiration of replication timeout means
+		 * communication problem, we don't send the error message to
+		 * the standby.
+		 */
+		ereport(COMMERROR,
+				(errmsg("terminating walsender process due to replication timeout")));
+
+		WalSndShutdown();
+	}
+}
+
 /* Main loop of walsender process that streams the WAL over Copy messages. */
 static void
 WalSndLoop(WalSndSendData send_data)
@@ -1716,7 +1751,7 @@ WalSndLoop(WalSndSendData send_data)
 
 		/* Try to flush pending output to the client */
 		if (pq_flush_if_writable() != 0)
-			goto send_failure;
+			WalSndShutdown();
 
 		/* If nothing remains to be sent right now ... */
 		if (WalSndCaughtUp && !pq_is_send_pending())
@@ -1757,17 +1792,16 @@ WalSndLoop(WalSndSendData send_data)
 		 */
 		if ((WalSndCaughtUp && !streamingDoneSending) || pq_is_send_pending())
 		{
-			TimestampTz timeout = 0;
 			long		sleeptime = 10000;		/* 10 s */
 			int			wakeEvents;
 
 			wakeEvents = WL_LATCH_SET | WL_POSTMASTER_DEATH | WL_TIMEOUT |
 				WL_SOCKET_READABLE;
 
-			if (pq_is_send_pending())
-				wakeEvents |= WL_SOCKET_WRITEABLE;
-			else if (wal_sender_timeout > 0 && !waiting_for_ping_response)
+			if (wal_sender_timeout > 0 && !waiting_for_ping_response)
 			{
+				TimestampTz timeout;
+
 				/*
 				 * If half of wal_sender_timeout has lapsed without receiving
 				 * any reply from standby, send a keep-alive message to
@@ -1781,17 +1815,19 @@ WalSndLoop(WalSndSendData send_data)
 					waiting_for_ping_response = true;
 					/* Try to flush pending output to the client */
 					if (pq_flush_if_writable() != 0)
-						break;
+						WalSndShutdown();
 				}
 			}
 
-			/* Determine time until replication timeout */
+			if (pq_is_send_pending())
+				wakeEvents |= WL_SOCKET_WRITEABLE;
+
+			/*
+			 * Wake up regularly enough to check whether wal_sender_timeout
+			 * has passed.
+			 */
 			if (wal_sender_timeout > 0)
-			{
-				timeout = TimestampTzPlusMilliseconds(last_reply_timestamp,
-													  wal_sender_timeout);
 				sleeptime = 1 + (wal_sender_timeout / 10);
-			}
 
 			/* Sleep until something happens or we time out */
 			ImmediateInterruptOK = true;
@@ -1805,34 +1841,10 @@ WalSndLoop(WalSndSendData send_data)
 			 * possibility that the client replied just as we reached the
 			 * timeout ... he's supposed to reply *before* that.
 			 */
-			if (wal_sender_timeout > 0 && GetCurrentTimestamp() >= timeout)
-			{
-				/*
-				 * Since typically expiration of replication timeout means
-				 * communication problem, we don't send the error message to
-				 * the standby.
-				 */
-				ereport(COMMERROR,
-						(errmsg("terminating walsender process due to replication timeout")));
-				goto send_failure;
-			}
+			WalSndCheckTimeOut();
 		}
 	}
 	return;
-
-send_failure:
-
-	/*
-	 * Get here on send failure.  Clean up and exit.
-	 *
-	 * Reset whereToSendOutput to prevent ereport from attempting to send any
-	 * more messages to the standby.
-	 */
-	if (whereToSendOutput == DestRemote)
-		whereToSendOutput = DestNone;
-
-	proc_exit(0);
-	abort();					/* keep the compiler quiet */
 }
 
 /* Initialize a per-walsender data structure for this walsender process */
