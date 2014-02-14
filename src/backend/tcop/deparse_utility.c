@@ -37,7 +37,9 @@
 #include "catalog/pg_depend.h"
 #include "catalog/pg_inherits.h"
 #include "catalog/pg_operator.h"
+#include "catalog/pg_opclass.h"
 #include "catalog/pg_proc.h"
+#include "catalog/pg_range.h"
 #include "catalog/pg_trigger.h"
 #include "catalog/pg_type.h"
 #include "commands/defrem.h"
@@ -1472,6 +1474,104 @@ deparse_CreateEnumStmt(Oid objectId, Node *parsetree)
 	return enumtype;
 }
 
+static ObjTree *
+deparse_CreateRangeStmt(Oid objectId, Node *parsetree)
+{
+	ObjTree	   *range;
+	ObjTree	   *tmp;
+	List	   *definition = NIL;
+	Relation	pg_range;
+	HeapTuple	rangeTup;
+	Form_pg_range rangeForm;
+	ScanKeyData key[1];
+	SysScanDesc scan;
+
+	pg_range = heap_open(RangeRelationId, RowExclusiveLock);
+
+	ScanKeyInit(&key[0],
+				Anum_pg_range_rngtypid,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(objectId));
+
+	scan = systable_beginscan(pg_range, RangeTypidIndexId, true,
+							  NULL, 1, key);
+
+	rangeTup = systable_getnext(scan);
+	if (!HeapTupleIsValid(rangeTup))
+		elog(ERROR, "cache lookup failed for range with type oid %u",
+			 objectId);
+
+	rangeForm = (Form_pg_range) GETSTRUCT(rangeTup);
+
+	range = new_objtree_VA("CREATE TYPE %{identity}D AS RANGE (%{definition:, }s)", 0);
+	tmp = new_objtree_for_qualname_id(TypeRelationId, objectId);
+	append_object_object(range, "identity", tmp);
+
+	/* SUBTYPE */
+	tmp = new_objtree_for_qualname_id(TypeRelationId,
+									  rangeForm->rngsubtype);
+	tmp = new_objtree_VA("SUBTYPE = %{type}D",
+						 2,
+						 "clause", ObjTypeString, "subtype",
+						 "type", ObjTypeObject, tmp);
+	definition = lappend(definition, new_object_object(tmp));
+
+	/* SUBTYPE_OPCLASS */
+	if (OidIsValid(rangeForm->rngsubopc))
+	{
+		tmp = new_objtree_for_qualname_id(OperatorClassRelationId,
+										  rangeForm->rngsubopc);
+		tmp = new_objtree_VA("SUBTYPE_OPCLASS = %{opclass}D",
+							 2,
+							 "clause", ObjTypeString, "opclass",
+							 "opclass", ObjTypeObject, tmp);
+		definition = lappend(definition, new_object_object(tmp));
+	}
+
+	/* COLLATION */
+	if (OidIsValid(rangeForm->rngcollation))
+	{
+		tmp = new_objtree_for_qualname_id(CollationRelationId,
+										  rangeForm->rngcollation);
+		tmp = new_objtree_VA("COLLATION = %{collation}D",
+							 2,
+							 "clause", ObjTypeString, "collation",
+							 "collation", ObjTypeObject, tmp);
+		definition = lappend(definition, new_object_object(tmp));
+	}
+
+	/* CANONICAL */
+	if (OidIsValid(rangeForm->rngcanonical))
+	{
+		tmp = new_objtree_for_qualname_id(ProcedureRelationId,
+										  rangeForm->rngcanonical);
+		tmp = new_objtree_VA("CANONICAL = %{canonical}D",
+							 2,
+							 "clause", ObjTypeString, "canonical",
+							 "canonical", ObjTypeObject, tmp);
+		definition = lappend(definition, new_object_object(tmp));
+	}
+
+	/* SUBTYPE_DIFF */
+	if (OidIsValid(rangeForm->rngsubdiff))
+	{
+		tmp = new_objtree_for_qualname_id(ProcedureRelationId,
+										  rangeForm->rngsubdiff);
+		tmp = new_objtree_VA("SUBTYPE_DIFF = %{subtype_diff}D",
+							 2,
+							 "clause", ObjTypeString, "subtype_diff",
+							 "subtype_diff", ObjTypeObject, tmp);
+		definition = lappend(definition, new_object_object(tmp));
+	}
+
+	append_array_object(range, "definition", definition);
+
+	systable_endscan(scan);
+	heap_close(pg_range, RowExclusiveLock);
+
+	return range;
+}
+
 static inline ObjElem *
 deparse_Seq_Cache(ObjTree *parent, Form_pg_sequence seqdata)
 {
@@ -1978,7 +2078,7 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_CreateRangeStmt:	/* CREATE TYPE AS RANGE */
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			command = deparse_CreateRangeStmt(objectId, parsetree);
 			break;
 
 		case T_AlterEnumStmt:
