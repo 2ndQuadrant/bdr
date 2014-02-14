@@ -152,7 +152,7 @@ static StringInfoData tmpbuf;
 static TimestampTz last_reply_timestamp;
 
 /* Have we sent a heartbeat message asking for reply, since last reply? */
-static bool ping_sent = false;
+static bool waiting_for_ping_response = false;
 
 /*
  * While streaming WAL in Copy mode, streamingDoneSending is set to true
@@ -1142,10 +1142,10 @@ WalSndWaitForWal(XLogRecPtr loc)
 		 * possibly are waiting for a later location. So we send pings
 		 * containing the flush location every now and then.
 		 */
-		if (MyWalSnd->flush < sentPtr && !ping_sent)
+		if (MyWalSnd->flush < sentPtr && !waiting_for_ping_response)
 		{
 			WalSndKeepalive(true);
-			ping_sent = true;
+			waiting_for_ping_response = true;
 		}
 
 		/* check whether we're done */
@@ -1168,7 +1168,7 @@ WalSndWaitForWal(XLogRecPtr loc)
 		/* Determine time until replication timeout */
 		if (wal_sender_timeout > 0)
 		{
-			if (!ping_sent)
+			if (!waiting_for_ping_response)
 			{
 				TimestampTz timeout;
 
@@ -1182,7 +1182,7 @@ WalSndWaitForWal(XLogRecPtr loc)
 				if (GetCurrentTimestamp() >= timeout)
 				{
 					WalSndKeepalive(true);
-					ping_sent = true;
+					waiting_for_ping_response = true;
 					wakeEvents |= WL_SOCKET_WRITEABLE;
 					/* Try to flush pending output to the client */
 					if (pq_flush_if_writable() != 0)
@@ -1391,7 +1391,7 @@ ProcessRepliesIfAny(void)
 	if (received)
 	{
 		last_reply_timestamp = GetCurrentTimestamp();
-		ping_sent = false;
+		waiting_for_ping_response = false;
 	}
 }
 
@@ -1664,7 +1664,7 @@ WalSndLoop(WalSndSendData send_data)
 
 	/* Initialize the last reply timestamp */
 	last_reply_timestamp = GetCurrentTimestamp();
-	ping_sent = false;
+	waiting_for_ping_response = false;
 
 	/*
 	 * Loop until we reach the end of this timeline or the client requests to
@@ -1766,7 +1766,7 @@ WalSndLoop(WalSndSendData send_data)
 
 			if (pq_is_send_pending())
 				wakeEvents |= WL_SOCKET_WRITEABLE;
-			else if (wal_sender_timeout > 0 && !ping_sent)
+			else if (wal_sender_timeout > 0 && !waiting_for_ping_response)
 			{
 				/*
 				 * If half of wal_sender_timeout has lapsed without receiving
@@ -1778,7 +1778,7 @@ WalSndLoop(WalSndSendData send_data)
 				if (GetCurrentTimestamp() >= timeout)
 				{
 					WalSndKeepalive(true);
-					ping_sent = true;
+					waiting_for_ping_response = true;
 					/* Try to flush pending output to the client */
 					if (pq_flush_if_writable() != 0)
 						break;
@@ -2405,7 +2405,7 @@ WalSndDone(WalSndSendData send_data)
 
 		proc_exit(0);
 	}
-	if (!ping_sent)
+	if (!waiting_for_ping_response)
 		WalSndKeepalive(true);
 }
 
