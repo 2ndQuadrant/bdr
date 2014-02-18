@@ -836,7 +836,7 @@ build_scan_key(ScanKey skey, Relation rel, Relation idxrel, HeapTuple key)
 					BTEqualStrategyNumber,
 					regop,
 					fastgetattr(key, mainattno,
-								RelationGetDescr(idxrel), &isnull));
+								RelationGetDescr(rel), &isnull));
 		if (isnull)
 			elog(ERROR, "index tuple with a null column");
 	}
