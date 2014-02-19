@@ -14,6 +14,7 @@
 #include "postgres.h"
 
 #include "utils/builtins.h"
+#include "utils/ruleutils.h"
 
 
 /*

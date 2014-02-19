@@ -655,7 +655,6 @@ extern Datum record_image_ge(PG_FUNCTION_ARGS);
 extern Datum btrecordimagecmp(PG_FUNCTION_ARGS);
 
 /* ruleutils.c */
-extern bool quote_all_identifiers;
 extern Datum pg_get_ruledef(PG_FUNCTION_ARGS);
 extern Datum pg_get_ruledef_ext(PG_FUNCTION_ARGS);
 extern Datum pg_get_viewdef(PG_FUNCTION_ARGS);
@@ -665,13 +664,10 @@ extern Datum pg_get_viewdef_name(PG_FUNCTION_ARGS);
 extern Datum pg_get_viewdef_name_ext(PG_FUNCTION_ARGS);
 extern Datum pg_get_indexdef(PG_FUNCTION_ARGS);
 extern Datum pg_get_indexdef_ext(PG_FUNCTION_ARGS);
-extern char *pg_get_indexdef_string(Oid indexrelid);
-extern char *pg_get_indexdef_columns(Oid indexrelid, bool pretty);
 extern Datum pg_get_triggerdef(PG_FUNCTION_ARGS);
 extern Datum pg_get_triggerdef_ext(PG_FUNCTION_ARGS);
 extern Datum pg_get_constraintdef(PG_FUNCTION_ARGS);
 extern Datum pg_get_constraintdef_ext(PG_FUNCTION_ARGS);
-extern char *pg_get_constraintdef_string(Oid constraintId);
 extern Datum pg_get_expr(PG_FUNCTION_ARGS);
 extern Datum pg_get_expr_ext(PG_FUNCTION_ARGS);
 extern Datum pg_get_userbyid(PG_FUNCTION_ARGS);
@@ -681,17 +677,6 @@ extern Datum pg_get_function_arguments(PG_FUNCTION_ARGS);
 extern Datum pg_get_function_identity_arguments(PG_FUNCTION_ARGS);
 extern Datum pg_get_function_result(PG_FUNCTION_ARGS);
 extern Datum pg_get_function_arg_default(PG_FUNCTION_ARGS);
-extern char *deparse_expression(Node *expr, List *dpcontext,
-				   bool forceprefix, bool showimplicit);
-extern List *deparse_context_for(const char *aliasname, Oid relid);
-extern List *deparse_context_for_planstate(Node *planstate, List *ancestors,
-							  List *rtable, List *rtable_names);
-extern List *select_rtable_names_for_explain(List *rtable,
-								Bitmapset *rels_used);
-extern const char *quote_identifier(const char *ident);
-extern char *quote_qualified_identifier(const char *qualifier,
-						   const char *ident);
-extern char *generate_collation_name(Oid collid);
 
 
 /* tid.c */
@@ -1057,11 +1042,13 @@ extern char *format_type_be_qualified(Oid type_oid);
 extern char *format_type_with_typemod(Oid type_oid, int32 typemod);
 extern Datum oidvectortypes(PG_FUNCTION_ARGS);
 extern int32 type_maximum_size(Oid type_oid, int32 typemod);
+extern void format_type_detailed(Oid type_oid, int32 typemod,
+					 char **nspname, char **typname,
+					 char **typemodstr, bool *is_array);
 
 /* quote.c */
 extern Datum quote_ident(PG_FUNCTION_ARGS);
 extern Datum quote_literal(PG_FUNCTION_ARGS);
-extern char *quote_literal_cstr(const char *rawstr);
 extern Datum quote_nullable(PG_FUNCTION_ARGS);
 
 /* guc.c */
@@ -1183,6 +1170,8 @@ extern Datum unique_key_recheck(PG_FUNCTION_ARGS);
 
 /* commands/event_trigger.c */
 extern Datum pg_event_trigger_dropped_objects(PG_FUNCTION_ARGS);
+extern Datum pg_event_trigger_get_creation_commands(PG_FUNCTION_ARGS);
+extern Datum pg_event_trigger_expand_command(PG_FUNCTION_ARGS);
 
 /* commands/extension.c */
 extern Datum pg_available_extensions(PG_FUNCTION_ARGS);

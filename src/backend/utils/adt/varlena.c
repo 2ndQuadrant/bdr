@@ -29,6 +29,7 @@
 #include "utils/bytea.h"
 #include "utils/lsyscache.h"
 #include "utils/pg_locale.h"
+#include "utils/ruleutils.h"
 
 
 /* GUC variable */

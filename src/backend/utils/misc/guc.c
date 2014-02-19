@@ -81,6 +81,7 @@
 #include "utils/plancache.h"
 #include "utils/portal.h"
 #include "utils/ps_status.h"
+#include "utils/ruleutils.h"
 #include "utils/snapmgr.h"
 #include "utils/tzparser.h"
 #include "utils/xml.h"

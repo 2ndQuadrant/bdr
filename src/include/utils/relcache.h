@@ -41,6 +41,9 @@ extern List *RelationGetIndexList(Relation relation);
 extern Oid	RelationGetOidIndex(Relation relation);
 extern List *RelationGetIndexExpressions(Relation relation);
 extern List *RelationGetIndexPredicate(Relation relation);
+/* in ruleutils.c */
+extern char *RelationGetColumnDefault(Relation rel, AttrNumber attno,
+						 List *dpcontext);
 
 typedef enum IndexAttrBitmapKind
 {

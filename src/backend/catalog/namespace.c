@@ -53,6 +53,7 @@
 #include "utils/inval.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
+#include "utils/ruleutils.h"
 #include "utils/syscache.h"
 
 
