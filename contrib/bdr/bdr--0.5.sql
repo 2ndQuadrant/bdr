@@ -161,6 +161,11 @@ DECLARE
 BEGIN
         FOR r IN SELECT * FROM pg_event_trigger_get_creation_commands()
         LOOP
+				/* ignore temporary objects */
+				IF r.schema = 'pg_temp' THEN
+					CONTINUE;
+				END IF;
+
                 INSERT INTO bdr.bdr_queued_commands
 					(obj_type, obj_identity, command, executed)
 					VALUES
