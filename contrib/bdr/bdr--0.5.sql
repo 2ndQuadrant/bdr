@@ -145,4 +145,36 @@ VALUES (
     'bdr_sequence_options'
 );
 
+CREATE TABLE bdr_queued_commands (
+    obj_type text,
+	obj_identity text,
+	command text,
+	executed bool
+);
+
+CREATE OR REPLACE FUNCTION bdr.queue_commands()
+ RETURNS event_trigger
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+        r RECORD;
+BEGIN
+        FOR r IN SELECT * FROM pg_event_trigger_get_creation_commands()
+        LOOP
+                INSERT INTO bdr.bdr_queued_commands
+					(obj_type, obj_identity, command, executed)
+					VALUES
+                        (r.object_type,
+						r.identity,
+                        pg_catalog.pg_event_trigger_expand_command(r.command),
+						'false');
+        END LOOP;
+END;
+$function$;
+
+CREATE EVENT TRIGGER queue_commands
+ON ddl_command_end
+WHEN tag IN ('create table', 'create index', 'create sequence')
+EXECUTE PROCEDURE bdr.queue_commands();
+
 RESET search_path;
