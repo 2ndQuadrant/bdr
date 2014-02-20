@@ -663,6 +663,7 @@ _PG_init(void)
 	apply_worker.bgw_start_time = BgWorkerStart_RecoveryFinished;
 	apply_worker.bgw_main = bdr_apply_main;
 	apply_worker.bgw_restart_time = 5;
+	apply_worker.bgw_notify_pid = 0;
 
 	/* Common sequence worker values */
 	sequencer_worker.bgw_flags = BGWORKER_SHMEM_ACCESS |
@@ -670,6 +671,7 @@ _PG_init(void)
 	sequencer_worker.bgw_start_time = BgWorkerStart_RecoveryFinished;
 	sequencer_worker.bgw_main = bdr_sequencer_main;
 	sequencer_worker.bgw_restart_time = 5;
+	sequencer_worker.bgw_notify_pid = 0;
 
 	foreach(c, cons)
 	{
