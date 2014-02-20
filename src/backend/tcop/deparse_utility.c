@@ -520,13 +520,19 @@ static ObjTree *
 new_objtree_for_type(ObjTree *parent, Oid typeId, int32 typmod)
 {
 	ObjTree    *typeParam;
+	Oid			typnspid;
 	char	   *typnsp;
 	char	   *typename;
 	char	   *typmodstr;
 	bool		is_array;
 
 	format_type_detailed(typeId, typmod,
-						 &typnsp, &typename, &typmodstr, &is_array);
+						 &typnspid, &typename, &typmodstr, &is_array);
+
+	if (isAnyTempNamespace(typnspid))
+		typnsp = pstrdup("pg_temp");
+	else
+		typnsp = get_namespace_name(typnspid);
 
 	/*
 	 * XXX We need this kludge to support types whose typmods include extra
@@ -558,6 +564,9 @@ new_objtree_for_type(ObjTree *parent, Oid typeId, int32 typmod)
 /*
  * A helper routine to setup %{}D and %{}O elements
  *
+ * Elements "schemaname" and "objname" are set.  If the namespace OID
+ * corresponds to a temp schema, that's set to "pg_temp".
+ *
  * The difference between those two element types is whether the objname will
  * be quoted as an identifier or not, which is not something that this routine
  * concerns itself with; that will be up to the expand function.
@@ -572,7 +581,10 @@ new_objtree_for_qualname(ObjTree *parent, Oid nspid, char *name)
 	 * We don't use new_objtree_VA here because these names don't have a "fmt"
 	 */
 	qualified = new_objtree(parent);
-	namespace = get_namespace_name(nspid);
+	if (isAnyTempNamespace(nspid))
+		namespace = pstrdup("pg_temp");
+	else
+		namespace = get_namespace_name(nspid);
 	append_string_object(qualified, "schemaname", namespace);
 	append_string_object(qualified, "objname", pstrdup(name));
 
@@ -582,6 +594,9 @@ new_objtree_for_qualname(ObjTree *parent, Oid nspid, char *name)
 /*
  * A helper routine to setup %{}D and %{}O elements, with the object specified
  * by classId/objId
+ *
+ * Elements "schemaname" and "objname" are set.  If the object is a temporary
+ * object, the schema name is set to "pg_temp".
  */
 static ObjTree *
 new_objtree_for_qualname_id(ObjTree *parent, Oid classId, Oid objectId)

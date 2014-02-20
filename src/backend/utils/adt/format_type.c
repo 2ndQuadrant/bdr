@@ -332,7 +332,7 @@ format_type_internal(Oid type_oid, int32 typemod,
  * Similar to format_type_internal, except we return each bit of information
  * separately:
  *
- * - nspname is the schema name, without quotes.
+ * - nspid is the schema OID
  *
  * - typename is set to the type name, without quotes
  *
@@ -348,7 +348,7 @@ format_type_internal(Oid type_oid, int32 typemod,
  */
 void
 format_type_detailed(Oid type_oid, int32 typemod,
-					 char **nspname, char **typname, char **typemodstr,
+					 Oid *nspid, char **typname, char **typemodstr,
 					 bool *is_array)
 {
 	HeapTuple	tuple;
@@ -383,7 +383,7 @@ format_type_detailed(Oid type_oid, int32 typemod,
 	else
 		*is_array = false;
 
-	*nspname = get_namespace_name(typeform->typnamespace);
+	*nspid = typeform->typnamespace;
 	*typname = pstrdup(NameStr(typeform->typname));
 
 	if (typemod > 0)
