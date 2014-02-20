@@ -68,6 +68,9 @@ extern void bdr_sequence_alloc(PG_FUNCTION_ARGS);
 extern void bdr_sequence_setval(PG_FUNCTION_ARGS);
 extern Datum bdr_sequence_options(PG_FUNCTION_ARGS);
 
+/* DDL replication support */
+extern void setup_queuedcmds_relid(void);
+
 /* statistic functions */
 extern void bdr_count_shmem_init(size_t nnodes);
 extern void bdr_count_set_current_node(RepNodeId node_id);

@@ -53,6 +53,7 @@ static void tuple_to_stringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple
 static void check_sequencer_wakeup(Relation rel);
 
 bool request_sequencer_wakeup = false;
+static Oid		QueuedDDLCommandsRelid = InvalidOid;
 
 void
 process_remote_begin(char *data, size_t r)
@@ -153,6 +154,83 @@ process_remote_commit(char *data, size_t r)
 	}
 }
 
+static HeapTuple
+process_queued_ddl_command(HeapTuple cmdtup)
+{
+	Relation	cmdsrel;
+	HeapTuple	newtup;
+	Datum		datum;
+	char	   *type;
+	char	   *identstr;
+	char	   *cmdstr;
+	bool		isnull;
+
+	cmdsrel = heap_open(QueuedDDLCommandsRelid, AccessShareLock);
+
+	/* fetch the object type */
+	datum = heap_getattr(cmdtup, 1,
+						 RelationGetDescr(cmdsrel),
+						 &isnull);
+	if (isnull)
+	{
+		elog(LOG, "null object type in command tuple in \"%s\"",
+			 RelationGetRelationName(cmdsrel));
+		return cmdtup;
+	}
+	type = TextDatumGetCString(datum);
+
+	/* fetch the object identity */
+	datum = heap_getattr(cmdtup, 2,
+						 RelationGetDescr(cmdsrel),
+						 &isnull);
+	if (isnull)
+	{
+		elog(WARNING, "null identity in command tuple for object of type %s",
+			 RelationGetRelationName(cmdsrel));
+		return cmdtup;
+	}
+	identstr = TextDatumGetCString(datum);
+	elog(LOG, "got queued command for %s: \"%s\"", type, identstr);
+
+	/* finally fetch and execute the command */
+	datum = heap_getattr(cmdtup, 3,
+						 RelationGetDescr(cmdsrel),
+						 &isnull);
+	if (isnull)
+	{
+		elog(LOG, "null command in tuple for %s \"%s\"", type, identstr);
+		return cmdtup;
+	}
+	cmdstr = TextDatumGetCString(datum);
+
+	/* do the SPI dance */
+	{
+		int		ret;
+
+		/*
+		 * XXX it might be wise to establish a savepoint here, to avoid
+		 * a larger problem in case the command fails; at the very least
+		 * we still need to process the original insertion.
+		 */
+		SPI_connect();
+		PushActiveSnapshot(GetTransactionSnapshot());
+		ret = SPI_execute(cmdstr, false, 0);
+		if (ret != SPI_OK_UTILITY)
+			elog(LOG, "SPI_execute failed");
+
+		SPI_finish();
+		PopActiveSnapshot();
+	}
+
+	/* set "executed" true */
+	// newtup = heap_modify_tuple( .. );
+	newtup = cmdtup;
+
+	pfree(identstr);
+	heap_close(cmdsrel, AccessShareLock);
+
+	return newtup;
+}
 
 void
 process_remote_insert(char *data, size_t r)
@@ -173,6 +251,9 @@ process_remote_insert(char *data, size_t r)
 			 action);
 
 	data = read_tuple(data, r, &tup, &reloid);
+
+	if (reloid == QueuedDDLCommandsRelid)
+		tup = *process_queued_ddl_command(&tup);
 
 	rel = heap_open(reloid, RowExclusiveLock);
 
@@ -907,4 +988,46 @@ find_pkey_tuple(ScanKey skey, Relation rel, Relation idxrel,
 		ReleaseBuffer(buf);
 	}
 	return found;
+}
+
+void
+setup_queuedcmds_relid(void)
+{
+	Datum	oid;
+	int		ret;
+	bool	isnull;
+
+	StartTransactionCommand();
+	SPI_connect();
+	PushActiveSnapshot(GetTransactionSnapshot());
+
+	ret = SPI_execute("SELECT oid FROM pg_class "
+					  "WHERE oid = 'bdr.bdr_queued_commands'::regclass",
+					  true, 0);
+	if (ret != SPI_OK_SELECT)
+		goto failed;
+
+	if (SPI_processed != 1)
+		goto failed;
+
+	oid = SPI_getbinval(SPI_tuptable->vals[0],
+						SPI_tuptable->tupdesc,
+						1, &isnull);
+	if (isnull)
+		goto failed;
+
+	if (true)
+		QueuedDDLCommandsRelid = DatumGetObjectId(oid);
+	else
+	{
+failed:
+		QueuedDDLCommandsRelid = InvalidOid;
+	}
+
+	SPI_finish();
+	PopActiveSnapshot();
+	CommitTransactionCommand();
+	pgstat_report_activity(STATE_IDLE, NULL);
+
+	elog(LOG, "bdr.bdr_queued_commands OID set to %u", QueuedDDLCommandsRelid);
 }
