@@ -1389,11 +1389,12 @@ pg_event_trigger_get_creation_commands(PG_FUNCTION_ARGS)
 		 */
 		if (command != NULL)
 		{
-			Datum		values[6];
-			bool		nulls[6];
+			Datum		values[7];
+			bool		nulls[7];
 			ObjectAddress addr;
 			char	   *identity;
 			char	   *type;
+			char	   *schema = NULL;
 			int			i = 0;
 
 			addr.classId = get_objtype_catalog_oid(obj->objtype);
@@ -1401,6 +1402,41 @@ pg_event_trigger_get_creation_commands(PG_FUNCTION_ARGS)
 			addr.objectSubId = 0;
 			type = getObjectTypeDescription(&addr);
 			identity = getObjectIdentity(&addr);
+
+			/*
+			 * Obtain schema name, if any ("pg_temp" if a temp object)
+			 */
+			if (is_objectclass_supported(addr.classId))
+			{
+				AttrNumber	nspAttnum;
+
+				nspAttnum = get_object_attnum_namespace(addr.classId);
+				if (nspAttnum != InvalidAttrNumber)
+				{
+					Relation	catalog;
+					HeapTuple	objtup;
+					Oid			schema_oid;
+					bool		isnull;
+
+					catalog = heap_open(addr.classId, AccessShareLock);
+					objtup = get_catalog_object_by_oid(catalog,
+													   addr.objectId);
+					if (!HeapTupleIsValid(objtup))
+						elog(ERROR, "cache lookup failed for object %u/%u",
+							 addr.classId, addr.objectId);
+					schema_oid = heap_getattr(objtup, nspAttnum,
+											  RelationGetDescr(catalog), &isnull);
+					if (isnull)
+						elog(ERROR, "invalid null namespace in object %u/%u/%d",
+							 addr.classId, addr.objectId, addr.objectSubId);
+					if (isAnyTempNamespace(schema_oid))
+						schema = pstrdup("pg_temp");
+					else
+						schema = get_namespace_name(schema_oid);
+
+					heap_close(catalog, AccessShareLock);
+				}
+			}
 
 			MemSet(nulls, 0, sizeof(nulls));
 
@@ -1412,13 +1448,17 @@ pg_event_trigger_get_creation_commands(PG_FUNCTION_ARGS)
 			values[i++] = Int32GetDatum(addr.objectSubId);
 			/* object_type */
 			values[i++] = CStringGetTextDatum(type);
+			/* schema */
+			if (schema == NULL)
+				nulls[i++] = true;
+			else
+				values[i++] = CStringGetTextDatum(schema);
 			/* identity */
 			values[i++] = CStringGetTextDatum(identity);
 			/* command */
 			values[i++] = CStringGetTextDatum(command);
 
 			tuplestore_putvalues(tupstore, tupdesc, values, nulls);
-			pfree(identity);
 		}
 	}
 
