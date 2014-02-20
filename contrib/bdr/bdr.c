@@ -420,6 +420,9 @@ bdr_apply_main(Datum main_arg)
 
 	replication_origin_id = replication_identifier;
 
+	/* setup initial queued_cmds OID */
+	setup_queuedcmds_relid();
+
 	while (!got_sigterm)
 	{
 		/* int		 ret; */
