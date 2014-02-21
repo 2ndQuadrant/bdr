@@ -1182,7 +1182,8 @@ ProcessUtilitySlow(Node *parsetree,
 
 			case T_AlterExtensionStmt:
 				EventTriggerStashExtensionStart();
-				ExecAlterExtensionStmt((AlterExtensionStmt *) parsetree);
+				objectId = ExecAlterExtensionStmt((AlterExtensionStmt *) parsetree);
+				EventTriggerStashCommand(objectId, OBJECT_EXTENSION, parsetree);
 				EventTriggerStashExtensionStop();
 				break;
 
