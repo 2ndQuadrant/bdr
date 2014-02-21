@@ -693,6 +693,81 @@ get_persistence_str(char persistence)
 }
 
 /*
+ * deparse_CreateExtensionStmt
+ *		deparse a CreateExtensionStmt
+ *
+ * Given an extension OID and the parsetree that created it, return the JSON
+ * blob representing the creation command.
+ *
+ * XXX the current representation makes the output command dependant on the
+ * installed versions of the extension.  Is this a problem?
+ */
+static ObjTree *
+deparse_CreateExtensionStmt(Oid objectId, Node *parsetree)
+{
+	CreateExtensionStmt *node = (CreateExtensionStmt *) parsetree;
+	Relation    pg_extension;
+	HeapTuple   extTup;
+	Form_pg_extension extForm;
+	ObjTree	   *extStmt;
+	ObjTree	   *tmp;
+	List	   *list;
+	ListCell   *cell;
+
+	pg_extension = heap_open(ExtensionRelationId, AccessShareLock);
+	extTup = get_catalog_object_by_oid(pg_extension, objectId);
+	if (!HeapTupleIsValid(extTup))
+		elog(ERROR, "cache lookup failed for extension with OID %u",
+			 objectId);
+	extForm = (Form_pg_extension) GETSTRUCT(extTup);
+
+	extStmt = new_objtree_VA("CREATE EXTENSION %{if_not_exists}s %{identity}I "
+							 "%{options: }s",
+							 1, "identity", ObjTypeString, node->extname);
+	append_string_object(extStmt, "if_not_exists",
+						 node->if_not_exists ? "IF NOT EXISTS" : "");
+	list = NIL;
+	foreach(cell, node->options)
+	{
+		DefElem *opt = (DefElem *) lfirst(cell);
+
+		if (strcmp(opt->defname, "schema") == 0)
+		{
+			/* skip this one; we add one unconditionally below */
+			continue;
+		}
+		else if (strcmp(opt->defname, "new_version") == 0)
+		{
+			tmp = new_objtree_VA("VERSION %{version}L", 2,
+								 "type", ObjTypeString, "version",
+								 "version", ObjTypeString, defGetString(opt));
+			list = lappend(list, new_object_object(tmp));
+		}
+		else if (strcmp(opt->defname, "old_version") == 0)
+		{
+			tmp = new_objtree_VA("FROM %{version}L", 2,
+								 "type", ObjTypeString, "from",
+								 "version", ObjTypeString, defGetString(opt));
+			list = lappend(list, new_object_object(tmp));
+		}
+		else
+			elog(ERROR, "unsupported option %s", opt->defname);
+	}
+
+	tmp = new_objtree_VA("SCHEMA %{schema}I",
+						 2, "type", ObjTypeString, "schema",
+						 "schema", ObjTypeString,
+						 get_namespace_name(extForm->extnamespace));
+	list = lappend(list, new_object_object(tmp));
+
+	append_array_object(extStmt, "options", list);
+
+	heap_close(pg_extension, AccessShareLock);
+
+	return extStmt;
+}
+
+/*
  * deparse_CreateTrigStmt
  *		Deparse a CreateTrigStmt (CREATE TRIGGER)
  *
@@ -2105,7 +2180,7 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_CreateExtensionStmt:
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			command = deparse_CreateExtensionStmt(objectId, parsetree);
 			break;
 
 		case T_AlterExtensionStmt:
