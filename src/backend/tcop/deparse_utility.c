@@ -671,7 +671,6 @@ deparse_ViewStmt(Oid objectId, Node *parsetree)
 	ObjTree    *tmp;
 	char	   *command;
 	Relation	relation;
-	OverrideSearchPath *overridePath;
 
 	relation = relation_open(objectId, AccessShareLock);
 
@@ -685,17 +684,8 @@ deparse_ViewStmt(Oid objectId, Node *parsetree)
 								   RelationGetRelationName(relation));
 	append_object_object(viewStmt, "identity", tmp);
 
-	/*
-	 * We want all names to be qualified, so set an empty search path before
-	 * calling ruleutils.c.
-	 */
-	overridePath = GetOverrideSearchPath(CurrentMemoryContext);
-	overridePath->schemas = NIL;
-	PushOverrideSearchPath(overridePath);
-
 	append_string_object(viewStmt, "query",
 						 pg_get_viewdef_internal(objectId));
-	PopOverrideSearchPath();
 
 	command = jsonize_objtree(viewStmt);
 	free_objtree(viewStmt);
@@ -840,14 +830,9 @@ deparse_CreateTrigStmt(Oid objectId, Node *parsetree)
 	tmp = new_objtree_VA(trigger, "WHEN %{clause}s", 0);
 	if (node->whenClause)
 	{
-		OverrideSearchPath  *overridePath;
 		Node	   *whenClause;
 		Datum		value;
 		bool		isnull;
-
-		overridePath = GetOverrideSearchPath(CurrentMemoryContext);
-		overridePath->schemas = NIL;
-		PushOverrideSearchPath(overridePath);
 
 		value = fastgetattr(trigTup, Anum_pg_trigger_tgqual,
 							RelationGetDescr(pg_trigger), &isnull);
@@ -859,8 +844,6 @@ deparse_CreateTrigStmt(Oid objectId, Node *parsetree)
 							 pg_get_trigger_whenclause(trigForm,
 													   whenClause,
 													   false));
-
-		PopOverrideSearchPath();
 	}
 	else
 		append_bool_object(tmp, "present", false);
@@ -1165,7 +1148,6 @@ obtainTableConstraints(List *elements, Oid objectId, ObjTree *parent)
 	SysScanDesc scan;
 	HeapTuple	tuple;
 	ObjTree    *tmp;
-	OverrideSearchPath *overridePath;
 
 	/*
 	 * scan pg_constraint to fetch all constraints linked to the given
@@ -1178,14 +1160,6 @@ obtainTableConstraints(List *elements, Oid objectId, ObjTree *parent)
 				ObjectIdGetDatum(objectId));
 	scan = systable_beginscan(conRel, ConstraintRelidIndexId,
 							  true, NULL, 1, &key);
-
-	/*
-	 * We need to ensure all names in the constraint definitions are
-	 * qualified, so set an empty search_path for the duration of this loop.
-	 */
-	overridePath = GetOverrideSearchPath(CurrentMemoryContext);
-	overridePath->schemas = NIL;
-	PushOverrideSearchPath(overridePath);
 
 	/*
 	 * For each constraint, add a node to the list of table elements.  In
@@ -1243,8 +1217,6 @@ obtainTableConstraints(List *elements, Oid objectId, ObjTree *parent)
 		elements = lappend(elements,
 						   new_object_object(parent, NULL, tmp));
 	}
-
-	PopOverrideSearchPath();
 
 	systable_endscan(scan);
 	heap_close(conRel, AccessShareLock);
@@ -1930,7 +1902,6 @@ deparse_IndexStmt(Oid objectId, Node *parsetree)
 	ObjTree    *tmp;
 	Relation	idxrel;
 	Relation	heaprel;
-	OverrideSearchPath *overridePath;
 	char	   *command;
 	char	   *index_am;
 	char	   *definition;
@@ -1950,14 +1921,9 @@ deparse_IndexStmt(Oid objectId, Node *parsetree)
 	idxrel = relation_open(objectId, AccessShareLock);
 	heaprel = relation_open(idxrel->rd_index->indrelid, AccessShareLock);
 
-	overridePath = GetOverrideSearchPath(CurrentMemoryContext);
-	overridePath->schemas = NIL;
-	PushOverrideSearchPath(overridePath);
-
 	pg_get_indexdef_detailed(objectId,
 							 &index_am, &definition, &reloptions,
 							 &tablespace, &whereClause);
-	PopOverrideSearchPath();
 
 	indexStmt =
 		new_objtree_VA(NULL,
@@ -2061,14 +2027,24 @@ deparse_CreateSchemaStmt(Oid objectId, Node *parsetree)
  *
  * The command is expanded fully, so that there are no ambiguities even in the
  * face of search_path changes.
- *
- * Note we currently only support commands for which ProcessUtilitySlow saves
- * objects to create; currently this excludes all forms of ALTER and DROP.
  */
 char *
 deparse_utility_command(Oid objectId, Node *parsetree)
 {
+	OverrideSearchPath *overridePath;
 	char	   *command;
+
+	/*
+	 * Many routines underlying this one will invoke ruleutils.c functionality
+	 * in order to obtain deparsed versions of expressions.  In such results,
+	 * we want all object names to be qualified, so that results are "portable"
+	 * to environments with different search_path settings.  Rather than inject
+	 * what would be repetitive calls to override search path all over the
+	 * place, we do it centrally here.
+	 */
+	overridePath = GetOverrideSearchPath(CurrentMemoryContext);
+	overridePath->schemas = NIL;
+	PushOverrideSearchPath(overridePath);
 
 	switch (nodeTag(parsetree))
 	{
@@ -2150,6 +2126,8 @@ deparse_utility_command(Oid objectId, Node *parsetree)
 			elog(LOG, "unrecognized node type: %d",
 				 (int) nodeTag(parsetree));
 	}
+
+	PopOverrideSearchPath();
 
 	return command;
 }
