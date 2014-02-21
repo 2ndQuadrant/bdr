@@ -658,6 +658,69 @@ get_persistence_str(char persistence)
 }
 
 /*
+ * deparse_CreateExtensionStmt
+ * 		deparse a CreateExtensionStmt
+ *
+ * Given an extension OID and the parsetree that created it, return the JSON
+ * blob representing the creation command.
+ *
+ * XXX the current representation makes the output command dependant on the
+ * installed versions of the extension.  Is this a problem?
+ */
+static char *
+deparse_CreateExtensionStmt(Oid objectId, Node *parsetree)
+{
+	CreateExtensionStmt *node = (CreateExtensionStmt *) parsetree;
+	ObjTree	   *extStmt;
+	ObjTree	   *tmp;
+	char	   *command;
+	List	   *list;
+	ListCell   *cell;
+
+	extStmt = new_objtree_VA(NULL,
+							 "CREATE EXTENSION %{if_not_exists}s %{identity}I "
+							 "%{options: }s",
+							 1, "identity", ObjTypeString, node->extname);
+	append_string_object(extStmt, "if_not_exists",
+						 node->if_not_exists ? "IF NOT EXISTS" : "");
+	list = NIL;
+	foreach(cell, node->options)
+	{
+		DefElem *opt = (DefElem *) lfirst(cell);
+
+		if (strcmp(opt->defname, "schema") == 0)
+		{
+			tmp = new_objtree_VA(extStmt, "SCHEMA %{schema}I", 2,
+								 "type", ObjTypeString, "schema",
+								 "schema", ObjTypeString, defGetString(opt));
+			list = lappend(list, new_object_object(extStmt, NULL, tmp));
+		}
+		else if (strcmp(opt->defname, "new_version") == 0)
+		{
+			tmp = new_objtree_VA(extStmt, "VERSION %{version}L", 2,
+								 "type", ObjTypeString, "version",
+								 "version", ObjTypeString, defGetString(opt));
+			list = lappend(list, new_object_object(extStmt, NULL, tmp));
+		}
+		else if (strcmp(opt->defname, "old_version") == 0)
+		{
+			tmp = new_objtree_VA(extStmt, "FROM %{version}L", 2,
+								 "type", ObjTypeString, "from",
+								 "version", ObjTypeString, defGetString(opt));
+			list = lappend(list, new_object_object(extStmt, NULL, tmp));
+		}
+		else
+			elog(ERROR, "unsupported option %s", opt->defname);
+	}
+	append_array_object(extStmt, "options", list);
+
+	command = jsonize_objtree(extStmt);
+	free_objtree(extStmt);
+
+	return command;
+}
+
+/*
  * deparse_ViewStmt
  *		deparse a ViewStmt
  *
@@ -2126,8 +2189,11 @@ deparse_utility_command(Oid objectId, Node *parsetree)
 
 			/* other local objects */
 		case T_DefineStmt:
-		case T_CreateExtensionStmt:
 			command = NULL;
+			break;
+
+		case T_CreateExtensionStmt:
+			command = deparse_CreateExtensionStmt(objectId, parsetree);
 			break;
 
 		case T_CompositeTypeStmt:		/* CREATE TYPE (composite) */
