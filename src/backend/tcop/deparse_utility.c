@@ -1239,6 +1239,8 @@ deparse_CreateStmt(Oid objectId, Node *parsetree)
 	List	   *dpcontext;
 	ObjTree    *createStmt;
 	ObjTree    *tmp;
+	List	   *list;
+	ListCell   *cell;
 	char	   *command;
 	char	   *fmtstr;
 
@@ -1251,11 +1253,11 @@ deparse_CreateStmt(Oid objectId, Node *parsetree)
 	if (node->ofTypename)
 		fmtstr = "CREATE %{persistence}s TABLE %{if_not_exists}s %{identity}D "
 			"OF %{of_type}T %{table_elements}s "
-			"%{on_commit}s %{tablespace}s";
+			"%{on_commit}s %{tablespace}s WITH (%{with:, }s)";
 	else
 		fmtstr = "CREATE %{persistence}s TABLE %{if_not_exists}s %{identity}D "
 			"(%{table_elements:, }s) %{inherits}s "
-			"%{on_commit}s %{tablespace}s";
+			"%{on_commit}s %{tablespace}s WITH (%{with:, }s)";
 
 	createStmt =
 		new_objtree_VA(NULL, fmtstr, 1,
@@ -1408,6 +1410,41 @@ deparse_CreateStmt(Oid objectId, Node *parsetree)
 			break;
 	}
 	append_object_object(createStmt, "on_commit", tmp);
+
+	/*
+	 * WITH clause.  We always emit one, containing at least the OIDS option.
+	 * That way we don't depend on the default value for default_with_oids.
+	 * We can skip emitting other options if there don't appear in the parse
+	 * node.
+	 */
+	tmp = new_objtree_VA(createStmt, "oids=%{value}s", 2,
+						 "option", ObjTypeString, "oids",
+						 "value", ObjTypeString,
+						 relation->rd_rel->relhasoids ? "ON" : "OFF");
+	list = list_make1(new_object_object(createStmt, NULL, tmp));
+	foreach(cell, node->options)
+	{
+		DefElem	*opt = (DefElem *) lfirst(cell);
+		char   *fmt;
+		char   *value;
+
+		/* already handled above */
+		if (strcmp(opt->defname, "oids") == 0)
+			continue;
+
+		if (opt->defnamespace)
+			fmt = psprintf("%s.%s=%%{value}s", opt->defnamespace, opt->defname);
+		else
+			fmt = psprintf("%s=%%{value}s", opt->defname);
+		value = opt->arg ? defGetString(opt) :
+			defGetBoolean(opt) ? "TRUE" : "FALSE";
+		tmp = new_objtree_VA(createStmt, fmt, 2,
+							 "option", ObjTypeString, opt->defname,
+							 "value", ObjTypeString, value);
+		list = lappend(list,
+					   new_object_object(createStmt, NULL, tmp));
+	}
+	append_array_object(createStmt, "with", list);
 
 	command = jsonize_objtree(createStmt);
 
