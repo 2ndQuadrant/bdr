@@ -690,7 +690,7 @@ _PG_init(void)
 		con->name = pstrdup(name);
 		con->apply_delay = 0;
 
-		sprintf(optname_dsn, "bdr.%s.dsn", name);
+		sprintf(optname_dsn, "bdr.%s_dsn", name);
 		DefineCustomStringVariable(optname_dsn,
 								   optname_dsn,
 								   NULL,
@@ -699,7 +699,7 @@ _PG_init(void)
 								   GUC_NOT_IN_SAMPLE,
 								   NULL, NULL, NULL);
 
-		sprintf(optname_delay, "bdr.%s.apply_delay", name);
+		sprintf(optname_delay, "bdr.%s_apply_delay", name);
 		DefineCustomIntVariable(optname_delay,
 								optname_delay,
 								NULL,
