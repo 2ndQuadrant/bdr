@@ -2152,6 +2152,8 @@ deparse_utility_command(Oid objectId, Node *parsetree)
 	 */
 	overridePath = GetOverrideSearchPath(CurrentMemoryContext);
 	overridePath->schemas = NIL;
+	overridePath->addCatalog = false;
+	overridePath->addTemp = false;
 	PushOverrideSearchPath(overridePath);
 
 	switch (nodeTag(parsetree))
