@@ -303,6 +303,14 @@ pg_replication_identifier_setup_replaying_from(PG_FUNCTION_ARGS)
 }
 
 Datum
+pg_replication_identifier_is_replaying(PG_FUNCTION_ARGS)
+{
+	CheckReplicationIdentifierPrerequisites(true);
+
+	PG_RETURN_BOOL(replication_origin_id != InvalidRepNodeId);
+}
+
+Datum
 pg_replication_identifier_reset_replaying_from(PG_FUNCTION_ARGS)
 {
 	CheckReplicationIdentifierPrerequisites(true);

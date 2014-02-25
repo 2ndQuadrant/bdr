@@ -4905,6 +4905,9 @@ DESCR("setup transaction timestamp and origin lsn");
 DATA(insert OID = 3216 (  pg_get_replication_identifier_progress PGNSP PGUID 12 1 100 0 0 f f f f f t v 0 0 2249 "" "{26,25,25,25}" "{o,o,o,o}" "{local_id, external_id, remote_lsn, local_lsn}" _null_ pg_get_replication_identifier_progress _null_ _null_ _null_ ));
 DESCR("replication identifier progress");
 
+DATA(insert OID = 4401 (  pg_replication_identifier_is_replaying PGNSP PGUID 12 1 0 0 0 f f f f t f v 0 0 16 "" _null_ _null_ _null_ _null_ pg_replication_identifier_is_replaying _null_ _null_ _null_ ));
+DESCR("is a replication identifier setup");
+
 
 /*
  * Symbolic values for provolatile column: these indicate whether the result
