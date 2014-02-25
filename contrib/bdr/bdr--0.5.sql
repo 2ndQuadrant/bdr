@@ -109,23 +109,23 @@ SELECT pg_catalog.pg_extension_config_dump('bdr_votes', '');
 REVOKE ALL ON TABLE bdr_votes FROM PUBLIC;
 
 CREATE OR REPLACE FUNCTION bdr_sequence_alloc(INTERNAL)
- RETURNS INTERNAL
- LANGUAGE C
- STABLE STRICT
+RETURNS INTERNAL
+LANGUAGE C
+STABLE STRICT
 AS 'MODULE_PATHNAME'
 ;
 
 CREATE OR REPLACE FUNCTION bdr_sequence_setval(INTERNAL)
- RETURNS INTERNAL
- LANGUAGE C
- STABLE STRICT
+RETURNS INTERNAL
+LANGUAGE C
+STABLE STRICT
 AS 'MODULE_PATHNAME'
 ;
 
 CREATE OR REPLACE FUNCTION bdr_sequence_options(INTERNAL)
- RETURNS INTERNAL
- LANGUAGE C
- STABLE STRICT
+RETURNS INTERNAL
+LANGUAGE C
+STABLE STRICT
 AS 'MODULE_PATHNAME'
 ;
 
@@ -147,9 +147,9 @@ VALUES (
 
 CREATE TABLE bdr_queued_commands (
     obj_type text,
-	obj_identity text,
-	command text,
-	executed bool
+    obj_identity text,
+    command text,
+    executed bool
 );
 
 CREATE OR REPLACE FUNCTION bdr.queue_commands()
@@ -157,23 +157,23 @@ CREATE OR REPLACE FUNCTION bdr.queue_commands()
  LANGUAGE plpgsql
 AS $function$
 DECLARE
-        r RECORD;
+    r RECORD;
 BEGIN
-        FOR r IN SELECT * FROM pg_event_trigger_get_creation_commands()
-        LOOP
-				/* ignore temporary objects */
-				IF r.schema = 'pg_temp' THEN
-					CONTINUE;
-				END IF;
+    FOR r IN SELECT * FROM pg_event_trigger_get_creation_commands()
+    LOOP
+        /* ignore temporary objects */
+        IF r.schema = 'pg_temp' THEN
+            CONTINUE;
+        END IF;
 
-                INSERT INTO bdr.bdr_queued_commands
-					(obj_type, obj_identity, command, executed)
-					VALUES
-                        (r.object_type,
-						r.identity,
-                        pg_catalog.pg_event_trigger_expand_command(r.command),
-						'false');
-        END LOOP;
+        INSERT INTO bdr.bdr_queued_commands
+            (obj_type, obj_identity, command, executed)
+            VALUES
+                (r.object_type,
+                r.identity,
+                pg_catalog.pg_event_trigger_expand_command(r.command),
+                'false');
+    END LOOP;
 END;
 $function$;
 
