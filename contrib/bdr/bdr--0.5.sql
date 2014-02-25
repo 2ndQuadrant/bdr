@@ -159,6 +159,10 @@ AS $function$
 DECLARE
     r RECORD;
 BEGIN
+    IF pg_replication_identifier_is_replaying() THEN
+       RETURN;
+    END IF;
+
     FOR r IN SELECT * FROM pg_event_trigger_get_creation_commands()
     LOOP
         /* ignore temporary objects */
