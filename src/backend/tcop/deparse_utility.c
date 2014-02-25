@@ -658,6 +658,69 @@ get_persistence_str(char persistence)
 }
 
 /*
+ * deparse_CreateExtensionStmt
+ * 		deparse a CreateExtensionStmt
+ *
+ * Given an extension OID and the parsetree that created it, return the JSON
+ * blob representing the creation command.
+ *
+ * XXX the current representation makes the output command dependant on the
+ * installed versions of the extension.  Is this a problem?
+ */
+static char *
+deparse_CreateExtensionStmt(Oid objectId, Node *parsetree)
+{
+	CreateExtensionStmt *node = (CreateExtensionStmt *) parsetree;
+	ObjTree	   *extStmt;
+	ObjTree	   *tmp;
+	char	   *command;
+	List	   *list;
+	ListCell   *cell;
+
+	extStmt = new_objtree_VA(NULL,
+							 "CREATE EXTENSION %{if_not_exists}s %{identity}I "
+							 "%{options: }s",
+							 1, "identity", ObjTypeString, node->extname);
+	append_string_object(extStmt, "if_not_exists",
+						 node->if_not_exists ? "IF NOT EXISTS" : "");
+	list = NIL;
+	foreach(cell, node->options)
+	{
+		DefElem *opt = (DefElem *) lfirst(cell);
+
+		if (strcmp(opt->defname, "schema") == 0)
+		{
+			tmp = new_objtree_VA(extStmt, "SCHEMA %{schema}I", 2,
+								 "type", ObjTypeString, "schema",
+								 "schema", ObjTypeString, defGetString(opt));
+			list = lappend(list, new_object_object(extStmt, NULL, tmp));
+		}
+		else if (strcmp(opt->defname, "new_version") == 0)
+		{
+			tmp = new_objtree_VA(extStmt, "VERSION %{version}L", 2,
+								 "type", ObjTypeString, "version",
+								 "version", ObjTypeString, defGetString(opt));
+			list = lappend(list, new_object_object(extStmt, NULL, tmp));
+		}
+		else if (strcmp(opt->defname, "old_version") == 0)
+		{
+			tmp = new_objtree_VA(extStmt, "FROM %{version}L", 2,
+								 "type", ObjTypeString, "from",
+								 "version", ObjTypeString, defGetString(opt));
+			list = lappend(list, new_object_object(extStmt, NULL, tmp));
+		}
+		else
+			elog(ERROR, "unsupported option %s", opt->defname);
+	}
+	append_array_object(extStmt, "options", list);
+
+	command = jsonize_objtree(extStmt);
+	free_objtree(extStmt);
+
+	return command;
+}
+
+/*
  * deparse_ViewStmt
  *		deparse a ViewStmt
  *
@@ -671,7 +734,6 @@ deparse_ViewStmt(Oid objectId, Node *parsetree)
 	ObjTree    *tmp;
 	char	   *command;
 	Relation	relation;
-	OverrideSearchPath *overridePath;
 
 	relation = relation_open(objectId, AccessShareLock);
 
@@ -685,17 +747,8 @@ deparse_ViewStmt(Oid objectId, Node *parsetree)
 								   RelationGetRelationName(relation));
 	append_object_object(viewStmt, "identity", tmp);
 
-	/*
-	 * We want all names to be qualified, so set an empty search path before
-	 * calling ruleutils.c.
-	 */
-	overridePath = GetOverrideSearchPath(CurrentMemoryContext);
-	overridePath->schemas = NIL;
-	PushOverrideSearchPath(overridePath);
-
 	append_string_object(viewStmt, "query",
 						 pg_get_viewdef_internal(objectId));
-	PopOverrideSearchPath();
 
 	command = jsonize_objtree(viewStmt);
 	free_objtree(viewStmt);
@@ -840,14 +893,9 @@ deparse_CreateTrigStmt(Oid objectId, Node *parsetree)
 	tmp = new_objtree_VA(trigger, "WHEN %{clause}s", 0);
 	if (node->whenClause)
 	{
-		OverrideSearchPath  *overridePath;
 		Node	   *whenClause;
 		Datum		value;
 		bool		isnull;
-
-		overridePath = GetOverrideSearchPath(CurrentMemoryContext);
-		overridePath->schemas = NIL;
-		PushOverrideSearchPath(overridePath);
 
 		value = fastgetattr(trigTup, Anum_pg_trigger_tgqual,
 							RelationGetDescr(pg_trigger), &isnull);
@@ -859,8 +907,6 @@ deparse_CreateTrigStmt(Oid objectId, Node *parsetree)
 							 pg_get_trigger_whenclause(trigForm,
 													   whenClause,
 													   false));
-
-		PopOverrideSearchPath();
 	}
 	else
 		append_bool_object(tmp, "present", false);
@@ -1165,7 +1211,6 @@ obtainTableConstraints(List *elements, Oid objectId, ObjTree *parent)
 	SysScanDesc scan;
 	HeapTuple	tuple;
 	ObjTree    *tmp;
-	OverrideSearchPath *overridePath;
 
 	/*
 	 * scan pg_constraint to fetch all constraints linked to the given
@@ -1178,14 +1223,6 @@ obtainTableConstraints(List *elements, Oid objectId, ObjTree *parent)
 				ObjectIdGetDatum(objectId));
 	scan = systable_beginscan(conRel, ConstraintRelidIndexId,
 							  true, NULL, 1, &key);
-
-	/*
-	 * We need to ensure all names in the constraint definitions are
-	 * qualified, so set an empty search_path for the duration of this loop.
-	 */
-	overridePath = GetOverrideSearchPath(CurrentMemoryContext);
-	overridePath->schemas = NIL;
-	PushOverrideSearchPath(overridePath);
 
 	/*
 	 * For each constraint, add a node to the list of table elements.  In
@@ -1244,8 +1281,6 @@ obtainTableConstraints(List *elements, Oid objectId, ObjTree *parent)
 						   new_object_object(parent, NULL, tmp));
 	}
 
-	PopOverrideSearchPath();
-
 	systable_endscan(scan);
 	heap_close(conRel, AccessShareLock);
 
@@ -1267,6 +1302,8 @@ deparse_CreateStmt(Oid objectId, Node *parsetree)
 	List	   *dpcontext;
 	ObjTree    *createStmt;
 	ObjTree    *tmp;
+	List	   *list;
+	ListCell   *cell;
 	char	   *command;
 	char	   *fmtstr;
 
@@ -1279,11 +1316,11 @@ deparse_CreateStmt(Oid objectId, Node *parsetree)
 	if (node->ofTypename)
 		fmtstr = "CREATE %{persistence}s TABLE %{if_not_exists}s %{identity}D "
 			"OF %{of_type}T %{table_elements}s "
-			"%{on_commit}s %{tablespace}s";
+			"%{on_commit}s %{tablespace}s WITH (%{with:, }s)";
 	else
 		fmtstr = "CREATE %{persistence}s TABLE %{if_not_exists}s %{identity}D "
 			"(%{table_elements:, }s) %{inherits}s "
-			"%{on_commit}s %{tablespace}s";
+			"%{on_commit}s %{tablespace}s WITH (%{with:, }s)";
 
 	createStmt =
 		new_objtree_VA(NULL, fmtstr, 1,
@@ -1436,6 +1473,41 @@ deparse_CreateStmt(Oid objectId, Node *parsetree)
 			break;
 	}
 	append_object_object(createStmt, "on_commit", tmp);
+
+	/*
+	 * WITH clause.  We always emit one, containing at least the OIDS option.
+	 * That way we don't depend on the default value for default_with_oids.
+	 * We can skip emitting other options if there don't appear in the parse
+	 * node.
+	 */
+	tmp = new_objtree_VA(createStmt, "oids=%{value}s", 2,
+						 "option", ObjTypeString, "oids",
+						 "value", ObjTypeString,
+						 relation->rd_rel->relhasoids ? "ON" : "OFF");
+	list = list_make1(new_object_object(createStmt, NULL, tmp));
+	foreach(cell, node->options)
+	{
+		DefElem	*opt = (DefElem *) lfirst(cell);
+		char   *fmt;
+		char   *value;
+
+		/* already handled above */
+		if (strcmp(opt->defname, "oids") == 0)
+			continue;
+
+		if (opt->defnamespace)
+			fmt = psprintf("%s.%s=%%{value}s", opt->defnamespace, opt->defname);
+		else
+			fmt = psprintf("%s=%%{value}s", opt->defname);
+		value = opt->arg ? defGetString(opt) :
+			defGetBoolean(opt) ? "TRUE" : "FALSE";
+		tmp = new_objtree_VA(createStmt, fmt, 2,
+							 "option", ObjTypeString, opt->defname,
+							 "value", ObjTypeString, value);
+		list = lappend(list,
+					   new_object_object(createStmt, NULL, tmp));
+	}
+	append_array_object(createStmt, "with", list);
 
 	command = jsonize_objtree(createStmt);
 
@@ -1938,7 +2010,6 @@ deparse_IndexStmt(Oid objectId, Node *parsetree)
 	ObjTree    *tmp;
 	Relation	idxrel;
 	Relation	heaprel;
-	OverrideSearchPath *overridePath;
 	char	   *command;
 	char	   *index_am;
 	char	   *definition;
@@ -1958,14 +2029,9 @@ deparse_IndexStmt(Oid objectId, Node *parsetree)
 	idxrel = relation_open(objectId, AccessShareLock);
 	heaprel = relation_open(idxrel->rd_index->indrelid, AccessShareLock);
 
-	overridePath = GetOverrideSearchPath(CurrentMemoryContext);
-	overridePath->schemas = NIL;
-	PushOverrideSearchPath(overridePath);
-
 	pg_get_indexdef_detailed(objectId,
 							 &index_am, &definition, &reloptions,
 							 &tablespace, &whereClause);
-	PopOverrideSearchPath();
 
 	indexStmt =
 		new_objtree_VA(NULL,
@@ -2069,14 +2135,24 @@ deparse_CreateSchemaStmt(Oid objectId, Node *parsetree)
  *
  * The command is expanded fully, so that there are no ambiguities even in the
  * face of search_path changes.
- *
- * Note we currently only support commands for which ProcessUtilitySlow saves
- * objects to create; currently this excludes all forms of ALTER and DROP.
  */
 char *
 deparse_utility_command(Oid objectId, Node *parsetree)
 {
+	OverrideSearchPath *overridePath;
 	char	   *command;
+
+	/*
+	 * Many routines underlying this one will invoke ruleutils.c functionality
+	 * in order to obtain deparsed versions of expressions.  In such results,
+	 * we want all object names to be qualified, so that results are "portable"
+	 * to environments with different search_path settings.  Rather than inject
+	 * what would be repetitive calls to override search path all over the
+	 * place, we do it centrally here.
+	 */
+	overridePath = GetOverrideSearchPath(CurrentMemoryContext);
+	overridePath->schemas = NIL;
+	PushOverrideSearchPath(overridePath);
 
 	switch (nodeTag(parsetree))
 	{
@@ -2121,8 +2197,11 @@ deparse_utility_command(Oid objectId, Node *parsetree)
 
 			/* other local objects */
 		case T_DefineStmt:
-		case T_CreateExtensionStmt:
 			command = NULL;
+			break;
+
+		case T_CreateExtensionStmt:
+			command = deparse_CreateExtensionStmt(objectId, parsetree);
 			break;
 
 		case T_CompositeTypeStmt:		/* CREATE TYPE (composite) */
@@ -2158,6 +2237,8 @@ deparse_utility_command(Oid objectId, Node *parsetree)
 			elog(LOG, "unrecognized node type: %d",
 				 (int) nodeTag(parsetree));
 	}
+
+	PopOverrideSearchPath();
 
 	return command;
 }
