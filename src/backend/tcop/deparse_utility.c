@@ -3512,6 +3512,7 @@ deparse_Seq_OwnedBy(ObjTree *parent, Oid sequenceId)
 static char *
 deparse_CreateSeqStmt(Oid objectId, Node *parsetree)
 {
+	CreateSeqStmt *node = (CreateSeqStmt *) parsetree;
 	ObjTree    *createSeq;
 	ObjTree    *tmp;
 	Relation	relation = relation_open(objectId, AccessShareLock);
@@ -3523,7 +3524,7 @@ deparse_CreateSeqStmt(Oid objectId, Node *parsetree)
 
 	createSeq =
 		new_objtree_VA("CREATE %{persistence}s SEQUENCE %{identity}D "
-					   "%{definition: }s",
+					   "%{definition: }s %{using}s",
 					   1,
 					   "persistence", ObjTypeString,
 					   get_persistence_str(relation->rd_rel->relpersistence));
@@ -3544,6 +3545,13 @@ deparse_CreateSeqStmt(Oid objectId, Node *parsetree)
 
 	append_array_object(createSeq, "definition", elems);
 
+	tmp = new_objtree_VA("USING %{accessMethod}I", 0);
+	if (node->accessMethod && node->accessMethod[0] != '\0')
+		append_string_object(tmp, "accessMethod", node->accessMethod);
+	else
+		append_bool_object(tmp, "present", false);
+	append_object_object(createSeq, "using", tmp);
+
 	command = jsonize_objtree(createSeq);
 
 	free_objtree(createSeq);
@@ -3555,6 +3563,7 @@ deparse_CreateSeqStmt(Oid objectId, Node *parsetree)
 static char *
 deparse_AlterSeqStmt(Oid objectId, Node *parsetree)
 {
+	AlterSeqStmt *node = ((AlterSeqStmt *) parsetree);
 	ObjTree	   *alterSeq;
 	ObjTree	   *tmp;
 	Relation	relation = relation_open(objectId, AccessShareLock);
@@ -3566,12 +3575,13 @@ deparse_AlterSeqStmt(Oid objectId, Node *parsetree)
 	seqdata = get_sequence_values(objectId);
 
 	alterSeq =
-		new_objtree_VA("ALTER SEQUENCE %{identity}D %{definition: }s", 0);
+		new_objtree_VA("ALTER SEQUENCE %{identity}D "
+					   "%{definition: }s %{using}s", 0);
 	tmp = new_objtree_for_qualname(relation->rd_rel->relnamespace,
 								   RelationGetRelationName(relation));
 	append_object_object(alterSeq, "identity", tmp);
 
-	foreach(cell, ((AlterSeqStmt *) parsetree)->options)
+	foreach(cell, node->options)
 	{
 		DefElem *elem = (DefElem *) lfirst(cell);
 		ObjElem *newelm;
@@ -3599,6 +3609,13 @@ deparse_AlterSeqStmt(Oid objectId, Node *parsetree)
 	}
 
 	append_array_object(alterSeq, "definition", elems);
+
+	tmp = new_objtree_VA("USING %{accessMethod}I", 0);
+	if (node->accessMethod && node->accessMethod[0] != '\0')
+		append_string_object(tmp, "accessMethod", node->accessMethod);
+	else
+		append_bool_object(tmp, "present", false);
+	append_object_object(alterSeq, "using", tmp);
 
 	command = jsonize_objtree(alterSeq);
 
