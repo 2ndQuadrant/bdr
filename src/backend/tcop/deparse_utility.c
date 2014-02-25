@@ -1885,6 +1885,7 @@ deparse_Seq_OwnedBy(ObjTree *parent, Oid sequenceId)
 static char *
 deparse_CreateSeqStmt(Oid objectId, Node *parsetree)
 {
+	CreateSeqStmt *node = (CreateSeqStmt *) parsetree;
 	ObjTree    *createSeq;
 	ObjTree    *tmp;
 	Relation	relation = relation_open(objectId, AccessShareLock);
@@ -1897,7 +1898,7 @@ deparse_CreateSeqStmt(Oid objectId, Node *parsetree)
 	createSeq =
 		new_objtree_VA(NULL,
 					   "CREATE %{persistence}s SEQUENCE %{identity}D "
-					   "%{definition: }s",
+					   "%{definition: }s %{using}s",
 					   1,
 					   "persistence", ObjTypeString,
 					   get_persistence_str(relation->rd_rel->relpersistence));
@@ -1918,6 +1919,13 @@ deparse_CreateSeqStmt(Oid objectId, Node *parsetree)
 	/* we purposefully do not emit OWNED BY here */
 
 	append_array_object(createSeq, "definition", elems);
+
+	if (node->accessMethod)
+	{
+		tmp = new_objtree_VA(createSeq, "USING %{accessMethod}s", 1,
+							 "accessMethod", ObjTypeString, node->accessMethod);
+		append_object_object(createSeq, "using", tmp);
+	}
 
 	command = jsonize_objtree(createSeq);
 
