@@ -2196,6 +2196,95 @@ deparse_IndexStmt(Oid objectId, Node *parsetree)
 	return indexStmt;
 }
 
+static ObjTree *
+deparse_RuleStmt(Oid objectId, Node *parsetree)
+{
+	RuleStmt *node = (RuleStmt *) parsetree;
+	ObjTree	   *ruleStmt;
+	ObjTree	   *tmp;
+	Relation	pg_rewrite;
+	Form_pg_rewrite rewrForm;
+	HeapTuple	rewrTup;
+	SysScanDesc	scan;
+	ScanKeyData	key;
+	Datum		ev_qual;
+	Datum		ev_actions;
+	bool		isnull;
+	char	   *qual;
+	List	   *actions;
+	List	   *list;
+	ListCell   *cell;
+
+	pg_rewrite = heap_open(RewriteRelationId, AccessShareLock);
+	ScanKeyInit(&key,
+				ObjectIdAttributeNumber,
+				BTEqualStrategyNumber,
+				F_OIDEQ, ObjectIdGetDatum(objectId));
+
+	scan = systable_beginscan(pg_rewrite, RewriteOidIndexId, true,
+							  NULL, 1, &key);
+	rewrTup = systable_getnext(scan);
+	if (!HeapTupleIsValid(rewrTup))
+		elog(ERROR, "cache lookup failed for rewrite rule with oid %u",
+			 objectId);
+
+	rewrForm = (Form_pg_rewrite) GETSTRUCT(rewrTup);
+
+	ruleStmt =
+		new_objtree_VA("CREATE %{or_replace}s RULE %{identity}I "
+					   "AS ON %{event}s TO %{table}D %{where_clause}s "
+					   "DO %{instead}s (%{actions:; }s)", 2,
+					   "identity", ObjTypeString, node->rulename,
+					   "or_replace", ObjTypeString,
+					   node->replace ? "OR REPLACE" : "");
+	append_string_object(ruleStmt, "event",
+						 node->event == CMD_SELECT ? "SELECT" :
+						 node->event == CMD_UPDATE ? "UPDATE" :
+						 node->event == CMD_DELETE ? "DELETE" :
+						 node->event == CMD_INSERT ? "INSERT" : "XXX");
+	append_object_object(ruleStmt, "table",
+						 new_objtree_for_qualname_id(RelationRelationId,
+													 rewrForm->ev_class));
+
+	append_string_object(ruleStmt, "instead",
+						 node->instead ? "INSTEAD" : "ALSO");
+
+	ev_qual = heap_getattr(rewrTup, Anum_pg_rewrite_ev_qual,
+						   RelationGetDescr(pg_rewrite), &isnull);
+	ev_actions = heap_getattr(rewrTup, Anum_pg_rewrite_ev_action,
+							  RelationGetDescr(pg_rewrite), &isnull);
+
+	pg_get_ruledef_details(ev_qual, ev_actions, &qual, &actions);
+
+	tmp = new_objtree_VA("WHERE %{clause}s", 0);
+
+	if (qual)
+		append_string_object(tmp, "clause", qual);
+	else
+	{
+		append_null_object(tmp, "clause");
+		append_bool_object(tmp, "present", false);
+	}
+
+	append_object_object(ruleStmt, "where_clause", tmp);
+
+	list = NIL;
+	foreach(cell, actions)
+	{
+		char *action = lfirst(cell);
+
+		list = lappend(list, new_string_object(action));
+	}
+	append_array_object(ruleStmt, "actions", list);
+
+	systable_endscan(scan);
+	heap_close(pg_rewrite, AccessShareLock);
+
+	return ruleStmt;
+}
+
+
+
 /*
  * deparse_CreateSchemaStmt
  *		deparse a CreateSchemaStmt
@@ -2364,7 +2453,7 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_RuleStmt:
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			command = deparse_RuleStmt(objectId, parsetree);
 			break;
 
 		case T_CreateSeqStmt:

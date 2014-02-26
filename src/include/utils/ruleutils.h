@@ -30,6 +30,8 @@ extern void pg_get_indexdef_detailed(Oid indexrelid,
 extern char *pg_get_trigger_whenclause(Form_pg_trigger trigrec,
 						  Node *whenClause, bool pretty);
 extern char *pg_get_constraintdef_string(Oid constraintId, bool fullCommand);
+extern void pg_get_ruledef_details(Datum ev_qual, Datum ev_action,
+					   char **whereClause, List **actions);
 
 extern char *deparse_expression(Node *expr, List *dpcontext,
 				   bool forceprefix, bool showimplicit);

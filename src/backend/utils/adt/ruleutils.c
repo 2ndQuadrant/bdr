@@ -449,6 +449,77 @@ pg_get_ruledef_ext(PG_FUNCTION_ARGS)
 	PG_RETURN_TEXT_P(string_to_text(pg_get_ruledef_worker(ruleoid, prettyFlags)));
 }
 
+/*
+ * Given a pair of Datum corresponding to a rule's pg_rewrite.ev_qual and
+ * ev_action columns, return their text representation; ev_qual as a single
+ * string in whereClause and ev_action as a List of strings (which might be
+ * NIL, signalling NOTHING) in actions.
+ */
+void
+pg_get_ruledef_details(Datum ev_qual, Datum ev_action,
+					   char **whereClause, List **actions)
+{
+	int prettyFlags = 0;
+	char *qualstr = TextDatumGetCString(ev_qual);
+	char *actionstr = TextDatumGetCString(ev_action);
+	List *actionNodeList = (List *) stringToNode(actionstr);
+	StringInfoData buf;
+
+	initStringInfo(&buf);
+	if (strlen(qualstr) > 0 && strcmp(qualstr, "<>") != 0)
+	{
+		Node	   *qual;
+		Query	   *query;
+		deparse_context context;
+		deparse_namespace dpns;
+
+		qual = stringToNode(qualstr);
+
+		query = (Query *) linitial(actionNodeList);
+		query = getInsertSelectQuery(query, NULL);
+
+		AcquireRewriteLocks(query, false, false);
+
+		context.buf = &buf;
+		context.namespaces = list_make1(&dpns);
+		context.windowClause = NIL;
+		context.windowTList = NIL;
+		context.varprefix = (list_length(query->rtable) != 1);
+		context.prettyFlags = prettyFlags;
+		context.wrapColumn = WRAP_COLUMN_DEFAULT;
+		context.indentLevel = PRETTYINDENT_STD;
+
+		set_deparse_for_query(&dpns, query, NIL);
+
+		get_rule_expr(qual, &context, false);
+
+		*whereClause = pstrdup(buf.data);
+	}
+	else
+		*whereClause = NULL;
+
+	if (list_length(actionNodeList) == 0)
+		*actions = NIL;
+	else
+	{
+		ListCell *cell;
+		List	*output = NIL;
+
+		foreach(cell, actionNodeList)
+		{
+			Query	*query = (Query *) lfirst(cell);
+
+			if (query->commandType == CMD_NOTHING)
+				continue;
+
+			resetStringInfo(&buf);
+			get_query_def(query, &buf, NIL, NULL,
+						  prettyFlags, WRAP_COLUMN_DEFAULT, 0);
+			output = lappend(output, pstrdup(buf.data));
+		}
+		*actions = output;
+	}
+}
 
 static char *
 pg_get_ruledef_worker(Oid ruleoid, int prettyFlags)
