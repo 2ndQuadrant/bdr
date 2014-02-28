@@ -213,7 +213,8 @@ $function$;
 
 CREATE EVENT TRIGGER queue_commands
 ON ddl_command_end
-WHEN tag IN ('create table', 'create index', 'create sequence')
+WHEN tag IN ('create table', 'create index', 'create sequence',
+     'create trigger')
 EXECUTE PROCEDURE bdr.queue_commands();
 
 RESET search_path;
