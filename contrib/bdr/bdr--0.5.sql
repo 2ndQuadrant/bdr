@@ -152,6 +152,28 @@ CREATE TABLE bdr_queued_commands (
     executed bool
 );
 
+CREATE OR REPLACE FUNCTION bdr.queue_truncate()
+ RETURNS TRIGGER
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+    ident TEXT;
+BEGIN
+
+    ident := TG_ARGV[0];
+
+    INSERT INTO bdr.bdr_queued_commands
+        (obj_type, obj_identity, command, executed)
+        VALUES
+            ('table',
+            ident,
+            'TRUNCATE TABLE ONLY ' || ident,
+            'false');
+
+    RETURN NULL;
+END;
+$function$;
+
 CREATE OR REPLACE FUNCTION bdr.queue_commands()
  RETURNS event_trigger
  LANGUAGE plpgsql
@@ -177,6 +199,14 @@ BEGIN
                 r.identity,
                 pg_catalog.pg_event_trigger_expand_command(r.command),
                 'false');
+
+        IF r.object_type = 'table' THEN
+            EXECUTE 'CREATE TRIGGER truncate_trigger AFTER TRUNCATE ON ' ||
+                    r.identity ||
+                    ' FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate(' ||
+                    quote_literal(r.identity) ||
+                    ')';
+        END IF;
     END LOOP;
 END;
 $function$;
