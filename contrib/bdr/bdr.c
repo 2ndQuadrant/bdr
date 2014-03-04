@@ -851,7 +851,7 @@ bdr_maintain_schema(void)
 	/* make sure we're operating without other bdr workers interfering */
 	extrel = heap_open(ExtensionRelationId, ShareUpdateExclusiveLock);
 
-    extoid = get_extension_oid("bdr", true);
+	extoid = get_extension_oid("bdr", true);
 
 	/* create required extension if they don't exists yet */
 	if (extoid == InvalidOid)
