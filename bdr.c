@@ -879,7 +879,7 @@ bdr_maintain_schema(void)
 		ExecAlterExtensionStmt(&alter_stmt);
 	}
 
-	heap_close(extrel, ShareUpdateExclusiveLock);
+	heap_close(extrel, NoLock);
 
 	PopActiveSnapshot();
 	CommitTransactionCommand();
