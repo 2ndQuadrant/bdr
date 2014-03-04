@@ -26,7 +26,6 @@
 #include "access/xact.h"
 #include "catalog/pg_type.h"
 #include "catalog/namespace.h"
-#include "commands/extension.h"
 #include "commands/sequence.h"
 #include "executor/spi.h"
 #include "utils/builtins.h"
@@ -534,8 +533,6 @@ bdr_sequencer_wakeup(void)
 void
 bdr_sequencer_init(void)
 {
-	CreateExtensionStmt create_stmt;
-	AlterExtensionStmt alter_stmt;
 	BdrSequencerSlot *slot;
 
 	Assert(bdr_sequencer_con != NULL);
@@ -543,32 +540,6 @@ bdr_sequencer_init(void)
 	slot = &BdrSequencerCtl->slots[bdr_sequencer_con->slot];
 	slot->database_oid = MyDatabaseId;
 	slot->proclatch = &MyProc->procLatch;
-
-	create_stmt.if_not_exists = true;
-	create_stmt.options = NIL;
-
-	alter_stmt.options = NIL;
-
-	StartTransactionCommand();
-	PushActiveSnapshot(GetTransactionSnapshot());
-
-	create_stmt.extname = (char *)"btree_gist";
-	alter_stmt.extname = (char *)"btree_gist";
-
-	/* create extension if not exists */
-	CreateExtension(&create_stmt);
-	/* update extension otherwise */
-	ExecAlterExtensionStmt(&alter_stmt);
-
-	create_stmt.extname = (char *)"bdr";
-	alter_stmt.extname = (char *)"bdr";
-	/* create extension if not exists */
-	CreateExtension(&create_stmt);
-	/* update extension otherwise */
-	ExecAlterExtensionStmt(&alter_stmt);
-
-	PopActiveSnapshot();
-	CommitTransactionCommand();
 }
 
 static void
