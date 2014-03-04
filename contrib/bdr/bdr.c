@@ -29,13 +29,17 @@
 #include "pgstat.h"
 
 #include "access/committs.h"
+#include "access/heapam.h"
 #include "access/xact.h"
+#include "catalog/pg_extension.h"
 #include "catalog/pg_index.h"
+#include "commands/extension.h"
 #include "lib/stringinfo.h"
 #include "replication/replication_identifier.h"
 #include "utils/builtins.h"
 #include "utils/guc.h"
 #include "utils/memutils.h"
+#include "utils/snapmgr.h"
 #include "utils/timestamp.h"
 
 /* sequencer */
@@ -57,6 +61,8 @@ BDRSequencerCon *bdr_sequencer_con = NULL;
 PG_MODULE_MAGIC;
 
 void		_PG_init(void);
+
+static void bdr_maintain_schema(void);
 
 /*
  * Converts an int64 to network byte order.
@@ -245,6 +251,9 @@ bdr_apply_main(Datum main_arg)
 
 	/* Connect to our database */
 	BackgroundWorkerInitializeConnection(bdr_apply_con->dbname, NULL);
+
+	/* make sure BDR extension exists */
+	bdr_maintain_schema();
 
 	/* always work in our own schema */
 	SetConfigOption("search_path", "bdr, pg_catalog",
@@ -552,6 +561,9 @@ bdr_sequencer_main(Datum main_arg)
 	/* Connect to our database */
 	BackgroundWorkerInitializeConnection(bdr_sequencer_con->dbname, NULL);
 
+	/* make sure BDR extension exists */
+	bdr_maintain_schema();
+
 	/* always work in our own schema */
 	SetConfigOption("search_path", "bdr, pg_catalog",
 					PGC_BACKEND, PGC_S_OVERRIDE);
@@ -561,7 +573,7 @@ bdr_sequencer_main(Datum main_arg)
 
 	elog(WARNING, "starting sequencer on db \"%s\"", bdr_sequencer_con->dbname);
 
-	/* make sure BDR extension exists */
+	/* initialize sequencer */
 	bdr_sequencer_init();
 
 	while (!got_sigterm)
@@ -819,4 +831,56 @@ out:
 	bdr_sequencer_shmem_init(nregistered, num_used_databases);
 
 	MemoryContextSwitchTo(old_context);
+}
+
+/*
+ * Make sure all required extensions are installed in the correct version for
+ * the current database.
+ *
+ * Concurrent executions will block, but not fail.
+ */
+static void
+bdr_maintain_schema(void)
+{
+	Relation extrel;
+	Oid		extoid;
+
+	StartTransactionCommand();
+	PushActiveSnapshot(GetTransactionSnapshot());
+
+	/* make sure we're operating without other bdr workers interfering */
+	extrel = heap_open(ExtensionRelationId, ShareUpdateExclusiveLock);
+
+    extoid = get_extension_oid("bdr", true);
+
+	/* create required extension if they don't exists yet */
+	if (extoid == InvalidOid)
+	{
+		CreateExtensionStmt create_stmt;
+
+		create_stmt.if_not_exists = false;
+		create_stmt.options = NIL;
+		create_stmt.extname = (char *)"btree_gist";
+
+		CreateExtension(&create_stmt);
+
+		create_stmt.extname = (char *)"bdr";
+		CreateExtension(&create_stmt);
+	}
+	else
+	{
+		AlterExtensionStmt alter_stmt;
+
+		alter_stmt.options = NIL;
+		alter_stmt.extname = (char *)"btree_gist";
+		ExecAlterExtensionStmt(&alter_stmt);
+
+		alter_stmt.extname = (char *)"bdr";
+		ExecAlterExtensionStmt(&alter_stmt);
+	}
+
+	heap_close(extrel, ShareUpdateExclusiveLock);
+
+	PopActiveSnapshot();
+	CommitTransactionCommand();
 }
