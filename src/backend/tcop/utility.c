@@ -1002,6 +1002,8 @@ ProcessUtilitySlow(Node *parsetree,
 								/* Do the table alteration proper */
 								AlterTable(relid, lockmode,
 										   (AlterTableStmt *) stmt);
+								EventTriggerStashCommand(relid, OBJECT_TABLE,
+														 stmt);
 							}
 							else
 							{
@@ -1185,7 +1187,8 @@ ProcessUtilitySlow(Node *parsetree,
 				break;
 
 			case T_AlterExtensionStmt:
-				ExecAlterExtensionStmt((AlterExtensionStmt *) parsetree);
+				objectId = ExecAlterExtensionStmt((AlterExtensionStmt *) parsetree);
+				EventTriggerStashCommand(objectId, OBJECT_EXTENSION, parsetree);
 				break;
 
 			case T_AlterExtensionContentsStmt:
