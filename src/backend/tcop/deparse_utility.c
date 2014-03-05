@@ -978,7 +978,7 @@ deparse_CreateTrigStmt(Oid objectId, Node *parsetree)
  * column definition by this routine; other constraints must be emitted
  * elsewhere (the info in the parse node is incomplete anyway.)
  */
-static ObjElem *
+static ObjTree *
 deparse_ColumnDef(ObjTree *parent, Relation relation, List *dpcontext,
 				  bool composite, ColumnDef *coldef)
 {
@@ -1083,7 +1083,7 @@ deparse_ColumnDef(ObjTree *parent, Relation relation, List *dpcontext,
 
 	ReleaseSysCache(attrTup);
 
-	return new_object_object(parent, NULL, column);
+	return column;
 }
 
 /*
@@ -1099,7 +1099,7 @@ deparse_ColumnDef(ObjTree *parent, Relation relation, List *dpcontext,
  *
  * FIXME --- actually, what about default values?
  */
-static ObjElem *
+static ObjTree *
 deparse_ColumnDef_typed(ObjTree *parent, Relation relation, List *dpcontext,
 						ColumnDef *coldef)
 {
@@ -1145,7 +1145,7 @@ deparse_ColumnDef_typed(ObjTree *parent, Relation relation, List *dpcontext,
 								"name", ObjTypeString, coldef->colname);
 
 	ReleaseSysCache(attrTup);
-	return new_object_object(parent, NULL, column);
+	return column;
 }
 
 /*
@@ -1172,16 +1172,20 @@ deparseTableElements(List *elements, ObjTree *parent, Relation relation,
 		{
 			case T_ColumnDef:
 				{
-					ObjElem    *column;
+					ObjTree	   *tree;
 
-					column = typed ?
+					tree = typed ?
 						deparse_ColumnDef_typed(parent, relation, dpcontext,
 												(ColumnDef *) elt) :
 						deparse_ColumnDef(parent, relation, dpcontext,
 										  composite, (ColumnDef *) elt);
+					if (tree != NULL)
+					{
+						ObjElem    *column;
 
-					if (column != NULL)
+						column = new_object_object(parent, NULL, tree);
 						elements = lappend(elements, column);
+					}
 				}
 				break;
 			case T_Constraint:
@@ -1336,7 +1340,7 @@ deparse_CreateStmt(Oid objectId, Node *parsetree)
 						 node->if_not_exists ? "IF NOT EXISTS" : "");
 
 	dpcontext = deparse_context_for(RelationGetRelationName(relation),
-								  objectId);
+									objectId);
 
 	if (node->ofTypename)
 	{
@@ -2129,6 +2133,71 @@ deparse_CreateSchemaStmt(Oid objectId, Node *parsetree)
 	return command;
 }
 
+static char *
+deparse_AlterTableStmt(Oid objectId, Node *parsetree)
+{
+	AlterTableStmt *node = (AlterTableStmt *) parsetree;
+	ObjTree	   *alterTableStmt;
+	ObjTree	   *tmp;
+	List	   *dpcontext;
+	Relation	rel;
+	List	   *subcmds = NIL;
+	ListCell   *cell;
+	char	   *command;
+
+	rel = heap_open(objectId, AccessShareLock);
+	dpcontext = deparse_context_for(RelationGetRelationName(rel),
+									objectId);
+
+	alterTableStmt =
+		new_objtree_VA(NULL, "ALTER TABLE %{identity}D %{subcmds:, }s", 0);
+	tmp = new_objtree_for_qualname(alterTableStmt,
+								   rel->rd_rel->relnamespace,
+								   RelationGetRelationName(rel));
+	append_object_object(alterTableStmt, "identity", tmp);
+
+	foreach(cell, node->cmds)
+	{
+		AlterTableCmd	*subcmd = (AlterTableCmd *) lfirst(cell);
+		ObjTree	   *tree;
+
+		switch (subcmd->subtype)
+		{
+			case AT_AddColumn:
+				Assert(IsA(subcmd->def, ColumnDef));
+				tree = deparse_ColumnDef(alterTableStmt, rel, dpcontext,
+										 false, (ColumnDef *) subcmd->def);
+				tmp = new_objtree_VA(alterTableStmt,
+									 "ADD COLUMN %{definition}s",
+									 2, "type", ObjTypeString, "add column",
+									 "definition", ObjTypeObject, tree);
+				subcmds = lappend(subcmds,
+								  new_object_object(alterTableStmt, NULL, tmp));
+				break;
+
+			default:
+				elog(WARNING, "unsupported alter table subtype %d",
+					 subcmd->subtype);
+				break;
+		}
+	}
+
+	if (list_length(subcmds) == 0)
+	{
+		command = NULL;
+	}
+	else
+	{
+		append_array_object(alterTableStmt, "subcmds", subcmds);
+		command = jsonize_objtree(alterTableStmt);
+	}
+
+	free_objtree(alterTableStmt);
+	heap_close(rel, AccessShareLock);
+
+	return command;
+}
+
 /*
  * Given a utility command parsetree and the OID of the corresponding object,
  * return a JSON representation of the command.
@@ -2232,6 +2301,10 @@ deparse_utility_command(Oid objectId, Node *parsetree)
 			/* matviews */
 		case T_RefreshMatViewStmt:
 			command = NULL;
+			break;
+
+		case T_AlterTableStmt:
+			command = deparse_AlterTableStmt(objectId, parsetree);
 			break;
 
 		default:
