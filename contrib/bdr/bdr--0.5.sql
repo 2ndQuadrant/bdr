@@ -200,7 +200,7 @@ BEGIN
                 pg_catalog.pg_event_trigger_expand_command(r.command),
                 'false');
 
-        IF r.object_type = 'table' THEN
+        IF TG_TAG = 'CREATE TABLE' THEN
             EXECUTE 'CREATE TRIGGER truncate_trigger AFTER TRUNCATE ON ' ||
                     r.identity ||
                     ' FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate(' ||
