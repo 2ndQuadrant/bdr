@@ -159,28 +159,33 @@ pg_decode_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 		case REORDER_BUFFER_CHANGE_INSERT:
 			appendStringInfoChar(ctx->out, 'I');		/* action INSERT */
 			appendStringInfoChar(ctx->out, 'N');		/* new tuple follows */
-			write_tuple(ctx->out, relation, &change->tp.newtuple->tuple);
+			write_tuple(ctx->out, relation, &change->data.tp.newtuple->tuple);
 			break;
 		case REORDER_BUFFER_CHANGE_UPDATE:
 			appendStringInfoChar(ctx->out, 'U');		/* action UPDATE */
-			if (change->tp.oldtuple != NULL)
+			if (change->data.tp.oldtuple != NULL)
 			{
 				appendStringInfoChar(ctx->out, 'K');	/* old key follows */
-				write_tuple(ctx->out, relation, &change->tp.oldtuple->tuple);
+				write_tuple(ctx->out, relation,
+							&change->data.tp.oldtuple->tuple);
 			}
 			appendStringInfoChar(ctx->out, 'N');		/* new tuple follows */
-			write_tuple(ctx->out, relation, &change->tp.newtuple->tuple);
+			write_tuple(ctx->out, relation,
+						&change->data.tp.newtuple->tuple);
 			break;
 		case REORDER_BUFFER_CHANGE_DELETE:
 			appendStringInfoChar(ctx->out, 'D');		/* action DELETE */
-			if (change->tp.oldtuple != NULL)
+			if (change->data.tp.oldtuple != NULL)
 			{
 				appendStringInfoChar(ctx->out, 'K');	/* old key follows */
-				write_tuple(ctx->out, relation, &change->tp.oldtuple->tuple);
+				write_tuple(ctx->out, relation,
+							&change->data.tp.oldtuple->tuple);
 			}
 			else
 				appendStringInfoChar(ctx->out, 'E');	/* empty */
 			break;
+		default:
+			Assert(false);
 	}
 	OutputPluginWrite(ctx, true);
 
