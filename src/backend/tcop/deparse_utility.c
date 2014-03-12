@@ -539,10 +539,10 @@ new_objtree_for_type(ObjTree *parent, Oid typeId, int32 typmod)
 	/*
 	 * XXX We need this kludge to support types whose typmods include extra
 	 * verbiage after the parenthised value.  Really, this only applies to
-	 * timestamp and timestamptz, whose the typmod takes the form "(N)
-	 * with[out] time zone", which causes a syntax error with schema-qualified
-	 * names extracted from pg_type (as opposed to specialized type names
-	 * defined by the SQL standard).
+	 * timestamp and timestamptz, whose typmod take the form "(N) with[out]
+	 * time zone", which causes a syntax error with schema-qualified names
+	 * extracted from pg_type (as opposed to specialized type names defined by
+	 * the SQL standard).
 	 */
 	if (typmodstr)
 	{
@@ -2261,8 +2261,233 @@ deparse_AlterTableStmt(Oid objectId, Node *parsetree)
 									 "ADD COLUMN %{definition}s",
 									 2, "type", ObjTypeString, "add column",
 									 "definition", ObjTypeObject, tree);
+				/* XXX NOT NULL doesn't work!? */
 				subcmds = lappend(subcmds,
 								  new_object_object(alterTableStmt, NULL, tmp));
+				break;
+
+			case AT_AddColumnRecurse:
+			case AT_DropColumnRecurse:
+			case AT_AddConstraintRecurse:
+			case AT_ValidateConstraintRecurse:
+			case AT_DropConstraintRecurse:
+			case AT_AddOidsRecurse:
+			case AT_AddIndex:
+			case AT_AddIndexConstraint:
+			case AT_ReAddIndex:
+			case AT_ReAddConstraint:
+			case AT_ProcessedConstraint:
+			case AT_ReplaceRelOptions:
+				/* Subtypes used for internal operations; nothing to do here */
+				break;
+
+			case AT_AddColumnToView:
+				/* CREATE OR REPLACE VIEW -- nothing to do here */
+				break;
+
+			case AT_ColumnDefault:
+				if (subcmd->def == NULL)
+				{
+					tmp = new_objtree_VA(alterTableStmt,
+										 "ALTER COLUMN %{column}I DROP DEFAULT",
+										 1, "type", ObjTypeString, "drop default");
+				}
+				else
+				{
+					List	   *dpcontext;
+					HeapTuple	attrtup;
+					AttrNumber	attno;
+
+					tmp = new_objtree_VA(alterTableStmt,
+										 "ALTER COLUMN %{column}I SET DEFAULT %{definition}s",
+										 1, "type", ObjTypeString, "set default");
+
+					dpcontext = deparse_context_for(RelationGetRelationName(rel),
+													RelationGetRelid(rel));
+					attrtup = SearchSysCacheAttName(RelationGetRelid(rel), subcmd->name);
+					attno = ((Form_pg_attribute) GETSTRUCT(attrtup))->attnum;
+					append_string_object(tmp, "definition",
+										 RelationGetColumnDefault(rel, attno, dpcontext));
+					ReleaseSysCache(attrtup);
+				}
+				append_string_object(tmp, "column", subcmd->name);
+
+				subcmds = lappend(subcmds,
+								  new_object_object(alterTableStmt, NULL, tmp));
+				break;
+
+			case AT_DropNotNull:
+				tmp = new_objtree_VA(alterTableStmt,
+									 "ALTER COLUMN %{column}I DROP NOT NULL",
+									 1, "type", ObjTypeString, "drop not null");
+				append_string_object(tmp, "column", subcmd->name);
+				subcmds = lappend(subcmds,
+								  new_object_object(alterTableStmt, NULL, tmp));
+				break;
+
+			case AT_SetNotNull:
+				tmp = new_objtree_VA(alterTableStmt,
+									 "ALTER COLUMN %{column}I SET NOT NULL",
+									 1, "type", ObjTypeString, "set not null");
+				append_string_object(tmp, "column", subcmd->name);
+				subcmds = lappend(subcmds,
+								  new_object_object(alterTableStmt, NULL, tmp));
+				break;
+
+			case AT_SetStatistics:
+				/* not yet */
+				break;
+
+			case AT_SetOptions:
+				/* not yet */
+				break;
+
+			case AT_ResetOptions:
+				/* not yet */
+				break;
+
+			case AT_SetStorage:
+				Assert(IsA(subcmd->def, String));
+				tmp = new_objtree_VA(alterTableStmt,
+									 "ALTER COLUMN %{column}I SET STORAGE %{storage}s",
+									 3, "type", ObjTypeString, "set storage",
+									 "column", ObjTypeString, subcmd->name,
+									 "storage", ObjTypeString,
+									 strVal((Value *) subcmd->def));
+				subcmds = lappend(subcmds,
+								  new_object_object(alterTableStmt, NULL, tmp));
+				break;
+
+			case AT_DropColumn:
+				tmp = new_objtree_VA(alterTableStmt,
+									 "DROP COLUMN %{column}I",
+									 2, "type", ObjTypeString, "drop column",
+								 "column", ObjTypeString, subcmd->name);
+				subcmds = lappend(subcmds,
+								  new_object_object(alterTableStmt, NULL, tmp));
+				break;
+
+			case AT_AddConstraint:
+				break;
+
+			case AT_AlterConstraint:
+				break;
+
+			case AT_ValidateConstraint:
+				tmp = new_objtree_VA(alterTableStmt,
+									 "VALIDATE CONSTRAINT %{constraint}I", 2,
+									 "type", ObjTypeString, "validate constraint",
+									 "constraint", ObjTypeString, subcmd->name);
+				subcmds = lappend(subcmds,
+								  new_object_object(alterTableStmt, NULL, tmp));
+				break;
+
+			case AT_DropConstraint:
+				tmp = new_objtree_VA(alterTableStmt,
+									 "DROP CONSTRAINT %{constraint}I", 2,
+									 "type", ObjTypeString, "drop constraint",
+									 "constraint", ObjTypeString, subcmd->name);
+				subcmds = lappend(subcmds,
+								  new_object_object(alterTableStmt, NULL, tmp));
+				break;
+
+			case AT_AlterColumnType:
+				tmp = new_objtree_VA(alterTableStmt,
+									 "ALTER COLUMN %{column}I SET DATA TYPE %{datatype}T collate_clause using_clause",
+									 2, "type", ObjTypeString, "alter column type",
+									 "column", ObjTypeString, subcmd->name);
+				/* FIXME figure out correct typid/typmod , collate clause, using_clause */
+				append_object_object(tmp, "datatype",
+									 new_objtree_for_type(tmp, INT4OID, -1));
+				subcmds = lappend(subcmds,
+								  new_object_object(alterTableStmt, NULL, tmp));
+				break;
+
+			case AT_AlterColumnGenericOptions:
+				break;
+
+			case AT_ChangeOwner:
+				tmp = new_objtree_VA(alterTableStmt,
+									 "OWNER TO %{owner}I",
+									 2, "type", ObjTypeString, "change owner",
+									 "owner",  ObjTypeString, subcmd->name);
+				subcmds = lappend(subcmds,
+								  new_object_object(alterTableStmt, NULL, tmp));
+				break;
+
+			case AT_ClusterOn:
+				break;
+
+			case AT_DropCluster:
+				break;
+
+			case AT_AddOids:
+				break;
+
+			case AT_DropOids:
+				break;
+
+			case AT_SetTableSpace:
+				break;
+
+			case AT_SetRelOptions:
+				break;
+
+			case AT_ResetRelOptions:
+				break;
+
+			case AT_EnableTrig:
+				break;
+
+			case AT_EnableAlwaysTrig:
+				break;
+
+			case AT_EnableReplicaTrig:
+				break;
+
+			case AT_DisableTrig:
+				break;
+
+			case AT_EnableTrigAll:
+				break;
+
+			case AT_DisableTrigAll:
+				break;
+
+			case AT_EnableTrigUser:
+				break;
+
+			case AT_DisableTrigUser:
+				break;
+
+			case AT_EnableRule:
+				break;
+
+			case AT_EnableAlwaysRule:
+				break;
+
+			case AT_EnableReplicaRule:
+				break;
+
+			case AT_DisableRule:
+				break;
+
+			case AT_AddInherit:
+				break;
+
+			case AT_DropInherit:
+				break;
+
+			case AT_AddOf:
+				break;
+
+			case AT_DropOf:
+				break;
+
+			case AT_ReplicaIdentity:
+				break;
+
+			case AT_GenericOptions:
 				break;
 
 			default:
@@ -2375,6 +2600,10 @@ deparse_utility_command(Oid objectId, Node *parsetree)
 
 		case T_CreateRangeStmt:	/* CREATE TYPE AS RANGE */
 			command = deparse_CreateRangeStmt(objectId, parsetree);
+			break;
+
+		case T_RenameStmt:		/* ALTER .. RENAME */
+			command = NULL;
 			break;
 
 		case T_CreateDomainStmt:

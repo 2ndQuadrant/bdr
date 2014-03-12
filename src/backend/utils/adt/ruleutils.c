@@ -467,7 +467,7 @@ pg_get_ruledef_details(Datum ev_qual, Datum ev_action,
 		query = (Query *) linitial(actionNodeList);
 		query = getInsertSelectQuery(query, NULL);
 
-		AcquireRewriteLocks(query, false);
+		AcquireRewriteLocks(query, false, false);
 
 		context.buf = &buf;
 		context.namespaces = list_make1(&dpns);
