@@ -86,6 +86,7 @@ IDENTIFY_SYSTEM		{ return K_IDENTIFY_SYSTEM; }
 LABEL			{ return K_LABEL; }
 NOWAIT			{ return K_NOWAIT; }
 PROGRESS			{ return K_PROGRESS; }
+MAX_RATE		{ return K_MAX_RATE; }
 WAL			{ return K_WAL; }
 TIMELINE			{ return K_TIMELINE; }
 START_REPLICATION	{ return K_START_REPLICATION; }
@@ -93,6 +94,7 @@ CREATE_REPLICATION_SLOT		{ return K_CREATE_REPLICATION_SLOT; }
 DROP_REPLICATION_SLOT		{ return K_DROP_REPLICATION_SLOT; }
 TIMELINE_HISTORY	{ return K_TIMELINE_HISTORY; }
 PHYSICAL			{ return K_PHYSICAL; }
+LOGICAL				{ return K_LOGICAL; }
 SLOT				{ return K_SLOT; }
 
 ","				{ return ','; }

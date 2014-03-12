@@ -2424,7 +2424,8 @@ RenameConstraint(RenameStmt *stmt)
 }
 
 /*
- * Execute ALTER TABLE/INDEX/SEQUENCE/VIEW/FOREIGN TABLE RENAME
+ * Execute ALTER TABLE/INDEX/SEQUENCE/VIEW/MATERIALIZED VIEW/FOREIGN TABLE
+ * RENAME
  */
 Oid
 RenameRelation(RenameStmt *stmt)
@@ -2432,8 +2433,9 @@ RenameRelation(RenameStmt *stmt)
 	Oid			relid;
 
 	/*
-	 * Grab an exclusive lock on the target table, index, sequence or view,
-	 * which we will NOT release until end of transaction.
+	 * Grab an exclusive lock on the target table, index, sequence, view,
+	 * materialized view, or foreign table, which we will NOT release until
+	 * end of transaction.
 	 *
 	 * Lock level used here should match RenameRelationInternal, to avoid lock
 	 * escalation.
@@ -2476,8 +2478,9 @@ RenameRelationInternal(Oid myrelid, const char *newrelname, bool is_internal)
 	Oid			namespaceId;
 
 	/*
-	 * Grab an exclusive lock on the target table, index, sequence or view,
-	 * which we will NOT release until end of transaction.
+	 * Grab an exclusive lock on the target table, index, sequence, view,
+	 * materialized view, or foreign table, which we will NOT release until
+	 * end of transaction.
 	 */
 	targetrelation = relation_open(myrelid, AccessExclusiveLock);
 	namespaceId = RelationGetNamespace(targetrelation);
@@ -9030,8 +9033,8 @@ ATExecSetTableSpace(Oid tableOid, Oid newTableSpace, LOCKMODE lockmode)
 	FlushRelationBuffers(rel);
 
 	/*
-	 * Relfilenodes are not unique across tablespaces, so we need to allocate
-	 * a new one in the new tablespace.
+	 * Relfilenodes are not unique in databases across tablespaces, so we
+	 * need to allocate a new one in the new tablespace.
 	 */
 	newrelfilenode = GetNewRelFileNode(newTableSpace, NULL,
 									   rel->rd_rel->relpersistence);

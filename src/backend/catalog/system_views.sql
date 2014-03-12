@@ -586,6 +586,8 @@ CREATE VIEW pg_stat_activity AS
             S.state_change,
             S.waiting,
             S.state,
+            S.backend_xid,
+            s.backend_xmin,
             S.query
     FROM pg_database D, pg_stat_get_activity(NULL) AS S, pg_authid U
     WHERE S.datid = D.oid AND
@@ -601,6 +603,7 @@ CREATE VIEW pg_stat_replication AS
             S.client_hostname,
             S.client_port,
             S.backend_start,
+            S.backend_xmin,
             W.state,
             W.sent_location,
             W.write_location,
@@ -616,11 +619,13 @@ CREATE VIEW pg_stat_replication AS
 CREATE VIEW pg_replication_slots AS
     SELECT
             L.slot_name,
+            L.plugin,
             L.slot_type,
             L.datoid,
             D.datname AS database,
             L.active,
             L.xmin,
+            L.catalog_xmin,
             L.restart_lsn
     FROM pg_get_replication_slots() AS L
             LEFT JOIN pg_database D ON (L.datoid = D.oid);
@@ -810,7 +815,7 @@ COMMENT ON FUNCTION ts_debug(text) IS
 
 CREATE OR REPLACE FUNCTION
   pg_start_backup(label text, fast boolean DEFAULT false)
-  RETURNS text STRICT VOLATILE LANGUAGE internal AS 'pg_start_backup';
+  RETURNS pg_lsn STRICT VOLATILE LANGUAGE internal AS 'pg_start_backup';
 
 CREATE OR REPLACE FUNCTION
   json_populate_record(base anyelement, from_json json, use_json_as_text boolean DEFAULT false)
@@ -819,3 +824,44 @@ CREATE OR REPLACE FUNCTION
 CREATE OR REPLACE FUNCTION
   json_populate_recordset(base anyelement, from_json json, use_json_as_text boolean DEFAULT false)
   RETURNS SETOF anyelement LANGUAGE internal STABLE ROWS 100  AS 'json_populate_recordset';
+
+CREATE OR REPLACE FUNCTION pg_logical_slot_get_changes(
+    IN slotname name, IN upto_lsn pg_lsn, IN upto_nchanges int, VARIADIC options text[] DEFAULT '{}',
+    OUT location pg_lsn, OUT xid xid, OUT data text)
+RETURNS SETOF RECORD
+LANGUAGE INTERNAL
+VOLATILE ROWS 1000 COST 1000
+AS 'pg_logical_slot_get_changes';
+
+CREATE OR REPLACE FUNCTION pg_logical_slot_peek_changes(
+    IN slotname name, IN upto_lsn pg_lsn, IN upto_nchanges int, VARIADIC options text[] DEFAULT '{}',
+    OUT location pg_lsn, OUT xid xid, OUT data text)
+RETURNS SETOF RECORD
+LANGUAGE INTERNAL
+VOLATILE ROWS 1000 COST 1000
+AS 'pg_logical_slot_peek_changes';
+
+CREATE OR REPLACE FUNCTION pg_logical_slot_get_binary_changes(
+    IN slotname name, IN upto_lsn pg_lsn, IN upto_nchanges int, VARIADIC options text[] DEFAULT '{}',
+    OUT location pg_lsn, OUT xid xid, OUT data bytea)
+RETURNS SETOF RECORD
+LANGUAGE INTERNAL
+VOLATILE ROWS 1000 COST 1000
+AS 'pg_logical_slot_get_binary_changes';
+
+CREATE OR REPLACE FUNCTION pg_logical_slot_peek_binary_changes(
+    IN slotname name, IN upto_lsn pg_lsn, IN upto_nchanges int, VARIADIC options text[] DEFAULT '{}',
+    OUT location pg_lsn, OUT xid xid, OUT data bytea)
+RETURNS SETOF RECORD
+LANGUAGE INTERNAL
+VOLATILE ROWS 1000 COST 1000
+AS 'pg_logical_slot_peek_binary_changes';
+
+CREATE OR REPLACE FUNCTION
+  make_interval(years int4 DEFAULT 0, months int4 DEFAULT 0, weeks int4 DEFAULT 0,
+                days int4 DEFAULT 0, hours int4 DEFAULT 0, mins int4 DEFAULT 0,
+                secs double precision DEFAULT 0.0)
+RETURNS interval
+LANGUAGE INTERNAL
+STRICT IMMUTABLE
+AS 'make_interval';

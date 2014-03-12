@@ -1,6 +1,10 @@
 <!-- doc/src/sgml/pgupgrade.sgml -->
 
 <refentry id="pgupgrade">
+ <indexterm zone="pgupgrade">
+  <primary>pg_upgrade</primary>
+ </indexterm>
+
  <refmeta>
   <refentrytitle><application>pg_upgrade</application></refentrytitle>
   <manvolnum>1</manvolnum>
@@ -11,10 +15,6 @@
   <refname>pg_upgrade</refname>
   <refpurpose>upgrade a <productname>PostgreSQL</productname> server instance</refpurpose>
  </refnamediv>
-
- <indexterm zone="pgupgrade">
-  <primary>pg_upgrade</primary>
- </indexterm>
 
  <refsynopsisdiv>
   <cmdsynopsis>
@@ -458,8 +458,9 @@ psql --username postgres --file script.sql postgres
     <para>
      Once you are satisfied with the upgrade, you can delete the old
      cluster's data directories by running the script mentioned when
-     <command>pg_upgrade</command> completes. You can also delete the
-     old installation directories
+     <command>pg_upgrade</command> completes. (Automatic deletion is not
+     possible if you have user-defined tablespaces inside the old data
+     directory.)  You can also delete the old installation directories
      (e.g. <filename>bin</>, <filename>share</>).
     </para>
    </step>

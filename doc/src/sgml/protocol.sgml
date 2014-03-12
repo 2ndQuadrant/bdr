@@ -1302,10 +1302,13 @@
 
 <para>
 To initiate streaming replication, the frontend sends the
-<literal>replication</> parameter in the startup message. This tells the
-backend to go into walsender mode, wherein a small set of replication commands
-can be issued instead of SQL statements. Only the simple query protocol can be
-used in walsender mode.
+<literal>replication</> parameter in the startup message. A boolean value
+of <literal>true</> tells the backend to go into walsender mode, wherein a
+small set of replication commands can be issued instead of SQL statements. Only
+the simple query protocol can be used in walsender mode.
+Passing <literal>database</> as the value instructs walsender to connect to
+the database specified in the <literal>dbname</> parameter, which will allow
+the connection to be used for logical replication from that database.
 
 The commands accepted in walsender mode are:
 
@@ -1315,7 +1318,7 @@ The commands accepted in walsender mode are:
     <listitem>
      <para>
       Requests the server to identify itself. Server replies with a result
-      set of a single row, containing three fields:
+      set of a single row, containing four fields:
      </para>
 
      <para>
@@ -1353,6 +1356,17 @@ The commands accepted in walsender mode are:
       <para>
        Current xlog write location. Useful to get a known location in the
        transaction log where streaming can start.
+      </para>
+      </listitem>
+      </varlistentry>
+
+      <varlistentry>
+      <term>
+       dbname
+      </term>
+      <listitem>
+      <para>
+       Database connected to or NULL.
       </para>
       </listitem>
       </varlistentry>
@@ -1772,7 +1786,7 @@ The commands accepted in walsender mode are:
   </varlistentry>
 
   <varlistentry>
-    <term>BASE_BACKUP [<literal>LABEL</literal> <replaceable>'label'</replaceable>] [<literal>PROGRESS</literal>] [<literal>FAST</literal>] [<literal>WAL</literal>] [<literal>NOWAIT</literal>]</term>
+    <term>BASE_BACKUP [<literal>LABEL</literal> <replaceable>'label'</replaceable>] [<literal>PROGRESS</literal>] [<literal>FAST</literal>] [<literal>WAL</literal>] [<literal>NOWAIT</literal>] [<literal>MAX_RATE</literal> <replaceable>rate</replaceable>]</term>
     <listitem>
      <para>
       Instructs the server to start streaming a base backup.
@@ -1840,7 +1854,21 @@ The commands accepted in walsender mode are:
           the waiting and the warning, leaving the client responsible for
           ensuring the required log is available.
          </para>
-         </listitem>
+        </listitem>
+       </varlistentry>
+
+       <varlistentry>
+        <term><literal>MAX_RATE</literal> <replaceable>rate</></term>
+        <listitem>
+         <para>
+          Limit (throttle) the maximum amount of data transferred from server
+          to client per unit of time.  The expected unit is kilobytes per second.
+          If this option is specified, the value must either be equal to zero
+          or it must fall within the range from 32 kB through 1 GB (inclusive).
+          If zero is passed or the option is not specified, no restriction is
+          imposed on the transfer.
+         </para>
+        </listitem>
        </varlistentry>
       </variablelist>
      </para>

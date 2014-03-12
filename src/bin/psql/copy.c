@@ -269,11 +269,8 @@ do_copy(const char *args)
 {
 	PQExpBufferData query;
 	FILE	   *copystream;
-	FILE	   *save_file;
-	FILE	  **override_file;
 	struct copy_options *options;
 	bool		success;
-	struct stat st;
 
 	/* parse options */
 	options = parse_slash_copy(args);
@@ -287,8 +284,6 @@ do_copy(const char *args)
 
 	if (options->from)
 	{
-		override_file = &pset.cur_cmd_source;
-
 		if (options->file)
 		{
 			if (options->program)
@@ -308,8 +303,6 @@ do_copy(const char *args)
 	}
 	else
 	{
-		override_file = &pset.queryFout;
-
 		if (options->file)
 		{
 			if (options->program)
@@ -345,13 +338,21 @@ do_copy(const char *args)
 
 	if (!options->program)
 	{
+		struct stat st;
+		int result;
+
 		/* make sure the specified file is not a directory */
-		fstat(fileno(copystream), &st);
-		if (S_ISDIR(st.st_mode))
-		{
-			fclose(copystream);
+		if ((result = fstat(fileno(copystream), &st)) < 0)
+			psql_error("could not stat file: %s\n",
+					   strerror(errno));
+
+		if (result == 0 && S_ISDIR(st.st_mode))
 			psql_error("%s: cannot copy from/to a directory\n",
 					   options->file);
+
+		if (result < 0 || S_ISDIR(st.st_mode))
+		{
+			fclose(copystream);
 			free_copy_options(options);
 			return false;
 		}
@@ -368,11 +369,10 @@ do_copy(const char *args)
 	if (options->after_tofrom)
 		appendPQExpBufferStr(&query, options->after_tofrom);
 
-	/* Run it like a user command, interposing the data source or sink. */
-	save_file = *override_file;
-	*override_file = copystream;
+	/* run it like a user command, but with copystream as data source/sink */
+	pset.copyStream = copystream;
 	success = SendQuery(query.data);
-	*override_file = save_file;
+	pset.copyStream = NULL;
 	termPQExpBuffer(&query);
 
 	if (options->file != NULL)

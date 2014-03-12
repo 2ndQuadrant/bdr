@@ -198,7 +198,10 @@ static const char *subdirs[] = {
 	"pg_replslot",
 	"pg_tblspc",
 	"pg_stat",
-	"pg_stat_tmp"
+	"pg_stat_tmp",
+	"pg_llog",
+	"pg_llog/snapshots",
+	"pg_llog/mappings"
 };
 
 
@@ -1293,7 +1296,12 @@ setup_config(void)
 	snprintf(path, sizeof(path), "%s/postgresql.conf", pg_data);
 
 	writefile(path, conflines);
-	chmod(path, S_IRUSR | S_IWUSR);
+	if (chmod(path, S_IRUSR | S_IWUSR) != 0)
+	{
+		fprintf(stderr, _("%s: could not change permissions of \"%s\": %s\n"),
+				progname, path, strerror(errno));
+		exit_nicely();
+	}
 
 	/*
 	 * create the automatic configuration file to store the configuration
@@ -1308,7 +1316,12 @@ setup_config(void)
 	sprintf(path, "%s/%s", pg_data, PG_AUTOCONF_FILENAME);
 
 	writefile(path, autoconflines);
-	chmod(path, S_IRUSR | S_IWUSR);
+	if (chmod(path, S_IRUSR | S_IWUSR) != 0)
+	{
+		fprintf(stderr, _("%s: could not change permissions of \"%s\": %s\n"),
+				progname, path, strerror(errno));
+		exit_nicely();
+	}
 
 	free(conflines);
 
@@ -1387,7 +1400,12 @@ setup_config(void)
 	snprintf(path, sizeof(path), "%s/pg_hba.conf", pg_data);
 
 	writefile(path, conflines);
-	chmod(path, S_IRUSR | S_IWUSR);
+	if (chmod(path, S_IRUSR | S_IWUSR) != 0)
+	{
+		fprintf(stderr, _("%s: could not change permissions of \"%s\": %s\n"),
+				progname, path, strerror(errno));
+		exit_nicely();
+	}
 
 	free(conflines);
 
@@ -1398,7 +1416,12 @@ setup_config(void)
 	snprintf(path, sizeof(path), "%s/pg_ident.conf", pg_data);
 
 	writefile(path, conflines);
-	chmod(path, S_IRUSR | S_IWUSR);
+	if (chmod(path, S_IRUSR | S_IWUSR) != 0)
+	{
+		fprintf(stderr, _("%s: could not change permissions of \"%s\": %s\n"),
+				progname, path, strerror(errno));
+		exit_nicely();
+	}
 
 	free(conflines);
 
@@ -1957,8 +1980,14 @@ setup_collation(void)
 		 * only, so this doesn't clash with "en_US" for LATIN1, say.
 		 */
 		if (normalize_locale_name(alias, localebuf))
+		{
+			char   *quoted_alias = escape_quotes(alias);
+
 			PG_CMD_PRINTF3("INSERT INTO tmp_pg_collation VALUES (E'%s', E'%s', %d);\n",
-						   escape_quotes(alias), quoted_locale, enc);
+						   quoted_alias, quoted_locale, enc);
+			free(quoted_alias);
+		}
+		free(quoted_locale);
 	}
 
 	/* Add an SQL-standard name */

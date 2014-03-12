@@ -97,6 +97,7 @@ static bool allow_core_files = false;
 static time_t start_time;
 
 static char postopts_file[MAXPGPATH];
+static char version_file[MAXPGPATH];
 static char pid_file[MAXPGPATH];
 static char backup_file[MAXPGPATH];
 static char recovery_file[MAXPGPATH];
@@ -152,8 +153,9 @@ static void pgwin32_doRunAsService(void);
 static int	CreateRestrictedProcess(char *cmd, PROCESS_INFORMATION *processInfo, bool as_service);
 #endif
 
-static pgpid_t get_pgpid(void);
+static pgpid_t get_pgpid(bool is_status_request);
 static char **readfile(const char *path);
+static void free_readfile(char **optlines);
 static int	start_postmaster(void);
 static void read_post_opts(void);
 
@@ -245,10 +247,34 @@ print_msg(const char *msg)
 }
 
 static pgpid_t
-get_pgpid(void)
+get_pgpid(bool is_status_request)
 {
 	FILE	   *pidf;
 	long		pid;
+	struct stat statbuf;
+
+	if (stat(pg_data, &statbuf) != 0)
+	{
+		if (errno == ENOENT)
+			printf(_("%s: directory \"%s\" does not exist\n"), progname,
+					 pg_data);
+		else
+			printf(_("%s: cannot access directory \"%s\"\n"), progname,
+					 pg_data);
+		/*
+		 * The Linux Standard Base Core Specification 3.1 says this should return
+		 * '4, program or service status is unknown'
+		 * https://refspecs.linuxbase.org/LSB_3.1.0/LSB-Core-generic/LSB-Core-generic/iniscrptact.html
+		 */
+		exit(is_status_request ? 4 : 1);
+	}
+
+	if (stat(version_file, &statbuf) != 0 && errno == ENOENT)
+	{
+		printf(_("%s: directory \"%s\" is not a database cluster directory\n"),
+				 progname, pg_data);
+		exit(is_status_request ? 4 : 1);
+	}
 
 	pidf = fopen(pid_file, "r");
 	if (pidf == NULL)
@@ -369,6 +395,25 @@ readfile(const char *path)
 }
 
 
+/*
+ * Free memory allocated for optlines through readfile()
+ */
+void
+free_readfile(char **optlines)
+{
+	char   *curr_line = NULL;
+	int		i = 0;
+
+	if (!optlines)
+		return;
+
+	while ((curr_line = optlines[i++]))
+		free(curr_line);
+
+	free(optlines);
+
+	return;
+}
 
 /*
  * start/test/stop routines
@@ -572,6 +617,13 @@ test_postmaster_connection(bool do_checkpoint)
 					}
 				}
 			}
+
+			/*
+			 * Free the results of readfile.
+			 *
+			 * This is safe to call even if optlines is NULL.
+			 */
+			free_readfile(optlines);
 		}
 
 		/* If we have a connection string, ping the server */
@@ -703,11 +755,14 @@ read_post_opts(void)
 				{
 					*arg1 = '\0';		/* terminate so we get only program
 										 * name */
-					post_opts = arg1 + 1;		/* point past whitespace */
+					post_opts = pg_strdup(arg1 + 1); /* point past whitespace */
 				}
 				if (exec_path == NULL)
-					exec_path = optline;
+					exec_path = pg_strdup(optline);
 			}
+
+			/* Free the results of readfile. */
+			free_readfile(optlines);
 		}
 	}
 }
@@ -780,7 +835,7 @@ do_start(void)
 
 	if (ctl_command != RESTART_COMMAND)
 	{
-		old_pid = get_pgpid();
+		old_pid = get_pgpid(false);
 		if (old_pid != 0)
 			write_stderr(_("%s: another server might be running; "
 						   "trying to start server anyway\n"),
@@ -864,7 +919,7 @@ do_stop(void)
 	pgpid_t		pid;
 	struct stat statbuf;
 
-	pid = get_pgpid();
+	pid = get_pgpid(false);
 
 	if (pid == 0)				/* no pid file */
 	{
@@ -913,7 +968,7 @@ do_stop(void)
 
 		for (cnt = 0; cnt < wait_seconds; cnt++)
 		{
-			if ((pid = get_pgpid()) != 0)
+			if ((pid = get_pgpid(false)) != 0)
 			{
 				print_msg(".");
 				pg_usleep(1000000);		/* 1 sec */
@@ -950,7 +1005,7 @@ do_restart(void)
 	pgpid_t		pid;
 	struct stat statbuf;
 
-	pid = get_pgpid();
+	pid = get_pgpid(false);
 
 	if (pid == 0)				/* no pid file */
 	{
@@ -1003,7 +1058,7 @@ do_restart(void)
 
 		for (cnt = 0; cnt < wait_seconds; cnt++)
 		{
-			if ((pid = get_pgpid()) != 0)
+			if ((pid = get_pgpid(false)) != 0)
 			{
 				print_msg(".");
 				pg_usleep(1000000);		/* 1 sec */
@@ -1041,7 +1096,7 @@ do_reload(void)
 {
 	pgpid_t		pid;
 
-	pid = get_pgpid();
+	pid = get_pgpid(false);
 	if (pid == 0)				/* no pid file */
 	{
 		write_stderr(_("%s: PID file \"%s\" does not exist\n"), progname, pid_file);
@@ -1080,7 +1135,7 @@ do_promote(void)
 	pgpid_t		pid;
 	struct stat statbuf;
 
-	pid = get_pgpid();
+	pid = get_pgpid(false);
 
 	if (pid == 0)				/* no pid file */
 	{
@@ -1174,7 +1229,7 @@ do_status(void)
 {
 	pgpid_t		pid;
 
-	pid = get_pgpid();
+	pid = get_pgpid(true);
 	/* Is there a pid file? */
 	if (pid != 0)
 	{
@@ -1195,14 +1250,20 @@ do_status(void)
 			if (postmaster_is_alive((pid_t) pid))
 			{
 				char	  **optlines;
+				char	  **curr_line;
 
 				printf(_("%s: server is running (PID: %ld)\n"),
 					   progname, pid);
 
 				optlines = readfile(postopts_file);
 				if (optlines != NULL)
-					for (; *optlines != NULL; optlines++)
-						fputs(*optlines, stdout);
+				{
+					for (curr_line = optlines; *curr_line != NULL; curr_line++)
+						fputs(*curr_line, stdout);
+
+					/* Free the results of readfile */
+					free_readfile(optlines);
+				}
 				return;
 			}
 		}
@@ -1211,7 +1272,7 @@ do_status(void)
 
 	/*
 	 * The Linux Standard Base Core Specification 3.1 says this should return
-	 * '3'
+	 * '3, program is not running'
 	 * https://refspecs.linuxbase.org/LSB_3.1.0/LSB-Core-generic/LSB-Core-generic/iniscrptact.html
 	 */
 	exit(3);
@@ -2249,6 +2310,7 @@ main(int argc, char **argv)
 	if (pg_data)
 	{
 		snprintf(postopts_file, MAXPGPATH, "%s/postmaster.opts", pg_data);
+		snprintf(version_file, MAXPGPATH, "%s/PG_VERSION", pg_data);
 		snprintf(pid_file, MAXPGPATH, "%s/postmaster.pid", pg_data);
 		snprintf(backup_file, MAXPGPATH, "%s/backup_label", pg_data);
 		snprintf(recovery_file, MAXPGPATH, "%s/recovery.conf", pg_data);

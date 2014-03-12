@@ -781,10 +781,6 @@ ProcKill(int code, Datum arg)
 	/* Make sure we're out of the sync rep lists */
 	SyncRepCleanupAtProcExit();
 
-	/* Make sure active replication slots are released */
-	if (MyReplicationSlot != NULL)
-		ReplicationSlotRelease();
-
 #ifdef USE_ASSERT_CHECKING
 	if (assert_enabled)
 	{
@@ -802,6 +798,10 @@ ProcKill(int code, Datum arg)
 	 * facility by releasing our PGPROC ...
 	 */
 	LWLockReleaseAll();
+
+	/* Make sure active replication slots are released */
+	if (MyReplicationSlot != NULL)
+		ReplicationSlotRelease();
 
 	/*
 	 * Clear MyProc first; then disown the process latch.  This is so that
@@ -1158,8 +1158,7 @@ ProcSleep(LOCALLOCK *locallock, LockMethod lockMethodTable)
 			 * Only do it if the worker is not working to protect against Xid
 			 * wraparound.
 			 */
-			if ((autovac != NULL) &&
-				(autovac_pgxact->vacuumFlags & PROC_IS_AUTOVACUUM) &&
+			if ((autovac_pgxact->vacuumFlags & PROC_IS_AUTOVACUUM) &&
 				!(autovac_pgxact->vacuumFlags & PROC_VACUUM_FOR_WRAPAROUND))
 			{
 				int			pid = autovac->pid;

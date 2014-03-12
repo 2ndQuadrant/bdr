@@ -3549,11 +3549,9 @@ cast(-44 as bit(12))           <lineannotation>111111010100</lineannotation>
 
     <note>
      <para>
-      Prior to <productname>PostgreSQL</productname> 8.0, casting an
-      integer to <type>bit(n)</> would copy the leftmost <literal>n</>
-      bits of the integer, whereas now it copies the rightmost <literal>n</>
-      bits.  Also, casting an integer to a bit string width wider than
-      the integer itself will sign-extend on the left.
+      Casting an integer to <type>bit(n)</> copies the rightmost
+      <literal>n</> bits.  Casting an integer to a bit string width wider
+      than the integer itself will sign-extend on the left.
      </para>
     </note>
 
@@ -5787,6 +5785,20 @@ SELECT SUBSTRING('XY1234Z', 'Y*?([0-9]{1,3})');
 
      <listitem>
       <para>
+       <function>to_timestamp</function> and <function>to_date</function>
+       exist to handle input formats that cannot be converted by
+       simple casting.  These functions interpret input liberally,
+       with minimal error checking.  While they produce valid output,
+       the conversion can yield unexpected results.  For example,
+       input to these functions is not restricted by normal ranges,
+       thus <literal>to_date('20096040','YYYYMMDD')</literal> returns
+       <literal>2014-01-17</literal> rather than causing an error.
+       Casting does not have this behavior.
+      </para>
+     </listitem>
+  
+     <listitem>
+      <para>
        Ordinary text is allowed in <function>to_char</function>
        templates and will be output literally.  You can put a substring
        in double quotes to force it to be interpreted as literal text
@@ -6725,6 +6737,32 @@ SELECT SUBSTRING('XY1234Z', 'Y*?([0-9]{1,3})');
        <row>
         <entry>
          <indexterm>
+          <primary>make_interval</primary>
+         </indexterm>
+         <literal>
+          <function>
+           make_interval(<parameter>years</parameter> <type>int</type> DEFAULT 0,
+           <parameter>months</parameter> <type>int</type> DEFAULT 0,
+           <parameter>weeks</parameter> <type>int</type> DEFAULT 0,
+           <parameter>days</parameter> <type>int</type> DEFAULT 0,
+           <parameter>hours</parameter> <type>int</type> DEFAULT 0,
+           <parameter>mins</parameter> <type>int</type> DEFAULT 0,
+           <parameter>secs</parameter> <type>double precision</type> DEFAULT 0.0)
+          </function>
+         </literal>
+        </entry>
+        <entry><type>interval</type></entry>
+        <entry>
+         Create interval from years, months, weeks, days, hours, minutes and
+         seconds fields
+        </entry>
+        <entry><literal>make_interval(days := 10)</literal></entry>
+        <entry><literal>10 days</literal></entry>
+       </row>
+
+       <row>
+        <entry>
+         <indexterm>
           <primary>make_time</primary>
          </indexterm>
          <literal>
@@ -6741,6 +6779,57 @@ SELECT SUBSTRING('XY1234Z', 'Y*?([0-9]{1,3})');
         </entry>
         <entry><literal>make_time(8, 15, 23.5)</literal></entry>
         <entry><literal>08:15:23.5</literal></entry>
+       </row>
+
+       <row>
+        <entry>
+         <indexterm>
+          <primary>make_timestamp</primary>
+         </indexterm>
+         <literal>
+          <function>
+           make_timestamp(<parameter>year</parameter> <type>int</type>,
+           <parameter>month</parameter> <type>int</type>,
+           <parameter>day</parameter> <type>int</type>,
+           <parameter>hour</parameter> <type>int</type>,
+           <parameter>min</parameter> <type>int</type>,
+           <parameter>sec</parameter> <type>double precision</type>)
+          </function>
+         </literal>
+        </entry>
+        <entry><type>timestamp</type></entry>
+        <entry>
+         Create timestamp from year, month, day, hour, minute and seconds fields
+        </entry>
+        <entry><literal>make_timestamp(1-23, 7, 15, 8, 15, 23.5)</literal></entry>
+        <entry><literal>2013-07-15 08:15:23.5</literal></entry>
+       </row>
+
+       <row>
+        <entry>
+         <indexterm>
+          <primary>make_timestamptz</primary>
+         </indexterm>
+         <literal>
+          <function>
+           make_timestamptz(<parameter>year</parameter> <type>int</type>,
+           <parameter>month</parameter> <type>int</type>,
+           <parameter>day</parameter> <type>int</type>,
+           <parameter>hour</parameter> <type>int</type>,
+           <parameter>min</parameter> <type>int</type>,
+           <parameter>sec</parameter> <type>double precision</type>,
+           <optional> <parameter>timezone</parameter> <type>text</type> </optional>)
+          </function>
+         </literal>
+        </entry>
+        <entry><type>timestamp with time zone</type></entry>
+        <entry>
+         Create timestamp with time zone from year, month, day, hour, minute
+         and seconds fields. When <parameter>timezone</parameter> is not specified,
+         then current time zone is used.
+        </entry>
+        <entry><literal>make_timestamp(1-23, 7, 15, 8, 15, 23.5)</literal></entry>
+        <entry><literal>2013-07-15 08:15:23.5+01</literal></entry>
        </row>
 
        <row>
@@ -6855,7 +6944,7 @@ SELECT (DATE '2001-10-30', DATE '2001-10-30') OVERLAPS
    time zone that recognizes DST), this means <literal>interval '1 day'</literal>
    does not necessarily equal <literal>interval '24 hours'</literal>.
    For example, with the session time zone set to <literal>CST7CDT</literal>,
-   <literal>timestamp with time zone '2005-04-02 12:00-07' + interval '1 day' </literal>
+   <literal>timestamp with time zone '2005-04-02 12:00-07' + interval '1 day'</literal>
    will produce <literal>timestamp with time zone '2005-04-03 12:00-06'</literal>,
    while adding <literal>interval '24 hours'</literal> to the same initial
    <type>timestamp with time zone</type> produces
@@ -6958,12 +7047,6 @@ SELECT EXTRACT(CENTURY FROM TIMESTAMP '2001-02-16 20:38:40');
 
         If you disagree with this, please write your complaint to:
         Pope, Cathedral Saint-Peter of Roma, Vatican.
-       </para>
-
-       <para>
-        <productname>PostgreSQL</productname> releases before 8.0 did not
-        follow the conventional numbering of centuries, but just returned
-        the year field divided by 100.
        </para>
       </listitem>
      </varlistentry>
@@ -7159,12 +7242,6 @@ SELECT EXTRACT(MILLENNIUM FROM TIMESTAMP '2001-02-16 20:38:40');
        <para>
         Years in the 1900s are in the second millennium.
         The third millennium started January 1, 2001.
-       </para>
-
-       <para>
-        <productname>PostgreSQL</productname> releases before 8.0 did not
-        follow the conventional numbering of millennia, but just returned
-        the year field divided by 1000.
        </para>
       </listitem>
      </varlistentry>
@@ -10747,8 +10824,7 @@ nextval('foo'::text)      <lineannotation><literal>foo</literal> is looked up at
         next <function>nextval</function> will return exactly the specified
         value, and sequence advancement commences with the following
         <function>nextval</function>.  Furthermore, the value reported by
-        <function>currval</> is not changed in this case (this is a change
-        from pre-8.3 behavior).  For example,
+        <function>currval</> is not changed in this case.  For example,
 
 <screen>
 SELECT setval('foo', 42);           <lineannotation>Next <function>nextval</> will return 43</lineannotation>
@@ -15884,35 +15960,35 @@ SELECT set_config('log_statement_stats', 'off', false);
        <entry>
         <literal><function>pg_create_restore_point(<parameter>name</> <type>text</>)</function></literal>
         </entry>
-       <entry><type>text</type></entry>
+       <entry><type>pg_lsn</type></entry>
        <entry>Create a named point for performing restore (restricted to superusers)</entry>
       </row>
       <row>
        <entry>
         <literal><function>pg_current_xlog_insert_location()</function></literal>
         </entry>
-       <entry><type>text</type></entry>
+       <entry><type>pg_lsn</type></entry>
        <entry>Get current transaction log insert location</entry>
       </row>
       <row>
        <entry>
         <literal><function>pg_current_xlog_location()</function></literal>
         </entry>
-       <entry><type>text</type></entry>
+       <entry><type>pg_lsn</type></entry>
        <entry>Get current transaction log write location</entry>
       </row>
       <row>
        <entry>
         <literal><function>pg_start_backup(<parameter>label</> <type>text</> <optional>, <parameter>fast</> <type>boolean</> </optional>)</function></literal>
         </entry>
-       <entry><type>text</type></entry>
+       <entry><type>pg_lsn</type></entry>
        <entry>Prepare for performing on-line backup (restricted to superusers or replication roles)</entry>
       </row>
       <row>
        <entry>
         <literal><function>pg_stop_backup()</function></literal>
         </entry>
-       <entry><type>text</type></entry>
+       <entry><type>pg_lsn</type></entry>
        <entry>Finish performing on-line backup (restricted to superusers or replication roles)</entry>
       </row>
       <row>
@@ -15933,26 +16009,26 @@ SELECT set_config('log_statement_stats', 'off', false);
        <entry>
         <literal><function>pg_switch_xlog()</function></literal>
         </entry>
-       <entry><type>text</type></entry>
+       <entry><type>pg_lsn</type></entry>
        <entry>Force switch to a new transaction log file (restricted to superusers)</entry>
       </row>
       <row>
        <entry>
-        <literal><function>pg_xlogfile_name(<parameter>location</> <type>text</>)</function></literal>
+        <literal><function>pg_xlogfile_name(<parameter>location</> <type>pg_lsn</>)</function></literal>
         </entry>
        <entry><type>text</type></entry>
        <entry>Convert transaction log location string to file name</entry>
       </row>
       <row>
        <entry>
-        <literal><function>pg_xlogfile_name_offset(<parameter>location</> <type>text</>)</function></literal>
+        <literal><function>pg_xlogfile_name_offset(<parameter>location</> <type>pg_lsn</>)</function></literal>
         </entry>
        <entry><type>text</>, <type>integer</></entry>
        <entry>Convert transaction log location string to file name and decimal byte offset within file</entry>
       </row>
       <row>
        <entry>
-        <literal><function>pg_xlog_location_diff(<parameter>location</> <type>text</>, <parameter>location</> <type>text</>)</function></literal>
+        <literal><function>pg_xlog_location_diff(<parameter>location</> <type>pg_lsn</>, <parameter>location</> <type>pg_lsn</>)</function></literal>
        </entry>
        <entry><type>numeric</></entry>
        <entry>Calculate the difference between two transaction log locations</entry>
@@ -16107,7 +16183,7 @@ postgres=# SELECT * FROM pg_xlogfile_name_offset(pg_stop_backup());
        <entry>
         <literal><function>pg_last_xlog_receive_location()</function></literal>
         </entry>
-       <entry><type>text</type></entry>
+       <entry><type>pg_lsn</type></entry>
        <entry>Get last transaction log location received and synced to disk by
         streaming replication. While streaming replication is in progress
         this will increase monotonically. If recovery has completed this will
@@ -16121,7 +16197,7 @@ postgres=# SELECT * FROM pg_xlogfile_name_offset(pg_stop_backup());
        <entry>
         <literal><function>pg_last_xlog_replay_location()</function></literal>
         </entry>
-       <entry><type>text</type></entry>
+       <entry><type>pg_lsn</type></entry>
        <entry>Get last transaction log location replayed during recovery.
         If recovery is still in progress this will increase monotonically.
         If recovery has completed then this value will remain static at
@@ -16332,10 +16408,10 @@ postgres=# SELECT * FROM pg_xlogfile_name_offset(pg_stop_backup());
         <indexterm>
          <primary>pg_create_physical_replication_slot</primary>
         </indexterm>
-        <literal><function>pg_create_physical_replication_slot(<parameter>slotname</parameter> <type>text</type>, <parameter>plugin</parameter> <type>text</type>)</function></literal>
+        <literal><function>pg_create_physical_replication_slot(<parameter>slotname</parameter> <type>name</type>)</function></literal>
        </entry>
        <entry>
-        (<parameter>slotname</parameter> <type>text</type>, <parameter>xlog_position</parameter> <type>text</type>)
+        (<parameter>slotname</parameter> <type>name</type>, <parameter>xlog_position</parameter> <type>pg_lsn</type>)
        </entry>
        <entry>
         Creates a new physical replication slot named
@@ -16350,10 +16426,10 @@ postgres=# SELECT * FROM pg_xlogfile_name_offset(pg_stop_backup());
         <indexterm>
          <primary>pg_drop_replication_slot</primary>
         </indexterm>
-        <literal><function>pg_drop_replication_slot(<parameter>slotname</parameter> <type>text</type>)</function></literal>
+        <literal><function>pg_drop_replication_slot(<parameter>slotname</parameter> <type>name</type>)</function></literal>
        </entry>
        <entry>
-        (<parameter>slotname</parameter> <type>text</type>)
+        <type>void</type>
        </entry>
        <entry>
         Drops the physical or logical replication slot

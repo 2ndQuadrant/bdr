@@ -132,6 +132,7 @@ static int	binary_upgrade = 0;
 static int	disable_dollar_quoting = 0;
 static int	dump_inserts = 0;
 static int	column_inserts = 0;
+static int	if_exists = 0;
 static int	no_security_labels = 0;
 static int	no_synchronized_snapshots = 0;
 static int	no_unlogged_table_data = 0;
@@ -234,9 +235,9 @@ static char *format_function_arguments_old(Archive *fout,
 							  char **argnames);
 static char *format_function_signature(Archive *fout,
 						  FuncInfo *finfo, bool honor_quotes);
-static const char *convertRegProcReference(Archive *fout,
+static char *convertRegProcReference(Archive *fout,
 						const char *proc);
-static const char *convertOperatorReference(Archive *fout, const char *opr);
+static char *convertOperatorReference(Archive *fout, const char *opr);
 static const char *convertTSFunction(Archive *fout, Oid funcOid);
 static Oid	findLastBuiltinOid_V71(Archive *fout, const char *);
 static Oid	findLastBuiltinOid_V70(Archive *fout);
@@ -345,6 +346,7 @@ main(int argc, char **argv)
 		{"disable-dollar-quoting", no_argument, &disable_dollar_quoting, 1},
 		{"disable-triggers", no_argument, &disable_triggers, 1},
 		{"exclude-table-data", required_argument, NULL, 4},
+		{"if-exists", no_argument, &if_exists, 1},
 		{"inserts", no_argument, &dump_inserts, 1},
 		{"lock-wait-timeout", required_argument, NULL, 2},
 		{"no-tablespaces", no_argument, &outputNoTablespaces, 1},
@@ -561,10 +563,16 @@ main(int argc, char **argv)
 		dump_inserts = 1;
 
 	if (dataOnly && schemaOnly)
-		exit_horribly(NULL, "options -s/--schema-only and -a/--data-only cannot be used together\n");
+	{
+		write_msg(NULL, "options -s/--schema-only and -a/--data-only cannot be used together\n");
+		exit_nicely(1);
+	}
 
 	if (dataOnly && outputClean)
-		exit_horribly(NULL, "options -c/--clean and -a/--data-only cannot be used together\n");
+	{
+		write_msg(NULL, "options -c/--clean and -a/--data-only cannot be used together\n");
+		exit_nicely(1);
+	}
 
 	if (dump_inserts && oids)
 	{
@@ -572,6 +580,9 @@ main(int argc, char **argv)
 		write_msg(NULL, "(The INSERT command cannot set OIDs.)\n");
 		exit_nicely(1);
 	}
+
+	if (if_exists && !outputClean)
+		exit_horribly(NULL, "option --if-exists requires -c/--clean option\n");
 
 	/* Identify archive format to emit */
 	archiveFormat = parseArchiveFormat(format, &archiveMode);
@@ -805,6 +816,7 @@ main(int argc, char **argv)
 	ropt->dropSchema = outputClean;
 	ropt->dataOnly = dataOnly;
 	ropt->schemaOnly = schemaOnly;
+	ropt->if_exists = if_exists;
 	ropt->dumpSections = dumpSections;
 	ropt->aclsSkip = aclsSkip;
 	ropt->superuser = outputSuperuser;
@@ -886,6 +898,7 @@ help(const char *progname)
 	printf(_("  --disable-dollar-quoting     disable dollar quoting, use SQL standard quoting\n"));
 	printf(_("  --disable-triggers           disable triggers during data-only restore\n"));
 	printf(_("  --exclude-table-data=TABLE   do NOT dump data for the named table(s)\n"));
+	printf(_("  --if-exists                  use IF EXISTS when dropping objects\n"));
 	printf(_("  --inserts                    dump data as INSERT commands, rather than COPY\n"));
 	printf(_("  --no-security-labels         do not dump security label assignments\n"));
 	printf(_("  --no-synchronized-snapshots  do not use synchronized snapshots in parallel jobs\n"));
@@ -9604,7 +9617,7 @@ dumpFunc(Archive *fout, FuncInfo *finfo)
 	PQExpBuffer asPart;
 	PGresult   *res;
 	char	   *funcsig;		/* identity signature */
-	char	   *funcfullsig;	/* full signature */
+	char	   *funcfullsig = NULL;	/* full signature */
 	char	   *funcsig_tag;
 	char	   *proretset;
 	char	   *prosrc;
@@ -9912,13 +9925,10 @@ dumpFunc(Archive *fout, FuncInfo *finfo)
 		funcsig = format_function_arguments(finfo, funciargs, false);
 	}
 	else
-	{
 		/* pre-8.4, do it ourselves */
 		funcsig = format_function_arguments_old(fout,
 												finfo, nallargs, allargtypes,
 												argmodes, argnames);
-		funcfullsig = funcsig;
-	}
 
 	funcsig_tag = format_function_signature(fout, finfo, false);
 
@@ -9929,7 +9939,8 @@ dumpFunc(Archive *fout, FuncInfo *finfo)
 					  fmtId(finfo->dobj.namespace->dobj.name),
 					  funcsig);
 
-	appendPQExpBuffer(q, "CREATE FUNCTION %s ", funcfullsig);
+	appendPQExpBuffer(q, "CREATE FUNCTION %s ", funcfullsig ? funcfullsig :
+					  funcsig);
 	if (funcresult)
 		appendPQExpBuffer(q, "RETURNS %s", funcresult);
 	else
@@ -10052,6 +10063,8 @@ dumpFunc(Archive *fout, FuncInfo *finfo)
 	destroyPQExpBuffer(labelq);
 	destroyPQExpBuffer(asPart);
 	free(funcsig);
+	if (funcfullsig)
+		free(funcfullsig);
 	free(funcsig_tag);
 	if (allargtypes)
 		free(allargtypes);
@@ -10246,6 +10259,8 @@ dumpOpr(Archive *fout, OprInfo *oprinfo)
 	char	   *oprjoin;
 	char	   *oprcanmerge;
 	char	   *oprcanhash;
+	char	   *oprregproc;
+	char	   *oprref;
 
 	/* Skip if not to be dumped */
 	if (!oprinfo->dobj.dump || dataOnly)
@@ -10352,8 +10367,12 @@ dumpOpr(Archive *fout, OprInfo *oprinfo)
 	oprcanmerge = PQgetvalue(res, 0, i_oprcanmerge);
 	oprcanhash = PQgetvalue(res, 0, i_oprcanhash);
 
-	appendPQExpBuffer(details, "    PROCEDURE = %s",
-					  convertRegProcReference(fout, oprcode));
+	oprregproc = convertRegProcReference(fout, oprcode);
+	if (oprregproc)
+	{
+		appendPQExpBuffer(details, "    PROCEDURE = %s", oprregproc);
+		free(oprregproc);
+	}
 
 	appendPQExpBuffer(oprid, "%s (",
 					  oprinfo->dobj.name);
@@ -10388,13 +10407,19 @@ dumpOpr(Archive *fout, OprInfo *oprinfo)
 	else
 		appendPQExpBufferStr(oprid, ", NONE)");
 
-	name = convertOperatorReference(fout, oprcom);
-	if (name)
-		appendPQExpBuffer(details, ",\n    COMMUTATOR = %s", name);
+	oprref = convertOperatorReference(fout, oprcom);
+	if (oprref)
+	{
+		appendPQExpBuffer(details, ",\n    COMMUTATOR = %s", oprref);
+		free(oprref);
+	}
 
-	name = convertOperatorReference(fout, oprnegate);
-	if (name)
-		appendPQExpBuffer(details, ",\n    NEGATOR = %s", name);
+	oprref = convertOperatorReference(fout, oprnegate);
+	if (oprref)
+	{
+		appendPQExpBuffer(details, ",\n    NEGATOR = %s", oprref);
+		free(oprref);
+	}
 
 	if (strcmp(oprcanmerge, "t") == 0)
 		appendPQExpBufferStr(details, ",\n    MERGES");
@@ -10402,13 +10427,19 @@ dumpOpr(Archive *fout, OprInfo *oprinfo)
 	if (strcmp(oprcanhash, "t") == 0)
 		appendPQExpBufferStr(details, ",\n    HASHES");
 
-	name = convertRegProcReference(fout, oprrest);
-	if (name)
-		appendPQExpBuffer(details, ",\n    RESTRICT = %s", name);
+	oprregproc = convertRegProcReference(fout, oprrest);
+	if (oprregproc)
+	{
+		appendPQExpBuffer(details, ",\n    RESTRICT = %s", oprregproc);
+		free(oprregproc);
+	}
 
-	name = convertRegProcReference(fout, oprjoin);
-	if (name)
-		appendPQExpBuffer(details, ",\n    JOIN = %s", name);
+	oprregproc = convertRegProcReference(fout, oprjoin);
+	if (oprregproc)
+	{
+		appendPQExpBuffer(details, ",\n    JOIN = %s", oprregproc);
+		free(oprregproc);
+	}
 
 	/*
 	 * DROP must be fully qualified in case same name appears in pg_catalog
@@ -10453,12 +10484,13 @@ dumpOpr(Archive *fout, OprInfo *oprinfo)
 /*
  * Convert a function reference obtained from pg_operator
  *
- * Returns what to print, or NULL if function references is InvalidOid
+ * Returns allocated string of what to print, or NULL if function references
+ * is InvalidOid. Returned string is expected to be free'd by the caller.
  *
  * In 7.3 the input is a REGPROCEDURE display; we have to strip the
  * argument-types part.  In prior versions, the input is a REGPROC display.
  */
-static const char *
+static char *
 convertRegProcReference(Archive *fout, const char *proc)
 {
 	/* In all cases "-" means a null reference */
@@ -10488,20 +10520,21 @@ convertRegProcReference(Archive *fout, const char *proc)
 	}
 
 	/* REGPROC before 7.3 does not quote its result */
-	return fmtId(proc);
+	return pg_strdup(fmtId(proc));
 }
 
 /*
  * Convert an operator cross-reference obtained from pg_operator
  *
- * Returns what to print, or NULL to print nothing
+ * Returns an allocated string of what to print, or NULL to print nothing.
+ * Caller is responsible for free'ing result string.
  *
  * In 7.3 and up the input is a REGOPERATOR display; we have to strip the
  * argument-types part, and add OPERATOR() decoration if the name is
  * schema-qualified.  In older versions, the input is just a numeric OID,
  * which we search our operator list for.
  */
-static const char *
+static char *
 convertOperatorReference(Archive *fout, const char *opr)
 {
 	OprInfo    *oprInfo;
@@ -10549,7 +10582,7 @@ convertOperatorReference(Archive *fout, const char *opr)
 				  opr);
 		return NULL;
 	}
-	return oprInfo->dobj.name;
+	return pg_strdup(oprInfo->dobj.name);
 }
 
 /*
@@ -11508,7 +11541,7 @@ dumpAgg(Archive *fout, AggInfo *agginfo)
 	PQExpBuffer labelq;
 	PQExpBuffer details;
 	char	   *aggsig;			/* identity signature */
-	char	   *aggfullsig;		/* full signature */
+	char	   *aggfullsig = NULL;		/* full signature */
 	char	   *aggsig_tag;
 	PGresult   *res;
 	int			i_aggtransfn;
@@ -11522,6 +11555,7 @@ dumpAgg(Archive *fout, AggInfo *agginfo)
 	const char *aggtransfn;
 	const char *aggfinalfn;
 	const char *aggsortop;
+	char	   *aggsortconvop;
 	bool		hypothetical;
 	const char *aggtranstype;
 	const char *aggtransspace;
@@ -11656,11 +11690,8 @@ dumpAgg(Archive *fout, AggInfo *agginfo)
 		aggsig = format_function_arguments(&agginfo->aggfn, funciargs, true);
 	}
 	else
-	{
 		/* pre-8.4, do it ourselves */
 		aggsig = format_aggregate_signature(agginfo, fout, true);
-		aggfullsig = aggsig;
-	}
 
 	aggsig_tag = format_aggregate_signature(agginfo, fout, false);
 
@@ -11668,6 +11699,12 @@ dumpAgg(Archive *fout, AggInfo *agginfo)
 	{
 		write_msg(NULL, "WARNING: aggregate function %s could not be dumped correctly for this database version; ignored\n",
 				  aggsig);
+
+		if (aggfullsig)
+			free(aggfullsig);
+
+		free(aggsig);
+
 		return;
 	}
 
@@ -11712,11 +11749,12 @@ dumpAgg(Archive *fout, AggInfo *agginfo)
 						  aggfinalfn);
 	}
 
-	aggsortop = convertOperatorReference(fout, aggsortop);
-	if (aggsortop)
+	aggsortconvop = convertOperatorReference(fout, aggsortop);
+	if (aggsortconvop)
 	{
 		appendPQExpBuffer(details, ",\n    SORTOP = %s",
-						  aggsortop);
+						  aggsortconvop);
+		free(aggsortconvop);
 	}
 
 	if (hypothetical)
@@ -11730,7 +11768,7 @@ dumpAgg(Archive *fout, AggInfo *agginfo)
 					  aggsig);
 
 	appendPQExpBuffer(q, "CREATE AGGREGATE %s (\n%s\n);\n",
-					  aggfullsig, details->data);
+					  aggfullsig ? aggfullsig : aggsig, details->data);
 
 	appendPQExpBuffer(labelq, "AGGREGATE %s", aggsig);
 
@@ -11773,6 +11811,8 @@ dumpAgg(Archive *fout, AggInfo *agginfo)
 			agginfo->aggfn.rolname, agginfo->aggfn.proacl);
 
 	free(aggsig);
+	if (aggfullsig)
+		free(aggfullsig);
 	free(aggsig_tag);
 
 	PQclear(res);
@@ -12414,6 +12454,7 @@ dumpUserMappings(Archive *fout,
 
 	destroyPQExpBuffer(query);
 	destroyPQExpBuffer(delq);
+	destroyPQExpBuffer(tag);
 	destroyPQExpBuffer(q);
 }
 
@@ -13732,7 +13773,7 @@ dumpIndex(Archive *fout, IndxInfo *indxinfo)
 							  fmtId(indxinfo->dobj.name));
 		}
 
-		/* If the index is clustered, we need to record that. */
+		/* If the index defines identity, we need to record that. */
 		if (indxinfo->indisreplident)
 		{
 			appendPQExpBuffer(q, "\nALTER TABLE ONLY %s REPLICA IDENTITY USING",

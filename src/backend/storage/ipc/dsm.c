@@ -886,6 +886,33 @@ dsm_keep_mapping(dsm_segment *seg)
 }
 
 /*
+ * Keep a dynamic shared memory segment until postmaster shutdown.
+ *
+ * This function should not be called more than once per segment;
+ * on Windows, doing so will create unnecessary handles which will
+ * consume system resources to no benefit.
+ *
+ * Note that this function does not arrange for the current process to
+ * keep the segment mapped indefinitely; if that behavior is desired,
+ * dsm_keep_mapping() should be used from each process that needs to
+ * retain the mapping.
+ */
+void
+dsm_keep_segment(dsm_segment *seg)
+{
+	/*
+	 * Bump reference count for this segment in shared memory. This will
+	 * ensure that even if there is no session which is attached to this
+	 * segment, it will remain until postmaster shutdown.
+	 */
+	LWLockAcquire(DynamicSharedMemoryControlLock, LW_EXCLUSIVE);
+	dsm_control->item[seg->control_slot].refcnt++;
+	LWLockRelease(DynamicSharedMemoryControlLock);
+
+	dsm_impl_keep_segment(seg->handle, seg->impl_private);
+}
+
+/*
  * Find an existing mapping for a shared memory segment, if there is one.
  */
 dsm_segment *
@@ -976,6 +1003,37 @@ cancel_on_dsm_detach(dsm_segment *seg, on_dsm_detach_callback function,
 			pfree(cb);
 			break;
 		}
+	}
+}
+
+/*
+ * Discard all registered on-detach callbacks without executing them.
+ */
+void
+reset_on_dsm_detach(void)
+{
+	dlist_iter		iter;
+
+	dlist_foreach(iter, &dsm_segment_list)
+	{
+		dsm_segment *seg = dlist_container(dsm_segment, node, iter.cur);
+
+		/* Throw away explicit on-detach actions one by one. */
+		while (!slist_is_empty(&seg->on_detach))
+		{
+			slist_node *node;
+			dsm_segment_detach_callback *cb;
+
+			node = slist_pop_head_node(&seg->on_detach);
+			cb = slist_container(dsm_segment_detach_callback, node, node);
+			pfree(cb);
+		}
+
+		/*
+		 * Decrementing the reference count is a sort of implicit on-detach
+		 * action; make sure we don't do that, either.
+		 */
+		seg->control_slot = INVALID_CONTROL_SLOT;
 	}
 }
 
