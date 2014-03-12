@@ -179,7 +179,7 @@ typedef enum
 } RecoveryTargetType;
 
 extern XLogRecPtr XactLastRecEnd;
-extern XLogRecPtr XactLastCommitEnd;
+extern PGDLLIMPORT XLogRecPtr XactLastCommitEnd;
 
 extern bool reachedConsistency;
 
