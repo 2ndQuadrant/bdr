@@ -38,6 +38,7 @@
 #include "lib/stringinfo.h"
 #include "pgstat.h"
 #include "utils/builtins.h"
+#include "utils/ruleutils.h"
 #include "utils/snapmgr.h"
 #include "tcop/utility.h"
 

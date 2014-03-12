@@ -7,7 +7,7 @@
 #include "postgres.h"
 
 #include "mb/pg_wchar.h"
-#include "utils/builtins.h"
+#include "utils/ruleutils.h"
 
 #include "plpython.h"
 
