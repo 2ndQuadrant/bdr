@@ -2504,6 +2504,7 @@ deparse_AlterTableStmt(Oid objectId, Node *parsetree)
 	AlterTableStmt *node = (AlterTableStmt *) parsetree;
 	ObjTree	   *alterTableStmt;
 	ObjTree	   *tmp;
+	ObjTree	   *tmp2;
 	List	   *dpcontext;
 	Relation	rel;
 	List	   *subcmds = NIL;
@@ -2691,18 +2692,45 @@ deparse_AlterTableStmt(Oid objectId, Node *parsetree)
 				break;
 
 			case AT_ClusterOn:
+				tmp = new_objtree_VA(alterTableStmt,
+									 "CLUSTER ON %{index}I", 2,
+									 "type", ObjTypeString, "cluster on",
+									 "index", ObjTypeString, subcmd->name);
+				subcmds = lappend(subcmds,
+								  new_object_object(alterTableStmt, NULL, tmp));
 				break;
 
 			case AT_DropCluster:
+				tmp = new_objtree_VA(alterTableStmt,
+									 "SET WITHOUT CLUSTER", 1,
+									 "type", ObjTypeString, "set without cluster");
+				subcmds = lappend(subcmds,
+								  new_object_object(alterTableStmt, NULL, tmp));
 				break;
 
 			case AT_AddOids:
+				tmp = new_objtree_VA(alterTableStmt,
+									 "SET WITH OIDS", 1,
+									 "type", ObjTypeString, "set with oids");
+				subcmds = lappend(subcmds,
+								  new_object_object(alterTableStmt, NULL, tmp));
 				break;
 
 			case AT_DropOids:
+				tmp = new_objtree_VA(alterTableStmt,
+									 "SET WITHOUT OIDS", 1,
+									 "type", ObjTypeString, "set without oids");
+				subcmds = lappend(subcmds,
+								  new_object_object(alterTableStmt, NULL, tmp));
 				break;
 
 			case AT_SetTableSpace:
+				tmp = new_objtree_VA(alterTableStmt,
+									 "SET TABLESPACE %{tablespace}I", 2,
+									 "type", ObjTypeString, "set tablespace",
+									 "tablespace", ObjTypeString, subcmd->name);
+				subcmds = lappend(subcmds,
+								  new_object_object(alterTableStmt, NULL, tmp));
 				break;
 
 			case AT_SetRelOptions:
@@ -2711,28 +2739,76 @@ deparse_AlterTableStmt(Oid objectId, Node *parsetree)
 			case AT_ResetRelOptions:
 				break;
 
+				/*
+				 * FIXME --- should we unify representation of all these
+				 * ENABLE/DISABLE TRIGGER commands??
+				 */
 			case AT_EnableTrig:
+				tmp = new_objtree_VA(alterTableStmt,
+									 "ENABLE TRIGGER %{trigger}I", 2,
+									 "type", ObjTypeString, "enable trigger",
+									 "trigger", ObjTypeString, subcmd->name);
+				subcmds = lappend(subcmds,
+								  new_object_object(alterTableStmt, NULL, tmp));
 				break;
 
 			case AT_EnableAlwaysTrig:
+				tmp = new_objtree_VA(alterTableStmt,
+									 "ENABLE ALWAYS TRIGGER %{trigger}I", 2,
+									 "type", ObjTypeString, "enable always trigger",
+									 "trigger", ObjTypeString, subcmd->name);
+				subcmds = lappend(subcmds,
+								  new_object_object(alterTableStmt, NULL, tmp));
 				break;
 
 			case AT_EnableReplicaTrig:
+				tmp = new_objtree_VA(alterTableStmt,
+									 "ENABLE REPLICA TRIGGER %{trigger}I", 2,
+									 "type", ObjTypeString, "enable replica trigger",
+									 "trigger", ObjTypeString, subcmd->name);
+				subcmds = lappend(subcmds,
+								  new_object_object(alterTableStmt, NULL, tmp));
 				break;
 
 			case AT_DisableTrig:
+				tmp = new_objtree_VA(alterTableStmt,
+									 "DISABLE TRIGGER %{trigger}I", 2,
+									 "type", ObjTypeString, "disable trigger",
+									 "trigger", ObjTypeString, subcmd->name);
+				subcmds = lappend(subcmds,
+								  new_object_object(alterTableStmt, NULL, tmp));
 				break;
 
 			case AT_EnableTrigAll:
+				tmp = new_objtree_VA(alterTableStmt,
+									 "ENABLE TRIGGER ALL", 1,
+									 "type", ObjTypeString, "enable trigger all");
+				subcmds = lappend(subcmds,
+								  new_object_object(alterTableStmt, NULL, tmp));
 				break;
 
 			case AT_DisableTrigAll:
+				tmp = new_objtree_VA(alterTableStmt,
+									 "DISABLE TRIGGER ALL", 1,
+									 "type", ObjTypeString, "disable trigger all");
+				subcmds = lappend(subcmds,
+								  new_object_object(alterTableStmt, NULL, tmp));
 				break;
 
 			case AT_EnableTrigUser:
+				tmp = new_objtree_VA(alterTableStmt,
+									 "ENABLE TRIGGER USER", 1,
+									 "type", ObjTypeString, "enable trigger user");
+				subcmds = lappend(subcmds,
+								  new_object_object(alterTableStmt, NULL, tmp));
 				break;
 
 			case AT_DisableTrigUser:
+				tmp = new_objtree_VA(alterTableStmt,
+									 "DISABLE TRIGGER USER", 1,
+									 "type", ObjTypeString, "disable trigger user");
+				subcmds = lappend(subcmds,
+								  new_object_object(alterTableStmt, NULL, tmp));
 				break;
 
 			case AT_EnableRule:
@@ -2748,9 +2824,16 @@ deparse_AlterTableStmt(Oid objectId, Node *parsetree)
 				break;
 
 			case AT_AddInherit:
+				/*
+				 * XXX this case is interesting: we cannot rely on parse node
+				 * because parent name might be unqualified; but there's no way
+				 * to extract it from catalog either, since we don't know which
+				 * of the parents is the new one.
+				 */
 				break;
 
 			case AT_DropInherit:
+				/* XXX ditto ... */
 				break;
 
 			case AT_AddOf:
@@ -2760,6 +2843,29 @@ deparse_AlterTableStmt(Oid objectId, Node *parsetree)
 				break;
 
 			case AT_ReplicaIdentity:
+				tmp = new_objtree_VA(alterTableStmt,
+									 "REPLICA IDENTITY %{ident}s", 1,
+									 "type", ObjTypeString, "replica identity");
+				switch (((ReplicaIdentityStmt *) subcmd->def)->identity_type)
+				{
+					case REPLICA_IDENTITY_DEFAULT:
+						append_string_object(tmp, "ident", "DEFAULT");
+						break;
+					case REPLICA_IDENTITY_FULL:
+						append_string_object(tmp, "ident", "FULL");
+						break;
+					case REPLICA_IDENTITY_NOTHING:
+						append_string_object(tmp, "ident", "NOTHING");
+						break;
+					case REPLICA_IDENTITY_INDEX:
+						tmp2 = new_objtree_VA(tmp, "USING INDEX %{index}I", 1,
+											  "index", ObjTypeString,
+											  ((ReplicaIdentityStmt *) subcmd->def)->name);
+						append_object_object(tmp, "ident", tmp2);
+						break;
+				}
+				subcmds = lappend(subcmds,
+								  new_object_object(alterTableStmt, NULL, tmp));
 				break;
 
 			case AT_GenericOptions:
