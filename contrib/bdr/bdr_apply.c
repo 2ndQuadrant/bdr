@@ -62,8 +62,9 @@ typedef struct BDRTupleData
 static void build_scan_key(ScanKey skey, Relation rel, Relation idx_rel, HeapTuple key);
 static bool find_pkey_tuple(ScanKey skey, Relation rel, Relation idx_rel, ItemPointer tid, bool lock);
 static void UserTableUpdateIndexes(Relation rel, HeapTuple tuple);
+static Relation read_rel(StringInfo s, LOCKMODE mode);
 extern void read_tuple_parts(StringInfo s, Relation rel, BDRTupleData *tup);
-static HeapTuple read_tuple(StringInfo s, Oid *reloid);
+static HeapTuple read_tuple(StringInfo s, Relation rel);
 static void tuple_to_stringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple);
 
 static void check_sequencer_wakeup(Relation rel);
@@ -251,21 +252,19 @@ process_remote_insert(StringInfo s)
 #endif
 	char		action;
 	HeapTuple	tup;
-	Oid			reloid;
 	Relation	rel;
 
-	action = pq_getmsgbyte(s);
+	rel = read_rel(s, RowExclusiveLock);
 
+	action = pq_getmsgbyte(s);
 	if (action != 'N')
-		elog(ERROR, "expected new tuple but got %c",
+		elog(ERROR, "expected new tuple but got %d",
 			 action);
 
-	tup = read_tuple(s, &reloid);
+	tup = read_tuple(s, rel);
 
-	if (reloid == QueuedDDLCommandsRelid)
+	if (RelationGetRelid(rel) == QueuedDDLCommandsRelid)
 		tup = process_queued_ddl_command(tup);
-
-	rel = heap_open(reloid, RowExclusiveLock);
 
 	if (rel->rd_rel->relkind != RELKIND_RELATION)
 		elog(ERROR, "unexpected relkind '%c' rel \"%s\"",
@@ -329,9 +328,7 @@ process_remote_update(StringInfo s)
 	char		action;
 	HeapTuple	old_key;
 	HeapTuple	new_tuple;
-	Oid			reloid;
 	Oid			idxoid;
-	Oid			keyoid = InvalidOid;
 	HeapTuple	generated_key = NULL;
 	ItemPointerData oldtid;
 	Relation	rel;
@@ -340,18 +337,21 @@ process_remote_update(StringInfo s)
 	ScanKeyData skey[INDEX_MAX_KEYS];
 	bool		primary_key_changed = false;
 
+	rel = read_rel(s, RowExclusiveLock);
+
 	action = pq_getmsgbyte(s);
 
 	/* old key present, identifying key changed */
+	if (action != 'K' && action != 'N')
+		elog(ERROR, "expected action 'N' or 'K', got %c",
+			 action);
+
 	if (action == 'K')
 	{
-		old_key = read_tuple(s, &keyoid);
+		old_key = read_tuple(s, rel);
 		action = pq_getmsgbyte(s);
 		primary_key_changed = true;;
 	}
-	else if (action != 'N')
-		elog(ERROR, "expected action 'N' or 'K', got %c",
-			 action);
 
 	/* check for new  tuple */
 	if (action != 'N')
@@ -359,10 +359,7 @@ process_remote_update(StringInfo s)
 			 action);
 
 	/* read new tuple */
-	new_tuple = read_tuple(s, &reloid);
-
-	/* collected all data, lookup table definition */
-	rel = heap_open(reloid, RowExclusiveLock);
+	new_tuple = read_tuple(s, rel);
 
 	if (rel->rd_rel->relkind != RELKIND_RELATION)
 		elog(ERROR, "unexpected relkind '%c' rel \"%s\"",
@@ -371,12 +368,7 @@ process_remote_update(StringInfo s)
 	/*
 	 * Check which tuple we want to use for the pkey lookup.
 	 */
-	if (primary_key_changed)
-	{
-		if (reloid != keyoid)
-			elog(ERROR, "mismatching key, tuple oids: %u %u", reloid, keyoid);
-	}
-	else
+	if (!primary_key_changed)
 	{
 		/* key hasn't changed, just use columns from the new tuple */
 		old_key = new_tuple;
@@ -569,7 +561,6 @@ process_remote_delete(StringInfo s)
 	StringInfoData o;
 #endif
 	char		action;
-	Oid			reloid;
 	Oid			idxoid;
 	HeapTuple	old_key;
 	Relation	rel;
@@ -578,20 +569,20 @@ process_remote_delete(StringInfo s)
 	bool		found_old;
 	ItemPointerData oldtid;
 
+	rel = read_rel(s, RowExclusiveLock);
+
 	action = pq_getmsgbyte(s);
+
+	if (action != 'K' && action != 'E')
+		elog(ERROR, "expected action K or E got %c", action);
 
 	if (action == 'E')
 	{
 		elog(WARNING, "got delete without pkey");
 		return;
 	}
-	else if (action != 'K')
-		elog(ERROR, "expected action K got %c", action);
 
-	old_key = read_tuple(s, &reloid);
-
-	/* collected all data, lookup table definition */
-	rel = heap_open(reloid, RowExclusiveLock);
+	old_key = read_tuple(s, rel);
 
 	/* lookup index to build scankey */
 	if (rel->rd_indexvalid == 0)
@@ -665,6 +656,12 @@ read_tuple_parts(StringInfo s, Relation rel, BDRTupleData *tup)
 	TupleDesc	desc = RelationGetDescr(rel);
 	int			i;
 	int			rnatts;
+	char		action;
+
+	action = pq_getmsgbyte(s);
+
+	if (action != 'T')
+		elog(ERROR, "expected TUPLE, got %c", action);
 
 	memset(tup->isnull, 1, sizeof(tup->isnull));
 	memset(tup->changed, 1, sizeof(tup->changed));
@@ -754,6 +751,27 @@ read_tuple_parts(StringInfo s, Relation rel, BDRTupleData *tup)
 	}
 }
 
+static Relation
+read_rel(StringInfo s, LOCKMODE mode)
+{
+	int			relnamelen;
+	int			nspnamelen;
+	RangeVar*	rv;
+	Oid			relid;
+
+	rv = makeNode(RangeVar);
+
+	nspnamelen = pq_getmsgint(s, 2);
+	rv->schemaname = (char *) pq_getmsgbytes(s, nspnamelen);
+
+	relnamelen = pq_getmsgint(s, 2);
+	rv->relname = (char *) pq_getmsgbytes(s, relnamelen);
+
+	relid = RangeVarGetRelidExtended(rv, mode, false, false, NULL, NULL);
+
+	return heap_open(relid, NoLock);
+}
+
 /*
  * Read a tuple from s, return it as a HeapTuple allocated in the current
  * memory context. Also, reloid is set to the OID of the relation that this
@@ -761,44 +779,13 @@ read_tuple_parts(StringInfo s, Relation rel, BDRTupleData *tup)
  * they are resolved to the corresponding local OID.)
  */
 static HeapTuple
-read_tuple(StringInfo s, Oid *reloid)
+read_tuple(StringInfo s, Relation rel)
 {
-	int			relnamelen;
-	const char *relname;
-	Oid			relid;
-	int			nspnamelen;
-	const char *nspname;
-	Oid			nspoid;
-	char		action;
-	Relation	rel;
 	BDRTupleData tupdata;
 	HeapTuple	tup;
 
-	*reloid = InvalidOid;
-
-	action = pq_getmsgbyte(s);
-
-	if (action != 'T')
-		elog(ERROR, "expected TUPLE, got %c", action);
-
-	nspnamelen = pq_getmsgint(s, 2);
-	nspname = pq_getmsgbytes(s, nspnamelen);
-
-	relnamelen = pq_getmsgint(s, 2);
-	relname = pq_getmsgbytes(s, relnamelen);
-
-	/* resolve the names into a relation OID */
-	nspoid = get_namespace_oid(nspname, false);
-	relid = get_relname_relid(relname, nspoid);
-	if (relid == InvalidOid)
-		elog(ERROR, "could not resolve relation name %s.%s", nspname, relname);
-
-
-	rel = heap_open(relid, RowExclusiveLock);
-	*reloid = relid;
 	read_tuple_parts(s, rel, &tupdata);
 	tup = heap_form_tuple(RelationGetDescr(rel), tupdata.values, tupdata.isnull);
-	heap_close(rel, NoLock);
 	return tup;
 }
 
