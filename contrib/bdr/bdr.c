@@ -35,6 +35,7 @@
 #include "catalog/pg_index.h"
 #include "commands/extension.h"
 #include "lib/stringinfo.h"
+#include "libpq/pqformat.h"
 #include "replication/replication_identifier.h"
 #include "utils/builtins.h"
 #include "utils/guc.h"
@@ -84,30 +85,6 @@ sendint64(int64 i, char *buf)
 }
 
 /*
- * Converts an int64 from network byte order to native format.
- *
- * FIXME: replace with pq_getmsgint64
- */
-static int64
-recvint64(char *buf)
-{
-	int64		result;
-	uint32		h32;
-	uint32		l32;
-
-	memcpy(&h32, buf, 4);
-	memcpy(&l32, buf + 4, 4);
-	h32 = ntohl(h32);
-	l32 = ntohl(l32);
-
-	result = h32;
-	result <<= 32;
-	result |= l32;
-
-	return result;
-}
-
-/*
  * Send a Standby Status Update message to server.
  */
 static bool
@@ -134,7 +111,7 @@ sendFeedback(PGconn *conn, XLogRecPtr blockpos, int64 now, bool replyRequested,
 	len += 8;
 	sendint64(blockpos, &replybuf[len]);		/* apply */
 	len += 8;
-	sendint64(now, &replybuf[len]);		/* sendTime */
+	sendint64(now, &replybuf[len]);				/* sendTime */
 	len += 8;
 	replybuf[len] = replyRequested ? 1 : 0;		/* replyRequested */
 	len += 1;
@@ -176,35 +153,33 @@ bdr_sighup(SIGNAL_ARGS)
 }
 
 static void
-process_remote_action(char *data, size_t r)
+process_remote_action(StringInfo s)
 {
 	char		action;
 
-	action = data[0];
-	data += 1;
-	r--;
+	action = pq_getmsgbyte(s);
 
 	switch (action)
 	{
 			/* BEGIN */
 		case 'B':
-			process_remote_begin(data, r);
+			process_remote_begin(s);
 			break;
 			/* COMMIT */
 		case 'C':
-			process_remote_commit(data, r);
+			process_remote_commit(s);
 			break;
 			/* INSERT */
 		case 'I':
-			process_remote_insert(data, r);
+			process_remote_insert(s);
 			break;
 			/* UPDATE */
 		case 'U':
-			process_remote_update(data, r);
+			process_remote_update(s);
 			break;
 			/* DELETE */
 		case 'D':
-			process_remote_delete(data, r);
+			process_remote_delete(s);
 			break;
 		default:
 			elog(ERROR, "unknown action of type %c", action);
@@ -491,23 +466,23 @@ bdr_apply_main(Datum main_arg)
 			}
 			else
 			{
-				if (copybuf[0] == 'w')
+				int c;
+				StringInfoData s;
+
+				initStringInfo(&s);
+				s.data = copybuf;
+				s.len = r;
+
+				c = pq_getmsgbyte(&s);
+
+				if (c == 'w')
 				{
-					int			hdr_len = 0;
-					char	   *data;
 					XLogRecPtr	start_lsn;
 					XLogRecPtr	end_lsn;
 
-					hdr_len = 1;	/* msgtype 'w' */
-
-					start_lsn = recvint64(&copybuf[hdr_len]);
-
-					hdr_len += 8;		/* dataStart */
-
-					end_lsn = recvint64(&copybuf[hdr_len]);
-
-					hdr_len += 8;		/* walEnd */
-					hdr_len += 8;		/* sendTime */
+					start_lsn = pq_getmsgint64(&s);
+					end_lsn = pq_getmsgint64(&s);
+					pq_getmsgint64(&s); /* sendTime */
 
 					if (last_received < start_lsn)
 						last_received = start_lsn;
@@ -515,15 +490,13 @@ bdr_apply_main(Datum main_arg)
 					if (last_received < end_lsn)
 						last_received = end_lsn;
 
-					data = copybuf + hdr_len;
-
-					process_remote_action(data, r);
+					process_remote_action(&s);
 				}
-				else if (copybuf[0] == 'k')
+				else if (c == 'k')
 				{
 					XLogRecPtr	temp;
 
-					temp = recvint64(&copybuf[1]);
+					temp = pq_getmsgint64(&s);
 
 					sendFeedback(streamConn, temp,
 								 GetCurrentTimestamp(), false, true);

@@ -30,6 +30,8 @@
 #include "executor/spi.h"
 #include "executor/executor.h"
 
+#include "libpq/pqformat.h"
+
 #include "parser/parse_relation.h"
 
 #include "replication/logical.h"
@@ -44,10 +46,22 @@
 #include "utils/syscache.h"
 #include "utils/tqual.h"
 
+#define VERBOSE_INSERT
+#define VERBOSE_DELETE
+#define VERBOSE_UPDATE
+
+typedef struct BDRTupleData
+{
+	Datum		values[MaxTupleAttributeNumber];
+	bool		isnull[MaxTupleAttributeNumber];
+	bool		changed[MaxTupleAttributeNumber];
+} BDRTupleData;
+
 static void build_scan_key(ScanKey skey, Relation rel, Relation idx_rel, HeapTuple key);
 static bool find_pkey_tuple(ScanKey skey, Relation rel, Relation idx_rel, ItemPointer tid, bool lock);
 static void UserTableUpdateIndexes(Relation rel, HeapTuple tuple);
-static char *read_tuple(char *data, size_t len, HeapTuple tuple, Oid *reloid);
+extern void read_tuple_parts(StringInfo s, Relation rel, BDRTupleData *tup);
+static HeapTuple read_tuple(StringInfo s, Oid *reloid);
 static void tuple_to_stringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple);
 
 static void check_sequencer_wakeup(Relation rel);
@@ -56,29 +70,27 @@ bool request_sequencer_wakeup = false;
 static Oid		QueuedDDLCommandsRelid = InvalidOid;
 
 void
-process_remote_begin(char *data, size_t r)
+process_remote_begin(StringInfo s)
 {
-	XLogRecPtr *origlsn;
-	TimestampTz *committime;
-	TimestampTz current;
-	char	    statbuf[100];
+	XLogRecPtr		origlsn;
+	TimestampTz		committime;
+	TimestampTz		current;
+	char	    	statbuf[100];
+
 	Assert(bdr_apply_con != NULL);
 
-	origlsn = (XLogRecPtr *) data;
-	data += sizeof(XLogRecPtr);
-
-	committime = (TimestampTz *) data;
-	data += sizeof(TimestampTz);
+	origlsn = *(XLogRecPtr *) pq_getmsgbytes(s, 8);
+	committime = *(TimestampTz *) pq_getmsgbytes(s, 8);
 
 	/* setup state for commit and conflict detection */
-	replication_origin_lsn = *origlsn;
-	replication_origin_timestamp = *committime;
+	replication_origin_lsn = origlsn;
+	replication_origin_timestamp = committime;
 
 	snprintf(statbuf, sizeof(statbuf),
 			"bdr_apply: BEGIN origin(source, orig_lsn, timestamp): %s, %X/%X, %s",
 			 bdr_apply_con->name,
-			(uint32) (*origlsn >> 32), (uint32) *origlsn,
-			timestamptz_to_str(*committime));
+			(uint32) (origlsn >> 32), (uint32) origlsn,
+			timestamptz_to_str(committime));
 
 	elog(LOG, "%s", statbuf);
 
@@ -113,35 +125,32 @@ process_remote_begin(char *data, size_t r)
 }
 
 void
-process_remote_commit(char *data, size_t r)
+process_remote_commit(StringInfo s)
 {
-	XLogRecPtr *origlsn;
-	XLogRecPtr *end_lsn;
-	TimestampTz *committime;
+	XLogRecPtr		origlsn;
+	TimestampTz		committime;
+	TimestampTz		end_lsn;
 
-	origlsn = (XLogRecPtr *) data;
-	data += sizeof(XLogRecPtr);
+	Assert(bdr_apply_con != NULL);
 
-	end_lsn = (XLogRecPtr *) data;
-	data += sizeof(XLogRecPtr);
-
-	committime = (TimestampTz *) data;
-	data += sizeof(TimestampTz);
+	origlsn = *(XLogRecPtr *) pq_getmsgbytes(s, 8);
+	end_lsn = *(XLogRecPtr *) pq_getmsgbytes(s, 8);
+	committime = *(TimestampTz *) pq_getmsgbytes(s, 8);
 
 	elog(LOG, "COMMIT origin(lsn, end, timestamp): %X/%X, %X/%X, %s",
-		 (uint32) (*origlsn >> 32), (uint32) *origlsn,
-		 (uint32) (*end_lsn >> 32), (uint32) *end_lsn,
-		 timestamptz_to_str(*committime));
+		 (uint32) (origlsn >> 32), (uint32) origlsn,
+		 (uint32) (end_lsn >> 32), (uint32) end_lsn,
+		 timestamptz_to_str(committime));
 
-	Assert(*origlsn == replication_origin_lsn);
-	Assert(*committime == replication_origin_timestamp);
+	Assert(origlsn == replication_origin_lsn);
+	Assert(committime == replication_origin_timestamp);
 
 	PopActiveSnapshot();
 	CommitTransactionCommand();
 
 	pgstat_report_activity(STATE_IDLE, NULL);
 
-	AdvanceCachedReplicationIdentifier(*end_lsn, XactLastCommitEnd);
+	AdvanceCachedReplicationIdentifier(end_lsn, XactLastCommitEnd);
 
 	CurrentResourceOwner = bdr_saved_resowner;
 
@@ -233,27 +242,26 @@ process_queued_ddl_command(HeapTuple cmdtup)
 }
 
 void
-process_remote_insert(char *data, size_t r)
+process_remote_insert(StringInfo s)
 {
 #ifdef VERBOSE_INSERT
-	StringInfoData s;
+	StringInfoData o;
 #endif
 	char		action;
-	HeapTupleData tup;
+	HeapTuple	tup;
 	Oid			reloid;
 	Relation	rel;
 
-	action = data[0];
-	data++;
+	action = pq_getmsgbyte(s);
 
 	if (action != 'N')
 		elog(ERROR, "expected new tuple but got %c",
 			 action);
 
-	data = read_tuple(data, r, &tup, &reloid);
+	tup = read_tuple(s, &reloid);
 
 	if (reloid == QueuedDDLCommandsRelid)
-		tup = *process_queued_ddl_command(&tup);
+		tup = process_queued_ddl_command(tup);
 
 	rel = heap_open(reloid, RowExclusiveLock);
 
@@ -261,18 +269,18 @@ process_remote_insert(char *data, size_t r)
 		elog(ERROR, "unexpected relkind '%c' rel \"%s\"",
 			 rel->rd_rel->relkind, RelationGetRelationName(rel));
 
-	simple_heap_insert(rel, &tup);
-	UserTableUpdateIndexes(rel, &tup);
+	simple_heap_insert(rel, tup);
+	UserTableUpdateIndexes(rel, tup);
 	bdr_count_insert();
 
 	check_sequencer_wakeup(rel);
 
 	/* debug output */
-#if VERBOSE_INSERT
-	initStringInfo(&s);
-	tuple_to_stringinfo(&s, RelationGetDescr(rel), &tup);
-	elog(LOG, "INSERT: %s", s.data);
-	resetStringInfo(&s);
+#ifdef VERBOSE_INSERT
+	initStringInfo(&o);
+	tuple_to_stringinfo(&o, RelationGetDescr(rel), tup);
+	elog(LOG, "INSERT: %s", o.data);
+	resetStringInfo(&o);
 #endif
 
 	heap_close(rel, NoLock);
@@ -313,12 +321,12 @@ fetch_sysid_via_node_id(RepNodeId node_id, uint64 *sysid, TimeLineID *tli)
 }
 
 void
-process_remote_update(char *data, size_t r)
+process_remote_update(StringInfo s)
 {
 	StringInfoData s_key;
 	char		action;
-	HeapTupleData old_key;
-	HeapTupleData new_tuple;
+	HeapTuple	old_key;
+	HeapTuple	new_tuple;
 	Oid			reloid;
 	Oid			idxoid;
 	Oid			keyoid = InvalidOid;
@@ -330,15 +338,13 @@ process_remote_update(char *data, size_t r)
 	ScanKeyData skey[INDEX_MAX_KEYS];
 	bool		primary_key_changed = false;
 
-	action = data[0];
-	data++;
+	action = pq_getmsgbyte(s);
 
 	/* old key present, identifying key changed */
 	if (action == 'K')
 	{
-		data = read_tuple(data, r, &old_key, &keyoid);
-		action = data[0];
-		data++;
+		old_key = read_tuple(s, &keyoid);
+		action = pq_getmsgbyte(s);
 		primary_key_changed = true;;
 	}
 	else if (action != 'N')
@@ -351,7 +357,7 @@ process_remote_update(char *data, size_t r)
 			 action);
 
 	/* read new tuple */
-	data = read_tuple(data, r, &new_tuple, &reloid);
+	new_tuple = read_tuple(s, &reloid);
 
 	/* collected all data, lookup table definition */
 	rel = heap_open(reloid, RowExclusiveLock);
@@ -390,7 +396,7 @@ process_remote_update(char *data, size_t r)
 
 	Assert(idxrel->rd_index->indisunique);
 
-	build_scan_key(skey, rel, idxrel, &old_key);
+	build_scan_key(skey, rel, idxrel, old_key);
 
 	/* look for tuple identified by the (old) primary key */
 	found_old = find_pkey_tuple(skey, rel, idxrel, &oldtid, true);
@@ -507,7 +513,7 @@ process_remote_update(char *data, size_t r)
 				   MAXDATELEN);
 
 			initStringInfo(&s_key);
-			tuple_to_stringinfo(&s_key, RelationGetDescr(idxrel), &old_key);
+			tuple_to_stringinfo(&s_key, RelationGetDescr(idxrel), old_key);
 
 			ereport(LOG,
 					(errcode(ERRCODE_INTEGRITY_CONSTRAINT_VIOLATION),
@@ -521,9 +527,9 @@ process_remote_update(char *data, size_t r)
 
 		if (apply_update)
 		{
-			simple_heap_update(rel, &oldtid, &new_tuple);
+			simple_heap_update(rel, &oldtid, new_tuple);
 			/* FIXME: HOT support */
-			UserTableUpdateIndexes(rel, &new_tuple);
+			UserTableUpdateIndexes(rel, new_tuple);
 			bdr_count_update();
 		}
 		else
@@ -532,7 +538,7 @@ process_remote_update(char *data, size_t r)
 	else
 	{
 		initStringInfo(&s_key);
-		tuple_to_stringinfo(&s_key, RelationGetDescr(idxrel), &old_key);
+		tuple_to_stringinfo(&s_key, RelationGetDescr(idxrel), old_key);
 		bdr_count_update_conflict();
 
 		ereport(ERROR,
@@ -555,23 +561,22 @@ err:
 }
 
 void
-process_remote_delete(char *data, size_t r)
+process_remote_delete(StringInfo s)
 {
 #ifdef VERBOSE_DELETE
-	StringInfoData s;
+	StringInfoData o;
 #endif
 	char		action;
 	Oid			reloid;
 	Oid			idxoid;
-	HeapTupleData old_key;
+	HeapTuple	old_key;
 	Relation	rel;
 	Relation	idxrel;
 	ScanKeyData skey[INDEX_MAX_KEYS];
 	bool		found_old;
 	ItemPointerData oldtid;
 
-	action = data[0];
-	data++;
+	action = pq_getmsgbyte(s);
 
 	if (action == 'E')
 	{
@@ -581,7 +586,7 @@ process_remote_delete(char *data, size_t r)
 	else if (action != 'K')
 		elog(ERROR, "expected action K got %c", action);
 
-	data = read_tuple(data, r, &old_key, &reloid);
+	old_key = read_tuple(s, &reloid);
 
 	/* collected all data, lookup table definition */
 	rel = heap_open(reloid, RowExclusiveLock);
@@ -604,7 +609,7 @@ process_remote_delete(char *data, size_t r)
 		elog(ERROR, "unexpected relkind '%c' rel \"%s\"",
 			 rel->rd_rel->relkind, RelationGetRelationName(rel));
 
-	build_scan_key(skey, rel, idxrel, &old_key);
+	build_scan_key(skey, rel, idxrel, old_key);
 
 	/* try to find tuple via a (candidate|primary) key */
 	found_old = find_pkey_tuple(skey, rel, idxrel, &oldtid, true);
@@ -622,7 +627,7 @@ process_remote_delete(char *data, size_t r)
 		bdr_count_delete_conflict();
 
 		initStringInfo(&s_key);
-		tuple_to_stringinfo(&s_key, RelationGetDescr(idxrel), &old_key);
+		tuple_to_stringinfo(&s_key, RelationGetDescr(idxrel), old_key);
 
 		ereport(ERROR,
 				(errcode(ERRCODE_INTEGRITY_CONSTRAINT_VIOLATION),
@@ -630,11 +635,11 @@ process_remote_delete(char *data, size_t r)
 		resetStringInfo(&s_key);
 	}
 
-#if VERBOSE_DELETE
-	initStringInfo(&s);
-	tuple_to_stringinfo(&s, RelationGetDescr(idxrel), &old_key);
-	elog(LOG, "DELETE old-key: %s", s.data);
-	resetStringInfo(&s);
+#ifdef VERBOSE_DELETE
+	initStringInfo(&o);
+	tuple_to_stringinfo(&o, RelationGetDescr(idxrel), old_key);
+	elog(LOG, "DELETE old-key: %s", o.data);
+	resetStringInfo(&o);
 #endif
 
 	check_sequencer_wakeup(rel);
@@ -652,72 +657,133 @@ check_sequencer_wakeup(Relation rel)
 		request_sequencer_wakeup = true;
 }
 
-/*
- * Converts an int64 from network byte order to native format.
- *
- * FIXME: replace with pg_getmsgint64
- */
-static int64
-recvint64(char *buf)
+void
+read_tuple_parts(StringInfo s, Relation rel, BDRTupleData *tup)
 {
-	int64		result;
-	uint32		h32;
-	uint32		l32;
+	TupleDesc	desc = RelationGetDescr(rel);
+	int			i;
+	int			rnatts;
 
-	memcpy(&h32, buf, 4);
-	memcpy(&l32, buf + 4, 4);
-	h32 = ntohl(h32);
-	l32 = ntohl(l32);
+	memset(tup->isnull, 1, sizeof(tup->isnull));
+	memset(tup->changed, 1, sizeof(tup->changed));
 
-	result = h32;
-	result <<= 32;
-	result |= l32;
+	rnatts = pq_getmsgint(s, 4);
 
-	return result;
+	if (desc->natts != rnatts)
+		elog(ERROR, "tuple natts mismatch, %u vs %u", desc->natts, rnatts);
+
+	/* FIXME: unaligned data accesses */
+
+	for (i = 0; i < desc->natts; i++)
+	{
+		Form_pg_attribute att = desc->attrs[i];
+		char		kind = pq_getmsgbyte(s);
+		const char *data;
+		int	   		len;
+
+		switch (kind)
+		{
+			case 'n': /* null */
+				/* already marked as null */
+				break;
+			case 'u': /* unchanged column */
+				tup->isnull[i] = false;
+				tup->changed[i] = false;
+				break;
+
+			case 'b': /* binary format */
+				tup->isnull[i] = false;
+				len = pq_getmsgint(s, 4); /* read length */
+
+				data = pq_getmsgbytes(s, len);
+
+				/* and data */
+				if (att->attbyval)
+					tup->values[i] = fetch_att(data, true, len);
+				else
+					tup->values[i] = PointerGetDatum(data);
+				break;
+			case 's': /* send/recv format */
+				{
+					Oid typreceive;
+					Oid typioparam;
+					StringInfoData buf;
+
+					tup->isnull[i] = false;
+					len = pq_getmsgint(s, 4); /* read length */
+
+					getTypeBinaryInputInfo(att->atttypid, &typreceive, &typioparam);
+
+					/* create StringInfo pointing into the bigger buffer */
+					initStringInfo(&buf);
+					/* and data */
+					buf.data = (char *) pq_getmsgbytes(s, len);
+					buf.len = len;
+					tup->values[i] = OidReceiveFunctionCall(
+						typreceive, &buf, typioparam, att->atttypmod);
+
+					if (buf.len != buf.cursor)
+						ereport(ERROR,
+								(errcode(ERRCODE_INVALID_BINARY_REPRESENTATION),
+								 errmsg("incorrect binary data format")));
+					break;
+				}
+			case 't': /* text format */
+				{
+					Oid typinput;
+					Oid typioparam;
+
+					tup->isnull[i] = false;
+					len = pq_getmsgint(s, 4); /* read length */
+
+					getTypeInputInfo(att->atttypid, &typinput, &typioparam);
+					/* and data */
+					data = (char *) pq_getmsgbytes(s, len);
+					tup->values[i] = OidInputFunctionCall(
+						typinput, (char *) data, typioparam, att->atttypmod);
+				}
+				break;
+			default:
+				elog(ERROR, "unknown column type '%c'", kind);
+		}
+
+		if (att->attisdropped && !tup->isnull[i])
+			elog(ERROR, "data for dropped column");
+	}
 }
 
 /*
- * Read a tuple specification from the given data of the given len, filling
- * the HeapTuple with it.  Also, reloid is set to the OID of the relation
- * that this tuple is related to.  (The passed data contains schema and
- * relation names; they are resolved to the corresponding local OID.)
+ * Read a tuple from s, return it as a HeapTuple allocated in the current
+ * memory context. Also, reloid is set to the OID of the relation that this
+ * tuple is related to.(The passed data contains schema and relation names;
+ * they are resolved to the corresponding local OID.)
  */
-static char *
-read_tuple(char *data, size_t len, HeapTuple tuple, Oid *reloid)
+static HeapTuple
+read_tuple(StringInfo s, Oid *reloid)
 {
-	int64		relnamelen;
-	char	   *relname;
+	int			relnamelen;
+	const char *relname;
 	Oid			relid;
-	int64		nspnamelen;
-	char	   *nspname;
-	int64		tuplelen;
+	int			nspnamelen;
+	const char *nspname;
 	Oid			nspoid;
-	char		t;
+	char		action;
+	Relation	rel;
+	BDRTupleData tupdata;
+	HeapTuple	tup;
 
 	*reloid = InvalidOid;
 
-	/* FIXME: unaligned data accesses */
-	t = data[0];
-	data += 1;
-	if (t != 'T')
-		elog(ERROR, "expected TUPLE, got %c", t);
+	action = pq_getmsgbyte(s);
 
-	nspnamelen = recvint64(&data[0]);
-	data += 8;
-	nspname = data;
-	data += nspnamelen;
+	if (action != 'T')
+		elog(ERROR, "expected TUPLE, got %c", action);
 
-	relnamelen = recvint64(&data[0]);
-	data += 8;
-	relname = data;
-	data += relnamelen;
+	nspnamelen = pq_getmsgint(s, 2);
+	nspname = pq_getmsgbytes(s, nspnamelen);
 
-	tuplelen = recvint64(&data[0]);
-	data += 8;
-
-	tuple->t_data = (HeapTupleHeader) data;
-	tuple->t_len = tuplelen;
-	data += tuplelen;
+	relnamelen = pq_getmsgint(s, 2);
+	relname = pq_getmsgbytes(s, relnamelen);
 
 	/* resolve the names into a relation OID */
 	nspoid = get_namespace_oid(nspname, false);
@@ -725,9 +791,13 @@ read_tuple(char *data, size_t len, HeapTuple tuple, Oid *reloid)
 	if (relid == InvalidOid)
 		elog(ERROR, "could not resolve relation name %s.%s", nspname, relname);
 
-	*reloid = relid;
 
-	return data;
+	rel = heap_open(relid, RowExclusiveLock);
+	*reloid = relid;
+	read_tuple_parts(s, rel, &tupdata);
+	tup = heap_form_tuple(RelationGetDescr(rel), tupdata.values, tupdata.isnull);
+	heap_close(rel, NoLock);
+	return tup;
 }
 
 /* print the tuple 'tuple' into the StringInfo s */
