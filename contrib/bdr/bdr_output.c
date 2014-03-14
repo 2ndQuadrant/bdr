@@ -13,6 +13,7 @@
 #include "postgres.h"
 
 #include "access/sysattr.h"
+#include "access/tuptoaster.h"
 
 #include "catalog/pg_class.h"
 #include "catalog/pg_namespace.h"
@@ -193,37 +194,167 @@ pg_decode_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 	MemoryContextReset(data->context);
 }
 
+/*
+ * Write a tuple to the outputstream, in the most efficient format possible.
+ */
 static void
 write_tuple(StringInfo out, Relation rel, HeapTuple tuple)
 {
-	HeapTuple	cache;
-	Form_pg_namespace classNsp;
+	TupleDesc	desc;
+
+	Datum		values[MaxTupleAttributeNumber];
+	bool		isnull[MaxTupleAttributeNumber];
+
 	const char *nspname;
 	int64		nspnamelen;
 	const char *relname;
 	int64		relnamelen;
+	int			i;
 
-	cache = SearchSysCache1(NAMESPACEOID,
-							ObjectIdGetDatum(rel->rd_rel->relnamespace));
-	if (!HeapTupleIsValid(cache))
+	nspname = get_namespace_name(rel->rd_rel->relnamespace);
+	if (nspname == NULL)
 		elog(ERROR, "cache lookup failed for namespace %u",
 			 rel->rd_rel->relnamespace);
-	classNsp = (Form_pg_namespace) GETSTRUCT(cache);
-	nspname = pstrdup(NameStr(classNsp->nspname));
 	nspnamelen = strlen(nspname) + 1;
-	ReleaseSysCache(cache);
 
 	relname = NameStr(rel->rd_rel->relname);
 	relnamelen = strlen(relname) + 1;
 
 	appendStringInfoChar(out, 'T');		/* tuple follows */
 
-	pq_sendint64(out, nspnamelen);		/* schema name length */
+	pq_sendint(out, nspnamelen, 2);		/* schema name length */
 	appendBinaryStringInfo(out, nspname, nspnamelen);
 
-	pq_sendint64(out, relnamelen);		/* table name length */
+	pq_sendint(out, relnamelen, 2);		/* table name length */
 	appendBinaryStringInfo(out, relname, relnamelen);
 
-	pq_sendint64(out, tuple->t_len);	/* tuple length */
-	appendBinaryStringInfo(out, (char *) tuple->t_data, tuple->t_len);
+	desc = RelationGetDescr(rel);
+
+	pq_sendint(out, desc->natts, 4);		/* number of attributes */
+
+	/* try to allocate enough memory from the get go */
+	enlargeStringInfo(out, tuple->t_len +
+					  desc->natts * ( 1 + 4));
+
+	/*
+	 * XXX: should this prove to be a relevant bottleneck, it might be
+	 * interesting to inline heap_deform_tuple() here, we don't actually need
+	 * the information in the form we get from it.
+	 */
+	heap_deform_tuple(tuple, desc, values, isnull);
+
+	for (i = 0; i < desc->natts; i++)
+	{
+		HeapTuple	typtup;
+		Form_pg_type typclass;
+
+		Form_pg_attribute att = desc->attrs[i];
+
+		bool use_binary = false;
+		bool use_sendrecv = false;
+
+		if (isnull[i] || att->attisdropped)
+		{
+			appendStringInfoChar(out, 'n');	/* null column */
+			continue;
+		}
+		else if (att->attlen == -1 && VARATT_IS_EXTERNAL_ONDISK(values[i]))
+		{
+			appendStringInfoChar(out, 'u');	/* unchanged toast column */
+			continue;
+		}
+
+		typtup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(att->atttypid));
+		if (!HeapTupleIsValid(typtup))
+			elog(ERROR, "cache lookup failed for type %u", att->atttypid);
+		typclass = (Form_pg_type) GETSTRUCT(typtup);
+
+		/* builtin type */
+		if (typclass->typtype == 'b' &&
+			att->atttypid < FirstNormalObjectId &&
+			typclass->typelem == InvalidOid)
+			use_binary = true;
+		else if (OidIsValid(typclass->typreceive))
+			use_sendrecv = true;
+
+		if (use_binary)
+		{
+			appendStringInfoChar(out, 'b');	/* binary data follows */
+
+			/* pass by value */
+			if (att->attbyval)
+			{
+				pq_sendint(out, att->attlen, 4); /* length */
+
+				enlargeStringInfo(out, att->attlen);
+				store_att_byval(out->data + out->len, values[i], att->attlen);
+				out->len += att->attlen;
+				out->data[out->len] = '\0';
+			}
+			/* fixed length non-varlena pass-by-reference type */
+			else if (att->attlen > 0)
+			{
+				pq_sendint(out, att->attlen, 4); /* length */
+
+				appendBinaryStringInfo(out, DatumGetPointer(values[i]),
+									   att->attlen);
+			}
+			/* varlena type */
+			else if (att->attlen == -1)
+			{
+				char *data = DatumGetPointer(values[i]);
+
+				/* send indirect datums inline */
+				if (VARATT_IS_EXTERNAL_INDIRECT(values[i]))
+				{
+					struct varatt_indirect redirect;
+					VARATT_EXTERNAL_GET_POINTER(redirect, data);
+					data = (char *) redirect.pointer;
+				}
+
+				Assert(!VARATT_IS_EXTERNAL(data));
+
+				pq_sendint(out, VARSIZE_ANY(data), 4); /* length */
+
+				appendBinaryStringInfo(out, data,
+									   VARSIZE_ANY(data));
+
+			}
+			else
+			{
+				elog(ERROR, "unsupported tuple type");
+			}
+		}
+		else if (use_sendrecv)
+		{
+			bytea	   *outputbytes;
+			int			len;
+
+			appendStringInfoChar(out, 's');	/* 'send' data follows */
+
+			outputbytes =
+				OidSendFunctionCall(typclass->typsend, values[i]);
+
+			len = VARSIZE(outputbytes) - VARHDRSZ;
+			pq_sendint(out, len, 4); /* length */
+			pq_sendbytes(out, VARDATA(outputbytes), len); /* data */
+			pfree(outputbytes);
+		}
+		else
+		{
+			char   	   *outputstr;
+			int			len;
+
+			appendStringInfoChar(out, 's');	/* 'text' data follows */
+
+			outputstr =
+				OidOutputFunctionCall(typclass->typoutput, values[i]);
+			len = strlen(outputstr) + 1;
+			pq_sendint(out, len, 4); /* length */
+			appendBinaryStringInfo(out, outputstr, len); /* data */
+			pfree(outputstr);
+		}
+
+		ReleaseSysCache(typtup);
+	}
 }
