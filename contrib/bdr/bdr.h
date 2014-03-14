@@ -48,11 +48,11 @@ extern BDRWorkerCon *bdr_apply_con;
 extern BDRSequencerCon *bdr_sequencer_con;
 
 /* apply support */
-extern void process_remote_begin(char *data, size_t r);
-extern void process_remote_commit(char *data, size_t r);
-extern void process_remote_insert(char *data, size_t r);
-extern void process_remote_update(char *data, size_t r);
-extern void process_remote_delete(char *data, size_t r);
+extern void process_remote_begin(StringInfo s);
+extern void process_remote_commit(StringInfo s);
+extern void process_remote_insert(StringInfo s);
+extern void process_remote_update(StringInfo s);
+extern void process_remote_delete(StringInfo s);
 
 /* sequence support */
 extern void bdr_sequencer_shmem_init(int nnodes, int sequencers);
