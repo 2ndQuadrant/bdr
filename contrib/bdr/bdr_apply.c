@@ -46,9 +46,11 @@
 #include "utils/syscache.h"
 #include "utils/tqual.h"
 
+/* Useful for development:
 #define VERBOSE_INSERT
 #define VERBOSE_DELETE
 #define VERBOSE_UPDATE
+*/
 
 typedef struct BDRTupleData
 {
