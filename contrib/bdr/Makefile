@@ -11,6 +11,8 @@ all:
 	$(MAKE) -f $(top_srcdir)/contrib/bdr/output.mk $(MAKECMDGOALS)
 	$(MAKE) -f $(top_srcdir)/contrib/bdr/worker.mk $(MAKECMDGOALS)
 
+clean: all
+
 # phony target...
 check: all
 
