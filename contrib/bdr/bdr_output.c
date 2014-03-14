@@ -58,6 +58,7 @@ static void pg_decode_change(LogicalDecodingContext *ctx,
 				 ReorderBufferChange *change);
 
 /* private prototypes */
+static void write_rel(StringInfo out, Relation rel);
 static void write_tuple(StringInfo out, Relation rel, HeapTuple tuple);
 
 void
@@ -159,11 +160,13 @@ pg_decode_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 	{
 		case REORDER_BUFFER_CHANGE_INSERT:
 			appendStringInfoChar(ctx->out, 'I');		/* action INSERT */
+			write_rel(ctx->out, relation);
 			appendStringInfoChar(ctx->out, 'N');		/* new tuple follows */
 			write_tuple(ctx->out, relation, &change->data.tp.newtuple->tuple);
 			break;
 		case REORDER_BUFFER_CHANGE_UPDATE:
 			appendStringInfoChar(ctx->out, 'U');		/* action UPDATE */
+			write_rel(ctx->out, relation);
 			if (change->data.tp.oldtuple != NULL)
 			{
 				appendStringInfoChar(ctx->out, 'K');	/* old key follows */
@@ -176,6 +179,7 @@ pg_decode_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 			break;
 		case REORDER_BUFFER_CHANGE_DELETE:
 			appendStringInfoChar(ctx->out, 'D');		/* action DELETE */
+			write_rel(ctx->out, relation);
 			if (change->data.tp.oldtuple != NULL)
 			{
 				appendStringInfoChar(ctx->out, 'K');	/* old key follows */
@@ -195,21 +199,15 @@ pg_decode_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 }
 
 /*
- * Write a tuple to the outputstream, in the most efficient format possible.
+ * Write schema.relation to the output stream.
  */
 static void
-write_tuple(StringInfo out, Relation rel, HeapTuple tuple)
+write_rel(StringInfo out, Relation rel)
 {
-	TupleDesc	desc;
-
-	Datum		values[MaxTupleAttributeNumber];
-	bool		isnull[MaxTupleAttributeNumber];
-
 	const char *nspname;
 	int64		nspnamelen;
 	const char *relname;
 	int64		relnamelen;
-	int			i;
 
 	nspname = get_namespace_name(rel->rd_rel->relnamespace);
 	if (nspname == NULL)
@@ -220,15 +218,27 @@ write_tuple(StringInfo out, Relation rel, HeapTuple tuple)
 	relname = NameStr(rel->rd_rel->relname);
 	relnamelen = strlen(relname) + 1;
 
-	appendStringInfoChar(out, 'T');		/* tuple follows */
-
 	pq_sendint(out, nspnamelen, 2);		/* schema name length */
 	appendBinaryStringInfo(out, nspname, nspnamelen);
 
 	pq_sendint(out, relnamelen, 2);		/* table name length */
 	appendBinaryStringInfo(out, relname, relnamelen);
+}
+
+/*
+ * Write a tuple to the outputstream, in the most efficient format possible.
+ */
+static void
+write_tuple(StringInfo out, Relation rel, HeapTuple tuple)
+{
+	TupleDesc	desc;
+	Datum		values[MaxTupleAttributeNumber];
+	bool		isnull[MaxTupleAttributeNumber];
+	int			i;
 
 	desc = RelationGetDescr(rel);
+
+	appendStringInfoChar(out, 'T');			/* tuple follows */
 
 	pq_sendint(out, desc->natts, 4);		/* number of attributes */
 
