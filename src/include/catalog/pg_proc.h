@@ -4003,6 +4003,8 @@ DATA(insert OID = 2774 (  ginqueryarrayextract	PGNSP PGUID 12 1 0 0 0 f f f f t 
 DESCR("GIN array support");
 DATA(insert OID = 2744 (  ginarrayconsistent	PGNSP PGUID 12 1 0 0 0 f f f f t f i 8 0 16 "2281 21 2277 23 2281 2281 2281 2281" _null_ _null_ _null_ _null_ ginarrayconsistent _null_ _null_ _null_ ));
 DESCR("GIN array support");
+DATA(insert OID = 3920 (  ginarraytriconsistent	PGNSP PGUID 12 1 0 0 0 f f f f t f i 7 0 16 "2281 21 2277 23 2281 2281 2281" _null_ _null_ _null_ _null_ ginarraytriconsistent _null_ _null_ _null_ ));
+DESCR("GIN array support");
 DATA(insert OID = 3076 (  ginarrayextract	 PGNSP PGUID 12 1 0 0 0 f f f f t f i 2 0 2281 "2277 2281" _null_ _null_ _null_ _null_	ginarrayextract_2args _null_ _null_ _null_ ));
 DESCR("GIN array support (obsolete)");
 
@@ -4345,6 +4347,8 @@ DESCR("GIN tsvector support");
 DATA(insert OID = 3657 (  gin_extract_tsquery	PGNSP PGUID 12 1 0 0 0 f f f f t f i 7 0 2281 "3615 2281 21 2281 2281 2281 2281" _null_ _null_ _null_ _null_ gin_extract_tsquery _null_ _null_ _null_ ));
 DESCR("GIN tsvector support");
 DATA(insert OID = 3658 (  gin_tsquery_consistent PGNSP PGUID 12 1 0 0 0 f f f f t f i 8 0 16 "2281 21 3615 23 2281 2281 2281 2281" _null_ _null_ _null_ _null_	gin_tsquery_consistent _null_ _null_ _null_ ));
+DESCR("GIN tsvector support");
+DATA(insert OID = 3921 (  gin_tsquery_triconsistent PGNSP PGUID 12 1 0 0 0 f f f f t f i 7 0 16 "2281 21 3615 23 2281 2281 2281" _null_ _null_ _null_ _null_	gin_tsquery_triconsistent _null_ _null_ _null_ ));
 DESCR("GIN tsvector support");
 DATA(insert OID = 3724 (  gin_cmp_tslexeme		PGNSP PGUID 12 1 0 0 0 f f f f t f i 2 0 23 "25 25" _null_ _null_ _null_ _null_ gin_cmp_tslexeme _null_ _null_ _null_ ));
 DESCR("GIN tsvector support");
@@ -4854,7 +4858,7 @@ DATA(insert OID = 3566 (  pg_event_trigger_dropped_objects		PGNSP PGUID 12 10 10
 DESCR("list objects dropped by the current command");
 DATA(insert OID = 3567 (  pg_event_trigger_get_creation_commands PGNSP PGUID 12 10 100 0 0 f f f f t t s 0 0 2249 "" "{26,26,23,25,25,25,114}" "{o,o,o,o,o,o,o}" "{classid,objid,objsubid,object_type,schema,identity,command}" _null_ pg_event_trigger_get_creation_commands _null_ _null_ _null_ ));
 DESCR("list JSON-formatted commands executed by the current command");
-DATA(insert OID = 3568 (  pg_event_trigger_expand_command PGNSP PGUID 12 10 1 0 0 f f f f t f s 1 0 25 "114" _null_ _null_ _null_ _null_ pg_event_trigger_expand_command _null_ _null_ _null_ ));
+DATA(insert OID = 3568 (  pg_event_trigger_expand_command PGNSP PGUID 12 10 0 0 0 f f f f t f s 1 0 25 "114" _null_ _null_ _null_ _null_ pg_event_trigger_expand_command _null_ _null_ _null_ ));
 DESCR("format JSON command");
 
 /* generic transition functions for ordered-set aggregates */

@@ -1148,6 +1148,7 @@ extern Datum ginarrayextract(PG_FUNCTION_ARGS);
 extern Datum ginarrayextract_2args(PG_FUNCTION_ARGS);
 extern Datum ginqueryarrayextract(PG_FUNCTION_ARGS);
 extern Datum ginarrayconsistent(PG_FUNCTION_ARGS);
+extern Datum ginarraytriconsistent(PG_FUNCTION_ARGS);
 
 /* access/transam/twophase.c */
 extern Datum pg_prepared_xact(PG_FUNCTION_ARGS);

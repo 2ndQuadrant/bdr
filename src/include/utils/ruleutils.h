@@ -21,6 +21,8 @@
 
 extern bool quote_all_identifiers;
 
+extern void pg_get_ruledef_details(Datum ev_qual, Datum ev_action,
+					   char **whereClause, List **actions);
 extern char *pg_get_viewdef_internal(Oid viewoid);
 extern char *pg_get_indexdef_string(Oid indexrelid);
 extern char *pg_get_indexdef_columns(Oid indexrelid, bool pretty);
