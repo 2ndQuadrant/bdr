@@ -4834,7 +4834,7 @@ DATA(insert OID = 3566 (  pg_event_trigger_dropped_objects		PGNSP PGUID 12 10 10
 DESCR("list objects dropped by the current command");
 DATA(insert OID = 3567 (  pg_event_trigger_get_creation_commands PGNSP PGUID 12 10 100 0 0 f f f f t t s 0 0 2249 "" "{26,26,23,25,25,25,114}" "{o,o,o,o,o,o,o}" "{classid,objid,objsubid,object_type,schema,identity,command}" _null_ pg_event_trigger_get_creation_commands _null_ _null_ _null_ ));
 DESCR("list JSON-formatted commands executed by the current command");
-DATA(insert OID = 3568 (  pg_event_trigger_expand_command PGNSP PGUID 12 10 1 0 0 f f f f t f s 1 0 25 "114" _null_ _null_ _null_ _null_ pg_event_trigger_expand_command _null_ _null_ _null_ ));
+DATA(insert OID = 3568 (  pg_event_trigger_expand_command PGNSP PGUID 12 10 0 0 0 f f f f t f s 1 0 25 "114" _null_ _null_ _null_ _null_ pg_event_trigger_expand_command _null_ _null_ _null_ ));
 DESCR("format JSON command");
 
 /* generic transition functions for ordered-set aggregates */
