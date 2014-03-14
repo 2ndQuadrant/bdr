@@ -27,6 +27,7 @@
 #include "utils/memutils.h"
 #include "utils/rel.h"
 #include "utils/relcache.h"
+#include "utils/ruleutils.h"
 #include "utils/syscache.h"
 #include "utils/typcache.h"
 
