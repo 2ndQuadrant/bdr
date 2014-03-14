@@ -528,7 +528,6 @@ process_remote_update(StringInfo s)
 			nt = heap_modify_tuple(old_tuple, RelationGetDescr(rel),
 								   new_tuple.values, new_tuple.isnull, new_tuple.changed);
 			simple_heap_update(rel, &oldtid, nt);
-			/* FIXME: HOT support */
 			UserTableUpdateIndexes(rel, nt);
 			bdr_count_update();
 		}
@@ -893,10 +892,16 @@ static void
 UserTableUpdateIndexes(Relation rel, HeapTuple tuple)
 {
 	/* this is largely copied together from copy.c's CopyFrom */
-	EState	   *estate = CreateExecutorState();
+	EState	   *estate;
 	ResultRelInfo *resultRelInfo;
 	List	   *recheckIndexes = NIL;
 	TupleDesc	tupleDesc = RelationGetDescr(rel);
+
+	/* HOT update does not require index inserts */
+	if (HeapTupleIsHeapOnly(tuple))
+		return;
+
+	estate = CreateExecutorState();
 
 	resultRelInfo = makeNode(ResultRelInfo);
 	resultRelInfo->ri_RangeTableIndex = 1;		/* dummy */
