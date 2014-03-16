@@ -33,9 +33,11 @@
 #include "access/xact.h"
 #include "catalog/pg_extension.h"
 #include "catalog/pg_index.h"
+#include "catalog/catversion.h"
 #include "commands/extension.h"
 #include "lib/stringinfo.h"
 #include "libpq/pqformat.h"
+#include "mb/pg_wchar.h"
 #include "replication/replication_identifier.h"
 #include "utils/builtins.h"
 #include "utils/guc.h"
@@ -204,7 +206,7 @@ bdr_apply_main(Datum main_arg)
 	Oid			remote_dboid_i;
 	char		local_sysid[32];
 	char		remote_ident[256];
-	char		query[256];
+	StringInfoData query;
 	char		conninfo_repl[MAXCONNINFO + 75];
 	XLogRecPtr	last_received = InvalidXLogRecPtr;
 	char	   *sqlstate;
@@ -212,6 +214,8 @@ bdr_apply_main(Datum main_arg)
 	RepNodeId	replication_identifier;
 	XLogRecPtr	start_from;
 	NameData	slot_name;
+
+	initStringInfo(&query);
 
 	bdr_apply_con = (BDRWorkerCon *) DatumGetPointer(main_arg);
 
@@ -338,14 +342,15 @@ bdr_apply_main(Datum main_arg)
 		ForceSyncCommit();
 
 		/* acquire remote decoding slot */
-		snprintf(query, sizeof(query), "CREATE_REPLICATION_SLOT \"%s\" LOGICAL %s",
-				 NameStr(slot_name), "bdr_output");
-		res = PQexec(streamConn, query);
+		resetStringInfo(&query);
+		appendStringInfo(&query, "CREATE_REPLICATION_SLOT \"%s\" LOGICAL %s",
+						 NameStr(slot_name), "bdr_output");
+		res = PQexec(streamConn, query.data);
 
 		if (PQresultStatus(res) != PGRES_TUPLES_OK)
 		{
 			elog(FATAL, "could not send replication command \"%s\": status %s: %s\n",
-				 query, PQresStatus(PQresultStatus(res)), PQresultErrorMessage(res));
+				 query.data, PQresStatus(PQresultStatus(res)), PQresultErrorMessage(res));
 		}
 		PQclear(res);
 
@@ -387,16 +392,32 @@ bdr_apply_main(Datum main_arg)
 		 replication_identifier,
 		 (uint32) (start_from >> 32), (uint32) start_from);
 
-	snprintf(query, sizeof(query), "START_REPLICATION SLOT \"%s\" LOGICAL %X/%X",
-	   NameStr(slot_name), (uint32) (start_from >> 32), (uint32) start_from);
-	res = PQexec(streamConn, query);
+	resetStringInfo(&query);
+	appendStringInfo(&query, "START_REPLICATION SLOT \"%s\" LOGICAL %X/%X (",
+					 NameStr(slot_name), (uint32) (start_from >> 32),
+					 (uint32) start_from);
+	appendStringInfo(&query, "pg_version '%u'", PG_VERSION_NUM);
+	appendStringInfo(&query, ", pg_catversion '%u'", CATALOG_VERSION_NO);
+	appendStringInfo(&query, ", bdr_version '%u'", BDR_VERSION_NUM);
+	appendStringInfo(&query, ", sizeof_int '%zu'", sizeof(int));
+	appendStringInfo(&query, ", sizeof_long '%zu'", sizeof(long));
+	appendStringInfo(&query, ", sizeof_datum '%zu'", sizeof(Datum));
+	appendStringInfo(&query, ", maxalign '%d'", MAXIMUM_ALIGNOF);
+	appendStringInfo(&query, ", float4_byval '%d'", bdr_get_float4byval());
+	appendStringInfo(&query, ", float8_byval '%d'", bdr_get_float8byval());
+	appendStringInfo(&query, ", integer_datetimes '%d'", bdr_get_integer_timestamps());
+	appendStringInfo(&query, ", bigendian '%d'", bdr_get_bigendian());
+	appendStringInfo(&query, ", db_encoding '%s'", GetDatabaseEncodingName());
+
+	appendStringInfoChar(&query, ')');
+	res = PQexec(streamConn, query.data);
 
 	sqlstate = PQresultErrorField(res, PG_DIAG_SQLSTATE);
 
 	if (PQresultStatus(res) != PGRES_COPY_BOTH)
 	{
 		elog(FATAL, "could not send replication command \"%s\": %s\n, sqlstate: %s",
-			 query, PQresultErrorMessage(res), sqlstate);
+			 query.data, PQresultErrorMessage(res), sqlstate);
 	}
 	PQclear(res);
 

@@ -14,6 +14,7 @@
 #include "access/xlogdefs.h"
 #include "utils/resowner.h"
 
+#define BDR_VERSION_NUM 500
 
 typedef struct BDRWorkerCon
 {
@@ -83,6 +84,12 @@ extern void bdr_count_update_conflict(void);
 extern void bdr_count_delete(void);
 extern void bdr_count_delete_conflict(void);
 extern void bdr_count_disconnect(void);
+
+/* compat check functions */
+extern bool bdr_get_float4byval(void);
+extern bool bdr_get_float8byval(void);
+extern bool bdr_get_integer_timestamps(void);
+extern bool bdr_get_bigendian(void);
 
 
 #endif	/* BDR_H */

@@ -15,6 +15,8 @@
 #include "access/sysattr.h"
 #include "access/tuptoaster.h"
 
+#include "bdr.h"
+
 #include "catalog/pg_class.h"
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_type.h"
@@ -22,11 +24,14 @@
 
 #include "libpq/pqformat.h"
 
+#include "mb/pg_wchar.h"
+
 #include "nodes/parsenodes.h"
 
 #include "replication/output_plugin.h"
 #include "replication/logical.h"
 
+#include "utils/builtins.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
@@ -43,8 +48,24 @@ extern void		_PG_output_plugin_init(OutputPluginCallbacks *cb);
 typedef struct
 {
 	MemoryContext context;
-	bool		include_xids;
-} TestDecodingData;
+
+	bool allow_binary_protocol;
+	bool allow_sendrecv_protocol;
+	bool int_datetime_mismatch;
+
+	uint32 client_pg_version;
+	uint32 client_pg_catversion;
+	uint32 client_bdr_version;
+	size_t client_sizeof_int;
+	size_t client_sizeof_long;
+	size_t client_sizeof_datum;
+	size_t client_maxalign;
+	bool client_bigendian;
+	bool client_float4_byval;
+	bool client_float8_byval;
+	bool client_int_datetime;
+	char *client_db_encoding;
+} BdrOutputData;
 
 /* These must be available to pg_dlsym() */
 static void pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt,
@@ -59,7 +80,8 @@ static void pg_decode_change(LogicalDecodingContext *ctx,
 
 /* private prototypes */
 static void write_rel(StringInfo out, Relation rel);
-static void write_tuple(StringInfo out, Relation rel, HeapTuple tuple);
+static void write_tuple(BdrOutputData *data, StringInfo out, Relation rel,
+						HeapTuple tuple);
 
 void
 _PG_init(void)
@@ -80,13 +102,60 @@ _PG_output_plugin_init(OutputPluginCallbacks *cb)
 }
 
 
+static void
+bdr_parse_uint32(DefElem *elem, uint32 *res)
+{
+	errno = 0;
+	*res = strtoul(strVal(elem->arg), NULL, 0);
+
+	if (errno != 0)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("could not parse uint32 value \"%s\" for parameter \"%s\": %m",
+						strVal(elem->arg), elem->defname)));
+}
+
+static void
+bdr_parse_size_t(DefElem *elem, size_t *res)
+{
+	errno = 0;
+	*res = strtoull(strVal(elem->arg), NULL, 0);
+
+	if (errno != 0)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("could not parse size_t value \"%s\" for parameter \"%s\": %m",
+						strVal(elem->arg), elem->defname)));
+}
+
+static void
+bdr_parse_bool(DefElem *elem, bool *res)
+{
+	if (!parse_bool(strVal(elem->arg), res))
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("could not parse boolean value \"%s\" for parameter \"%s\": %m",
+						strVal(elem->arg), elem->defname)));
+}
+
+static void
+bdr_req_param(const char *param)
+{
+	ereport(ERROR,
+			(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+			 errmsg("missing value for for parameter \"%s\"",
+					param)));
+}
+
+
 /* initialize this plugin */
 static void
 pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool is_init)
 {
-	TestDecodingData *data;
+	ListCell   *option;
+	BdrOutputData *data;
 
-	data = palloc(sizeof(TestDecodingData));
+	data = palloc0(sizeof(BdrOutputData));
 	data->context = AllocSetContextCreate(TopMemoryContext,
 										  "bdr conversion context",
 										  ALLOCSET_DEFAULT_MINSIZE,
@@ -96,6 +165,130 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 	ctx->output_plugin_private = data;
 
 	opt->output_type = OUTPUT_PLUGIN_BINARY_OUTPUT;
+
+	/* parse options passed in by the client */
+
+	foreach(option, ctx->output_plugin_options)
+	{
+		DefElem    *elem = lfirst(option);
+
+		Assert(elem->arg == NULL || IsA(elem->arg, String));
+
+		if (strcmp(elem->defname, "pg_version") == 0)
+			bdr_parse_uint32(elem, &data->client_pg_version);
+		else if (strcmp(elem->defname, "pg_catversion") == 0)
+			bdr_parse_uint32(elem, &data->client_pg_catversion);
+		else if (strcmp(elem->defname, "bdr_version") == 0)
+			bdr_parse_uint32(elem, &data->client_bdr_version);
+		else if (strcmp(elem->defname, "sizeof_int") == 0)
+			bdr_parse_size_t(elem, &data->client_sizeof_int);
+		else if (strcmp(elem->defname, "sizeof_long") == 0)
+			bdr_parse_size_t(elem, &data->client_sizeof_long);
+		else if (strcmp(elem->defname, "sizeof_datum") == 0)
+			bdr_parse_size_t(elem, &data->client_sizeof_datum);
+		else if (strcmp(elem->defname, "maxalign") == 0)
+			bdr_parse_size_t(elem, &data->client_maxalign);
+		else if (strcmp(elem->defname, "bigendian") == 0)
+			bdr_parse_bool(elem, &data->client_bigendian);
+		else if (strcmp(elem->defname, "float4_byval") == 0)
+			bdr_parse_bool(elem, &data->client_float4_byval);
+		else if (strcmp(elem->defname, "float8_byval") == 0)
+			bdr_parse_bool(elem, &data->client_float8_byval);
+		else if (strcmp(elem->defname, "integer_datetimes") == 0)
+			bdr_parse_bool(elem, &data->client_int_datetime);
+		else if (strcmp(elem->defname, "db_encoding") == 0)
+			data->client_db_encoding = pstrdup(strVal(elem->arg));
+		else
+		{
+			ereport(ERROR,
+					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+					 errmsg("option \"%s\" = \"%s\" is unknown",
+							elem->defname,
+							elem->arg ? strVal(elem->arg) : "(null)")));
+		}
+	}
+
+	/* no options are passed in during initialization, so don't complain there */
+	if (!is_init)
+	{
+		if (data->client_pg_version == 0)
+			bdr_req_param("pg_version");
+		if (data->client_pg_catversion == 0)
+			bdr_req_param("pg_catversion");
+		if (data->client_bdr_version == 0)
+			bdr_req_param("bdr_version");
+		if (data->client_sizeof_int == 0)
+			bdr_req_param("sizeof_int");
+		if (data->client_sizeof_long == 0)
+			bdr_req_param("sizeof_long");
+		if (data->client_sizeof_datum == 0)
+			bdr_req_param("sizeof_datum");
+		if (data->client_maxalign == 0)
+			bdr_req_param("maxalign");
+		/* XXX: can't check for boolean values this way */
+		if (data->client_db_encoding == NULL)
+			bdr_req_param("db_encoding");
+
+		/* check incompatibilities we cannot work around */
+		if (strcmp(data->client_db_encoding, GetDatabaseEncodingName()) != 0)
+			elog(ERROR, "mismatching encodings are not yet supported");
+
+		if (data->client_bdr_version != BDR_VERSION_NUM)
+			elog(ERROR, "bdr versions currently have to match on both sides");
+
+		data->allow_binary_protocol = true;
+		data->allow_sendrecv_protocol = true;
+
+		/*
+		 * Now use the passed in information to determine how to encode the
+		 * data sent by the output plugin. We don't make datatype specific
+		 * decisions here, just generic decisions about using binary and/or
+		 * send/recv protocols.
+		 */
+
+		/*
+		 * Don't use the binary protocol if there are fundamental arch
+		 * differences.
+		 */
+		if (data->client_sizeof_int != sizeof(int) ||
+			data->client_sizeof_long != sizeof(long) ||
+			data->client_sizeof_datum != sizeof(Datum))
+		{
+			data->allow_binary_protocol = false;
+			elog(LOG, "disabling binary protocol because of sizeof differences");
+		}
+		else if (data->client_bigendian != bdr_get_bigendian())
+		{
+			data->allow_binary_protocol = false;
+			elog(LOG, "disabling binary protocol because of endianess difference");
+		}
+
+		/*
+		 * We also can't use the binary protocol if there are critical
+		 * differences in compile time settings.
+		 */
+		if (data->client_float4_byval != bdr_get_float4byval() ||
+			data->client_float8_byval != bdr_get_float8byval())
+			data->allow_binary_protocol = false;
+
+		if (data->client_int_datetime != bdr_get_integer_timestamps())
+			data->int_datetime_mismatch = true;
+		else
+			data->int_datetime_mismatch = false;
+
+
+		/*
+		 * Don't use the send/recv protocol if there are version
+		 * differences. There currently isn't any guarantee for cross version
+		 * compatibility of the send/recv representations. But there actually
+		 * *is* a compat. guarantee for architecture differences...
+		 *
+		 * XXX: We could easily do better by doing per datatype considerations
+		 * if there are known incompatibilities.
+		 */
+		if (data->client_pg_version / 100 == PG_VERSION_NUM / 100)
+			data->allow_sendrecv_protocol = false;
+	}
 }
 
 /* BEGIN callback */
@@ -103,7 +296,7 @@ void
 pg_decode_begin_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *txn)
 {
 #ifdef NOT_YET
-	TestDecodingData *data = ctx->output_plugin_private;
+	BdrOutputData *data = ctx->output_plugin_private;
 #endif
 	AssertVariableIsOfType(&pg_decode_begin_txn, LogicalDecodeBeginCB);
 
@@ -124,7 +317,7 @@ pg_decode_commit_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 					 XLogRecPtr commit_lsn)
 {
 #ifdef NOT_YET
-	TestDecodingData *data = ctx->output_plugin_private;
+	BdrOutputData *data = ctx->output_plugin_private;
 #endif
 
 	if (txn->origin_id != InvalidRepNodeId)
@@ -142,7 +335,7 @@ void
 pg_decode_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 				 Relation relation, ReorderBufferChange *change)
 {
-	TestDecodingData *data;
+	BdrOutputData *data;
 	MemoryContext old;
 
 	data = ctx->output_plugin_private;
@@ -162,7 +355,7 @@ pg_decode_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 			appendStringInfoChar(ctx->out, 'I');		/* action INSERT */
 			write_rel(ctx->out, relation);
 			appendStringInfoChar(ctx->out, 'N');		/* new tuple follows */
-			write_tuple(ctx->out, relation, &change->data.tp.newtuple->tuple);
+			write_tuple(data, ctx->out, relation, &change->data.tp.newtuple->tuple);
 			break;
 		case REORDER_BUFFER_CHANGE_UPDATE:
 			appendStringInfoChar(ctx->out, 'U');		/* action UPDATE */
@@ -170,11 +363,11 @@ pg_decode_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 			if (change->data.tp.oldtuple != NULL)
 			{
 				appendStringInfoChar(ctx->out, 'K');	/* old key follows */
-				write_tuple(ctx->out, relation,
+				write_tuple(data, ctx->out, relation,
 							&change->data.tp.oldtuple->tuple);
 			}
 			appendStringInfoChar(ctx->out, 'N');		/* new tuple follows */
-			write_tuple(ctx->out, relation,
+			write_tuple(data, ctx->out, relation,
 						&change->data.tp.newtuple->tuple);
 			break;
 		case REORDER_BUFFER_CHANGE_DELETE:
@@ -183,7 +376,7 @@ pg_decode_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 			if (change->data.tp.oldtuple != NULL)
 			{
 				appendStringInfoChar(ctx->out, 'K');	/* old key follows */
-				write_tuple(ctx->out, relation,
+				write_tuple(data, ctx->out, relation,
 							&change->data.tp.oldtuple->tuple);
 			}
 			else
@@ -226,10 +419,41 @@ write_rel(StringInfo out, Relation rel)
 }
 
 /*
+ * Make the executive decision about which protocol to use.
+ */
+static void
+decide_datum_transfer(BdrOutputData *data,
+					  Form_pg_attribute att, Form_pg_type typclass,
+					  bool *use_binary, bool *use_sendrecv)
+{
+	/* builtin type */
+	if (data->int_datetime_mismatch &&
+		(att->atttypid == TIMESTAMPOID || att->atttypid == TIMESTAMPTZOID ||
+		 att->atttypid == TIMEOID))
+	{
+		*use_binary = false;
+		*use_sendrecv = false;
+	}
+	else if (data->allow_binary_protocol &&
+		typclass->typtype == 'b' &&
+		att->atttypid < FirstNormalObjectId &&
+		typclass->typelem == InvalidOid)
+	{
+		*use_binary = true;
+	}
+	else if (data->allow_sendrecv_protocol &&
+			 OidIsValid(typclass->typreceive))
+	{
+		*use_sendrecv = true;
+	}
+}
+
+/*
  * Write a tuple to the outputstream, in the most efficient format possible.
  */
 static void
-write_tuple(StringInfo out, Relation rel, HeapTuple tuple)
+write_tuple(BdrOutputData *data, StringInfo out, Relation rel,
+			HeapTuple tuple)
 {
 	TupleDesc	desc;
 	Datum		values[MaxTupleAttributeNumber];
@@ -279,13 +503,7 @@ write_tuple(StringInfo out, Relation rel, HeapTuple tuple)
 			elog(ERROR, "cache lookup failed for type %u", att->atttypid);
 		typclass = (Form_pg_type) GETSTRUCT(typtup);
 
-		/* builtin type */
-		if (typclass->typtype == 'b' &&
-			att->atttypid < FirstNormalObjectId &&
-			typclass->typelem == InvalidOid)
-			use_binary = true;
-		else if (OidIsValid(typclass->typreceive))
-			use_sendrecv = true;
+		decide_datum_transfer(data, att, typclass, &use_binary, &use_sendrecv);
 
 		if (use_binary)
 		{
