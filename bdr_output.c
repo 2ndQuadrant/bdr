@@ -304,9 +304,9 @@ pg_decode_begin_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *txn)
 		return;
 
 	OutputPluginPrepareWrite(ctx, true);
-	appendStringInfoChar(ctx->out, 'B');		/* BEGIN */
-	appendBinaryStringInfo(ctx->out, (char *) &txn->final_lsn, sizeof(XLogRecPtr));
-	appendBinaryStringInfo(ctx->out, (char *) &txn->commit_time, sizeof(TimestampTz));
+	pq_sendbyte(ctx->out, 'B');		/* BEGIN */
+	pq_sendint64(ctx->out, txn->final_lsn);
+	pq_sendint64(ctx->out, txn->commit_time);
 	OutputPluginWrite(ctx, true);
 	return;
 }
@@ -324,10 +324,10 @@ pg_decode_commit_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 		return;
 
 	OutputPluginPrepareWrite(ctx, true);
-	appendStringInfoChar(ctx->out, 'C');		/* sending COMMIT */
-	appendBinaryStringInfo(ctx->out, (char *) &commit_lsn, sizeof(XLogRecPtr));
-	appendBinaryStringInfo(ctx->out, (char *) &txn->end_lsn, sizeof(XLogRecPtr));
-	appendBinaryStringInfo(ctx->out, (char *) &txn->commit_time, sizeof(TimestampTz));
+	pq_sendbyte(ctx->out, 'C');		/* sending COMMIT */
+	pq_sendint64(ctx->out, commit_lsn);
+	pq_sendint64(ctx->out, txn->end_lsn);
+	pq_sendint64(ctx->out, txn->commit_time);
 	OutputPluginWrite(ctx, true);
 }
 
@@ -352,35 +352,35 @@ pg_decode_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 	switch (change->action)
 	{
 		case REORDER_BUFFER_CHANGE_INSERT:
-			appendStringInfoChar(ctx->out, 'I');		/* action INSERT */
+			pq_sendbyte(ctx->out, 'I');		/* action INSERT */
 			write_rel(ctx->out, relation);
-			appendStringInfoChar(ctx->out, 'N');		/* new tuple follows */
+			pq_sendbyte(ctx->out, 'N');		/* new tuple follows */
 			write_tuple(data, ctx->out, relation, &change->data.tp.newtuple->tuple);
 			break;
 		case REORDER_BUFFER_CHANGE_UPDATE:
-			appendStringInfoChar(ctx->out, 'U');		/* action UPDATE */
+			pq_sendbyte(ctx->out, 'U');		/* action UPDATE */
 			write_rel(ctx->out, relation);
 			if (change->data.tp.oldtuple != NULL)
 			{
-				appendStringInfoChar(ctx->out, 'K');	/* old key follows */
+				pq_sendbyte(ctx->out, 'K');	/* old key follows */
 				write_tuple(data, ctx->out, relation,
 							&change->data.tp.oldtuple->tuple);
 			}
-			appendStringInfoChar(ctx->out, 'N');		/* new tuple follows */
+			pq_sendbyte(ctx->out, 'N');		/* new tuple follows */
 			write_tuple(data, ctx->out, relation,
 						&change->data.tp.newtuple->tuple);
 			break;
 		case REORDER_BUFFER_CHANGE_DELETE:
-			appendStringInfoChar(ctx->out, 'D');		/* action DELETE */
+			pq_sendbyte(ctx->out, 'D');		/* action DELETE */
 			write_rel(ctx->out, relation);
 			if (change->data.tp.oldtuple != NULL)
 			{
-				appendStringInfoChar(ctx->out, 'K');	/* old key follows */
+				pq_sendbyte(ctx->out, 'K');	/* old key follows */
 				write_tuple(data, ctx->out, relation,
 							&change->data.tp.oldtuple->tuple);
 			}
 			else
-				appendStringInfoChar(ctx->out, 'E');	/* empty */
+				pq_sendbyte(ctx->out, 'E');	/* empty */
 			break;
 		default:
 			Assert(false);
@@ -462,7 +462,7 @@ write_tuple(BdrOutputData *data, StringInfo out, Relation rel,
 
 	desc = RelationGetDescr(rel);
 
-	appendStringInfoChar(out, 'T');			/* tuple follows */
+	pq_sendbyte(out, 'T');			/* tuple follows */
 
 	pq_sendint(out, desc->natts, 4);		/* number of attributes */
 
@@ -489,12 +489,12 @@ write_tuple(BdrOutputData *data, StringInfo out, Relation rel,
 
 		if (isnull[i] || att->attisdropped)
 		{
-			appendStringInfoChar(out, 'n');	/* null column */
+			pq_sendbyte(out, 'n');	/* null column */
 			continue;
 		}
 		else if (att->attlen == -1 && VARATT_IS_EXTERNAL_ONDISK(values[i]))
 		{
-			appendStringInfoChar(out, 'u');	/* unchanged toast column */
+			pq_sendbyte(out, 'u');	/* unchanged toast column */
 			continue;
 		}
 
@@ -507,7 +507,7 @@ write_tuple(BdrOutputData *data, StringInfo out, Relation rel,
 
 		if (use_binary)
 		{
-			appendStringInfoChar(out, 'b');	/* binary data follows */
+			pq_sendbyte(out, 'b');	/* binary data follows */
 
 			/* pass by value */
 			if (att->attbyval)
@@ -558,7 +558,7 @@ write_tuple(BdrOutputData *data, StringInfo out, Relation rel,
 			bytea	   *outputbytes;
 			int			len;
 
-			appendStringInfoChar(out, 's');	/* 'send' data follows */
+			pq_sendbyte(out, 's');	/* 'send' data follows */
 
 			outputbytes =
 				OidSendFunctionCall(typclass->typsend, values[i]);
@@ -573,7 +573,7 @@ write_tuple(BdrOutputData *data, StringInfo out, Relation rel,
 			char   	   *outputstr;
 			int			len;
 
-			appendStringInfoChar(out, 's');	/* 'text' data follows */
+			pq_sendbyte(out, 's');	/* 'text' data follows */
 
 			outputstr =
 				OidOutputFunctionCall(typclass->typoutput, values[i]);
