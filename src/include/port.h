@@ -382,6 +382,14 @@ extern size_t strlcat(char *dst, const char *src, size_t siz);
 extern size_t strlcpy(char *dst, const char *src, size_t siz);
 #endif
 
+#ifndef HAVE_STRTOULL
+extern unsigned long long strtoull(const char *nptr, char **endptr, int base);
+#endif
+
+#ifndef HAVE_STRTOULL
+extern long long strtoll(const char *nptr, char **endptr, int base);
+#endif
+
 #if !defined(HAVE_RANDOM) && !defined(__BORLANDC__)
 extern long random(void);
 #endif
