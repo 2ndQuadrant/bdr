@@ -82,8 +82,8 @@ process_remote_begin(StringInfo s)
 
 	Assert(bdr_apply_con != NULL);
 
-	origlsn = *(XLogRecPtr *) pq_getmsgbytes(s, 8);
-	committime = *(TimestampTz *) pq_getmsgbytes(s, 8);
+	origlsn = pq_getmsgint64(s);
+	committime = pq_getmsgint64(s);
 
 	/* setup state for commit and conflict detection */
 	replication_origin_lsn = origlsn;
@@ -102,10 +102,8 @@ process_remote_begin(StringInfo s)
 	/* don't want the overhead otherwise */
 	if (bdr_apply_con->apply_delay > 0)
 	{
-		current = GetCurrentTimestamp();
-#ifndef HAVE_INT64_TIMESTAMP
-#error "we require integer timestamps"
-#endif
+		current = GetCurrentIntegerTimestamp();
+
 		/* ensure no weirdness due to clock drift */
 		if (current > replication_origin_timestamp)
 		{
@@ -136,9 +134,9 @@ process_remote_commit(StringInfo s)
 
 	Assert(bdr_apply_con != NULL);
 
-	origlsn = *(XLogRecPtr *) pq_getmsgbytes(s, 8);
-	end_lsn = *(XLogRecPtr *) pq_getmsgbytes(s, 8);
-	committime = *(TimestampTz *) pq_getmsgbytes(s, 8);
+	origlsn = pq_getmsgint64(s);
+	end_lsn = pq_getmsgint64(s);
+	committime = pq_getmsgint64(s);
 
 	elog(LOG, "COMMIT origin(lsn, end, timestamp): %X/%X, %X/%X, %s",
 		 (uint32) (origlsn >> 32), (uint32) origlsn,
