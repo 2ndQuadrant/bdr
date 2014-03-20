@@ -573,7 +573,7 @@ write_tuple(BdrOutputData *data, StringInfo out, Relation rel,
 			char   	   *outputstr;
 			int			len;
 
-			pq_sendbyte(out, 's');	/* 'text' data follows */
+			pq_sendbyte(out, 't');	/* 'text' data follows */
 
 			outputstr =
 				OidOutputFunctionCall(typclass->typoutput, values[i]);
