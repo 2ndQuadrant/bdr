@@ -286,7 +286,7 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 		 * XXX: We could easily do better by doing per datatype considerations
 		 * if there are known incompatibilities.
 		 */
-		if (data->client_pg_version / 100 == PG_VERSION_NUM / 100)
+		if (data->client_pg_version / 100 != PG_VERSION_NUM / 100)
 			data->allow_sendrecv_protocol = false;
 	}
 }
