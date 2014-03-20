@@ -31,6 +31,7 @@
 #include "access/committs.h"
 #include "access/heapam.h"
 #include "access/xact.h"
+#include "catalog/namespace.h"
 #include "catalog/pg_extension.h"
 #include "catalog/pg_index.h"
 #include "catalog/catversion.h"
@@ -41,6 +42,7 @@
 #include "replication/replication_identifier.h"
 #include "utils/builtins.h"
 #include "utils/guc.h"
+#include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/snapmgr.h"
 #include "utils/timestamp.h"
@@ -424,9 +426,6 @@ bdr_apply_main(Datum main_arg)
 	fd = PQsocket(streamConn);
 
 	replication_origin_id = replication_identifier;
-
-	/* setup initial queued_cmds OID */
-	setup_queuedcmds_relid();
 
 	while (!got_sigterm)
 	{
@@ -838,6 +837,7 @@ bdr_maintain_schema(void)
 {
 	Relation extrel;
 	Oid		extoid;
+	Oid			schema_oid;
 
 	StartTransactionCommand();
 	PushActiveSnapshot(GetTransactionSnapshot());
@@ -874,6 +874,16 @@ bdr_maintain_schema(void)
 	}
 
 	heap_close(extrel, NoLock);
+
+	/* setup initial queued_cmds OID */
+	schema_oid = get_namespace_oid("bdr", false);
+	if (schema_oid != InvalidOid)
+	{
+		QueuedDDLCommandsRelid = get_relname_relid("bdr_queued_commands",
+												   schema_oid);
+	}
+
+	elog(LOG, "bdr.bdr_queued_commands OID set to %u", QueuedDDLCommandsRelid);
 
 	PopActiveSnapshot();
 	CommitTransactionCommand();
