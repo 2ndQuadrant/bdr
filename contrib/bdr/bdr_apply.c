@@ -70,7 +70,7 @@ static void tuple_to_stringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple
 static void check_sequencer_wakeup(Relation rel);
 
 bool request_sequencer_wakeup = false;
-static Oid		QueuedDDLCommandsRelid = InvalidOid;
+Oid			QueuedDDLCommandsRelid = InvalidOid;
 
 void
 process_remote_begin(StringInfo s)
@@ -1057,46 +1057,4 @@ find_pkey_tuple(ScanKey skey, Relation rel, Relation idxrel,
 	}
 
 	return tuple;
-}
-
-void
-setup_queuedcmds_relid(void)
-{
-	Datum	oid;
-	int		ret;
-	bool	isnull;
-
-	StartTransactionCommand();
-	SPI_connect();
-	PushActiveSnapshot(GetTransactionSnapshot());
-
-	ret = SPI_execute("SELECT oid FROM pg_class "
-					  "WHERE oid = 'bdr.bdr_queued_commands'::regclass",
-					  true, 0);
-	if (ret != SPI_OK_SELECT)
-		goto failed;
-
-	if (SPI_processed != 1)
-		goto failed;
-
-	oid = SPI_getbinval(SPI_tuptable->vals[0],
-						SPI_tuptable->tupdesc,
-						1, &isnull);
-	if (isnull)
-		goto failed;
-
-	if (true)
-		QueuedDDLCommandsRelid = DatumGetObjectId(oid);
-	else
-	{
-failed:
-		QueuedDDLCommandsRelid = InvalidOid;
-	}
-
-	SPI_finish();
-	PopActiveSnapshot();
-	CommitTransactionCommand();
-	pgstat_report_activity(STATE_IDLE, NULL);
-
-	elog(LOG, "bdr.bdr_queued_commands OID set to %u", QueuedDDLCommandsRelid);
 }

@@ -48,6 +48,9 @@ extern ResourceOwner bdr_saved_resowner;
 extern BDRWorkerCon *bdr_apply_con;
 extern BDRSequencerCon *bdr_sequencer_con;
 
+/* DDL replication support */
+extern Oid	QueuedDDLCommandsRelid;
+
 /* apply support */
 extern void process_remote_begin(StringInfo s);
 extern void process_remote_commit(StringInfo s);
@@ -68,9 +71,6 @@ extern void bdr_sequencer_wakeup(void);
 extern void bdr_sequence_alloc(PG_FUNCTION_ARGS);
 extern void bdr_sequence_setval(PG_FUNCTION_ARGS);
 extern Datum bdr_sequence_options(PG_FUNCTION_ARGS);
-
-/* DDL replication support */
-extern void setup_queuedcmds_relid(void);
 
 /* statistic functions */
 extern void bdr_count_shmem_init(size_t nnodes);
