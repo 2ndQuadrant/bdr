@@ -2619,6 +2619,46 @@ deparse_AlterTableStmt(Oid objectId, Node *parsetree)
 	return command;
 }
 
+static char *
+deparse_AlterEnumStmt(Oid objectId, Node *parsetree)
+{
+	AlterEnumStmt *node = (AlterEnumStmt *) parsetree;
+	ObjTree	   *alterEnum;
+	ObjTree	   *tmp;
+	char	   *command;
+
+	alterEnum =
+		new_objtree_VA(NULL,
+					   "ALTER TYPE %{identity}D ADD VALUE %{if_not_exists}s %{value}L %{position}s",
+					   0);
+
+	append_string_object(alterEnum, "if_not_exists",
+						 node->skipIfExists ? "IF NOT EXISTS" : "");
+	append_object_object(alterEnum, "identity",
+						 new_objtree_for_qualname_id(alterEnum,
+													 TypeRelationId,
+													 objectId));
+	append_string_object(alterEnum, "value", node->newVal);
+	tmp = new_objtree_VA(alterEnum,
+			  			 "%{after_or_before}s %{neighbour}L", 0);
+	if (node->newValNeighbor)
+	{
+		append_string_object(tmp, "after_or_before",
+							 node->newValIsAfter ? "AFTER" : "BEFORE");
+		append_string_object(tmp, "neighbour", node->newValNeighbor);
+	}
+	else
+	{
+		append_bool_object(tmp, "present", false);
+	}
+	append_object_object(alterEnum, "position", tmp);
+
+	command = jsonize_objtree(alterEnum);
+	free_objtree(alterEnum);
+
+	return command;
+}
+
 /*
  * Given a utility command parsetree and the OID of the corresponding object,
  * return a JSON representation of the command.
@@ -2730,6 +2770,10 @@ deparse_utility_command(Oid objectId, Node *parsetree)
 
 		case T_AlterTableStmt:
 			command = deparse_AlterTableStmt(objectId, parsetree);
+			break;
+
+		case T_AlterEnumStmt:
+			command = deparse_AlterEnumStmt(objectId, parsetree);
 			break;
 
 		default:
