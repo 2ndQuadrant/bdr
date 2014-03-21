@@ -2045,6 +2045,39 @@ deparse_CreateSchemaStmt(Oid objectId, Node *parsetree)
 	return createSchema;
 }
 
+static ObjTree *
+deparse_AlterEnumStmt(Oid objectId, Node *parsetree)
+{
+	AlterEnumStmt *node = (AlterEnumStmt *) parsetree;
+	ObjTree	   *alterEnum;
+	ObjTree	   *tmp;
+
+	alterEnum =
+		new_objtree_VA("ALTER TYPE %{identity}D ADD VALUE %{if_not_exists}s %{value}L %{position}s",
+					   0);
+
+	append_string_object(alterEnum, "if_not_exists",
+						 node->skipIfExists ? "IF NOT EXISTS" : "");
+	append_object_object(alterEnum, "identity",
+						 new_objtree_for_qualname_id(TypeRelationId,
+													 objectId));
+	append_string_object(alterEnum, "value", node->newVal);
+	tmp = new_objtree_VA("%{after_or_before}s %{neighbour}L", 0);
+	if (node->newValNeighbor)
+	{
+		append_string_object(tmp, "after_or_before",
+							 node->newValIsAfter ? "AFTER" : "BEFORE");
+		append_string_object(tmp, "neighbour", node->newValNeighbor);
+	}
+	else
+	{
+		append_bool_object(tmp, "present", false);
+	}
+	append_object_object(alterEnum, "position", tmp);
+
+	return alterEnum;
+}
+
 /*
  * Handle deparsing of simple commands.
  *
@@ -2155,7 +2188,7 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_AlterEnumStmt:
-			command = NULL;
+			command = deparse_AlterEnumStmt(objectId, parsetree);
 			break;
 
 		case T_ViewStmt:		/* CREATE VIEW */
