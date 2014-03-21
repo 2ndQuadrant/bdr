@@ -1248,7 +1248,8 @@ ProcessUtilitySlow(Node *parsetree,
 				break;
 
 			case T_AlterEnumStmt:		/* ALTER TYPE (enum) */
-				AlterEnum((AlterEnumStmt *) parsetree, isTopLevel);
+				objectId = AlterEnum((AlterEnumStmt *) parsetree, isTopLevel);
+				EventTriggerStashCommand(objectId, OBJECT_TYPE, parsetree);
 				break;
 
 			case T_ViewStmt:	/* CREATE VIEW */
