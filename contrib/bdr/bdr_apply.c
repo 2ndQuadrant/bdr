@@ -732,9 +732,11 @@ process_remote_delete(StringInfo s)
 static void
 check_sequencer_wakeup(Relation rel)
 {
-	if (strcmp(RelationGetRelationName(rel), "bdr_sequence_values") == 0 ||
-		strcmp(RelationGetRelationName(rel), "bdr_sequence_elections") == 0 ||
-		strcmp(RelationGetRelationName(rel), "bdr_votes") == 0)
+	Oid			reloid = RelationGetRelid(rel);
+
+	if (reloid == BdrSequenceValuesRelid ||
+		reloid == BdrSequenceElectionsRelid ||
+		reloid == BdrVotesRelid)
 		request_sequencer_wakeup = true;
 }
 

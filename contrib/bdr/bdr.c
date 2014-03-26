@@ -833,6 +833,19 @@ out:
 	MemoryContextSwitchTo(old_context);
 }
 
+static Oid
+lookup_relid(const char *relname, Oid schema_oid)
+{
+	Oid			relid;
+
+	relid = get_relname_relid(relname, schema_oid);
+
+	if (!relid)
+		elog(ERROR, "cache lookup failed for relation public.%s", relname);
+
+	return relid;
+}
+
 /*
  * Make sure all required extensions are installed in the correct version for
  * the current database.
@@ -886,9 +899,19 @@ bdr_maintain_schema(void)
 	schema_oid = get_namespace_oid("bdr", false);
 	if (schema_oid != InvalidOid)
 	{
-		QueuedDDLCommandsRelid = get_relname_relid("bdr_queued_commands",
-												   schema_oid);
+		QueuedDDLCommandsRelid = lookup_relid("bdr_queued_commands",
+											  schema_oid);
+
+		BdrSequenceValuesRelid = lookup_relid("bdr_sequence_values",
+											  schema_oid);
+
+		BdrSequenceElectionsRelid = lookup_relid("bdr_sequence_elections",
+												 schema_oid);
+
+		BdrVotesRelid = lookup_relid("bdr_votes", schema_oid);
 	}
+	else
+		elog(ERROR, "cache lookup failed for schema bdr");
 
 	elog(LOG, "bdr.bdr_queued_commands OID set to %u", QueuedDDLCommandsRelid);
 
