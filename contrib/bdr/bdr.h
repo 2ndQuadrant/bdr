@@ -51,6 +51,11 @@ extern BDRSequencerCon *bdr_sequencer_con;
 /* DDL replication support */
 extern Oid	QueuedDDLCommandsRelid;
 
+/* sequencer support */
+extern Oid	BdrSequenceValuesRelid;
+extern Oid	BdrSequenceElectionsRelid;
+extern Oid	BdrVotesRelid;
+
 /* apply support */
 extern void process_remote_begin(StringInfo s);
 extern void process_remote_commit(StringInfo s);
