@@ -662,6 +662,12 @@ _PG_init(void)
 	if (connections == NULL)
 		goto out;
 
+	/*
+	 * otherwise, set up a ProcessUtility_hook to stop unsupported commands
+	 * being run
+	 */
+	init_bdr_commandfilter();
+
 	if (!SplitIdentifierString(connections, ',', &cons))
 	{
 		/* syntax error in list */
