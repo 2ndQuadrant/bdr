@@ -56,6 +56,11 @@ typedef struct BdrSequenceValues {
 	int64		end_value;
 } BdrSequenceValues;
 
+/* cached relids */
+Oid	BdrSequenceValuesRelid;		/* bdr_sequence_values */
+Oid	BdrSequenceElectionsRelid;	/* bdr_sequence_elections */
+Oid	BdrVotesRelid;		/* bdr_votes */
+
 static BdrSequencerControl *BdrSequencerCtl = NULL;
 
 /* how many nodes have we built shmem for */
@@ -543,16 +548,8 @@ bdr_sequencer_init(void)
 }
 
 static void
-bdr_sequencer_lock_rel(char *relname)
+bdr_sequencer_lock_rel(char *relname, Oid relid)
 {
-	Oid nspoid;
-	Oid relid;
-
-	nspoid = get_namespace_oid("bdr", false);
-	relid = get_relname_relid(relname, nspoid);
-	if (!relid)
-		elog(ERROR, "cache lookup failed for relation public.%s", relname);
-
 	SetCurrentStatementStartTimestamp();
 	pgstat_report_activity(STATE_RUNNING, relname);
 	LockRelationOid(relid, ExclusiveLock);
@@ -561,10 +558,9 @@ bdr_sequencer_lock_rel(char *relname)
 static void
 bdr_sequencer_lock(void)
 {
-
-	bdr_sequencer_lock_rel("bdr_sequence_elections");
-	bdr_sequencer_lock_rel("bdr_sequence_values");
-	bdr_sequencer_lock_rel("bdr_votes");
+	bdr_sequencer_lock_rel("bdr_sequence_elections", BdrSequenceElectionsRelid);
+	bdr_sequencer_lock_rel("bdr_sequence_values", BdrSequenceValuesRelid);
+	bdr_sequencer_lock_rel("bdr_votes", BdrVotesRelid);
 }
 
 void
