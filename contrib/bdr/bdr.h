@@ -96,5 +96,7 @@ extern bool bdr_get_float8byval(void);
 extern bool bdr_get_integer_timestamps(void);
 extern bool bdr_get_bigendian(void);
 
+/* forbid commands we do not support currently (or never will) */
+extern void init_bdr_commandfilter(void);
 
 #endif	/* BDR_H */
