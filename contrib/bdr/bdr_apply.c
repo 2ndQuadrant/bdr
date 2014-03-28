@@ -413,7 +413,6 @@ process_remote_update(StringInfo s)
 	HeapTuple	old_tuple;
 	BDRTupleData new_tuple;
 	Oid			idxoid;
-	HeapTuple	generated_key = NULL;
 	ItemPointerData oldtid;
 	Relation	rel;
 	Relation	idxrel;
@@ -632,8 +631,6 @@ process_remote_update(StringInfo s)
 	}
 
 err:
-	if (!primary_key_changed && generated_key != NULL)
-		heap_freetuple(generated_key);
 
 	check_sequencer_wakeup(rel);
 
