@@ -924,9 +924,9 @@ bdr_sequencer_fill_sequence(Oid seqoid, char *seqschema, char *seqname)
 
 	log_sequence_tuple(rel, &seqtuple, page);
 
+done_with_sequence:
 	END_CRIT_SECTION();
 
-done_with_sequence:
 	UnlockReleaseBuffer(buf);
 	heap_close(rel, NoLock);
 }
