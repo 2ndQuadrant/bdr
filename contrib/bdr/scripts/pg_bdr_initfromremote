@@ -1,0 +1,77 @@
+#!/bin/bash
+
+JOBS=1
+
+i=0
+argv=("$@")
+while (($i < ${#argv[*]})); do
+    case "${argv[$i]}" in
+        --bindir)
+            ((i++)); BINDIR="${argv[$i]}"
+        ;;
+        --snapshot)
+            ((i++)); SNAPSHOT="${argv[$i]}"
+        ;;
+        --source)
+            ((i++)); SOURCE="${argv[$i]}"
+        ;;
+        --target)
+            ((i++)); TARGET="${argv[$i]}"
+        ;;
+        --directory)
+            ((i++)); DIR="${argv[$i]}"
+        ;;
+        --jobs)
+            ((i++)); JOBS="${argv[$i]}"
+        ;;
+        --help)
+            echo "Usage: bdr_replica --source <dsn> --target <dsn> [--snapshot <name>] --dir /path/to/dir [--jobs N]"
+            echo "<dsn> is a libpq conninfo string, e.g. \"host=/tmp post=5433 dbnae=xxx\""
+            echo "(Specify \"--bindir /path/to/binaries\" to locate pg_dump/pg_restore)"
+            exit 0
+        ;;
+        *)
+            echo Unknown command-line option: ${argv[$i]}
+            exit 1
+        ;;
+    esac
+
+    ((i++))
+done
+
+if [ -s "$BINDIR" ]; then
+    DUMP="$BINDIR/pg_dump"
+    RESTORE="$BINDIR/pg_restore"
+else
+    DUMP=$(which pg_dump 2>/dev/null)
+    RESTORE=$(which pg_restore 2>/dev/null)
+fi
+
+if [ ! -x "$DUMP" ]; then
+    echo "Can't find pg_dump executable in PATH"; exit 1
+fi
+
+if [ ! -x "$RESTORE" ]; then
+    echo "Can't find pg_restore executable in PATH"; exit 1
+fi
+
+if [ -z "$SOURCE" ]; then
+    echo Please specify a source DSN with '--source "port=nnn dbname=xxx"'; exit 1
+fi
+
+if [ -z "$TARGET" ]; then
+    echo Please specify a target DSN with '--target "port=nnn dbname=xxx"'; exit 1
+fi
+
+if [ -z "$DIR" ]; then
+    echo Please specify a directory with '--temp-directory /path/to/dir'; exit 1
+fi
+
+SNAP=${SNAPSHOT:+"--snapshot $SNAPSHOT"}
+
+set -e
+
+$DUMP -j $JOBS $SNAP -F d -f $DIR "$SOURCE"
+$RESTORE -j $JOBS -F d -d "$TARGET" $DIR
+
+exit 0

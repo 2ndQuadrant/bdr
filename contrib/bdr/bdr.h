@@ -27,6 +27,16 @@ typedef struct BDRWorkerCon
 	char *dsn;
 	/* how much do we want to delay apply, in ms */
 	int apply_delay;
+	/* should we copy the upstream database? */
+	bool init_replica;
+	/* the path to bdr-aware binaries */
+	char *replica_bin_dir;
+	/* the base path to store pg_dump output */
+	char *replica_tmp_dir;
+	/* the dsn to use for the local database */
+	char *replica_local_dsn;
+	/* the command to use for init_replica */
+	char *replica_script_path;
 
 	RepNodeId origin_id;
 	uint64 sysid;
