@@ -18,8 +18,8 @@ while (($i < ${#argv[*]})); do
         --target)
             ((i++)); TARGET="${argv[$i]}"
         ;;
-        --directory)
-            ((i++)); DIR="${argv[$i]}"
+        --tmp-directory)
+            ((i++)); TMPDIR="${argv[$i]}"
         ;;
         --jobs)
             ((i++)); JOBS="${argv[$i]}"
@@ -63,7 +63,7 @@ if [ -z "$TARGET" ]; then
     echo Please specify a target DSN with '--target "port=nnn dbname=xxx"'; exit 1
 fi
 
-if [ -z "$DIR" ]; then
+if [ -z "$TMPDIR" ]; then
     echo Please specify a directory with '--temp-directory /path/to/dir'; exit 1
 fi
 
@@ -71,7 +71,7 @@ SNAP=${SNAPSHOT:+"--snapshot $SNAPSHOT"}
 
 set -e
 
-$DUMP -j $JOBS $SNAP -F d -f $DIR "$SOURCE"
-$RESTORE -j $JOBS -F d -d "$TARGET" $DIR
+$DUMP -j $JOBS $SNAP -F d -f $TMPDIR "$SOURCE"
+$RESTORE -j $JOBS -F d -d "$TARGET" $TMPDIR
 
 exit 0

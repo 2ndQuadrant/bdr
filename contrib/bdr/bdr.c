@@ -1032,11 +1032,11 @@ init_replica(BDRWorkerCon *wcon, PGconn *conn, PGresult *res)
 			"--source", wcon->dsn,
 			"--target", wcon->replica_local_dsn,
 			"--bindir", wcon->replica_bin_dir,
-			"--directory", directory,
+			"--tmp-directory", directory,
 			NULL
 		};
 
-		elog(LOG, "Creating replica with: %s --snapshot %s --source \"%s\" --target \"%s\" --bindir \"%s\" --directory \"%s\"",
+		elog(LOG, "Creating replica with: %s --snapshot %s --source \"%s\" --target \"%s\" --bindir \"%s\" --tmp-directory \"%s\"",
 			 wcon->replica_script_path, snapshot, wcon->dsn, wcon->replica_local_dsn,
 			 wcon->replica_bin_dir, directory);
 
