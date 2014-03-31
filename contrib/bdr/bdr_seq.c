@@ -605,7 +605,7 @@ again:
 								values, nulls, false, 0);
 
 	if (ret != SPI_OK_INSERT)
-		elog(ERROR, "blub");
+		elog(ERROR, "expected SPI state %u, got %u", SPI_OK_INSERT, ret);
 	my_processed = SPI_processed;
 	elog(LOG, "started %d votes", my_processed);
 
@@ -662,7 +662,7 @@ bdr_sequencer_start_elections(void)
 								values, nulls, false, 0);
 
 	if (ret != SPI_OK_INSERT_RETURNING)
-		elog(ERROR, "blub");
+		elog(ERROR, "expected SPI state %u, got %u", SPI_OK_INSERT_RETURNING, ret);
 
 	elog(LOG, "started %d elections", SPI_processed);
 
@@ -719,7 +719,7 @@ bdr_sequencer_tally(void)
 								values, nulls, false, 0);
 
 	if (ret != SPI_OK_SELECT)
-		elog(ERROR, "blub");
+		elog(ERROR, "expected SPI state %u, got %u", SPI_OK_SELECT, ret);
 
 	elog(LOG, "tallied %d elections", SPI_processed);
 
@@ -796,7 +796,7 @@ bdr_sequencer_fill_chunk(Oid seqoid, char *seqschema, char *seqname,
 	ret = SPI_execute_with_args(get_chunk_sql, 6, argtypes,
 								values, nulls, false, 0);
 	if (ret != SPI_OK_UPDATE_RETURNING)
-		elog(ERROR, "blart");
+		elog(ERROR, "expected SPI state %u, got %u", SPI_OK_UPDATE_RETURNING, ret);
 
 	if (SPI_processed != 1)
 	{
