@@ -1,7 +1,7 @@
 # contrib/bdr/output.mk
 
 MODULE_big = bdr_output
-OBJS = bdr_output.o bdr_compat.o
+OBJS = bdr_compat.o bdr_output.o
 
 PG_CPPFLAGS = -I$(libpq_srcdir)
 SHLIB_LINK = $(libpq)
