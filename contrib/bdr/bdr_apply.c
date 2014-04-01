@@ -38,10 +38,15 @@
 #include "replication/replication_identifier.h"
 
 #include "storage/bufmgr.h"
+#include "storage/lmgr.h"
+
+#include "tcop/tcopprot.h"
+#include "tcop/utility.h"
 
 #include "utils/builtins.h"
 #include "utils/datetime.h"
 #include "utils/lsyscache.h"
+#include "utils/memutils.h"
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
 #include "utils/tqual.h"
@@ -69,8 +74,22 @@ static void tuple_to_stringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple
 
 static void check_sequencer_wakeup(Relation rel);
 
-bool request_sequencer_wakeup = false;
+bool		request_sequencer_wakeup = false;
+bool		started_transaction = false;
 Oid			QueuedDDLCommandsRelid = InvalidOid;
+
+static bool
+bdr_performing_work(void)
+{
+	if (started_transaction)
+		return false;
+
+	started_transaction = true;
+	StartTransactionCommand();
+	PushActiveSnapshot(GetTransactionSnapshot());
+
+	return true;
+}
 
 void
 process_remote_begin(StringInfo s)
@@ -81,6 +100,8 @@ process_remote_begin(StringInfo s)
 	char	    	statbuf[100];
 
 	Assert(bdr_apply_con != NULL);
+
+	started_transaction = false;
 
 	origlsn = pq_getmsgint64(s);
 	committime = pq_getmsgint64(s);
@@ -120,9 +141,6 @@ process_remote_begin(StringInfo s)
 	}
 
 	request_sequencer_wakeup = false;
-
-	StartTransactionCommand();
-	PushActiveSnapshot(GetTransactionSnapshot());
 }
 
 void
@@ -146,8 +164,11 @@ process_remote_commit(StringInfo s)
 	Assert(origlsn == replication_origin_lsn);
 	Assert(committime == replication_origin_timestamp);
 
-	PopActiveSnapshot();
-	CommitTransactionCommand();
+	if (started_transaction)
+	{
+		PopActiveSnapshot();
+		CommitTransactionCommand();
+	}
 
 	pgstat_report_activity(STATE_IDLE, NULL);
 
@@ -164,29 +185,43 @@ process_remote_commit(StringInfo s)
 	}
 }
 
-static HeapTuple
-process_queued_ddl_command(HeapTuple cmdtup)
+static void
+process_queued_ddl_command(HeapTuple cmdtup, bool tx_just_started)
 {
 	Relation	cmdsrel;
+#ifdef NOT_YET
 	HeapTuple	newtup;
+#endif
 	Datum		datum;
 	char	   *type;
 	char	   *identstr;
 	char	   *cmdstr;
 	bool		isnull;
 
-	cmdsrel = heap_open(QueuedDDLCommandsRelid, AccessShareLock);
+	List	   *commands;
+	ListCell   *command_i;
+	bool		isTopLevel;
+	MemoryContext oldcontext;
+
+	/* ----
+	 * We can't use spi here, because it implicitly assumes a transaction
+	 * context. As we want to be able to replicate CONCURRENTLY commands,
+	 * that's not going to work...
+	 * So instead do all the work manually, being careful about managing the
+	 * lifecycle of objects.
+	 * ----
+	 */
+	oldcontext = MemoryContextSwitchTo(MessageContext);
+
+	cmdsrel = heap_open(QueuedDDLCommandsRelid, NoLock);
 
 	/* fetch the object type */
 	datum = heap_getattr(cmdtup, 1,
 						 RelationGetDescr(cmdsrel),
 						 &isnull);
 	if (isnull)
-	{
-		elog(LOG, "null object type in command tuple in \"%s\"",
+		elog(ERROR, "null object type in command tuple in \"%s\"",
 			 RelationGetRelationName(cmdsrel));
-		return cmdtup;
-	}
 	type = TextDatumGetCString(datum);
 
 	/* fetch the object identity */
@@ -194,52 +229,72 @@ process_queued_ddl_command(HeapTuple cmdtup)
 						 RelationGetDescr(cmdsrel),
 						 &isnull);
 	if (isnull)
-	{
-		elog(WARNING, "null identity in command tuple for object of type %s",
+		elog(ERROR, "null identity in command tuple for object of type %s",
 			 RelationGetRelationName(cmdsrel));
-		return cmdtup;
-	}
+
 	identstr = TextDatumGetCString(datum);
-	elog(LOG, "got queued command for %s: \"%s\"", type, identstr);
 
 	/* finally fetch and execute the command */
 	datum = heap_getattr(cmdtup, 3,
 						 RelationGetDescr(cmdsrel),
 						 &isnull);
 	if (isnull)
-	{
-		elog(LOG, "null command in tuple for %s \"%s\"", type, identstr);
-		return cmdtup;
-	}
+		elog(ERROR, "null command in tuple for %s \"%s\"", type, identstr);
+
 	cmdstr = TextDatumGetCString(datum);
 
-	/* do the SPI dance */
+	/* close relation, command execution might end/start xact */
+	heap_close(cmdsrel, NoLock);
+
+	commands = pg_parse_query(cmdstr);
+
+	MemoryContextSwitchTo(oldcontext);
+
+	/*
+	 * Do a limited amount of safety checking against CONCURRENTLY commands
+	 * executed in situations where they aren't allowed. The sender side shoul
+	 * provide protection, but better be safe than sorry.
+	 */
+	isTopLevel = (list_length(commands) == 1) && tx_just_started;
+
+	foreach(command_i, commands)
 	{
-		int		ret;
+		List   	   *plantree_list;
+		List	   *querytree_list;
+		Node	   *command = (Node *) lfirst(command_i);
+		ListCell   *stmt_i;
 
-		/*
-		 * XXX it might be wise to establish a savepoint here, to avoid
-		 * a larger problem in case the command fails; at the very least
-		 * we still need to process the original insertion.
-		 */
-		SPI_connect();
 		PushActiveSnapshot(GetTransactionSnapshot());
-		ret = SPI_execute(cmdstr, false, 0);
-		if (ret != SPI_OK_UTILITY)
-			elog(LOG, "SPI_execute failed");
 
-		SPI_finish();
+		oldcontext = MemoryContextSwitchTo(MessageContext);
+
+		querytree_list = pg_analyze_and_rewrite(
+			command, cmdstr, NULL, 0);
+
+		plantree_list = pg_plan_queries(
+			querytree_list, 0, NULL);
+
 		PopActiveSnapshot();
+
+		foreach(stmt_i, plantree_list)
+		{
+			Node *stmt = lfirst(stmt_i);
+			if (IsA(stmt, PlannedStmt))
+				elog(ERROR, "frak");
+
+			ProcessUtility(stmt,
+						   cmdstr,
+						   isTopLevel ? PROCESS_UTILITY_TOPLEVEL : PROCESS_UTILITY_QUERY,
+						   NULL, CreateDestReceiver(DestNone), NULL);
+		}
+		MemoryContextSwitchTo(oldcontext);
 	}
 
-	/* set "executed" true */
+#ifdef NOT_YET
+	/* FIXME: update tuple to set set "executed" to true */
 	// newtup = heap_modify_tuple( .. );
 	newtup = cmdtup;
-
-	pfree(identstr);
-	heap_close(cmdsrel, AccessShareLock);
-
-	return newtup;
+#endif
 }
 
 void
@@ -251,7 +306,15 @@ process_remote_insert(StringInfo s)
 	char		action;
 	HeapTuple	tup;
 	Relation	rel;
+	bool		started_tx;
 
+	started_tx = bdr_performing_work();
+
+	/*
+	 * Read tuple into a context that's long lived enough for CONCURRENTLY
+	 * processing.
+	 */
+	MemoryContextSwitchTo(MessageContext);
 	rel = read_rel(s, RowExclusiveLock);
 
 	action = pq_getmsgbyte(s);
@@ -260,9 +323,6 @@ process_remote_insert(StringInfo s)
 			 action);
 
 	tup = read_tuple(s, rel);
-
-	if (RelationGetRelid(rel) == QueuedDDLCommandsRelid)
-		tup = process_queued_ddl_command(tup);
 
 	if (rel->rd_rel->relkind != RELKIND_RELATION)
 		elog(ERROR, "unexpected relkind '%c' rel \"%s\"",
@@ -283,6 +343,31 @@ process_remote_insert(StringInfo s)
 #endif
 
 	heap_close(rel, NoLock);
+
+	/* execute DDL if insertion was into the ddl command queue */
+	if (RelationGetRelid(rel) == QueuedDDLCommandsRelid)
+	{
+		LockRelId	lockid = rel->rd_lockInfo.lockRelId;
+		TransactionId oldxid = GetTopTransactionId();
+
+		LockRelationIdForSession(&lockid, RowExclusiveLock);
+
+		process_queued_ddl_command(tup, started_tx);
+
+		rel = heap_open(QueuedDDLCommandsRelid, RowExclusiveLock);
+
+		UnlockRelationIdForSession(&lockid, RowExclusiveLock);
+
+		heap_close(rel, NoLock);
+
+		if (oldxid != GetTopTransactionId())
+		{
+			CommitTransactionCommand();
+			started_transaction = false;
+		}
+	}
+
+	heap_freetuple(tup);
 }
 
 static void

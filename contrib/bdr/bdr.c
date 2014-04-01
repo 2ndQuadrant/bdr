@@ -263,7 +263,6 @@ bdr_apply_main(Datum main_arg)
 						PQerrorMessage(streamConn))));
 	}
 
-
 	res = PQexec(streamConn, "IDENTIFY_SYSTEM");
 	if (PQresultStatus(res) != PGRES_TUPLES_OK)
 	{
@@ -427,6 +426,12 @@ bdr_apply_main(Datum main_arg)
 
 	replication_origin_id = replication_identifier;
 
+	MessageContext = AllocSetContextCreate(TopMemoryContext,
+										   "MessageContext",
+										   ALLOCSET_DEFAULT_MINSIZE,
+										   ALLOCSET_DEFAULT_INITSIZE,
+										   ALLOCSET_DEFAULT_MAXSIZE);
+
 	while (!got_sigterm)
 	{
 		/* int		 ret; */
@@ -523,6 +528,8 @@ bdr_apply_main(Datum main_arg)
 				}
 				/* other message types are purposefully ignored */
 			}
+
+			MemoryContextResetAndDeleteChildren(MessageContext);
 		}
 
 		/* confirm all writes at once */
