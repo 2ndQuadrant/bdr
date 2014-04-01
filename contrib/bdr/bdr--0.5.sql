@@ -214,6 +214,7 @@ $function$;
 CREATE EVENT TRIGGER queue_commands
 ON ddl_command_end
 WHEN tag IN ('create table', 'create index', 'create sequence',
+     'create schema',
      'create trigger', 'alter table', 'create extension', 'create type')
 EXECUTE PROCEDURE bdr.queue_commands();
 
