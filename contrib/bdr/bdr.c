@@ -579,7 +579,7 @@ bdr_sequencer_main(Datum main_arg)
 	CurrentResourceOwner = ResourceOwnerCreate(NULL, "bdr seq top-level resource owner");
 	bdr_saved_resowner = CurrentResourceOwner;
 
-	elog(WARNING, "starting sequencer on db \"%s\"", bdr_sequencer_con->dbname);
+	elog(LOG, "BDR starting sequencer on db \"%s\"", bdr_sequencer_con->dbname);
 
 	/* initialize sequencer */
 	bdr_sequencer_init();
