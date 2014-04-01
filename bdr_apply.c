@@ -74,7 +74,7 @@ static void tuple_to_stringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple
 
 static void check_sequencer_wakeup(Relation rel);
 
-static bool check_apply_update(RepNodeId local_node_id, TimestampTz ts, bool *log_update);
+static void check_apply_update(RepNodeId local_node_id, TimestampTz ts, bool *perform_update, bool *log_update);
 static void do_log_update(RepNodeId local_node_id, bool apply_update, TimestampTz ts, Relation idxrel, HeapTuple old_key);
 static void do_apply_update(Relation rel, ItemPointerData oldtid, HeapTuple old_tuple, BDRTupleData new_tuple);
 
@@ -485,7 +485,7 @@ process_remote_update(StringInfo s)
 		Buffer		buf;
 		bool		found;
 		TransactionId xmin;
-		TimestampTz ts;
+		TimestampTz local_ts;
 		RepNodeId	local_node_id;
 		bool		apply_update;
 		bool		log_update;
@@ -510,13 +510,13 @@ process_remote_update(StringInfo s)
 		 * strategy for this, except when the new update comes from the same
 		 * node that originated the previous version of the tuple.
 		 */
-		TransactionIdGetCommitTsData(xmin, &ts, &local_node_id_raw);
+		TransactionIdGetCommitTsData(xmin, &local_ts, &local_node_id_raw);
 		local_node_id = local_node_id_raw;
 
-		apply_update = check_apply_update(local_node_id, ts, &log_update);
+		check_apply_update(local_node_id, local_ts, &apply_update, &log_update);
 
 		if (log_update)
-			do_log_update(local_node_id, apply_update, ts, idxrel, old_key);
+			do_log_update(local_node_id, apply_update, local_ts, idxrel, old_key);
 
 		if (apply_update)
 			do_apply_update(rel, oldtid, old_tuple, new_tuple);
@@ -541,8 +541,15 @@ process_remote_update(StringInfo s)
 	heap_close(rel, NoLock);
 }
 
-static bool
-check_apply_update(RepNodeId local_node_id, TimestampTz ts, bool *log_update)
+/*
+ * Check whether a remote update conflicts with the local row version.
+ *
+ * perform_update, log_update is set to true if the update should be performed
+ * and logged respectively
+ */
+static void
+check_apply_update(RepNodeId local_node_id, TimestampTz local_ts,
+				   bool *perform_update, bool *log_update)
 {
 	uint64		local_sysid,
 				remote_sysid;
@@ -558,8 +565,8 @@ check_apply_update(RepNodeId local_node_id, TimestampTz ts, bool *log_update)
 		 * timing; that's just too common and valid since normal row level
 		 * locking guarantees are met.
 		 */
+		*perform_update = true;
 		*log_update = false;
-		return true;
 	}
 	else
 	{
@@ -569,43 +576,46 @@ check_apply_update(RepNodeId local_node_id, TimestampTz ts, bool *log_update)
 		 * sysid + TLI to discern.
 		 */
 
-		cmp = timestamptz_cmp_internal(replication_origin_timestamp, ts);
+		cmp = timestamptz_cmp_internal(replication_origin_timestamp,
+									   local_ts);
 
 		if (cmp > 0)
 		{
+			*perform_update = true;
 			*log_update = false;
-			return true;
+			return;
 		}
 		else if (cmp == 0)
 		{
-			*log_update = true;
-
 			fetch_sysid_via_node_id(local_node_id,
 									&local_sysid, &local_tli);
 			fetch_sysid_via_node_id(bdr_apply_con->origin_id,
 									&remote_sysid, &remote_tli);
 
 			if (local_sysid < remote_sysid)
-				return true;
+				*perform_update = true;
 			else if (local_sysid > remote_sysid)
-				return false;
+				*perform_update = false;
 			else if (local_tli < remote_tli)
-				return true;
+				*perform_update = true;
 			else if (local_tli > remote_tli)
-				return false;
+				*perform_update =  false;
 			else
 				/* shouldn't happen */
 				elog(ERROR, "unsuccessful node comparison");
+
+			*log_update = true;
+			return;
 		}
 		else
 		{
+			*perform_update = false;
 			*log_update = true;
-			return false;
+			return;
 		}
 	}
 
-	/* XXX dead code */
-	return false;
+	elog(ERROR, "unreachable code");
 }
 
 static void
