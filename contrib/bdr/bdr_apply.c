@@ -529,16 +529,9 @@ process_remote_update(StringInfo s)
 		tuple_to_stringinfo(&s_key, RelationGetDescr(idxrel), old_key);
 		bdr_count_update_conflict();
 
-		check_sequencer_wakeup(rel);
-
 		ereport(ERROR,
 				(errcode(ERRCODE_INTEGRITY_CONSTRAINT_VIOLATION),
 				 errmsg("CONFLICT: could not find existing tuple for pkey %s", s_key.data)));
-
-		/*
-		 * idxrel and rel will be closed by context cleanup, s_key will be
-		 * cleaned up as well
-		 */
 	}
 
 	check_sequencer_wakeup(rel);
