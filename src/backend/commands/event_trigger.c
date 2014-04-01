@@ -1381,6 +1381,19 @@ pg_event_trigger_get_creation_commands(PG_FUNCTION_ARGS)
 		stashedObject *obj = lfirst(lc);
 		char	   *command;
 
+		/*
+		 * For IF NOT EXISTS commands that attempt to create an existing
+		 * object, the returned OID is Invalid; in those cases, return an empty
+		 * command instead of trying to soldier on.
+		 *
+		 * XXX an alternative would be to look up the Oid of the existing
+		 * object and run the deparse with that.  But since the parse tree
+		 * might be different from the one that created the object in the first
+		 * place, we might not end up in a consistent state anyway.
+		 */
+		if (!OidIsValid(obj->objectId))
+			continue;
+
 		command = deparse_utility_command(obj->objectId, obj->parsetree);
 
 		/*
