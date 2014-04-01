@@ -413,7 +413,7 @@ process_remote_update(StringInfo s)
 {
 	StringInfoData s_key;
 	char		action;
-	HeapTuple	old_key;
+	HeapTuple	old_key = NULL;
 	HeapTuple	old_tuple;
 	BDRTupleData new_tuple;
 	Oid			idxoid;
@@ -421,7 +421,6 @@ process_remote_update(StringInfo s)
 	Relation	rel;
 	Relation	idxrel;
 	ScanKeyData skey[INDEX_MAX_KEYS];
-	bool		primary_key_changed = false;
 
 	rel = read_rel(s, RowExclusiveLock);
 
@@ -436,7 +435,6 @@ process_remote_update(StringInfo s)
 	{
 		old_key = read_tuple(s, rel);
 		action = pq_getmsgbyte(s);
-		primary_key_changed = true;
 	}
 
 	/* check for new  tuple */
@@ -452,14 +450,12 @@ process_remote_update(StringInfo s)
 	read_tuple_parts(s, rel, &new_tuple);
 
 	/*
-	 * Check which tuple we want to use for the pkey lookup.
+	 * Generate key for lookup if the primary key didn't change.
 	 */
-	if (!primary_key_changed)
+	if (old_key == NULL)
 	{
-		/* key hasn't changed, just use columns from the new tuple */
 		old_key = heap_form_tuple(RelationGetDescr(rel),
 								  new_tuple.values, new_tuple.isnull);
-
 	}
 
 	/* lookup index to build scankey */
