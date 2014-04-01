@@ -81,7 +81,6 @@ bdr_commandfilter(Node *parsetree,
 	DropStmt   *dropStatement;
 	RenameStmt *renameStatement;
 	AlterTableStmt *alterTableStatement;
-	IndexStmt  *indexStmt;
 
 	ereport(DEBUG4,
 		 (errmsg_internal("bdr_commandfilter ProcessUtility_hook invoked")));
@@ -95,15 +94,6 @@ bdr_commandfilter(Node *parsetree,
 			error_on_persistent_rv(((ClusterStmt *) parsetree)->relation,
 							 "SECURITY LABEL", AccessExclusiveLock, severity,
 								   false);
-			break;
-
-		case T_IndexStmt:
-			indexStmt = (IndexStmt *) parsetree;
-			if (indexStmt->concurrent)
-				error_on_persistent_rv(indexStmt->relation,
-									   "CREATE INDEX CONCURRENTLY",
-									   AccessExclusiveLock, severity,
-									   false);
 			break;
 
 			/*
