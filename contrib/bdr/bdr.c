@@ -750,7 +750,7 @@ _PG_init(void)
 								GUC_UNIT_MS,
 								NULL, NULL, NULL);
 
-		sprintf(optname_replica, "bdr.%s.init_replica", name);
+		sprintf(optname_replica, "bdr.%s_init_replica", name);
 		DefineCustomBoolVariable(optname_replica,
 								 optname_replica,
 								 NULL,
@@ -760,7 +760,7 @@ _PG_init(void)
 								 0,
 								 NULL, NULL, NULL);
 
-		sprintf(optname_bindir, "bdr.%s.replica_bin_dir", name);
+		sprintf(optname_bindir, "bdr.%s_replica_bin_dir", name);
 		DefineCustomStringVariable(optname_bindir,
 								   optname_bindir,
 								   NULL,
@@ -769,7 +769,7 @@ _PG_init(void)
 								   GUC_NOT_IN_SAMPLE,
 								   NULL, NULL, NULL);
 
-		sprintf(optname_tmpdir, "bdr.%s.replica_tmp_dir", name);
+		sprintf(optname_tmpdir, "bdr.%s_replica_tmp_dir", name);
 		DefineCustomStringVariable(optname_tmpdir,
 								   optname_tmpdir,
 								   NULL,
@@ -778,7 +778,7 @@ _PG_init(void)
 								   GUC_NOT_IN_SAMPLE,
 								   NULL, NULL, NULL);
 
-		sprintf(optname_local_dsn, "bdr.%s.replica_local_dsn", name);
+		sprintf(optname_local_dsn, "bdr.%s_replica_local_dsn", name);
 		DefineCustomStringVariable(optname_local_dsn,
 								   optname_local_dsn,
 								   NULL,
@@ -787,7 +787,7 @@ _PG_init(void)
 								   GUC_NOT_IN_SAMPLE,
 								   NULL, NULL, NULL);
 
-		sprintf(optname_script_path, "bdr.%s.replica_script_path", name);
+		sprintf(optname_script_path, "bdr.%s_replica_script_path", name);
 		DefineCustomStringVariable(optname_script_path,
 								   optname_script_path,
 								   NULL,
