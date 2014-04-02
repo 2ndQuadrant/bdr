@@ -81,6 +81,7 @@ bdr_commandfilter(Node *parsetree,
 	DropStmt   *dropStatement;
 	RenameStmt *renameStatement;
 	AlterTableStmt *alterTableStatement;
+	bool hasInvalid;
 
 	ereport(DEBUG4,
 		 (errmsg_internal("bdr_commandfilter ProcessUtility_hook invoked")));
@@ -103,9 +104,39 @@ bdr_commandfilter(Node *parsetree,
 			 */
 		case T_AlterTableStmt:
 			alterTableStatement = (AlterTableStmt *) parsetree;
-			error_on_persistent_rv(alterTableStatement->relation,
-								   "ALTER TABLE", AccessExclusiveLock,
-								   severity, alterTableStatement->missing_ok);
+			hasInvalid = false;
+
+			foreach(cell, alterTableStatement->cmds)
+			{
+				AlterTableCmd *stmt = (AlterTableCmd *) lfirst(cell);
+
+				switch (stmt->subtype)
+				{
+					/*
+					 * allowed for now:
+					 */
+					case AT_AddColumn: /* add column */
+
+					case AT_ColumnDefault: /* ALTER COLUMN DEFAULT */
+
+					case AT_ClusterOn: /* CLUSTER ON */
+					case AT_DropCluster: /* SET WITHOUT CLUSTER */
+
+					case AT_SetRelOptions: /* SET (...) */
+					case AT_ResetRelOptions: /* RESET (...) */
+					case AT_ReplaceRelOptions: /* replace reloption list */
+						break;
+
+					default:
+						hasInvalid = true;
+						break;
+				}
+			}
+
+			if (hasInvalid)
+				error_on_persistent_rv(alterTableStatement->relation,
+									   "ALTER TABLE", AccessExclusiveLock,
+									   severity, alterTableStatement->missing_ok);
 			break;
 
 		case T_RenameStmt:
