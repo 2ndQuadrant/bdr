@@ -1002,16 +1002,16 @@ init_replica(BDRWorkerCon *wcon, PGconn *conn, PGresult *res)
 	char *directory;
 
 	if (!wcon->replica_bin_dir)
-		elog(FATAL, "no replica_bin_dir specified");
+		elog(FATAL, "bdr init_replica: no replica_bin_dir specified");
 
 	if (!wcon->replica_tmp_dir)
-		elog(FATAL, "no replica_tmp_dir specified");
+		elog(FATAL, "bdr init_replica: no replica_tmp_dir specified");
 
 	if (!wcon->replica_local_dsn)
-		elog(FATAL, "no replica_local_dsn specified");
+		elog(FATAL, "bdr init_replica: no replica_local_dsn specified");
 
 	if (!wcon->replica_script_path)
-		elog(FATAL, "no replica_script_path specified");
+		elog(FATAL, "bdr init_replica: no replica_script_path specified");
 
 	snapshot = PQgetvalue(res, 0, 2);
 	directory = palloc(strlen(wcon->replica_tmp_dir)+32);
