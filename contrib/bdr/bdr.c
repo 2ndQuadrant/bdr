@@ -627,7 +627,8 @@ _PG_init(void)
 {
 	BackgroundWorker apply_worker;
 	BackgroundWorker sequencer_worker;
-	List	   *cons;
+	List	   *connames;
+	List       *conns = NIL;
 	ListCell   *c;
 	MemoryContext old_context;
 	Size		nregistered = 0;
@@ -637,6 +638,8 @@ _PG_init(void)
 
 	size_t		off;
 	bool		found;
+
+	BDRWorkerCon *init_apply_worker = NULL;
 
 	if (!process_shared_preload_libraries_in_progress)
 		elog(ERROR, "bdr can only be loaded via shared_preload_libraries");
@@ -676,7 +679,7 @@ _PG_init(void)
 	 */
 	init_bdr_commandfilter();
 
-	if (!SplitIdentifierString(connections, ',', &cons))
+	if (!SplitIdentifierString(connections, ',', &connames))
 	{
 		/* syntax error in list */
 		ereport(FATAL,
@@ -684,7 +687,7 @@ _PG_init(void)
 				 errmsg("invalid list syntax for \"bdr.connections\"")));
 	}
 
-	used_databases = malloc(sizeof(char *) * list_length(cons));
+	used_databases = malloc(sizeof(char *) * list_length(connames));
 
 	/* Common apply worker values */
 	apply_worker.bgw_flags = BGWORKER_SHMEM_ACCESS |
@@ -702,7 +705,11 @@ _PG_init(void)
 	sequencer_worker.bgw_restart_time = 5;
 	sequencer_worker.bgw_notify_pid = 0;
 
-	foreach(c, cons)
+	/*
+	 * Read all connections and create their BDRWorkerCon structs,
+	 * validating parameters and sanity checking as we go.
+	 */
+	foreach(c, connames)
 	{
 		const char *name = (char *) lfirst(c);
 		char	   *errmsg = NULL;
@@ -832,9 +839,29 @@ _PG_init(void)
 			cur_option++;
 		}
 
+		if (con->init_replica)
+		{
+			if (init_apply_worker != NULL)
+				elog(ERROR, "Connections %s and %s both have init_replica enabled, cannot continue",
+					con->name, init_apply_worker->name);
+			else 
+				init_apply_worker = con;
+		}
+
+		conns = lcons(con, conns);
+
+		/* cleanup */
+		PQconninfoFree(options);
+	}
+	/* */
+
+	foreach(c, conns)
+	{
+		BDRWorkerCon *con;
+		con = (BDRWorkerCon*) lfirst(c);
 
 		snprintf(apply_worker.bgw_name, BGW_MAXLEN,
-				 "bdr apply: %s", name);
+				 "bdr apply: %s", con->name);
 		apply_worker.bgw_main_arg = PointerGetDatum(con);
 
 		RegisterBackgroundWorker(&apply_worker);
@@ -855,9 +882,6 @@ _PG_init(void)
 		{
 			used_databases[num_used_databases++] = pstrdup(con->dbname);
 		}
-
-		/* cleanup */
-		PQconninfoFree(options);
 	}
 
 	Assert(num_used_databases <= nregistered);
