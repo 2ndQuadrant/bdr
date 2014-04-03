@@ -755,6 +755,9 @@ create_worker_con(char *name)
 
 /*
  * Entrypoint of this module.
+ *
+ * Runs in the postmaster, so it can't use SPI, and should do as little as
+ * sensibly possible.
  */
 void
 _PG_init(void)
@@ -768,11 +771,8 @@ _PG_init(void)
 	Size		nregistered = 0;
 
 	char	  **used_databases;
+	char      **database_initcons;
 	Size		num_used_databases = 0;
-
-	size_t		off;
-
-	BDRWorkerCon *init_apply_worker = NULL;
 
 	if (!process_shared_preload_libraries_in_progress)
 		elog(ERROR, "bdr can only be loaded via shared_preload_libraries");
@@ -782,7 +782,7 @@ _PG_init(void)
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("bdr requires \"track_commit_timestamp\" to be enabled")));
 
-	/* guc's et al need to survive this */
+	/* guc's et al need to survive outside the lifetime of the library init */
 	old_context = MemoryContextSwitchTo(TopMemoryContext);
 
 	DefineCustomStringVariable("bdr.connections",
@@ -812,6 +812,9 @@ _PG_init(void)
 	 */
 	init_bdr_commandfilter();
 
+	/*
+	 * Get the list of BDR connection names to iterate over
+	 */
 	if (!SplitIdentifierString(connections, ',', &connames))
 	{
 		/* syntax error in list */
@@ -820,7 +823,66 @@ _PG_init(void)
 				 errmsg("invalid list syntax for \"bdr.connections\"")));
 	}
 
-	used_databases = malloc(sizeof(char *) * list_length(connames));
+	/* Names of all databases we're going to be doing BDR for */
+	used_databases = palloc0(sizeof(char *) * list_length(connames));
+	/* Name of the worker with init_replica set for each db for the
+	 * corresponding index in used_databases */
+	database_initcons = palloc0(sizeof(char *) * list_length(connames));
+
+	/*
+	 * Read all connections and create their BDRWorkerCon structs,
+	 * validating parameters and sanity checking as we go.
+	 */
+	foreach(c, connames)
+	{
+		size_t		  off;
+		BDRWorkerCon *con;
+
+		char *name = (char *) lfirst(c);
+		con = create_worker_con(name);
+
+		if (!con)
+			continue;
+
+		/* If this is a DB name we haven't seen yet, add it to our set of known DBs */
+		for (off = 0; off < num_used_databases; off++)
+		{
+			if (strcmp(con->dbname , used_databases[off]) == 0)
+				break;
+		}
+
+		if (off == num_used_databases)
+		{
+			/* Didn't find a match, add new db name */
+			used_databases[num_used_databases++] = pstrdup(con->dbname);
+		}
+
+		/*
+		 * Make sure that at most one of the worker configs for each DB can be
+		 * configured to run initialization.
+		 */
+		if (con->init_replica)
+		{
+			if (database_initcons[off] != NULL)
+				elog(ERROR, "Connections %s and %s on database %s both have init_replica enabled, cannot continue",
+					con->name, database_initcons[off], used_databases[off]);
+			else 
+				database_initcons[off] = con->name;
+		}
+
+		conns = lcons(con, conns);
+	}
+	/* We've ensured there are no duplicate init connections */
+	pfree(database_initcons);
+
+	/*
+	 * We now need to register one static bgworker per database.
+	 * When started, this worker will continue setup - doing any
+	 * required initialization of the database, then registering
+	 * dynamic bgworkers for the DB's individual BDR connections.
+	 */
+
+
 
 	/* Common apply worker values */
 	apply_worker.bgw_flags = BGWORKER_SHMEM_ACCESS |
@@ -829,6 +891,21 @@ _PG_init(void)
 	apply_worker.bgw_main = bdr_apply_main;
 	apply_worker.bgw_restart_time = 5;
 	apply_worker.bgw_notify_pid = 0;
+
+	foreach(c, conns)
+	{
+		BDRWorkerCon *con;
+		con = (BDRWorkerCon*) lfirst(c);
+
+		snprintf(apply_worker.bgw_name, BGW_MAXLEN,
+				 "bdr apply: %s", con->name);
+		apply_worker.bgw_main_arg = PointerGetDatum(con);
+
+		RegisterBackgroundWorker(&apply_worker);
+		nregistered++;
+	}
+
+	Assert(num_used_databases <= nregistered);
 
 	/* Common sequence worker values */
 	sequencer_worker.bgw_flags = BGWORKER_SHMEM_ACCESS |
@@ -839,68 +916,10 @@ _PG_init(void)
 	sequencer_worker.bgw_notify_pid = 0;
 
 	/*
-	 * Read all connections and create their BDRWorkerCon structs,
-	 * validating parameters and sanity checking as we go.
-	 */
-	foreach(c, connames)
-	{
-		BDRWorkerCon *con;
-		char *name = (char *) lfirst(c);
-		con = create_worker_con(name);
-
-		if (!con)
-			continue;
-
-		if (con->init_replica)
-		{
-			if (init_apply_worker != NULL)
-				elog(ERROR, "Connections %s and %s both have init_replica enabled, cannot continue",
-					con->name, init_apply_worker->name);
-			else 
-				init_apply_worker = con;
-		}
-
-		conns = lcons(con, conns);
-	}
-	/* */
-
-	foreach(c, conns)
-	{
-		bool found = false;
-
-		BDRWorkerCon *con;
-		con = (BDRWorkerCon*) lfirst(c);
-
-		snprintf(apply_worker.bgw_name, BGW_MAXLEN,
-				 "bdr apply: %s", con->name);
-		apply_worker.bgw_main_arg = PointerGetDatum(con);
-
-		RegisterBackgroundWorker(&apply_worker);
-		nregistered++;
-
-		/* keep track of the databases used */
-		/* check whether we already have a connection in this db */
-		for (off = 0; off < num_used_databases; off++)
-		{
-			if (strcmp(con->dbname , used_databases[off]) == 0)
-			{
-				found = true;
-				break;
-			}
-		}
-
-		if (!found)
-		{
-			used_databases[num_used_databases++] = pstrdup(con->dbname);
-		}
-	}
-
-	Assert(num_used_databases <= nregistered);
-
-	/*
 	 * start sequence coordination process if necessary. One process per
 	 * database, *not* one per configured connection.
 	 */
+	size_t off;
 	for (off = 0; off < num_used_databases; off++)
 	{
 		const char *name = used_databases[off];
