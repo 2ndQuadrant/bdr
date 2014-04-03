@@ -619,6 +619,140 @@ bdr_sequencer_main(Datum main_arg)
 	proc_exit(0);
 }
 
+static BDRWorkerCon*
+create_worker_con(char *name)
+{
+	char	   *errmsg = NULL;
+	PQconninfoOption *options;
+	PQconninfoOption *cur_option;
+
+	/* don't free, referenced by the guc machinery! */
+	char	   *optname_dsn = palloc(strlen(name) + 30);
+	char	   *optname_delay = palloc(strlen(name) + 30);
+	char	   *optname_replica = palloc(strlen(name) + 30);
+	char	   *optname_bindir = palloc(strlen(name) + 30);
+	char	   *optname_tmpdir = palloc(strlen(name) + 30);
+	char	   *optname_local_dsn = palloc(strlen(name) + 30);
+	char	   *optname_script_path = palloc(strlen(name) + 30);
+	BDRWorkerCon *con;
+
+	con = palloc(sizeof(BDRWorkerCon));
+	con->dsn = NULL;
+	con->name = pstrdup(name);
+	con->apply_delay = 0;
+	con->init_replica = false;
+	con->replica_bin_dir = NULL;
+	con->replica_tmp_dir = NULL;
+	con->replica_local_dsn = NULL;
+	con->replica_script_path = NULL;
+
+	sprintf(optname_dsn, "bdr.%s_dsn", name);
+	DefineCustomStringVariable(optname_dsn,
+							   optname_dsn,
+							   NULL,
+							   &con->dsn,
+							   NULL, PGC_POSTMASTER,
+							   GUC_NOT_IN_SAMPLE,
+							   NULL, NULL, NULL);
+
+	sprintf(optname_delay, "bdr.%s_apply_delay", name);
+	DefineCustomIntVariable(optname_delay,
+							optname_delay,
+							NULL,
+							&con->apply_delay,
+							0, 0, INT_MAX,
+							PGC_SIGHUP,
+							GUC_UNIT_MS,
+							NULL, NULL, NULL);
+
+	sprintf(optname_replica, "bdr.%s_init_replica", name);
+	DefineCustomBoolVariable(optname_replica,
+							 optname_replica,
+							 NULL,
+							 &con->init_replica,
+							 false,
+							 PGC_SIGHUP,
+							 0,
+							 NULL, NULL, NULL);
+
+	sprintf(optname_bindir, "bdr.%s_replica_bin_dir", name);
+	DefineCustomStringVariable(optname_bindir,
+							   optname_bindir,
+							   NULL,
+							   &con->replica_bin_dir,
+							   NULL, PGC_POSTMASTER,
+							   GUC_NOT_IN_SAMPLE,
+							   NULL, NULL, NULL);
+
+	sprintf(optname_tmpdir, "bdr.%s_replica_tmp_dir", name);
+	DefineCustomStringVariable(optname_tmpdir,
+							   optname_tmpdir,
+							   NULL,
+							   &con->replica_tmp_dir,
+							   NULL, PGC_POSTMASTER,
+							   GUC_NOT_IN_SAMPLE,
+							   NULL, NULL, NULL);
+
+	sprintf(optname_local_dsn, "bdr.%s_replica_local_dsn", name);
+	DefineCustomStringVariable(optname_local_dsn,
+							   optname_local_dsn,
+							   NULL,
+							   &con->replica_local_dsn,
+							   NULL, PGC_POSTMASTER,
+							   GUC_NOT_IN_SAMPLE,
+							   NULL, NULL, NULL);
+
+	sprintf(optname_script_path, "bdr.%s_replica_script_path", name);
+	DefineCustomStringVariable(optname_script_path,
+							   optname_script_path,
+							   NULL,
+							   &con->replica_script_path,
+							   NULL, PGC_POSTMASTER,
+							   GUC_NOT_IN_SAMPLE,
+							   NULL, NULL, NULL);
+
+	if (!con->dsn)
+	{
+		elog(WARNING, "no connection information for %s", name);
+		return NULL;
+	}
+
+	elog(LOG, "bgworkers, connection: %s", con->dsn);
+
+	options = PQconninfoParse(con->dsn, &errmsg);
+	if (errmsg != NULL)
+	{
+		char	   *str = pstrdup(errmsg);
+
+		PQfreemem(errmsg);
+		elog(ERROR, "msg: %s", str);
+	}
+
+	cur_option = options;
+	while (cur_option->keyword != NULL)
+	{
+		if (strcmp(cur_option->keyword, "dbname") == 0)
+		{
+			if (cur_option->val == NULL)
+				elog(ERROR, "no dbname set");
+
+			con->dbname = pstrdup(cur_option->val);
+		}
+
+		if (cur_option->val != NULL)
+		{
+			elog(LOG, "option: %s, val: %s",
+				 cur_option->keyword, cur_option->val);
+		}
+		cur_option++;
+	}
+
+	/* cleanup */
+	PQconninfoFree(options);
+
+	return con;
+}
+
 /*
  * Entrypoint of this module.
  */
@@ -637,7 +771,6 @@ _PG_init(void)
 	Size		num_used_databases = 0;
 
 	size_t		off;
-	bool		found;
 
 	BDRWorkerCon *init_apply_worker = NULL;
 
@@ -711,133 +844,12 @@ _PG_init(void)
 	 */
 	foreach(c, connames)
 	{
-		const char *name = (char *) lfirst(c);
-		char	   *errmsg = NULL;
-		PQconninfoOption *options;
-		PQconninfoOption *cur_option;
-
-		/* don't free, referenced by the guc machinery! */
-		char	   *optname_dsn = palloc(strlen(name) + 30);
-		char	   *optname_delay = palloc(strlen(name) + 30);
-		char	   *optname_replica = palloc(strlen(name) + 30);
-		char	   *optname_bindir = palloc(strlen(name) + 30);
-		char	   *optname_tmpdir = palloc(strlen(name) + 30);
-		char	   *optname_local_dsn = palloc(strlen(name) + 30);
-		char	   *optname_script_path = palloc(strlen(name) + 30);
 		BDRWorkerCon *con;
+		char *name = (char *) lfirst(c);
+		con = create_worker_con(name);
 
-		found = false;
-
-		con = palloc(sizeof(BDRWorkerCon));
-		con->dsn = (char *) lfirst(c);
-		con->name = pstrdup(name);
-		con->apply_delay = 0;
-		con->init_replica = false;
-		con->replica_bin_dir = NULL;
-		con->replica_tmp_dir = NULL;
-		con->replica_local_dsn = NULL;
-		con->replica_script_path = NULL;
-
-		sprintf(optname_dsn, "bdr.%s_dsn", name);
-		DefineCustomStringVariable(optname_dsn,
-								   optname_dsn,
-								   NULL,
-								   &con->dsn,
-								   NULL, PGC_POSTMASTER,
-								   GUC_NOT_IN_SAMPLE,
-								   NULL, NULL, NULL);
-
-		sprintf(optname_delay, "bdr.%s_apply_delay", name);
-		DefineCustomIntVariable(optname_delay,
-								optname_delay,
-								NULL,
-								&con->apply_delay,
-								0, 0, INT_MAX,
-								PGC_SIGHUP,
-								GUC_UNIT_MS,
-								NULL, NULL, NULL);
-
-		sprintf(optname_replica, "bdr.%s_init_replica", name);
-		DefineCustomBoolVariable(optname_replica,
-								 optname_replica,
-								 NULL,
-								 &con->init_replica,
-								 false,
-								 PGC_SIGHUP,
-								 0,
-								 NULL, NULL, NULL);
-
-		sprintf(optname_bindir, "bdr.%s_replica_bin_dir", name);
-		DefineCustomStringVariable(optname_bindir,
-								   optname_bindir,
-								   NULL,
-								   &con->replica_bin_dir,
-								   NULL, PGC_POSTMASTER,
-								   GUC_NOT_IN_SAMPLE,
-								   NULL, NULL, NULL);
-
-		sprintf(optname_tmpdir, "bdr.%s_replica_tmp_dir", name);
-		DefineCustomStringVariable(optname_tmpdir,
-								   optname_tmpdir,
-								   NULL,
-								   &con->replica_tmp_dir,
-								   NULL, PGC_POSTMASTER,
-								   GUC_NOT_IN_SAMPLE,
-								   NULL, NULL, NULL);
-
-		sprintf(optname_local_dsn, "bdr.%s_replica_local_dsn", name);
-		DefineCustomStringVariable(optname_local_dsn,
-								   optname_local_dsn,
-								   NULL,
-								   &con->replica_local_dsn,
-								   NULL, PGC_POSTMASTER,
-								   GUC_NOT_IN_SAMPLE,
-								   NULL, NULL, NULL);
-
-		sprintf(optname_script_path, "bdr.%s_replica_script_path", name);
-		DefineCustomStringVariable(optname_script_path,
-								   optname_script_path,
-								   NULL,
-								   &con->replica_script_path,
-								   NULL, PGC_POSTMASTER,
-								   GUC_NOT_IN_SAMPLE,
-								   NULL, NULL, NULL);
-
-		if (!con->dsn)
-		{
-			elog(WARNING, "no connection information for %s", name);
+		if (!con)
 			continue;
-		}
-
-		elog(LOG, "bgworkers, connection: %s", con->dsn);
-
-		options = PQconninfoParse(con->dsn, &errmsg);
-		if (errmsg != NULL)
-		{
-			char	   *str = pstrdup(errmsg);
-
-			PQfreemem(errmsg);
-			elog(ERROR, "msg: %s", str);
-		}
-
-		cur_option = options;
-		while (cur_option->keyword != NULL)
-		{
-			if (strcmp(cur_option->keyword, "dbname") == 0)
-			{
-				if (cur_option->val == NULL)
-					elog(ERROR, "no dbname set");
-
-				con->dbname = pstrdup(cur_option->val);
-			}
-
-			if (cur_option->val != NULL)
-			{
-				elog(LOG, "option: %s, val: %s",
-					 cur_option->keyword, cur_option->val);
-			}
-			cur_option++;
-		}
 
 		if (con->init_replica)
 		{
@@ -849,14 +861,13 @@ _PG_init(void)
 		}
 
 		conns = lcons(con, conns);
-
-		/* cleanup */
-		PQconninfoFree(options);
 	}
 	/* */
 
 	foreach(c, conns)
 	{
+		bool found = false;
+
 		BDRWorkerCon *con;
 		con = (BDRWorkerCon*) lfirst(c);
 
