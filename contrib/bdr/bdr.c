@@ -583,10 +583,14 @@ bdr_sequencer_main(Datum main_arg)
 		 * instead, they may wait on their process latch, which sleeps as
 		 * necessary, but is awakened if postmaster dies.  That way the
 		 * background process goes away immediately in an emergency.
+		 *
+		 * We wake up everytime our latch gets set or if 180 seconds have
+		 * passed without events. That's a stopgap for the case a backend
+		 * committed sequencer changes but died before setting the latch.
 		 */
 		rc = WaitLatch(&MyProc->procLatch,
 					   WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
-					   10000L);
+					   180000L);
 
 		ResetLatch(&MyProc->procLatch);
 
