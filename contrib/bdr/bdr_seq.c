@@ -468,10 +468,10 @@ static void
 bdr_sequencer_shmem_shutdown(int code, Datum arg)
 {
 	BdrSequencerSlot *slot;
-	if (bdr_sequencer_con == NULL)
+	if (bdr_static_con == NULL)
 		return;
 
-	slot = &BdrSequencerCtl->slots[bdr_sequencer_con->slot];
+	slot = &BdrSequencerCtl->slots[bdr_static_con->slot];
 
 	slot->database_oid = InvalidOid;
 	slot->proclatch = NULL;
@@ -540,9 +540,9 @@ bdr_sequencer_init(void)
 {
 	BdrSequencerSlot *slot;
 
-	Assert(bdr_sequencer_con != NULL);
+	Assert(bdr_static_con != NULL);
 
-	slot = &BdrSequencerCtl->slots[bdr_sequencer_con->slot];
+	slot = &BdrSequencerCtl->slots[bdr_static_con->slot];
 	slot->database_oid = MyDatabaseId;
 	slot->proclatch = &MyProc->procLatch;
 }
@@ -710,7 +710,7 @@ bdr_sequencer_tally(void)
 	nulls[3] = false;
 
 	argtypes[4] = INT4OID;
-	values[4] = Int32GetDatum(bdr_sequencer_con->num_nodes);
+	values[4] = Int32GetDatum(list_length(bdr_static_con->conns));
 	nulls[4] = false;
 
 	SetCurrentStatementStartTimestamp();

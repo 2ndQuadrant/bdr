@@ -68,7 +68,7 @@ static char *connections = NULL;
 static char *bdr_synchronous_commit = NULL;
 
 BDRWorkerCon *bdr_apply_con = NULL;
-BDRSequencerCon *bdr_sequencer_con = NULL;
+BDRStaticCon *bdr_static_con = NULL;
 
 static void init_replica(BDRWorkerCon *wcon, PGconn *conn, PGresult *res);
 
@@ -557,7 +557,7 @@ bdr_sequencer_main(Datum main_arg)
 {
 	int rc;
 
-	bdr_sequencer_con = (BDRSequencerCon *) DatumGetPointer(main_arg);
+	bdr_static_con = (BDRStaticCon *) DatumGetPointer(main_arg);
 
 	/* Establish signal handlers before unblocking signals. */
 	pqsignal(SIGHUP, bdr_sighup);
@@ -567,7 +567,7 @@ bdr_sequencer_main(Datum main_arg)
 	BackgroundWorkerUnblockSignals();
 
 	/* Connect to our database */
-	BackgroundWorkerInitializeConnection(bdr_sequencer_con->dbname, NULL);
+	BackgroundWorkerInitializeConnection(bdr_static_con->dbname, NULL);
 
 	/* make sure BDR extension exists */
 	bdr_maintain_schema();
@@ -579,7 +579,7 @@ bdr_sequencer_main(Datum main_arg)
 	CurrentResourceOwner = ResourceOwnerCreate(NULL, "bdr seq top-level resource owner");
 	bdr_saved_resowner = CurrentResourceOwner;
 
-	elog(LOG, "BDR starting sequencer on db \"%s\"", bdr_sequencer_con->dbname);
+	elog(LOG, "BDR starting sequencer on db \"%s\"", bdr_static_con->dbname);
 
 	/* initialize sequencer */
 	bdr_sequencer_init();
@@ -754,21 +754,77 @@ create_worker_con(char *name)
 }
 
 /*
- * Entrypoint of this module.
+ * Each database with BDR enabled on it has a static background
+ * worker, registered at shared_preload_libraries time during
+ * postmaster start. This is the entry point for these bgworkers.
  *
- * Runs in the postmaster, so it can't use SPI, and should do as little as
- * sensibly possible.
+ * This worker handles BDR startup on the database and launches
+ * apply workers for each BDR connection.
+ *
+ * Since the worker is fork()ed from the postmaster, all globals
+ * initialised in _PG_init remain valid.
+ */
+static void
+bdr_static_worker(Datum main_arg)
+{
+	BackgroundWorker  apply_worker;
+	List             *apply_workers = NIL;
+	ListCell		 *c;
+
+	bdr_static_con = (BDRStaticCon *) DatumGetPointer(main_arg);
+
+	elog(LOG, "Starting bdr worker for %s", bdr_static_con->dbname);
+
+	/* Common apply worker values */
+	apply_worker.bgw_flags = BGWORKER_SHMEM_ACCESS |
+		BGWORKER_BACKEND_DATABASE_CONNECTION;
+	apply_worker.bgw_start_time = BgWorkerStart_RecoveryFinished;
+	apply_worker.bgw_main = bdr_apply_main;
+	apply_worker.bgw_restart_time = 5;
+	apply_worker.bgw_notify_pid = 0;
+
+	foreach(c, bdr_static_con->conns)
+	{
+		BDRWorkerCon 		   *con;
+		BackgroundWorkerHandle *bgw_handle;
+
+		con = (BDRWorkerCon*) lfirst(c);
+
+		if ( strcmp(con->dbname, bdr_static_con->dbname) != 0 )
+			/* Connection for a different DB than ours, skip it */
+			continue;
+
+		snprintf(apply_worker.bgw_name, BGW_MAXLEN,
+				 "bdr apply: %s", con->name);
+		apply_worker.bgw_main_arg = PointerGetDatum(con);
+
+		RegisterDynamicBackgroundWorker(&apply_worker, &bgw_handle);
+		apply_workers = lcons(bgw_handle, apply_workers);
+	}
+
+	/* Once we're done with init, launch the sequencer
+	 * (should integrate it) */
+	bdr_sequencer_main(main_arg);
+}
+
+/*
+ * Entrypoint of this module - called at shared_preload_libraries time
+ * in the context of the postmaster.
+ *
+ * Can't use SPI, and should do as little as sensibly possible. Must
+ * initialize any PGC_POSTMASTER custom GUCs, register static bgworkers,
+ * as that can't be done later.
  */
 void
 _PG_init(void)
 {
-	BackgroundWorker apply_worker;
-	BackgroundWorker sequencer_worker;
+	BackgroundWorker static_worker;
 	List	   *connames;
 	List       *conns = NIL;
 	ListCell   *c;
 	MemoryContext old_context;
-	Size		nregistered = 0;
+	Size		nregistered;
+	size_t      off;
 
 	char	  **used_databases;
 	char      **database_initcons;
@@ -881,63 +937,28 @@ _PG_init(void)
 	 * required initialization of the database, then registering
 	 * dynamic bgworkers for the DB's individual BDR connections.
 	 */
-
-
-
-	/* Common apply worker values */
-	apply_worker.bgw_flags = BGWORKER_SHMEM_ACCESS |
+	static_worker.bgw_flags = BGWORKER_SHMEM_ACCESS |
 		BGWORKER_BACKEND_DATABASE_CONNECTION;
-	apply_worker.bgw_start_time = BgWorkerStart_RecoveryFinished;
-	apply_worker.bgw_main = bdr_apply_main;
-	apply_worker.bgw_restart_time = 5;
-	apply_worker.bgw_notify_pid = 0;
+	static_worker.bgw_start_time = BgWorkerStart_RecoveryFinished;
+	static_worker.bgw_main = bdr_static_worker;
+	static_worker.bgw_restart_time = 5;
+	static_worker.bgw_notify_pid = 0;
 
-	foreach(c, conns)
-	{
-		BDRWorkerCon *con;
-		con = (BDRWorkerCon*) lfirst(c);
-
-		snprintf(apply_worker.bgw_name, BGW_MAXLEN,
-				 "bdr apply: %s", con->name);
-		apply_worker.bgw_main_arg = PointerGetDatum(con);
-
-		RegisterBackgroundWorker(&apply_worker);
-		nregistered++;
-	}
-
-	Assert(num_used_databases <= nregistered);
-
-	/* Common sequence worker values */
-	sequencer_worker.bgw_flags = BGWORKER_SHMEM_ACCESS |
-		BGWORKER_BACKEND_DATABASE_CONNECTION;
-	sequencer_worker.bgw_start_time = BgWorkerStart_RecoveryFinished;
-	sequencer_worker.bgw_main = bdr_sequencer_main;
-	sequencer_worker.bgw_restart_time = 5;
-	sequencer_worker.bgw_notify_pid = 0;
-
-	/*
-	 * start sequence coordination process if necessary. One process per
-	 * database, *not* one per configured connection.
-	 */
-	size_t off;
 	for (off = 0; off < num_used_databases; off++)
 	{
-		const char *name = used_databases[off];
-		BDRSequencerCon *con;
-
-		con = palloc(sizeof(BDRSequencerCon));
-		con->dbname = pstrdup(name);
-		con->num_nodes = nregistered;
+		/* Start a worker for this db */
+		BDRStaticCon *con = palloc(sizeof(BDRStaticCon));
+		con->dbname = used_databases[off];
+		/* Pass all the connections, even those for other dbs;
+		 * let the backend filter them out. */
+		con->conns = conns;
 		con->slot = off;
 
-		elog(LOG, "starting seq on %s", name);
-
-		snprintf(sequencer_worker.bgw_name, BGW_MAXLEN,
-				 "bdr sequencer: %s", name);
-		sequencer_worker.bgw_main_arg = PointerGetDatum(con);
-
-		RegisterBackgroundWorker(&sequencer_worker);
-
+		elog(LOG, "starting bdr worker for db %s", con->dbname);
+		snprintf(static_worker.bgw_name, BGW_MAXLEN,
+				 "bdr: %s", con->dbname);
+		static_worker.bgw_main_arg = PointerGetDatum(con);
+		RegisterBackgroundWorker(&static_worker);
 	}
 
 	EmitWarningsOnPlaceholders("bdr");
@@ -951,6 +972,7 @@ out:
 	 */
 
 	/* register a slot for every remote node */
+	nregistered = list_length(conns);
 	bdr_count_shmem_init(nregistered);
 	bdr_sequencer_shmem_init(nregistered, num_used_databases);
 
