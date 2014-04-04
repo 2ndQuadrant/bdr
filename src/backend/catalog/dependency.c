@@ -207,11 +207,19 @@ deleteObjectsInList(ObjectAddresses *targetObjects, Relation *depRel,
 	{
 		for (i = 0; i < targetObjects->numrefs; i++)
 		{
-			ObjectAddress *thisobj = targetObjects->refs + i;
+			const ObjectAddress *thisobj = &targetObjects->refs[i];
+			const ObjectAddressExtra *extra = &targetObjects->extras[i];
+			bool	original = false;
+			bool	normal = false;
+
+			if (extra->flags & DEPFLAG_ORIGINAL)
+				original = true;
+			if (extra->flags & DEPFLAG_NORMAL)
+				normal = true;
 
 			if (EventTriggerSupportsObjectClass(getObjectClass(thisobj)))
 			{
-				EventTriggerSQLDropAddObject(thisobj);
+				EventTriggerSQLDropAddObject(thisobj, original, normal);
 			}
 		}
 	}
