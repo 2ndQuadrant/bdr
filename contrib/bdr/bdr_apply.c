@@ -78,7 +78,6 @@ static void check_apply_update(RepNodeId local_node_id, TimestampTz ts, bool *pe
 static void do_log_update(RepNodeId local_node_id, bool apply_update, TimestampTz ts, Relation idxrel, HeapTuple old_key);
 static void do_apply_update(Relation rel, ItemPointerData oldtid, HeapTuple old_tuple, BDRTupleData new_tuple);
 
-bool		request_sequencer_wakeup = false;
 bool		started_transaction = false;
 Oid			QueuedDDLCommandsRelid = InvalidOid;
 
@@ -143,8 +142,6 @@ process_remote_begin(StringInfo s)
 			pg_usleep(usec + (sec * USECS_PER_SEC));
 		}
 	}
-
-	request_sequencer_wakeup = false;
 }
 
 void
@@ -181,12 +178,6 @@ process_remote_commit(StringInfo s)
 	CurrentResourceOwner = bdr_saved_resowner;
 
 	bdr_count_commit();
-
-	if (request_sequencer_wakeup)
-	{
-		request_sequencer_wakeup = false;
-		bdr_sequencer_wakeup();
-	}
 }
 
 static void
@@ -771,7 +762,7 @@ check_sequencer_wakeup(Relation rel)
 	if (reloid == BdrSequenceValuesRelid ||
 		reloid == BdrSequenceElectionsRelid ||
 		reloid == BdrVotesRelid)
-		request_sequencer_wakeup = true;
+		bdr_schedule_eoxact_sequencer_wakeup();
 }
 
 void
