@@ -56,6 +56,8 @@ typedef struct BdrSequenceValues {
 	int64		end_value;
 } BdrSequenceValues;
 
+static void bdr_schedule_eoxact_sequencer_wakeup(void);
+
 /* cached relids */
 Oid	BdrSequenceValuesRelid;		/* bdr_sequence_values */
 Oid	BdrSequenceElectionsRelid;	/* bdr_sequence_elections */
@@ -70,6 +72,8 @@ static size_t bdr_seq_nnodes = 0;
 static size_t bdr_seq_nsequencers = 0;
 
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
+
+static bool bdr_seq_pending_wakeup = false;
 
 /* vote */
 const char* vote_sql =
@@ -533,6 +537,43 @@ bdr_sequencer_wakeup(void)
 
 		SetLatch(slot->proclatch);
 	}
+}
+
+
+static void
+bdr_sequence_xact_callback(XactEvent event, void *arg)
+{
+	if (event != XACT_EVENT_COMMIT)
+		return;
+
+	if (bdr_seq_pending_wakeup)
+	{
+		bdr_sequencer_wakeup();
+		bdr_seq_pending_wakeup = false;
+	}
+}
+
+/*
+ * Schedule a wakeup of all sequencer workers, as soon as this transaction
+ * commits.
+ *
+ * This is e.g. useful when a new sequnece is created, and the voting process
+ * should start immediately.
+ *
+ * NB: There's a window between the commit and this callback in which this
+ * backend could die without causing a cluster wide restart. So we need to
+ * periodically check whether we've missed wakeups.
+ */
+static void bdr_schedule_eoxact_sequencer_wakeup(void)
+{
+	static bool registered = false;
+
+	if (!registered)
+	{
+		RegisterXactCallback(bdr_sequence_xact_callback, NULL);
+		registered = true;
+	}
+	bdr_seq_pending_wakeup = true;
 }
 
 void
@@ -1131,6 +1172,9 @@ bdr_sequence_alloc(PG_FUNCTION_ARGS)
 	result = elm->last;
 
 	END_CRIT_SECTION();
+
+	/* schedule wakeup as soon as other xacts can see the seuqence */
+	bdr_schedule_eoxact_sequencer_wakeup();
 }
 
 PG_FUNCTION_INFO_V1(bdr_sequence_setval);
@@ -1158,6 +1202,9 @@ bdr_sequence_setval(PG_FUNCTION_ARGS)
 	log_sequence_tuple(seqrel, seqtuple, page);
 
 	END_CRIT_SECTION();
+
+	/* schedule wakeup as soon as other xacts can see the seuqence */
+	bdr_schedule_eoxact_sequencer_wakeup();
 }
 
 PG_FUNCTION_INFO_V1(bdr_sequence_options);
@@ -1173,4 +1220,7 @@ bdr_sequence_options(PG_FUNCTION_ARGS)
 		PG_RETURN_BYTEA_P(result);
 
 	PG_RETURN_NULL();
+
+	/* schedule wakeup as soon as other xacts can see the seuqence */
+	bdr_schedule_eoxact_sequencer_wakeup();
 }
