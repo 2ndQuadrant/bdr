@@ -422,6 +422,8 @@ process_remote_update(StringInfo s)
 	Relation	idxrel;
 	ScanKeyData skey[INDEX_MAX_KEYS];
 
+	bdr_performing_work();
+
 	rel = read_rel(s, RowExclusiveLock);
 
 	action = pq_getmsgbyte(s);
@@ -567,6 +569,7 @@ check_apply_update(RepNodeId local_node_id, TimestampTz local_ts,
 		 */
 		*perform_update = true;
 		*log_update = false;
+		return;
 	}
 	else
 	{
@@ -685,6 +688,8 @@ process_remote_delete(StringInfo s)
 	ScanKeyData skey[INDEX_MAX_KEYS];
 	bool		found_old;
 	ItemPointerData oldtid;
+
+	bdr_performing_work();
 
 	rel = read_rel(s, RowExclusiveLock);
 
