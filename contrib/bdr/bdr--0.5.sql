@@ -218,4 +218,42 @@ WHEN tag IN ('create table', 'create index', 'create sequence',
      'create trigger', 'alter table', 'create extension', 'create type')
 EXECUTE PROCEDURE bdr.queue_commands();
 
+-- This type is tailored to use as input to get_object_address
+CREATE TYPE bdr.dropped_object AS
+  (objtype text, objnames text[], objargs text[]);
+
+CREATE TABLE bdr.bdr_queued_drops
+ (dropped_objects bdr.dropped_object[] NOT NULL);
+
+CREATE OR REPLACE FUNCTION bdr.queue_dropped_objects()
+ RETURNS event_trigger
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+    r RECORD;
+	dropped bdr.dropped_object;
+	otherobjs bdr.dropped_object[] = '{}';
+BEGIN
+	FOR r IN SELECT * FROM pg_event_trigger_dropped_objects()
+	LOOP
+		IF r.original OR r.normal THEN
+			dropped.objtype = r.object_type;
+			dropped.objnames = r.address_names;
+			dropped.objargs = r.address_args;
+			otherobjs := otherobjs || dropped;
+			RAISE LOG 'object is: %', dropped;
+		END IF;
+	END LOOP;
+
+	IF otherobjs <> '{}' THEN
+		INSERT INTO bdr.bdr_queued_drops
+			(dropped_objects) VALUES (otherobjs);
+	END IF;
+END;
+$function$;
+
+CREATE EVENT TRIGGER queue_drops
+ON sql_drop
+EXECUTE PROCEDURE bdr.queue_dropped_objects();
+
 RESET search_path;
