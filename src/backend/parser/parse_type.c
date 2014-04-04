@@ -705,10 +705,10 @@ pts_error_callback(void *arg)
 /*
  * Given a string that is supposed to be a SQL-compatible type declaration,
  * such as "int4" or "integer" or "character varying(32)", parse
- * the string and convert it to a type OID and type modifier.
+ * the string and return the result as a TypeName.
  */
-void
-parseTypeString(const char *str, Oid *typeid_p, int32 *typmod_p)
+TypeName *
+typeStringToTypeName(const char *str)
 {
 	StringInfoData buf;
 	List	   *raw_parsetree_list;
@@ -775,6 +775,7 @@ parseTypeString(const char *str, Oid *typeid_p, int32 *typmod_p)
 		typecast->arg == NULL ||
 		!IsA(typecast->arg, A_Const))
 		goto fail;
+
 	typeName = typecast->typeName;
 	if (typeName == NULL ||
 		!IsA(typeName, TypeName))
@@ -782,14 +783,27 @@ parseTypeString(const char *str, Oid *typeid_p, int32 *typmod_p)
 	if (typeName->setof)
 		goto fail;
 
-	typenameTypeIdAndMod(NULL, typeName, typeid_p, typmod_p);
-
 	pfree(buf.data);
 
-	return;
+	return typeName;
 
 fail:
 	ereport(ERROR,
 			(errcode(ERRCODE_SYNTAX_ERROR),
 			 errmsg("invalid type name \"%s\"", str)));
+}
+
+/*
+ * Given a string that is supposed to be a SQL-compatible type declaration,
+ * such as "int4" or "integer" or "character varying(32)", parse
+ * the string and convert it to a type OID and type modifier.
+ */
+void
+parseTypeString(const char *str, Oid *typeid_p, int32 *typmod_p)
+{
+	TypeName   *typeName;
+
+	typeName = typeStringToTypeName(str);
+
+	typenameTypeIdAndMod(NULL, typeName, typeid_p, typmod_p);
 }
