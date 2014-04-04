@@ -56,8 +56,6 @@ typedef struct BdrSequenceValues {
 	int64		end_value;
 } BdrSequenceValues;
 
-static void bdr_schedule_eoxact_sequencer_wakeup(void);
-
 /* cached relids */
 Oid	BdrSequenceValuesRelid;		/* bdr_sequence_values */
 Oid	BdrSequenceElectionsRelid;	/* bdr_sequence_elections */
@@ -539,7 +537,6 @@ bdr_sequencer_wakeup(void)
 	}
 }
 
-
 static void
 bdr_sequence_xact_callback(XactEvent event, void *arg)
 {
@@ -564,7 +561,8 @@ bdr_sequence_xact_callback(XactEvent event, void *arg)
  * backend could die without causing a cluster wide restart. So we need to
  * periodically check whether we've missed wakeups.
  */
-static void bdr_schedule_eoxact_sequencer_wakeup(void)
+void
+bdr_schedule_eoxact_sequencer_wakeup(void)
 {
 	static bool registered = false;
 
