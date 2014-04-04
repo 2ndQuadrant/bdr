@@ -203,14 +203,13 @@ deleteObjectsInList(ObjectAddresses *targetObjects, Relation *depRel,
 	/*
 	 * Keep track of objects for event triggers, if necessary.
 	 */
-	if (trackDroppedObjectsNeeded())
+	if (trackDroppedObjectsNeeded() && !(flags & PERFORM_DELETION_INTERNAL))
 	{
 		for (i = 0; i < targetObjects->numrefs; i++)
 		{
 			ObjectAddress *thisobj = targetObjects->refs + i;
 
-			if ((!(flags & PERFORM_DELETION_INTERNAL)) &&
-				EventTriggerSupportsObjectClass(getObjectClass(thisobj)))
+			if (EventTriggerSupportsObjectClass(getObjectClass(thisobj)))
 			{
 				EventTriggerSQLDropAddObject(thisobj);
 			}
