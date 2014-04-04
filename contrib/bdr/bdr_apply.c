@@ -25,15 +25,19 @@
 #include "access/sysattr.h"
 #include "access/xact.h"
 
+#include "catalog/dependency.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_type.h"
 
 #include "executor/spi.h"
 #include "executor/executor.h"
 
+#include "funcapi.h"
+
 #include "libpq/pqformat.h"
 
 #include "parser/parse_relation.h"
+#include "parser/parse_type.h"
 
 #include "replication/logical.h"
 #include "replication/replication_identifier.h"
@@ -44,6 +48,7 @@
 #include "tcop/tcopprot.h"
 #include "tcop/utility.h"
 
+#include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/datetime.h"
 #include "utils/lsyscache.h"
@@ -85,6 +90,7 @@ static EState *bdr_create_rel_estate(Relation rel);
 
 bool		started_transaction = false;
 Oid			QueuedDDLCommandsRelid = InvalidOid;
+Oid			QueuedDropsRelid = InvalidOid;
 
 static bool
 bdr_performing_work(void)
@@ -296,6 +302,212 @@ process_queued_ddl_command(HeapTuple cmdtup, bool tx_just_started)
 #endif
 }
 
+static HeapTuple
+process_queued_drop(HeapTuple cmdtup)
+{
+	Relation	cmdsrel;
+	HeapTuple	newtup;
+	Datum		arrayDatum;
+	ArrayType  *array;
+	bool		null;
+	Oid			elmtype;
+	int16		elmlen;
+	bool		elmbyval;
+	char		elmalign;
+	Oid			elmoutoid;
+	bool		elmisvarlena;
+	TupleDesc	elemdesc;
+	Datum	   *values;
+	int			nelems;
+	int			i;
+	ObjectAddresses *addresses;
+
+	cmdsrel = heap_open(QueuedDropsRelid, AccessShareLock);
+	arrayDatum = heap_getattr(cmdtup, 1,
+							  RelationGetDescr(cmdsrel),
+							  &null);
+	if (null)
+	{
+		elog(WARNING, "null dropped object array in command tuple in \"%s\"",
+			 RelationGetRelationName(cmdsrel));
+		return cmdtup;
+	}
+	array = DatumGetArrayTypeP(arrayDatum);
+	elmtype = ARR_ELEMTYPE(array);
+
+	get_typlenbyvalalign(elmtype, &elmlen, &elmbyval, &elmalign);
+	deconstruct_array(array, elmtype,
+					  elmlen, elmbyval, elmalign,
+					  &values, NULL, &nelems);
+
+	getTypeOutputInfo(elmtype, &elmoutoid, &elmisvarlena);
+	elemdesc = TypeGetTupleDesc(elmtype, NIL);
+
+	addresses = new_object_addresses();
+
+	for (i = 0; i < nelems; i++)
+	{
+		HeapTupleHeader	elemhdr;
+		HeapTupleData tmptup;
+		ObjectType objtype;
+		Datum	datum;
+		bool	isnull;
+		char   *type;
+		List   *objnames;
+		List   *objargs = NIL;
+		Relation objrel;
+		ObjectAddress addr;
+
+		elemhdr = (HeapTupleHeader) DatumGetPointer(values[i]);
+		tmptup.t_len = HeapTupleHeaderGetDatumLength(elemhdr);
+		ItemPointerSetInvalid(&(tmptup.t_self));
+		tmptup.t_tableOid = InvalidOid;
+		tmptup.t_data = elemhdr;
+
+		/* obtain the object type as a C-string ... */
+		datum = heap_getattr(&tmptup, 1, elemdesc, &isnull);
+		if (isnull)
+		{
+			elog(WARNING, "null type !?");
+			continue;
+		}
+		type = TextDatumGetCString(datum);
+		objtype = unstringify_objtype(type);
+
+		if (objtype == OBJECT_TYPE ||
+			objtype == OBJECT_DOMAIN)
+		{
+			Datum  *values;
+			bool   *nulls;
+			int		nelems;
+			char   *typestring;
+			TypeName *typeName;
+
+			datum = heap_getattr(&tmptup, 2, elemdesc, &isnull);
+			if (isnull)
+			{
+				elog(WARNING, "null typename !?");
+				continue;
+			}
+
+			deconstruct_array(DatumGetArrayTypeP(datum),
+							  TEXTOID, -1, false, 'i',
+							  &values, &nulls, &nelems);
+
+			typestring = TextDatumGetCString(values[0]);
+			typeName = typeStringToTypeName(typestring);
+			objnames = typeName->names;
+		}
+		else if (objtype == OBJECT_FUNCTION ||
+				 objtype == OBJECT_AGGREGATE ||
+				 objtype == OBJECT_OPERATOR)
+		{
+			Datum  *values;
+			bool   *nulls;
+			int		nelems;
+			int		i;
+			char   *typestring;
+
+			/* objname */
+			objnames = NIL;
+			datum = heap_getattr(&tmptup, 2, elemdesc, &isnull);
+			if (isnull)
+			{
+				elog(WARNING, "null objname !?");
+				continue;
+			}
+
+			deconstruct_array(DatumGetArrayTypeP(datum),
+							  TEXTOID, -1, false, 'i',
+							  &values, &nulls, &nelems);
+			for (i = 0; i < nelems; i++)
+				objnames = lappend(objnames,
+								   makeString(TextDatumGetCString(values[i])));
+
+			/* objargs are type names */
+			datum = heap_getattr(&tmptup, 3, elemdesc, &isnull);
+			if (isnull)
+			{
+				elog(WARNING, "null typename !?");
+				continue;
+			}
+
+			deconstruct_array(DatumGetArrayTypeP(datum),
+							  TEXTOID, -1, false, 'i',
+							  &values, &nulls, &nelems);
+
+			for (i = 0; i < nelems; i++)
+			{
+				typestring = TextDatumGetCString(values[i]);
+				objargs = lappend(objargs, typeStringToTypeName(typestring));
+			}
+		}
+		else
+		{
+			Datum  *values;
+			bool   *nulls;
+			int		nelems;
+			int		i;
+
+			/* objname */
+			objnames = NIL;
+			datum = heap_getattr(&tmptup, 2, elemdesc, &isnull);
+			if (isnull)
+			{
+				elog(WARNING, "null objname !?");
+				continue;
+			}
+
+			deconstruct_array(DatumGetArrayTypeP(datum),
+							  TEXTOID, -1, false, 'i',
+							  &values, &nulls, &nelems);
+			for (i = 0; i < nelems; i++)
+				objnames = lappend(objnames,
+								   makeString(TextDatumGetCString(values[i])));
+
+			datum = heap_getattr(&tmptup, 3, elemdesc, &isnull);
+			if (!isnull)
+			{
+				Datum  *values;
+				bool   *nulls;
+				int		nelems;
+				int		i;
+
+				deconstruct_array(DatumGetArrayTypeP(datum),
+								  TEXTOID, -1, false, 'i',
+								  &values, &nulls, &nelems);
+				for (i = 0; i < nelems; i++)
+					objargs = lappend(objargs,
+									  makeString(TextDatumGetCString(values[i])));
+			}
+		}
+
+		addr = get_object_address(objtype, objnames, objargs, &objrel,
+								  AccessExclusiveLock, false);
+		/* unsupported object? */
+		if (addr.classId == InvalidOid)
+			continue;
+
+		/*
+		 * For certain objects, get_object_address returned us an open and
+		 * locked relation.  Close it because we have no use for it; but
+		 * keeping the lock seems easier than figure out lock level to release.
+		 */
+		if (objrel != NULL)
+			relation_close(objrel, NoLock);
+
+		add_exact_object_address(&addr, addresses);
+	}
+
+	performMultipleDeletions(addresses, DROP_RESTRICT, 0);
+
+	newtup = cmdtup;
+
+	heap_close(cmdsrel, AccessShareLock);
+
+	return newtup;
+}
+
 void
 process_remote_insert(StringInfo s)
 {
@@ -374,6 +586,8 @@ process_remote_insert(StringInfo s)
 			started_transaction = false;
 		}
 	}
+	else if (RelationGetRelid(rel) == QueuedDropsRelid)
+		process_queued_drop(tup);
 
 	ExecResetTupleTable(estate->es_tupleTable, true);
 	FreeExecutorState(estate);

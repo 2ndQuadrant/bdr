@@ -50,6 +50,7 @@ extern BDRSequencerCon *bdr_sequencer_con;
 
 /* DDL replication support */
 extern Oid	QueuedDDLCommandsRelid;
+extern Oid	QueuedDropsRelid;
 
 /* sequencer support */
 extern Oid	BdrSequenceValuesRelid;
