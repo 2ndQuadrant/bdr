@@ -552,73 +552,6 @@ bdr_apply_main(Datum main_arg)
 	proc_exit(0);
 }
 
-static void
-bdr_sequencer_main(Datum main_arg)
-{
-	int rc;
-
-	bdr_static_con = (BDRStaticCon *) DatumGetPointer(main_arg);
-
-	/* Establish signal handlers before unblocking signals. */
-	pqsignal(SIGHUP, bdr_sighup);
-	pqsignal(SIGTERM, bdr_sigterm);
-
-	/* We're now ready to receive signals */
-	BackgroundWorkerUnblockSignals();
-
-	/* Connect to our database */
-	BackgroundWorkerInitializeConnection(bdr_static_con->dbname, NULL);
-
-	/* make sure BDR extension exists */
-	bdr_maintain_schema();
-
-	/* always work in our own schema */
-	SetConfigOption("search_path", "bdr, pg_catalog",
-					PGC_BACKEND, PGC_S_OVERRIDE);
-
-	CurrentResourceOwner = ResourceOwnerCreate(NULL, "bdr seq top-level resource owner");
-	bdr_saved_resowner = CurrentResourceOwner;
-
-	elog(LOG, "BDR starting sequencer on db \"%s\"", bdr_static_con->dbname);
-
-	/* initialize sequencer */
-	bdr_sequencer_init();
-
-	while (!got_sigterm)
-	{
-		/*
-		 * Background workers mustn't call usleep() or any direct equivalent:
-		 * instead, they may wait on their process latch, which sleeps as
-		 * necessary, but is awakened if postmaster dies.  That way the
-		 * background process goes away immediately in an emergency.
-		 */
-		rc = WaitLatch(&MyProc->procLatch,
-					   WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
-					   10000L);
-
-		ResetLatch(&MyProc->procLatch);
-
-		/* emergency bailout if postmaster has died */
-		if (rc & WL_POSTMASTER_DEATH)
-			proc_exit(1);
-
-		/* check whether we need to vote */
-		bdr_sequencer_vote();
-
-		/* check whether any of our elections needs to be tallied */
-		bdr_sequencer_tally();
-
-		/* check all bdr sequences for used up chunks */
-		bdr_sequencer_fill_sequences();
-
-		/* check whether we need to start new elections */
-		bdr_sequencer_start_elections();
-		pgstat_report_activity(STATE_IDLE, NULL);
-	}
-
-	proc_exit(0);
-}
-
 static BDRWorkerCon*
 create_worker_con(char *name)
 {
@@ -763,6 +696,8 @@ create_worker_con(char *name)
  *
  * Since the worker is fork()ed from the postmaster, all globals
  * initialised in _PG_init remain valid.
+ *
+ * This worker can use the SPI and shared memory.
  */
 static void
 bdr_static_worker(Datum main_arg)
@@ -770,6 +705,7 @@ bdr_static_worker(Datum main_arg)
 	BackgroundWorker  apply_worker;
 	List             *apply_workers = NIL;
 	ListCell		 *c;
+	int				  rc;
 
 	bdr_static_con = (BDRStaticCon *) DatumGetPointer(main_arg);
 
@@ -783,6 +719,7 @@ bdr_static_worker(Datum main_arg)
 	apply_worker.bgw_restart_time = 5;
 	apply_worker.bgw_notify_pid = 0;
 
+	/* Launch apply workers */
 	foreach(c, bdr_static_con->conns)
 	{
 		BDRWorkerCon 		   *con;
@@ -802,9 +739,64 @@ bdr_static_worker(Datum main_arg)
 		apply_workers = lcons(bgw_handle, apply_workers);
 	}
 
-	/* Once we're done with init, launch the sequencer
-	 * (should integrate it) */
-	bdr_sequencer_main(main_arg);
+	/* Establish signal handlers before unblocking signals. */
+	pqsignal(SIGHUP, bdr_sighup);
+	pqsignal(SIGTERM, bdr_sigterm);
+
+	/* We're now ready to receive signals */
+	BackgroundWorkerUnblockSignals();
+
+	/* Connect to our database */
+	BackgroundWorkerInitializeConnection(bdr_static_con->dbname, NULL);
+
+	/* make sure BDR extension exists */
+	bdr_maintain_schema();
+
+	/* always work in our own schema */
+	SetConfigOption("search_path", "bdr, pg_catalog",
+					PGC_BACKEND, PGC_S_OVERRIDE);
+
+	CurrentResourceOwner = ResourceOwnerCreate(NULL, "bdr seq top-level resource owner");
+	bdr_saved_resowner = CurrentResourceOwner;
+
+	elog(LOG, "BDR starting sequencer on db \"%s\"", bdr_static_con->dbname);
+
+	/* initialize sequencer */
+	bdr_sequencer_init();
+
+	while (!got_sigterm)
+	{
+		/*
+		 * Background workers mustn't call usleep() or any direct equivalent:
+		 * instead, they may wait on their process latch, which sleeps as
+		 * necessary, but is awakened if postmaster dies.  That way the
+		 * background process goes away immediately in an emergency.
+		 */
+		rc = WaitLatch(&MyProc->procLatch,
+					   WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
+					   10000L);
+
+		ResetLatch(&MyProc->procLatch);
+
+		/* emergency bailout if postmaster has died */
+		if (rc & WL_POSTMASTER_DEATH)
+			proc_exit(1);
+
+		/* check whether we need to vote */
+		bdr_sequencer_vote();
+
+		/* check whether any of our elections needs to be tallied */
+		bdr_sequencer_tally();
+
+		/* check all bdr sequences for used up chunks */
+		bdr_sequencer_fill_sequences();
+
+		/* check whether we need to start new elections */
+		bdr_sequencer_start_elections();
+		pgstat_report_activity(STATE_IDLE, NULL);
+	}
+
+	proc_exit(0);
 }
 
 /*
