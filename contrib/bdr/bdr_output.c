@@ -52,6 +52,7 @@ typedef struct
 	bool allow_binary_protocol;
 	bool allow_sendrecv_protocol;
 	bool int_datetime_mismatch;
+	bool forward_changesets;
 
 	uint32 client_pg_version;
 	uint32 client_pg_catversion;
@@ -198,6 +199,8 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 			bdr_parse_bool(elem, &data->client_int_datetime);
 		else if (strcmp(elem->defname, "db_encoding") == 0)
 			data->client_db_encoding = pstrdup(strVal(elem->arg));
+		else if (strcmp(elem->defname, "forward_changesets") == 0)
+			bdr_parse_bool(elem, &data->forward_changesets);
 		else
 		{
 			ereport(ERROR,
@@ -291,6 +294,17 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 	}
 }
 
+/*
+ * Only changesets generated on the local node should be replicated
+ * to the client unless we're in changeset forwarding mode.
+ */
+static inline bool
+should_forward_changeset(LogicalDecodingContext *ctx, ReorderBufferTXN *txn)
+{
+	return (txn->origin_id == InvalidRepNodeId)
+		   || ((BdrOutputData*)ctx->output_plugin_private)->forward_changesets;
+}
+
 /* BEGIN callback */
 void
 pg_decode_begin_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *txn)
@@ -300,7 +314,7 @@ pg_decode_begin_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *txn)
 #endif
 	AssertVariableIsOfType(&pg_decode_begin_txn, LogicalDecodeBeginCB);
 
-	if (txn->origin_id != InvalidRepNodeId)
+	if (!should_forward_changeset(ctx, txn))
 		return;
 
 	OutputPluginPrepareWrite(ctx, true);
@@ -320,7 +334,7 @@ pg_decode_commit_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 	BdrOutputData *data = ctx->output_plugin_private;
 #endif
 
-	if (txn->origin_id != InvalidRepNodeId)
+	if (!should_forward_changeset(ctx, txn))
 		return;
 
 	OutputPluginPrepareWrite(ctx, true);
@@ -343,8 +357,7 @@ pg_decode_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 	/* Avoid leaking memory by using and resetting our own context */
 	old = MemoryContextSwitchTo(data->context);
 
-	/* only log changes originating locally */
-	if (txn->origin_id != InvalidRepNodeId)
+	if (!should_forward_changeset(ctx, txn))
 		return;
 
 	OutputPluginPrepareWrite(ctx, true);
