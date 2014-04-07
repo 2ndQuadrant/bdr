@@ -100,7 +100,7 @@ process_remote_begin(StringInfo s)
 	XLogRecPtr		origlsn;
 	TimestampTz		committime;
 	TimestampTz		current;
-	char	    	statbuf[100];
+	char			statbuf[100];
 
 	Assert(bdr_apply_con != NULL);
 
@@ -134,7 +134,8 @@ process_remote_begin(StringInfo s)
 			long		sec;
 			int			usec;
 
-			current = TimestampTzPlusMilliseconds(current, -bdr_apply_con->apply_delay);
+			current = TimestampTzPlusMilliseconds(current,
+												  -bdr_apply_con->apply_delay);
 
 			TimestampDifference(current, replication_origin_timestamp,
 								&sec, &usec);
@@ -254,7 +255,7 @@ process_queued_ddl_command(HeapTuple cmdtup, bool tx_just_started)
 
 	foreach(command_i, commands)
 	{
-		List   	   *plantree_list;
+		List	   *plantree_list;
 		List	   *querytree_list;
 		Node	   *command = (Node *) lfirst(command_i);
 		ListCell   *stmt_i;
@@ -392,7 +393,8 @@ fetch_sysid_via_node_id(RepNodeId node_id, uint64 *sysid, TimeLineID *tli)
 		ident = text_to_cstring(&node_class->riname);
 
 		if (sscanf(ident, "bdr: "UINT64_FORMAT"-%u-%u-%u:%s",
-				   &remote_sysid, &remote_tli, &remote_dboid, &local_dboid, NameStr(replication_name)) != 4)
+				   &remote_sysid, &remote_tli, &remote_dboid, &local_dboid,
+				   NameStr(replication_name)) != 4)
 			elog(ERROR, "could not parse sysid: %s", ident);
 		ReleaseSysCache(node);
 		pfree(ident);
@@ -506,10 +508,12 @@ process_remote_update(StringInfo s)
 		TransactionIdGetCommitTsData(xmin, &local_ts, &local_node_id_raw);
 		local_node_id = local_node_id_raw;
 
-		check_apply_update(local_node_id, local_ts, &apply_update, &log_update);
+		check_apply_update(local_node_id, local_ts,
+						   &apply_update, &log_update);
 
 		if (log_update)
-			do_log_update(local_node_id, apply_update, local_ts, idxrel, old_key);
+			do_log_update(local_node_id, apply_update, local_ts,
+						  idxrel, old_key);
 
 		if (apply_update)
 			do_apply_update(rel, oldtid, old_tuple, new_tuple);
@@ -524,7 +528,8 @@ process_remote_update(StringInfo s)
 
 		ereport(ERROR,
 				(errcode(ERRCODE_INTEGRITY_CONSTRAINT_VIOLATION),
-				 errmsg("CONFLICT: could not find existing tuple for pkey %s", s_key.data)));
+				 errmsg("CONFLICT: could not find existing tuple for pkey %s",
+						s_key.data)));
 	}
 
 	check_sequencer_wakeup(rel);
@@ -653,7 +658,8 @@ do_log_update(RepNodeId local_node_id, bool apply_update, TimestampTz ts,
 }
 
 static void
-do_apply_update(Relation rel, ItemPointerData oldtid, HeapTuple old_tuple, BDRTupleData new_tuple)
+do_apply_update(Relation rel, ItemPointerData oldtid,
+				HeapTuple old_tuple, BDRTupleData new_tuple)
 {
 	HeapTuple	nt;
 
@@ -793,7 +799,7 @@ read_tuple_parts(StringInfo s, Relation rel, BDRTupleData *tup)
 		Form_pg_attribute att = desc->attrs[i];
 		char		kind = pq_getmsgbyte(s);
 		const char *data;
-		int	   		len;
+		int			len;
 
 		switch (kind)
 		{
@@ -826,7 +832,8 @@ read_tuple_parts(StringInfo s, Relation rel, BDRTupleData *tup)
 					tup->isnull[i] = false;
 					len = pq_getmsgint(s, 4); /* read length */
 
-					getTypeBinaryInputInfo(att->atttypid, &typreceive, &typioparam);
+					getTypeBinaryInputInfo(att->atttypid,
+										   &typreceive, &typioparam);
 
 					/* create StringInfo pointing into the bigger buffer */
 					initStringInfo(&buf);
@@ -900,7 +907,8 @@ read_tuple(StringInfo s, Relation rel)
 	HeapTuple	tup;
 
 	read_tuple_parts(s, rel, &tupdata);
-	tup = heap_form_tuple(RelationGetDescr(rel), tupdata.values, tupdata.isnull);
+	tup = heap_form_tuple(RelationGetDescr(rel),
+						  tupdata.values, tupdata.isnull);
 	return tup;
 }
 
@@ -1086,7 +1094,8 @@ build_scan_key(ScanKey skey, Relation rel, Relation idxrel, HeapTuple key)
 									   BTEqualStrategyNumber);
 
 		if (!OidIsValid(operator))
-			elog(ERROR, "could not lookup equality operator for type %u, optype %u in opfamily %u",
+			elog(ERROR,
+				 "could not lookup equality operator for type %u, optype %u in opfamily %u",
 				 atttype, optype, opfamily);
 
 		regop = get_opcode(operator);
