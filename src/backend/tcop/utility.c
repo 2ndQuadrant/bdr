@@ -1250,7 +1250,8 @@ ProcessUtilitySlow(Node *parsetree,
 				break;
 
 			case T_AlterEnumStmt:		/* ALTER TYPE (enum) */
-				AlterEnum((AlterEnumStmt *) parsetree, isTopLevel);
+				objectId = AlterEnum((AlterEnumStmt *) parsetree, isTopLevel);
+				EventTriggerStashCommand(objectId, OBJECT_TYPE, parsetree);
 				break;
 
 			case T_ViewStmt:	/* CREATE VIEW */
@@ -1348,7 +1349,33 @@ ProcessUtilitySlow(Node *parsetree,
 				break;
 
 			case T_RenameStmt:
-				ExecRenameStmt((RenameStmt *) parsetree);
+				{
+					ObjectType	objtype;
+
+					objectId = ExecRenameStmt((RenameStmt *) parsetree);
+
+					/*
+					 * Kludge alert: the event trigger machinery as a whole
+					 * doesn't support OBJECT_COLUMN nor OBJECT_ATTRIBUTE, so
+					 * fool it by using the relation type instead.  In certain
+					 * cases this is actually incorrect (for example we might
+					 * be renaming a type attribute or a view column), but the
+					 * deparsing functions will cope with this by actually
+					 * looking at the renameType directly.  The object type and
+					 * identity as reported by
+					 * pg_event_trigger_get_creation_commands might be
+					 * misleading, though.
+					 *
+					 * To support this better we ought to have the attribute
+					 * number for the column or attribute here.  Maybe have
+					 * ExecRenameStmt pass it back?
+					 */
+					objtype = ((RenameStmt *) parsetree)->renameType;
+					if (objtype == OBJECT_COLUMN ||
+						objtype == OBJECT_ATTRIBUTE)
+						objtype = ((RenameStmt *) parsetree)->relationType;
+					EventTriggerStashCommand(objectId, objtype, parsetree);
+				}
 				break;
 
 			case T_AlterObjectSchemaStmt:

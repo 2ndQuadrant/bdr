@@ -81,6 +81,7 @@ extern void bdr_sequencer_start_elections(void);
 extern void bdr_sequencer_fill_sequences(void);
 
 extern void bdr_sequencer_wakeup(void);
+extern void bdr_schedule_eoxact_sequencer_wakeup(void);
 
 extern void bdr_sequence_alloc(PG_FUNCTION_ARGS);
 extern void bdr_sequence_setval(PG_FUNCTION_ARGS);

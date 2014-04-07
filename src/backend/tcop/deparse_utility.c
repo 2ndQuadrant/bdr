@@ -661,7 +661,7 @@ get_persistence_str(char persistence)
 
 /*
  * deparse_CreateExtensionStmt
- * 		deparse a CreateExtensionStmt
+ *		deparse a CreateExtensionStmt
  *
  * Given an extension OID and the parsetree that created it, return the JSON
  * blob representing the creation command.
@@ -1710,6 +1710,273 @@ deparse_CreateRangeStmt(Oid objectId, Node *parsetree)
 	return command;
 }
 
+/*
+ * Return the given object type as a string.
+ */
+static const char *
+stringify_objtype(ObjectType objtype)
+{
+	switch (objtype)
+	{
+		case OBJECT_TABLE:
+			return "TABLE";
+		case OBJECT_SEQUENCE:
+			return "SEQUENCE";
+		case OBJECT_VIEW:
+			return "VIEW";
+		case OBJECT_MATVIEW:
+			return "MATERIALIZED VIEW";
+		case OBJECT_INDEX:
+			return "INDEX";
+		case OBJECT_FOREIGN_TABLE:
+			return "FOREIGN TABLE";
+		case OBJECT_TYPE:
+			return "TYPE";
+		case OBJECT_SCHEMA:
+			return "SCHEMA";
+		case OBJECT_FDW:
+			return "FOREIGN DATA WRAPPER";
+		case OBJECT_LANGUAGE:
+			return "LANGUAGE";
+		case OBJECT_FOREIGN_SERVER:
+			return "SERVER";
+		case OBJECT_COLLATION:
+			return "COLLATION";
+		case OBJECT_CONVERSION:
+			return "CONVERSION";
+		case OBJECT_DOMAIN:
+			return "DOMAIN";
+		case OBJECT_TSDICTIONARY:
+			return "TEXT SEARCH DICTIONARY";
+		case OBJECT_TSPARSER:
+			return "TEXT SEARCH PARSER";
+		case OBJECT_TSTEMPLATE:
+			return "TEXT SEARCH TEMPLATE";
+		case OBJECT_TSCONFIGURATION:
+			return "TEXT SEARCH CONFIGURATION";
+
+		default:
+			elog(ERROR, "unsupported objtype %d", objtype);
+	}
+}
+
+static char *
+deparse_RenameStmt(Oid objectId, Node *parsetree)
+{
+	RenameStmt *node = (RenameStmt *) parsetree;
+	ObjTree	   *renameStmt;
+	char	   *command;
+	char	   *fmtstr;
+	Relation	relation;
+	Oid			schemaId;
+	const char *subthing;
+
+	/*
+	 * FIXME --- this code is missing support for inheritance behavioral flags,
+	 * i.e. the "*" and ONLY elements.
+	 */
+
+	/*
+	 * In a ALTER .. RENAME command, we don't have the original name of the
+	 * object in system catalogs: since we inspect them after the command has
+	 * executed, the old name is already gone.  Therefore, we extract it from
+	 * the parse node.  Note we still extract the schema name from the catalog
+	 * (it might not be present in the parse node); it cannot possibly have
+	 * changed anyway.
+	 *
+	 * XXX what if there's another event trigger running concurrently that
+	 * renames the schema or moves the object to another schema?  Seems
+	 * pretty far-fetched, but possible nonetheless.
+	 */
+	switch (node->renameType)
+	{
+		case OBJECT_TABLE:
+		case OBJECT_SEQUENCE:
+		case OBJECT_VIEW:
+		case OBJECT_MATVIEW:
+		case OBJECT_INDEX:
+		case OBJECT_FOREIGN_TABLE:
+			fmtstr = psprintf("ALTER %s %%{if_exists}s %%{identity}D RENAME TO %%{newname}I",
+							  stringify_objtype(node->renameType));
+			relation = relation_open(objectId, AccessShareLock);
+			schemaId = RelationGetNamespace(relation);
+			renameStmt = new_objtree_VA(NULL, fmtstr, 0);
+			append_object_object(renameStmt, "identity",
+								 new_objtree_for_qualname(renameStmt,
+														  schemaId,
+														  node->relation->relname));
+			append_string_object(renameStmt, "if_exists",
+								 node->missing_ok ? "IF EXISTS" : "");
+			relation_close(relation, AccessShareLock);
+			break;
+
+		case OBJECT_COLUMN:
+		case OBJECT_ATTRIBUTE:
+			relation = relation_open(objectId, AccessShareLock);
+			schemaId = RelationGetNamespace(relation);
+
+			if (node->renameType == OBJECT_COLUMN)
+				subthing = "COLUMN";
+			else
+				subthing = "ATTRIBUTE";
+
+			fmtstr = psprintf("ALTER %s %%{if_exists}s %%{identity}D RENAME %s %%{colname}I TO %%{newname}I",
+							  stringify_objtype(node->relationType),
+							  subthing);
+			renameStmt = new_objtree_VA(NULL, fmtstr, 0);
+			append_object_object(renameStmt, "identity",
+								 new_objtree_for_qualname(renameStmt,
+														  schemaId,
+														  node->relation->relname));
+			append_string_object(renameStmt, "colname", node->subname);
+			append_string_object(renameStmt, "if_exists",
+								 node->missing_ok ? "IF EXISTS" : "");
+			relation_close(relation, AccessShareLock);
+			break;
+
+		case OBJECT_SCHEMA:
+		case OBJECT_FDW:
+		case OBJECT_LANGUAGE:
+		case OBJECT_FOREIGN_SERVER:
+			fmtstr = psprintf("ALTER %s %%{identity}I RENAME TO %%{newname}I",
+							  stringify_objtype(node->relationType));
+			renameStmt = new_objtree_VA(NULL, fmtstr, 0);
+			append_string_object(renameStmt, "identity",
+								 node->subname);
+			break;
+
+		case OBJECT_COLLATION:
+		case OBJECT_CONVERSION:
+		case OBJECT_DOMAIN:
+		case OBJECT_TSDICTIONARY:
+		case OBJECT_TSPARSER:
+		case OBJECT_TSTEMPLATE:
+		case OBJECT_TSCONFIGURATION:
+		case OBJECT_TYPE:
+			{
+				ObjTree    *ident;
+				HeapTuple	objTup;
+				Oid			catalogId;
+				Relation	catalog;
+				bool		isnull;
+				AttrNumber	nspnum;
+
+				catalogId = get_objtype_catalog_oid(node->renameType);
+				catalog = heap_open(catalogId, AccessShareLock);
+				objTup = get_catalog_object_by_oid(catalog, objectId);
+				nspnum = get_object_attnum_namespace(catalogId);
+
+				schemaId = DatumGetObjectId(heap_getattr(objTup,
+														 nspnum,
+														 RelationGetDescr(catalog),
+														 &isnull));
+
+				fmtstr = psprintf("ALTER %s %%{identity}D RENAME TO %%{newname}I",
+								  stringify_objtype(node->renameType));
+				renameStmt = new_objtree_VA(NULL, fmtstr, 0);
+				ident = new_objtree_for_qualname(renameStmt,
+												 schemaId,
+												 strVal(llast(node->object)));
+				append_object_object(renameStmt, "identity", ident);
+				relation_close(catalog, AccessShareLock);
+
+			}
+			break;
+
+		case OBJECT_AGGREGATE:
+		case OBJECT_FUNCTION:
+			elog(ERROR, "renaming of functions and aggregates is not supported yet");
+
+		case OBJECT_CONSTRAINT:
+			{
+				HeapTuple		conTup;
+				Form_pg_constraint	constrForm;
+				ObjTree		   *ident;
+
+				conTup = SearchSysCache1(CONSTROID, objectId);
+				constrForm = (Form_pg_constraint) GETSTRUCT(conTup);
+				fmtstr = psprintf("ALTER %s %%{identity}D RENAME CONSTRAINT %%{conname}I TO %%{newname}I",
+								  stringify_objtype(node->relationType));
+				renameStmt = new_objtree_VA(NULL, fmtstr, 0);
+
+				if (node->relationType == OBJECT_DOMAIN)
+					ident = new_objtree_for_qualname_id(renameStmt,
+														TypeRelationId,
+														constrForm->contypid);
+				else if (node->relationType == OBJECT_TABLE)
+					ident = new_objtree_for_qualname_id(renameStmt,
+														RelationRelationId,
+														constrForm->conrelid);
+				else
+					elog(ERROR, "invalid relation type %d", node->relationType);
+
+				append_string_object(renameStmt, "conname", node->subname);
+				append_object_object(renameStmt, "identity", ident);
+				ReleaseSysCache(conTup);
+			}
+			break;
+
+		case OBJECT_OPCLASS:
+		case OBJECT_OPFAMILY:
+			ereport(ERROR,
+					(errmsg("renaming of operator classes and families is not supported")));
+			break;
+
+		case OBJECT_RULE:
+			{
+				HeapTuple	rewrTup;
+				Form_pg_rewrite rewrForm;
+				Relation	pg_rewrite;
+
+				pg_rewrite = relation_open(RewriteRelationId, AccessShareLock);
+				rewrTup = get_catalog_object_by_oid(pg_rewrite, objectId);
+				rewrForm = (Form_pg_rewrite) GETSTRUCT(rewrTup);
+
+				renameStmt = new_objtree_VA(NULL,
+											"ALTER RULE %{rulename}I ON %{identity}D RENAME TO %{newname}I",
+											0);
+				append_string_object(renameStmt, "rulename", node->subname);
+				append_object_object(renameStmt, "identity",
+									 new_objtree_for_qualname_id(renameStmt,
+																 RelationRelationId,
+																 rewrForm->ev_class));
+				relation_close(pg_rewrite, AccessShareLock);
+			}
+			break;
+
+		case OBJECT_TRIGGER:
+			{
+				HeapTuple	trigTup;
+				Form_pg_trigger trigForm;
+				Relation	pg_trigger;
+
+				pg_trigger = relation_open(TriggerRelationId, AccessShareLock);
+				trigTup = get_catalog_object_by_oid(pg_trigger, objectId);
+				trigForm = (Form_pg_trigger) GETSTRUCT(trigTup);
+
+				renameStmt = new_objtree_VA(NULL,
+											"ALTER TRIGGER %{triggername}I ON %{identity}D RENAME TO %{newname}I",
+											0);
+				append_string_object(renameStmt, "triggername", node->subname);
+				append_object_object(renameStmt, "identity",
+									 new_objtree_for_qualname_id(renameStmt,
+																 RelationRelationId,
+																 trigForm->tgrelid));
+				relation_close(pg_trigger, AccessShareLock);
+			}
+			break;
+		default:
+			elog(ERROR, "unsupported object type %d", node->renameType);
+	}
+
+	append_string_object(renameStmt, "newname", node->newname);
+
+	command = jsonize_objtree(renameStmt);
+	free_objtree(renameStmt);
+
+	return command;
+}
+
 static inline ObjElem *
 deparse_Seq_Cache(ObjTree *parent, Form_pg_sequence seqdata)
 {
@@ -2237,6 +2504,7 @@ deparse_AlterTableStmt(Oid objectId, Node *parsetree)
 	AlterTableStmt *node = (AlterTableStmt *) parsetree;
 	ObjTree	   *alterTableStmt;
 	ObjTree	   *tmp;
+	ObjTree	   *tmp2;
 	List	   *dpcontext;
 	Relation	rel;
 	List	   *subcmds = NIL;
@@ -2424,18 +2692,45 @@ deparse_AlterTableStmt(Oid objectId, Node *parsetree)
 				break;
 
 			case AT_ClusterOn:
+				tmp = new_objtree_VA(alterTableStmt,
+									 "CLUSTER ON %{index}I", 2,
+									 "type", ObjTypeString, "cluster on",
+									 "index", ObjTypeString, subcmd->name);
+				subcmds = lappend(subcmds,
+								  new_object_object(alterTableStmt, NULL, tmp));
 				break;
 
 			case AT_DropCluster:
+				tmp = new_objtree_VA(alterTableStmt,
+									 "SET WITHOUT CLUSTER", 1,
+									 "type", ObjTypeString, "set without cluster");
+				subcmds = lappend(subcmds,
+								  new_object_object(alterTableStmt, NULL, tmp));
 				break;
 
 			case AT_AddOids:
+				tmp = new_objtree_VA(alterTableStmt,
+									 "SET WITH OIDS", 1,
+									 "type", ObjTypeString, "set with oids");
+				subcmds = lappend(subcmds,
+								  new_object_object(alterTableStmt, NULL, tmp));
 				break;
 
 			case AT_DropOids:
+				tmp = new_objtree_VA(alterTableStmt,
+									 "SET WITHOUT OIDS", 1,
+									 "type", ObjTypeString, "set without oids");
+				subcmds = lappend(subcmds,
+								  new_object_object(alterTableStmt, NULL, tmp));
 				break;
 
 			case AT_SetTableSpace:
+				tmp = new_objtree_VA(alterTableStmt,
+									 "SET TABLESPACE %{tablespace}I", 2,
+									 "type", ObjTypeString, "set tablespace",
+									 "tablespace", ObjTypeString, subcmd->name);
+				subcmds = lappend(subcmds,
+								  new_object_object(alterTableStmt, NULL, tmp));
 				break;
 
 			case AT_SetRelOptions:
@@ -2444,28 +2739,76 @@ deparse_AlterTableStmt(Oid objectId, Node *parsetree)
 			case AT_ResetRelOptions:
 				break;
 
+				/*
+				 * FIXME --- should we unify representation of all these
+				 * ENABLE/DISABLE TRIGGER commands??
+				 */
 			case AT_EnableTrig:
+				tmp = new_objtree_VA(alterTableStmt,
+									 "ENABLE TRIGGER %{trigger}I", 2,
+									 "type", ObjTypeString, "enable trigger",
+									 "trigger", ObjTypeString, subcmd->name);
+				subcmds = lappend(subcmds,
+								  new_object_object(alterTableStmt, NULL, tmp));
 				break;
 
 			case AT_EnableAlwaysTrig:
+				tmp = new_objtree_VA(alterTableStmt,
+									 "ENABLE ALWAYS TRIGGER %{trigger}I", 2,
+									 "type", ObjTypeString, "enable always trigger",
+									 "trigger", ObjTypeString, subcmd->name);
+				subcmds = lappend(subcmds,
+								  new_object_object(alterTableStmt, NULL, tmp));
 				break;
 
 			case AT_EnableReplicaTrig:
+				tmp = new_objtree_VA(alterTableStmt,
+									 "ENABLE REPLICA TRIGGER %{trigger}I", 2,
+									 "type", ObjTypeString, "enable replica trigger",
+									 "trigger", ObjTypeString, subcmd->name);
+				subcmds = lappend(subcmds,
+								  new_object_object(alterTableStmt, NULL, tmp));
 				break;
 
 			case AT_DisableTrig:
+				tmp = new_objtree_VA(alterTableStmt,
+									 "DISABLE TRIGGER %{trigger}I", 2,
+									 "type", ObjTypeString, "disable trigger",
+									 "trigger", ObjTypeString, subcmd->name);
+				subcmds = lappend(subcmds,
+								  new_object_object(alterTableStmt, NULL, tmp));
 				break;
 
 			case AT_EnableTrigAll:
+				tmp = new_objtree_VA(alterTableStmt,
+									 "ENABLE TRIGGER ALL", 1,
+									 "type", ObjTypeString, "enable trigger all");
+				subcmds = lappend(subcmds,
+								  new_object_object(alterTableStmt, NULL, tmp));
 				break;
 
 			case AT_DisableTrigAll:
+				tmp = new_objtree_VA(alterTableStmt,
+									 "DISABLE TRIGGER ALL", 1,
+									 "type", ObjTypeString, "disable trigger all");
+				subcmds = lappend(subcmds,
+								  new_object_object(alterTableStmt, NULL, tmp));
 				break;
 
 			case AT_EnableTrigUser:
+				tmp = new_objtree_VA(alterTableStmt,
+									 "ENABLE TRIGGER USER", 1,
+									 "type", ObjTypeString, "enable trigger user");
+				subcmds = lappend(subcmds,
+								  new_object_object(alterTableStmt, NULL, tmp));
 				break;
 
 			case AT_DisableTrigUser:
+				tmp = new_objtree_VA(alterTableStmt,
+									 "DISABLE TRIGGER USER", 1,
+									 "type", ObjTypeString, "disable trigger user");
+				subcmds = lappend(subcmds,
+								  new_object_object(alterTableStmt, NULL, tmp));
 				break;
 
 			case AT_EnableRule:
@@ -2481,9 +2824,16 @@ deparse_AlterTableStmt(Oid objectId, Node *parsetree)
 				break;
 
 			case AT_AddInherit:
+				/*
+				 * XXX this case is interesting: we cannot rely on parse node
+				 * because parent name might be unqualified; but there's no way
+				 * to extract it from catalog either, since we don't know which
+				 * of the parents is the new one.
+				 */
 				break;
 
 			case AT_DropInherit:
+				/* XXX ditto ... */
 				break;
 
 			case AT_AddOf:
@@ -2493,6 +2843,29 @@ deparse_AlterTableStmt(Oid objectId, Node *parsetree)
 				break;
 
 			case AT_ReplicaIdentity:
+				tmp = new_objtree_VA(alterTableStmt,
+									 "REPLICA IDENTITY %{ident}s", 1,
+									 "type", ObjTypeString, "replica identity");
+				switch (((ReplicaIdentityStmt *) subcmd->def)->identity_type)
+				{
+					case REPLICA_IDENTITY_DEFAULT:
+						append_string_object(tmp, "ident", "DEFAULT");
+						break;
+					case REPLICA_IDENTITY_FULL:
+						append_string_object(tmp, "ident", "FULL");
+						break;
+					case REPLICA_IDENTITY_NOTHING:
+						append_string_object(tmp, "ident", "NOTHING");
+						break;
+					case REPLICA_IDENTITY_INDEX:
+						tmp2 = new_objtree_VA(tmp, "USING INDEX %{index}I", 1,
+											  "index", ObjTypeString,
+											  ((ReplicaIdentityStmt *) subcmd->def)->name);
+						append_object_object(tmp, "ident", tmp2);
+						break;
+				}
+				subcmds = lappend(subcmds,
+								  new_object_object(alterTableStmt, NULL, tmp));
 				break;
 
 			case AT_GenericOptions:
@@ -2517,6 +2890,46 @@ deparse_AlterTableStmt(Oid objectId, Node *parsetree)
 
 	free_objtree(alterTableStmt);
 	heap_close(rel, AccessShareLock);
+
+	return command;
+}
+
+static char *
+deparse_AlterEnumStmt(Oid objectId, Node *parsetree)
+{
+	AlterEnumStmt *node = (AlterEnumStmt *) parsetree;
+	ObjTree	   *alterEnum;
+	ObjTree	   *tmp;
+	char	   *command;
+
+	alterEnum =
+		new_objtree_VA(NULL,
+					   "ALTER TYPE %{identity}D ADD VALUE %{if_not_exists}s %{value}L %{position}s",
+					   0);
+
+	append_string_object(alterEnum, "if_not_exists",
+						 node->skipIfExists ? "IF NOT EXISTS" : "");
+	append_object_object(alterEnum, "identity",
+						 new_objtree_for_qualname_id(alterEnum,
+													 TypeRelationId,
+													 objectId));
+	append_string_object(alterEnum, "value", node->newVal);
+	tmp = new_objtree_VA(alterEnum,
+			  			 "%{after_or_before}s %{neighbour}L", 0);
+	if (node->newValNeighbor)
+	{
+		append_string_object(tmp, "after_or_before",
+							 node->newValIsAfter ? "AFTER" : "BEFORE");
+		append_string_object(tmp, "neighbour", node->newValNeighbor);
+	}
+	else
+	{
+		append_bool_object(tmp, "present", false);
+	}
+	append_object_object(alterEnum, "position", tmp);
+
+	command = jsonize_objtree(alterEnum);
+	free_objtree(alterEnum);
 
 	return command;
 }
@@ -2611,7 +3024,7 @@ deparse_utility_command(Oid objectId, Node *parsetree)
 			break;
 
 		case T_RenameStmt:		/* ALTER .. RENAME */
-			command = NULL;
+			command = deparse_RenameStmt(objectId, parsetree);
 			break;
 
 		case T_CreateDomainStmt:
@@ -2632,6 +3045,10 @@ deparse_utility_command(Oid objectId, Node *parsetree)
 
 		case T_AlterTableStmt:
 			command = deparse_AlterTableStmt(objectId, parsetree);
+			break;
+
+		case T_AlterEnumStmt:
+			command = deparse_AlterEnumStmt(objectId, parsetree);
 			break;
 
 		default:

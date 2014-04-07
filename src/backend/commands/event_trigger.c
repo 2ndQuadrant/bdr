@@ -1639,10 +1639,7 @@ dequote_jsonval(char *jsonval)
 		 */
 		if (jsonval[i] == '\\' &&
 			jsonval[i + 1] == '"')
-		{
-			i++;
 			continue;
-		}
 
 		result[j++] = jsonval[i];
 	}
