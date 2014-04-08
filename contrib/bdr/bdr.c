@@ -313,6 +313,47 @@ bdr_connect(
 	return streamConn;
 }
 
+static void
+bdr_create_slot(
+	PGconn	   *streamConn,
+	Name		slot_name,
+	char	   *remote_ident,
+	RepNodeId  *replication_identifier
+)
+{
+	StringInfoData query;
+	PGresult   *res;
+
+	initStringInfo(&query);
+
+	StartTransactionCommand();
+
+	/* we want the new identifier on stable storage immediately */
+	ForceSyncCommit();
+
+	/* acquire remote decoding slot */
+	resetStringInfo(&query);
+	appendStringInfo(&query, "CREATE_REPLICATION_SLOT \"%s\" LOGICAL %s",
+					 NameStr(*slot_name), "bdr_output");
+	res = PQexec(streamConn, query.data);
+
+	if (PQresultStatus(res) != PGRES_TUPLES_OK)
+	{
+		elog(FATAL, "could not send replication command \"%s\": status %s: %s\n",
+			 query.data, PQresStatus(PQresultStatus(res)), PQresultErrorMessage(res));
+	}
+
+	/* acquire new local identifier, but don't commit */
+	*replication_identifier = CreateReplicationIdentifier(remote_ident);
+
+	/* now commit local identifier */
+	CommitTransactionCommand();
+	CurrentResourceOwner = bdr_saved_resowner;
+	elog(LOG, "created replication identifier %u", *replication_identifier);
+	
+	PQclear(res);
+}
+
 /*
  * Perform setup work common to all bdr worker types, such as:
  *
@@ -378,6 +419,7 @@ bdr_apply_main(Datum main_arg)
 	elog(LOG, "%s initialized on %s, remote %s",
 		 MyBgworkerEntry->bgw_name, bdr_apply_con->dbname, conninfo_repl);
 
+	/* Establish BDR conn and IDENTIFY_SYSTEM */
 	streamConn = bdr_connect(
 		conninfo_repl,
 		remote_ident, sizeof(remote_ident),
@@ -387,50 +429,23 @@ bdr_apply_main(Datum main_arg)
 		);
 
 	StartTransactionCommand();
-
 	replication_identifier = GetReplicationIdentifier(remote_ident, true);
-
 	CommitTransactionCommand();
-
 
 	if (OidIsValid(replication_identifier))
 		elog(LOG, "found valid replication identifier %u", replication_identifier);
-	/* create local replication identifier and a remote slot */
 	else
 	{
-		elog(LOG, "lookup failed, create new identifier");
-		/* doing this really safely would require 2pc... */
-		StartTransactionCommand();
+		elog(LOG, "Creating new slot %s", NameStr(slot_name));
 
-		/* we want the new identifier on stable storage immediately */
-		ForceSyncCommit();
-
-		/* acquire remote decoding slot */
-		resetStringInfo(&query);
-		appendStringInfo(&query, "CREATE_REPLICATION_SLOT \"%s\" LOGICAL %s",
-						 NameStr(slot_name), "bdr_output");
-		res = PQexec(streamConn, query.data);
-
-		if (PQresultStatus(res) != PGRES_TUPLES_OK)
-		{
-			elog(FATAL, "could not send replication command \"%s\": status %s: %s\n",
-				 query.data, PQresStatus(PQresultStatus(res)), PQresultErrorMessage(res));
-		}
-
-		/* acquire new local identifier, but don't commit */
-		replication_identifier = CreateReplicationIdentifier(remote_ident);
-
-		/* now commit local identifier */
-		CommitTransactionCommand();
-		CurrentResourceOwner = bdr_saved_resowner;
-		elog(LOG, "created replication identifier %u", replication_identifier);
+		/* create local replication identifier and a remote slot */
+		bdr_create_slot(streamConn, &slot_name, remote_ident, &replication_identifier);
 
 		/* copy the database, if needed */
 		if (bdr_apply_con->init_replica)
 			init_replica(bdr_apply_con, streamConn, res);
-		
-		PQclear(res);
 	}
+
 
 	bdr_apply_con->origin_id = replication_identifier;
 
