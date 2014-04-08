@@ -28,6 +28,7 @@
 /* these headers are used by this particular worker's code */
 #include "pgstat.h"
 
+#include "port.h"
 #include "access/committs.h"
 #include "access/heapam.h"
 #include "access/xact.h"
@@ -70,7 +71,7 @@ static char *bdr_synchronous_commit = NULL;
 BDRWorkerCon *bdr_apply_con = NULL;
 BDRStaticCon *bdr_static_con = NULL;
 
-static void init_replica(BDRWorkerCon *wcon, PGconn *conn, PGresult *res);
+static void init_replica(BDRWorkerCon *wcon, PGconn *conn, char *snapshot);
 
 PG_MODULE_MAGIC;
 
@@ -318,7 +319,8 @@ bdr_create_slot(
 	PGconn	   *streamConn,
 	Name		slot_name,
 	char	   *remote_ident,
-	RepNodeId  *replication_identifier
+	RepNodeId  *replication_identifier,
+	char      **snapshot
 )
 {
 	StringInfoData query;
@@ -351,6 +353,8 @@ bdr_create_slot(
 	CurrentResourceOwner = bdr_saved_resowner;
 	elog(LOG, "created replication identifier %u", *replication_identifier);
 	
+	*snapshot = pstrdup(PQgetvalue(res, 0, 2));
+
 	PQclear(res);
 }
 
@@ -403,6 +407,8 @@ bdr_apply_main(Datum main_arg)
 	XLogRecPtr	start_from;
 	NameData	slot_name;
 
+	char *bindir;
+
 	initStringInfo(&query);
 
 	bdr_apply_con = (BDRWorkerCon *) DatumGetPointer(main_arg);
@@ -436,16 +442,16 @@ bdr_apply_main(Datum main_arg)
 		elog(LOG, "found valid replication identifier %u", replication_identifier);
 	else
 	{
+		char *snapshot;
 		elog(LOG, "Creating new slot %s", NameStr(slot_name));
 
 		/* create local replication identifier and a remote slot */
-		bdr_create_slot(streamConn, &slot_name, remote_ident, &replication_identifier);
+		bdr_create_slot(streamConn, &slot_name, remote_ident, &replication_identifier, &snapshot);
 
 		/* copy the database, if needed */
 		if (bdr_apply_con->init_replica)
-			init_replica(bdr_apply_con, streamConn, res);
+			init_replica(bdr_apply_con, streamConn, snapshot);
 	}
-
 
 	bdr_apply_con->origin_id = replication_identifier;
 
@@ -630,8 +636,6 @@ create_worker_con(char *name)
 	char	   *optname_dsn = palloc(strlen(name) + 30);
 	char	   *optname_delay = palloc(strlen(name) + 30);
 	char	   *optname_replica = palloc(strlen(name) + 30);
-	char	   *optname_bindir = palloc(strlen(name) + 30);
-	char	   *optname_tmpdir = palloc(strlen(name) + 30);
 	char	   *optname_local_dsn = palloc(strlen(name) + 30);
 	char	   *optname_script_path = palloc(strlen(name) + 30);
 	BDRWorkerCon *con;
@@ -641,8 +645,6 @@ create_worker_con(char *name)
 	con->name = pstrdup(name);
 	con->apply_delay = 0;
 	con->init_replica = false;
-	con->replica_bin_dir = NULL;
-	con->replica_tmp_dir = NULL;
 	con->replica_local_dsn = NULL;
 	con->replica_script_path = NULL;
 
@@ -674,24 +676,6 @@ create_worker_con(char *name)
 							 PGC_SIGHUP,
 							 0,
 							 NULL, NULL, NULL);
-
-	sprintf(optname_bindir, "bdr.%s_replica_bin_dir", name);
-	DefineCustomStringVariable(optname_bindir,
-							   optname_bindir,
-							   NULL,
-							   &con->replica_bin_dir,
-							   NULL, PGC_POSTMASTER,
-							   GUC_NOT_IN_SAMPLE,
-							   NULL, NULL, NULL);
-
-	sprintf(optname_tmpdir, "bdr.%s_replica_tmp_dir", name);
-	DefineCustomStringVariable(optname_tmpdir,
-							   optname_tmpdir,
-							   NULL,
-							   &con->replica_tmp_dir,
-							   NULL, PGC_POSTMASTER,
-							   GUC_NOT_IN_SAMPLE,
-							   NULL, NULL, NULL);
 
 	sprintf(optname_local_dsn, "bdr.%s_replica_local_dsn", name);
 	DefineCustomStringVariable(optname_local_dsn,
@@ -1140,17 +1124,14 @@ bdr_maintain_schema(void)
  * up a new logical replica from an existing node.
  */
 static void
-init_replica(BDRWorkerCon *wcon, PGconn *conn, PGresult *res)
+init_replica(BDRWorkerCon *wcon, PGconn *conn, char *snapshot)
 {
 	pid_t pid;
-	char *snapshot;
-	char *directory;
+	char *bindir;
+	char *tmpdir = "/tmp"; /* TODO: determine this sensibly */
 
-	if (!wcon->replica_bin_dir)
-		elog(FATAL, "bdr init_replica: no replica_bin_dir specified");
-
-	if (!wcon->replica_tmp_dir)
-		elog(FATAL, "bdr init_replica: no replica_tmp_dir specified");
+	bindir = pstrdup(my_exec_path);
+	get_parent_directory(bindir);
 
 	if (!wcon->replica_local_dsn)
 		elog(FATAL, "bdr init_replica: no replica_local_dsn specified");
@@ -1158,9 +1139,8 @@ init_replica(BDRWorkerCon *wcon, PGconn *conn, PGresult *res)
 	if (!wcon->replica_script_path)
 		elog(FATAL, "bdr init_replica: no replica_script_path specified");
 
-	snapshot = PQgetvalue(res, 0, 2);
-	directory = palloc(strlen(wcon->replica_tmp_dir)+32);
-	sprintf(directory, "%s.%s.%d", wcon->replica_tmp_dir,
+	tmpdir = palloc(strlen(tmpdir)+32);
+	sprintf(tmpdir, "%s.%s.%d", tmpdir,
 			snapshot, getpid());
 
 	pid = fork();
@@ -1176,14 +1156,14 @@ init_replica(BDRWorkerCon *wcon, PGconn *conn, PGresult *res)
 			"--snapshot", snapshot,
 			"--source", wcon->dsn,
 			"--target", wcon->replica_local_dsn,
-			"--bindir", wcon->replica_bin_dir,
-			"--tmp-directory", directory,
+			"--bindir", bindir,
+			"--tmp-directory", tmpdir,
 			NULL
 		};
 
 		elog(LOG, "Creating replica with: %s --snapshot %s --source \"%s\" --target \"%s\" --bindir \"%s\" --tmp-directory \"%s\"",
 			 wcon->replica_script_path, snapshot, wcon->dsn, wcon->replica_local_dsn,
-			 wcon->replica_bin_dir, directory);
+			 bindir, tmpdir);
 
 		n = execve(wcon->replica_script_path, argv, envp);
 		if (n < 0)
