@@ -587,7 +587,7 @@ process_remote_insert(StringInfo s)
 		}
 	}
 	else if (RelationGetRelid(rel) == QueuedDropsRelid)
-		process_queued_drop(tup);
+		process_queued_drop(slot->tts_tuple);
 
 	ExecResetTupleTable(estate->es_tupleTable, true);
 	FreeExecutorState(estate);
