@@ -52,6 +52,7 @@ extern void EventTriggerEndCompleteQuery(void);
 extern void EventTriggerStashCommand(Oid objectId, ObjectType objtype,
 						 Node *parsetree);
 extern bool trackDroppedObjectsNeeded(void);
-extern void EventTriggerSQLDropAddObject(ObjectAddress *object);
+extern void EventTriggerSQLDropAddObject(const ObjectAddress *object,
+							 bool original, bool normal);
 
 #endif   /* EVENT_TRIGGER_H */
