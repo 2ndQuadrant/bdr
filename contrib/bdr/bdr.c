@@ -69,7 +69,7 @@ static char *connections = NULL;
 static char *bdr_synchronous_commit = NULL;
 
 BDRWorkerCon *bdr_apply_con = NULL;
-BDRStaticCon *bdr_static_con = NULL;
+BDRPerdbCon *bdr_static_con = NULL;
 
 static void init_replica(BDRWorkerCon *wcon, PGconn *conn, char *snapshot);
 
@@ -314,6 +314,14 @@ bdr_connect(
 	return streamConn;
 }
 
+/*
+ * Create a slot on a remote node, and the corresponding local
+ * replication identifier.
+ */
+/* 
+ * TODO we should really handle the case where the slot already exists but there's
+ * no local replication identifier, by dropping and recreating the slot.
+ */
 static void
 bdr_create_slot(
 	PGconn	   *streamConn,
@@ -800,11 +808,11 @@ launch_apply_workers(char *dbname, List *conns)
  * This worker can use the SPI and shared memory.
  */
 static void
-bdr_static_worker(Datum main_arg)
+bdr_perdb_worker(Datum main_arg)
 {
 	int				  rc;
 
-	bdr_static_con = (BDRStaticCon *) DatumGetPointer(main_arg);
+	bdr_static_con = (BDRPerdbCon *) DatumGetPointer(main_arg);
 
 	bdr_worker_init(bdr_static_con->dbname);
 
@@ -871,7 +879,7 @@ bdr_static_worker(Datum main_arg)
 void
 _PG_init(void)
 {
-	BackgroundWorker static_worker;
+	BackgroundWorker perdb_worker;
 	List	   *connames;
 	List       *conns = NIL;
 	ListCell   *c;
@@ -990,17 +998,17 @@ _PG_init(void)
 	 * required initialization of the database, then registering
 	 * dynamic bgworkers for the DB's individual BDR connections.
 	 */
-	static_worker.bgw_flags = BGWORKER_SHMEM_ACCESS |
+	perdb_worker.bgw_flags = BGWORKER_SHMEM_ACCESS |
 		BGWORKER_BACKEND_DATABASE_CONNECTION;
-	static_worker.bgw_start_time = BgWorkerStart_RecoveryFinished;
-	static_worker.bgw_main = bdr_static_worker;
-	static_worker.bgw_restart_time = 5;
-	static_worker.bgw_notify_pid = 0;
+	perdb_worker.bgw_start_time = BgWorkerStart_RecoveryFinished;
+	perdb_worker.bgw_main = bdr_perdb_worker;
+	perdb_worker.bgw_restart_time = 5;
+	perdb_worker.bgw_notify_pid = 0;
 
 	for (off = 0; off < num_used_databases; off++)
 	{
 		/* Start a worker for this db */
-		BDRStaticCon *con = palloc(sizeof(BDRStaticCon));
+		BDRPerdbCon *con = palloc(sizeof(BDRPerdbCon));
 		con->dbname = used_databases[off];
 		/* Pass all the connections, even those for other dbs;
 		 * let the backend filter them out. */
@@ -1008,10 +1016,10 @@ _PG_init(void)
 		con->slot = off;
 
 		elog(LOG, "starting bdr worker for db %s", con->dbname);
-		snprintf(static_worker.bgw_name, BGW_MAXLEN,
+		snprintf(perdb_worker.bgw_name, BGW_MAXLEN,
 				 "bdr: %s", con->dbname);
-		static_worker.bgw_main_arg = PointerGetDatum(con);
-		RegisterBackgroundWorker(&static_worker);
+		perdb_worker.bgw_main_arg = PointerGetDatum(con);
+		RegisterBackgroundWorker(&perdb_worker);
 	}
 
 	EmitWarningsOnPlaceholders("bdr");

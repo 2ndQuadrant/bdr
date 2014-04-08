@@ -39,7 +39,7 @@ typedef struct BDRWorkerCon
 	TimeLineID timeline;
 } BDRWorkerCon;
 
-typedef struct BDRStaticCon
+typedef struct BDRPerdbCon
 {
 	/* local database name */
 	char *dbname;
@@ -47,11 +47,11 @@ typedef struct BDRStaticCon
 	size_t slot;
 
 	List *conns;
-} BDRStaticCon;
+} BDRPerdbCon;
 
 extern ResourceOwner bdr_saved_resowner;
 extern BDRWorkerCon *bdr_apply_con;
-extern BDRStaticCon *bdr_static_con;
+extern BDRPerdbCon *bdr_static_con;
 
 /* DDL replication support */
 extern Oid	QueuedDDLCommandsRelid;
