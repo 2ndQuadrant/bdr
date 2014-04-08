@@ -313,6 +313,40 @@ bdr_connect(
 	return streamConn;
 }
 
+/*
+ * Perform setup work common to all bdr worker types, such as:
+ *
+ * - set signal handers and unblock signals
+ * - Establish db connection
+ * - set search_path
+ *
+ */
+static void
+bdr_worker_init(char *dbname)
+{
+	/* Establish signal handlers before unblocking signals. */
+	pqsignal(SIGHUP, bdr_sighup);
+	pqsignal(SIGTERM, bdr_sigterm);
+
+	/* We're now ready to receive signals */
+	BackgroundWorkerUnblockSignals();
+
+	/* Connect to our database */
+	BackgroundWorkerInitializeConnection(dbname, NULL);
+
+	/* make sure BDR extension exists */
+	bdr_maintain_schema();
+
+	/* always work in our own schema */
+	SetConfigOption("search_path", "bdr, pg_catalog",
+					PGC_BACKEND, PGC_S_OVERRIDE);
+
+	/* setup synchronous commit according to the user's wishes */
+	if (bdr_synchronous_commit != NULL)
+		SetConfigOption("synchronous_commit", bdr_synchronous_commit,
+						PGC_BACKEND, PGC_S_OVERRIDE);	/* other context? */
+}
+
 static void
 bdr_apply_main(Datum main_arg)
 {
@@ -332,27 +366,7 @@ bdr_apply_main(Datum main_arg)
 
 	bdr_apply_con = (BDRWorkerCon *) DatumGetPointer(main_arg);
 
-	/* Establish signal handlers before unblocking signals. */
-	pqsignal(SIGHUP, bdr_sighup);
-	pqsignal(SIGTERM, bdr_sigterm);
-
-	/* We're now ready to receive signals */
-	BackgroundWorkerUnblockSignals();
-
-	/* Connect to our database */
-	BackgroundWorkerInitializeConnection(bdr_apply_con->dbname, NULL);
-
-	/* make sure BDR extension exists */
-	bdr_maintain_schema();
-
-	/* always work in our own schema */
-	SetConfigOption("search_path", "bdr, pg_catalog",
-					PGC_BACKEND, PGC_S_OVERRIDE);
-
-	/* setup synchronous commit according to the user's wishes */
-	if (bdr_synchronous_commit != NULL)
-		SetConfigOption("synchronous_commit", bdr_synchronous_commit,
-						PGC_BACKEND, PGC_S_OVERRIDE);	/* other context? */
+	bdr_worker_init(bdr_apply_con->dbname);
 
 	CurrentResourceOwner = ResourceOwnerCreate(NULL, "bdr apply top-level resource owner");
 	bdr_saved_resowner = CurrentResourceOwner;
@@ -724,6 +738,55 @@ create_worker_con(char *name)
 	return con;
 }
 
+
+/*
+ * Launch a dynamic bgworker to run bdr_apply_main
+ * for each bdr connection on this database.
+ *
+ * Takes the DB name and a list of BDRWorkerCon*
+ * to launch. Only those with a matching dbname 
+ * are launched.
+ */
+static List*
+launch_apply_workers(char *dbname, List *conns)
+{
+	List             *apply_workers = NIL;
+	ListCell		 *c;
+
+	BackgroundWorker  apply_worker;
+
+	/* Common apply worker values */
+	apply_worker.bgw_flags = BGWORKER_SHMEM_ACCESS |
+		BGWORKER_BACKEND_DATABASE_CONNECTION;
+	apply_worker.bgw_start_time = BgWorkerStart_RecoveryFinished;
+	apply_worker.bgw_main = bdr_apply_main;
+	apply_worker.bgw_restart_time = 5;
+	apply_worker.bgw_notify_pid = 0;
+
+	/* Launch apply workers */
+	foreach(c, conns)
+	{
+		BDRWorkerCon 		   *con;
+		BackgroundWorkerHandle *bgw_handle;
+
+		con = (BDRWorkerCon*) lfirst(c);
+
+		if ( strcmp(con->dbname, dbname) != 0 )
+			/* Connection for a different DB than ours, skip it */
+			continue;
+
+		snprintf(apply_worker.bgw_name, BGW_MAXLEN,
+				 "bdr apply: %s", con->name);
+		apply_worker.bgw_main_arg = PointerGetDatum(con);
+
+		RegisterDynamicBackgroundWorker(&apply_worker, &bgw_handle);
+		apply_workers = lcons(bgw_handle, apply_workers);
+	}
+
+
+	return apply_workers;
+}
+
 /*
  * Each database with BDR enabled on it has a static background
  * worker, registered at shared_preload_libraries time during
@@ -740,64 +803,21 @@ create_worker_con(char *name)
 static void
 bdr_static_worker(Datum main_arg)
 {
-	BackgroundWorker  apply_worker;
-	List             *apply_workers = NIL;
-	ListCell		 *c;
 	int				  rc;
 
 	bdr_static_con = (BDRStaticCon *) DatumGetPointer(main_arg);
 
-	/* Establish signal handlers before unblocking signals. */
-	pqsignal(SIGHUP, bdr_sighup);
-	pqsignal(SIGTERM, bdr_sigterm);
-
-	/* We're now ready to receive signals */
-	BackgroundWorkerUnblockSignals();
-
-	/* Connect to our database */
-	BackgroundWorkerInitializeConnection(bdr_static_con->dbname, NULL);
-
-	/* make sure BDR extension exists */
-	bdr_maintain_schema();
-
-	/* always work in our own schema */
-	SetConfigOption("search_path", "bdr, pg_catalog",
-					PGC_BACKEND, PGC_S_OVERRIDE);
+	bdr_worker_init(bdr_static_con->dbname);
 
 	CurrentResourceOwner = ResourceOwnerCreate(NULL, "bdr seq top-level resource owner");
 	bdr_saved_resowner = CurrentResourceOwner;
 
+	elog(LOG, "Starting bdr apply workers for db %s", bdr_static_con->dbname);
+
+	/* Launch the apply workers; ignore the returned list of handles for now */
+	(void) launch_apply_workers(bdr_static_con->dbname, bdr_static_con->conns);
+
 	elog(LOG, "BDR starting sequencer on db \"%s\"", bdr_static_con->dbname);
-
-	elog(LOG, "Starting bdr worker for %s", bdr_static_con->dbname);
-
-	/* Common apply worker values */
-	apply_worker.bgw_flags = BGWORKER_SHMEM_ACCESS |
-		BGWORKER_BACKEND_DATABASE_CONNECTION;
-	apply_worker.bgw_start_time = BgWorkerStart_RecoveryFinished;
-	apply_worker.bgw_main = bdr_apply_main;
-	apply_worker.bgw_restart_time = 5;
-	apply_worker.bgw_notify_pid = 0;
-
-	/* Launch apply workers */
-	foreach(c, bdr_static_con->conns)
-	{
-		BDRWorkerCon 		   *con;
-		BackgroundWorkerHandle *bgw_handle;
-
-		con = (BDRWorkerCon*) lfirst(c);
-
-		if ( strcmp(con->dbname, bdr_static_con->dbname) != 0 )
-			/* Connection for a different DB than ours, skip it */
-			continue;
-
-		snprintf(apply_worker.bgw_name, BGW_MAXLEN,
-				 "bdr apply: %s", con->name);
-		apply_worker.bgw_main_arg = PointerGetDatum(con);
-
-		RegisterDynamicBackgroundWorker(&apply_worker, &bgw_handle);
-		apply_workers = lcons(bgw_handle, apply_workers);
-	}
 
 	/* initialize sequencer */
 	bdr_sequencer_init();
