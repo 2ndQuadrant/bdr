@@ -77,7 +77,6 @@ bdr_commandfilter(Node *parsetree,
 {
 	int			severity = ERROR;
 	ListCell   *cell;
-	RenameStmt *renameStatement;
 	AlterTableStmt *alterTableStatement;
 	bool hasInvalid;
 
@@ -135,19 +134,6 @@ bdr_commandfilter(Node *parsetree,
 				error_on_persistent_rv(alterTableStatement->relation,
 									   "ALTER TABLE", AccessExclusiveLock,
 									   severity, alterTableStatement->missing_ok);
-			break;
-
-		case T_RenameStmt:
-			renameStatement = (RenameStmt *) parsetree;
-			if (renameStatement->renameType == OBJECT_TABLE ||
-				renameStatement->renameType == OBJECT_TYPE ||
-				renameStatement->renameType == OBJECT_ATTRIBUTE)
-			{
-				error_on_persistent_rv(renameStatement->relation,
-									   "ALTER ... RENAME",
-									   AccessExclusiveLock, severity,
-									   renameStatement->missing_ok);
-			}
 			break;
 
 		case T_AlterEnumStmt:
