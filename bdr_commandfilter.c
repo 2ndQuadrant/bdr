@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
- * bdr_forbid_utility_commands.c
- *		forbid utility commands not yet or never supported
+ * bdr_commandfilter.c
+ *		prevent execution of utility commands not yet or never supported
  *
  *
  * Copyright (C) 2012-2014, PostgreSQL Global Development Group
@@ -11,18 +11,17 @@
  *
  * -------------------------------------------------------------------------
  */
-
 #include "postgres.h"
 
+#include "access/heapam.h"
 #include "bdr.h"
-#include "fmgr.h"
-#include "tcop/utility.h"
+#include "catalog/namespace.h"
 #include "commands/dbcommands.h"
+#include "fmgr.h"
 #include "miscadmin.h"
+#include "tcop/utility.h"
 #include "utils/guc.h"
 #include "utils/rel.h"
-#include "access/heapam.h"
-#include "catalog/namespace.h"
 
 /*
 * bdr_commandfilter.c: a ProcessUtility_hook to prevent a cluster from running
@@ -78,7 +77,6 @@ bdr_commandfilter(Node *parsetree,
 {
 	int			severity = ERROR;
 	ListCell   *cell;
-	DropStmt   *dropStatement;
 	RenameStmt *renameStatement;
 	AlterTableStmt *alterTableStatement;
 	bool hasInvalid;
@@ -150,46 +148,6 @@ bdr_commandfilter(Node *parsetree,
 									   AccessExclusiveLock, severity,
 									   renameStatement->missing_ok);
 			}
-			break;
-
-		case T_DropStmt:
-
-			/*
-			 * DROP is fun to handle, since a DropStmt might be for a matview,
-			 * index, etc, not just a table, per the comment on
-			 * RemoveRelations in tablecmds.c
-			 *
-			 * For now we forbid DROP TABLE, DROP VIEW, DROP SEQUENCE, DROP
-			 * TRIGGER, DROP RULE, DROP EXTENSION as well as DROP TYPE
-			 */
-			dropStatement = (DropStmt *) parsetree;
-			if (dropStatement->removeType == OBJECT_TABLE ||
-				dropStatement->removeType == OBJECT_VIEW ||
-				dropStatement->removeType == OBJECT_SEQUENCE ||
-				dropStatement->removeType == OBJECT_TRIGGER ||
-				dropStatement->removeType == OBJECT_RULE ||
-				dropStatement->removeType == OBJECT_EXTENSION ||
-				dropStatement->removeType == OBJECT_TYPE)
-			{
-				foreach(cell, dropStatement->objects)
-				{
-					/*
-					 * makeRangeVarFromNameList() reports an error if the cell
-					 * has more than three or less than 1 entries; thus we do
-					 * not validate here
-					 */
-					error_on_persistent_rv(
-							 makeRangeVarFromNameList((List *) lfirst(cell)),
-										   "DROP",
-										   AccessExclusiveLock, severity,
-										   dropStatement->missing_ok);
-				}
-			}
-			break;
-
-		case T_DropOwnedStmt:
-			ereport(severity,
-					(errmsg("DROP OWNED is unsafe with BDR active")));
 			break;
 
 		case T_AlterEnumStmt:
