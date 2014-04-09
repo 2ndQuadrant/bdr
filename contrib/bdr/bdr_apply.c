@@ -575,17 +575,30 @@ process_remote_insert(StringInfo s)
 
 	check_sequencer_wakeup(rel);
 
-	heap_close(rel, NoLock);
-
 	/* execute DDL if insertion was into the ddl command queue */
-	if (RelationGetRelid(rel) == QueuedDDLCommandsRelid)
+	if (RelationGetRelid(rel) == QueuedDDLCommandsRelid ||
+		RelationGetRelid(rel) == QueuedDropsRelid)
 	{
+		HeapTuple ht;
 		LockRelId	lockid = rel->rd_lockInfo.lockRelId;
 		TransactionId oldxid = GetTopTransactionId();
 
-		LockRelationIdForSession(&lockid, RowExclusiveLock);
+		/*
+		 * Release transaction bound resources for CONCURRENTLY support.
+		 */
+		MemoryContextSwitchTo(MessageContext);
+		ht = heap_copytuple(slot->tts_tuple);
 
-		process_queued_ddl_command(slot->tts_tuple, started_tx);
+		LockRelationIdForSession(&lockid, RowExclusiveLock);
+		heap_close(rel, NoLock);
+
+		ExecResetTupleTable(estate->es_tupleTable, true);
+		FreeExecutorState(estate);
+
+		if (RelationGetRelid(rel) == QueuedDDLCommandsRelid)
+			process_queued_ddl_command(ht, started_tx);
+		if (RelationGetRelid(rel) == QueuedDropsRelid)
+			process_queued_drop(ht);
 
 		rel = heap_open(QueuedDDLCommandsRelid, RowExclusiveLock);
 
@@ -599,11 +612,12 @@ process_remote_insert(StringInfo s)
 			started_transaction = false;
 		}
 	}
-	else if (RelationGetRelid(rel) == QueuedDropsRelid)
-		process_queued_drop(slot->tts_tuple);
-
-	ExecResetTupleTable(estate->es_tupleTable, true);
-	FreeExecutorState(estate);
+	else
+	{
+		heap_close(rel, NoLock);
+		ExecResetTupleTable(estate->es_tupleTable, true);
+		FreeExecutorState(estate);
+	}
 
 	CommandCounterIncrement();
 }
