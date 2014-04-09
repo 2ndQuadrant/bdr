@@ -245,6 +245,21 @@ bdr_establish_connection_and_slot(BdrConnectionConfig *cfg, Name out_slot_name,
 	uint64 *out_sysid, TimeLineID* out_timeline, RepNodeId
 	*out_replication_identifier, char **out_snapshot);
 
+typedef enum BDRConflictHandlerType
+{
+	BDRUpdateUpdateConflictHandler,
+	BDRUpdateDeleteConflictHandler,
+	BDRInsertInsertConflictHandler,
+	BDRInsertUpdateConflictHandler
+}	BDRConflictHandlerType;
+
+typedef struct BDRConflictHandler
+{
+	Oid			handler_oid;
+	BDRConflictHandlerType handler_type;
+	uint64		timeframe;
+}	BDRConflictHandler;
+
 /*
  * This structure is for caching relation specific information, such as
  * conflict handlers.
@@ -255,10 +270,21 @@ typedef struct BDRRelation
 	Oid			reloid;
 
 	Relation	rel;
+
+	BDRConflictHandler *conflict_handlers;
+	size_t		conflict_handlers_len;
 }	BDRRelation;
 
 /* use instead of heap_open()/heap_close() */
 extern BDRRelation *bdr_heap_open(Oid reloid, LOCKMODE lockmode);
 extern void bdr_heap_close(BDRRelation * rel, LOCKMODE lockmode);
+
+/* conflict handlers API */
+extern void bdr_conflict_handlers_init(void);
+
+extern HeapTuple bdr_conflict_handlers_resolve(BDRRelation * rel, const HeapTuple local,
+							  const HeapTuple remote, const char *command_tag,
+							  BDRConflictHandlerType event_type,
+							  uint64 timeframe, bool *skip);
 
 #endif   /* BDR_H */
