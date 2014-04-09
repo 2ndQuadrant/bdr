@@ -106,12 +106,15 @@ static void tuple_to_stringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple
 
 static void tuple_to_stringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple);
 
-static void check_apply_update(RepNodeId local_node_id, TimestampTz ts, bool *perform_update, bool *log_update);
-static void do_log_update(RepNodeId local_node_id, bool apply_update, TimestampTz ts, Relation idxrel, HeapTuple old_key);
-static void do_apply_update(BDRRelation *rel, EState *estate,
-							TupleTableSlot *oldslot, TupleTableSlot *newslot,
-							BDRTupleData new_tuple);
-
+static void check_apply_update(RepNodeId local_node_id, TimestampTz local_ts,
+				   BDRRelation *rel, HeapTuple local_tuple,
+				   HeapTuple remote_tuple, HeapTuple *new_tuple,
+				   bool *perform_update, bool *log_update);
+static void do_log_update(RepNodeId local_node_id, bool apply_update,
+			  TimestampTz ts, Relation idxrel, BDRRelation *rel,
+			  HeapTuple old_key, HeapTuple user_tuple);
+static void do_apply_update(BDRRelation *rel, EState *estate, TupleTableSlot *oldslot,
+				TupleTableSlot *newslot);
 static void fetch_sysid_via_node_id(RepNodeId node_id, uint64 *sysid, TimeLineID *tli);
 
 static void check_sequencer_wakeup(BDRRelation *rel);
@@ -405,8 +408,8 @@ process_remote_insert(StringInfo s)
 		TransactionIdGetCommitTsData(xmin, &local_ts, &local_node_id_raw);
 		local_node_id = local_node_id_raw;
 
-		check_apply_update(local_node_id, local_ts,
-						   &apply_update, &log_update);
+		check_apply_update(local_node_id, local_ts, rel,
+						   NULL, NULL, NULL, &apply_update, &log_update);
 
 		elog(LOG, "insert vs insert conflict: %s",
 			 apply_update ? "update" : "ignore");
@@ -498,6 +501,8 @@ process_remote_update(StringInfo s)
 	Relation	idxrel;
 	StringInfoData o;
 	ScanKeyData skey[INDEX_MAX_KEYS];
+	HeapTuple	user_tuple = NULL,
+				remote_tuple = NULL;
 
 	bdr_performing_work();
 
@@ -548,15 +553,6 @@ process_remote_update(StringInfo s)
 		ExecStoreTuple(old_key, oldslot, InvalidBuffer, true);
 	}
 
-#ifdef VERBOSE_UPDATE
-	initStringInfo(&o);
-	tuple_to_stringinfo(&o, RelationGetDescr(rel), oldslot->tts_tuple);
-	appendStringInfo(&o, " to");
-	tuple_to_stringinfo(&o, RelationGetDescr(rel), oldslot->tts_tuple);
-	elog(LOG, "UPDATE:%s", o.data);
-	resetStringInfo(&o);
-#endif
-
 	/* lookup index to build scankey */
 	if (rel->rel->rd_indexvalid == 0)
 		RelationGetIndexList(rel->rel);
@@ -591,6 +587,23 @@ process_remote_update(StringInfo s)
 
 		CommitExtraData local_node_id_raw;
 
+		remote_tuple = heap_modify_tuple(oldslot->tts_tuple,
+										 RelationGetDescr(rel->rel),
+										 new_tuple.values,
+										 new_tuple.isnull,
+										 new_tuple.changed);
+
+		ExecStoreTuple(remote_tuple, newslot, InvalidBuffer, true);
+
+#ifdef VERBOSE_UPDATE
+		initStringInfo(&o);
+		tuple_to_stringinfo(&o, RelationGetDescr(rel), oldslot->tts_tuple);
+		appendStringInfo(&o, " to");
+		tuple_to_stringinfo(&o, RelationGetDescr(rel), remote_tuple);
+		elog(LOG, "UPDATE:%s", o.data);
+		resetStringInfo(&o);
+#endif
+
 		/* refetch tuple, check for old commit ts & origin */
 		xmin = HeapTupleHeaderGetXmin(oldslot->tts_tuple->t_data);
 
@@ -604,15 +617,31 @@ process_remote_update(StringInfo s)
 		TransactionIdGetCommitTsData(xmin, &local_ts, &local_node_id_raw);
 		local_node_id = local_node_id_raw;
 
-		check_apply_update(local_node_id, local_ts,
-						   &apply_update, &log_update);
+		check_apply_update(local_node_id, local_ts, rel, oldslot->tts_tuple,
+						   remote_tuple, &user_tuple, &apply_update,
+						   &log_update);
 
 		if (log_update)
 			do_log_update(local_node_id, apply_update, local_ts,
-						  idxrel, oldslot->tts_tuple);
+						  idxrel, rel, oldslot->tts_tuple, user_tuple);
 
 		if (apply_update)
-			do_apply_update(rel, estate, oldslot, newslot, new_tuple);
+		{
+			/* user provided a new tuple; form it to a bdr tuple */
+			if (user_tuple != NULL)
+			{
+#ifdef VERBOSE_UPDATE
+				initStringInfo(&o);
+				tuple_to_stringinfo(&o, RelationGetDescr(rel), user_tuple);
+				elog(LOG, "USER tuple:%s", o.data);
+				resetStringInfo(&o);
+#endif
+
+				ExecStoreTuple(user_tuple, newslot, InvalidBuffer, true);
+			}
+
+			do_apply_update(rel, estate, oldslot, newslot);
+		}
 		else
 			bdr_count_update_conflict();
 	}
@@ -754,13 +783,24 @@ process_remote_delete(StringInfo s)
  */
 static void
 check_apply_update(RepNodeId local_node_id, TimestampTz local_ts,
-				   bool *perform_update, bool *log_update)
+				 BDRRelation *rel, HeapTuple local_tuple, HeapTuple remote_tuple,
+				HeapTuple *new_tuple, bool *perform_update, bool *log_update)
 {
 	uint64		local_sysid,
 				remote_sysid;
 	TimeLineID	local_tli,
 				remote_tli;
-	int			cmp;
+	int			cmp, microsecs;
+	long		secs;
+
+	bool		skip = false;
+
+	/*
+	 * ensure that new_tuple is initialized with NULL; there are cases where
+	 * we wouldn't touch it otherwise.
+	 */
+	if (new_tuple)
+		*new_tuple = NULL;
 
 	if (local_node_id == bdr_apply_worker->origin_id)
 	{
@@ -782,8 +822,7 @@ check_apply_update(RepNodeId local_node_id, TimestampTz local_ts,
 		 * sysid + TLI to discern.
 		 */
 
-		cmp = timestamptz_cmp_internal(replication_origin_timestamp,
-									   local_ts);
+		cmp = timestamptz_cmp_internal(replication_origin_timestamp, local_ts);
 
 		if (cmp > 0)
 		{
@@ -798,25 +837,74 @@ check_apply_update(RepNodeId local_node_id, TimestampTz local_ts,
 			fetch_sysid_via_node_id(bdr_apply_worker->origin_id,
 									&remote_sysid, &remote_tli);
 
-			if (local_sysid < remote_sysid)
-				*perform_update = true;
-			else if (local_sysid > remote_sysid)
-				*perform_update = false;
-			else if (local_tli < remote_tli)
-				*perform_update = true;
-			else if (local_tli > remote_tli)
-				*perform_update = false;
+			/*
+			 * We let users decide how the conflict should be resolved; if no
+			 * trigger could be found or if the trigger decided not to care,
+			 * we fall back to „last update wins“
+			 *
+			 * Since the comparison of the two timestamps is 0 we simply give
+			 * 0 as the timeframe as well.
+			 */
+			if (new_tuple)
+				*new_tuple = bdr_conflict_handlers_resolve(rel, local_tuple,
+													  remote_tuple, "UPDATE",
+											  BDRUpdateUpdateConflictHandler,
+														   0, &skip);
+
+			/*
+			 * Always ignore this update if the user decides to; otherwise
+			 * apply the user tuple or, if none supplied, fall back to „last
+			 * update wins“
+			 */
+			if (!skip)
+			{
+				if (new_tuple == NULL || *new_tuple == NULL)
+				{
+					if (local_sysid < remote_sysid)
+						*perform_update = true;
+					else if (local_sysid > remote_sysid)
+						*perform_update = false;
+					else if (local_tli < remote_tli)
+						*perform_update = true;
+					else if (local_tli > remote_tli)
+						*perform_update = false;
+					else
+						/* shouldn't happen */
+						elog(ERROR, "unsuccessful node comparison");
+				}
+				else
+					*perform_update = true;
+			}
 			else
-				/* shouldn't happen */
-				elog(ERROR, "unsuccessful node comparison");
+				*perform_update = false;
 
 			*log_update = true;
 			return;
 		}
 		else
 		{
-			*perform_update = false;
+			TimestampDifference(replication_origin_timestamp, local_ts,
+								&secs, &microsecs);
+
+			/*
+			 * We let users decide how the conflict should be resolved; if no
+			 * trigger could be found or if the triggers decide not to care,
+			 * we fall back to „last update wins“
+			 */
+			if (new_tuple)
+				*new_tuple = bdr_conflict_handlers_resolve(rel, local_tuple,
+													  remote_tuple, "UPDATE",
+											  BDRUpdateUpdateConflictHandler,
+										abs(secs) * 1000000 + abs(microsecs),
+														   &skip);
+
+			if (new_tuple == NULL || *new_tuple == NULL || skip)
+				*perform_update = false;
+			else
+				*perform_update = true;
+
 			*log_update = true;
+
 			return;
 		}
 	}
@@ -826,9 +914,11 @@ check_apply_update(RepNodeId local_node_id, TimestampTz local_ts,
 
 static void
 do_log_update(RepNodeId local_node_id, bool apply_update, TimestampTz ts,
-			  Relation idxrel, HeapTuple old_key)
+			  Relation idxrel, BDRRelation *rel, HeapTuple old_key,
+			  HeapTuple user_tuple)
 {
-	StringInfoData s_key;
+	StringInfoData s_key,
+				s_user_tuple;
 	char		remote_ts[MAXDATELEN + 1];
 	char		local_ts[MAXDATELEN + 1];
 
@@ -854,28 +944,39 @@ do_log_update(RepNodeId local_node_id, bool apply_update, TimestampTz ts,
 	initStringInfo(&s_key);
 	tuple_to_stringinfo(&s_key, RelationGetDescr(idxrel), old_key);
 
-	ereport(LOG,
-			(errcode(ERRCODE_INTEGRITY_CONSTRAINT_VIOLATION),
-			 errmsg("CONFLICT: %s remote update originating at node " UINT64_FORMAT ":%u at ts %s; row was previously updated at %s node " UINT64_FORMAT ":%u at ts %s. PKEY:%s",
-					apply_update ? "applying" : "skipping",
-					remote_sysid, remote_tli, remote_ts,
-					local_node_id == InvalidRepNodeId ? "local" : "remote",
-					local_sysid, local_tli, local_ts, s_key.data)));
+	if (user_tuple != NULL)
+	{
+		initStringInfo(&s_user_tuple);
+		tuple_to_stringinfo(&s_user_tuple, RelationGetDescr(rel->rel),
+							user_tuple);
+
+		ereport(LOG,
+				(errcode(ERRCODE_INTEGRITY_CONSTRAINT_VIOLATION),
+				 errmsg("CONFLICT: %s remote update originating at node " UINT64_FORMAT ":%u at ts %s; row was previously updated at %s node " UINT64_FORMAT ":%u at ts %s. PKEY:%s, resolved by user tuple:%s",
+						apply_update ? "applying" : "skipping",
+						remote_sysid, remote_tli, remote_ts,
+						local_node_id == InvalidRepNodeId ? "local" : "remote",
+						local_sysid, local_tli, local_ts, s_key.data,
+						s_user_tuple.data)));
+	}
+	else
+	{
+		ereport(LOG,
+				(errcode(ERRCODE_INTEGRITY_CONSTRAINT_VIOLATION),
+				 errmsg("CONFLICT: %s remote update originating at node " UINT64_FORMAT ":%u at ts %s; row was previously updated at %s node " UINT64_FORMAT ":%u at ts %s. PKEY:%s",
+						apply_update ? "applying" : "skipping",
+						remote_sysid, remote_tli, remote_ts,
+						local_node_id == InvalidRepNodeId ? "local" : "remote",
+						local_sysid, local_tli, local_ts, s_key.data)));
+	}
+
 	resetStringInfo(&s_key);
 }
 
 static void
-do_apply_update(BDRRelation *rel, EState *estate,
-				TupleTableSlot *oldslot,
-				TupleTableSlot *newslot,
-				BDRTupleData new_tuple)
+do_apply_update(BDRRelation *rel, EState *estate, TupleTableSlot *oldslot,
+				TupleTableSlot *newslot)
 {
-	HeapTuple	nt;
-
-	nt = heap_modify_tuple(oldslot->tts_tuple, RelationGetDescr(rel->rel),
-						   new_tuple.values, new_tuple.isnull,
-						   new_tuple.changed);
-	ExecStoreTuple(nt, newslot, InvalidBuffer, true);
 	simple_heap_update(rel->rel, &oldslot->tts_tuple->t_self, newslot->tts_tuple);
 	UserTableUpdateIndexes(estate, newslot);
 	bdr_count_update();
