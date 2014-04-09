@@ -115,6 +115,11 @@ typedef struct SQLDropObject
 	const char *objname;
 	const char *objidentity;
 	const char *objecttype;
+	List	   *addrnames;
+	List	   *addrargs;
+	ObjectAddress dependee;
+	bool		original;
+	bool		normal;
 	slist_node	next;
 } SQLDropObject;
 
@@ -928,6 +933,7 @@ EventTriggerSupportsObjectType(ObjectType obtype)
 		case OBJECT_CONSTRAINT:
 		case OBJECT_COLLATION:
 		case OBJECT_CONVERSION:
+		case OBJECT_DEFAULT:
 		case OBJECT_DOMAIN:
 		case OBJECT_EXTENSION:
 		case OBJECT_FDW:
@@ -1103,7 +1109,7 @@ trackDroppedObjectsNeeded(void)
  * Register one object as being dropped by the current command.
  */
 void
-EventTriggerSQLDropAddObject(ObjectAddress *object)
+EventTriggerSQLDropAddObject(const ObjectAddress *object, bool original, bool normal)
 {
 	SQLDropObject *obj;
 	MemoryContext oldcxt;
@@ -1122,6 +1128,8 @@ EventTriggerSQLDropAddObject(ObjectAddress *object)
 
 	obj = palloc0(sizeof(SQLDropObject));
 	obj->address = *object;
+	obj->original = original;
+	obj->normal = normal;
 
 	/*
 	 * Obtain schema names from the object's catalog tuple, if one exists;
@@ -1183,10 +1191,11 @@ EventTriggerSQLDropAddObject(ObjectAddress *object)
 		heap_close(catalog, AccessShareLock);
 	}
 
-	/* object identity */
-	obj->objidentity = getObjectIdentity(&obj->address);
+	/* object identity, objname and objargs */
+	obj->objidentity =
+		getObjectIdentityParts(&obj->address, &obj->addrnames, &obj->addrargs);
 
-	/* and object type, too */
+	/* object type */
 	obj->objecttype = getObjectTypeDescription(&obj->address);
 
 	slist_push_head(&(currentEventTriggerState->SQLDropList), &obj->next);
@@ -1249,8 +1258,8 @@ pg_event_trigger_dropped_objects(PG_FUNCTION_ARGS)
 	{
 		SQLDropObject *obj;
 		int			i = 0;
-		Datum		values[7];
-		bool		nulls[7];
+		Datum		values[11];
+		bool		nulls[11];
 
 		obj = slist_container(SQLDropObject, next, iter.cur);
 
@@ -1265,6 +1274,12 @@ pg_event_trigger_dropped_objects(PG_FUNCTION_ARGS)
 
 		/* objsubid */
 		values[i++] = Int32GetDatum(obj->address.objectSubId);
+
+		/* original */
+		values[i++] = BoolGetDatum(obj->original);
+
+		/* normal */
+		values[i++] = BoolGetDatum(obj->normal);
 
 		/* object_type */
 		values[i++] = CStringGetTextDatum(obj->objecttype);
@@ -1284,6 +1299,54 @@ pg_event_trigger_dropped_objects(PG_FUNCTION_ARGS)
 		/* object_identity */
 		if (obj->objidentity)
 			values[i++] = CStringGetTextDatum(obj->objidentity);
+		else
+			nulls[i++] = true;
+
+		/* address_names */
+		if (obj->addrnames)
+		{
+			ArrayType *arr;
+			Datum	*datums;
+			int		j = 0;
+			ListCell *cell;
+
+			datums = palloc(sizeof(text *) * list_length(obj->addrnames));
+			foreach(cell, obj->addrnames)
+			{
+				char   *name = lfirst(cell);
+
+				datums[j++] = CStringGetTextDatum(name);
+			}
+
+			arr = construct_array(datums, list_length(obj->addrnames),
+								  TEXTOID, -1, false, 'i');
+
+			values[i++] = PointerGetDatum(arr);
+		}
+		else
+			nulls[i++] = true;
+
+		/* address_args */
+		/* FIXME duplicated code block ... */
+		if (obj->addrargs)
+		{
+			ArrayType *arr;
+			Datum   *datums;
+			int		j = 0;
+			ListCell *cell;
+
+			datums = palloc(sizeof(text *) * list_length(obj->addrargs));
+			foreach(cell, obj->addrargs)
+			{
+				char	*arg = lfirst(cell);
+
+				datums[j++] = CStringGetTextDatum(arg);
+			}
+
+			arr = construct_array(datums, list_length(obj->addrargs),
+								  TEXTOID, -1, false, 'i');
+			values[i++] = PointerGetDatum(arr);
+		}
 		else
 			nulls[i++] = true;
 

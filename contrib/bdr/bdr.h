@@ -58,6 +58,7 @@ extern Oid	BdrNodesRelid;
 
 /* DDL replication support */
 extern Oid	QueuedDDLCommandsRelid;
+extern Oid	QueuedDropsRelid;
 
 /* sequencer support */
 extern Oid	BdrSequenceValuesRelid;

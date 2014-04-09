@@ -1200,11 +1200,14 @@ bdr_maintain_schema(void)
 		BdrVotesRelid = lookup_relid("bdr_votes", schema_oid);
 
 		BdrNodesRelid = lookup_relid("bdr_nodes", schema_oid);
+
+		QueuedDropsRelid = lookup_relid("bdr_queued_drops", schema_oid);
 	}
 	else
 		elog(ERROR, "cache lookup failed for schema bdr");
 
 	elog(LOG, "bdr.bdr_queued_commands OID set to %u", QueuedDDLCommandsRelid);
+	elog(LOG, "bdr.bdr_queued_drops OID set to %u", QueuedDropsRelid);
 
 	PopActiveSnapshot();
 	CommitTransactionCommand();

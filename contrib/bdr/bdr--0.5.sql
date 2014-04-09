@@ -218,6 +218,7 @@ WHEN tag IN ('create table', 'create index', 'create sequence',
      'create trigger', 'alter table', 'create extension', 'create type')
 EXECUTE PROCEDURE bdr.queue_commands();
 
+
 CREATE TABLE bdr_nodes (
     node_id bigint primary key,
     node_status "char" not null,
@@ -227,5 +228,45 @@ CREATE TABLE bdr_nodes (
 COMMENT ON TABLE bdr_nodes IS 'All known nodes in this BDR group';
 COMMENT ON COLUMN bdr_nodes.node_id IS 'Unique identifier of the node as used in the walsender protocol and xlogs';
 COMMENT ON COLUMN bdr_nodes.node_status IS 'Readiness of the node: [i]nitializing, [c]atchup, or [r]eady. Doesn''t indicate connected/disconnected.';
+
+
+-- This type is tailored to use as input to get_object_address
+CREATE TYPE bdr.dropped_object AS
+  (objtype text, objnames text[], objargs text[]);
+
+CREATE TABLE bdr.bdr_queued_drops
+ (dropped_objects bdr.dropped_object[] NOT NULL);
+
+CREATE OR REPLACE FUNCTION bdr.queue_dropped_objects()
+ RETURNS event_trigger
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+    r RECORD;
+	dropped bdr.dropped_object;
+	otherobjs bdr.dropped_object[] = '{}';
+BEGIN
+	FOR r IN SELECT * FROM pg_event_trigger_dropped_objects()
+	LOOP
+		IF r.original OR r.normal THEN
+			dropped.objtype = r.object_type;
+			dropped.objnames = r.address_names;
+			dropped.objargs = r.address_args;
+			otherobjs := otherobjs || dropped;
+			RAISE LOG 'object is: %', dropped;
+		END IF;
+	END LOOP;
+
+	IF otherobjs <> '{}' THEN
+		INSERT INTO bdr.bdr_queued_drops
+			(dropped_objects) VALUES (otherobjs);
+	END IF;
+END;
+$function$;
+
+CREATE EVENT TRIGGER queue_drops
+ON sql_drop
+EXECUTE PROCEDURE bdr.queue_dropped_objects();
+
 
 RESET search_path;

@@ -57,7 +57,10 @@ extern HeapTuple get_catalog_object_by_oid(Relation catalog,
 extern char *getObjectDescription(const ObjectAddress *object);
 extern char *getObjectDescriptionOids(Oid classid, Oid objid);
 
+extern int unstringify_objtype(const char *objtype);
 extern char *getObjectTypeDescription(const ObjectAddress *object);
 extern char *getObjectIdentity(const ObjectAddress *address);
+extern char *getObjectIdentityParts(const ObjectAddress *address,
+					   List **objname, List **objargs);
 
 #endif   /* OBJECTADDRESS_H */
