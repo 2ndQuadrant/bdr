@@ -45,6 +45,7 @@
 #include "storage/bufmgr.h"
 #include "storage/lmgr.h"
 
+#include "tcop/pquery.h"
 #include "tcop/tcopprot.h"
 #include "tcop/utility.h"
 
@@ -267,11 +268,16 @@ process_queued_ddl_command(HeapTuple cmdtup, bool tx_just_started)
 		List	   *plantree_list;
 		List	   *querytree_list;
 		Node	   *command = (Node *) lfirst(command_i);
-		ListCell   *stmt_i;
+		const char *commandTag;
+		Portal		portal;
+		DestReceiver *receiver;
 
+		/* temporarily push snapshot for parse analysis/planning */
 		PushActiveSnapshot(GetTransactionSnapshot());
 
 		oldcontext = MemoryContextSwitchTo(MessageContext);
+
+		commandTag = CreateCommandTag(command);
 
 		querytree_list = pg_analyze_and_rewrite(
 			command, cmdstr, NULL, 0);
@@ -281,17 +287,24 @@ process_queued_ddl_command(HeapTuple cmdtup, bool tx_just_started)
 
 		PopActiveSnapshot();
 
-		foreach(stmt_i, plantree_list)
-		{
-			Node *stmt = lfirst(stmt_i);
-			if (IsA(stmt, PlannedStmt))
-				elog(ERROR, "frak");
+		portal = CreatePortal("", true, true);
+		PortalDefineQuery(portal, NULL,
+						  cmdstr, commandTag,
+						  plantree_list, NULL);
+		PortalStart(portal, NULL, 0, InvalidSnapshot);
 
-			ProcessUtility(stmt,
-						   cmdstr,
-						   isTopLevel ? PROCESS_UTILITY_TOPLEVEL : PROCESS_UTILITY_QUERY,
-						   NULL, CreateDestReceiver(DestNone), NULL);
-		}
+		receiver = CreateDestReceiver(DestNone);
+
+		(void) PortalRun(portal, FETCH_ALL,
+						 isTopLevel,
+						 receiver, receiver,
+						 NULL);
+		(*receiver->rDestroy) (receiver);
+
+		PortalDrop(portal, false);
+
+		CommandCounterIncrement();
+
 		MemoryContextSwitchTo(oldcontext);
 	}
 
