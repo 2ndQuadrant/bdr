@@ -53,6 +53,9 @@ extern ResourceOwner bdr_saved_resowner;
 extern BDRWorkerCon *bdr_apply_con;
 extern BDRPerdbCon *bdr_static_con;
 
+/* Node tracking and safe startup */
+extern Oid	BdrNodesRelid;
+
 /* DDL replication support */
 extern Oid	QueuedDDLCommandsRelid;
 

@@ -218,4 +218,14 @@ WHEN tag IN ('create table', 'create index', 'create sequence',
      'create trigger', 'alter table', 'create extension', 'create type')
 EXECUTE PROCEDURE bdr.queue_commands();
 
+CREATE TABLE bdr_nodes (
+    node_id bigint primary key,
+    node_status "char" not null,
+    check (node_status in ('i', 'c', 'r'))
+);
+
+COMMENT ON TABLE bdr_nodes IS 'All known nodes in this BDR group';
+COMMENT ON COLUMN bdr_nodes.node_id IS 'Unique identifier of the node as used in the walsender protocol and xlogs';
+COMMENT ON COLUMN bdr_nodes.node_status IS 'Readiness of the node: [i]nitializing, [c]atchup, or [r]eady. Doesn''t indicate connected/disconnected.';
+
 RESET search_path;

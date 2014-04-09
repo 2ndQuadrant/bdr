@@ -68,6 +68,8 @@ ResourceOwner bdr_saved_resowner;
 static char *connections = NULL;
 static char *bdr_synchronous_commit = NULL;
 
+Oid   BdrNodesRelid;
+
 BDRWorkerCon *bdr_apply_con = NULL;
 BDRPerdbCon *bdr_static_con = NULL;
 
@@ -1116,6 +1118,8 @@ bdr_maintain_schema(void)
 												 schema_oid);
 
 		BdrVotesRelid = lookup_relid("bdr_votes", schema_oid);
+
+		BdrNodesRelid = lookup_relid("bdr_nodes", schema_oid);
 	}
 	else
 		elog(ERROR, "cache lookup failed for schema bdr");
