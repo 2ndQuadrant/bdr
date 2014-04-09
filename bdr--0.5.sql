@@ -150,6 +150,65 @@ VALUES (
     'bdr_sequence_options'
 );
 
+
+CREATE TYPE bdr.bdr_handler_types
+    AS ENUM('UPDATE_VS_UPDATE', 'UPDATE_VS_DELETE',
+        'INSERT_VS_INSERT', 'INSERT_VS_UPDATE');
+
+CREATE TYPE bdr.bdr_conflict_handler_action
+    AS ENUM('IGNORE', 'ROW', 'SKIP');
+
+CREATE TABLE bdr.bdr_conflict_handlers (
+    ch_name NAME NOT NULL,
+    ch_type bdr.bdr_handler_types NOT NULL,
+    ch_reloid Oid NOT NULL,
+    ch_fun regprocedure NOT NULL,
+    ch_timeframe INTERVAL,
+    PRIMARY KEY(ch_reloid, ch_name)
+) WITH OIDS;
+SELECT pg_catalog.pg_extension_config_dump('bdr_conflict_handlers', '');
+REVOKE ALL ON TABLE bdr_conflict_handlers FROM PUBLIC;
+
+CREATE INDEX bdr_conflict_handlers_ch_type_reloid_idx
+    ON bdr_conflict_handlers(ch_reloid, ch_type);
+
+CREATE FUNCTION bdr.bdr_create_conflict_handler(
+        ch_rel REGCLASS,
+        ch_name NAME,
+        ch_proc REGPROCEDURE,
+        ch_type bdr.bdr_handler_types,
+        ch_timeframe INTERVAL
+)
+RETURNS VOID
+LANGUAGE C
+STRICT
+AS 'MODULE_PATHNAME'
+;
+
+CREATE FUNCTION bdr.bdr_create_conflict_handler(
+        ch_rel REGCLASS,
+        ch_name NAME,
+        ch_proc REGPROCEDURE,
+        ch_type bdr.bdr_handler_types
+)
+RETURNS VOID
+LANGUAGE C
+STRICT
+AS 'MODULE_PATHNAME'
+;
+
+CREATE FUNCTION bdr.bdr_drop_conflict_handler(ch_rel REGCLASS, ch_name NAME)
+RETURNS VOID
+LANGUAGE C
+STRICT
+AS 'MODULE_PATHNAME'
+;
+
+CREATE VIEW bdr_list_conflict_handlers(ch_name, ch_type, ch_reloid, ch_fun) AS
+    SELECT ch_name, ch_type, ch_reloid, ch_fun
+        FROM bdr.bdr_conflict_handlers;
+
+
 CREATE TABLE bdr_queued_commands (
     lsn pg_lsn NOT NULL,
     queued_at timestamptz NOT NULL,

@@ -16,8 +16,11 @@
 
 #include "access/sysattr.h"
 #include "access/tuptoaster.h"
+#include "access/xact.h"
 
 #include "catalog/index.h"
+
+#include "catalog/namespace.h"
 #include "catalog/pg_class.h"
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_type.h"
@@ -65,6 +68,7 @@ typedef struct
 	bool client_float8_byval;
 	bool client_int_datetime;
 	char *client_db_encoding;
+	Oid bdr_conflict_handlers_reloid;
 } BdrOutputData;
 
 /* These must be available to pg_dlsym() */
@@ -154,6 +158,8 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 {
 	ListCell   *option;
 	BdrOutputData *data;
+	Oid schema_oid;
+	bool tx_started = true;
 
 	data = palloc0(sizeof(BdrOutputData));
 	data->context = AllocSetContextCreate(TopMemoryContext,
@@ -165,6 +171,8 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 	ctx->output_plugin_private = data;
 
 	opt->output_type = OUTPUT_PLUGIN_BINARY_OUTPUT;
+
+	data->bdr_conflict_handlers_reloid = InvalidOid;
 
 	/* parse options passed in by the client */
 
@@ -290,6 +298,31 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 		 */
 		if (data->client_pg_version / 100 != PG_VERSION_NUM / 100)
 			data->allow_sendrecv_protocol = false;
+
+
+		if (!IsTransactionState())
+		{
+			tx_started = false;
+			StartTransactionCommand();
+		}
+
+		schema_oid = get_namespace_oid("bdr", true);
+		if (schema_oid != InvalidOid)
+		{
+			data->bdr_conflict_handlers_reloid =
+				get_relname_relid("bdr_conflict_handlers", schema_oid);
+
+			if (data->bdr_conflict_handlers_reloid == InvalidOid)
+				elog(ERROR, "cache lookup for relation bdr.bdr_conflict_handlers failed");
+			else
+				elog(LOG, "bdr.bdr_conflict_handlers OID set to %u",
+					 data->bdr_conflict_handlers_reloid);
+		}
+		else
+			elog(WARNING, "cache lookup for schema bdr failed");
+
+		if (!tx_started)
+			CommitTransactionCommand();
 	}
 }
 
@@ -393,6 +426,10 @@ pg_decode_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 	old = MemoryContextSwitchTo(data->context);
 
 	if (!should_forward_changeset(ctx, txn))
+		return;
+
+	if(data->bdr_conflict_handlers_reloid != InvalidOid &&
+	   RelationGetRelid(relation) == data->bdr_conflict_handlers_reloid)
 		return;
 
 	OutputPluginPrepareWrite(ctx, true);
