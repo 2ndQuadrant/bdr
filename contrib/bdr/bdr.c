@@ -1670,6 +1670,8 @@ bdr_maintain_schema(void)
 	elog(LOG, "bdr.bdr_queued_commands OID set to %u", QueuedDDLCommandsRelid);
 	elog(LOG, "bdr.bdr_queued_drops OID set to %u", QueuedDropsRelid);
 
+	bdr_conflict_handlers_init();
+
 	PopActiveSnapshot();
 	CommitTransactionCommand();
 }
