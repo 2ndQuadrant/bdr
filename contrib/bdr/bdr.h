@@ -16,44 +16,79 @@
 
 #define BDR_VERSION_NUM 500
 
+typedef enum
+{
+	/*
+	 * This shm array slot is unused and may be allocated. Must be zero,
+	 * as it's set by memset(...) during shm segment init.
+	 */
+	BDR_WORKER_EMPTY_SLOT = 0,
+	/* This shm array slot contains data for an apply worker */
+	BDR_WORKER_APPLY,
+	/* This shm array slot contains data fro a per-db worker */
+	BDR_WORKER_PERDB
+} BDRWorkerType;
+
+typedef struct BDRWorkerShmSlotHeader
+{
+	/* Type of worker. Also used to determine if slot is free. */
+	BDRWorkerType worker_type;
+} BDRWorkerShmSlotHeader;
+
+/*
+ * BDRWorkerCon describes a BDR worker connection.
+ *
+ * This struct is stored in an array in shared memory, so it can't have any
+ * pointers.
+ */
 typedef struct BDRWorkerCon
 {
+	BDRWorkerShmSlotHeader header;
+
 	/* name specified in configuration */
-	char *name;
+	NameData name;
 
 	/* local & remote database name */
-	char *dbname;
-	/* dsn to connect to the remote database */
-	char *dsn;
-	/* how much do we want to delay apply, in ms */
-	int apply_delay;
-	/* should we copy the upstream database? */
-	bool init_replica;
-	/* the dsn to use for the local database */
-	char *replica_local_dsn;
-	/* the command to use for init_replica */
-	char *replica_script_path;
+	NameData dbname;
 
 	RepNodeId origin_id;
+
 	uint64 sysid;
+
 	TimeLineID timeline;
+
 } BDRWorkerCon;
 
+/*
+ * BDRPerdbCon describes a per-database worker, a static bgworker that manages
+ * BDR for a given DB.
+ *
+ * TODO: Make this capable of living in shared memory so we can support dynamic
+ * reconfiguration and EXEC_BACKEND. Probably coexist with BDRWorkerCon using
+ * first field as worker type, allocating array entries big enough to hold either
+ * worker struct. Or use a union.
+ */
 typedef struct BDRPerdbCon
 {
 	/* local database name */
-	char *dbname;
+	NameData dbname;
 
-	size_t slot;
+	size_t slot; /* TODO: rename, confusingly like replication slot */
 
+	/* Should get this from shm */
 	List *conns;
 } BDRPerdbCon;
+
+static const size_t BDR_WORKER_SHM_ENTRY_SIZE = sizeof(BDRPerdbCon) > sizeof(BDRWorkerCon) ? sizeof(BDRPerdbCon) : sizeof(BDRWorkerCon);
 
 extern ResourceOwner bdr_saved_resowner;
 extern BDRWorkerCon *bdr_apply_con;
 extern BDRPerdbCon *bdr_static_con;
 
-/* Node tracking and safe startup */
+/* bdr.max_workers guc */
+extern int bdr_max_workers;
+
+/* bdr_nodes table oid */
 extern Oid	BdrNodesRelid;
 
 /* DDL replication support */
@@ -64,6 +99,9 @@ extern Oid	QueuedDropsRelid;
 extern Oid	BdrSequenceValuesRelid;
 extern Oid	BdrSequenceElectionsRelid;
 extern Oid	BdrVotesRelid;
+
+/* Helpers for accessing configuration */
+const char *BDRGetWorkerOption(const char * worker_name, const char * option_name, bool missing_ok);
 
 /* apply support */
 extern void process_remote_begin(StringInfo s);

@@ -111,6 +111,8 @@ process_remote_begin(StringInfo s)
 	TimestampTz		committime;
 	TimestampTz		current;
 	char			statbuf[100];
+	int				apply_delay = 0;
+	const char     *apply_delay_str;
 
 	Assert(bdr_apply_con != NULL);
 
@@ -125,7 +127,7 @@ process_remote_begin(StringInfo s)
 
 	snprintf(statbuf, sizeof(statbuf),
 			"bdr_apply: BEGIN origin(source, orig_lsn, timestamp): %s, %X/%X, %s",
-			 bdr_apply_con->name,
+			 NameStr(bdr_apply_con->name),
 			(uint32) (origlsn >> 32), (uint32) origlsn,
 			timestamptz_to_str(committime));
 
@@ -133,8 +135,13 @@ process_remote_begin(StringInfo s)
 
 	pgstat_report_activity(STATE_RUNNING, statbuf);
 
+	apply_delay_str = BDRGetWorkerOption(NameStr(bdr_apply_con->name), "apply_delay", true);
+	if (apply_delay_str)
+		/* This is an integer GUC, so parsing as an int can't fail */
+		(void) parse_int(apply_delay_str, &apply_delay, 0, NULL);
+
 	/* don't want the overhead otherwise */
-	if (bdr_apply_con->apply_delay > 0)
+	if (apply_delay > 0)
 	{
 		current = GetCurrentIntegerTimestamp();
 
@@ -145,7 +152,7 @@ process_remote_begin(StringInfo s)
 			int			usec;
 
 			current = TimestampTzPlusMilliseconds(current,
-												  -bdr_apply_con->apply_delay);
+												  -apply_delay);
 
 			TimestampDifference(current, replication_origin_timestamp,
 								&sec, &usec);
