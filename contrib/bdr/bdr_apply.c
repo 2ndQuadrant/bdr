@@ -92,6 +92,14 @@ bool		started_transaction = false;
 Oid			QueuedDDLCommandsRelid = InvalidOid;
 Oid			QueuedDropsRelid = InvalidOid;
 
+/*
+ * This code only runs within an apply bgworker, so we can stash a pointer to our
+ * state in shm in a global for convenient access.
+ *
+ * TODO: make static once bdr_apply_main moved into bdr.c
+ */
+BdrApplyWorker *bdr_apply_worker = NULL;
+
 static bool
 bdr_performing_work(void)
 {
@@ -114,7 +122,7 @@ process_remote_begin(StringInfo s)
 	int				apply_delay = 0;
 	const char     *apply_delay_str;
 
-	Assert(bdr_apply_con != NULL);
+	Assert(bdr_apply_worker != NULL);
 
 	started_transaction = false;
 
@@ -127,7 +135,7 @@ process_remote_begin(StringInfo s)
 
 	snprintf(statbuf, sizeof(statbuf),
 			"bdr_apply: BEGIN origin(source, orig_lsn, timestamp): %s, %X/%X, %s",
-			 NameStr(bdr_apply_con->name),
+			 NameStr(bdr_apply_worker->name),
 			(uint32) (origlsn >> 32), (uint32) origlsn,
 			timestamptz_to_str(committime));
 
@@ -135,7 +143,7 @@ process_remote_begin(StringInfo s)
 
 	pgstat_report_activity(STATE_RUNNING, statbuf);
 
-	apply_delay_str = BDRGetWorkerOption(NameStr(bdr_apply_con->name), "apply_delay", true);
+	apply_delay_str = BDRGetWorkerOption(NameStr(bdr_apply_worker->name), "apply_delay", true);
 	if (apply_delay_str)
 		/* This is an integer GUC, so parsing as an int can't fail */
 		(void) parse_int(apply_delay_str, &apply_delay, 0, NULL);
@@ -169,7 +177,7 @@ process_remote_commit(StringInfo s)
 	TimestampTz		committime;
 	TimestampTz		end_lsn;
 
-	Assert(bdr_apply_con != NULL);
+	Assert(bdr_apply_worker != NULL);
 
 	origlsn = pq_getmsgint64(s);
 	end_lsn = pq_getmsgint64(s);
@@ -529,6 +537,8 @@ process_remote_insert(StringInfo s)
 
 	started_tx = bdr_performing_work();
 
+	Assert(bdr_apply_worker != NULL);
+
 	/*
 	 * Read tuple into a context that's long lived enough for CONCURRENTLY
 	 * processing.
@@ -812,7 +822,7 @@ check_apply_update(RepNodeId local_node_id, TimestampTz local_ts,
 				remote_tli;
 	int			cmp;
 
-	if (local_node_id == bdr_apply_con->origin_id)
+	if (local_node_id == bdr_apply_worker->origin_id)
 	{
 		/*
 		 * If the row got updated twice within a single node, just apply the
@@ -845,7 +855,7 @@ check_apply_update(RepNodeId local_node_id, TimestampTz local_ts,
 		{
 			fetch_sysid_via_node_id(local_node_id,
 									&local_sysid, &local_tli);
-			fetch_sysid_via_node_id(bdr_apply_con->origin_id,
+			fetch_sysid_via_node_id(bdr_apply_worker->origin_id,
 									&remote_sysid, &remote_tli);
 
 			if (local_sysid < remote_sysid)
@@ -890,11 +900,11 @@ do_log_update(RepNodeId local_node_id, bool apply_update, TimestampTz ts,
 
 	fetch_sysid_via_node_id(local_node_id,
 							&local_sysid, &local_tli);
-	fetch_sysid_via_node_id(bdr_apply_con->origin_id,
+	fetch_sysid_via_node_id(bdr_apply_worker->origin_id,
 							&remote_sysid, &remote_tli);
 
-	Assert(remote_sysid == bdr_apply_con->sysid);
-	Assert(remote_tli == bdr_apply_con->timeline);
+	Assert(remote_sysid == bdr_apply_worker->sysid);
+	Assert(remote_tli == bdr_apply_worker->timeline);
 
 	memcpy(remote_ts, timestamptz_to_str(replication_origin_timestamp),
 		   MAXDATELEN);
@@ -945,6 +955,8 @@ process_remote_delete(StringInfo s)
 	Relation	idxrel;
 	ScanKeyData skey[INDEX_MAX_KEYS];
 	bool		found_old;
+
+	Assert(bdr_apply_worker != NULL);
 
 	bdr_performing_work();
 

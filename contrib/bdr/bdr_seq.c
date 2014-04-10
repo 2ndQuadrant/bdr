@@ -56,6 +56,10 @@ typedef struct BdrSequenceValues {
 	int64		end_value;
 } BdrSequenceValues;
 
+static Size n_databases;
+/* Our offset within the shared memory array of registered sequence managers */
+static int  seq_slot = -1;
+
 /* cached relids */
 Oid	BdrSequenceValuesRelid;		/* bdr_sequence_values */
 Oid	BdrSequenceElectionsRelid;	/* bdr_sequence_elections */
@@ -470,13 +474,14 @@ static void
 bdr_sequencer_shmem_shutdown(int code, Datum arg)
 {
 	BdrSequencerSlot *slot;
-	if (bdr_static_con == NULL)
+	if (seq_slot < 0)
 		return;
 
-	slot = &BdrSequencerCtl->slots[bdr_static_con->seq_slot];
+	slot = &BdrSequencerCtl->slots[seq_slot];
 
 	slot->database_oid = InvalidOid;
 	slot->proclatch = NULL;
+	seq_slot = -1;
 }
 
 static void
@@ -575,13 +580,14 @@ bdr_schedule_eoxact_sequencer_wakeup(void)
 }
 
 void
-bdr_sequencer_init(void)
+bdr_sequencer_init(int new_seq_slot)
 {
 	BdrSequencerSlot *slot;
 
-	Assert(bdr_static_con != NULL);
+	Assert(seq_slot == -1);
+	seq_slot = new_seq_slot;
 
-	slot = &BdrSequencerCtl->slots[bdr_static_con->seq_slot];
+	slot = &BdrSequencerCtl->slots[seq_slot];
 	slot->database_oid = MyDatabaseId;
 	slot->proclatch = &MyProc->procLatch;
 }
@@ -749,7 +755,7 @@ bdr_sequencer_tally(void)
 	nulls[3] = false;
 
 	argtypes[4] = INT4OID;
-	values[4] = Int32GetDatum(list_length(bdr_static_con->conns));
+	values[4] = Int32GetDatum(bdr_node_count());
 	nulls[4] = false;
 
 	SetCurrentStatementStartTimestamp();
