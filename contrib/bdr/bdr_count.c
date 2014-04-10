@@ -105,7 +105,7 @@ static void bdr_count_unserialize(void);
 
 extern Datum pg_stat_get_bdr(PG_FUNCTION_ARGS);
 
-PG_FUNCTION_INFO_V1(pg_stat_bdr);
+PG_FUNCTION_INFO_V1(pg_stat_get_bdr);
 
 static Size
 bdr_count_shmem_size(void)
