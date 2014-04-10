@@ -473,7 +473,7 @@ bdr_sequencer_shmem_shutdown(int code, Datum arg)
 	if (bdr_static_con == NULL)
 		return;
 
-	slot = &BdrSequencerCtl->slots[bdr_static_con->slot];
+	slot = &BdrSequencerCtl->slots[bdr_static_con->seq_slot];
 
 	slot->database_oid = InvalidOid;
 	slot->proclatch = NULL;
@@ -581,7 +581,7 @@ bdr_sequencer_init(void)
 
 	Assert(bdr_static_con != NULL);
 
-	slot = &BdrSequencerCtl->slots[bdr_static_con->slot];
+	slot = &BdrSequencerCtl->slots[bdr_static_con->seq_slot];
 	slot->database_oid = MyDatabaseId;
 	slot->proclatch = &MyProc->procLatch;
 }

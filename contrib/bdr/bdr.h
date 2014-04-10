@@ -73,10 +73,8 @@ typedef struct BDRPerdbCon
 	/* local database name */
 	NameData dbname;
 
-	size_t slot; /* TODO: rename, confusingly like replication slot */
+	size_t seq_slot;
 
-	/* Should get this from shm */
-	List *conns;
 } BDRPerdbCon;
 
 static const size_t BDR_WORKER_SHM_ENTRY_SIZE = sizeof(BDRPerdbCon) > sizeof(BDRWorkerCon) ? sizeof(BDRPerdbCon) : sizeof(BDRWorkerCon);
