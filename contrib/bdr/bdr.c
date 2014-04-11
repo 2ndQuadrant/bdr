@@ -291,8 +291,6 @@ bdr_connect(
 	char		local_sysid[32];
 	NameData	replication_name;
 
-	Assert(!IsUnderPostmaster);
-
 	initStringInfo(&query);
 	NameStr(replication_name)[0] = '\0';
 
@@ -387,8 +385,6 @@ bdr_create_slot(
 {
 	StringInfoData query;
 	PGresult   *res;
-
-	Assert(!IsUnderPostmaster);
 
 	initStringInfo(&query);
 
@@ -1066,7 +1062,7 @@ static size_t bdr_worker_shm_size()
 
 /*
  * Allocate a shared memory segment big enough to hold 
- * bdr_max_connections entries in the array of BDR worker
+ * bdr_max_workers entries in the array of BDR worker
  * info structs (BdrApplyWorker).
  */
 static void
@@ -1084,6 +1080,12 @@ bdr_worker_alloc_shm_segment()
 	 * doing.
 	 */
 	RequestAddinLWLocks(1);
+
+	/*
+	 * Whether this is a first startup or crash recovery, we'll be
+	 * re-initing the bgworkers.
+	 */
+	bdr_startup_context = NULL;
 
 	prev_shmem_startup_hook = shmem_startup_hook;
 	shmem_startup_hook = bdr_worker_shmem_startup;
@@ -1136,8 +1138,6 @@ static void
 bdr_worker_shmem_create_workers()
 {
 	ListCell *c;
-
-	Assert(IsUnderPostmaster && !process_shared_preload_libraries_in_progress);
 
 	/*
 	 * Copy the BdrApplyWorker configs created in _PG_init into shared
@@ -1250,6 +1250,7 @@ _PG_init(void)
 	char	  **used_databases;
 	char      **database_initcons;
 	Size		num_used_databases = 0;
+	int			nworkers = 0;
 
 	if (!process_shared_preload_libraries_in_progress)
 		elog(ERROR, "bdr can only be loaded via shared_preload_libraries");
@@ -1290,6 +1291,7 @@ _PG_init(void)
 							PGC_POSTMASTER,
 							0,
 							NULL, NULL, NULL);
+	/* TODO: If bdr_max_workers is unset/zero, autoset from number of bdr.connections */
 
 	DefineCustomStringVariable("bdr.init_replica_script_path",
 							   "Path to script to run when replicating a new DB from upstream master",
@@ -1309,6 +1311,16 @@ _PG_init(void)
 	 */
 	init_bdr_commandfilter();
 
+	/*
+	 * Allocate a shared memory segment to store the bgworker connection
+	 * information we must pass to each worker we launch.
+	 *
+	 * This registers a hook on shm initialization, bdr_worker_shmem_startup(),
+	 * which populates the shm segment with configured apply workers using
+	 * data in bdr_startup_context.
+	 */
+	bdr_worker_alloc_shm_segment();
+
 	/* Prepare storage to pass data into our shared memory startup hook */
 	bdr_startup_context = (BdrStartupContext*)palloc(sizeof(BdrStartupContext));
 
@@ -1323,16 +1335,6 @@ _PG_init(void)
 				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 				 errmsg("invalid list syntax for \"bdr.connections\"")));
 	}
-
-	/*
-	 * Allocate a shared memory segment to store the bgworker connection
-	 * information we must pass to each worker we launch.
-	 *
-	 * This registers a hook on shm initialization, bdr_worker_shmem_startup(),
-	 * which populates the shm segment with configured apply workers using
-	 * data in bdr_startup_context.
-	 */
-	bdr_worker_alloc_shm_segment();
 
 	/* Names of all databases we're going to be doing BDR for */
 	used_databases = palloc0(sizeof(char *) * list_length(connames));
@@ -1356,6 +1358,8 @@ _PG_init(void)
 		apply_worker->origin_id = InvalidRepNodeId;
 		bdr_startup_context->workers = lcons(apply_worker, bdr_startup_context->workers);
 	}
+	nworkers = list_length(bdr_startup_context->workers);
+
 	/*
 	 * Free the connames list cells. The strings are just pointers into
 	 * 'connections' and must not be freed'd.
@@ -1428,10 +1432,7 @@ out:
 	 * might still be needed for some sql callable functions or such.
 	 */
 
-	if (bdr_startup_context)
-		n_configured_bdr_nodes = list_length(bdr_startup_context->workers);
-	else
-		n_configured_bdr_nodes = 0;
+	n_configured_bdr_nodes = nworkers;
 
 	/* register a slot for every remote node */
 	bdr_count_shmem_init(n_configured_bdr_nodes);
