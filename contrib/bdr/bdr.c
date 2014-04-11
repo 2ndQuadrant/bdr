@@ -93,6 +93,19 @@ static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
 static BdrWorkerControl *BdrWorkerCtl = NULL;
 
 /*
+ * Used only in postmaster to pass data from _PG_init during
+ * shared_preload_libraries into the shared memory startup hook.
+ */
+typedef struct BdrStartupContext
+{
+	/* List of palloc'd BdrApplyWorker instances to copy into shm */
+	List	*workers;
+} BdrStartupContext;
+
+static BdrStartupContext *bdr_startup_context;
+
+
+/*
  * We need somewhere to store config options for each bdr apply worker when
  * we're creating the GUCs for each worker in the postmaster during startup.
  *
@@ -115,6 +128,8 @@ void		_PG_init(void);
 static void init_replica(BdrApplyWorker *wcon, PGconn *conn, char *snapshot);
 static void bdr_maintain_schema(void);
 static void bdr_worker_shmem_startup(void);
+static void bdr_worker_shmem_create_workers(void);
+static BdrWorker* bdr_worker_shm_alloc(BdrWorkerType worker_type);
 
 /*
  * Converts an int64 to network byte order.
@@ -730,6 +745,9 @@ bdr_apply_main(Datum main_arg)
  *
  * Params:
  *
+ *  name
+ *  Name of this conn - bdr.<name>
+ *
  * 	used_databases
  * 	Array of char*, names of distinct databases named in configured conns
  *
@@ -739,6 +757,9 @@ bdr_apply_main(Datum main_arg)
  *	database_initcons
  *	For each index in used_databases, name of con with init_replica=t if any
  *
+ *	out_worker
+ *	Initialize this BdrApplyWorker with the name and dbname found.
+ *
  * TODO At some point we'll have to make the GUC setup dynamic so we can handle
  * workers being added/removed with a config reload SIGHUP. 
  */
@@ -747,7 +768,8 @@ create_bdr_con_gucs(
 	char  *name,
 	char **used_databases,
 	Size  *num_used_databases,
-	char **database_initcons
+	char **database_initcons,
+	BdrApplyWorker *out_worker
 )
 {
 	int			off;
@@ -755,7 +777,6 @@ create_bdr_con_gucs(
 	PQconninfoOption *options;
 	PQconninfoOption *cur_option;
 	BdrApplyWorkerConfigOptions *opts;
-	NameData	dbname;
 
 	/* don't free, referenced by the guc machinery! */
 	char	   *optname_dsn = palloc(strlen(name) + 30);
@@ -765,6 +786,9 @@ create_bdr_con_gucs(
 	opts = palloc(sizeof(BdrApplyWorkerConfigOptions));
 
 	Assert(process_shared_preload_libraries_in_progress);
+
+	strncpy(NameStr(out_worker->name), name, NAMEDATALEN);
+	NameStr(out_worker->name)[NAMEDATALEN-1] = '\0';
 
 	sprintf(optname_dsn, "bdr.%s_dsn", name);
 	DefineCustomStringVariable(optname_dsn,
@@ -829,8 +853,8 @@ create_bdr_con_gucs(
 			if (cur_option->val == NULL)
 				elog(ERROR, "no dbname set");
 
-			strncpy(NameStr(dbname), cur_option->val, NAMEDATALEN);
-			NameStr(dbname)[NAMEDATALEN-1] = '\0';
+			strncpy(NameStr(out_worker->dbname), cur_option->val, NAMEDATALEN);
+			NameStr(out_worker->dbname)[NAMEDATALEN-1] = '\0';
 		}
 
 		if (cur_option->val != NULL)
@@ -847,14 +871,14 @@ create_bdr_con_gucs(
 	/* If this is a DB name we haven't seen yet, add it to our set of known DBs */
 	for (off = 0; off < *num_used_databases; off++)
 	{
-		if (strcmp(NameStr(dbname), used_databases[off]) == 0)
+		if (strcmp(NameStr(out_worker->dbname), used_databases[off]) == 0)
 			break;
 	}
 
 	if (off == *num_used_databases)
 	{
 		/* Didn't find a match, add new db name */
-		used_databases[(*num_used_databases)++] = pstrdup(NameStr(dbname));
+		used_databases[(*num_used_databases)++] = pstrdup(NameStr(out_worker->dbname));
 	}
 
 	/*
@@ -1111,17 +1135,31 @@ static void bdr_worker_shmem_startup(void)
 static void
 bdr_worker_shmem_create_workers()
 {
+	ListCell *c;
+
 	Assert(IsUnderPostmaster && !process_shared_preload_libraries_in_progress);
 
 	/*
-	 * TODO: Expose required info from _PG_init to save re-calculating it
-	 * here. Copy it into the shared memory segment and free it.
+	 * Copy the BdrApplyWorker configs created in _PG_init into shared
+	 * memory, then free the palloc'd original.
 	 *
-	 * Want at least:
-	 * 	- connames filtered to omit conns we won't be using
-	 *
+	 * This is necessary on EXEC_BACKEND (Windows) where postmaster memory
+	 * isn't accessible by other backends, and is also required when launching
+	 * one bgworker from another.
 	 */
-	elog(FATAL, "Not implemented yet...");
+	foreach(c, bdr_startup_context->workers)
+	{
+		BdrApplyWorker *worker = (BdrApplyWorker*)lfirst(c);
+		BdrApplyWorker *shmworker;
+
+		shmworker = (BdrApplyWorker*) bdr_worker_shm_alloc(BDR_WORKER_APPLY);
+		memcpy(shmworker, worker, sizeof(BdrApplyWorker));
+		pfree(worker);
+	}
+
+	list_free(bdr_startup_context->workers);
+	pfree(bdr_startup_context);
+	bdr_startup_context = NULL;
 }
 
 
@@ -1192,25 +1230,6 @@ bdr_worker_shm_release(BdrWorker* worker, BackgroundWorkerHandle *handle)
 }
 
 /*
- * Return an allocated shm slot for a BdrApplyWorker, with worker name and dbname
- * initialized. Other fields are zeroed.
- */
-static BdrApplyWorker*
-bdr_worker_shm_alloc_apply_worker(char *name, char* dbname)
-{
-	BdrApplyWorker *con = (BdrApplyWorker*) bdr_worker_shm_alloc(BDR_WORKER_APPLY);
-	
-	strncpy(NameStr(con->name), name, NAMEDATALEN);
-	NameStr(con->name)[NAMEDATALEN-1] = '\0';
-
-	strncpy(NameStr(con->dbname), dbname, NAMEDATALEN);
-	NameStr(con->dbname)[NAMEDATALEN-1] = '\0';
-
-	return con;
-}
-
-
-/*
  * Entrypoint of this module - called at shared_preload_libraries time
  * in the context of the postmaster.
  *
@@ -1225,8 +1244,8 @@ _PG_init(void)
 	List	   *connames;
 	ListCell   *c;
 	MemoryContext old_context;
-	Size		nregistered = 0;
 	size_t      off;
+	char	   *connections_tmp;
 
 	char	  **used_databases;
 	char      **database_initcons;
@@ -1239,6 +1258,8 @@ _PG_init(void)
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("bdr requires \"track_commit_timestamp\" to be enabled")));
+
+	bdr_startup_context = NULL;
 
 	/* guc's et al need to survive outside the lifetime of the library init */
 	old_context = MemoryContextSwitchTo(TopMemoryContext);
@@ -1288,10 +1309,14 @@ _PG_init(void)
 	 */
 	init_bdr_commandfilter();
 
-	/*
-	 * Get the list of BDR connection names to iterate over
-	 */
-	if (!SplitIdentifierString(connections, ',', &connames))
+	/* Prepare storage to pass data into our shared memory startup hook */
+	bdr_startup_context = (BdrStartupContext*)palloc(sizeof(BdrStartupContext));
+
+	/* Copy 'connections' guc so SplitIdentifierString can modify it in-place */
+	connections_tmp = pstrdup(connections);
+
+	/* Get the list of BDR connection names to iterate over. */
+	if (!SplitIdentifierString(connections_tmp, ',', &connames))
 	{
 		/* syntax error in list */
 		ereport(FATAL,
@@ -1304,7 +1329,8 @@ _PG_init(void)
 	 * information we must pass to each worker we launch.
 	 *
 	 * This registers a hook on shm initialization, bdr_worker_shmem_startup(),
-	 * which populates the shm segment with configured apply workers.
+	 * which populates the shm segment with configured apply workers using
+	 * data in bdr_startup_context.
 	 */
 	bdr_worker_alloc_shm_segment();
 
@@ -1317,20 +1343,31 @@ _PG_init(void)
 	database_initcons = palloc0(sizeof(char *) * list_length(connames));
 
 	/*
-	 * Read all connections and create their BdrApplyWorker structs,
-	 * validating parameters and sanity checking as we go.
+	 * Read all connections and create their BdrApplyWorker structs, validating
+	 * parameters and sanity checking as we go. The structs are palloc'd, but
+	 * will be copied into shared memory and free'd during shm init.
 	 */
 	foreach(c, connames)
 	{
+		BdrApplyWorker *apply_worker = (BdrApplyWorker*)palloc(sizeof(BdrApplyWorker));
 		char *name = (char *) lfirst(c);
-		if (!create_bdr_con_gucs(name, used_databases, &num_used_databases, database_initcons))
+		if (!create_bdr_con_gucs(name, used_databases, &num_used_databases, database_initcons, apply_worker))
 			continue;
-		nregistered++;
+		apply_worker->origin_id = InvalidRepNodeId;
+		bdr_startup_context->workers = lcons(apply_worker, bdr_startup_context->workers);
 	}
+	/*
+	 * Free the connames list cells. The strings are just pointers into
+	 * 'connections' and must not be freed'd.
+	 * */
+	list_free(connames);
+	connames = NIL;
 
 	/*
 	 * We've ensured there are no duplicate init connections, no need
-	 * to remember which conn is the init_replica conn anymore.
+	 * to remember which conn is the init_replica conn anymore. The contents
+	 * are just pointers into connections_tmp
+	 * so we don't want to free them.
 	 */
 	pfree(database_initcons);
 
@@ -1347,6 +1384,8 @@ _PG_init(void)
 	 * from BDR at runtime, this'll need to move into a static
 	 * bgworker or code called by the shm startup hook and a guc
 	 * reload hook.
+	 *
+	 * TODO: Move this into the shared memory based init.
 	 */
 	perdb_worker.bgw_flags = BGWORKER_SHMEM_ACCESS |
 		BGWORKER_BACKEND_DATABASE_CONNECTION;
@@ -1378,6 +1417,8 @@ _PG_init(void)
 		pfree(used_databases[off]);
 	pfree(used_databases);
 
+	pfree(connections_tmp);
+
 out:
 
 	/*
@@ -1387,10 +1428,14 @@ out:
 	 * might still be needed for some sql callable functions or such.
 	 */
 
+	if (bdr_startup_context)
+		n_configured_bdr_nodes = list_length(bdr_startup_context->workers);
+	else
+		n_configured_bdr_nodes = 0;
+
 	/* register a slot for every remote node */
-	bdr_count_shmem_init(nregistered);
-	bdr_sequencer_shmem_init(nregistered, num_used_databases);
-	n_configured_bdr_nodes = nregistered;
+	bdr_count_shmem_init(n_configured_bdr_nodes);
+	bdr_sequencer_shmem_init(n_configured_bdr_nodes, num_used_databases);
 
 	MemoryContextSwitchTo(old_context);
 }
