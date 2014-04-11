@@ -926,21 +926,37 @@ launch_apply_workers(char *dbname)
 	for (i = 0; i < bdr_max_workers; i++)
 	{
 		BdrWorker *worker = &BdrWorkerCtl->slots[i];
-		if (worker->worker_type == BDR_WORKER_APPLY)
+		switch(worker->worker_type)
 		{
-			BdrApplyWorker *con = &worker->worker_data.apply_worker;
-			if ( strcmp(NameStr(con->dbname), dbname) == 0 )
-			{
-				/* It's an apply worker for our DB; launch it */
-				BackgroundWorkerHandle *bgw_handle;
+			case BDR_WORKER_APPLY:
+				{
+					BdrApplyWorker *con = &worker->worker_data.apply_worker;
+					if ( strcmp(NameStr(con->dbname), dbname) == 0 )
+					{
+						/* It's an apply worker for our DB; launch it */
+						BackgroundWorkerHandle *bgw_handle;
 
-				snprintf(apply_worker.bgw_name, BGW_MAXLEN,
-						 "bdr apply: %s", NameStr(con->name));
-				apply_worker.bgw_main_arg = PointerGetDatum(con);
+						snprintf(apply_worker.bgw_name, BGW_MAXLEN,
+								 "bdr apply: %s", NameStr(con->name));
+						apply_worker.bgw_main_arg = PointerGetDatum(con);
 
-				RegisterDynamicBackgroundWorker(&apply_worker, &bgw_handle);
-				apply_workers = lcons(bgw_handle, apply_workers);
-			}
+						if (!RegisterDynamicBackgroundWorker(&apply_worker, &bgw_handle))
+						{
+							elog(ERROR, "Failed to register background worker"); // FIXME better error
+						}
+						elog(LOG, "Registered worker");
+						apply_workers = lcons(bgw_handle, apply_workers);
+					}
+				}
+				break;
+			case BDR_WORKER_EMPTY_SLOT:
+			case BDR_WORKER_PERDB:
+				/* Nothing to do; switch only so we get warnings for insane cases */
+				break;
+			default:
+				/* Bogus value */
+				elog(FATAL, "Unhandled BdrWorkerType case %i, memory corruption?", worker->worker_type);
+				break;
 		}
 	}
 	LWLockRelease(BdrWorkerCtl->lock);
@@ -1150,12 +1166,16 @@ bdr_worker_shmem_create_workers()
 	foreach(c, bdr_startup_context->workers)
 	{
 		BdrApplyWorker *worker = (BdrApplyWorker*)lfirst(c);
-		BdrApplyWorker *shmworker;
+		BdrWorker 	   *shmworker;
 
-		shmworker = (BdrApplyWorker*) bdr_worker_shm_alloc(BDR_WORKER_APPLY);
-		memcpy(shmworker, worker, sizeof(BdrApplyWorker));
+		shmworker = (BdrWorker*) bdr_worker_shm_alloc(BDR_WORKER_APPLY);
+		Assert(shmworker->worker_type == BDR_WORKER_APPLY);
+		elog(LOG, "copying %p to %p", worker, shmworker);
+		elog(LOG, "worker %s for %s", NameStr(worker->name), NameStr(worker->dbname));
+		memcpy(&shmworker->worker_data, worker, sizeof(BdrApplyWorker));
 		pfree(worker);
 	}
+	elog(LOG, "copied %i entries", list_length(bdr_startup_context->workers));
 
 	list_free(bdr_startup_context->workers);
 	pfree(bdr_startup_context);
