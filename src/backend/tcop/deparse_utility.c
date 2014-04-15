@@ -38,6 +38,7 @@
 #include "catalog/pg_depend.h"
 #include "catalog/pg_extension.h"
 #include "catalog/pg_inherits.h"
+#include "catalog/pg_language.h"
 #include "catalog/pg_operator.h"
 #include "catalog/pg_opclass.h"
 #include "catalog/pg_opfamily.h"
@@ -1696,6 +1697,359 @@ deparse_CreateDomain(Oid objectId, Node *parsetree)
 	return createDomain;
 }
 
+static ObjTree *
+deparse_FunctionSet(VariableSetKind kind, char *name, char *value)
+{
+	ObjTree	   *r;
+
+	if (kind == VAR_RESET_ALL)
+	{
+		r = new_objtree_VA("RESET ALL", 0);
+	}
+	else if (value != NULL)
+	{
+		/*
+		 * Some GUC variable names are 'LIST' type and hence must not be
+		 * quoted. FIXME: shouldn't this and pg_get_functiondef() rather use
+		 * guc.c to check for GUC_LIST?
+		 */
+		if (pg_strcasecmp(name, "DateStyle") == 0
+			|| pg_strcasecmp(name, "search_path") == 0)
+			r = new_objtree_VA("SET %{set_name}I TO %{set_value}s", 0);
+		else
+			r = new_objtree_VA("SET %{set_name}I TO %{set_value}L", 0);
+
+		append_string_object(r, "set_name", name);
+		append_string_object(r, "set_value", value);
+	}
+	else
+	{
+		r = new_objtree_VA("RESET %{set_name}I", 0);
+		append_string_object(r, "set_name", name);
+	}
+
+	return r;
+}
+
+/*
+ * deparse_CreateFunctionStmt
+ *		Deparse a CreateFunctionStmt (CREATE FUNCTION)
+ *
+ * Given a function OID and the parsetree that created it, return the JSON
+ * blob representing the creation command.
+ */
+static ObjTree *
+deparse_CreateFunction(Oid objectId, Node *parsetree)
+{
+	CreateFunctionStmt *node = (CreateFunctionStmt *) parsetree;
+	ObjTree	   *createFunc;
+	ObjTree	   *sign;
+	ObjTree	   *tmp;
+	Datum		tmpdatum;
+	char	   *fmt;
+	char	   *definition;
+	char	   *source;
+	char	   *probin;
+	List	   *params;
+	List	   *defaults;
+	List	   *sets = NIL;
+	ListCell   *cell;
+	ListCell   *curdef;
+	ListCell   *table_params = NULL;
+	HeapTuple	procTup;
+	Form_pg_proc procForm;
+	HeapTuple	langTup;
+	Oid		   *typarray;
+	Form_pg_language langForm;
+	int			i;
+	int			typnum;
+	bool		isnull;
+
+	/* get the pg_proc tuple */
+	procTup = SearchSysCache1(PROCOID, objectId);
+	if (!HeapTupleIsValid(procTup))
+		elog(ERROR, "cache lookup failure for function with OID %u",
+			 objectId);
+	procForm = (Form_pg_proc) GETSTRUCT(procTup);
+
+	/* get the corresponding pg_language tuple */
+	langTup = SearchSysCache1(LANGOID, procForm->prolang);
+	if (!HeapTupleIsValid(langTup))
+		elog(ERROR, "cache lookup failure for language with OID %u",
+			 procForm->prolang);
+	langForm = (Form_pg_language) GETSTRUCT(langTup);
+
+	/*
+	 * Determine useful values for prosrc and probin.  We cope with probin
+	 * being either NULL or "-", but prosrc must have a valid value.
+	 */
+	tmpdatum = SysCacheGetAttr(PROCOID, procTup,
+							   Anum_pg_proc_prosrc, &isnull);
+	if (isnull)
+		elog(ERROR, "null prosrc in function with OID %u", objectId);
+	source = TextDatumGetCString(tmpdatum);
+
+	/* Determine a useful value for probin */
+	tmpdatum = SysCacheGetAttr(PROCOID, procTup,
+							   Anum_pg_proc_probin, &isnull);
+	if (isnull)
+		probin = NULL;
+	else
+	{
+		probin = TextDatumGetCString(tmpdatum);
+		if (probin[0] == '\0' || strcmp(probin, "-") == 0)
+			probin = NULL;
+	}
+
+	if (probin == NULL)
+		definition = "%{definition}L";
+	else
+		definition = "%{objfile}L, %{symbol}L";
+
+	fmt = psprintf("CREATE %%{or_replace}s FUNCTION %%{signature}s "
+				   "RETURNS %%{return_type}s LANGUAGE %%{language}I "
+				   "%%{window}s %%{volatility}s %%{leakproof}s "
+				   "%%{strict}s %%{security_definer}s %%{cost}s %%{rows}s "
+				   "%%{set_options: }s "
+				   "AS %s", definition);
+
+	createFunc = new_objtree_VA(fmt, 1,
+								"or_replace", ObjTypeString,
+								node->replace ? "OR REPLACE" : "");
+
+	sign = new_objtree_VA("%{identity}D(%{arguments:, }s)", 0);
+
+	/*
+	 * To construct the arguments array, extract the type OIDs from the
+	 * function's pg_proc entry.  If pronargs equals the parameter list length,
+	 * there are no OUT parameters and thus we can extract the type OID from
+	 * proargtypes; otherwise we need to decode proallargtypes, which is
+	 * a bit more involved.
+	 */
+	typarray = palloc(list_length(node->parameters) * sizeof(Oid));
+	if (list_length(node->parameters) > procForm->pronargs)
+	{
+		bool	isnull;
+		Datum	alltypes;
+		Datum  *values;
+		bool   *nulls;
+		int		nelems;
+
+		alltypes = SysCacheGetAttr(PROCOID, procTup,
+								   Anum_pg_proc_proallargtypes, &isnull);
+		if (isnull)
+			elog(ERROR, "NULL proallargtypes, but more parameters than args");
+		deconstruct_array(DatumGetArrayTypeP(alltypes),
+						  OIDOID, 4, 't', 'i',
+						  &values, &nulls, &nelems);
+		if (nelems != list_length(node->parameters))
+			elog(ERROR, "mismatched proallargatypes");
+		for (i = 0; i < list_length(node->parameters); i++)
+			typarray[i] = values[i];
+	}
+	else
+	{
+		for (i = 0; i < list_length(node->parameters); i++)
+			 typarray[i] = procForm->proargtypes.values[i];
+	}
+
+	/*
+	 * If there are any default expressions, we read the deparsed expression as
+	 * a list so that we can attach them to each argument.
+	 */
+	tmpdatum = SysCacheGetAttr(PROCOID, procTup,
+							   Anum_pg_proc_proargdefaults, &isnull);
+	if (!isnull)
+	{
+		defaults = FunctionGetDefaults(DatumGetTextP(tmpdatum));
+		curdef = list_head(defaults);
+	}
+	else
+	{
+		defaults = NIL;
+		curdef = NULL;
+	}
+
+	/*
+	 * Now iterate over each parameter in the parsetree to create the
+	 * parameters array.
+	 */
+	params = NIL;
+	typnum = 0;
+	foreach(cell, node->parameters)
+	{
+		FunctionParameter *param = (FunctionParameter *) lfirst(cell);
+		ObjTree	   *tmp2;
+		ObjTree	   *tmp3;
+
+		/*
+		 * A PARAM_TABLE parameter indicates end of input arguments; the
+		 * following parameters are part of the return type.  We ignore them
+		 * here, but keep track of the current position in the list so that
+		 * we can easily produce the return type below.
+		 */
+		if (param->mode == FUNC_PARAM_TABLE)
+		{
+			table_params = cell;
+			break;
+		}
+
+		/*
+		 * Note that %{name}s is a string here, not an identifier; the reason
+		 * for this is that an absent parameter name must produce an empty
+		 * string, not "", which is what would happen if we were to use
+		 * %{name}I here.  So we add another level of indirection to allow us
+		 * to inject a "present" parameter.
+		 */
+		tmp2 = new_objtree_VA("%{mode}s %{name}s %{type}T %{default}s", 0);
+		append_string_object(tmp2, "mode",
+							 param->mode == FUNC_PARAM_IN ? "IN" :
+							 param->mode == FUNC_PARAM_OUT ? "OUT" :
+							 param->mode == FUNC_PARAM_INOUT ? "INOUT" :
+							 param->mode == FUNC_PARAM_VARIADIC ? "VARIADIC" :
+							 "INVALID MODE");
+
+		/* optional wholesale suppression of "name" occurs here */
+		append_object_object(tmp2, "name",
+							 new_objtree_VA("%{name}I", 2,
+											"name", ObjTypeString,
+											param->name ? param->name : "NULL",
+											"present", ObjTypeBool,
+											param->name ? true : false));
+
+		tmp3 = new_objtree_VA("DEFAULT %{value}s", 0);
+		if (PointerIsValid(param->defexpr))
+		{
+			char *expr;
+
+			if (curdef == NULL)
+				elog(ERROR, "proargdefaults list too short");
+			expr = lfirst(curdef);
+
+			append_string_object(tmp3, "value", expr);
+			curdef = lnext(curdef);
+		}
+		else
+			append_bool_object(tmp3, "present", false);
+		append_object_object(tmp2, "default", tmp3);
+
+		append_object_object(tmp2, "type",
+							 new_objtree_for_type(typarray[typnum++], -1));
+
+		params = lappend(params, new_object_object(tmp2));
+	}
+	append_array_object(sign, "arguments", params);
+	append_object_object(sign, "identity",
+						 new_objtree_for_qualname_id(ProcedureRelationId,
+													 objectId));
+	append_object_object(createFunc, "signature", sign);
+
+	/*
+	 * A return type can adopt one of two forms: either a [SETOF] some_type, or
+	 * a TABLE(list-of-types).  We can tell the second form because we saw a
+	 * table param above while scanning the argument list.
+	 */
+	if (table_params == NULL)
+	{
+		tmp = new_objtree_VA("%{setof}s %{rettype}T", 0);
+		append_string_object(tmp, "setof",
+							 procForm->proretset ? "SETOF" : "");
+		append_object_object(tmp, "rettype",
+							 new_objtree_for_type(procForm->prorettype, -1));
+		append_string_object(tmp, "return_form", "plain");
+	}
+	else
+	{
+		List	   *rettypes = NIL;
+		ObjTree	   *tmp2;
+
+		tmp = new_objtree_VA("TABLE (%{rettypes:, }s)", 0);
+		for (; table_params != NULL; table_params = lnext(table_params))
+		{
+			FunctionParameter *param = lfirst(table_params);
+
+			tmp2 = new_objtree_VA("%{name}I %{type}T", 0);
+			append_string_object(tmp2, "name", param->name);
+			append_object_object(tmp2, "type",
+								 new_objtree_for_type(typarray[typnum++], -1));
+			rettypes = lappend(rettypes, new_object_object(tmp2));
+		}
+
+		append_array_object(tmp, "rettypes", rettypes);
+		append_string_object(tmp, "return_form", "table");
+	}
+
+	append_object_object(createFunc, "return_type", tmp);
+
+	append_string_object(createFunc, "language",
+						 NameStr(langForm->lanname));
+
+	append_string_object(createFunc, "window",
+						 procForm->proiswindow ? "WINDOW" : "");
+	append_string_object(createFunc, "volatility",
+						 procForm->provolatile == PROVOLATILE_VOLATILE ?
+						 "VOLATILE" :
+						 procForm->provolatile == PROVOLATILE_STABLE ?
+						 "STABLE" :
+						 procForm->provolatile == PROVOLATILE_IMMUTABLE ?
+						 "IMMUTABLE" : "INVALID VOLATILITY");
+
+	append_string_object(createFunc, "leakproof",
+						 procForm->proleakproof ? "LEAKPROOF" : "");
+	append_string_object(createFunc, "strict",
+						 procForm->proisstrict ?
+						 "RETURNS NULL ON NULL INPUT" :
+						 "CALLED ON NULL INPUT");
+
+	append_string_object(createFunc, "security_definer",
+						 procForm->prosecdef ?
+						 "SECURITY DEFINER" : "SECURITY INVOKER");
+
+	append_object_object(createFunc, "cost",
+						 new_objtree_VA("COST %{cost}n", 1,
+										"cost", ObjTypeFloat,
+										procForm->procost));
+
+	tmp = new_objtree_VA("ROWS %{rows}n", 0);
+	if (procForm->prorows == 0)
+		append_bool_object(tmp, "present", false);
+	else
+		append_float_object(tmp, "rows", procForm->prorows);
+	append_object_object(createFunc, "rows", tmp);
+
+	foreach(cell, node->options)
+	{
+		DefElem	*defel = (DefElem *) lfirst(cell);
+		ObjTree	   *tmp = NULL;
+
+		if (strcmp(defel->defname, "set") == 0)
+		{
+			VariableSetStmt *sstmt = (VariableSetStmt *) defel->arg;
+			char *value = ExtractSetVariableArgs(sstmt);
+
+			tmp = deparse_FunctionSet(sstmt->kind, sstmt->name, value);
+			sets = lappend(sets, new_object_object(tmp));
+		}
+	}
+	append_array_object(createFunc, "set_options", sets);
+
+	if (probin == NULL)
+	{
+		append_string_object(createFunc, "definition",
+							 source);
+	}
+	else
+	{
+		append_string_object(createFunc, "objfile", probin);
+		append_string_object(createFunc, "symbol", source);
+	}
+
+	ReleaseSysCache(langTup);
+	ReleaseSysCache(procTup);
+
+	return createFunc;
+}
+
 /*
  * Return the given object type as a string.
  */
@@ -2744,7 +3098,7 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_CreateFunctionStmt:
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			command = deparse_CreateFunction(objectId, parsetree);
 			break;
 
 		case T_AlterFunctionStmt:
