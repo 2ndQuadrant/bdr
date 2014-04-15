@@ -9764,3 +9764,28 @@ DomainGetDefault(HeapTuple domTup)
 
 	return defstr;
 }
+
+/*
+ * Return the defaults values of arguments to a function, as a list of
+ * deparsed expressions.
+ */
+List *
+FunctionGetDefaults(text *proargdefaults)
+{
+	List   *nodedefs;
+	List   *strdefs = NIL;
+	ListCell *cell;
+
+	nodedefs = (List *) stringToNode(TextDatumGetCString(proargdefaults));
+	if (!IsA(nodedefs, List))
+		elog(ERROR, "proargdefaults is not a list");
+
+	foreach(cell, nodedefs)
+	{
+		Node   *onedef = lfirst(cell);
+
+		strdefs = lappend(strdefs, deparse_expression_pretty(onedef, NIL, false, false, 0, 0));
+	}
+
+	return strdefs;
+}

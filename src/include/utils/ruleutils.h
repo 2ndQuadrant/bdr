@@ -42,6 +42,7 @@ extern List *set_deparse_context_planstate(List *dpcontext,
 extern List *select_rtable_names_for_explain(List *rtable,
 								Bitmapset *rels_used);
 extern char *generate_collation_name(Oid collid);
+extern List *FunctionGetDefaults(text *proargdefaults);
 
 extern char *RelationGetColumnDefault(Relation rel, AttrNumber attno,
 						 List *dpcontext);
