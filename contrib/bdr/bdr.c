@@ -54,7 +54,7 @@
 /* apply */
 #include "libpq-fe.h"
 
-/* init_replica */
+/* bdr_init_replica */
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -71,7 +71,7 @@ Oid   BdrNodesRelid;
 /* GUC storage */
 static char *connections = NULL;
 static char *bdr_synchronous_commit = NULL;
-static char *bdr_init_replica_script_path = NULL;
+static char *bdr_bdr_init_replica_script_path = NULL;
 static int bdr_max_workers;
 
 /* TODO: Remove when bdr_apply_main moved into bdr_apply.c */
@@ -118,14 +118,14 @@ typedef struct BdrApplyWorkerConfigOptions
 {
 	char *dsn;
 	int   apply_delay;
-	bool  init_replica;
+	bool  bdr_init_replica;
 	char *replica_local_dsn;
 } BdrApplyWorkerConfigOptions;
 
 PG_MODULE_MAGIC;
 
 void		_PG_init(void);
-static void init_replica(BdrApplyWorker *wcon, PGconn *conn, char *snapshot);
+static void bdr_init_replica(BdrApplyWorker *wcon, PGconn *conn, char *snapshot);
 static void bdr_maintain_schema(void);
 static void bdr_worker_shmem_startup(void);
 static void bdr_worker_shmem_create_workers(void);
@@ -135,7 +135,7 @@ static BdrWorker* bdr_worker_shm_alloc(BdrWorkerType worker_type);
  * Converts an int64 to network byte order.
  */
 static void
-sendint64(int64 i, char *buf)
+bdr_sendint64(int64 i, char *buf)
 {
 	uint32		n32;
 
@@ -154,7 +154,7 @@ sendint64(int64 i, char *buf)
  * Send a Standby Status Update message to server.
  */
 static bool
-sendFeedback(PGconn *conn, XLogRecPtr blockpos, int64 now, bool replyRequested,
+bdr_send_feedback(PGconn *conn, XLogRecPtr blockpos, int64 now, bool replyRequested,
 			 bool force)
 {
 	char		replybuf[1 + 8 + 8 + 8 + 8 + 1];
@@ -171,13 +171,13 @@ sendFeedback(PGconn *conn, XLogRecPtr blockpos, int64 now, bool replyRequested,
 
 	replybuf[len] = 'r';
 	len += 1;
-	sendint64(blockpos, &replybuf[len]);		/* write */
+	bdr_sendint64(blockpos, &replybuf[len]);		/* write */
 	len += 8;
-	sendint64(blockpos, &replybuf[len]);		/* flush */
+	bdr_sendint64(blockpos, &replybuf[len]);		/* flush */
 	len += 8;
-	sendint64(blockpos, &replybuf[len]);		/* apply */
+	bdr_sendint64(blockpos, &replybuf[len]);		/* apply */
 	len += 8;
-	sendint64(now, &replybuf[len]);				/* sendTime */
+	bdr_sendint64(now, &replybuf[len]);				/* sendTime */
 	len += 8;
 	replybuf[len] = replyRequested ? 1 : 0;		/* replyRequested */
 	len += 1;
@@ -219,7 +219,7 @@ bdr_sighup(SIGNAL_ARGS)
 }
 
 static void
-process_remote_action(StringInfo s)
+bdr_process_remote_action(StringInfo s)
 {
 	char		action;
 
@@ -461,7 +461,7 @@ bdr_worker_init(char *dbname)
  * next GUC-related call.
  */
 const char *
-BDRGetWorkerOption(const char * worker_name, const char * option_name, bool missing_ok)
+bdr_get_worker_option(const char * worker_name, const char * option_name, bool missing_ok)
 {
 	char	   *gucname;
 	size_t      namelen;
@@ -516,7 +516,7 @@ bdr_apply_main(Datum main_arg)
 	CurrentResourceOwner = ResourceOwnerCreate(NULL, "bdr apply top-level resource owner");
 	bdr_saved_resowner = CurrentResourceOwner;
 
-	dsn = BDRGetWorkerOption(NameStr(bdr_apply_worker->name), "dsn", false);
+	dsn = bdr_get_worker_option(NameStr(bdr_apply_worker->name), "dsn", false);
 	snprintf(conninfo_repl, sizeof(conninfo_repl),
 			 "%s replication=database fallback_application_name=bdr",
 			 dsn);
@@ -542,7 +542,7 @@ bdr_apply_main(Datum main_arg)
 	else
 	{
 		char *snapshot;
-		bool should_init_replica;
+		bool should_bdr_init_replica;
 
 		elog(LOG, "Creating new slot %s", NameStr(slot_name));
 
@@ -550,12 +550,12 @@ bdr_apply_main(Datum main_arg)
 		bdr_create_slot(streamConn, &slot_name, remote_ident, &replication_identifier, &snapshot);
 
 		/* Do we need to do any database init? */
-		if (!parse_bool(BDRGetWorkerOption(NameStr(bdr_apply_worker->name), "init_replica", false), &should_init_replica))
-			elog(ERROR, "Config option bdr.%s_init_replica was valid bool at startup, now invalid, argh?",
+		if (!parse_bool(bdr_get_worker_option(NameStr(bdr_apply_worker->name), "bdr_init_replica", false), &should_bdr_init_replica))
+			elog(ERROR, "Config option bdr.%s_bdr_init_replica was valid bool at startup, now invalid, argh?",
 					NameStr(bdr_apply_worker->name) );
 
-		if (should_init_replica)
-			init_replica(bdr_apply_worker, streamConn, snapshot);
+		if (should_bdr_init_replica)
+			bdr_init_replica(bdr_apply_worker, streamConn, snapshot);
 	}
 
 	bdr_apply_worker->origin_id = replication_identifier;
@@ -701,7 +701,7 @@ bdr_apply_main(Datum main_arg)
 					if (last_received < end_lsn)
 						last_received = end_lsn;
 
-					process_remote_action(&s);
+					bdr_process_remote_action(&s);
 				}
 				else if (c == 'k')
 				{
@@ -709,7 +709,7 @@ bdr_apply_main(Datum main_arg)
 
 					temp = pq_getmsgint64(&s);
 
-					sendFeedback(streamConn, temp,
+					bdr_send_feedback(streamConn, temp,
 								 GetCurrentTimestamp(), false, true);
 				}
 				/* other message types are purposefully ignored */
@@ -723,7 +723,7 @@ bdr_apply_main(Datum main_arg)
 		 * FIXME: we should only do that after an xlog flush... Yuck.
 		 */
 		if (last_received != InvalidXLogRecPtr)
-			sendFeedback(streamConn, last_received,
+			bdr_send_feedback(streamConn, last_received,
 						 GetCurrentTimestamp(), false, false);
 	}
 
@@ -751,7 +751,7 @@ bdr_apply_main(Datum main_arg)
  * 	Number of distinct databases named in conns
  *
  *	database_initcons
- *	For each index in used_databases, name of con with init_replica=t if any
+ *	For each index in used_databases, name of con with bdr_init_replica=t if any
  *
  *	out_worker
  *	Initialize this BdrApplyWorker with the name and dbname found.
@@ -760,7 +760,7 @@ bdr_apply_main(Datum main_arg)
  * workers being added/removed with a config reload SIGHUP. 
  */
 static bool
-create_bdr_con_gucs(
+bdr_create_con_gucs(
 	char  *name,
 	char **used_databases,
 	Size  *num_used_databases,
@@ -805,11 +805,11 @@ create_bdr_con_gucs(
 							GUC_UNIT_MS,
 							NULL, NULL, NULL);
 
-	sprintf(optname_replica, "bdr.%s_init_replica", name);
+	sprintf(optname_replica, "bdr.%s_bdr_init_replica", name);
 	DefineCustomBoolVariable(optname_replica,
 							 optname_replica,
 							 NULL,
-							 &opts->init_replica,
+							 &opts->bdr_init_replica,
 							 false,
 							 PGC_SIGHUP,
 							 0,
@@ -881,10 +881,10 @@ create_bdr_con_gucs(
 	 * Make sure that at most one of the worker configs for each DB can be
 	 * configured to run initialization.
 	 */
-	if (opts->init_replica)
+	if (opts->bdr_init_replica)
 	{
 		if (database_initcons[off] != NULL)
-			elog(ERROR, "Connections %s and %s on database %s both have init_replica enabled, cannot continue",
+			elog(ERROR, "Connections %s and %s on database %s both have bdr_init_replica enabled, cannot continue",
 				name, database_initcons[off], used_databases[off]);
 		else 
 			database_initcons[off] = name; /* no need to pstrdup, see _PG_init */
@@ -905,7 +905,7 @@ create_bdr_con_gucs(
  * launches them.
  */
 static List*
-launch_apply_workers(char *dbname)
+bdr_launch_apply_workers(char *dbname)
 {
 	List             *apply_workers = NIL;
 	BackgroundWorker  apply_worker;
@@ -994,7 +994,7 @@ bdr_node_count()
  * This worker can use the SPI and shared memory.
  */
 static void
-perdb_worker_main(Datum main_arg)
+bdr_perdb_worker_main(Datum main_arg)
 {
 	int				  rc;
 	List			 *apply_workers;
@@ -1015,7 +1015,7 @@ perdb_worker_main(Datum main_arg)
 	elog(LOG, "Starting bdr apply workers for db %s", NameStr(bdr_perdb_worker->dbname));
 
 	/* Launch the apply workers */
-	apply_workers = launch_apply_workers(NameStr(bdr_perdb_worker->dbname));
+	apply_workers = bdr_launch_apply_workers(NameStr(bdr_perdb_worker->dbname));
 
 	/* 
 	 * For now, just free the bgworker handles. Later we'll probably want them for
@@ -1313,10 +1313,10 @@ _PG_init(void)
 							NULL, NULL, NULL);
 	/* TODO: If bdr_max_workers is unset/zero, autoset from number of bdr.connections */
 
-	DefineCustomStringVariable("bdr.init_replica_script_path",
+	DefineCustomStringVariable("bdr.bdr_init_replica_script_path",
 							   "Path to script to run when replicating a new DB from upstream master",
 							   NULL,
-							   &bdr_init_replica_script_path,
+							   &bdr_bdr_init_replica_script_path,
 							   NULL, PGC_POSTMASTER,
 							   GUC_NOT_IN_SAMPLE,
 							   NULL, NULL, NULL);
@@ -1360,7 +1360,7 @@ _PG_init(void)
 	used_databases = palloc0(sizeof(char *) * list_length(connames));
 	/* 
 	 * For each db named in used_databases, the corresponding index
-	 * is the name of the conn with init_replica=t if any.
+	 * is the name of the conn with bdr_init_replica=t if any.
 	 */
 	database_initcons = palloc0(sizeof(char *) * list_length(connames));
 
@@ -1373,7 +1373,7 @@ _PG_init(void)
 	{
 		BdrApplyWorker *apply_worker = (BdrApplyWorker*)palloc(sizeof(BdrApplyWorker));
 		char *name = (char *) lfirst(c);
-		if (!create_bdr_con_gucs(name, used_databases, &num_used_databases, database_initcons, apply_worker))
+		if (!bdr_create_con_gucs(name, used_databases, &num_used_databases, database_initcons, apply_worker))
 			continue;
 		apply_worker->origin_id = InvalidRepNodeId;
 		bdr_startup_context->workers = lcons(apply_worker, bdr_startup_context->workers);
@@ -1389,7 +1389,7 @@ _PG_init(void)
 
 	/*
 	 * We've ensured there are no duplicate init connections, no need
-	 * to remember which conn is the init_replica conn anymore. The contents
+	 * to remember which conn is the bdr_init_replica conn anymore. The contents
 	 * are just pointers into connections_tmp
 	 * so we don't want to free them.
 	 */
@@ -1414,7 +1414,7 @@ _PG_init(void)
 	perdb_worker.bgw_flags = BGWORKER_SHMEM_ACCESS |
 		BGWORKER_BACKEND_DATABASE_CONNECTION;
 	perdb_worker.bgw_start_time = BgWorkerStart_RecoveryFinished;
-	perdb_worker.bgw_main = perdb_worker_main;
+	perdb_worker.bgw_main = bdr_perdb_worker_main;
 	perdb_worker.bgw_restart_time = 5;
 	perdb_worker.bgw_notify_pid = 0;
 
@@ -1462,7 +1462,7 @@ out:
 }
 
 static Oid
-lookup_relid(const char *relname, Oid schema_oid)
+bdr_lookup_relid(const char *relname, Oid schema_oid)
 {
 	Oid			relid;
 
@@ -1527,20 +1527,20 @@ bdr_maintain_schema(void)
 	schema_oid = get_namespace_oid("bdr", false);
 	if (schema_oid != InvalidOid)
 	{
-		QueuedDDLCommandsRelid = lookup_relid("bdr_queued_commands",
+		QueuedDDLCommandsRelid = bdr_lookup_relid("bdr_queued_commands",
 											  schema_oid);
 
-		BdrSequenceValuesRelid = lookup_relid("bdr_sequence_values",
+		BdrSequenceValuesRelid = bdr_lookup_relid("bdr_sequence_values",
 											  schema_oid);
 
-		BdrSequenceElectionsRelid = lookup_relid("bdr_sequence_elections",
+		BdrSequenceElectionsRelid = bdr_lookup_relid("bdr_sequence_elections",
 												 schema_oid);
 
-		BdrVotesRelid = lookup_relid("bdr_votes", schema_oid);
+		BdrVotesRelid = bdr_lookup_relid("bdr_votes", schema_oid);
 
-		BdrNodesRelid = lookup_relid("bdr_nodes", schema_oid);
+		BdrNodesRelid = bdr_lookup_relid("bdr_nodes", schema_oid);
 
-		QueuedDropsRelid = lookup_relid("bdr_queued_drops", schema_oid);
+		QueuedDropsRelid = bdr_lookup_relid("bdr_queued_drops", schema_oid);
 	}
 	else
 		elog(ERROR, "cache lookup failed for schema bdr");
@@ -1558,7 +1558,7 @@ bdr_maintain_schema(void)
  * up a new logical replica from an existing node.
  */
 static void
-init_replica(BdrApplyWorker *wcon, PGconn *conn, char *snapshot)
+bdr_init_replica(BdrApplyWorker *wcon, PGconn *conn, char *snapshot)
 {
 	pid_t pid;
 	char *bindir;
@@ -1569,14 +1569,14 @@ init_replica(BdrApplyWorker *wcon, PGconn *conn, char *snapshot)
 	bindir = pstrdup(my_exec_path);
 	get_parent_directory(bindir);
 
-	replica_local_dsn = pstrdup(BDRGetWorkerOption(NameStr(wcon->name), "replica_local_dsn", false));
-	remote_dsn  = pstrdup(BDRGetWorkerOption(NameStr(wcon->name), "dsn", false));
+	replica_local_dsn = pstrdup(bdr_get_worker_option(NameStr(wcon->name), "replica_local_dsn", false));
+	remote_dsn  = pstrdup(bdr_get_worker_option(NameStr(wcon->name), "dsn", false));
 
 	if (!replica_local_dsn)
-		elog(FATAL, "bdr init_replica: no replica_local_dsn specified");
+		elog(FATAL, "bdr bdr_init_replica: no replica_local_dsn specified");
 
-	if (!bdr_init_replica_script_path)
-		elog(FATAL, "bdr init_replica: no bdr_init_replica_script_path specified");
+	if (!bdr_bdr_init_replica_script_path)
+		elog(FATAL, "bdr bdr_init_replica: no bdr_bdr_init_replica_script_path specified");
 
 	tmpdir = palloc(strlen(tmpdir)+32);
 	sprintf(tmpdir, "%s.%s.%d", tmpdir,
@@ -1591,7 +1591,7 @@ init_replica(BdrApplyWorker *wcon, PGconn *conn, char *snapshot)
 
 		char *const envp[] = { NULL };
 		char *const argv[] = {
-			bdr_init_replica_script_path,
+			bdr_bdr_init_replica_script_path,
 			"--snapshot", snapshot,
 			"--source", remote_dsn,
 			"--target", replica_local_dsn,
@@ -1601,10 +1601,10 @@ init_replica(BdrApplyWorker *wcon, PGconn *conn, char *snapshot)
 		};
 
 		elog(LOG, "Creating replica with: %s --snapshot %s --source \"%s\" --target \"%s\" --bindir \"%s\" --tmp-directory \"%s\"",
-			 bdr_init_replica_script_path, snapshot, remote_dsn, replica_local_dsn,
+			 bdr_bdr_init_replica_script_path, snapshot, remote_dsn, replica_local_dsn,
 			 bindir, tmpdir);
 
-		n = execve(bdr_init_replica_script_path, argv, envp);
+		n = execve(bdr_bdr_init_replica_script_path, argv, envp);
 		if (n < 0)
 			exit(n);
 

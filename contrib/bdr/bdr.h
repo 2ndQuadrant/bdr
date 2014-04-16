@@ -101,7 +101,7 @@ extern Oid	BdrSequenceElectionsRelid;
 extern Oid	BdrVotesRelid;
 
 /* Helpers for accessing configuration */
-const char *BDRGetWorkerOption(const char * worker_name, const char * option_name, bool missing_ok);
+const char *bdr_get_worker_option(const char * worker_name, const char * option_name, bool missing_ok);
 
 /* apply support */
 extern void process_remote_begin(StringInfo s);

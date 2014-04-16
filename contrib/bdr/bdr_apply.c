@@ -144,7 +144,7 @@ process_remote_begin(StringInfo s)
 
 	pgstat_report_activity(STATE_RUNNING, statbuf);
 
-	apply_delay_str = BDRGetWorkerOption(NameStr(bdr_apply_worker->name), "apply_delay", true);
+	apply_delay_str = bdr_get_worker_option(NameStr(bdr_apply_worker->name), "apply_delay", true);
 	if (apply_delay_str)
 		/* This is an integer GUC, so parsing as an int can't fail */
 		(void) parse_int(apply_delay_str, &apply_delay, 0, NULL);
