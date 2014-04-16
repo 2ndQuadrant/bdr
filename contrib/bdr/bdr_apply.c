@@ -45,6 +45,7 @@
 #include "storage/bufmgr.h"
 #include "storage/lmgr.h"
 
+#include "tcop/pquery.h"
 #include "tcop/tcopprot.h"
 #include "tcop/utility.h"
 
@@ -282,11 +283,16 @@ process_queued_ddl_command(HeapTuple cmdtup, bool tx_just_started)
 		List	   *plantree_list;
 		List	   *querytree_list;
 		Node	   *command = (Node *) lfirst(command_i);
-		ListCell   *stmt_i;
+		const char *commandTag;
+		Portal		portal;
+		DestReceiver *receiver;
 
+		/* temporarily push snapshot for parse analysis/planning */
 		PushActiveSnapshot(GetTransactionSnapshot());
 
 		oldcontext = MemoryContextSwitchTo(MessageContext);
+
+		commandTag = CreateCommandTag(command);
 
 		querytree_list = pg_analyze_and_rewrite(
 			command, cmdstr, NULL, 0);
@@ -296,17 +302,24 @@ process_queued_ddl_command(HeapTuple cmdtup, bool tx_just_started)
 
 		PopActiveSnapshot();
 
-		foreach(stmt_i, plantree_list)
-		{
-			Node *stmt = lfirst(stmt_i);
-			if (IsA(stmt, PlannedStmt))
-				elog(ERROR, "frak");
+		portal = CreatePortal("", true, true);
+		PortalDefineQuery(portal, NULL,
+						  cmdstr, commandTag,
+						  plantree_list, NULL);
+		PortalStart(portal, NULL, 0, InvalidSnapshot);
 
-			ProcessUtility(stmt,
-						   cmdstr,
-						   isTopLevel ? PROCESS_UTILITY_TOPLEVEL : PROCESS_UTILITY_QUERY,
-						   NULL, CreateDestReceiver(DestNone), NULL);
-		}
+		receiver = CreateDestReceiver(DestNone);
+
+		(void) PortalRun(portal, FETCH_ALL,
+						 isTopLevel,
+						 receiver, receiver,
+						 NULL);
+		(*receiver->rDestroy) (receiver);
+
+		PortalDrop(portal, false);
+
+		CommandCounterIncrement();
+
 		MemoryContextSwitchTo(oldcontext);
 	}
 
@@ -579,17 +592,30 @@ process_remote_insert(StringInfo s)
 
 	check_sequencer_wakeup(rel);
 
-	heap_close(rel, NoLock);
-
 	/* execute DDL if insertion was into the ddl command queue */
-	if (RelationGetRelid(rel) == QueuedDDLCommandsRelid)
+	if (RelationGetRelid(rel) == QueuedDDLCommandsRelid ||
+		RelationGetRelid(rel) == QueuedDropsRelid)
 	{
+		HeapTuple ht;
 		LockRelId	lockid = rel->rd_lockInfo.lockRelId;
 		TransactionId oldxid = GetTopTransactionId();
 
-		LockRelationIdForSession(&lockid, RowExclusiveLock);
+		/*
+		 * Release transaction bound resources for CONCURRENTLY support.
+		 */
+		MemoryContextSwitchTo(MessageContext);
+		ht = heap_copytuple(slot->tts_tuple);
 
-		process_queued_ddl_command(slot->tts_tuple, started_tx);
+		LockRelationIdForSession(&lockid, RowExclusiveLock);
+		heap_close(rel, NoLock);
+
+		ExecResetTupleTable(estate->es_tupleTable, true);
+		FreeExecutorState(estate);
+
+		if (RelationGetRelid(rel) == QueuedDDLCommandsRelid)
+			process_queued_ddl_command(ht, started_tx);
+		if (RelationGetRelid(rel) == QueuedDropsRelid)
+			process_queued_drop(ht);
 
 		rel = heap_open(QueuedDDLCommandsRelid, RowExclusiveLock);
 
@@ -603,11 +629,12 @@ process_remote_insert(StringInfo s)
 			started_transaction = false;
 		}
 	}
-	else if (RelationGetRelid(rel) == QueuedDropsRelid)
-		process_queued_drop(slot->tts_tuple);
-
-	ExecResetTupleTable(estate->es_tupleTable, true);
-	FreeExecutorState(estate);
+	else
+	{
+		heap_close(rel, NoLock);
+		ExecResetTupleTable(estate->es_tupleTable, true);
+		FreeExecutorState(estate);
+	}
 
 	CommandCounterIncrement();
 }

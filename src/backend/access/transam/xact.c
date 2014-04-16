@@ -4877,9 +4877,7 @@ xact_redo_commit(xl_xact_commit *xlrec,
 	inval_msgs = (SharedInvalidationMessage *) &(subxacts[xlrec->nsubxacts]);
 
 	if (xlrec->xinfo & XACT_CONTAINS_ORIGIN)
-	{
 		origin = (xl_xact_origin *) &(inval_msgs[xlrec->nmsgs]);
-	}
 
 	xact_redo_commit_internal(xid, lsn, xlrec->xact_time,
 							  subxacts, xlrec->nsubxacts,

@@ -3097,7 +3097,7 @@ getObjectIdentityParts(const ObjectAddress *object,
 				appendStringInfoString(&buffer,
 								 quote_identifier(NameStr(conForm->conname)));
 				if (objname)
-					*objname = list_make1(NameStr(conForm->conname));
+					*objname = list_make1(pstrdup(NameStr(conForm->conname)));
 				ReleaseSysCache(conTup);
 				break;
 			}
@@ -3158,7 +3158,7 @@ getObjectIdentityParts(const ObjectAddress *object,
 				appendStringInfoString(&buffer,
 							   quote_identifier(NameStr(langForm->lanname)));
 				if (objname)
-					*objname = list_make1(NameStr(langForm->lanname));
+					*objname = list_make1(pstrdup(NameStr(langForm->lanname)));
 				ReleaseSysCache(langTup);
 				break;
 			}
@@ -3393,7 +3393,7 @@ getObjectIdentityParts(const ObjectAddress *object,
 				appendStringInfoString(&buffer,
 									   quote_identifier(NameStr(formParser->prsname)));
 				if (objname)
-					*objname = list_make1(NameStr(formParser->prsname));
+					*objname = list_make1(pstrdup(NameStr(formParser->prsname)));
 				ReleaseSysCache(tup);
 				break;
 			}
@@ -3412,7 +3412,7 @@ getObjectIdentityParts(const ObjectAddress *object,
 				appendStringInfoString(&buffer,
 							  quote_identifier(NameStr(formDict->dictname)));
 				if (objname)
-					*objname = list_make1(NameStr(formDict->dictname));
+					*objname = list_make1(pstrdup(NameStr(formDict->dictname)));
 				ReleaseSysCache(tup);
 				break;
 			}
@@ -3431,7 +3431,7 @@ getObjectIdentityParts(const ObjectAddress *object,
 				appendStringInfoString(&buffer,
 							  quote_identifier(NameStr(formTmpl->tmplname)));
 				if (objname)
-					*objname = list_make1(NameStr(formTmpl->tmplname));
+					*objname = list_make1(pstrdup(NameStr(formTmpl->tmplname)));
 				ReleaseSysCache(tup);
 				break;
 			}
@@ -3450,7 +3450,7 @@ getObjectIdentityParts(const ObjectAddress *object,
 				appendStringInfoString(&buffer,
 								 quote_identifier(NameStr(formCfg->cfgname)));
 				if (objname)
-					*objname = list_make1(NameStr(formCfg->cfgname));
+					*objname = list_make1(pstrdup(NameStr(formCfg->cfgname)));
 				ReleaseSysCache(tup);
 				break;
 			}

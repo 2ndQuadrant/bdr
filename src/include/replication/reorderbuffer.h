@@ -162,6 +162,7 @@ typedef struct ReorderBufferTXN
 
 	/* origin of the change that caused this transaction */
 	RepNodeId origin_id;
+	XLogRecPtr origin_lsn;
 
 	/* did the TX have catalog changes */
 	bool		does_timetravel;
@@ -339,7 +340,7 @@ void		ReorderBufferReturnChange(ReorderBuffer *, ReorderBufferChange *);
 void		ReorderBufferQueueChange(ReorderBuffer *, TransactionId, XLogRecPtr lsn, ReorderBufferChange *);
 void		ReorderBufferCommit(ReorderBuffer *, TransactionId,
 							XLogRecPtr commit_lsn, XLogRecPtr end_lsn,
-							TimestampTz commit_time, RepNodeId origin_id);
+							TimestampTz commit_time, RepNodeId origin_id, XLogRecPtr origin_lsn);
 void		ReorderBufferAssignChild(ReorderBuffer *, TransactionId, TransactionId, XLogRecPtr commit_lsn);
 void		ReorderBufferCommitChild(ReorderBuffer *, TransactionId, TransactionId,
 									 XLogRecPtr commit_lsn, XLogRecPtr end_lsn);

@@ -211,12 +211,6 @@ BEGIN
 END;
 $function$;
 
-CREATE EVENT TRIGGER queue_commands
-ON ddl_command_end
-WHEN tag IN ('create table', 'create index', 'create sequence',
-     'create schema',
-     'create trigger', 'alter table', 'create extension', 'create type')
-EXECUTE PROCEDURE bdr.queue_commands();
 
 
 CREATE TABLE bdr_nodes (
@@ -268,5 +262,15 @@ CREATE EVENT TRIGGER queue_drops
 ON sql_drop
 EXECUTE PROCEDURE bdr.queue_dropped_objects();
 
+---
+--- this should always be last to avoid replicating our internal schema
+---
+
+CREATE EVENT TRIGGER queue_commands
+ON ddl_command_end
+WHEN tag IN ('create table', 'create index', 'create sequence',
+     'create schema',
+     'create trigger', 'alter table', 'create extension', 'create type')
+EXECUTE PROCEDURE bdr.queue_commands();
 
 RESET search_path;

@@ -613,7 +613,7 @@ bdr_sequencer_vote(void)
 {
 	Oid			argtypes[4];
 	Datum		values[4];
-	bool		nulls[4];
+	char		nulls[4];
 	char		local_sysid[32];
 	int			ret;
 	int			my_processed;
@@ -672,7 +672,7 @@ bdr_sequencer_start_elections(void)
 {
 	Oid			argtypes[4];
 	Datum		values[4];
-	bool		nulls[4];
+	char		nulls[4];
 	char		local_sysid[32];
 	int			ret;
 
@@ -725,7 +725,7 @@ bdr_sequencer_tally(void)
 {
 	Oid			argtypes[5];
 	Datum		values[5];
-	bool		nulls[5];
+	char		nulls[5];
 	char		local_sysid[32];
 	int			ret;
 
@@ -799,7 +799,7 @@ bdr_sequencer_fill_chunk(Oid seqoid, char *seqschema, char *seqname,
 {
 	Oid			argtypes[6];
 	Datum		values[6];
-	bool		nulls[6];
+	char		nulls[6];
 	char		local_sysid[32];
 	int			ret;
 	int64		lower, upper;
