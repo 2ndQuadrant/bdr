@@ -16,37 +16,77 @@
 
 #define BDR_VERSION_NUM 500
 
-typedef struct BDRWorkerCon
+/*
+ * BdrApplyWorker describes a BDR worker connection.
+ *
+ * This struct is stored in an array in shared memory, so it can't have any
+ * pointers.
+ */
+typedef struct BdrApplyWorker
 {
-	/* name specified in configuration */
-	char *name;
-
 	/* local & remote database name */
-	char *dbname;
-	/* dsn to connect to the remote database */
-	char *dsn;
-	/* how much do we want to delay apply, in ms */
-	int apply_delay;
+	NameData dbname;
+
+	/* connection name specified in configuration */
+	NameData name;
 
 	RepNodeId origin_id;
+
 	uint64 sysid;
+
 	TimeLineID timeline;
-} BDRWorkerCon;
 
-typedef struct BDRSequencerCon
+} BdrApplyWorker;
+
+/*
+ * BDRPerdbCon describes a per-database worker, a static bgworker that manages
+ * BDR for a given DB.
+ */
+typedef struct BdrPerdbWorker
 {
-	/* local database name */
-	char *dbname;
+	/* local & remote database name */
+	NameData dbname;
 
-	size_t slot;
+	size_t seq_slot;
 
-	/* yuck */
-	size_t num_nodes;
-} BDRSequencerCon;
+} BdrPerdbWorker;
+
+
+/*
+ * Type of BDR worker in a BdrWorker struct
+ */
+typedef enum
+{
+	/*
+	 * This shm array slot is unused and may be allocated. Must be zero,
+	 * as it's set by memset(...) during shm segment init.
+	 */
+	BDR_WORKER_EMPTY_SLOT = 0,
+	/* This shm array slot contains data for a */
+	BDR_WORKER_APPLY,
+	/* This is data for a per-database worker BdrPerdbWorker */
+	BDR_WORKER_PERDB
+} BdrWorkerType;
+
+/*
+ * BDRWorker entries describe shared memory slots that keep track of
+ * all BDR worker types. A slot may contain data for a number of different
+ * kinds of worker; this union makes sure each slot is the same size and
+ * is easily accessed via an array.
+ */
+typedef struct BdrWorker
+{
+	/* Type of worker. Also used to determine if this shm slot is free. */
+	BdrWorkerType worker_type;
+
+	union worker_data {
+		BdrApplyWorker apply_worker;
+		BdrPerdbWorker perdb_worker;
+	} worker_data;
+
+} BdrWorker;
 
 extern ResourceOwner bdr_saved_resowner;
-extern BDRWorkerCon *bdr_apply_con;
-extern BDRSequencerCon *bdr_sequencer_con;
 
 /* DDL replication support */
 extern Oid	QueuedDDLCommandsRelid;
@@ -57,6 +97,9 @@ extern Oid	BdrSequenceValuesRelid;
 extern Oid	BdrSequenceElectionsRelid;
 extern Oid	BdrVotesRelid;
 
+/* Helpers for accessing configuration */
+const char *bdr_get_worker_option(const char * worker_name, const char * option_name, bool missing_ok);
+
 /* apply support */
 extern void process_remote_begin(StringInfo s);
 extern void process_remote_commit(StringInfo s);
@@ -66,11 +109,12 @@ extern void process_remote_delete(StringInfo s);
 
 /* sequence support */
 extern void bdr_sequencer_shmem_init(int nnodes, int sequencers);
-extern void bdr_sequencer_init(void);
+extern void bdr_sequencer_init(int seq_slot);
 extern void bdr_sequencer_vote(void);
 extern void bdr_sequencer_tally(void);
 extern void bdr_sequencer_start_elections(void);
 extern void bdr_sequencer_fill_sequences(void);
+extern int  bdr_node_count(void);
 
 extern void bdr_sequencer_wakeup(void);
 extern void bdr_schedule_eoxact_sequencer_wakeup(void);
