@@ -665,7 +665,7 @@ fetch_sysid_via_node_id(RepNodeId node_id, uint64 *sysid, TimeLineID *tli)
 
 		ident = text_to_cstring(&node_class->riname);
 
-		if (sscanf(ident, "bdr: "UINT64_FORMAT"-%u-%u-%u:%s",
+		if (sscanf(ident, BDR_NODE_ID_FORMAT,
 				   &remote_sysid, &remote_tli, &remote_dboid, &local_dboid,
 				   NameStr(replication_name)) != 4)
 			elog(ERROR, "could not parse sysid: %s", ident);
