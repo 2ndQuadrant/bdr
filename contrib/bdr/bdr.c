@@ -1606,7 +1606,7 @@ bdr_init_replica(BdrApplyWorker *wcon, PGconn *conn, char *snapshot)
 
 		n = execve(bdr_bdr_init_replica_script_path, argv, envp);
 		if (n < 0)
-			exit(n);
+			_exit(n);
 
 		pfree(replica_local_dsn);
 		pfree(remote_dsn);
