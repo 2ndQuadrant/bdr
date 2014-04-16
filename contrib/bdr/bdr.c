@@ -255,8 +255,8 @@ bdr_process_remote_action(StringInfo s)
 /*
  * Establish a BDR connection
  *
- * Connects to the remote node, identifies it, and generates local
- * and remote replication identifiers and slot name.
+ * Connects to the remote node, identifies it, and generates local and remote
+ * replication identifiers and slot name.
  *
  * The local replication identifier is not saved, the caller must do that.
  *
@@ -367,12 +367,13 @@ bdr_connect(
 }
 
 /*
- * Create a slot on a remote node, and the corresponding local
- * replication identifier.
+ * Create a slot on a remote node, and the corresponding local replication
+ * identifier.
  */
 /* 
- * TODO we should really handle the case where the slot already exists but there's
- * no local replication identifier, by dropping and recreating the slot.
+ * TODO we should really handle the case where the slot already exists but
+ * there's no local replication identifier, by dropping and recreating the
+ * slot.
  */
 static void
 bdr_create_slot(
@@ -484,8 +485,8 @@ bdr_get_worker_option(const char * worker_name, const char * option_name, bool m
 /*
  * Entry point and main loop for a BDR apply worker.
  *
- * Responsible for establishing a replication connection,
- * creating slots, replaying.
+ * Responsible for establishing a replication connection, creating slots,
+ * replaying.
  *
  * TODO: move to bdr_apply.c
  */
@@ -896,13 +897,11 @@ bdr_create_con_gucs(
 
 
 /*
- * Launch a dynamic bgworker to run bdr_apply_main
- * for each bdr connection on the database identified by
- * dbname.
+ * Launch a dynamic bgworker to run bdr_apply_main for each bdr connection on
+ * the database identified by dbname.
  *
- * Scans the BdrWorkerCtl shm segment for workers of type
- * BDR_WORKER_APPLY with a matching database name and
- * launches them.
+ * Scans the BdrWorkerCtl shm segment for workers of type BDR_WORKER_APPLY with
+ * a matching database name and launches them.
  */
 static List*
 bdr_launch_apply_workers(char *dbname)
@@ -969,10 +968,10 @@ bdr_launch_apply_workers(char *dbname)
  *
  * Sequence support relies on this. 
  *
- * TODO: Use bdr.bdr_nodes to get this information. For now we assume
- * that each node has connections to all other nodes and that all configured
- * connections are correct and valid, so the number of nodes is equal to the
- * number of configured connections.
+ * TODO: Use bdr.bdr_nodes to get this information. For now we assume that each
+ * node has connections to all other nodes and that all configured connections
+ * are correct and valid, so the number of nodes is equal to the number of
+ * configured connections.
  */
 int
 bdr_node_count()
@@ -981,15 +980,15 @@ bdr_node_count()
 }
 
 /*
- * Each database with BDR enabled on it has a static background
- * worker, registered at shared_preload_libraries time during
- * postmaster start. This is the entry point for these bgworkers.
+ * Each database with BDR enabled on it has a static background worker,
+ * registered at shared_preload_libraries time during postmaster start. This is
+ * the entry point for these bgworkers.
  *
- * This worker handles BDR startup on the database and launches
- * apply workers for each BDR connection.
+ * This worker handles BDR startup on the database and launches apply workers
+ * for each BDR connection.
  *
- * Since the worker is fork()ed from the postmaster, all globals
- * initialised in _PG_init remain valid.
+ * Since the worker is fork()ed from the postmaster, all globals initialised in
+ * _PG_init remain valid.
  *
  * This worker can use the SPI and shared memory.
  */
@@ -1018,8 +1017,8 @@ bdr_perdb_worker_main(Datum main_arg)
 	apply_workers = bdr_launch_apply_workers(NameStr(bdr_perdb_worker->dbname));
 
 	/* 
-	 * For now, just free the bgworker handles. Later we'll probably want them for
-	 * adding/removing/reconfiguring bgworkers.
+	 * For now, just free the bgworker handles. Later we'll probably want them
+	 * for adding/removing/reconfiguring bgworkers.
 	 */
 	foreach(c, apply_workers)
 	{
@@ -1077,9 +1076,8 @@ static size_t bdr_worker_shm_size()
 }
 
 /*
- * Allocate a shared memory segment big enough to hold 
- * bdr_max_workers entries in the array of BDR worker
- * info structs (BdrApplyWorker).
+ * Allocate a shared memory segment big enough to hold bdr_max_workers entries
+ * in the array of BDR worker info structs (BdrApplyWorker).
  */
 static void
 bdr_worker_alloc_shm_segment()
@@ -1090,16 +1088,15 @@ bdr_worker_alloc_shm_segment()
 	RequestAddinShmemSpace(bdr_worker_shm_size());
 
 	/*
-	 * We'll need to be able to take exclusive locks so only one per-db
-	 * backend tries to allocate or free blocks from this array at once.
-	 * There won't be enough contention to make anything fancier worth
-	 * doing.
+	 * We'll need to be able to take exclusive locks so only one per-db backend
+	 * tries to allocate or free blocks from this array at once.  There won't
+	 * be enough contention to make anything fancier worth doing.
 	 */
 	RequestAddinLWLocks(1);
 
 	/*
-	 * Whether this is a first startup or crash recovery, we'll be
-	 * re-initing the bgworkers.
+	 * Whether this is a first startup or crash recovery, we'll be re-initing
+	 * the bgworkers.
 	 */
 	bdr_startup_context = NULL;
 
@@ -1128,25 +1125,23 @@ static void bdr_worker_shmem_startup(void)
 		BdrWorkerCtl->lock = LWLockAssign();
 
 		/*
-		 * Now that the shm segment is initialized, we can
-		 * populate it with BdrWorker entries for the connections
-		 * we created GUCs for during _PG_init .
+		 * Now that the shm segment is initialized, we can populate it with
+		 * BdrWorker entries for the connections we created GUCs for during
+		 * _PG_init .
 		 */
 		bdr_worker_shmem_create_workers();
 	}
 	LWLockRelease(AddinShmemInitLock);
 
 	/*
-	 * We don't have anything to preserve on shutdown
-	 * and don't support being unloaded from a running Pg,
-	 * so don't register any shutdown hook.
+	 * We don't have anything to preserve on shutdown and don't support being
+	 * unloaded from a running Pg, so don't register any shutdown hook.
 	 */
 }
 
 /*
- * After _PG_init we've read the GUCs for the workers but
- * haven't populated the shared memory segment at BdrWorkerCtl
- * with BDRWorker entries yet.
+ * After _PG_init we've read the GUCs for the workers but haven't populated the
+ * shared memory segment at BdrWorkerCtl with BDRWorker entries yet.
  *
  * The shm segment is initialized now, so do that.
  */
@@ -1156,8 +1151,8 @@ bdr_worker_shmem_create_workers()
 	ListCell *c;
 
 	/*
-	 * Copy the BdrApplyWorker configs created in _PG_init into shared
-	 * memory, then free the palloc'd original.
+	 * Copy the BdrApplyWorker configs created in _PG_init into shared memory,
+	 * then free the palloc'd original.
 	 *
 	 * This is necessary on EXEC_BACKEND (Windows) where postmaster memory
 	 * isn't accessible by other backends, and is also required when launching
@@ -1184,8 +1179,8 @@ bdr_worker_shmem_create_workers()
 
 
 /*
- * Allocate a block from the bdr_worker shm segment in BdrWorkerCtl,
- * or ERROR if there are no free slots.
+ * Allocate a block from the bdr_worker shm segment in BdrWorkerCtl, or ERROR
+ * if there are no free slots.
  *
  * The block is zeroed. The worker type is set in the header.
  *
@@ -1250,12 +1245,12 @@ bdr_worker_shm_release(BdrWorker* worker, BackgroundWorkerHandle *handle)
 }
 
 /*
- * Entrypoint of this module - called at shared_preload_libraries time
- * in the context of the postmaster.
+ * Entrypoint of this module - called at shared_preload_libraries time in the
+ * context of the postmaster.
  *
- * Can't use SPI, and should do as little as sensibly possible. Must
- * initialize any PGC_POSTMASTER custom GUCs, register static bgworkers,
- * as that can't be done later.
+ * Can't use SPI, and should do as little as sensibly possible. Must initialize
+ * any PGC_POSTMASTER custom GUCs, register static bgworkers, as that can't be
+ * done later.
  */
 void
 _PG_init(void)
@@ -1302,7 +1297,10 @@ _PG_init(void)
 							   0,
 							   NULL, NULL, NULL);
 
-	/* Limit on worker count - number of slots to allocate in fixed shared memory array */
+	/* 
+	 * Limit on worker count - number of slots to allocate in fixed shared
+	 * memory array.
+	 */
 	DefineCustomIntVariable("bdr.max_workers",
 							"max number of bdr connections + distinct databases",
 							NULL,
@@ -1311,7 +1309,10 @@ _PG_init(void)
 							PGC_POSTMASTER,
 							0,
 							NULL, NULL, NULL);
-	/* TODO: If bdr_max_workers is unset/zero, autoset from number of bdr.connections */
+	/*
+	 * TODO: If bdr_max_workers is unset/zero, autoset from number of
+	 * bdr.connections
+	 */
 
 	DefineCustomStringVariable("bdr.bdr_init_replica_script_path",
 							   "Path to script to run when replicating a new DB from upstream master",
@@ -1325,10 +1326,7 @@ _PG_init(void)
 	if (connections == NULL)
 		goto out;
 
-	/*
-	 * otherwise, set up a ProcessUtility_hook to stop unsupported commands
-	 * being run
-	 */
+	/* Set up a ProcessUtility_hook to stop unsupported commands being run */
 	init_bdr_commandfilter();
 
 	/*
@@ -1336,8 +1334,8 @@ _PG_init(void)
 	 * information we must pass to each worker we launch.
 	 *
 	 * This registers a hook on shm initialization, bdr_worker_shmem_startup(),
-	 * which populates the shm segment with configured apply workers using
-	 * data in bdr_startup_context.
+	 * which populates the shm segment with configured apply workers using data
+	 * in bdr_startup_context.
 	 */
 	bdr_worker_alloc_shm_segment();
 
@@ -1359,8 +1357,8 @@ _PG_init(void)
 	/* Names of all databases we're going to be doing BDR for */
 	used_databases = palloc0(sizeof(char *) * list_length(connames));
 	/* 
-	 * For each db named in used_databases, the corresponding index
-	 * is the name of the conn with bdr_init_replica=t if any.
+	 * For each db named in used_databases, the corresponding index is the name
+	 * of the conn with bdr_init_replica=t if any.
 	 */
 	database_initcons = palloc0(sizeof(char *) * list_length(connames));
 
@@ -1383,31 +1381,29 @@ _PG_init(void)
 	/*
 	 * Free the connames list cells. The strings are just pointers into
 	 * 'connections' and must not be freed'd.
-	 * */
+	 */
 	list_free(connames);
 	connames = NIL;
 
 	/*
-	 * We've ensured there are no duplicate init connections, no need
-	 * to remember which conn is the bdr_init_replica conn anymore. The contents
-	 * are just pointers into connections_tmp
-	 * so we don't want to free them.
+	 * We've ensured there are no duplicate init connections, no need to
+	 * remember which conn is the bdr_init_replica conn anymore. The contents
+	 * are just pointers into connections_tmp so we don't want to free them.
 	 */
 	pfree(database_initcons);
 
 	/*
-	 * We now need to register one static bgworker per database.
-	 * When started, this worker will continue setup - doing any
-	 * required initialization of the database, then registering
-	 * dynamic bgworkers for the DB's individual BDR connections.
+	 * We now need to register one static bgworker per database.  When started,
+	 * this worker will continue setup - doing any required initialization of
+	 * the database, then registering dynamic bgworkers for the DB's individual
+	 * BDR connections.
 	 * 
-	 * These workers get started *after* the shm init callback
-	 * is run, we're just registering them for launch.
+	 * These workers get started *after* the shm init callback is run, we're
+	 * just registering them for launch.
 	 *
-	 * If we ever want to support dynamically adding/removing DBs
-	 * from BDR at runtime, this'll need to move into a static
-	 * bgworker or code called by the shm startup hook and a guc
-	 * reload hook.
+	 * If we ever want to support dynamically adding/removing DBs from BDR at
+	 * runtime, this'll need to move into a static bgworker or code called by
+	 * the shm startup hook and a guc reload hook.
 	 *
 	 * TODO: Move this into the shared memory based init.
 	 */
@@ -1448,8 +1444,8 @@ out:
 	/*
 	 * initialize other modules that need shared memory
 	 *
-	 * Do so even if we haven't any remote nodes setup, the shared memory
-	 * might still be needed for some sql callable functions or such.
+	 * Do so even if we haven't any remote nodes setup, the shared memory might
+	 * still be needed for some sql callable functions or such.
 	 */
 
 	n_configured_bdr_nodes = nworkers;
@@ -1553,9 +1549,9 @@ bdr_maintain_schema(void)
 }
 
 /*
- * Use a script to copy the contents of a remote node using pg_dump
- * and apply it to the local node. Runs during slot creation to bring
- * up a new logical replica from an existing node.
+ * Use a script to copy the contents of a remote node using pg_dump and apply
+ * it to the local node. Runs during slot creation to bring up a new logical
+ * replica from an existing node.
  */
 static void
 bdr_init_replica(BdrApplyWorker *wcon, PGconn *conn, char *snapshot)
