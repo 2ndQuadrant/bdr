@@ -15,6 +15,8 @@
 #include "utils/resowner.h"
 
 #define BDR_VERSION_NUM 500
+#define BDR_SLOT_NAME_FORMAT "bdr_%u_%s_%u_%u__%s"
+#define BDR_NODE_ID_FORMAT "bdr_"UINT64_FORMAT"_%u_%u_%u_%s"
 
 /*
  * BdrApplyWorker describes a BDR worker connection.
