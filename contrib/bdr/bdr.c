@@ -340,7 +340,7 @@ bdr_connect(char *conninfo_repl,
 	 * FIXME: This might truncate the identifier if replication_name is
 	 * somewhat longer...
 	 */
-	snprintf(NameStr(*slot_name), NAMEDATALEN, "bdr_%u_%s_%u_%u__%s",
+	snprintf(NameStr(*slot_name), NAMEDATALEN, BDR_SLOT_NAME_FORMAT,
 			 remote_dboid_i, local_sysid, ThisTimeLineID,
 			 MyDatabaseId, NameStr(replication_name));
 	NameStr(*slot_name)[NAMEDATALEN - 1] = '\0';
@@ -349,7 +349,7 @@ bdr_connect(char *conninfo_repl,
 	 * Build replication identifier.
 	 */
 	snprintf(remote_ident, remote_ident_length,
-			 "bdr_"UINT64_FORMAT"_%u_%u_%u_%s",
+			 BDR_NODE_ID_FORMAT,
 			 *remote_sysid_i, *remote_tlid_i, remote_dboid_i, MyDatabaseId,
 			 NameStr(replication_name));
 
