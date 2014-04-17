@@ -19,6 +19,15 @@
 #define BDR_NODE_ID_FORMAT "bdr_"UINT64_FORMAT"_%u_%u_%u_%s"
 
 /*
+ * Flags to indicate which fields are present in a commit record sent by the
+ * output plugin.
+ */
+typedef enum BdrOutputCommitFlags
+{
+	BDR_OUTPUT_COMMIT_HAS_ORIGIN = 1
+} BdrOutputCommitFlags;
+
+/*
  * BdrApplyWorker describes a BDR worker connection.
  *
  * This struct is stored in an array in shared memory, so it can't have any
