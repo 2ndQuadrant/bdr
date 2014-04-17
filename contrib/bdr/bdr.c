@@ -127,7 +127,7 @@ static BdrWorker* bdr_worker_shm_alloc(BdrWorkerType worker_type);
  * Converts an int64 to network byte order.
  */
 static void
-sendint64(int64 i, char *buf)
+bdr_sendint64(int64 i, char *buf)
 {
 	uint32		n32;
 
@@ -146,7 +146,7 @@ sendint64(int64 i, char *buf)
  * Send a Standby Status Update message to server.
  */
 static bool
-sendFeedback(PGconn *conn, XLogRecPtr blockpos, int64 now, bool replyRequested,
+bdr_send_feedback(PGconn *conn, XLogRecPtr blockpos, int64 now, bool replyRequested,
 			 bool force)
 {
 	char		replybuf[1 + 8 + 8 + 8 + 8 + 1];
@@ -163,13 +163,13 @@ sendFeedback(PGconn *conn, XLogRecPtr blockpos, int64 now, bool replyRequested,
 
 	replybuf[len] = 'r';
 	len += 1;
-	sendint64(blockpos, &replybuf[len]);		/* write */
+	bdr_sendint64(blockpos, &replybuf[len]);		/* write */
 	len += 8;
-	sendint64(blockpos, &replybuf[len]);		/* flush */
+	bdr_sendint64(blockpos, &replybuf[len]);		/* flush */
 	len += 8;
-	sendint64(blockpos, &replybuf[len]);		/* apply */
+	bdr_sendint64(blockpos, &replybuf[len]);		/* apply */
 	len += 8;
-	sendint64(now, &replybuf[len]);				/* sendTime */
+	bdr_sendint64(now, &replybuf[len]);				/* sendTime */
 	len += 8;
 	replybuf[len] = replyRequested ? 1 : 0;		/* replyRequested */
 	len += 1;
@@ -211,7 +211,7 @@ bdr_sighup(SIGNAL_ARGS)
 }
 
 static void
-process_remote_action(StringInfo s)
+bdr_process_remote_action(StringInfo s)
 {
 	char		action;
 
@@ -690,7 +690,7 @@ bdr_apply_main(Datum main_arg)
 					if (last_received < end_lsn)
 						last_received = end_lsn;
 
-					process_remote_action(&s);
+					bdr_process_remote_action(&s);
 				}
 				else if (c == 'k')
 				{
@@ -698,7 +698,7 @@ bdr_apply_main(Datum main_arg)
 
 					temp = pq_getmsgint64(&s);
 
-					sendFeedback(streamConn, temp,
+					bdr_send_feedback(streamConn, temp,
 								 GetCurrentTimestamp(), false, true);
 				}
 				/* other message types are purposefully ignored */
@@ -712,7 +712,7 @@ bdr_apply_main(Datum main_arg)
 		 * FIXME: we should only do that after an xlog flush... Yuck.
 		 */
 		if (last_received != InvalidXLogRecPtr)
-			sendFeedback(streamConn, last_received,
+			bdr_send_feedback(streamConn, last_received,
 						 GetCurrentTimestamp(), false, false);
 	}
 
@@ -1408,7 +1408,7 @@ out:
 }
 
 static Oid
-lookup_relid(const char *relname, Oid schema_oid)
+bdr_lookup_relid(const char *relname, Oid schema_oid)
 {
 	Oid			relid;
 
@@ -1473,18 +1473,18 @@ bdr_maintain_schema(void)
 	schema_oid = get_namespace_oid("bdr", false);
 	if (schema_oid != InvalidOid)
 	{
-		QueuedDDLCommandsRelid = lookup_relid("bdr_queued_commands",
+		QueuedDDLCommandsRelid = bdr_lookup_relid("bdr_queued_commands",
 											  schema_oid);
 
-		BdrSequenceValuesRelid = lookup_relid("bdr_sequence_values",
+		BdrSequenceValuesRelid = bdr_lookup_relid("bdr_sequence_values",
 											  schema_oid);
 
-		BdrSequenceElectionsRelid = lookup_relid("bdr_sequence_elections",
+		BdrSequenceElectionsRelid = bdr_lookup_relid("bdr_sequence_elections",
 												 schema_oid);
 
-		BdrVotesRelid = lookup_relid("bdr_votes", schema_oid);
+		BdrVotesRelid = bdr_lookup_relid("bdr_votes", schema_oid);
 
-		QueuedDropsRelid = lookup_relid("bdr_queued_drops", schema_oid);
+		QueuedDropsRelid = bdr_lookup_relid("bdr_queued_drops", schema_oid);
 	}
 	else
 		elog(ERROR, "cache lookup failed for schema bdr");
