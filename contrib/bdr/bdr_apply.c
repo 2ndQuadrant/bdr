@@ -178,22 +178,34 @@ process_remote_begin(StringInfo s)
 void
 process_remote_commit(StringInfo s)
 {
-	XLogRecPtr		origlsn;
+	XLogRecPtr		commit_lsn;
 	TimestampTz		committime;
 	TimestampTz		end_lsn;
+	int				flags;
+	RepNodeId		origin_id = InvalidRepNodeId;
+	XLogRecPtr		origin_lsn = InvalidXLogRecPtr;
 
 	Assert(bdr_apply_worker != NULL);
 
-	origlsn = pq_getmsgint64(s);
+	flags = pq_getmsgint(s, 4);
+
+	/* order of access to fields after flags is important */
+	commit_lsn = pq_getmsgint64(s);
 	end_lsn = pq_getmsgint64(s);
 	committime = pq_getmsgint64(s);
 
+	if (flags & BDR_OUTPUT_COMMIT_HAS_ORIGIN)
+	{
+		origin_id = pq_getmsgint(s, 2);
+		origin_lsn = pq_getmsgint64(s);
+	}
+
 	elog(LOG, "COMMIT origin(lsn, end, timestamp): %X/%X, %X/%X, %s",
-		 (uint32) (origlsn >> 32), (uint32) origlsn,
+		 (uint32) (commit_lsn >> 32), (uint32) commit_lsn,
 		 (uint32) (end_lsn >> 32), (uint32) end_lsn,
 		 timestamptz_to_str(committime));
 
-	Assert(origlsn == replication_origin_lsn);
+	Assert(commit_lsn == replication_origin_lsn);
 	Assert(committime == replication_origin_timestamp);
 
 	if (started_transaction)
@@ -203,7 +215,30 @@ process_remote_commit(StringInfo s)
 
 	pgstat_report_activity(STATE_IDLE, NULL);
 
+	/*
+	 * Advance the local replication identifier's lsn, so we don't replay this
+	 * commit again.
+	 *
+	 * We always advance the local replication identifier for the origin node,
+	 * even if we're really replaying a commit that's been forwarded from
+	 * another node (per origin_id below). This is necessary to make sure we
+	 * don't replay the same forwarded commit multiple times.
+	 */
 	AdvanceCachedReplicationIdentifier(end_lsn, XactLastCommitEnd);
+
+	if (origin_id != InvalidRepNodeId)
+	{
+		/*
+		 * We're replaying a record that's been forwarded from another node, so
+		 * we need to advance the replication identifier for that node so that
+		 * replay directly from that node will start from the correct LSN when
+		 * we replicate directly.
+		 *
+		 * If it was from the immediate origin node, origin_id would be set to
+		 * InvalidRepNodeId by the remote end's output plugin.
+		 */
+		AdvanceReplicationIdentifier(origin_id, origin_lsn, XactLastCommitEnd);
+	}
 
 	CurrentResourceOwner = bdr_saved_resowner;
 
