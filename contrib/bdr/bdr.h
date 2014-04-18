@@ -47,6 +47,12 @@ typedef struct BdrApplyWorker
 
 	TimeLineID timeline;
 
+	/* If not InvalidXLogRecPtr, stop replay at this point and exit */
+	XLogRecPtr replay_stop_lsn;
+
+	/* Request that the remote forward all changes from other nodes */
+	bool forward_changesets;
+
 } BdrApplyWorker;
 
 /*
@@ -116,7 +122,7 @@ const char *bdr_get_worker_option(const char * worker_name, const char * option_
 
 /* apply support */
 extern void process_remote_begin(StringInfo s);
-extern void process_remote_commit(StringInfo s);
+extern bool process_remote_commit(StringInfo s);
 extern void process_remote_insert(StringInfo s);
 extern void process_remote_update(StringInfo s);
 extern void process_remote_delete(StringInfo s);

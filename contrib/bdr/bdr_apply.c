@@ -175,7 +175,15 @@ process_remote_begin(StringInfo s)
 	}
 }
 
-void
+/*
+ * Process a commit message from the output plugin, advance replication
+ * identifiers, commit the local transaction, and determine whether replay
+ * should continue.
+ *
+ * Returns true if apply should continue with the next record, false if replay
+ * should stop after this record.
+ */
+bool
 process_remote_commit(StringInfo s)
 {
 	XLogRecPtr		commit_lsn;
@@ -243,6 +251,29 @@ process_remote_commit(StringInfo s)
 	CurrentResourceOwner = bdr_saved_resowner;
 
 	bdr_count_commit();
+
+	/*
+	 * Stop replay if we're doing limited replay and we've replayed up to the
+	 * last record we're supposed to process.
+	 */
+	if (bdr_apply_worker->replay_stop_lsn != InvalidXLogRecPtr
+			&& bdr_apply_worker->replay_stop_lsn <= end_lsn)
+	{
+		ereport(LOG,
+				(errmsg("bdr apply %s finished processing; replayed to %X/%X of required %X/%X",
+				 NameStr(bdr_apply_worker->name),
+				 (uint32)(end_lsn>>32), (uint32)end_lsn,
+				 (uint32)(bdr_apply_worker->replay_stop_lsn>>32), (uint32)bdr_apply_worker->replay_stop_lsn)));
+		/*
+		 * We clear the replay_stop_lsn field to indicate successful catchup,
+		 * so we don't need a separate flag field in shmem for all apply
+		 * workers.
+		 */
+		bdr_apply_worker->replay_stop_lsn = InvalidXLogRecPtr;
+		return false;
+	}
+	else
+		return true;
 }
 
 void
