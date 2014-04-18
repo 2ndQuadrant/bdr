@@ -205,9 +205,12 @@ bdr_sigterm(SIGNAL_ARGS)
 static void
 bdr_sighup(SIGNAL_ARGS)
 {
-	elog(LOG, "got sighup!");
+	int			save_errno = errno;
+
 	if (MyProc)
 		SetLatch(&MyProc->procLatch);
+
+	errno = save_errno;
 }
 
 static void
