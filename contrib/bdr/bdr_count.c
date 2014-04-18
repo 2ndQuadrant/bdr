@@ -138,7 +138,7 @@ bdr_count_shmem_startup(void)
 {
 	bool		found;
 
-	if (prev_shmem_startup_hook)
+	if (prev_shmem_startup_hook != NULL)
 		prev_shmem_startup_hook();
 
 	LWLockAcquire(AddinShmemInitLock, LW_EXCLUSIVE);
@@ -148,7 +148,6 @@ bdr_count_shmem_startup(void)
 	if (!found)
 	{
 		/* initialize */
-
 		memset(BdrCountCtl, 0, bdr_count_shmem_size());
 		BdrCountCtl->lock = LWLockAssign();
 		bdr_count_unserialize();
