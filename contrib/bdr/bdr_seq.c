@@ -56,7 +56,6 @@ typedef struct BdrSequenceValues {
 	int64		end_value;
 } BdrSequenceValues;
 
-static Size n_databases;
 /* Our offset within the shared memory array of registered sequence managers */
 static int  seq_slot = -1;
 
@@ -489,7 +488,7 @@ bdr_sequencer_shmem_startup(void)
 {
 	bool		found;
 
-	if (prev_shmem_startup_hook)
+	if (prev_shmem_startup_hook != NULL)
 		prev_shmem_startup_hook();
 
 	LWLockAcquire(AddinShmemInitLock, LW_EXCLUSIVE);
