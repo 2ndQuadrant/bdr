@@ -94,7 +94,7 @@ static BdrWorkerControl *BdrWorkerCtl = NULL;
  */
 typedef struct BdrStartupContext
 {
-	/* List of palloc'd BdrApplyWorker instances to copy into shm */
+	/* List of palloc'd BdrApplyWorker instances to copy into shmem */
 	List    *workers;
 } BdrStartupContext;
 
@@ -121,7 +121,7 @@ void		_PG_init(void);
 static void bdr_maintain_schema(void);
 static void bdr_worker_shmem_startup(void);
 static void bdr_worker_shmem_create_workers(void);
-static BdrWorker* bdr_worker_shm_alloc(BdrWorkerType worker_type);
+static BdrWorker* bdr_worker_shmem_alloc(BdrWorkerType worker_type);
 
 /*
  * Converts an int64 to network byte order.
@@ -261,20 +261,16 @@ bdr_process_remote_action(StringInfo s)
  *   remote_tlid_i
  */
 static PGconn*
-bdr_connect(
-	char *conninfo_repl,
-	char* remote_ident, size_t remote_ident_length,
-	NameData* slot_name,
-	uint64* remote_sysid_i,
-	TimeLineID *remote_tlid_i
-	)
+bdr_connect(char *conninfo_repl,
+			char* remote_ident, size_t remote_ident_length,
+			NameData* slot_name,
+			uint64* remote_sysid_i, TimeLineID *remote_tlid_i)
 {
 	PGconn	   *streamConn;
 	PGresult   *res;
 	StringInfoData query;
 	char	   *remote_sysid;
 	char	   *remote_tlid;
-
 #ifdef NOT_USED
 	char	   *remote_dbname;
 #endif
@@ -349,8 +345,10 @@ bdr_connect(
 	/*
 	 * Build replication identifier.
 	 */
-	snprintf(remote_ident, remote_ident_length, "bdr_"UINT64_FORMAT"_%u_%u_%u_%s",
-			 *remote_sysid_i, *remote_tlid_i, remote_dboid_i, MyDatabaseId, NameStr(replication_name));
+	snprintf(remote_ident, remote_ident_length,
+			 "bdr_"UINT64_FORMAT"_%u_%u_%u_%s",
+			 *remote_sysid_i, *remote_tlid_i, remote_dboid_i, MyDatabaseId,
+			 NameStr(replication_name));
 
 	/* no parts of IDENTIFY_SYSTEM's response needed anymore */
 	PQclear(res);
@@ -368,13 +366,9 @@ bdr_connect(
  * slot.
  */
 static void
-bdr_create_slot(
-	PGconn	   *streamConn,
-	Name		slot_name,
-	char	   *remote_ident,
-	RepNodeId  *replication_identifier,
-	char      **snapshot
-)
+bdr_create_slot(PGconn *streamConn, Name slot_name,
+				char *remote_ident, RepNodeId *replication_identifier,
+				char **snapshot)
 {
 	StringInfoData query;
 	PGresult   *res;
@@ -395,7 +389,8 @@ bdr_create_slot(
 	if (PQresultStatus(res) != PGRES_TUPLES_OK)
 	{
 		elog(FATAL, "could not send replication command \"%s\": status %s: %s\n",
-			 query.data, PQresStatus(PQresultStatus(res)), PQresultErrorMessage(res));
+			 query.data,
+			 PQresStatus(PQresultStatus(res)), PQresultErrorMessage(res));
 	}
 
 	/* acquire new local identifier, but don't commit */
@@ -448,13 +443,15 @@ bdr_worker_init(char *dbname)
 }
 
 /*
- * GetConfigOption wrapper that gets an option name qualified by the worker's name.
+ * GetConfigOption wrapper that gets an option name qualified by the worker's
+ * name.
  *
  * The returned string is *not* modifiable and will only be valid until the
  * next GUC-related call.
  */
 const char *
-bdr_get_worker_option(const char * worker_name, const char * option_name, bool missing_ok)
+bdr_get_worker_option(const char * worker_name, const char * option_name,
+					  bool missing_ok)
 {
 	char	   *gucname;
 	size_t      namelen;
@@ -509,16 +506,19 @@ bdr_apply_main(Datum main_arg)
 
 	bdr_worker_init(NameStr(bdr_apply_worker->dbname));
 
-	CurrentResourceOwner = ResourceOwnerCreate(NULL, "bdr apply top-level resource owner");
+	CurrentResourceOwner =
+		ResourceOwnerCreate(NULL, "bdr apply top-level resource owner");
 	bdr_saved_resowner = CurrentResourceOwner;
 
-	dsn = bdr_get_worker_option(NameStr(bdr_apply_worker->name), "dsn", false);
+	dsn = bdr_get_worker_option(NameStr(bdr_apply_worker->name),
+								"dsn", false);
 	snprintf(conninfo_repl, sizeof(conninfo_repl),
 			 "%s replication=database fallback_application_name=bdr",
 			 dsn);
 
 	elog(LOG, "%s initialized on %s, remote %s",
-		 MyBgworkerEntry->bgw_name, NameStr(bdr_apply_worker->dbname), conninfo_repl);
+		 MyBgworkerEntry->bgw_name, NameStr(bdr_apply_worker->dbname),
+		 conninfo_repl);
 
 	/* Establish BDR conn and IDENTIFY_SYSTEM */
 	streamConn = bdr_connect(
@@ -534,7 +534,8 @@ bdr_apply_main(Datum main_arg)
 	CommitTransactionCommand();
 
 	if (OidIsValid(replication_identifier))
-		elog(LOG, "found valid replication identifier %u", replication_identifier);
+		elog(LOG, "found valid replication identifier %u",
+			 replication_identifier);
 	else
 	{
 		char *snapshot;
@@ -542,7 +543,8 @@ bdr_apply_main(Datum main_arg)
 		elog(LOG, "Creating new slot %s", NameStr(slot_name));
 
 		/* create local replication identifier and a remote slot */
-		bdr_create_slot(streamConn, &slot_name, remote_ident, &replication_identifier, &snapshot);
+		bdr_create_slot(streamConn, &slot_name, remote_ident,
+						&replication_identifier, &snapshot);
 
 		/* TODO: Initialize database from remote */
 	}
@@ -724,34 +726,32 @@ bdr_apply_main(Datum main_arg)
  * connection. They'll be accessed by the apply worker that uses these GUCs
  * later.
  *
- * Returns false if the config wasn't created for some reason (missing required
- * options, etc); true if it's ok. Out parameters are not changed if false is
- * returned.
+ * Returns false if the config wasn't created for some reason (missing
+ * required options, etc); true if it's ok. Out parameters are not changed if
+ * false is returned.
  *
  * Params:
  *
  *  name
  *  Name of this conn - bdr.<name>
  *
- * 	used_databases
- * 	Array of char*, names of distinct databases named in configured conns
+ *  used_databases
+ *  Array of char*, names of distinct databases named in configured conns
  *
- * 	num_used_databases
- * 	Number of distinct databases named in conns
+ *  num_used_databases
+ *  Number of distinct databases named in conns
  *
  *	out_worker
  *	Initialize this BdrApplyWorker with the name and dbname found.
  *
- * TODO At some point we'll have to make the GUC setup dynamic so we can handle
- * workers being added/removed with a config reload SIGHUP.
+ * TODO At some point we'll have to make the GUC setup dynamic so we can
+ * handle workers being added/removed with a config reload SIGHUP.
  */
 static bool
-bdr_create_con_gucs(
-	char  *name,
-	char **used_databases,
-	Size  *num_used_databases,
-	BdrApplyWorker *out_worker
-)
+bdr_create_con_gucs(char  *name,
+					char **used_databases,
+					Size  *num_used_databases,
+					BdrApplyWorker *out_worker)
 {
 	int			off;
 	char	   *errmsg = NULL;
@@ -813,7 +813,8 @@ bdr_create_con_gucs(
 			if (cur_option->val == NULL)
 				elog(ERROR, "no dbname set");
 
-			strncpy(NameStr(out_worker->dbname), cur_option->val, NAMEDATALEN);
+			strncpy(NameStr(out_worker->dbname), cur_option->val,
+					NAMEDATALEN);
 			NameStr(out_worker->dbname)[NAMEDATALEN-1] = '\0';
 		}
 
@@ -828,7 +829,10 @@ bdr_create_con_gucs(
 	/* cleanup */
 	PQconninfoFree(options);
 
-	/* If this is a DB name we haven't seen yet, add it to our set of known DBs */
+	/*
+	 * If this is a DB name we haven't seen yet, add it to our set of known
+	 * DBs.
+	 */
 	for (off = 0; off < *num_used_databases; off++)
 	{
 		if (strcmp(NameStr(out_worker->dbname), used_databases[off]) == 0)
@@ -838,7 +842,8 @@ bdr_create_con_gucs(
 	if (off == *num_used_databases)
 	{
 		/* Didn't find a match, add new db name */
-		used_databases[(*num_used_databases)++] = pstrdup(NameStr(out_worker->dbname));
+		used_databases[(*num_used_databases)++] =
+			pstrdup(NameStr(out_worker->dbname));
 	}
 
 	/* optname vars and opts intentionally leaked, see above */
@@ -850,8 +855,8 @@ bdr_create_con_gucs(
  * Launch a dynamic bgworker to run bdr_apply_main for each bdr connection on
  * the database identified by dbname.
  *
- * Scans the BdrWorkerCtl shm segment for workers of type BDR_WORKER_APPLY with
- * a matching database name and launches them.
+ * Scans the BdrWorkerCtl shmem segment for workers of type BDR_WORKER_APPLY
+ * with a matching database name and launches them.
  */
 static List*
 bdr_launch_apply_workers(char *dbname)
@@ -882,8 +887,8 @@ bdr_launch_apply_workers(char *dbname)
 		 * suppressing bgworker relaunch if shm was re-initialized after a
 		 * postmaster restart.
 		 *
-		 * FIXME remove after bgworker behaviour change to auto unregister bgworkers
-		 * on restart.
+		 * FIXME remove after bgworker behaviour change to auto unregister
+		 * bgworkers on restart.
 		 */
 		if (!BdrWorkerCtl->launch_workers)
 			break;
@@ -902,9 +907,11 @@ bdr_launch_apply_workers(char *dbname)
 								 "bdr apply: %s", NameStr(con->name));
 						apply_worker.bgw_main_arg = Int32GetDatum(i);
 
-						if (!RegisterDynamicBackgroundWorker(&apply_worker, &bgw_handle))
+						if (!RegisterDynamicBackgroundWorker(&apply_worker,
+															 &bgw_handle))
 						{
-							elog(ERROR, "Failed to register background worker"); // FIXME better error
+							/* FIXME better error */
+							elog(ERROR, "Failed to register background worker");
 						}
 						elog(LOG, "Registered worker");
 						apply_workers = lcons(bgw_handle, apply_workers);
@@ -917,7 +924,8 @@ bdr_launch_apply_workers(char *dbname)
 				break;
 			default:
 				/* Bogus value */
-				elog(FATAL, "Unhandled BdrWorkerType case %i, memory corruption?", worker->worker_type);
+				elog(FATAL, "Unhandled BdrWorkerType case %i, memory corruption?",
+					 worker->worker_type);
 				break;
 		}
 	}
@@ -951,34 +959,38 @@ bdr_node_count()
  * for each BDR connection.
  *
  * Since the worker is fork()ed from the postmaster, all globals initialised in
- * _PG_init remain valid.
+ * _PG_init remain valid (TODO: change this for EXEC_BACKEND support).
  *
  * This worker can use the SPI and shared memory.
  */
 static void
 bdr_perdb_worker_main(Datum main_arg)
 {
-	int				  rc;
-	List			 *apply_workers;
-	ListCell		 *c;
-	BdrPerdbWorker   *bdr_perdb_worker;
+	int				rc;
+	List		   *apply_workers;
+	ListCell	   *c;
+	BdrPerdbWorker *bdr_perdb_worker;
+	char		   *dbname;
 
 	Assert(IsBackgroundWorker);
 
 	/* FIXME: won't work with EXEC_BACKEND, change to index into shm array */
 	bdr_perdb_worker = (BdrPerdbWorker *) DatumGetPointer(main_arg);
+	dbname = NameStr(bdr_perdb_worker->dbname);
 
-	bdr_worker_init(NameStr(bdr_perdb_worker->dbname));
+	bdr_worker_init(dbname);
 
-	CurrentResourceOwner = ResourceOwnerCreate(NULL, "bdr seq top-level resource owner");
+	CurrentResourceOwner =
+		ResourceOwnerCreate(NULL, "bdr seq top-level resource owner");
 	bdr_saved_resowner = CurrentResourceOwner;
 
 	/* TODO: Hande need to initialize database from remote at this point */
 
-	elog(LOG, "Starting bdr apply workers for db %s", NameStr(bdr_perdb_worker->dbname));
+	elog(LOG, "Starting bdr apply workers for db %s",
+		 NameStr(bdr_perdb_worker->dbname));
 
 	/* Launch the apply workers */
-	apply_workers = bdr_launch_apply_workers(NameStr(bdr_perdb_worker->dbname));
+	apply_workers = bdr_launch_apply_workers(dbname);
 
 	/*
 	 * For now, just free the bgworker handles. Later we'll probably want them
@@ -990,7 +1002,8 @@ bdr_perdb_worker_main(Datum main_arg)
 		pfree(h);
 	}
 
-	elog(LOG, "BDR starting sequencer on db \"%s\"", NameStr(bdr_perdb_worker->dbname));
+	elog(LOG, "BDR starting sequencer on db \"%s\"",
+		 NameStr(bdr_perdb_worker->dbname));
 
 	/* initialize sequencer */
 	bdr_sequencer_init(bdr_perdb_worker->seq_slot);
@@ -1034,7 +1047,8 @@ bdr_perdb_worker_main(Datum main_arg)
 	proc_exit(0);
 }
 
-static size_t bdr_worker_shm_size()
+static size_t
+bdr_worker_shmem_size()
 {
 	Size		size = 0;
 
@@ -1051,12 +1065,12 @@ static size_t bdr_worker_shm_size()
  * Called during _PG_init, but not during postmaster restart.
  */
 static void
-bdr_worker_alloc_shm_segment()
+bdr_worker_alloc_shmem_segment()
 {
 	Assert(process_shared_preload_libraries_in_progress);
 
-	/* Allocate enough shm for the worker limit ... */
-	RequestAddinShmemSpace(bdr_worker_shm_size());
+	/* Allocate enough shmem for the worker limit ... */
+	RequestAddinShmemSpace(bdr_worker_shmem_size());
 
 	/*
 	 * We'll need to be able to take exclusive locks so only one per-db backend
@@ -1080,16 +1094,17 @@ bdr_worker_alloc_shm_segment()
  *
  * Called during postmaster start or restart, in the context of the postmaster.
  */
-static void bdr_worker_shmem_startup(void)
+static void
+bdr_worker_shmem_startup(void)
 {
 	bool        found;
 
-	if (prev_shmem_startup_hook)
+	if (prev_shmem_startup_hook != NULL)
 		prev_shmem_startup_hook();
 
 	LWLockAcquire(AddinShmemInitLock, LW_EXCLUSIVE);
 	BdrWorkerCtl = ShmemInitStruct("bdr_worker",
-								  bdr_worker_shm_size(),
+								  bdr_worker_shmem_size(),
 								  &found);
 	if (!found)
 	{
@@ -1097,7 +1112,7 @@ static void bdr_worker_shmem_startup(void)
 		Assert(IsPostmasterEnvironment && !IsUnderPostmaster);
 
 		/* Init shm segment header after postmaster start or restart */
-		memset(BdrWorkerCtl, 0, bdr_worker_shm_size());
+		memset(BdrWorkerCtl, 0, bdr_worker_shmem_size());
 		BdrWorkerCtl->lock = LWLockAssign();
 		/* If it's a restart, don't actually re-register bgworkers */
 		BdrWorkerCtl->launch_workers = !bdr_is_restart;
@@ -1130,7 +1145,7 @@ static void bdr_worker_shmem_startup(void)
  * instead of in _PG_init.
  */
 static void
-bdr_worker_shmem_create_workers()
+bdr_worker_shmem_create_workers(void)
 {
 	ListCell *c;
 
@@ -1144,13 +1159,13 @@ bdr_worker_shmem_create_workers()
 	 */
 	foreach(c, bdr_startup_context->workers)
 	{
-		BdrApplyWorker *worker = (BdrApplyWorker*)lfirst(c);
-		BdrWorker 	   *shmworker;
+		BdrApplyWorker *worker = (BdrApplyWorker *) lfirst(c);
+		BdrWorker	   *shmworker;
 
-		shmworker = (BdrWorker*) bdr_worker_shm_alloc(BDR_WORKER_APPLY);
+		shmworker = (BdrWorker *) bdr_worker_shmem_alloc(BDR_WORKER_APPLY);
 		Assert(shmworker->worker_type == BDR_WORKER_APPLY);
 		memcpy(&shmworker->worker_data, worker, sizeof(BdrApplyWorker));
-		n_configured_bdr_nodes ++;
+		n_configured_bdr_nodes++;
 	}
 
 	/*
@@ -1166,10 +1181,10 @@ bdr_worker_shmem_create_workers()
  *
  * The block is zeroed. The worker type is set in the header.
  *
- * To release a block, use bdr_worker_shm_release(...)
+ * To release a block, use bdr_worker_shmem_release(...)
  */
 static BdrWorker*
-bdr_worker_shm_alloc(BdrWorkerType worker_type)
+bdr_worker_shmem_alloc(BdrWorkerType worker_type)
 {
 	int i;
 	LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
@@ -1192,13 +1207,13 @@ bdr_worker_shm_alloc(BdrWorkerType worker_type)
 }
 
 /*
- * Release a block allocated by bdr_worker_shm_alloc so it can be
+ * Release a block allocated by bdr_worker_shmem_alloc so it can be
  * re-used.
  *
  * The bgworker *must* no longer be running.
  */
 static void
-bdr_worker_shm_release(BdrWorker* worker, BackgroundWorkerHandle *handle)
+bdr_worker_shmem_release(BdrWorker* worker, BackgroundWorkerHandle *handle)
 {
 	LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
 
@@ -1214,7 +1229,8 @@ bdr_worker_shm_release(BdrWorker* worker, BackgroundWorkerHandle *handle)
 			if (status == BGWH_STARTED)
 			{
 				LWLockRelease(BdrWorkerCtl->lock);
-				elog(ERROR, "BUG: Attempt to release shm segment for bdr worker type=%d pid=%d that's still alive", worker->worker_type, pid);
+				elog(ERROR, "BUG: Attempt to release shm segment for bdr worker type=%d pid=%d that's still alive",
+					 worker->worker_type, pid);
 			}
 		}
 
@@ -1307,10 +1323,10 @@ _PG_init(void)
 	 * which populates the shm segment with configured apply workers using data
 	 * in bdr_startup_context.
 	 */
-	bdr_worker_alloc_shm_segment();
+	bdr_worker_alloc_shmem_segment();
 
 	/* Prepare storage to pass data into our shared memory startup hook */
-	bdr_startup_context = (BdrStartupContext*)palloc(sizeof(BdrStartupContext));
+	bdr_startup_context = (BdrStartupContext *) palloc(sizeof(BdrStartupContext));
 
 	/* Copy 'connections' guc so SplitIdentifierString can modify it in-place */
 	connections_tmp = pstrdup(connections);
@@ -1334,12 +1350,19 @@ _PG_init(void)
 	 */
 	foreach(c, connames)
 	{
-		BdrApplyWorker *apply_worker = (BdrApplyWorker*)palloc(sizeof(BdrApplyWorker));
-		char *name = (char *) lfirst(c);
-		if (!bdr_create_con_gucs(name, used_databases, &num_used_databases, apply_worker))
+		BdrApplyWorker *apply_worker;
+		char *name;
+
+		apply_worker = (BdrApplyWorker *) palloc(sizeof(BdrApplyWorker));
+		name = (char *) lfirst(c);
+
+		if (!bdr_create_con_gucs(name, used_databases, &num_used_databases,
+								 apply_worker))
 			continue;
+
 		apply_worker->origin_id = InvalidRepNodeId;
-		bdr_startup_context->workers = lcons(apply_worker, bdr_startup_context->workers);
+		bdr_startup_context->workers = lcons(apply_worker,
+											 bdr_startup_context->workers);
 	}
 
 	/*
