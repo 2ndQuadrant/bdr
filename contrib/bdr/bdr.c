@@ -56,7 +56,7 @@
 
 #define MAXCONNINFO		1024
 
-static bool got_sigterm = false;
+static bool exit_worker = false;
 static int   n_configured_bdr_nodes = 0;
 ResourceOwner bdr_saved_resowner;
 static bool bdr_is_restart = false;
@@ -207,7 +207,7 @@ bdr_sigterm(SIGNAL_ARGS)
 {
 	int			save_errno = errno;
 
-	got_sigterm = true;
+	exit_worker = true;
 	if (MyProc)
 		SetLatch(&MyProc->procLatch);
 
@@ -225,6 +225,11 @@ bdr_sighup(SIGNAL_ARGS)
 	errno = save_errno;
 }
 
+/*
+ * Read a remote action type and process the action record.
+ *
+ * May set exit_worker to stop processing before next record.
+ */
 static void
 bdr_process_remote_action(StringInfo s)
 {
@@ -240,7 +245,8 @@ bdr_process_remote_action(StringInfo s)
 			break;
 			/* COMMIT */
 		case 'C':
-			process_remote_commit(s);
+			if (!process_remote_commit(s))
+				exit_worker = true;
 			break;
 			/* INSERT */
 		case 'I':
@@ -601,6 +607,8 @@ bdr_apply_main(Datum main_arg)
 	appendStringInfo(&query, ", integer_datetimes '%d'", bdr_get_integer_timestamps());
 	appendStringInfo(&query, ", bigendian '%d'", bdr_get_bigendian());
 	appendStringInfo(&query, ", db_encoding '%s'", GetDatabaseEncodingName());
+	if (bdr_apply_worker->forward_changesets)
+		appendStringInfo(&query, ", forward_changesets 't'");
 
 	appendStringInfoChar(&query, ')');
 	res = PQexec(streamConn, query.data);
@@ -624,7 +632,7 @@ bdr_apply_main(Datum main_arg)
 										   ALLOCSET_DEFAULT_INITSIZE,
 										   ALLOCSET_DEFAULT_MAXSIZE);
 
-	while (!got_sigterm)
+	while (!exit_worker)
 	{
 		/* int		 ret; */
 		int			rc;
@@ -659,7 +667,7 @@ bdr_apply_main(Datum main_arg)
 
 		for (;;)
 		{
-			if (got_sigterm)
+			if (exit_worker)
 				break;
 
 			r = PQgetCopyData(streamConn, &copybuf, 1);
@@ -933,7 +941,7 @@ bdr_launch_apply_workers(char *dbname)
 					BdrApplyWorker *con = &worker->worker_data.apply_worker;
 					if ( strcmp(NameStr(con->dbname), dbname) == 0 )
 					{
-						/* It's an apply worker for our DB; launch it */
+						/* It's an apply worker for our DB; register it */
 						BackgroundWorkerHandle *bgw_handle;
 
 						snprintf(apply_worker.bgw_name, BGW_MAXLEN,
@@ -1017,8 +1025,6 @@ bdr_perdb_worker_main(Datum main_arg)
 		ResourceOwnerCreate(NULL, "bdr seq top-level resource owner");
 	bdr_saved_resowner = CurrentResourceOwner;
 
-	/* TODO: Hande need to initialize database from remote at this point */
-
 	elog(LOG, "Starting bdr apply workers for db %s",
 		 NameStr(bdr_perdb_worker->dbname));
 
@@ -1041,7 +1047,7 @@ bdr_perdb_worker_main(Datum main_arg)
 	/* initialize sequencer */
 	bdr_sequencer_init(bdr_perdb_worker->seq_slot);
 
-	while (!got_sigterm)
+	while (!exit_worker)
 	{
 		/*
 		 * Background workers mustn't call usleep() or any direct equivalent:
@@ -1410,7 +1416,9 @@ _PG_init(void)
 		BdrApplyWorker *apply_worker;
 		char *name;
 
-		apply_worker = (BdrApplyWorker *) palloc(sizeof(BdrApplyWorker));
+		apply_worker = (BdrApplyWorker *) palloc0(sizeof(BdrApplyWorker));
+		apply_worker->forward_changesets = false;
+		apply_worker->replay_stop_lsn = InvalidXLogRecPtr;
 		name = (char *) lfirst(c);
 
 		if (!bdr_create_con_gucs(name, used_databases, &num_used_databases,
