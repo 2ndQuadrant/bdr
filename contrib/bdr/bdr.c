@@ -1036,7 +1036,12 @@ bdr_perdb_worker_main(Datum main_arg)
 
 static size_t bdr_worker_shm_size()
 {
-	return sizeof(BdrWorker) * bdr_max_workers;
+	Size		size = 0;
+
+	size = add_size(size, sizeof(BdrWorkerControl));
+	size = add_size(size, mul_size(bdr_max_workers, sizeof(BdrWorker)));
+
+	return size;
 }
 
 /*
