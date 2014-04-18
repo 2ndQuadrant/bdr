@@ -1299,21 +1299,43 @@ _PG_init(void)
 	 * memory array.
 	 */
 	DefineCustomIntVariable("bdr.max_workers",
-							"max number of bdr connections + distinct databases",
+							"max number of bdr connections + distinct databases. -1 auto-calculates.",
 							NULL,
 							&bdr_max_workers,
-							0, 0, 100,
+							-1, -1, 100,
 							PGC_POSTMASTER,
 							0,
 							NULL, NULL, NULL);
-	/*
-	 * TODO: If bdr_max_workers is unset/zero, autoset from number of
-	 * bdr.connections
-	 */
 
 	/* if nothing is configured, we're done */
 	if (connections == NULL)
 		goto out;
+
+	/* Copy 'connections' guc so SplitIdentifierString can modify it in-place */
+	connections_tmp = pstrdup(connections);
+
+	/* Get the list of BDR connection names to iterate over. */
+	if (!SplitIdentifierString(connections_tmp, ',', &connames))
+	{
+		/* syntax error in list */
+		ereport(FATAL,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("invalid list syntax for \"bdr.connections\"")));
+	}
+
+	/*
+	 * If bdr.max_connections is -1, the default, auto-set it with the
+	 * most workers we might need with the current number of connections
+	 * configured. Per-db workers are due to use shmem too, so we might
+	 * have up to one per-db worker for each configured connection if
+	 * each is on a different DB.
+	 */
+	if (bdr_max_workers == -1)
+	{
+		bdr_max_workers = list_length(connames) * 2;
+		elog(LOG, "bdr: bdr_max_workers unset, configuring for %d workers",
+			 bdr_max_workers);
+	}
 
 	/* Set up a ProcessUtility_hook to stop unsupported commands being run */
 	init_bdr_commandfilter();
@@ -1330,18 +1352,6 @@ _PG_init(void)
 
 	/* Prepare storage to pass data into our shared memory startup hook */
 	bdr_startup_context = (BdrStartupContext *) palloc(sizeof(BdrStartupContext));
-
-	/* Copy 'connections' guc so SplitIdentifierString can modify it in-place */
-	connections_tmp = pstrdup(connections);
-
-	/* Get the list of BDR connection names to iterate over. */
-	if (!SplitIdentifierString(connections_tmp, ',', &connames))
-	{
-		/* syntax error in list */
-		ereport(FATAL,
-				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-				 errmsg("invalid list syntax for \"bdr.connections\"")));
-	}
 
 	/* Names of all databases we're going to be doing BDR for */
 	used_databases = palloc0(sizeof(char *) * list_length(connames));
