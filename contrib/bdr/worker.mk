@@ -2,10 +2,12 @@
 
 MODULE_big = bdr
 OBJS = bdr.o bdr_apply.o bdr_compat.o bdr_commandfilter.o bdr_count.o \
-	bdr_seq.o
+	bdr_seq.o bdr_init_replica.o
 
 EXTENSION = bdr
 DATA = bdr--0.5.sql
+
+SCRIPTS = scripts/bdr_initial_load
 
 PG_CPPFLAGS = -I$(libpq_srcdir)
 SHLIB_LINK = $(libpq)

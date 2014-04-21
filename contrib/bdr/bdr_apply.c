@@ -16,6 +16,15 @@
 
 #include "bdr.h"
 
+/* These are always necessary for a bgworker */
+#include "miscadmin.h"
+#include "postmaster/bgworker.h"
+#include "storage/ipc.h"
+#include "storage/latch.h"
+#include "storage/lwlock.h"
+#include "storage/proc.h"
+#include "storage/shmem.h"
+
 #include "pgstat.h"
 
 #include "access/committs.h"
@@ -36,6 +45,7 @@
 #include "funcapi.h"
 
 #include "libpq/pqformat.h"
+#include "libpq-fe.h"
 
 #include "miscadmin.h"
 

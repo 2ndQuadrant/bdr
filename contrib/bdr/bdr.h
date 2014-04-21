@@ -18,6 +18,12 @@
 #define BDR_SLOT_NAME_FORMAT "bdr_%u_%s_%u_%u__%s"
 #define BDR_NODE_ID_FORMAT "bdr_"UINT64_FORMAT"_%u_%u_%u_%s"
 
+#define BDR_INIT_REPLICA_CMD "bdr_initial_load"
+
+/* forward delcs from other headers */
+typedef struct BackgroundWorkerHandle BackgroundWorkerHandle;
+typedef struct pg_conn PGconn;
+
 /*
  * Flags to indicate which fields are present in a commit record sent by the
  * output plugin.
@@ -41,13 +47,17 @@ typedef struct BdrApplyWorker
 	/* connection name specified in configuration */
 	NameData name;
 
+	/* TODO: Remove these from shm, into bdr worker global state */
 	RepNodeId origin_id;
-
 	uint64 sysid;
-
 	TimeLineID timeline;
 
-	/* If not InvalidXLogRecPtr, stop replay at this point and exit */
+	/*
+	 * If not InvalidXLogRecPtr, stop replay at this point and exit.
+	 *
+	 * To save shmem space in apply workers, this is reset to InvalidXLogRecPtr
+	 * if replay is successfully completed instead of setting a separate flag.
+	 */
 	XLogRecPtr replay_stop_lsn;
 
 	/* Request that the remote forward all changes from other nodes */
@@ -105,8 +115,31 @@ typedef struct BdrWorker
 
 /* GUCs */
 extern int	bdr_default_apply_delay;
+extern int bdr_max_workers;
+extern char *bdr_temp_dump_directory;
+
+/*
+ * Header for the shared memory segment ref'd by the BdrWorkerCtl ptr,
+ * containing bdr_max_workers entries of BdrWorkerCon .
+ */
+typedef struct BdrWorkerControl
+{
+	/* Must hold this lock when writing to BdrWorkerControl members */
+	LWLockId     lock;
+	/* Required only for bgworker restart issues: */
+	bool		 launch_workers;
+	/* Set/unset by bdr_apply_pause()/_replay(). */
+	bool		 pause_apply;
+	/* Array members, of size bdr_max_workers */
+	BdrWorker    slots[FLEXIBLE_ARRAY_MEMBER];
+} BdrWorkerControl;
+
+extern BdrWorkerControl *BdrWorkerCtl;
 
 extern ResourceOwner bdr_saved_resowner;
+
+/* bdr_nodes table oid */
+extern Oid	BdrNodesRelid;
 
 /* DDL replication support */
 extern Oid	QueuedDDLCommandsRelid;
@@ -162,7 +195,29 @@ extern bool bdr_get_float8byval(void);
 extern bool bdr_get_integer_timestamps(void);
 extern bool bdr_get_bigendian(void);
 
+/* initialize a new bdr member */
+extern void bdr_init_replica(Name dbname);
+
+/* shared memory management */
+extern BdrWorker* bdr_worker_shmem_alloc(BdrWorkerType worker_type);
+extern void bdr_worker_shmem_release(BdrWorker* worker, BackgroundWorkerHandle *handle);
+
 /* forbid commands we do not support currently (or never will) */
 extern void init_bdr_commandfilter(void);
+
+/* background workers */
+extern void bdr_apply_main(Datum main_arg);
+
+/* helpers shared by multiple worker types */
+extern PGconn*
+bdr_connect(char *conninfo_repl,
+			char* remote_ident, size_t remote_ident_length,
+			NameData* slot_name,
+			uint64* remote_sysid_i, TimeLineID *remote_tlid_i);
+
+extern PGconn*
+bdr_establish_connection_and_slot(Name connection_name, Name out_slot_name,
+	uint64 *out_sysid, TimeLineID* out_timeline, RepNodeId
+	*out_replication_identifier, char **out_snapshot);
 
 #endif	/* BDR_H */
