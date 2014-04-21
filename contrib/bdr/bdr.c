@@ -1309,7 +1309,12 @@ _PG_init(void)
 
 	/* if nothing is configured, we're done */
 	if (connections == NULL)
+	{
+		/* If worker count autoconfigured, use zero */
+		if (bdr_max_workers == -1)
+			bdr_max_workers = 0;
 		goto out;
+	}
 
 	/* Copy 'connections' guc so SplitIdentifierString can modify it in-place */
 	connections_tmp = pstrdup(connections);
