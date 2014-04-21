@@ -217,6 +217,33 @@ END;
 $function$;
 
 
+
+-- The bdr_nodes table tracks members of a BDR group; it's only concerned with
+-- one database, so the local and foreign database names are implicit.  All we
+-- care about is the sysid.
+--
+-- The sysid must be a numeric (or string) because PostgreSQL has no uint64 SQL
+-- type.
+--
+-- In future we may support different local dbnames, so store the dbname too.
+-- It's even possible we might replicate from one local DB to another (though
+-- who knows why we'd want to) so the PK should be the (dbname, sysid) tuple.
+--
+CREATE TABLE bdr_nodes (
+    node_sysid numeric,
+    node_dbname name not null,
+    node_status "char" not null,
+    primary key(node_sysid, node_dbname),
+    check (node_status in ('i', 'c', 'r'))
+);
+
+COMMENT ON TABLE bdr_nodes IS 'All known nodes in this BDR group.';
+COMMENT ON COLUMN bdr_nodes.node_sysid IS 'system_identifier from the control file of the node';
+COMMENT ON COLUMN bdr_nodes.node_dbname IS 'local database name on the node';
+COMMENT ON COLUMN bdr_nodes.node_status IS 'Readiness of the node: [i]nitializing, [c]atchup, [r]eady. Doesn''t indicate connected/disconnected.';
+
+SELECT pg_catalog.pg_extension_config_dump('bdr_nodes', '');
+
 -- This type is tailored to use as input to get_object_address
 CREATE TYPE bdr.dropped_object AS
   (objtype text, objnames text[], objargs text[]);
