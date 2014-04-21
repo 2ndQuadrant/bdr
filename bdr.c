@@ -40,12 +40,14 @@
 #include "lib/stringinfo.h"
 #include "libpq/pqformat.h"
 #include "mb/pg_wchar.h"
+#include "postmaster/bgwriter.h"
 #include "replication/replication_identifier.h"
 #include "utils/builtins.h"
 #include "utils/guc.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/snapmgr.h"
+#include "utils/syscache.h"
 #include "utils/timestamp.h"
 
 /* sequencer */
@@ -54,42 +56,29 @@
 /* apply */
 #include "libpq-fe.h"
 
+
 #define MAXCONNINFO		1024
 
 static bool exit_worker = false;
 static int   n_configured_bdr_nodes = 0;
 ResourceOwner bdr_saved_resowner;
 static bool bdr_is_restart = false;
+Oid   BdrNodesRelid;
 
 /* GUC storage */
 static char *connections = NULL;
 static char *bdr_synchronous_commit = NULL;
-static int bdr_max_workers;
 int bdr_default_apply_delay;
+int bdr_max_workers;
 
 /* TODO: Remove when bdr_apply_main moved into bdr_apply.c */
 extern BdrApplyWorker *bdr_apply_worker;
 
-/*
- * Header for the shared memory segment ref'd by the BdrWorkerCtl ptr,
- * containing bdr_max_workers entries of BdrWorkerCon .
- */
-typedef struct BdrWorkerControl
-{
-	/* Must hold this lock when writing to BdrWorkerControl members */
-	LWLockId     lock;
-	/* Required only for bgworker restart issues: */
-	bool		 launch_workers;
-	/* Set/unset by bdr_apply_pause()/_replay(). */
-	bool		 pause_apply;
-	/* Array members, of size bdr_max_workers */
-	BdrWorker    slots[FLEXIBLE_ARRAY_MEMBER];
-} BdrWorkerControl;
-
 /* shmem init hook to chain to on startup, if any */
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
+
 /* shortcut for finding the the worker shmem block */
-static BdrWorkerControl *BdrWorkerCtl = NULL;
+BdrWorkerControl *BdrWorkerCtl = NULL;
 
 /*
  * Used only in postmaster to pass data from _PG_init during
@@ -116,6 +105,8 @@ typedef struct BdrApplyWorkerConfigOptions
 {
 	char *dsn;
 	int   apply_delay;
+	bool  bdr_init_replica;
+	char *replica_local_dsn;
 } BdrApplyWorkerConfigOptions;
 
 PG_MODULE_MAGIC;
@@ -124,10 +115,6 @@ void		_PG_init(void);
 static void bdr_maintain_schema(void);
 static void bdr_worker_shmem_startup(void);
 static void bdr_worker_shmem_create_workers(void);
-static BdrWorker* bdr_worker_shmem_alloc(BdrWorkerType worker_type);
-static void bdr_worker_shmem_release(BdrWorker* worker,
-									 BackgroundWorkerHandle *handle)
-	__attribute__((unused)); /* TODO: remove this attribute when function is used */
 
 Datum bdr_apply_pause(PG_FUNCTION_ARGS);
 Datum bdr_apply_resume(PG_FUNCTION_ARGS);
@@ -281,7 +268,7 @@ bdr_process_remote_action(StringInfo s)
  *   remote_sysid_i
  *   remote_tlid_i
  */
-static PGconn*
+PGconn*
 bdr_connect(char *conninfo_repl,
 			char* remote_ident, size_t remote_ident_length,
 			NameData* slot_name,
@@ -378,8 +365,21 @@ bdr_connect(char *conninfo_repl,
 }
 
 /*
+ * ----------
  * Create a slot on a remote node, and the corresponding local replication
  * identifier.
+ *
+ * Arguments:
+ *   streamConn		Connection to use for slot creation
+ *   slot_name		Name of the slot to create
+ *   remote_ident	Identifier for the remote end
+ *
+ * Out parameters:
+ *   replication_identifier		Created local replication identifier
+ *   snapshot					If !NULL, snapshot ID of slot snapshot
+ *
+ * If a snapshot is returned it must be pfree()'d by the caller.
+ * ----------
  */
 /*
  * TODO we should really handle the case where the slot already exists but
@@ -409,6 +409,8 @@ bdr_create_slot(PGconn *streamConn, Name slot_name,
 
 	if (PQresultStatus(res) != PGRES_TUPLES_OK)
 	{
+		/* TODO: Should test whether this error is 'already exists' and carry on */
+
 		elog(FATAL, "could not send replication command \"%s\": status %s: %s\n",
 			 query.data,
 			 PQresStatus(PQresultStatus(res)), PQresultErrorMessage(res));
@@ -422,7 +424,8 @@ bdr_create_slot(PGconn *streamConn, Name slot_name,
 	CurrentResourceOwner = bdr_saved_resowner;
 	elog(LOG, "created replication identifier %u", *replication_identifier);
 
-	*snapshot = pstrdup(PQgetvalue(res, 0, 2));
+	if (snapshot)
+		*snapshot = pstrdup(PQgetvalue(res, 0, 2));
 
 	PQclear(res);
 }
@@ -493,6 +496,79 @@ bdr_get_worker_option(const char * worker_name, const char * option_name,
 }
 
 /*
+ *----------------------
+ * Connect to the BDR remote end, IDENTIFY_SYSTEM, and CREATE_SLOT if necessary.
+ * Generates slot name, replication identifier.
+ *
+ * Raises an error on failure, will not return null.
+ *
+ * Arguments:
+ * 	  connection_name:  bdr conn name from bdr.connections to get dsn from
+ *
+ * Returns:
+ *    the libpq connection
+ *
+ * Out parameters:
+ *    out_slot_name: the generated name of the slot on the remote end
+ *    out_sysid:     the remote end's system identifier
+ *    out_timeline:  the remote end's current timeline
+ *    out_replication_identifier: The replication identifier for this connection
+ *
+ *----------------------
+ */
+PGconn*
+bdr_establish_connection_and_slot(Name connection_name, Name out_slot_name,
+	uint64 *out_sysid, TimeLineID* out_timeline, RepNodeId
+	*out_replication_identifier, char **out_snapshot)
+{
+	char		conninfo_repl[MAXCONNINFO + 75];
+	const char *dsn;
+	char		remote_ident[256];
+	PGconn	   *streamConn;
+
+	dsn = bdr_get_worker_option(NameStr(*connection_name), "dsn", false);
+	snprintf(conninfo_repl, sizeof(conninfo_repl),
+			 "%s replication=database fallback_application_name=bdr",
+			 dsn);
+
+	/* Establish BDR conn and IDENTIFY_SYSTEM */
+	streamConn = bdr_connect(
+		conninfo_repl,
+		remote_ident, sizeof(remote_ident),
+		out_slot_name, out_sysid, out_timeline
+		);
+
+	StartTransactionCommand();
+	*out_replication_identifier = GetReplicationIdentifier(remote_ident, true);
+	CommitTransactionCommand();
+
+	if (OidIsValid(*out_replication_identifier))
+	{
+		elog(LOG, "found valid replication identifier %u",
+			 *out_replication_identifier);
+		if (out_snapshot)
+			*out_snapshot = NULL;
+	}
+	else
+	{
+		/*
+		 * Slot doesn't exist, create it.
+		 *
+		 * The per-db worker will create slots when we first init BDR, but new workers
+		 * added afterwards are expected to create their own slots at connect time; that's
+		 * when this runs.
+		 */
+
+		/* create local replication identifier and a remote slot */
+		elog(LOG, "Creating new slot %s", NameStr(*out_slot_name));
+		bdr_create_slot(streamConn, out_slot_name, remote_ident,
+						out_replication_identifier, out_snapshot);
+	}
+
+	return streamConn;
+}
+
+/*
  * Entry point and main loop for a BDR apply worker.
  *
  * Responsible for establishing a replication connection, creating slots,
@@ -500,21 +576,18 @@ bdr_get_worker_option(const char * worker_name, const char * option_name,
  *
  * TODO: move to bdr_apply.c
  */
-static void
+void
 bdr_apply_main(Datum main_arg)
 {
 	PGconn	   *streamConn;
 	PGresult   *res;
 	int			fd;
-	char		remote_ident[256];
 	StringInfoData query;
-	char		conninfo_repl[MAXCONNINFO + 75];
 	XLogRecPtr	last_received = InvalidXLogRecPtr;
 	char	   *sqlstate;
 	RepNodeId	replication_identifier;
 	XLogRecPtr	start_from;
 	NameData	slot_name;
-	const char *dsn;
 	BdrWorker  *bdr_worker_slot;
 
 	Assert(IsBackgroundWorker);
@@ -527,48 +600,15 @@ bdr_apply_main(Datum main_arg)
 
 	bdr_worker_init(NameStr(bdr_apply_worker->dbname));
 
-	CurrentResourceOwner =
-		ResourceOwnerCreate(NULL, "bdr apply top-level resource owner");
+	CurrentResourceOwner = ResourceOwnerCreate(NULL, "bdr apply top-level resource owner");
 	bdr_saved_resowner = CurrentResourceOwner;
 
-	dsn = bdr_get_worker_option(NameStr(bdr_apply_worker->name),
-								"dsn", false);
-	snprintf(conninfo_repl, sizeof(conninfo_repl),
-			 "%s replication=database fallback_application_name=bdr",
-			 dsn);
+	elog(LOG, "%s initialized on %s",
+		 MyBgworkerEntry->bgw_name, NameStr(bdr_apply_worker->dbname));
 
-	elog(LOG, "%s initialized on %s, remote %s",
-		 MyBgworkerEntry->bgw_name, NameStr(bdr_apply_worker->dbname),
-		 conninfo_repl);
-
-	/* Establish BDR conn and IDENTIFY_SYSTEM */
-	streamConn = bdr_connect(
-		conninfo_repl,
-		remote_ident, sizeof(remote_ident),
-		&slot_name,
-		&bdr_apply_worker->sysid,
-		&bdr_apply_worker->timeline
-		);
-
-	StartTransactionCommand();
-	replication_identifier = GetReplicationIdentifier(remote_ident, true);
-	CommitTransactionCommand();
-
-	if (OidIsValid(replication_identifier))
-		elog(LOG, "found valid replication identifier %u",
-			 replication_identifier);
-	else
-	{
-		char *snapshot;
-
-		elog(LOG, "Creating new slot %s", NameStr(slot_name));
-
-		/* create local replication identifier and a remote slot */
-		bdr_create_slot(streamConn, &slot_name, remote_ident,
-						&replication_identifier, &snapshot);
-
-		/* TODO: Initialize database from remote */
-	}
+	streamConn = bdr_establish_connection_and_slot(
+		&bdr_apply_worker->name, &slot_name, &bdr_apply_worker->sysid,
+		&bdr_apply_worker->timeline, &replication_identifier, NULL);
 
 	bdr_apply_worker->origin_id = replication_identifier;
 
@@ -792,6 +832,7 @@ static bool
 bdr_create_con_gucs(char  *name,
 					char **used_databases,
 					Size  *num_used_databases,
+					char **database_initcons,
 					BdrApplyWorker *out_worker)
 {
 	int			off;
@@ -803,6 +844,8 @@ bdr_create_con_gucs(char  *name,
 	/* don't free, referenced by the guc machinery! */
 	char	   *optname_dsn = palloc(strlen(name) + 30);
 	char	   *optname_delay = palloc(strlen(name) + 30);
+	char	   *optname_replica = palloc(strlen(name) + 30);
+	char	   *optname_local_dsn = palloc(strlen(name) + 30);
 	opts = palloc(sizeof(BdrApplyWorkerConfigOptions));
 
 	Assert(process_shared_preload_libraries_in_progress);
@@ -828,6 +871,25 @@ bdr_create_con_gucs(char  *name,
 							PGC_SIGHUP,
 							GUC_UNIT_MS,
 							NULL, NULL, NULL);
+
+	sprintf(optname_replica, "bdr.%s_init_replica", name);
+	DefineCustomBoolVariable(optname_replica,
+							 optname_replica,
+							 NULL,
+							 &opts->bdr_init_replica,
+							 false,
+							 PGC_SIGHUP,
+							 0,
+							 NULL, NULL, NULL);
+
+	sprintf(optname_local_dsn, "bdr.%s_replica_local_dsn", name);
+	DefineCustomStringVariable(optname_local_dsn,
+							   optname_local_dsn,
+							   NULL,
+							   &opts->replica_local_dsn,
+							   NULL, PGC_POSTMASTER,
+							   GUC_NOT_IN_SAMPLE,
+							   NULL, NULL, NULL);
 
 	if (!opts->dsn)
 	{
@@ -887,6 +949,19 @@ bdr_create_con_gucs(char  *name,
 			pstrdup(NameStr(out_worker->dbname));
 	}
 
+	/*
+	 * Make sure that at most one of the worker configs for each DB can be
+	 * configured to run initialization.
+	 */
+	if (opts->bdr_init_replica)
+	{
+		if (database_initcons[off] != NULL)
+			elog(ERROR, "Connections %s and %s on database %s both have bdr_init_replica enabled, cannot continue",
+				name, database_initcons[off], used_databases[off]);
+		else
+			database_initcons[off] = name; /* no need to pstrdup, see _PG_init */
+	}
+
 	/* optname vars and opts intentionally leaked, see above */
 	return true;
 }
@@ -912,6 +987,7 @@ bdr_launch_apply_workers(char *dbname)
 	apply_worker.bgw_flags = BGWORKER_SHMEM_ACCESS |
 		BGWORKER_BACKEND_DATABASE_CONNECTION;
 	apply_worker.bgw_start_time = BgWorkerStart_RecoveryFinished;
+	/* TODO: For EXEC_BACKEND we must use bgw_library_name & bgw_function_name */
 	apply_worker.bgw_main = bdr_apply_main;
 	apply_worker.bgw_restart_time = 5;
 	apply_worker.bgw_notify_pid = 0;
@@ -1000,36 +1076,35 @@ bdr_node_count()
  * for each BDR connection.
  *
  * Since the worker is fork()ed from the postmaster, all globals initialised in
- * _PG_init remain valid (TODO: change this for EXEC_BACKEND support).
+ * _PG_init remain valid.
  *
  * This worker can use the SPI and shared memory.
  */
 static void
 bdr_perdb_worker_main(Datum main_arg)
 {
-	int				rc;
-	List		   *apply_workers;
-	ListCell	   *c;
-	BdrPerdbWorker *bdr_perdb_worker;
-	char		   *dbname;
+	int				  rc;
+	List			 *apply_workers;
+	ListCell		 *c;
+	BdrPerdbWorker   *bdr_perdb_worker;
 
 	Assert(IsBackgroundWorker);
 
 	/* FIXME: won't work with EXEC_BACKEND, change to index into shm array */
 	bdr_perdb_worker = (BdrPerdbWorker *) DatumGetPointer(main_arg);
-	dbname = NameStr(bdr_perdb_worker->dbname);
 
-	bdr_worker_init(dbname);
+	bdr_worker_init(NameStr(bdr_perdb_worker->dbname));
 
-	CurrentResourceOwner =
-		ResourceOwnerCreate(NULL, "bdr seq top-level resource owner");
+	CurrentResourceOwner = ResourceOwnerCreate(NULL, "bdr seq top-level resource owner");
 	bdr_saved_resowner = CurrentResourceOwner;
 
-	elog(LOG, "Starting bdr apply workers for db %s",
-		 NameStr(bdr_perdb_worker->dbname));
+	/* Do we need to init the local DB from a remote node? */
+	bdr_init_replica(&bdr_perdb_worker->dbname);
+
+	elog(LOG, "Starting bdr apply workers for db %s", NameStr(bdr_perdb_worker->dbname));
 
 	/* Launch the apply workers */
-	apply_workers = bdr_launch_apply_workers(dbname);
+	apply_workers = bdr_launch_apply_workers(NameStr(bdr_perdb_worker->dbname));
 
 	/*
 	 * For now, just free the bgworker handles. Later we'll probably want them
@@ -1222,7 +1297,7 @@ bdr_worker_shmem_create_workers(void)
  *
  * To release a block, use bdr_worker_shmem_release(...)
  */
-static BdrWorker*
+BdrWorker*
 bdr_worker_shmem_alloc(BdrWorkerType worker_type)
 {
 	int i;
@@ -1250,8 +1325,11 @@ bdr_worker_shmem_alloc(BdrWorkerType worker_type)
  * re-used.
  *
  * The bgworker *must* no longer be running.
+ *
+ * If passed, the bgworker handle is checked to ensure the worker
+ * is not still running before the slot is released.
  */
-static void
+void
 bdr_worker_shmem_release(BdrWorker* worker, BackgroundWorkerHandle *handle)
 {
 	LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
@@ -1300,6 +1378,7 @@ _PG_init(void)
 	char	   *connections_tmp;
 
 	char	  **used_databases;
+	char      **database_initcons;
 	Size		num_used_databases = 0;
 
 	if (!process_shared_preload_libraries_in_progress)
@@ -1352,6 +1431,19 @@ _PG_init(void)
 							GUC_UNIT_MS,
 							NULL, NULL, NULL);
 
+	/*
+	 * We can't use the temp_tablespace safely for our dumps, because Pg's
+	 * crash recovery is very careful to delete only particularly formatted
+	 * files. Instead for now just allow user to specify dump storage.
+	 */
+	DefineCustomStringVariable("bdr.temp_dump_directory",
+							   "Directory to store dumps for local restore",
+							   NULL,
+							   &bdr_temp_dump_directory,
+							   "/tmp", PGC_SIGHUP,
+							   0,
+							   NULL, NULL, NULL);
+
 	/* if nothing is configured, we're done */
 	if (connections == NULL)
 	{
@@ -1384,7 +1476,7 @@ _PG_init(void)
 	{
 		bdr_max_workers = list_length(connames) * 2;
 		elog(LOG, "bdr: bdr_max_workers unset, configuring for %d workers",
-			 bdr_max_workers);
+				bdr_max_workers);
 	}
 
 	/* Set up a ProcessUtility_hook to stop unsupported commands being run */
@@ -1405,6 +1497,11 @@ _PG_init(void)
 
 	/* Names of all databases we're going to be doing BDR for */
 	used_databases = palloc0(sizeof(char *) * list_length(connames));
+	/*
+	 * For each db named in used_databases, the corresponding index is the name
+	 * of the conn with bdr_init_replica=t if any.
+	 */
+	database_initcons = palloc0(sizeof(char *) * list_length(connames));
 
 	/*
 	 * Read all connections and create their BdrApplyWorker structs, validating
@@ -1422,12 +1519,10 @@ _PG_init(void)
 		name = (char *) lfirst(c);
 
 		if (!bdr_create_con_gucs(name, used_databases, &num_used_databases,
-								 apply_worker))
+								 database_initcons, apply_worker))
 			continue;
-
 		apply_worker->origin_id = InvalidRepNodeId;
-		bdr_startup_context->workers = lcons(apply_worker,
-											 bdr_startup_context->workers);
+		bdr_startup_context->workers = lcons(apply_worker, bdr_startup_context->workers);
 	}
 
 	/*
@@ -1436,6 +1531,13 @@ _PG_init(void)
 	 */
 	list_free(connames);
 	connames = NIL;
+
+	/*
+	 * We've ensured there are no duplicate init connections, no need to
+	 * remember which conn is the bdr_init_replica conn anymore. The contents
+	 * are just pointers into connections_tmp so we don't want to free them.
+	 */
+	pfree(database_initcons);
 
 	/*
 	 * We now need to register one static bgworker per database.  When started,
@@ -1455,6 +1557,7 @@ _PG_init(void)
 	perdb_worker.bgw_flags = BGWORKER_SHMEM_ACCESS |
 		BGWORKER_BACKEND_DATABASE_CONNECTION;
 	perdb_worker.bgw_start_time = BgWorkerStart_RecoveryFinished;
+	/* TODO: For EXEC_BACKEND we must use bgw_library_name & bgw_function_name */
 	perdb_worker.bgw_main = bdr_perdb_worker_main;
 	perdb_worker.bgw_restart_time = 5;
 	perdb_worker.bgw_notify_pid = 0;
@@ -1576,6 +1679,8 @@ bdr_maintain_schema(void)
 												 schema_oid);
 
 		BdrVotesRelid = bdr_lookup_relid("bdr_votes", schema_oid);
+
+		BdrNodesRelid = bdr_lookup_relid("bdr_nodes", schema_oid);
 
 		QueuedDropsRelid = bdr_lookup_relid("bdr_queued_drops", schema_oid);
 	}
