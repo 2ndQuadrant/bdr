@@ -1495,7 +1495,7 @@ bdr_maintain_schema(void)
 	{
 		CreateExtensionStmt create_stmt;
 
-		create_stmt.if_not_exists = false;
+		create_stmt.if_not_exists = true;
 		create_stmt.options = NIL;
 		create_stmt.extname = (char *)"btree_gist";
 
