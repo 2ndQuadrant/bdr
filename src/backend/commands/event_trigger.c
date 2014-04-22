@@ -1041,8 +1041,7 @@ EventTriggerBeginCompleteQuery(void)
 								ALLOCSET_DEFAULT_MAXSIZE);
 	state = MemoryContextAlloc(cxt, sizeof(EventTriggerQueryState));
 	state->cxt = cxt;
-	if (trackDroppedObjectsNeeded())
-		slist_init(&(state->SQLDropList));
+	slist_init(&(state->SQLDropList));
 	state->in_sql_drop = false;
 	state->stash = NIL;
 
