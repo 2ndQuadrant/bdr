@@ -244,7 +244,7 @@ CheckReplicationIdentifierPrerequisites(bool check_slots)
 	if (check_slots && max_replication_slots == 0)
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("cannot query or manipulate replication identifiers when max_logical_slots = 0")));
+				 errmsg("cannot query or manipulate replication identifiers when max_replication_slots = 0")));
 
 }
 
