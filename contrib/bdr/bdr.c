@@ -1359,7 +1359,7 @@ _PG_init(void)
 	bdr_worker_alloc_shmem_segment();
 
 	/* Prepare storage to pass data into our shared memory startup hook */
-	bdr_startup_context = (BdrStartupContext *) palloc(sizeof(BdrStartupContext));
+	bdr_startup_context = (BdrStartupContext *) palloc0(sizeof(BdrStartupContext));
 
 	/* Names of all databases we're going to be doing BDR for */
 	used_databases = palloc0(sizeof(char *) * list_length(connames));
