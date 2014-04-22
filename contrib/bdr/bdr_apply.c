@@ -671,6 +671,9 @@ fetch_sysid_via_node_id(RepNodeId node_id, uint64 *sysid, TimeLineID *tli)
 			elog(ERROR, "could not parse sysid: %s", ident);
 		ReleaseSysCache(node);
 		pfree(ident);
+
+		*sysid = remote_sysid;
+		*tli = remote_tli;
 	}
 }
 
