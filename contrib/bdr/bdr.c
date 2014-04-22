@@ -122,6 +122,9 @@ static void bdr_maintain_schema(void);
 static void bdr_worker_shmem_startup(void);
 static void bdr_worker_shmem_create_workers(void);
 static BdrWorker* bdr_worker_shmem_alloc(BdrWorkerType worker_type);
+static void bdr_worker_shmem_release(BdrWorker* worker,
+									 BackgroundWorkerHandle *handle)
+	__attribute__((unused)); /* TODO: remove this attribute when function is used */
 
 /*
  * Converts an int64 to network byte order.
