@@ -120,7 +120,7 @@ process_remote_begin(StringInfo s)
 	TimestampTz		committime;
 	TimestampTz		current;
 	char			statbuf[100];
-	int				apply_delay = 0;
+	int				apply_delay = -1;
 	const char     *apply_delay_str;
 
 	Assert(bdr_apply_worker != NULL);
@@ -148,6 +148,9 @@ process_remote_begin(StringInfo s)
 	if (apply_delay_str)
 		/* This is an integer GUC, so parsing as an int can't fail */
 		(void) parse_int(apply_delay_str, &apply_delay, 0, NULL);
+
+	if (apply_delay == -1)
+		apply_delay = bdr_default_apply_delay;
 
 	/* don't want the overhead otherwise */
 	if (apply_delay > 0)
