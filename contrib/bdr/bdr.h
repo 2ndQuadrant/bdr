@@ -88,6 +88,9 @@ typedef struct BdrWorker
 
 } BdrWorker;
 
+/* GUCs */
+extern int	bdr_default_apply_delay;
+
 extern ResourceOwner bdr_saved_resowner;
 
 /* DDL replication support */

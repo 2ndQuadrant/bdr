@@ -65,6 +65,7 @@ static bool bdr_is_restart = false;
 static char *connections = NULL;
 static char *bdr_synchronous_commit = NULL;
 static int bdr_max_workers;
+int bdr_default_apply_delay;
 
 /* TODO: Remove when bdr_apply_main moved into bdr_apply.c */
 extern BdrApplyWorker *bdr_apply_worker;
@@ -789,7 +790,7 @@ bdr_create_con_gucs(char  *name,
 							optname_delay,
 							NULL,
 							&opts->apply_delay,
-							0, 0, INT_MAX,
+							-1, -1, INT_MAX,
 							PGC_SIGHUP,
 							GUC_UNIT_MS,
 							NULL, NULL, NULL);
@@ -1308,6 +1309,15 @@ _PG_init(void)
 							-1, -1, 100,
 							PGC_POSTMASTER,
 							0,
+							NULL, NULL, NULL);
+
+	DefineCustomIntVariable("bdr.default_apply_delay",
+							NULL,
+							NULL,
+							&bdr_default_apply_delay,
+							0, 0, INT_MAX,
+							PGC_SIGHUP,
+							GUC_UNIT_MS,
 							NULL, NULL, NULL);
 
 	/* if nothing is configured, we're done */
