@@ -14,6 +14,5 @@ all:
 clean: all
 
 # phony target...
-check: all
 
 .PHONY: all
