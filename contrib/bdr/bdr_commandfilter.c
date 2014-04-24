@@ -81,6 +81,7 @@ bdr_commandfilter(Node *parsetree,
 	CreateStmt *createStatement;
 	bool hasInvalid;
 	Constraint *con;
+	IndexStmt *indexStmt;
 
 	ereport(DEBUG4,
 		 (errmsg_internal("bdr_commandfilter ProcessUtility_hook invoked")));
@@ -114,6 +115,14 @@ bdr_commandfilter(Node *parsetree,
 			}
 
 			break;
+
+		case T_IndexStmt:
+			indexStmt = (IndexStmt *) parsetree;
+
+			if (indexStmt->whereClause && indexStmt->unique)
+				error_on_persistent_rv(indexStmt->relation,
+									   "CREATE UNIQUE INDEX ... WHERE",
+									   AccessExclusiveLock, severity, false);
 
 			/*
 			 * XXX allow ALTER TABLE statements when stabilized; still forbid *
