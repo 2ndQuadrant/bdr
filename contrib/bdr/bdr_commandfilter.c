@@ -78,7 +78,9 @@ bdr_commandfilter(Node *parsetree,
 	int			severity = ERROR;
 	ListCell   *cell;
 	AlterTableStmt *alterTableStatement;
+	CreateStmt *createStatement;
 	bool hasInvalid;
+	Constraint *con;
 
 	ereport(DEBUG4,
 		 (errmsg_internal("bdr_commandfilter ProcessUtility_hook invoked")));
@@ -92,6 +94,25 @@ bdr_commandfilter(Node *parsetree,
 			error_on_persistent_rv(((ClusterStmt *) parsetree)->relation,
 							 "SECURITY LABEL", AccessExclusiveLock, severity,
 								   false);
+			break;
+
+		case T_CreateStmt:
+			createStatement = (CreateStmt *) parsetree;
+
+			foreach(cell, createStatement->tableElts)
+			{
+				Node *element = lfirst(cell);
+
+				if (nodeTag(element) == T_Constraint)
+				{
+					con = (Constraint *) element;
+					if (con->contype == CONSTR_EXCLUSION &&
+						createStatement->relation->relpersistence != RELPERSISTENCE_TEMP)
+						ereport(severity,
+								(errmsg("EXCLUDE constraints are unsafe with BDR active")));
+				}
+			}
+
 			break;
 
 			/*
@@ -122,6 +143,19 @@ bdr_commandfilter(Node *parsetree,
 					case AT_SetRelOptions: /* SET (...) */
 					case AT_ResetRelOptions: /* RESET (...) */
 					case AT_ReplaceRelOptions: /* replace reloption list */
+						break;
+
+					case AT_AddConstraint:
+						if (IsA(stmt->def, Constraint))
+						{
+							con = (Constraint *) stmt->def;
+
+							if (con->contype == CONSTR_EXCLUSION)
+								error_on_persistent_rv(alterTableStatement->relation,
+													   "ALTER TABLE ... ADD CONSTRAINT ... EXCLUDE",
+													   AccessExclusiveLock, severity,
+													   alterTableStatement->missing_ok);
+						}
 						break;
 
 					default:
