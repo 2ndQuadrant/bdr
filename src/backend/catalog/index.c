@@ -1096,7 +1096,8 @@ index_create(Relation heapRelation,
 /*
  * index_constraint_create
  *
- * Set up a constraint associated with an index
+ * Set up a constraint associated with an index.  Return the new constraint's
+ * OID.
  *
  * heapRelation: table owning the index (must be suitably locked by caller)
  * indexRelationId: OID of the index
@@ -1113,7 +1114,7 @@ index_create(Relation heapRelation,
  * allow_system_table_mods: allow table to be a system catalog
  * is_internal: index is constructed due to internal process
  */
-void
+Oid
 index_constraint_create(Relation heapRelation,
 						Oid indexRelationId,
 						IndexInfo *indexInfo,
@@ -1301,6 +1302,8 @@ index_constraint_create(Relation heapRelation,
 		heap_freetuple(indexTuple);
 		heap_close(pg_index, RowExclusiveLock);
 	}
+
+	return conOid;
 }
 
 /*
