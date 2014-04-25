@@ -26,6 +26,7 @@
 typedef enum StashedCommandType
 {
 	SCT_Simple,
+	SCT_AlterTable
 } StashedCommandType;
 
 /*
@@ -52,6 +53,13 @@ typedef struct StashedCommand
 			uint32		objectSubId;
 			ObjectType	objtype;
 		} simple;
+
+		struct AlterTableCommand
+		{
+			Oid		objectId;
+			ObjectType objtype;
+			List   *subcmds;
+		} alterTable;
 	} d;
 } StashedCommand;
 
