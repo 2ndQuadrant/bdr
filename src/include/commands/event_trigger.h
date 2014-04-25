@@ -65,4 +65,10 @@ extern void EventTriggerStashCommand(ObjectAddress address,
 extern void EventTriggerInhibitCommandCollection(void);
 extern void EventTriggerUndoInhibitCommandCollection(void);
 
+extern void EventTriggerAlterTableStart(Node *parsetree);
+extern void EventTriggerAlterTableRelid(Oid objectId);
+extern void EventTriggerAlterTableStashSubcmd(Node *subcmd, Oid relid,
+								  AttrNumber attnum, Oid newoid);
+extern void EventTriggerAlterTableEnd(void);
+
 #endif   /* EVENT_TRIGGER_H */
