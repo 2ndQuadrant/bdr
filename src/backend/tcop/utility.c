@@ -982,6 +982,10 @@ ProcessUtilitySlow(Node *parsetree,
 						stmts = transformAlterTableStmt(relid, atstmt,
 														queryString);
 
+						/* ... ensure we have an event trigger context ... */
+						EventTriggerComplexCmdStart(parsetree, atstmt->relkind);
+						EventTriggerComplexCmdSetOid(relid);
+
 						/* ... and do it */
 						foreach(l, stmts)
 						{
@@ -995,19 +999,32 @@ ProcessUtilitySlow(Node *parsetree,
 							}
 							else
 							{
-								/* Recurse for anything else */
+								/*
+								 * Recurse for anything else.  If we need to do
+								 * so, "close" the current complex-command set,
+								 * and start a new one at the bottom; this is
+								 * needed to ensure the ordering of queued
+								 * commands is consistent with the way they are
+								 * executed here.
+								 */
+								EventTriggerComplexCmdEnd();
 								ProcessUtility(stmt,
 											   queryString,
 											   PROCESS_UTILITY_SUBCOMMAND,
 											   params,
 											   None_Receiver,
 											   NULL);
+								EventTriggerComplexCmdStart(parsetree, atstmt->relkind);
+								EventTriggerComplexCmdSetOid(relid);
 							}
 
 							/* Need CCI between commands */
 							if (lnext(l) != NULL)
 								CommandCounterIncrement();
 						}
+
+						/* done */
+						EventTriggerComplexCmdEnd();
 					}
 					else
 						ereport(NOTICE,
@@ -1156,6 +1173,7 @@ ProcessUtilitySlow(Node *parsetree,
 					stmt = transformIndexStmt(relid, stmt, queryString);
 
 					/* ... and do it */
+					EventTriggerComplexCmdStart(parsetree, OBJECT_INDEX);	/* relkind? */
 					objectId =
 						DefineIndex(relid,	/* OID of heap relation */
 									stmt,
@@ -1166,6 +1184,7 @@ ProcessUtilitySlow(Node *parsetree,
 									false); /* quiet */
 					EventTriggerStashCommand(objectId, OBJECT_INDEX,
 											 parsetree);
+					EventTriggerComplexCmdEnd();
 				}
 				break;
 
@@ -1249,8 +1268,10 @@ ProcessUtilitySlow(Node *parsetree,
 				break;
 
 			case T_ViewStmt:	/* CREATE VIEW */
+				EventTriggerComplexCmdStart(parsetree, OBJECT_VIEW);	/* XXX relkind? */
 				objectId = DefineView((ViewStmt *) parsetree, queryString);
 				EventTriggerStashCommand(objectId, OBJECT_VIEW, parsetree);
+				EventTriggerComplexCmdEnd();
 				break;
 
 			case T_CreateFunctionStmt:	/* CREATE FUNCTION */
@@ -1377,7 +1398,9 @@ ProcessUtilitySlow(Node *parsetree,
 				break;
 
 			case T_AlterTableSpaceMoveStmt:
+				EventTriggerComplexCmdStart(parsetree, OBJECT_TABLE);	/* XXX relkind? */
 				AlterTableSpaceMove((AlterTableSpaceMoveStmt *) parsetree);
+				EventTriggerComplexCmdEnd();
 				break;
 
 			case T_AlterOwnerStmt:

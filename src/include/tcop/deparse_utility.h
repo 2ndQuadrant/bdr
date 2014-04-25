@@ -26,6 +26,7 @@
 typedef enum StashedCommandType
 {
 	SCT_Basic,
+	SCT_AlterTable
 } StashedCommandType;
 
 /*
@@ -42,6 +43,7 @@ typedef struct StashedCommand
 {
 	StashedCommandType type;
 	bool		in_extension;
+	List	   *subcmds;	/* list of StashedATSubcmd */
 	Node	   *parsetree;
 
 	union
@@ -51,6 +53,13 @@ typedef struct StashedCommand
 			Oid			objectId;
 			ObjectType	objtype;
 		} basic;
+
+		struct AlterTableCommand
+		{
+			Oid		objectId;
+			ObjectType objtype;
+			List   *subcmds;
+		} alterTable;
 	} d;
 } StashedCommand;
 
