@@ -74,27 +74,6 @@ typedef struct BDRTupleData
 	bool		changed[MaxTupleAttributeNumber];
 } BDRTupleData;
 
-static void build_index_scan_keys(EState *estate, ScanKey *scan_keys, TupleTableSlot *slot);
-static void build_index_scan_key(ScanKey skey, Relation rel, Relation idx_rel, TupleTableSlot *slot);
-static bool find_pkey_tuple(ScanKey skey, Relation rel, Relation idx_rel, TupleTableSlot *slot,
-							bool lock, LockTupleMode mode);
-static void UserTableUpdateIndexes(EState *estate, TupleTableSlot *slot);
-static void UserTableUpdateOpenIndexes(EState *estate, TupleTableSlot *slot);
-static Relation read_rel(StringInfo s, LOCKMODE mode);
-extern void read_tuple_parts(StringInfo s, Relation rel, BDRTupleData *tup);
-static void read_tuple(StringInfo s, Relation rel, TupleTableSlot *slot);
-static void tuple_to_stringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple);
-
-static void check_sequencer_wakeup(Relation rel);
-
-static void check_apply_update(RepNodeId local_node_id, TimestampTz ts, bool *perform_update, bool *log_update);
-static void do_log_update(RepNodeId local_node_id, bool apply_update, TimestampTz ts, Relation idxrel, HeapTuple old_key);
-static void do_apply_update(Relation rel, EState *estate,
-							TupleTableSlot *oldslot, TupleTableSlot *newslot,
-							BDRTupleData new_tuple);
-
-static EState *bdr_create_rel_estate(Relation rel);
-
 bool		started_transaction = false;
 Oid			QueuedDDLCommandsRelid = InvalidOid;
 Oid			QueuedDropsRelid = InvalidOid;
@@ -107,17 +86,33 @@ Oid			QueuedDropsRelid = InvalidOid;
  */
 BdrApplyWorker *bdr_apply_worker = NULL;
 
-static bool
-bdr_performing_work(void)
-{
-	if (started_transaction)
-		return false;
+static void build_index_scan_keys(EState *estate, ScanKey *scan_keys, TupleTableSlot *slot);
+static void build_index_scan_key(ScanKey skey, Relation rel, Relation idx_rel, TupleTableSlot *slot);
+static bool find_pkey_tuple(ScanKey skey, Relation rel, Relation idx_rel, TupleTableSlot *slot,
+							bool lock, LockTupleMode mode);
 
-	started_transaction = true;
-	StartTransactionCommand();
+static void UserTableUpdateIndexes(EState *estate, TupleTableSlot *slot);
+static void UserTableUpdateOpenIndexes(EState *estate, TupleTableSlot *slot);
+static EState *bdr_create_rel_estate(Relation rel);
 
-	return true;
-}
+/* read data from the wire */
+static Relation read_rel(StringInfo s, LOCKMODE mode);
+extern void read_tuple_parts(StringInfo s, Relation rel, BDRTupleData *tup);
+static void read_tuple(StringInfo s, Relation rel, TupleTableSlot *slot);
+
+static void tuple_to_stringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple);
+
+static void check_apply_update(RepNodeId local_node_id, TimestampTz ts, bool *perform_update, bool *log_update);
+static void do_log_update(RepNodeId local_node_id, bool apply_update, TimestampTz ts, Relation idxrel, HeapTuple old_key);
+static void do_apply_update(Relation rel, EState *estate,
+							TupleTableSlot *oldslot, TupleTableSlot *newslot,
+							BDRTupleData new_tuple);
+static void fetch_sysid_via_node_id(RepNodeId node_id, uint64 *sysid, TimeLineID *tli);
+
+static void check_sequencer_wakeup(Relation rel);
+static HeapTuple process_queued_drop(HeapTuple cmdtup);
+static void process_queued_ddl_command(HeapTuple cmdtup, bool tx_just_started);
+static bool bdr_performing_work(void);
 
 void
 process_remote_begin(StringInfo s)
@@ -214,6 +209,611 @@ process_remote_commit(StringInfo s)
 
 	bdr_count_commit();
 }
+
+void
+process_remote_insert(StringInfo s)
+{
+	char		action;
+	EState	   *estate;
+	TupleTableSlot *slot;
+	TupleTableSlot *oldslot;
+	Relation	rel;
+	bool		started_tx;
+#ifdef VERBOSE_INSERT
+	StringInfoData o;
+#endif
+	ResultRelInfo *relinfo;
+	ItemPointer conflicts;
+	bool		conflict = false;
+	ScanKey	   *index_keys;
+	int			i;
+	ItemPointerData conflicting_tid;
+
+	ItemPointerSetInvalid(&conflicting_tid);
+
+	started_tx = bdr_performing_work();
+
+	Assert(bdr_apply_worker != NULL);
+
+	/*
+	 * Read tuple into a context that's long lived enough for CONCURRENTLY
+	 * processing.
+	 */
+	MemoryContextSwitchTo(MessageContext);
+	rel = read_rel(s, RowExclusiveLock);
+
+	action = pq_getmsgbyte(s);
+	if (action != 'N')
+		elog(ERROR, "expected new tuple but got %d",
+			 action);
+
+	estate = bdr_create_rel_estate(rel);
+	slot = ExecInitExtraTupleSlot(estate);
+	oldslot = ExecInitExtraTupleSlot(estate);
+	ExecSetSlotDescriptor(slot, RelationGetDescr(rel));
+	ExecSetSlotDescriptor(oldslot, RelationGetDescr(rel));
+
+	read_tuple(s, rel, slot);
+
+	if (rel->rd_rel->relkind != RELKIND_RELATION)
+		elog(ERROR, "unexpected relkind '%c' rel \"%s\"",
+			 rel->rd_rel->relkind, RelationGetRelationName(rel));
+
+	/* debug output */
+#ifdef VERBOSE_INSERT
+	initStringInfo(&o);
+	tuple_to_stringinfo(&o, RelationGetDescr(rel), slot->tts_tuple);
+	elog(LOG, "INSERT:%s", o.data);
+	resetStringInfo(&o);
+#endif
+
+	/*
+	 * Search for conflicting tuples.
+	 */
+	ExecOpenIndices(estate->es_result_relation_info);
+	relinfo = estate->es_result_relation_info;
+	index_keys = palloc0(relinfo->ri_NumIndices * sizeof(ScanKeyData*));
+	conflicts = palloc0(relinfo->ri_NumIndices * sizeof(ItemPointerData));
+
+	build_index_scan_keys(estate, index_keys, slot);
+
+	/* do a SnapshotDirty search for conflicting tuples */
+	for (i = 0; i < relinfo->ri_NumIndices; i++)
+	{
+		IndexInfo  *ii = relinfo->ri_IndexRelationInfo[i];
+		bool found = false;
+
+		Assert(ii->ii_Expressions == NIL);
+
+		if (!ii->ii_Unique)
+			continue;
+
+		/* if conflict: wait */
+		found = find_pkey_tuple(index_keys[i],
+								rel, relinfo->ri_IndexRelationDescs[i],
+								oldslot, true, LockTupleExclusive);
+
+		/* alert if there's more than one conflicting unique key */
+		if (found &&
+			ItemPointerIsValid(&conflicting_tid) &&
+			!ItemPointerEquals(&oldslot->tts_tuple->t_self,
+							   &conflicting_tid))
+		{
+			/* FIXME: improve logging here */
+			elog(ERROR, "diverging uniqueness conflict");
+		}
+		else if (found)
+		{
+			ItemPointerCopy(&oldslot->tts_tuple->t_self, &conflicting_tid);
+			conflict = true;
+			break;
+		}
+		else
+			ItemPointerSetInvalid(&conflicts[i]);
+
+		CHECK_FOR_INTERRUPTS();
+	}
+
+	/*
+	 * If there's a conflict use the version created later, otherwise do a
+	 * plain insert.
+	 */
+	if (conflict)
+	{
+		TransactionId xmin;
+		TimestampTz local_ts;
+		RepNodeId	local_node_id;
+		bool		apply_update;
+		bool		log_update;
+		CommitExtraData local_node_id_raw;
+
+		/* refetch tuple, check for old commit ts & origin */
+		xmin = HeapTupleHeaderGetXmin(oldslot->tts_tuple->t_data);
+
+		/*
+		 * We now need to determine whether to keep the original version of
+		 * the row, or apply the insert (as an update) we received.  We use
+		 * the last-update-wins strategy for this, except when the new update
+		 * comes from the same node that originated the previous version of
+		 * the tuple.
+		 */
+		TransactionIdGetCommitTsData(xmin, &local_ts, &local_node_id_raw);
+		local_node_id = local_node_id_raw;
+
+		check_apply_update(local_node_id, local_ts,
+						   &apply_update, &log_update);
+
+		elog(LOG, "insert vs insert conflict: %s",
+			 apply_update ? "update" : "ignore");
+
+		if (apply_update)
+		{
+			simple_heap_update(rel,
+							   &oldslot->tts_tuple->t_self,
+							   slot->tts_tuple);
+			/* races will be resolved by abort/retry */
+			UserTableUpdateOpenIndexes(estate, slot);
+		}
+	}
+	else
+	{
+		simple_heap_insert(rel, slot->tts_tuple);
+		/* races will be resolved by abort/retry */
+		UserTableUpdateOpenIndexes(estate, slot);
+	}
+
+	ExecCloseIndices(estate->es_result_relation_info);
+
+	check_sequencer_wakeup(rel);
+
+	/* execute DDL if insertion was into the ddl command queue */
+	if (RelationGetRelid(rel) == QueuedDDLCommandsRelid ||
+		RelationGetRelid(rel) == QueuedDropsRelid)
+	{
+		HeapTuple ht;
+		LockRelId	lockid = rel->rd_lockInfo.lockRelId;
+		TransactionId oldxid = GetTopTransactionId();
+
+		/* there never should be conflicts on these */
+		Assert(!conflict);
+
+		/*
+		 * Release transaction bound resources for CONCURRENTLY support.
+		 */
+		MemoryContextSwitchTo(MessageContext);
+		ht = heap_copytuple(slot->tts_tuple);
+
+		LockRelationIdForSession(&lockid, RowExclusiveLock);
+		heap_close(rel, NoLock);
+
+		ExecResetTupleTable(estate->es_tupleTable, true);
+		FreeExecutorState(estate);
+
+		if (RelationGetRelid(rel) == QueuedDDLCommandsRelid)
+			process_queued_ddl_command(ht, started_tx);
+		if (RelationGetRelid(rel) == QueuedDropsRelid)
+			process_queued_drop(ht);
+
+		rel = heap_open(QueuedDDLCommandsRelid, RowExclusiveLock);
+
+		UnlockRelationIdForSession(&lockid, RowExclusiveLock);
+
+		heap_close(rel, NoLock);
+
+		if (oldxid != GetTopTransactionId())
+		{
+			CommitTransactionCommand();
+			started_transaction = false;
+		}
+	}
+	else
+	{
+		heap_close(rel, NoLock);
+		ExecResetTupleTable(estate->es_tupleTable, true);
+		FreeExecutorState(estate);
+	}
+
+	CommandCounterIncrement();
+}
+
+void
+process_remote_update(StringInfo s)
+{
+	char		action;
+	EState	   *estate;
+	TupleTableSlot *newslot;
+	TupleTableSlot *oldslot;
+	bool		pkey_sent;
+	bool		found_tuple;
+	BDRTupleData new_tuple;
+	Oid			idxoid;
+	Relation	rel;
+	Relation	idxrel;
+	StringInfoData o;
+	ScanKeyData skey[INDEX_MAX_KEYS];
+
+	bdr_performing_work();
+
+	rel = read_rel(s, RowExclusiveLock);
+
+	action = pq_getmsgbyte(s);
+
+	/* old key present, identifying key changed */
+	if (action != 'K' && action != 'N')
+		elog(ERROR, "expected action 'N' or 'K', got %c",
+			 action);
+
+	estate = bdr_create_rel_estate(rel);
+	oldslot = ExecInitExtraTupleSlot(estate);
+	ExecSetSlotDescriptor(oldslot, RelationGetDescr(rel));
+	newslot = ExecInitExtraTupleSlot(estate);
+	ExecSetSlotDescriptor(newslot, RelationGetDescr(rel));
+
+	if (action == 'K')
+	{
+		pkey_sent = true;
+		read_tuple(s, rel, oldslot);
+		action = pq_getmsgbyte(s);
+	}
+	else
+		pkey_sent = false;
+
+	/* check for new  tuple */
+	if (action != 'N')
+		elog(ERROR, "expected action 'N', got %c",
+			 action);
+
+	if (rel->rd_rel->relkind != RELKIND_RELATION)
+		elog(ERROR, "unexpected relkind '%c' rel \"%s\"",
+			 rel->rd_rel->relkind, RelationGetRelationName(rel));
+
+	/* read new tuple */
+	read_tuple_parts(s, rel, &new_tuple);
+
+	/*
+	 * Generate key for lookup if the primary key didn't change.
+	 */
+	if (!pkey_sent)
+	{
+		HeapTuple old_key;
+		old_key = heap_form_tuple(RelationGetDescr(rel),
+								  new_tuple.values, new_tuple.isnull);
+		ExecStoreTuple(old_key, oldslot, InvalidBuffer, true);
+	}
+
+#ifdef VERBOSE_UPDATE
+	initStringInfo(&o);
+	tuple_to_stringinfo(&o, RelationGetDescr(rel), oldslot->tts_tuple);
+	appendStringInfo(&o, " to");
+	tuple_to_stringinfo(&o, RelationGetDescr(rel), oldslot->tts_tuple);
+	elog(LOG, "UPDATE:%s", o.data);
+	resetStringInfo(&o);
+#endif
+
+	/* lookup index to build scankey */
+	if (rel->rd_indexvalid == 0)
+		RelationGetIndexList(rel);
+	idxoid = rel->rd_replidindex;
+	if (!OidIsValid(idxoid))
+	{
+		elog(ERROR, "could not find primary key for table with oid %u",
+			 RelationGetRelid(rel));
+		return;
+	}
+
+	/* open index, so we can build scan key for row */
+	idxrel = index_open(idxoid, RowExclusiveLock);
+
+	Assert(idxrel->rd_index->indisunique);
+
+	build_index_scan_key(skey, rel, idxrel, oldslot);
+
+	PushActiveSnapshot(GetTransactionSnapshot());
+
+	/* look for tuple identified by the (old) primary key */
+	found_tuple = find_pkey_tuple(skey, rel, idxrel, oldslot, true,
+						pkey_sent ? LockTupleExclusive : LockTupleNoKeyExclusive);
+
+	if (found_tuple)
+	{
+		TransactionId xmin;
+		TimestampTz local_ts;
+		RepNodeId	local_node_id;
+		bool		apply_update;
+		bool		log_update;
+
+		CommitExtraData local_node_id_raw;
+
+		/* refetch tuple, check for old commit ts & origin */
+		xmin = HeapTupleHeaderGetXmin(oldslot->tts_tuple->t_data);
+
+		/*
+		 * We now need to determine whether to keep the original version of
+		 * the row, or apply the update we received.  We use the
+		 * last-update-wins strategy for this, except when the new update
+		 * comes from the same node that originated the previous version of
+		 * the tuple.
+		 */
+		TransactionIdGetCommitTsData(xmin, &local_ts, &local_node_id_raw);
+		local_node_id = local_node_id_raw;
+
+		check_apply_update(local_node_id, local_ts,
+						   &apply_update, &log_update);
+
+		if (log_update)
+			do_log_update(local_node_id, apply_update, local_ts,
+						  idxrel, oldslot->tts_tuple);
+
+		if (apply_update)
+			do_apply_update(rel, estate, oldslot, newslot, new_tuple);
+		else
+			bdr_count_update_conflict();
+	}
+	else
+	{
+		initStringInfo(&o);
+		tuple_to_stringinfo(&o, RelationGetDescr(rel),
+							oldslot->tts_tuple);
+		bdr_count_update_conflict();
+
+		ereport(ERROR,
+				(errcode(ERRCODE_INTEGRITY_CONSTRAINT_VIOLATION),
+				 errmsg("CONFLICT: could not find existing tuple for pkey %s",
+						o.data)));
+	}
+
+	PopActiveSnapshot();
+
+	check_sequencer_wakeup(rel);
+
+	/* release locks upon commit */
+	index_close(idxrel, NoLock);
+	heap_close(rel, NoLock);
+
+	ExecResetTupleTable(estate->es_tupleTable, true);
+	FreeExecutorState(estate);
+
+	CommandCounterIncrement();
+}
+
+void
+process_remote_delete(StringInfo s)
+{
+#ifdef VERBOSE_DELETE
+	StringInfoData o;
+#endif
+	char		action;
+	EState	   *estate;
+	TupleTableSlot *slot;
+	Oid			idxoid;
+	Relation	rel;
+	Relation	idxrel;
+	ScanKeyData skey[INDEX_MAX_KEYS];
+	bool		found_old;
+
+	Assert(bdr_apply_worker != NULL);
+
+	bdr_performing_work();
+
+	rel = read_rel(s, RowExclusiveLock);
+
+	action = pq_getmsgbyte(s);
+
+	if (action != 'K' && action != 'E')
+		elog(ERROR, "expected action K or E got %c", action);
+
+	if (action == 'E')
+	{
+		elog(WARNING, "got delete without pkey");
+		return;
+	}
+
+	estate = bdr_create_rel_estate(rel);
+	slot = ExecInitExtraTupleSlot(estate);
+	ExecSetSlotDescriptor(slot, RelationGetDescr(rel));
+
+	read_tuple(s, rel, slot);
+
+	/* lookup index to build scankey */
+	if (rel->rd_indexvalid == 0)
+		RelationGetIndexList(rel);
+	idxoid = rel->rd_replidindex;
+	if (!OidIsValid(idxoid))
+	{
+		elog(ERROR, "could not find primary key for table with oid %u",
+			 RelationGetRelid(rel));
+		return;
+	}
+
+	/* Now open the primary key index */
+	idxrel = index_open(idxoid, RowExclusiveLock);
+
+	if (rel->rd_rel->relkind != RELKIND_RELATION)
+		elog(ERROR, "unexpected relkind '%c' rel \"%s\"",
+			 rel->rd_rel->relkind, RelationGetRelationName(rel));
+
+#ifdef VERBOSE_DELETE
+	initStringInfo(&o);
+	tuple_to_stringinfo(&o, RelationGetDescr(idxrel), slot->tts_tuple);
+	elog(LOG, "DELETE old-key:%s", o.data);
+	resetStringInfo(&o);
+#endif
+
+	PushActiveSnapshot(GetTransactionSnapshot());
+
+	build_index_scan_key(skey, rel, idxrel, slot);
+
+	/* try to find tuple via a (candidate|primary) key */
+	found_old = find_pkey_tuple(skey, rel, idxrel, slot, true, LockTupleExclusive);
+
+	if (found_old)
+	{
+		simple_heap_delete(rel, &slot->tts_tuple->t_self);
+		bdr_count_delete();
+	}
+	else
+	{
+		StringInfoData s_key;
+
+		bdr_count_delete_conflict();
+
+		initStringInfo(&s_key);
+		tuple_to_stringinfo(&s_key, RelationGetDescr(idxrel), slot->tts_tuple);
+
+		ereport(ERROR,
+				(errcode(ERRCODE_INTEGRITY_CONSTRAINT_VIOLATION),
+				 errmsg("CONFLICT: DELETE could not find existing tuple for pkey %s", s_key.data)));
+		resetStringInfo(&s_key);
+	}
+
+	PopActiveSnapshot();
+
+	check_sequencer_wakeup(rel);
+
+	index_close(idxrel, NoLock);
+	heap_close(rel, NoLock);
+
+	ExecResetTupleTable(estate->es_tupleTable, true);
+	FreeExecutorState(estate);
+
+	CommandCounterIncrement();
+}
+
+/*
+ * Check whether a remote update conflicts with the local row version.
+ *
+ * perform_update, log_update is set to true if the update should be performed
+ * and logged respectively
+ */
+static void
+check_apply_update(RepNodeId local_node_id, TimestampTz local_ts,
+				   bool *perform_update, bool *log_update)
+{
+	uint64		local_sysid,
+				remote_sysid;
+	TimeLineID	local_tli,
+				remote_tli;
+	int			cmp;
+
+	if (local_node_id == bdr_apply_worker->origin_id)
+	{
+		/*
+		 * If the row got updated twice within a single node, just apply the
+		 * update with no conflict.  Don't warn/log either, regardless of the
+		 * timing; that's just too common and valid since normal row level
+		 * locking guarantees are met.
+		 */
+		*perform_update = true;
+		*log_update = false;
+		return;
+	}
+	else
+	{
+		/*
+		 * Decide what update wins based on transaction timestamp difference.
+		 * The later transaction wins.	If the timestamps compare equal, use
+		 * sysid + TLI to discern.
+		 */
+
+		cmp = timestamptz_cmp_internal(replication_origin_timestamp,
+									   local_ts);
+
+		if (cmp > 0)
+		{
+			*perform_update = true;
+			*log_update = false;
+			return;
+		}
+		else if (cmp == 0)
+		{
+			fetch_sysid_via_node_id(local_node_id,
+									&local_sysid, &local_tli);
+			fetch_sysid_via_node_id(bdr_apply_worker->origin_id,
+									&remote_sysid, &remote_tli);
+
+			if (local_sysid < remote_sysid)
+				*perform_update = true;
+			else if (local_sysid > remote_sysid)
+				*perform_update = false;
+			else if (local_tli < remote_tli)
+				*perform_update = true;
+			else if (local_tli > remote_tli)
+				*perform_update = false;
+			else
+				/* shouldn't happen */
+				elog(ERROR, "unsuccessful node comparison");
+
+			*log_update = true;
+			return;
+		}
+		else
+		{
+			*perform_update = false;
+			*log_update = true;
+			return;
+		}
+	}
+
+	elog(ERROR, "unreachable code");
+}
+
+static void
+do_log_update(RepNodeId local_node_id, bool apply_update, TimestampTz ts,
+			  Relation idxrel, HeapTuple old_key)
+{
+	StringInfoData s_key;
+	char		remote_ts[MAXDATELEN + 1];
+	char		local_ts[MAXDATELEN + 1];
+
+	uint64		local_sysid,
+				remote_sysid;
+	TimeLineID	local_tli,
+				remote_tli;
+
+
+	fetch_sysid_via_node_id(local_node_id,
+							&local_sysid, &local_tli);
+	fetch_sysid_via_node_id(bdr_apply_worker->origin_id,
+							&remote_sysid, &remote_tli);
+
+	Assert(remote_sysid == bdr_apply_worker->sysid);
+	Assert(remote_tli == bdr_apply_worker->timeline);
+
+	memcpy(remote_ts, timestamptz_to_str(replication_origin_timestamp),
+		   MAXDATELEN);
+	memcpy(local_ts, timestamptz_to_str(ts),
+		   MAXDATELEN);
+
+	initStringInfo(&s_key);
+	tuple_to_stringinfo(&s_key, RelationGetDescr(idxrel), old_key);
+
+	ereport(LOG,
+			(errcode(ERRCODE_INTEGRITY_CONSTRAINT_VIOLATION),
+			 errmsg("CONFLICT: %s remote update originating at node " UINT64_FORMAT ":%u at ts %s; row was previously updated at %s node " UINT64_FORMAT ":%u at ts %s. PKEY:%s",
+					apply_update ? "applying" : "skipping",
+					remote_sysid, remote_tli, remote_ts,
+					local_node_id == InvalidRepNodeId ? "local" : "remote",
+					local_sysid, local_tli, local_ts, s_key.data)));
+	resetStringInfo(&s_key);
+}
+
+static void
+do_apply_update(Relation rel, EState *estate,
+				TupleTableSlot *oldslot,
+				TupleTableSlot *newslot,
+				BDRTupleData new_tuple)
+{
+	HeapTuple	nt;
+
+	nt = heap_modify_tuple(oldslot->tts_tuple, RelationGetDescr(rel),
+						   new_tuple.values, new_tuple.isnull,
+						   new_tuple.changed);
+	ExecStoreTuple(nt, newslot, InvalidBuffer, true);
+	simple_heap_update(rel, &oldslot->tts_tuple->t_self, newslot->tts_tuple);
+	UserTableUpdateIndexes(estate, newslot);
+	bdr_count_update();
+}
+
 
 static void
 process_queued_ddl_command(HeapTuple cmdtup, bool tx_just_started)
@@ -545,212 +1145,6 @@ process_queued_drop(HeapTuple cmdtup)
 	return newtup;
 }
 
-void
-process_remote_insert(StringInfo s)
-{
-	char		action;
-	EState	   *estate;
-	TupleTableSlot *slot;
-	TupleTableSlot *oldslot;
-	Relation	rel;
-	bool		started_tx;
-#ifdef VERBOSE_INSERT
-	StringInfoData o;
-#endif
-	ResultRelInfo *relinfo;
-	ItemPointer conflicts;
-	bool		conflict = false;
-	ScanKey	   *index_keys;
-	int			i;
-	ItemPointerData conflicting_tid;
-
-	ItemPointerSetInvalid(&conflicting_tid);
-
-	started_tx = bdr_performing_work();
-
-	Assert(bdr_apply_worker != NULL);
-
-	/*
-	 * Read tuple into a context that's long lived enough for CONCURRENTLY
-	 * processing.
-	 */
-	MemoryContextSwitchTo(MessageContext);
-	rel = read_rel(s, RowExclusiveLock);
-
-	action = pq_getmsgbyte(s);
-	if (action != 'N')
-		elog(ERROR, "expected new tuple but got %d",
-			 action);
-
-	estate = bdr_create_rel_estate(rel);
-	slot = ExecInitExtraTupleSlot(estate);
-	oldslot = ExecInitExtraTupleSlot(estate);
-	ExecSetSlotDescriptor(slot, RelationGetDescr(rel));
-	ExecSetSlotDescriptor(oldslot, RelationGetDescr(rel));
-
-	read_tuple(s, rel, slot);
-
-	if (rel->rd_rel->relkind != RELKIND_RELATION)
-		elog(ERROR, "unexpected relkind '%c' rel \"%s\"",
-			 rel->rd_rel->relkind, RelationGetRelationName(rel));
-
-	/* debug output */
-#ifdef VERBOSE_INSERT
-	initStringInfo(&o);
-	tuple_to_stringinfo(&o, RelationGetDescr(rel), slot->tts_tuple);
-	elog(LOG, "INSERT:%s", o.data);
-	resetStringInfo(&o);
-#endif
-
-	/*
-	 * Search for conflicting tuples.
-	 */
-	ExecOpenIndices(estate->es_result_relation_info);
-	relinfo = estate->es_result_relation_info;
-	index_keys = palloc0(relinfo->ri_NumIndices * sizeof(ScanKeyData*));
-	conflicts = palloc0(relinfo->ri_NumIndices * sizeof(ItemPointerData));
-
-	build_index_scan_keys(estate, index_keys, slot);
-
-	/* do a SnapshotDirty search for conflicting tuples */
-	for (i = 0; i < relinfo->ri_NumIndices; i++)
-	{
-		IndexInfo  *ii = relinfo->ri_IndexRelationInfo[i];
-		bool found = false;
-
-		Assert(ii->ii_Expressions == NIL);
-
-		if (!ii->ii_Unique)
-			continue;
-
-		/* if conflict: wait */
-		found = find_pkey_tuple(index_keys[i],
-								rel, relinfo->ri_IndexRelationDescs[i],
-								oldslot, true, LockTupleExclusive);
-
-		/* alert if there's more than one conflicting unique key */
-		if (found &&
-			ItemPointerIsValid(&conflicting_tid) &&
-			!ItemPointerEquals(&oldslot->tts_tuple->t_self,
-							   &conflicting_tid))
-		{
-			/* FIXME: improve logging here */
-			elog(ERROR, "diverging uniqueness conflict");
-		}
-		else if (found)
-		{
-			ItemPointerCopy(&oldslot->tts_tuple->t_self, &conflicting_tid);
-			conflict = true;
-			break;
-		}
-		else
-			ItemPointerSetInvalid(&conflicts[i]);
-
-		CHECK_FOR_INTERRUPTS();
-	}
-
-	/*
-	 * If there's a conflict use the version created later, otherwise do a
-	 * plain insert.
-	 */
-	if (conflict)
-	{
-		TransactionId xmin;
-		TimestampTz local_ts;
-		RepNodeId	local_node_id;
-		bool		apply_update;
-		bool		log_update;
-		CommitExtraData local_node_id_raw;
-
-		/* refetch tuple, check for old commit ts & origin */
-		xmin = HeapTupleHeaderGetXmin(oldslot->tts_tuple->t_data);
-
-		/*
-		 * We now need to determine whether to keep the original version of
-		 * the row, or apply the insert (as an update) we received.  We use
-		 * the last-update-wins strategy for this, except when the new update
-		 * comes from the same node that originated the previous version of
-		 * the tuple.
-		 */
-		TransactionIdGetCommitTsData(xmin, &local_ts, &local_node_id_raw);
-		local_node_id = local_node_id_raw;
-
-		check_apply_update(local_node_id, local_ts,
-						   &apply_update, &log_update);
-
-		elog(LOG, "insert vs insert conflict: %s",
-			 apply_update ? "update" : "ignore");
-
-		if (apply_update)
-		{
-			simple_heap_update(rel,
-							   &oldslot->tts_tuple->t_self,
-							   slot->tts_tuple);
-			/* races will be resolved by abort/retry */
-			UserTableUpdateOpenIndexes(estate, slot);
-		}
-	}
-	else
-	{
-		simple_heap_insert(rel, slot->tts_tuple);
-		/* races will be resolved by abort/retry */
-		UserTableUpdateOpenIndexes(estate, slot);
-	}
-
-	ExecCloseIndices(estate->es_result_relation_info);
-
-	check_sequencer_wakeup(rel);
-
-	/* execute DDL if insertion was into the ddl command queue */
-	if (RelationGetRelid(rel) == QueuedDDLCommandsRelid ||
-		RelationGetRelid(rel) == QueuedDropsRelid)
-	{
-		HeapTuple ht;
-		LockRelId	lockid = rel->rd_lockInfo.lockRelId;
-		TransactionId oldxid = GetTopTransactionId();
-
-		/* there never should be conflicts on these */
-		Assert(!conflict);
-
-		/*
-		 * Release transaction bound resources for CONCURRENTLY support.
-		 */
-		MemoryContextSwitchTo(MessageContext);
-		ht = heap_copytuple(slot->tts_tuple);
-
-		LockRelationIdForSession(&lockid, RowExclusiveLock);
-		heap_close(rel, NoLock);
-
-		ExecResetTupleTable(estate->es_tupleTable, true);
-		FreeExecutorState(estate);
-
-		if (RelationGetRelid(rel) == QueuedDDLCommandsRelid)
-			process_queued_ddl_command(ht, started_tx);
-		if (RelationGetRelid(rel) == QueuedDropsRelid)
-			process_queued_drop(ht);
-
-		rel = heap_open(QueuedDDLCommandsRelid, RowExclusiveLock);
-
-		UnlockRelationIdForSession(&lockid, RowExclusiveLock);
-
-		heap_close(rel, NoLock);
-
-		if (oldxid != GetTopTransactionId())
-		{
-			CommitTransactionCommand();
-			started_transaction = false;
-		}
-	}
-	else
-	{
-		heap_close(rel, NoLock);
-		ExecResetTupleTable(estate->es_tupleTable, true);
-		FreeExecutorState(estate);
-	}
-
-	CommandCounterIncrement();
-}
-
 static void
 fetch_sysid_via_node_id(RepNodeId node_id, uint64 *sysid, TimeLineID *tli)
 {
@@ -789,402 +1183,16 @@ fetch_sysid_via_node_id(RepNodeId node_id, uint64 *sysid, TimeLineID *tli)
 	}
 }
 
-void
-process_remote_update(StringInfo s)
+static bool
+bdr_performing_work(void)
 {
-	char		action;
-	EState	   *estate;
-	TupleTableSlot *newslot;
-	TupleTableSlot *oldslot;
-	bool		pkey_sent;
-	bool		found_tuple;
-	BDRTupleData new_tuple;
-	Oid			idxoid;
-	Relation	rel;
-	Relation	idxrel;
-	StringInfoData o;
-	ScanKeyData skey[INDEX_MAX_KEYS];
+	if (started_transaction)
+		return false;
 
-	bdr_performing_work();
+	started_transaction = true;
+	StartTransactionCommand();
 
-	rel = read_rel(s, RowExclusiveLock);
-
-	action = pq_getmsgbyte(s);
-
-	/* old key present, identifying key changed */
-	if (action != 'K' && action != 'N')
-		elog(ERROR, "expected action 'N' or 'K', got %c",
-			 action);
-
-	estate = bdr_create_rel_estate(rel);
-	oldslot = ExecInitExtraTupleSlot(estate);
-	ExecSetSlotDescriptor(oldslot, RelationGetDescr(rel));
-	newslot = ExecInitExtraTupleSlot(estate);
-	ExecSetSlotDescriptor(newslot, RelationGetDescr(rel));
-
-	if (action == 'K')
-	{
-		pkey_sent = true;
-		read_tuple(s, rel, oldslot);
-		action = pq_getmsgbyte(s);
-	}
-	else
-		pkey_sent = false;
-
-	/* check for new  tuple */
-	if (action != 'N')
-		elog(ERROR, "expected action 'N', got %c",
-			 action);
-
-	if (rel->rd_rel->relkind != RELKIND_RELATION)
-		elog(ERROR, "unexpected relkind '%c' rel \"%s\"",
-			 rel->rd_rel->relkind, RelationGetRelationName(rel));
-
-	/* read new tuple */
-	read_tuple_parts(s, rel, &new_tuple);
-
-	/*
-	 * Generate key for lookup if the primary key didn't change.
-	 */
-	if (!pkey_sent)
-	{
-		HeapTuple old_key;
-		old_key = heap_form_tuple(RelationGetDescr(rel),
-								  new_tuple.values, new_tuple.isnull);
-		ExecStoreTuple(old_key, oldslot, InvalidBuffer, true);
-	}
-
-#ifdef VERBOSE_UPDATE
-	initStringInfo(&o);
-	tuple_to_stringinfo(&o, RelationGetDescr(rel), oldslot->tts_tuple);
-	appendStringInfo(&o, " to");
-	tuple_to_stringinfo(&o, RelationGetDescr(rel), oldslot->tts_tuple);
-	elog(LOG, "UPDATE:%s", o.data);
-	resetStringInfo(&o);
-#endif
-
-	/* lookup index to build scankey */
-	if (rel->rd_indexvalid == 0)
-		RelationGetIndexList(rel);
-	idxoid = rel->rd_replidindex;
-	if (!OidIsValid(idxoid))
-	{
-		elog(ERROR, "could not find primary key for table with oid %u",
-			 RelationGetRelid(rel));
-		return;
-	}
-
-	/* open index, so we can build scan key for row */
-	idxrel = index_open(idxoid, RowExclusiveLock);
-
-	Assert(idxrel->rd_index->indisunique);
-
-	build_index_scan_key(skey, rel, idxrel, oldslot);
-
-	PushActiveSnapshot(GetTransactionSnapshot());
-
-	/* look for tuple identified by the (old) primary key */
-	found_tuple = find_pkey_tuple(skey, rel, idxrel, oldslot, true,
-						pkey_sent ? LockTupleExclusive : LockTupleNoKeyExclusive);
-
-	if (found_tuple)
-	{
-		TransactionId xmin;
-		TimestampTz local_ts;
-		RepNodeId	local_node_id;
-		bool		apply_update;
-		bool		log_update;
-
-		CommitExtraData local_node_id_raw;
-
-		/* refetch tuple, check for old commit ts & origin */
-		xmin = HeapTupleHeaderGetXmin(oldslot->tts_tuple->t_data);
-
-		/*
-		 * We now need to determine whether to keep the original version of
-		 * the row, or apply the update we received.  We use the
-		 * last-update-wins strategy for this, except when the new update
-		 * comes from the same node that originated the previous version of
-		 * the tuple.
-		 */
-		TransactionIdGetCommitTsData(xmin, &local_ts, &local_node_id_raw);
-		local_node_id = local_node_id_raw;
-
-		check_apply_update(local_node_id, local_ts,
-						   &apply_update, &log_update);
-
-		if (log_update)
-			do_log_update(local_node_id, apply_update, local_ts,
-						  idxrel, oldslot->tts_tuple);
-
-		if (apply_update)
-			do_apply_update(rel, estate, oldslot, newslot, new_tuple);
-		else
-			bdr_count_update_conflict();
-	}
-	else
-	{
-		initStringInfo(&o);
-		tuple_to_stringinfo(&o, RelationGetDescr(rel),
-							oldslot->tts_tuple);
-		bdr_count_update_conflict();
-
-		ereport(ERROR,
-				(errcode(ERRCODE_INTEGRITY_CONSTRAINT_VIOLATION),
-				 errmsg("CONFLICT: could not find existing tuple for pkey %s",
-						o.data)));
-	}
-
-	PopActiveSnapshot();
-
-	check_sequencer_wakeup(rel);
-
-	/* release locks upon commit */
-	index_close(idxrel, NoLock);
-	heap_close(rel, NoLock);
-
-	ExecResetTupleTable(estate->es_tupleTable, true);
-	FreeExecutorState(estate);
-
-	CommandCounterIncrement();
-}
-
-/*
- * Check whether a remote update conflicts with the local row version.
- *
- * perform_update, log_update is set to true if the update should be performed
- * and logged respectively
- */
-static void
-check_apply_update(RepNodeId local_node_id, TimestampTz local_ts,
-				   bool *perform_update, bool *log_update)
-{
-	uint64		local_sysid,
-				remote_sysid;
-	TimeLineID	local_tli,
-				remote_tli;
-	int			cmp;
-
-	if (local_node_id == bdr_apply_worker->origin_id)
-	{
-		/*
-		 * If the row got updated twice within a single node, just apply the
-		 * update with no conflict.  Don't warn/log either, regardless of the
-		 * timing; that's just too common and valid since normal row level
-		 * locking guarantees are met.
-		 */
-		*perform_update = true;
-		*log_update = false;
-		return;
-	}
-	else
-	{
-		/*
-		 * Decide what update wins based on transaction timestamp difference.
-		 * The later transaction wins.	If the timestamps compare equal, use
-		 * sysid + TLI to discern.
-		 */
-
-		cmp = timestamptz_cmp_internal(replication_origin_timestamp,
-									   local_ts);
-
-		if (cmp > 0)
-		{
-			*perform_update = true;
-			*log_update = false;
-			return;
-		}
-		else if (cmp == 0)
-		{
-			fetch_sysid_via_node_id(local_node_id,
-									&local_sysid, &local_tli);
-			fetch_sysid_via_node_id(bdr_apply_worker->origin_id,
-									&remote_sysid, &remote_tli);
-
-			if (local_sysid < remote_sysid)
-				*perform_update = true;
-			else if (local_sysid > remote_sysid)
-				*perform_update = false;
-			else if (local_tli < remote_tli)
-				*perform_update = true;
-			else if (local_tli > remote_tli)
-				*perform_update = false;
-			else
-				/* shouldn't happen */
-				elog(ERROR, "unsuccessful node comparison");
-
-			*log_update = true;
-			return;
-		}
-		else
-		{
-			*perform_update = false;
-			*log_update = true;
-			return;
-		}
-	}
-
-	elog(ERROR, "unreachable code");
-}
-
-static void
-do_log_update(RepNodeId local_node_id, bool apply_update, TimestampTz ts,
-			  Relation idxrel, HeapTuple old_key)
-{
-	StringInfoData s_key;
-	char		remote_ts[MAXDATELEN + 1];
-	char		local_ts[MAXDATELEN + 1];
-
-	uint64		local_sysid,
-				remote_sysid;
-	TimeLineID	local_tli,
-				remote_tli;
-
-
-	fetch_sysid_via_node_id(local_node_id,
-							&local_sysid, &local_tli);
-	fetch_sysid_via_node_id(bdr_apply_worker->origin_id,
-							&remote_sysid, &remote_tli);
-
-	Assert(remote_sysid == bdr_apply_worker->sysid);
-	Assert(remote_tli == bdr_apply_worker->timeline);
-
-	memcpy(remote_ts, timestamptz_to_str(replication_origin_timestamp),
-		   MAXDATELEN);
-	memcpy(local_ts, timestamptz_to_str(ts),
-		   MAXDATELEN);
-
-	initStringInfo(&s_key);
-	tuple_to_stringinfo(&s_key, RelationGetDescr(idxrel), old_key);
-
-	ereport(LOG,
-			(errcode(ERRCODE_INTEGRITY_CONSTRAINT_VIOLATION),
-			 errmsg("CONFLICT: %s remote update originating at node " UINT64_FORMAT ":%u at ts %s; row was previously updated at %s node " UINT64_FORMAT ":%u at ts %s. PKEY:%s",
-					apply_update ? "applying" : "skipping",
-					remote_sysid, remote_tli, remote_ts,
-					local_node_id == InvalidRepNodeId ? "local" : "remote",
-					local_sysid, local_tli, local_ts, s_key.data)));
-	resetStringInfo(&s_key);
-}
-
-static void
-do_apply_update(Relation rel, EState *estate,
-				TupleTableSlot *oldslot,
-				TupleTableSlot *newslot,
-				BDRTupleData new_tuple)
-{
-	HeapTuple	nt;
-
-	nt = heap_modify_tuple(oldslot->tts_tuple, RelationGetDescr(rel),
-						   new_tuple.values, new_tuple.isnull,
-						   new_tuple.changed);
-	ExecStoreTuple(nt, newslot, InvalidBuffer, true);
-	simple_heap_update(rel, &oldslot->tts_tuple->t_self, newslot->tts_tuple);
-	UserTableUpdateIndexes(estate, newslot);
-	bdr_count_update();
-}
-
-void
-process_remote_delete(StringInfo s)
-{
-#ifdef VERBOSE_DELETE
-	StringInfoData o;
-#endif
-	char		action;
-	EState	   *estate;
-	TupleTableSlot *slot;
-	Oid			idxoid;
-	Relation	rel;
-	Relation	idxrel;
-	ScanKeyData skey[INDEX_MAX_KEYS];
-	bool		found_old;
-
-	Assert(bdr_apply_worker != NULL);
-
-	bdr_performing_work();
-
-	rel = read_rel(s, RowExclusiveLock);
-
-	action = pq_getmsgbyte(s);
-
-	if (action != 'K' && action != 'E')
-		elog(ERROR, "expected action K or E got %c", action);
-
-	if (action == 'E')
-	{
-		elog(WARNING, "got delete without pkey");
-		return;
-	}
-
-	estate = bdr_create_rel_estate(rel);
-	slot = ExecInitExtraTupleSlot(estate);
-	ExecSetSlotDescriptor(slot, RelationGetDescr(rel));
-
-	read_tuple(s, rel, slot);
-
-	/* lookup index to build scankey */
-	if (rel->rd_indexvalid == 0)
-		RelationGetIndexList(rel);
-	idxoid = rel->rd_replidindex;
-	if (!OidIsValid(idxoid))
-	{
-		elog(ERROR, "could not find primary key for table with oid %u",
-			 RelationGetRelid(rel));
-		return;
-	}
-
-	/* Now open the primary key index */
-	idxrel = index_open(idxoid, RowExclusiveLock);
-
-	if (rel->rd_rel->relkind != RELKIND_RELATION)
-		elog(ERROR, "unexpected relkind '%c' rel \"%s\"",
-			 rel->rd_rel->relkind, RelationGetRelationName(rel));
-
-#ifdef VERBOSE_DELETE
-	initStringInfo(&o);
-	tuple_to_stringinfo(&o, RelationGetDescr(idxrel), slot->tts_tuple);
-	elog(LOG, "DELETE old-key:%s", o.data);
-	resetStringInfo(&o);
-#endif
-
-	PushActiveSnapshot(GetTransactionSnapshot());
-
-	build_index_scan_key(skey, rel, idxrel, slot);
-
-	/* try to find tuple via a (candidate|primary) key */
-	found_old = find_pkey_tuple(skey, rel, idxrel, slot, true, LockTupleExclusive);
-
-	if (found_old)
-	{
-		simple_heap_delete(rel, &slot->tts_tuple->t_self);
-		bdr_count_delete();
-	}
-	else
-	{
-		StringInfoData s_key;
-
-		bdr_count_delete_conflict();
-
-		initStringInfo(&s_key);
-		tuple_to_stringinfo(&s_key, RelationGetDescr(idxrel), slot->tts_tuple);
-
-		ereport(ERROR,
-				(errcode(ERRCODE_INTEGRITY_CONSTRAINT_VIOLATION),
-				 errmsg("CONFLICT: DELETE could not find existing tuple for pkey %s", s_key.data)));
-		resetStringInfo(&s_key);
-	}
-
-	PopActiveSnapshot();
-
-	check_sequencer_wakeup(rel);
-
-	index_close(idxrel, NoLock);
-	heap_close(rel, NoLock);
-
-	ExecResetTupleTable(estate->es_tupleTable, true);
-	FreeExecutorState(estate);
-
-	CommandCounterIncrement();
+	return true;
 }
 
 static void
