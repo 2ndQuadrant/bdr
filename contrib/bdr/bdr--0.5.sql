@@ -255,6 +255,18 @@ CREATE EVENT TRIGGER queue_drops
 ON sql_drop
 EXECUTE PROCEDURE bdr.queue_dropped_objects();
 
+CREATE OR REPLACE FUNCTION bdr_apply_pause()
+RETURNS VOID
+LANGUAGE C
+AS 'MODULE_PATHNAME'
+;
+
+CREATE OR REPLACE FUNCTION bdr_apply_resume()
+RETURNS VOID
+LANGUAGE C
+AS 'MODULE_PATHNAME'
+;
+
 ---
 --- this should always be last to avoid replicating our internal schema
 ---
