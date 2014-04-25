@@ -14,6 +14,7 @@
 #include "postmaster/bgworker.h"
 #include "replication/logical.h"
 #include "utils/resowner.h"
+#include "storage/lock.h"
 
 #define BDR_VERSION_NUM 500
 #define BDR_SLOT_NAME_FORMAT "bdr_%u_%s_%u_%u__%s"
@@ -244,4 +245,20 @@ bdr_establish_connection_and_slot(BdrConnectionConfig *cfg, Name out_slot_name,
 	uint64 *out_sysid, TimeLineID* out_timeline, RepNodeId
 	*out_replication_identifier, char **out_snapshot);
 
-#endif	/* BDR_H */
+/*
+ * This structure is for caching relation specific information, such as
+ * conflict handlers.
+ */
+typedef struct BDRRelation
+{
+	/* hash key */
+	Oid			reloid;
+
+	Relation	rel;
+}	BDRRelation;
+
+/* use instead of heap_open()/heap_close() */
+extern BDRRelation *bdr_heap_open(Oid reloid, LOCKMODE lockmode);
+extern void bdr_heap_close(BDRRelation * rel, LOCKMODE lockmode);
+
+#endif   /* BDR_H */
