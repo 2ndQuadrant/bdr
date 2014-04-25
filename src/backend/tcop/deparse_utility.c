@@ -2720,6 +2720,389 @@ deparse_AlterEnumStmt(Oid objectId, Node *parsetree)
 	return alterEnum;
 }
 
+static ObjTree *
+deparse_AlterTableStmt(StashedCommand *cmd)
+{
+	ObjTree	   *alterTableStmt;
+	ObjTree	   *tmp;
+	ObjTree	   *tmp2;
+	List	   *dpcontext;
+	Relation	rel;
+	List	   *subcmds = NIL;
+	ListCell   *cell;
+
+	Assert(cmd->type == SCT_AlterTable);
+
+	rel = heap_open(cmd->d.alterTable.objectId, AccessShareLock);
+	dpcontext = deparse_context_for(RelationGetRelationName(rel),
+									cmd->d.alterTable.objectId);
+
+	alterTableStmt =
+		new_objtree_VA("ALTER TABLE %{identity}D %{subcmds:, }s", 0);
+	tmp = new_objtree_for_qualname(rel->rd_rel->relnamespace,
+								   RelationGetRelationName(rel));
+	append_object_object(alterTableStmt, "identity", tmp);
+
+	foreach(cell, cmd->d.alterTable.subcmds)
+	{
+		StashedATSubcmd	*substashed = (StashedATSubcmd *) lfirst(cell);
+		AlterTableCmd	*subcmd = (AlterTableCmd *) substashed->parsetree;
+		ObjTree	   *tree;
+
+		Assert(IsA(subcmd, AlterTableCmd));
+
+		switch (subcmd->subtype)
+		{
+			case AT_AddColumn:
+			case AT_AddColumnRecurse:
+				/* XXX need to set the "recurse" bit somewhere? */
+				Assert(IsA(subcmd->def, ColumnDef));
+				tree = deparse_ColumnDef(rel, dpcontext, false,
+										 (ColumnDef *) subcmd->def);
+				tmp = new_objtree_VA("ADD COLUMN %{definition}s",
+									 2, "type", ObjTypeString, "add column",
+									 "definition", ObjTypeObject, tree);
+				subcmds = lappend(subcmds, new_object_object(tmp));
+				break;
+
+			case AT_DropColumnRecurse:
+			case AT_ValidateConstraintRecurse:
+			case AT_DropConstraintRecurse:
+			case AT_AddOidsRecurse:
+			case AT_AddIndexConstraint:
+			case AT_ReAddIndex:
+			case AT_ReAddConstraint:
+			case AT_ProcessedConstraint:
+			case AT_ReplaceRelOptions:
+				/* Subtypes used for internal operations; nothing to do here */
+				break;
+
+			case AT_AddColumnToView:
+				/* CREATE OR REPLACE VIEW -- nothing to do here */
+				break;
+
+			case AT_ColumnDefault:
+				if (subcmd->def == NULL)
+				{
+					tmp = new_objtree_VA("ALTER COLUMN %{column}I DROP DEFAULT",
+										 1, "type", ObjTypeString, "drop default");
+				}
+				else
+				{
+					List	   *dpcontext;
+					HeapTuple	attrtup;
+					AttrNumber	attno;
+
+					tmp = new_objtree_VA("ALTER COLUMN %{column}I SET DEFAULT %{definition}s",
+										 1, "type", ObjTypeString, "set default");
+
+					dpcontext = deparse_context_for(RelationGetRelationName(rel),
+													RelationGetRelid(rel));
+					attrtup = SearchSysCacheAttName(RelationGetRelid(rel), subcmd->name);
+					attno = ((Form_pg_attribute) GETSTRUCT(attrtup))->attnum;
+					append_string_object(tmp, "definition",
+										 RelationGetColumnDefault(rel, attno, dpcontext));
+					ReleaseSysCache(attrtup);
+				}
+				append_string_object(tmp, "column", subcmd->name);
+
+				subcmds = lappend(subcmds, new_object_object(tmp));
+				break;
+
+			case AT_DropNotNull:
+				tmp = new_objtree_VA("ALTER COLUMN %{column}I DROP NOT NULL",
+									 1, "type", ObjTypeString, "drop not null");
+				append_string_object(tmp, "column", subcmd->name);
+				subcmds = lappend(subcmds, new_object_object(tmp));
+				break;
+
+			case AT_SetNotNull:
+				tmp = new_objtree_VA("ALTER COLUMN %{column}I SET NOT NULL",
+									 1, "type", ObjTypeString, "set not null");
+				append_string_object(tmp, "column", subcmd->name);
+				subcmds = lappend(subcmds, new_object_object(tmp));
+				break;
+
+			case AT_SetStatistics:
+				/* not yet */
+				break;
+
+			case AT_SetOptions:
+				/* not yet */
+				break;
+
+			case AT_ResetOptions:
+				/* not yet */
+				break;
+
+			case AT_SetStorage:
+				Assert(IsA(subcmd->def, String));
+				tmp = new_objtree_VA("ALTER COLUMN %{column}I SET STORAGE %{storage}s",
+									 3, "type", ObjTypeString, "set storage",
+									 "column", ObjTypeString, subcmd->name,
+									 "storage", ObjTypeString,
+									 strVal((Value *) subcmd->def));
+				subcmds = lappend(subcmds, new_object_object(tmp));
+				break;
+
+			case AT_DropColumn:
+				tmp = new_objtree_VA("DROP COLUMN %{column}I",
+									 2, "type", ObjTypeString, "drop column",
+								 "column", ObjTypeString, subcmd->name);
+				subcmds = lappend(subcmds, new_object_object(tmp));
+				break;
+
+			case AT_AddIndex:
+				{
+					Oid			idxOid = substashed->oid;
+					IndexStmt  *istmt;
+					Relation	idx;
+					const char *idxname;
+					Oid			constrOid;
+
+					Assert(IsA(subcmd->def, IndexStmt));
+					istmt = (IndexStmt *) subcmd->def;
+
+					if (!istmt->isconstraint)
+						break;
+
+					idx = relation_open(idxOid, AccessShareLock);
+					idxname = RelationGetRelationName(idx);
+
+					constrOid = get_relation_constraint_oid(
+						cmd->d.alterTable.objectId, idxname, false);
+
+					tmp = new_objtree_VA("ADD CONSTRAINT %{name}I %{definition}s",
+										 3, "type", ObjTypeString, "add constraint",
+										 "name", ObjTypeString, idxname,
+										 "definition", ObjTypeString,
+										 pg_get_constraintdef_string(constrOid, false));
+					subcmds = lappend(subcmds, new_object_object(tmp));
+
+					relation_close(idx, AccessShareLock);
+				}
+				break;
+
+			case AT_AddConstraint:
+			case AT_AddConstraintRecurse:
+				{
+					/* XXX need to set the "recurse" bit somewhere? */
+					Oid			constrOid = substashed->oid;
+
+					tmp = new_objtree_VA("ADD CONSTRAINT %{name}I %{definition}s",
+										 3, "type", ObjTypeString, "add constraint",
+										 "name", ObjTypeString, get_constraint_name(constrOid),
+										 "definition", ObjTypeString,
+										 pg_get_constraintdef_string(constrOid, false));
+					subcmds = lappend(subcmds, new_object_object(tmp));
+				}
+				break;
+
+			case AT_AlterConstraint:
+				break;
+
+			case AT_ValidateConstraint:
+				tmp = new_objtree_VA("VALIDATE CONSTRAINT %{constraint}I", 2,
+									 "type", ObjTypeString, "validate constraint",
+									 "constraint", ObjTypeString, subcmd->name);
+				subcmds = lappend(subcmds, new_object_object(tmp));
+				break;
+
+			case AT_DropConstraint:
+				tmp = new_objtree_VA("DROP CONSTRAINT %{constraint}I", 2,
+									 "type", ObjTypeString, "drop constraint",
+									 "constraint", ObjTypeString, subcmd->name);
+				subcmds = lappend(subcmds, new_object_object(tmp));
+				break;
+
+			case AT_AlterColumnType:
+				tmp = new_objtree_VA("ALTER COLUMN %{column}I SET DATA TYPE %{datatype}T collate_clause using_clause",
+									 2, "type", ObjTypeString, "alter column type",
+									 "column", ObjTypeString, subcmd->name);
+				/* FIXME figure out correct typid/typmod , collate clause, using_clause */
+				append_object_object(tmp, "datatype",
+									 new_objtree_for_type(INT4OID, -1));
+				subcmds = lappend(subcmds, new_object_object(tmp));
+				break;
+
+			case AT_AlterColumnGenericOptions:
+				break;
+
+			case AT_ChangeOwner:
+				tmp = new_objtree_VA("OWNER TO %{owner}I",
+									 2, "type", ObjTypeString, "change owner",
+									 "owner",  ObjTypeString, subcmd->name);
+				subcmds = lappend(subcmds, new_object_object(tmp));
+				break;
+
+			case AT_ClusterOn:
+				tmp = new_objtree_VA("CLUSTER ON %{index}I", 2,
+									 "type", ObjTypeString, "cluster on",
+									 "index", ObjTypeString, subcmd->name);
+				subcmds = lappend(subcmds, new_object_object(tmp));
+				break;
+
+			case AT_DropCluster:
+				tmp = new_objtree_VA("SET WITHOUT CLUSTER", 1,
+									 "type", ObjTypeString, "set without cluster");
+				subcmds = lappend(subcmds, new_object_object(tmp));
+				break;
+
+			case AT_AddOids:
+				tmp = new_objtree_VA("SET WITH OIDS", 1,
+									 "type", ObjTypeString, "set with oids");
+				subcmds = lappend(subcmds, new_object_object(tmp));
+				break;
+
+			case AT_DropOids:
+				tmp = new_objtree_VA("SET WITHOUT OIDS", 1,
+									 "type", ObjTypeString, "set without oids");
+				subcmds = lappend(subcmds, new_object_object(tmp));
+				break;
+
+			case AT_SetTableSpace:
+				tmp = new_objtree_VA("SET TABLESPACE %{tablespace}I", 2,
+									 "type", ObjTypeString, "set tablespace",
+									 "tablespace", ObjTypeString, subcmd->name);
+				subcmds = lappend(subcmds, new_object_object(tmp));
+				break;
+
+			case AT_SetRelOptions:
+				break;
+
+			case AT_ResetRelOptions:
+				break;
+
+				/*
+				 * FIXME --- should we unify representation of all these
+				 * ENABLE/DISABLE TRIGGER commands??
+				 */
+			case AT_EnableTrig:
+				tmp = new_objtree_VA("ENABLE TRIGGER %{trigger}I", 2,
+									 "type", ObjTypeString, "enable trigger",
+									 "trigger", ObjTypeString, subcmd->name);
+				subcmds = lappend(subcmds, new_object_object(tmp));
+				break;
+
+			case AT_EnableAlwaysTrig:
+				tmp = new_objtree_VA("ENABLE ALWAYS TRIGGER %{trigger}I", 2,
+									 "type", ObjTypeString, "enable always trigger",
+									 "trigger", ObjTypeString, subcmd->name);
+				subcmds = lappend(subcmds, new_object_object(tmp));
+				break;
+
+			case AT_EnableReplicaTrig:
+				tmp = new_objtree_VA("ENABLE REPLICA TRIGGER %{trigger}I", 2,
+									 "type", ObjTypeString, "enable replica trigger",
+									 "trigger", ObjTypeString, subcmd->name);
+				subcmds = lappend(subcmds, new_object_object(tmp));
+				break;
+
+			case AT_DisableTrig:
+				tmp = new_objtree_VA("DISABLE TRIGGER %{trigger}I", 2,
+									 "type", ObjTypeString, "disable trigger",
+									 "trigger", ObjTypeString, subcmd->name);
+				subcmds = lappend(subcmds, new_object_object(tmp));
+				break;
+
+			case AT_EnableTrigAll:
+				tmp = new_objtree_VA("ENABLE TRIGGER ALL", 1,
+									 "type", ObjTypeString, "enable trigger all");
+				subcmds = lappend(subcmds, new_object_object(tmp));
+				break;
+
+			case AT_DisableTrigAll:
+				tmp = new_objtree_VA("DISABLE TRIGGER ALL", 1,
+									 "type", ObjTypeString, "disable trigger all");
+				subcmds = lappend(subcmds, new_object_object(tmp));
+				break;
+
+			case AT_EnableTrigUser:
+				tmp = new_objtree_VA("ENABLE TRIGGER USER", 1,
+									 "type", ObjTypeString, "enable trigger user");
+				subcmds = lappend(subcmds, new_object_object(tmp));
+				break;
+
+			case AT_DisableTrigUser:
+				tmp = new_objtree_VA("DISABLE TRIGGER USER", 1,
+									 "type", ObjTypeString, "disable trigger user");
+				subcmds = lappend(subcmds, new_object_object(tmp));
+				break;
+
+			case AT_EnableRule:
+				break;
+
+			case AT_EnableAlwaysRule:
+				break;
+
+			case AT_EnableReplicaRule:
+				break;
+
+			case AT_DisableRule:
+				break;
+
+			case AT_AddInherit:
+				/*
+				 * XXX this case is interesting: we cannot rely on parse node
+				 * because parent name might be unqualified; but there's no way
+				 * to extract it from catalog either, since we don't know which
+				 * of the parents is the new one.
+				 */
+				break;
+
+			case AT_DropInherit:
+				/* XXX ditto ... */
+				break;
+
+			case AT_AddOf:
+				break;
+
+			case AT_DropOf:
+				break;
+
+			case AT_ReplicaIdentity:
+				tmp = new_objtree_VA("REPLICA IDENTITY %{ident}s", 1,
+									 "type", ObjTypeString, "replica identity");
+				switch (((ReplicaIdentityStmt *) subcmd->def)->identity_type)
+				{
+					case REPLICA_IDENTITY_DEFAULT:
+						append_string_object(tmp, "ident", "DEFAULT");
+						break;
+					case REPLICA_IDENTITY_FULL:
+						append_string_object(tmp, "ident", "FULL");
+						break;
+					case REPLICA_IDENTITY_NOTHING:
+						append_string_object(tmp, "ident", "NOTHING");
+						break;
+					case REPLICA_IDENTITY_INDEX:
+						tmp2 = new_objtree_VA("USING INDEX %{index}I", 1,
+											  "index", ObjTypeString,
+											  ((ReplicaIdentityStmt *) subcmd->def)->name);
+						append_object_object(tmp, "ident", tmp2);
+						break;
+				}
+				subcmds = lappend(subcmds, new_object_object(tmp));
+				break;
+
+			case AT_GenericOptions:
+				break;
+
+			default:
+				elog(WARNING, "unsupported alter table subtype %d",
+					 subcmd->subtype);
+				break;
+		}
+	}
+
+	heap_close(rel, AccessShareLock);
+
+	if (list_length(subcmds) == 0)
+		return NULL;
+
+	append_array_object(alterTableStmt, "subcmds", subcmds);
+	return alterTableStmt;
+}
+
 /*
  * Handle deparsing of simple commands.
  *
@@ -3006,6 +3389,9 @@ deparse_utility_command(StashedCommand *cmd)
 	{
 		case SCT_Simple:
 			tree = deparse_simple_command(cmd);
+			break;
+		case SCT_AlterTable:
+			tree = deparse_AlterTableStmt(cmd);
 			break;
 		default:
 			elog(ERROR, "unexpected deparse node type %d", cmd->type);
