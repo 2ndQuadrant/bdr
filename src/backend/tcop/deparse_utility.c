@@ -1664,6 +1664,63 @@ deparse_CreateRangeStmt(Oid objectId, Node *parsetree)
 	return command;
 }
 
+static char *
+deparse_CreateDomain(Oid objectId, Node *parsetree)
+{
+	ObjTree	   *createDomain;
+	ObjTree	   *tmp;
+	char	   *command;
+	HeapTuple	typTup;
+	Form_pg_type typForm;
+	List	   *constraints;
+
+	typTup = SearchSysCache1(TYPEOID,
+							 objectId);
+	if (!HeapTupleIsValid(typTup))
+		elog(ERROR, "cache lookup failed for domain with OID %u", objectId);
+	typForm = (Form_pg_type) GETSTRUCT(typTup);
+
+	createDomain = new_objtree_VA("CREATE DOMAIN %{identity}D AS %{type}D %{not_null}s %{constraints}s %{collation}s",
+								  0);
+
+	append_object_object(createDomain,
+						 "identity",
+						 new_objtree_for_qualname_id(TypeRelationId,
+													 objectId));
+	append_object_object(createDomain,
+						 "type",
+						 new_objtree_for_qualname_id(TypeRelationId,
+													 typForm->typbasetype));
+
+	if (typForm->typnotnull)
+		append_string_object(createDomain, "not_null", "NOT NULL");
+	else
+		append_string_object(createDomain, "not_null", "");
+
+	constraints = obtainConstraints(NIL, InvalidOid, objectId);
+	tmp = new_objtree_VA("%{elements: }s", 0);
+	if (constraints == NIL)
+		append_bool_object(tmp, "present", false);
+	else
+		append_array_object(tmp, "elements", constraints);
+	append_object_object(createDomain, "constraints", tmp);
+
+	tmp = new_objtree_VA("COLLATE %{collation}D", 0);
+	if (OidIsValid(typForm->typcollation))
+		append_object_object(tmp, "collation",
+							 new_objtree_for_qualname_id(CollationRelationId,
+														 typForm->typcollation));
+	else
+		append_bool_object(tmp, "present", false);
+	append_object_object(createDomain, "collation", tmp);
+
+	ReleaseSysCache(typTup);
+	command = jsonize_objtree(createDomain);
+	free_objtree(createDomain);
+
+	return command;
+}
+
 /*
  * Return the given object type as a string.
  */
@@ -2568,6 +2625,9 @@ deparse_utility_command(StashedCommand *cmd)
 			break;
 
 		case T_CreateDomainStmt:
+			command = deparse_CreateDomain(objectId, parsetree);
+			break;
+
 		case T_CreateFunctionStmt:
 		case T_CreateTableAsStmt:
 		case T_CreatePLangStmt:
