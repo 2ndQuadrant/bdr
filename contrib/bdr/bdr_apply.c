@@ -92,28 +92,29 @@ BdrConnectionConfig *bdr_apply_config = NULL;
 
 static void build_index_scan_keys(EState *estate, ScanKey *scan_keys, TupleTableSlot *slot);
 static void build_index_scan_key(ScanKey skey, Relation rel, Relation idx_rel, TupleTableSlot *slot);
-static bool find_pkey_tuple(ScanKey skey, Relation rel, Relation idx_rel, TupleTableSlot *slot,
+static bool find_pkey_tuple(ScanKey skey, BDRRelation *rel, Relation idx_rel, TupleTableSlot *slot,
 							bool lock, LockTupleMode mode);
 
 static void UserTableUpdateIndexes(EState *estate, TupleTableSlot *slot);
 static void UserTableUpdateOpenIndexes(EState *estate, TupleTableSlot *slot);
 static EState *bdr_create_rel_estate(Relation rel);
 
-/* read data from the wire */
-static Relation read_rel(StringInfo s, LOCKMODE mode);
-extern void read_tuple_parts(StringInfo s, Relation rel, BDRTupleData *tup);
-static void read_tuple(StringInfo s, Relation rel, TupleTableSlot *slot);
+static BDRRelation *read_rel(StringInfo s, LOCKMODE mode);
+extern void read_tuple_parts(StringInfo s, BDRRelation *rel, BDRTupleData *tup);
+static void read_tuple(StringInfo s, BDRRelation *rel, TupleTableSlot *slot);
+static void tuple_to_stringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple);
 
 static void tuple_to_stringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple);
 
 static void check_apply_update(RepNodeId local_node_id, TimestampTz ts, bool *perform_update, bool *log_update);
 static void do_log_update(RepNodeId local_node_id, bool apply_update, TimestampTz ts, Relation idxrel, HeapTuple old_key);
-static void do_apply_update(Relation rel, EState *estate,
+static void do_apply_update(BDRRelation *rel, EState *estate,
 							TupleTableSlot *oldslot, TupleTableSlot *newslot,
 							BDRTupleData new_tuple);
+
 static void fetch_sysid_via_node_id(RepNodeId node_id, uint64 *sysid, TimeLineID *tli);
 
-static void check_sequencer_wakeup(Relation rel);
+static void check_sequencer_wakeup(BDRRelation *rel);
 static HeapTuple process_queued_drop(HeapTuple cmdtup);
 static void process_queued_ddl_command(HeapTuple cmdtup, bool tx_just_started);
 static bool bdr_performing_work(void);
@@ -281,7 +282,7 @@ process_remote_insert(StringInfo s)
 	EState	   *estate;
 	TupleTableSlot *slot;
 	TupleTableSlot *oldslot;
-	Relation	rel;
+	BDRRelation	*rel;
 	bool		started_tx;
 #ifdef VERBOSE_INSERT
 	StringInfoData o;
@@ -311,17 +312,17 @@ process_remote_insert(StringInfo s)
 		elog(ERROR, "expected new tuple but got %d",
 			 action);
 
-	estate = bdr_create_rel_estate(rel);
+	estate = bdr_create_rel_estate(rel->rel);
 	slot = ExecInitExtraTupleSlot(estate);
 	oldslot = ExecInitExtraTupleSlot(estate);
-	ExecSetSlotDescriptor(slot, RelationGetDescr(rel));
-	ExecSetSlotDescriptor(oldslot, RelationGetDescr(rel));
+	ExecSetSlotDescriptor(slot, RelationGetDescr(rel->rel));
+	ExecSetSlotDescriptor(oldslot, RelationGetDescr(rel->rel));
 
 	read_tuple(s, rel, slot);
 
-	if (rel->rd_rel->relkind != RELKIND_RELATION)
+	if (rel->rel->rd_rel->relkind != RELKIND_RELATION)
 		elog(ERROR, "unexpected relkind '%c' rel \"%s\"",
-			 rel->rd_rel->relkind, RelationGetRelationName(rel));
+			 rel->rel->rd_rel->relkind, RelationGetRelationName(rel->rel));
 
 	/* debug output */
 #ifdef VERBOSE_INSERT
@@ -412,7 +413,7 @@ process_remote_insert(StringInfo s)
 
 		if (apply_update)
 		{
-			simple_heap_update(rel,
+			simple_heap_update(rel->rel,
 							   &oldslot->tts_tuple->t_self,
 							   slot->tts_tuple);
 			/* races will be resolved by abort/retry */
@@ -421,7 +422,7 @@ process_remote_insert(StringInfo s)
 	}
 	else
 	{
-		simple_heap_insert(rel, slot->tts_tuple);
+		simple_heap_insert(rel->rel, slot->tts_tuple);
 		/* races will be resolved by abort/retry */
 		UserTableUpdateOpenIndexes(estate, slot);
 	}
@@ -431,13 +432,14 @@ process_remote_insert(StringInfo s)
 	check_sequencer_wakeup(rel);
 
 	/* execute DDL if insertion was into the ddl command queue */
-	if (RelationGetRelid(rel) == QueuedDDLCommandsRelid ||
-		RelationGetRelid(rel) == QueuedDropsRelid)
+	if (RelationGetRelid(rel->rel) == QueuedDDLCommandsRelid ||
+		RelationGetRelid(rel->rel) == QueuedDropsRelid)
 	{
 		HeapTuple ht;
-		LockRelId	lockid = rel->rd_lockInfo.lockRelId;
+		LockRelId	lockid = rel->rel->rd_lockInfo.lockRelId;
 		TransactionId oldxid = GetTopTransactionId();
-		Oid relid = RelationGetRelid(rel);
+		Oid relid = RelationGetRelid(rel->rel);
+		Relation qrel;
 
 		/* there never should be conflicts on these */
 		Assert(!conflict);
@@ -449,7 +451,7 @@ process_remote_insert(StringInfo s)
 		ht = heap_copytuple(slot->tts_tuple);
 
 		LockRelationIdForSession(&lockid, RowExclusiveLock);
-		heap_close(rel, NoLock);
+		bdr_heap_close(rel, NoLock);
 
 		ExecResetTupleTable(estate->es_tupleTable, true);
 		FreeExecutorState(estate);
@@ -459,11 +461,11 @@ process_remote_insert(StringInfo s)
 		if (relid == QueuedDropsRelid)
 			process_queued_drop(ht);
 
-		rel = heap_open(QueuedDDLCommandsRelid, RowExclusiveLock);
+		qrel = heap_open(QueuedDDLCommandsRelid, RowExclusiveLock);
 
 		UnlockRelationIdForSession(&lockid, RowExclusiveLock);
 
-		heap_close(rel, NoLock);
+		heap_close(qrel, NoLock);
 
 		if (oldxid != GetTopTransactionId())
 		{
@@ -473,7 +475,7 @@ process_remote_insert(StringInfo s)
 	}
 	else
 	{
-		heap_close(rel, NoLock);
+		bdr_heap_close(rel, NoLock);
 		ExecResetTupleTable(estate->es_tupleTable, true);
 		FreeExecutorState(estate);
 	}
@@ -492,7 +494,7 @@ process_remote_update(StringInfo s)
 	bool		found_tuple;
 	BDRTupleData new_tuple;
 	Oid			idxoid;
-	Relation	rel;
+	BDRRelation	*rel;
 	Relation	idxrel;
 	StringInfoData o;
 	ScanKeyData skey[INDEX_MAX_KEYS];
@@ -508,11 +510,11 @@ process_remote_update(StringInfo s)
 		elog(ERROR, "expected action 'N' or 'K', got %c",
 			 action);
 
-	estate = bdr_create_rel_estate(rel);
+	estate = bdr_create_rel_estate(rel->rel);
 	oldslot = ExecInitExtraTupleSlot(estate);
-	ExecSetSlotDescriptor(oldslot, RelationGetDescr(rel));
+	ExecSetSlotDescriptor(oldslot, RelationGetDescr(rel->rel));
 	newslot = ExecInitExtraTupleSlot(estate);
-	ExecSetSlotDescriptor(newslot, RelationGetDescr(rel));
+	ExecSetSlotDescriptor(newslot, RelationGetDescr(rel->rel));
 
 	if (action == 'K')
 	{
@@ -528,9 +530,9 @@ process_remote_update(StringInfo s)
 		elog(ERROR, "expected action 'N', got %c",
 			 action);
 
-	if (rel->rd_rel->relkind != RELKIND_RELATION)
+	if (rel->rel->rd_rel->relkind != RELKIND_RELATION)
 		elog(ERROR, "unexpected relkind '%c' rel \"%s\"",
-			 rel->rd_rel->relkind, RelationGetRelationName(rel));
+			 rel->rel->rd_rel->relkind, RelationGetRelationName(rel->rel));
 
 	/* read new tuple */
 	read_tuple_parts(s, rel, &new_tuple);
@@ -541,7 +543,7 @@ process_remote_update(StringInfo s)
 	if (!pkey_sent)
 	{
 		HeapTuple old_key;
-		old_key = heap_form_tuple(RelationGetDescr(rel),
+		old_key = heap_form_tuple(RelationGetDescr(rel->rel),
 								  new_tuple.values, new_tuple.isnull);
 		ExecStoreTuple(old_key, oldslot, InvalidBuffer, true);
 	}
@@ -556,13 +558,13 @@ process_remote_update(StringInfo s)
 #endif
 
 	/* lookup index to build scankey */
-	if (rel->rd_indexvalid == 0)
-		RelationGetIndexList(rel);
-	idxoid = rel->rd_replidindex;
+	if (rel->rel->rd_indexvalid == 0)
+		RelationGetIndexList(rel->rel);
+	idxoid = rel->rel->rd_replidindex;
 	if (!OidIsValid(idxoid))
 	{
 		elog(ERROR, "could not find primary key for table with oid %u",
-			 RelationGetRelid(rel));
+			 RelationGetRelid(rel->rel));
 		return;
 	}
 
@@ -571,7 +573,7 @@ process_remote_update(StringInfo s)
 
 	Assert(idxrel->rd_index->indisunique);
 
-	build_index_scan_key(skey, rel, idxrel, oldslot);
+	build_index_scan_key(skey, rel->rel, idxrel, oldslot);
 
 	PushActiveSnapshot(GetTransactionSnapshot());
 
@@ -617,7 +619,7 @@ process_remote_update(StringInfo s)
 	else
 	{
 		initStringInfo(&o);
-		tuple_to_stringinfo(&o, RelationGetDescr(rel),
+		tuple_to_stringinfo(&o, RelationGetDescr(rel->rel),
 							oldslot->tts_tuple);
 		bdr_count_update_conflict();
 
@@ -633,7 +635,7 @@ process_remote_update(StringInfo s)
 
 	/* release locks upon commit */
 	index_close(idxrel, NoLock);
-	heap_close(rel, NoLock);
+	bdr_heap_close(rel, NoLock);
 
 	ExecResetTupleTable(estate->es_tupleTable, true);
 	FreeExecutorState(estate);
@@ -651,7 +653,7 @@ process_remote_delete(StringInfo s)
 	EState	   *estate;
 	TupleTableSlot *slot;
 	Oid			idxoid;
-	Relation	rel;
+	BDRRelation	*rel;
 	Relation	idxrel;
 	ScanKeyData skey[INDEX_MAX_KEYS];
 	bool		found_old;
@@ -673,29 +675,29 @@ process_remote_delete(StringInfo s)
 		return;
 	}
 
-	estate = bdr_create_rel_estate(rel);
+	estate = bdr_create_rel_estate(rel->rel);
 	slot = ExecInitExtraTupleSlot(estate);
-	ExecSetSlotDescriptor(slot, RelationGetDescr(rel));
+	ExecSetSlotDescriptor(slot, RelationGetDescr(rel->rel));
 
 	read_tuple(s, rel, slot);
 
 	/* lookup index to build scankey */
-	if (rel->rd_indexvalid == 0)
-		RelationGetIndexList(rel);
-	idxoid = rel->rd_replidindex;
+	if (rel->rel->rd_indexvalid == 0)
+		RelationGetIndexList(rel->rel);
+	idxoid = rel->rel->rd_replidindex;
 	if (!OidIsValid(idxoid))
 	{
 		elog(ERROR, "could not find primary key for table with oid %u",
-			 RelationGetRelid(rel));
+			 RelationGetRelid(rel->rel));
 		return;
 	}
 
 	/* Now open the primary key index */
 	idxrel = index_open(idxoid, RowExclusiveLock);
 
-	if (rel->rd_rel->relkind != RELKIND_RELATION)
+	if (rel->rel->rd_rel->relkind != RELKIND_RELATION)
 		elog(ERROR, "unexpected relkind '%c' rel \"%s\"",
-			 rel->rd_rel->relkind, RelationGetRelationName(rel));
+			 rel->rel->rd_rel->relkind, RelationGetRelationName(rel->rel));
 
 #ifdef VERBOSE_DELETE
 	initStringInfo(&o);
@@ -706,14 +708,14 @@ process_remote_delete(StringInfo s)
 
 	PushActiveSnapshot(GetTransactionSnapshot());
 
-	build_index_scan_key(skey, rel, idxrel, slot);
+	build_index_scan_key(skey, rel->rel, idxrel, slot);
 
 	/* try to find tuple via a (candidate|primary) key */
 	found_old = find_pkey_tuple(skey, rel, idxrel, slot, true, LockTupleExclusive);
 
 	if (found_old)
 	{
-		simple_heap_delete(rel, &slot->tts_tuple->t_self);
+		simple_heap_delete(rel->rel, &slot->tts_tuple->t_self);
 		bdr_count_delete();
 	}
 	else
@@ -736,7 +738,7 @@ process_remote_delete(StringInfo s)
 	check_sequencer_wakeup(rel);
 
 	index_close(idxrel, NoLock);
-	heap_close(rel, NoLock);
+	bdr_heap_close(rel, NoLock);
 
 	ExecResetTupleTable(estate->es_tupleTable, true);
 	FreeExecutorState(estate);
@@ -863,18 +865,18 @@ do_log_update(RepNodeId local_node_id, bool apply_update, TimestampTz ts,
 }
 
 static void
-do_apply_update(Relation rel, EState *estate,
+do_apply_update(BDRRelation *rel, EState *estate,
 				TupleTableSlot *oldslot,
 				TupleTableSlot *newslot,
 				BDRTupleData new_tuple)
 {
 	HeapTuple	nt;
 
-	nt = heap_modify_tuple(oldslot->tts_tuple, RelationGetDescr(rel),
+	nt = heap_modify_tuple(oldslot->tts_tuple, RelationGetDescr(rel->rel),
 						   new_tuple.values, new_tuple.isnull,
 						   new_tuple.changed);
 	ExecStoreTuple(nt, newslot, InvalidBuffer, true);
-	simple_heap_update(rel, &oldslot->tts_tuple->t_self, newslot->tts_tuple);
+	simple_heap_update(rel->rel, &oldslot->tts_tuple->t_self, newslot->tts_tuple);
 	UserTableUpdateIndexes(estate, newslot);
 	bdr_count_update();
 }
@@ -1261,9 +1263,9 @@ bdr_performing_work(void)
 }
 
 static void
-check_sequencer_wakeup(Relation rel)
+check_sequencer_wakeup(BDRRelation *rel)
 {
-	Oid			reloid = RelationGetRelid(rel);
+	Oid			reloid = RelationGetRelid(rel->rel);
 
 	if (reloid == BdrSequenceValuesRelid ||
 		reloid == BdrSequenceElectionsRelid ||
@@ -1272,9 +1274,9 @@ check_sequencer_wakeup(Relation rel)
 }
 
 void
-read_tuple_parts(StringInfo s, Relation rel, BDRTupleData *tup)
+read_tuple_parts(StringInfo s, BDRRelation *rel, BDRTupleData *tup)
 {
-	TupleDesc	desc = RelationGetDescr(rel);
+	TupleDesc	desc = RelationGetDescr(rel->rel);
 	int			i;
 	int			rnatts;
 	char		action;
@@ -1373,7 +1375,7 @@ read_tuple_parts(StringInfo s, Relation rel, BDRTupleData *tup)
 	}
 }
 
-static Relation
+static BDRRelation *
 read_rel(StringInfo s, LOCKMODE mode)
 {
 	int			relnamelen;
@@ -1391,7 +1393,7 @@ read_rel(StringInfo s, LOCKMODE mode)
 
 	relid = RangeVarGetRelidExtended(rv, mode, false, false, NULL, NULL);
 
-	return heap_open(relid, NoLock);
+	return bdr_heap_open(relid, NoLock);
 }
 
 /*
@@ -1401,13 +1403,13 @@ read_rel(StringInfo s, LOCKMODE mode)
  * they are resolved to the corresponding local OID.)
  */
 static void
-read_tuple(StringInfo s, Relation rel, TupleTableSlot *slot)
+read_tuple(StringInfo s, BDRRelation *rel, TupleTableSlot *slot)
 {
 	BDRTupleData tupdata;
 	HeapTuple	tup;
 
 	read_tuple_parts(s, rel, &tupdata);
-	tup = heap_form_tuple(RelationGetDescr(rel),
+	tup = heap_form_tuple(RelationGetDescr(rel->rel),
 						  tupdata.values, tupdata.isnull);
 	ExecStoreTuple(tup, slot, InvalidBuffer, true);
 }
@@ -1645,7 +1647,7 @@ build_index_scan_key(ScanKey skey, Relation rel, Relation idxrel, TupleTableSlot
  * false is returned otherwise.
  */
 static bool
-find_pkey_tuple(ScanKey skey, Relation rel, Relation idxrel,
+find_pkey_tuple(ScanKey skey, BDRRelation *rel, Relation idxrel,
 				TupleTableSlot *slot, bool lock, LockTupleMode mode)
 {
 	HeapTuple	scantuple;
@@ -1655,7 +1657,7 @@ find_pkey_tuple(ScanKey skey, Relation rel, Relation idxrel,
 	TransactionId xwait;
 
 	InitDirtySnapshot(snap);
-	scan = index_beginscan(rel, idxrel,
+	scan = index_beginscan(rel->rel, idxrel,
 						   &snap,
 						   RelationGetNumberOfAttributes(idxrel),
 						   0);
@@ -1700,7 +1702,7 @@ retry:
 
 		PushActiveSnapshot(GetLatestSnapshot());
 
-		res = heap_lock_tuple(rel, &locktup, GetCurrentCommandId(false), mode,
+		res = heap_lock_tuple(rel->rel, &locktup, GetCurrentCommandId(false), mode,
 							  false /* wait */,
 							  false /* don't follow updates */,
 							  &buf, &hufd);
