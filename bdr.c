@@ -80,6 +80,8 @@ typedef struct BdrWorkerControl
 	LWLockId     lock;
 	/* Required only for bgworker restart issues: */
 	bool		 launch_workers;
+	/* Set/unset by bdr_apply_pause()/_replay(). */
+	bool		 pause_apply;
 	/* Array members, of size bdr_max_workers */
 	BdrWorker    slots[FLEXIBLE_ARRAY_MEMBER];
 } BdrWorkerControl;
@@ -126,6 +128,12 @@ static BdrWorker* bdr_worker_shmem_alloc(BdrWorkerType worker_type);
 static void bdr_worker_shmem_release(BdrWorker* worker,
 									 BackgroundWorkerHandle *handle)
 	__attribute__((unused)); /* TODO: remove this attribute when function is used */
+
+Datum bdr_apply_pause(PG_FUNCTION_ARGS);
+Datum bdr_apply_resume(PG_FUNCTION_ARGS);
+
+PG_FUNCTION_INFO_V1(bdr_apply_pause);
+PG_FUNCTION_INFO_V1(bdr_apply_resume);
 
 /*
  * Converts an int64 to network byte order.
@@ -723,6 +731,24 @@ bdr_apply_main(Datum main_arg)
 		if (last_received != InvalidXLogRecPtr)
 			bdr_send_feedback(streamConn, last_received,
 						 GetCurrentTimestamp(), false, false);
+
+		/*
+		 * If the user has paused replication with bdr_apply_pause(), we
+		 * wait on our procLatch until pg_bdr_apply_resume() unsets the
+		 * flag in shmem. We don't pause until the end of the current
+		 * transaction, to avoid sleeping with locks held.
+		 *
+		 * XXX With the 1s timeout below, we don't risk delaying the
+		 * resumption too much. But it would be better to use a global
+		 * latch that can be set by pg_bdr_apply_resume(), and not have
+		 * to wake up so often.
+		 */
+
+		while (BdrWorkerCtl->pause_apply && !IsTransactionState())
+		{
+			ResetLatch(&MyProc->procLatch);
+			rc = WaitLatch(&MyProc->procLatch, WL_TIMEOUT, 1000L);
+		}
 	}
 
 	proc_exit(0);
@@ -1553,4 +1579,18 @@ bdr_maintain_schema(void)
 
 	PopActiveSnapshot();
 	CommitTransactionCommand();
+}
+
+Datum
+bdr_apply_pause(PG_FUNCTION_ARGS)
+{
+	BdrWorkerCtl->pause_apply = true;
+	PG_RETURN_VOID();
+}
+
+Datum
+bdr_apply_resume(PG_FUNCTION_ARGS)
+{
+	BdrWorkerCtl->pause_apply = false;
+	PG_RETURN_VOID();
 }
