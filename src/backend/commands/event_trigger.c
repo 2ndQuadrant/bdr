@@ -1612,6 +1612,8 @@ expand_get_boolval(Datum json, char *field_name, bool *isnull)
 	Datum		result;
 	char	   *value_str;
 
+	*isnull = false;
+
 	InitFunctionCallInfoData(fcinfo, NULL, 2, InvalidOid, NULL, NULL);
 
 	fcinfo.arg[0] = json;
