@@ -12,6 +12,7 @@
 #ifndef DEPARSE_UTILITY_H
 #define DEPARSE_UTILITY_H
 
+
 /*
  * Support for keeping track of a command to deparse.
  *
@@ -20,11 +21,21 @@
  * representation of it.
  */
 
+/*
+ * For ALTER TABLE commands, we keep a list of the subcommands therein.
+ */
+typedef struct StashedATSubcmd
+{
+	AttrNumber		attnum;	/* affected column number */
+	Oid				oid;	/* affected constraint, default value or index */
+	Node		   *parsetree;
+} StashedATSubcmd;
 
 typedef struct StashedCommand
 {
 	ObjectType	objtype;
 	Oid			objectId;
+	List	   *subcmds;	/* list of StashedATSubcmd */
 	Node	   *parsetree;
 } StashedCommand;
 

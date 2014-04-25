@@ -992,6 +992,9 @@ ProcessUtilitySlow(Node *parsetree,
 						stmts = transformAlterTableStmt(relid, atstmt,
 														queryString);
 
+						/* ... ensure we have an event trigger context ... */
+						EventTriggerStartRecordingSubcmds(relid, parsetree);
+
 						/* ... and do it */
 						foreach(l, stmts)
 						{
@@ -1005,19 +1008,31 @@ ProcessUtilitySlow(Node *parsetree,
 							}
 							else
 							{
-								/* Recurse for anything else */
+								/*
+								 * Recurse for anything else.  If we need to do
+								 * so, "close" the current complex-command set,
+								 * and start a new one at the bottom; this is
+								 * needed to ensure the ordering of queued
+								 * commands is consistent with the way they are
+								 * executed here.
+								 */
+								EventTriggerEndRecordingSubcmds();
 								ProcessUtility(stmt,
 											   queryString,
 											   PROCESS_UTILITY_SUBCOMMAND,
 											   params,
 											   None_Receiver,
 											   NULL);
+								EventTriggerStartRecordingSubcmds(relid, parsetree);
 							}
 
 							/* Need CCI between commands */
 							if (lnext(l) != NULL)
 								CommandCounterIncrement();
 						}
+
+						/* done */
+						EventTriggerEndRecordingSubcmds();
 					}
 					else
 						ereport(NOTICE,
