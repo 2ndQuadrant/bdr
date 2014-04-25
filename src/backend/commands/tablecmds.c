@@ -2781,6 +2781,8 @@ AlterTableInternal(Oid relid, List *cmds, bool recurse)
 
 	rel = relation_open(relid, lockmode);
 
+	EventTriggerAlterTableRelid(relid);
+
 	ATController(NULL, rel, cmds, recurse, lockmode);
 }
 
@@ -3666,6 +3668,12 @@ ATExecCmd(List **wqueue, AlteredTableInfo *tab, Relation rel,
 
 	/* supress compiler warning until we have some use for the address */
 	(void) address;
+
+	/*
+	 * Report the subcommand to interested event triggers.
+	 */
+	EventTriggerAlterTableStashSubcmd((Node *) cmd, RelationGetRelid(rel),
+									  address);
 
 	/*
 	 * Bump the command counter to ensure the next subcommand in the sequence
@@ -9703,7 +9711,10 @@ AlterTableMoveAll(AlterTableMoveAllStmt *stmt)
 
 		cmds = lappend(cmds, cmd);
 
+		EventTriggerAlterTableStart((Node *) stmt);
+		/* OID is set by AlterTableInternal */
 		AlterTableInternal(lfirst_oid(l), cmds, false);
+		EventTriggerAlterTableEnd();
 	}
 
 	return new_tablespaceoid;
