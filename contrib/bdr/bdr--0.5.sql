@@ -30,6 +30,9 @@ REVOKE ALL ON FUNCTION pg_stat_get_bdr() FROM PUBLIC;
 
 CREATE VIEW pg_stat_bdr AS SELECT * FROM pg_stat_get_bdr();
 
+-- We must be able to use exclusion constraints for global sequences
+SET bdr.permit_unsafe_ddl_commands=true;
+
 CREATE TABLE bdr_sequence_values
 (
     owning_sysid text NOT NULL,
@@ -57,6 +60,8 @@ CREATE TABLE bdr_sequence_values
     PRIMARY KEY(owning_sysid, owning_tlid, owning_dboid, owning_riname, seqschema, seqname, seqrange)
 );
 SELECT pg_catalog.pg_extension_config_dump('bdr_sequence_values', '');
+
+SET bdr.permit_unsafe_ddl_commands=false;
 
 REVOKE ALL ON TABLE bdr_sequence_values FROM PUBLIC;
 
