@@ -992,6 +992,9 @@ ProcessUtilitySlow(Node *parsetree,
 						stmts = transformAlterTableStmt(relid, atstmt,
 														queryString);
 
+						/* ... ensure we have an event trigger context ... */
+						EventTriggerStartRecordingSubcmds(relid, parsetree);
+
 						/* ... and do it */
 						foreach(l, stmts)
 						{
@@ -1018,6 +1021,9 @@ ProcessUtilitySlow(Node *parsetree,
 							if (lnext(l) != NULL)
 								CommandCounterIncrement();
 						}
+
+						/* done */
+						EventTriggerEndRecordingSubcmds();
 					}
 					else
 						ereport(NOTICE,

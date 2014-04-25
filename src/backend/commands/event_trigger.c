@@ -50,6 +50,7 @@ typedef struct EventTriggerQueryState
 	slist_head	SQLDropList;
 	bool		in_sql_drop;
 	MemoryContext cxt;
+	StashedCommand *curcmd;
 	List	   *stash;		/* list of StashedCommand; see deparse_utility.h */
 	struct EventTriggerQueryState *previous;
 } EventTriggerQueryState;
@@ -1037,6 +1038,7 @@ EventTriggerBeginCompleteQuery(void)
 	state->cxt = cxt;
 	slist_init(&(state->SQLDropList));
 	state->in_sql_drop = false;
+	state->curcmd = NULL;
 	state->stash = NIL;
 
 	state->previous = currentEventTriggerState;
@@ -1311,6 +1313,7 @@ EventTriggerStashCommand(Oid objectId, ObjectType objtype, Node *parsetree)
 
 	stashed->objectId = objectId;
 	stashed->objtype = objtype;
+	stashed->subcmds = NIL;
 	stashed->parsetree = copyObject(parsetree);
 
 	currentEventTriggerState->stash = lappend(currentEventTriggerState->stash,
@@ -1318,6 +1321,86 @@ EventTriggerStashCommand(Oid objectId, ObjectType objtype, Node *parsetree)
 
 	MemoryContextSwitchTo(oldcxt);
 }
+
+/*
+ * EventTriggerStartRecordingSubcmds
+ * 		Prepare to receive data on a complex DDL command about to be executed
+ *
+ * Note we don't actually stash the object we create here into the "stashed"
+ * list; instead we keep it in curcmd, and only when we're done processing the
+ * subcommands we will add it to the actual stash.
+ *
+ * FIXME -- this API isn't considering the possibility of an ALTER TABLE command
+ * being called reentrantly by an event trigger function.  Do we need stackable
+ * commands at this level?
+ */
+void
+EventTriggerStartRecordingSubcmds(Oid objectId, Node *parsetree)
+{
+	MemoryContext	oldcxt;
+	StashedCommand *stashed;
+
+	oldcxt = MemoryContextSwitchTo(currentEventTriggerState->cxt);
+
+	stashed = palloc(sizeof(StashedCommand));
+
+	stashed->objtype = OBJECT_TABLE;	/* XXX fix this? */
+	stashed->objectId = objectId;
+	stashed->subcmds = NIL;
+	stashed->parsetree = copyObject(parsetree);
+
+	currentEventTriggerState->curcmd = stashed;
+
+	MemoryContextSwitchTo(oldcxt);
+}
+
+/*
+ * EventTriggerRecordSubcmd
+ * 		Save data about a single part of a complex DDL command
+ *
+ * Right now we only support ALTER TABLE; there are no other DDL commands that
+ * require this.  (ALTER TYPE can also generate multiple subcommands, but it's
+ * actually parsed as ALTER TABLE, so there is no difference at this level.)
+ */
+void
+EventTriggerRecordSubcmd(Node *subcmd, AttrNumber attnum, Oid newoid)
+{
+	MemoryContext	oldcxt;
+	StashedATSubcmd *newsub;
+
+	Assert(IsA(subcmd, AlterTableCmd));
+
+	oldcxt = MemoryContextSwitchTo(currentEventTriggerState->cxt);
+
+	newsub = palloc(sizeof(StashedATSubcmd));
+	newsub->attnum = attnum;
+	newsub->oid = newoid;
+	newsub->parsetree = copyObject(subcmd);
+
+	currentEventTriggerState->curcmd->subcmds =
+		lappend(currentEventTriggerState->curcmd->subcmds, newsub);
+
+	MemoryContextSwitchTo(oldcxt);
+}
+
+/*
+ * EventTriggerEndRecordingSubcmds
+ * 		Finish up saving a complex DDL command
+ *
+ * FIXME this API isn't considering the possibility that a xact/subxact is
+ * aborted partway through.  Probably it's best to add an
+ * AtEOSubXact_EventTriggers() to fix this.
+ */
+void
+EventTriggerEndRecordingSubcmds(void)
+{
+	currentEventTriggerState->stash =
+		lappend(currentEventTriggerState->stash,
+				currentEventTriggerState->curcmd);
+
+	currentEventTriggerState->curcmd = NULL;
+}
+
 
 Datum
 pg_event_trigger_get_creation_commands(PG_FUNCTION_ARGS)
