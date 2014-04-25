@@ -42,14 +42,16 @@ static void
 error_on_persistent_rv(RangeVar *rv,
 					   const char *cmdtag,
 					   LOCKMODE lockmode,
-					   int severity,
 					   bool missing_ok)
 {
 	bool		needswal;
 	Relation	rel;
 
+	if (bdr_permit_unsafe_commands)
+		return;
+
 	if (rv == NULL)
-		ereport(severity,
+		ereport(ERROR,
 				(errmsg("Unqualified command %s is unsafe with BDR active.",
 						cmdtag)));
 
@@ -60,7 +62,7 @@ error_on_persistent_rv(RangeVar *rv,
 		needswal = RelationNeedsWAL(rel);
 		heap_close(rel, lockmode);
 		if (needswal)
-			ereport(severity,
+			ereport(ERROR,
 				 (errmsg("%s may only affect UNLOGGED or TEMPORARY tables " \
 						 "when BDR is active; %s is a regular table",
 						 cmdtag, rv->relname)));
@@ -75,26 +77,21 @@ bdr_commandfilter(Node *parsetree,
 				  DestReceiver *dest,
 				  char *completionTag)
 {
-	int			severity = ERROR;
 	ListCell   *cell;
 	AlterTableStmt *alterTableStatement;
 	CreateStmt *createStatement;
-	bool hasInvalid;
+	bool		hasInvalid;
 	Constraint *con;
-	IndexStmt *indexStmt;
+	IndexStmt  *indexStmt;
 
 	ereport(DEBUG4,
 		 (errmsg_internal("bdr_commandfilter ProcessUtility_hook invoked")));
-	if (bdr_permit_unsafe_commands)
-		severity = WARNING;
-
 
 	switch (nodeTag(parsetree))
 	{
 		case T_SecLabelStmt:	/* XXX what about this? */
 			error_on_persistent_rv(((ClusterStmt *) parsetree)->relation,
-							 "SECURITY LABEL", AccessExclusiveLock, severity,
-								   false);
+							   "SECURITY LABEL", AccessExclusiveLock, false);
 			break;
 
 		case T_CreateStmt:
@@ -102,15 +99,18 @@ bdr_commandfilter(Node *parsetree,
 
 			foreach(cell, createStatement->tableElts)
 			{
-				Node *element = lfirst(cell);
+				Node	   *element = lfirst(cell);
 
 				if (nodeTag(element) == T_Constraint)
 				{
 					con = (Constraint *) element;
 					if (con->contype == CONSTR_EXCLUSION &&
 						createStatement->relation->relpersistence != RELPERSISTENCE_TEMP)
-						ereport(severity,
-								(errmsg("EXCLUDE constraints are unsafe with BDR active")));
+					{
+						if (!bdr_permit_unsafe_commands)
+							ereport(ERROR,
+									(errmsg("EXCLUDE constraints are unsafe with BDR active")));
+					}
 				}
 			}
 
@@ -122,7 +122,7 @@ bdr_commandfilter(Node *parsetree,
 			if (indexStmt->whereClause && indexStmt->unique)
 				error_on_persistent_rv(indexStmt->relation,
 									   "CREATE UNIQUE INDEX ... WHERE",
-									   AccessExclusiveLock, severity, false);
+									   AccessExclusiveLock, false);
 
 			/*
 			 * XXX allow ALTER TABLE statements when stabilized; still forbid *
@@ -139,19 +139,19 @@ bdr_commandfilter(Node *parsetree,
 
 				switch (stmt->subtype)
 				{
-					/*
-					 * allowed for now:
-					 */
-					case AT_AddColumn: /* add column */
+						/*
+						 * allowed for now:
+						 */
+					case AT_AddColumn:	/* add column */
 
-					case AT_ColumnDefault: /* ALTER COLUMN DEFAULT */
+					case AT_ColumnDefault:		/* ALTER COLUMN DEFAULT */
 
-					case AT_ClusterOn: /* CLUSTER ON */
-					case AT_DropCluster: /* SET WITHOUT CLUSTER */
+					case AT_ClusterOn:	/* CLUSTER ON */
+					case AT_DropCluster:		/* SET WITHOUT CLUSTER */
 
-					case AT_SetRelOptions: /* SET (...) */
-					case AT_ResetRelOptions: /* RESET (...) */
-					case AT_ReplaceRelOptions: /* replace reloption list */
+					case AT_SetRelOptions:		/* SET (...) */
+					case AT_ResetRelOptions:	/* RESET (...) */
+					case AT_ReplaceRelOptions:	/* replace reloption list */
 						break;
 
 					case AT_AddConstraint:
@@ -161,9 +161,9 @@ bdr_commandfilter(Node *parsetree,
 
 							if (con->contype == CONSTR_EXCLUSION)
 								error_on_persistent_rv(alterTableStatement->relation,
-													   "ALTER TABLE ... ADD CONSTRAINT ... EXCLUDE",
-													   AccessExclusiveLock, severity,
-													   alterTableStatement->missing_ok);
+								"ALTER TABLE ... ADD CONSTRAINT ... EXCLUDE",
+													   AccessExclusiveLock,
+											alterTableStatement->missing_ok);
 						}
 						break;
 
@@ -176,12 +176,13 @@ bdr_commandfilter(Node *parsetree,
 			if (hasInvalid)
 				error_on_persistent_rv(alterTableStatement->relation,
 									   "ALTER TABLE", AccessExclusiveLock,
-									   severity, alterTableStatement->missing_ok);
+									   alterTableStatement->missing_ok);
 			break;
 
 		case T_AlterEnumStmt:
-			ereport(severity,
-			 (errmsg("ALTER TYPE ... ADD VALUE is unsafe with BDR active")));
+			if (!bdr_permit_unsafe_commands)
+				ereport(ERROR,
+						(errmsg("ALTER TYPE ... ADD VALUE is unsafe with BDR active")));
 			break;
 
 		default:
