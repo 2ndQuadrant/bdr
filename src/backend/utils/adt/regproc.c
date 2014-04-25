@@ -42,7 +42,11 @@
 #include "utils/tqual.h"
 
 static char *format_operator_internal(Oid operator_oid, bool force_qualify);
-static char *format_procedure_internal(Oid procedure_oid, bool force_qualify);
+static char *format_procedure_internal(Oid procedure_oid, bool force_qualify,
+						  bool args_only);
+static void format_procedure_args_internal(Form_pg_proc procform,
+							   StringInfo buf, bool force_qualify);
+
 static void parseNameAndArgTypes(const char *string, bool allowNone,
 					 List **names, int *nargs, Oid *argtypes);
 
@@ -363,13 +367,36 @@ to_regprocedure(PG_FUNCTION_ARGS)
 char *
 format_procedure(Oid procedure_oid)
 {
-	return format_procedure_internal(procedure_oid, false);
+	return format_procedure_internal(procedure_oid, false, false);
 }
 
 char *
 format_procedure_qualified(Oid procedure_oid)
 {
-	return format_procedure_internal(procedure_oid, true);
+	return format_procedure_internal(procedure_oid, true, false);
+}
+
+/*
+ * format_procedure_args	- converts proc OID to "(args)"
+ */
+char *
+format_procedure_args(Oid procedure_oid, bool force_qualify)
+{
+	StringInfoData buf;
+	HeapTuple	proctup;
+	Form_pg_proc procform;
+
+	proctup = SearchSysCache1(PROCOID, ObjectIdGetDatum(procedure_oid));
+	if (!HeapTupleIsValid(proctup))
+		elog(ERROR, "cache lookup failed for procedure %u", procedure_oid);
+	procform = (Form_pg_proc) GETSTRUCT(proctup);
+
+	initStringInfo(&buf);
+	format_procedure_args_internal(procform, &buf, force_qualify);
+
+	ReleaseSysCache(proctup);
+
+	return buf.data;
 }
 
 /*
@@ -380,7 +407,7 @@ format_procedure_qualified(Oid procedure_oid)
  * qualified if the function is not in path.
  */
 static char *
-format_procedure_internal(Oid procedure_oid, bool force_qualify)
+format_procedure_internal(Oid procedure_oid, bool force_qualify, bool args_only)
 {
 	char	   *result;
 	HeapTuple	proctup;
@@ -391,8 +418,6 @@ format_procedure_internal(Oid procedure_oid, bool force_qualify)
 	{
 		Form_pg_proc procform = (Form_pg_proc) GETSTRUCT(proctup);
 		char	   *proname = NameStr(procform->proname);
-		int			nargs = procform->pronargs;
-		int			i;
 		char	   *nspname;
 		StringInfoData buf;
 
@@ -400,29 +425,24 @@ format_procedure_internal(Oid procedure_oid, bool force_qualify)
 
 		initStringInfo(&buf);
 
-		/*
-		 * Would this proc be found (given the right args) by regprocedurein?
-		 * If not, or if caller requests it, we need to qualify it.
-		 */
-		if (!force_qualify && FunctionIsVisible(procedure_oid))
-			nspname = NULL;
-		else
-			nspname = get_namespace_name(procform->pronamespace);
-
-		appendStringInfo(&buf, "%s(",
-						 quote_qualified_identifier(nspname, proname));
-		for (i = 0; i < nargs; i++)
+		if (!args_only)
 		{
-			Oid			thisargtype = procform->proargtypes.values[i];
+			/*
+			 * Would this proc be found (given the right args) by
+			 * regprocedurein?  If not, or if caller requests it, we need to
+			 * qualify it.
+			 */
+			if (!force_qualify && FunctionIsVisible(procedure_oid))
+				nspname = NULL;
+			else
+				nspname = get_namespace_name(procform->pronamespace);
 
-			if (i > 0)
-				appendStringInfoChar(&buf, ',');
-			appendStringInfoString(&buf,
-								   force_qualify ?
-								   format_type_be_qualified(thisargtype) :
-								   format_type_be(thisargtype));
+			appendStringInfo(&buf, "%s",
+							 quote_qualified_identifier(nspname, proname));
 		}
-		appendStringInfoChar(&buf, ')');
+
+		/* add the attributes */
+		format_procedure_args_internal(procform, &buf, force_qualify);
 
 		result = buf.data;
 
@@ -436,6 +456,33 @@ format_procedure_internal(Oid procedure_oid, bool force_qualify)
 	}
 
 	return result;
+}
+
+/*
+ * Append the parenthised arguments of the given pg_proc row into the output
+ * buffer.  force_qualify indicates whether to schema-qualify type names
+ * regardless of visibility.
+ */
+static void
+format_procedure_args_internal(Form_pg_proc procform, StringInfo buf,
+							   bool force_qualify)
+{
+	int			i;
+	int			nargs = procform->pronargs;
+
+	appendStringInfoChar(buf, '(');
+	for (i = 0; i < nargs; i++)
+	{
+		Oid			thisargtype = procform->proargtypes.values[i];
+
+		if (i > 0)
+			appendStringInfoChar(buf, ',');
+		appendStringInfoString(buf,
+							   force_qualify ?
+							   format_type_be_qualified(thisargtype) :
+							   format_type_be(thisargtype));
+	}
+	appendStringInfoChar(buf, ')');
 }
 
 /*
