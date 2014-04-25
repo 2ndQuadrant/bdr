@@ -62,7 +62,7 @@ extern Oid index_create(Relation heapRelation,
 			 bool concurrent,
 			 bool is_internal);
 
-extern void index_constraint_create(Relation heapRelation,
+extern Oid index_constraint_create(Relation heapRelation,
 						Oid indexRelationId,
 						IndexInfo *indexInfo,
 						const char *constraintName,
