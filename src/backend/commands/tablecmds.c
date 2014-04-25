@@ -2359,6 +2359,28 @@ renameatt(RenameStmt *stmt, int *objsubid)
 	return relid;
 }
 
+/*
+ * As above, for composite types; returned OID is that of the pg_type tuple,
+ * not the pg_class entry.
+ */
+Oid
+renameatt_type(RenameStmt *stmt, int *objsubid)
+{
+	Oid		relid;
+	Oid		typid;
+	HeapTuple classTup;
+
+	relid = renameatt(stmt, objsubid);
+
+	classTup = SearchSysCache1(RELOID, relid);
+	if (!HeapTupleIsValid(classTup))
+		elog(ERROR, "cache lookup failed for relation %u", relid);
+
+	typid = ((Form_pg_class) GETSTRUCT(classTup))->reltype;
+	ReleaseSysCache(classTup);
+
+	return typid;
+}
 
 /*
  * same logic as renameatt_internal

@@ -333,8 +333,10 @@ ExecRenameStmt(RenameStmt *stmt, int *objsubid)
 			return RenameRelation(stmt);
 
 		case OBJECT_COLUMN:
-		case OBJECT_ATTRIBUTE:
 			return renameatt(stmt, objsubid);
+
+		case OBJECT_ATTRIBUTE:
+			return renameatt_type(stmt, objsubid);
 
 		case OBJECT_RULE:
 			return RenameRewriteRule(stmt->relation, stmt->subname,
