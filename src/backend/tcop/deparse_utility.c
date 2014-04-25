@@ -834,6 +834,88 @@ deparse_AlterExtensionContentsStmt(Oid objectId, Node *parsetree,
 	return stmt;
 }
 
+static ObjTree *
+deparse_AlterDomainStmt(Oid objectId, Node *parsetree,
+						ObjectAddress constraintAddr)
+{
+	AlterDomainStmt *node = (AlterDomainStmt *) parsetree;
+	HeapTuple	domTup;
+	Form_pg_type domForm;
+	ObjTree	   *alterDom;
+	char	   *fmt;
+
+	/* ALTER DOMAIN DROP CONSTRAINT is handled by the DROP support code */
+	if (node->subtype == 'X')
+		return NULL;
+
+	domTup = SearchSysCache1(TYPEOID, objectId);
+	if (!HeapTupleIsValid(domTup))
+		elog(ERROR, "cache lookup failed for domain with OID %u",
+			 objectId);
+	domForm = (Form_pg_type) GETSTRUCT(domTup);
+
+	switch (node->subtype)
+	{
+		case 'T':
+			/* SET DEFAULT / DROP DEFAULT */
+			if (node->def == NULL)
+				fmt = "ALTER DOMAIN %{identity}D DROP DEFAULT";
+			else
+				fmt = "ALTER DOMAIN %{identity}D SET DEFAULT %{default}s";
+			break;
+		case 'N':
+			/* DROP NOT NULL */
+			fmt = "ALTER DOMAIN %{identity}D DROP NOT NULL";
+			break;
+		case 'O':
+			/* SET NOT NULL */
+			fmt = "ALTER DOMAIN %{identity}D SET NOT NULL";
+			break;
+		case 'C':
+			/* ADD CONSTRAINT.  Only CHECK constraints are supported by domains */
+			fmt = "ALTER DOMAIN %{identity}D ADD CONSTRAINT %{constraint_name}I %{definition}s";
+			break;
+		case 'V':
+			/* VALIDATE CONSTRAINT */
+			fmt = "ALTER DOMAIN %{identity}D VALIDATE CONSTRAINT %{constraint_name}I";
+			break;
+		default:
+			elog(ERROR, "invalid subtype %c", node->subtype);
+	}
+
+	alterDom = new_objtree_VA(fmt, 0);
+	append_object_object(alterDom, "identity",
+						 new_objtree_for_qualname(domForm->typnamespace,
+												  NameStr(domForm->typname)));
+
+	/*
+	 * Process subtype-specific options.  Validating a constraint
+	 * requires its name ...
+	 */
+	if (node->subtype == 'V')
+		append_string_object(alterDom, "constraint_name", node->name);
+
+	/* ... a new constraint has a name and definition ... */
+	if (node->subtype == 'C')
+	{
+		append_string_object(alterDom, "definition",
+							 pg_get_constraintdef_string(constraintAddr.objectId,
+														 false));
+		/* can't rely on node->name here; might not be defined */
+		append_string_object(alterDom, "constraint_name",
+							 get_constraint_name(constraintAddr.objectId));
+	}
+
+	/* ... and setting a default has a definition only. */
+	if (node->subtype == 'T' && node->def != NULL)
+		append_string_object(alterDom, "default", DomainGetDefault(domTup));
+
+	/* done */
+	ReleaseSysCache(domTup);
+
+	return alterDom;
+}
+
 /*
  * deparse_CreateTrigStmt
  *		Deparse a CreateTrigStmt (CREATE TRIGGER)
@@ -1793,6 +1875,59 @@ deparse_CreateRangeStmt(Oid objectId, Node *parsetree)
 	heap_close(pg_range, RowExclusiveLock);
 
 	return range;
+}
+
+static ObjTree *
+deparse_CreateDomain(Oid objectId, Node *parsetree)
+{
+	ObjTree	   *createDomain;
+	ObjTree	   *tmp;
+	HeapTuple	typTup;
+	Form_pg_type typForm;
+	List	   *constraints;
+
+	typTup = SearchSysCache1(TYPEOID,
+							 objectId);
+	if (!HeapTupleIsValid(typTup))
+		elog(ERROR, "cache lookup failed for domain with OID %u", objectId);
+	typForm = (Form_pg_type) GETSTRUCT(typTup);
+
+	createDomain = new_objtree_VA("CREATE DOMAIN %{identity}D AS %{type}T %{not_null}s %{constraints}s %{collation}s",
+								  0);
+
+	append_object_object(createDomain,
+						 "identity",
+						 new_objtree_for_qualname_id(TypeRelationId,
+													 objectId));
+	append_object_object(createDomain,
+						 "type",
+						 new_objtree_for_type(typForm->typbasetype, typForm->typtypmod));
+
+	if (typForm->typnotnull)
+		append_string_object(createDomain, "not_null", "NOT NULL");
+	else
+		append_string_object(createDomain, "not_null", "");
+
+	constraints = obtainConstraints(NIL, InvalidOid, objectId);
+	tmp = new_objtree_VA("%{elements: }s", 0);
+	if (constraints == NIL)
+		append_bool_object(tmp, "present", false);
+	else
+		append_array_object(tmp, "elements", constraints);
+	append_object_object(createDomain, "constraints", tmp);
+
+	tmp = new_objtree_VA("COLLATE %{collation}D", 0);
+	if (OidIsValid(typForm->typcollation))
+		append_object_object(tmp, "collation",
+							 new_objtree_for_qualname_id(CollationRelationId,
+														 typForm->typcollation));
+	else
+		append_bool_object(tmp, "present", false);
+	append_object_object(createDomain, "collation", tmp);
+
+	ReleaseSysCache(typTup);
+
+	return createDomain;
 }
 
 /*
@@ -2827,7 +2962,8 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_AlterDomainStmt:
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			command = deparse_AlterDomainStmt(objectId, parsetree,
+											  cmd->d.simple.secondaryObject);
 			break;
 
 			/* other local objects */
@@ -2944,7 +3080,7 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_CreateDomainStmt:
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			command = deparse_CreateDomain(objectId, parsetree);
 			break;
 
 		case T_CreateConversionStmt:
