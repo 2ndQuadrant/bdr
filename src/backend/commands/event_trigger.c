@@ -57,6 +57,7 @@ typedef struct EventTriggerQueryState
 	int			table_rewrite_reason;	/* AT_REWRITE reason */
 
 	MemoryContext cxt;
+	StashedCommand *curcmd;
 	List	   *stash;		/* list of StashedCommand; see deparse_utility.h */
 	struct EventTriggerQueryState *previous;
 } EventTriggerQueryState;
@@ -1214,6 +1215,7 @@ EventTriggerBeginCompleteQuery(void)
 	slist_init(&(state->SQLDropList));
 	state->in_sql_drop = false;
 	state->table_rewrite_oid = InvalidOid;
+	state->curcmd = NULL;
 	state->stash = NIL;
 	state->previous = currentEventTriggerState;
 	currentEventTriggerState = state;
@@ -1578,6 +1580,138 @@ EventTriggerStashCommand(ObjectAddress address, ObjectAddress *secondaryObject,
 	MemoryContextSwitchTo(oldcxt);
 }
 
+/*
+ * EventTriggerStartRecordingSubcmds
+ *		Prepare to receive data on a complex DDL command about to be executed
+ *
+ * Note we don't actually stash the object we create here into the "stashed"
+ * list; instead we keep it in curcmd, and only when we're done processing the
+ * subcommands we will add it to the actual stash.
+ *
+ * XXX -- this API isn't considering the possibility of an ALTER TABLE command
+ * being called reentrantly by an event trigger function.  Do we need stackable
+ * commands at this level?  Perhaps at least we should detect the condition and
+ * raise an error.
+ */
+void
+EventTriggerComplexCmdStart(Node *parsetree, ObjectType objtype)
+{
+	MemoryContext	oldcxt;
+	StashedCommand *stashed;
+
+	oldcxt = MemoryContextSwitchTo(currentEventTriggerState->cxt);
+
+	stashed = palloc(sizeof(StashedCommand));
+
+	stashed->type = SCT_AlterTable;
+	stashed->in_extension = creating_extension;
+
+	stashed->d.alterTable.objectId = InvalidOid;
+	stashed->d.alterTable.objtype = objtype;
+	stashed->d.alterTable.subcmds = NIL;
+	stashed->parsetree = copyObject(parsetree);
+
+	currentEventTriggerState->curcmd = stashed;
+
+	MemoryContextSwitchTo(oldcxt);
+}
+
+/*
+ * Remember the OID of the object being affected by a complex command.
+ *
+ * This is needed because in some cases we don't know the OID until later.
+ */
+void
+EventTriggerComplexCmdSetOid(Oid objectId)
+{
+	/*
+	 * When processing an ALTER TYPE command, the given objectId is the one
+	 * found on pg_class for the composite type; we translate it to the
+	 * corresponding pg_type OID so that it can be properly be considered the
+	 * object's canonical objectId.
+	 */
+	if (currentEventTriggerState->curcmd->d.alterTable.objtype == OBJECT_TYPE)
+	{
+		HeapTuple	relTup;
+		Form_pg_class relForm;
+
+		relTup = SearchSysCache1(RELOID, objectId);
+		if (!HeapTupleIsValid(relTup))
+			elog(ERROR, "cache lookup failed for relation %u", objectId);
+		relForm = (Form_pg_class) GETSTRUCT(relTup);
+		Assert(relForm->relkind == RELKIND_COMPOSITE_TYPE);
+		objectId = relForm->reltype;
+		ReleaseSysCache(relTup);
+	}
+
+	currentEventTriggerState->curcmd->d.alterTable.objectId = objectId;
+}
+
+/*
+ * EventTriggerRecordSubcmd
+ * 		Save data about a single part of a complex DDL command
+ *
+ * Several different commands go through this path, but apart from ALTER TABLE
+ * itself, they are all concerned with AlterTableCmd nodes that are generated
+ * internally, so that's all that this code needs to handle at the moment.
+ */
+void
+EventTriggerRecordSubcmd(Node *subcmd, Oid relid, AttrNumber attnum,
+						 Oid newoid)
+{
+	MemoryContext	oldcxt;
+	StashedATSubcmd *newsub;
+
+	Assert(IsA(subcmd, AlterTableCmd));
+	Assert(OidIsValid(currentEventTriggerState->curcmd->d.alterTable.objectId));
+
+	/*
+	 * If we receive a subcommand intended for a relation other than the one
+	 * we've started the complex command for, ignore it.  This is chiefly
+	 * concerned with inheritance situations: in such cases, alter table
+	 * would dispatch multiple copies of the same command for various things,
+	 * but we're only concerned with the one for the main table.
+	 */
+	if (relid != currentEventTriggerState->curcmd->d.alterTable.objectId)
+		return;
+
+	oldcxt = MemoryContextSwitchTo(currentEventTriggerState->cxt);
+
+	newsub = palloc(sizeof(StashedATSubcmd));
+	newsub->attnum = attnum;
+	newsub->oid = newoid;
+	newsub->parsetree = copyObject(subcmd);
+
+	currentEventTriggerState->curcmd->d.alterTable.subcmds =
+		lappend(currentEventTriggerState->curcmd->d.alterTable.subcmds, newsub);
+
+	MemoryContextSwitchTo(oldcxt);
+}
+
+/*
+ * EventTriggerEndRecordingSubcmds
+ * 		Finish up saving a complex DDL command
+ *
+ * FIXME this API isn't considering the possibility that a xact/subxact is
+ * aborted partway through.  Probably it's best to add an
+ * AtEOSubXact_EventTriggers() to fix this.
+ */
+void
+EventTriggerComplexCmdEnd(void)
+{
+	/* If no subcommands, don't stash anything */
+	if (list_length(currentEventTriggerState->curcmd->d.alterTable.subcmds) != 0)
+	{
+		currentEventTriggerState->stash =
+			lappend(currentEventTriggerState->stash,
+					currentEventTriggerState->curcmd);
+	}
+	else
+		pfree(currentEventTriggerState->curcmd);
+
+	currentEventTriggerState->curcmd = NULL;
+}
+
 Datum
 pg_event_trigger_get_creation_commands(PG_FUNCTION_ARGS)
 {
@@ -1657,7 +1791,8 @@ pg_event_trigger_get_creation_commands(PG_FUNCTION_ARGS)
 
 			MemSet(nulls, 0, sizeof(nulls));
 
-			if (cmd->type == SCT_Simple)
+			if (cmd->type == SCT_Simple ||
+				cmd->type == SCT_AlterTable)
 			{
 				const char *tag;
 				char	   *identity;
@@ -1666,6 +1801,10 @@ pg_event_trigger_get_creation_commands(PG_FUNCTION_ARGS)
 
 				if (cmd->type == SCT_Simple)
 					addr = cmd->d.simple.address;
+				else if (cmd->type == SCT_AlterTable)
+					ObjectAddressSet(addr,
+							 		 get_objtype_catalog_oid(cmd->d.alterTable.objtype),
+							 		 cmd->d.alterTable.objectId);
 
 				tag = CreateCommandTag(cmd->parsetree);
 

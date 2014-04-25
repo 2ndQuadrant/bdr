@@ -62,5 +62,10 @@ extern void EventTriggerSQLDropAddObject(const ObjectAddress *object,
 
 extern void EventTriggerStashCommand(ObjectAddress address,
 						 ObjectAddress *secondaryObject, Node *parsetree);
+extern void EventTriggerComplexCmdStart(Node *parsetree, ObjectType objtype);
+extern void EventTriggerComplexCmdSetOid(Oid objectId);
+extern void EventTriggerRecordSubcmd(Node *subcmd, Oid relid,
+						 AttrNumber attnum, Oid newoid);
+extern void EventTriggerComplexCmdEnd(void);
 
 #endif   /* EVENT_TRIGGER_H */
