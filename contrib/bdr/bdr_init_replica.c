@@ -70,20 +70,23 @@ find_init_replica_worker(Name dbname)
 	/* Check whether one of our connections has init_replica set */
 	for (off = 0; off < bdr_max_workers; off++)
 	{
-		if (BdrWorkerCtl->slots[off].worker_type == BDR_WORKER_APPLY)
+		BdrApplyWorker *aw;
+
+		if (BdrWorkerCtl->slots[off].worker_type != BDR_WORKER_APPLY)
+			continue;
+
+		aw = &BdrWorkerCtl->slots[off].worker_data.apply_worker;
+
+		if (strcmp(NameStr(aw->dbname), NameStr(*dbname)) == 0)
 		{
-			BdrApplyWorker *aw = &BdrWorkerCtl->slots[off].worker_data.apply_worker;
-			if (strcmp(NameStr(aw->dbname), NameStr(*dbname)) == 0)
-			{
-				const char *init_replica_str;
-				bool init_replica = false;
-				init_replica_str = bdr_get_worker_option(NameStr(aw->name),
-														 "init_replica", true);
-				if (init_replica_str
-					&& parse_bool(init_replica_str, &init_replica)
-					&& init_replica)
-					return &BdrWorkerCtl->slots[off];
-			}
+			const char *init_replica_str;
+			bool init_replica = false;
+			init_replica_str = bdr_get_worker_option(NameStr(aw->name),
+													 "init_replica", true);
+			if (init_replica_str
+				&& parse_bool(init_replica_str, &init_replica)
+				&& init_replica)
+				return &BdrWorkerCtl->slots[off];
 		}
 	}
 	return NULL;
@@ -106,13 +109,16 @@ bdr_get_remote_status(PGconn *pgconn, Name dbname)
 
 	initStringInfo(&query);
 
-	PQescapeStringConn(pgconn, &escaped_dbname[0], NameStr(*dbname), NAMEDATALEN, &escape_error);
+	PQescapeStringConn(pgconn, &escaped_dbname[0], NameStr(*dbname),
+					   NAMEDATALEN, &escape_error);
 	if (escape_error)
 		elog(FATAL, "Failed to escape local dbname %s: %s",
 			 NameStr(*dbname), PQerrorMessage(pgconn));
 
 	appendStringInfo(&query,
-					 "SELECT node_status FROM bdr.bdr_nodes WHERE node_sysid = " UINT64_FORMAT " AND node_dbname = '%s' FOR UPDATE",
+					 "SELECT node_status FROM bdr.bdr_nodes"
+					 "WHERE node_sysid = " UINT64_FORMAT
+					 "    AND node_dbname = '%s' FOR UPDATE",
 					 GetSystemIdentifier(), escaped_dbname);
 	res = PQexec(pgconn, query.data);
 	if (PQresultStatus(res) != PGRES_TUPLES_OK)
@@ -146,7 +152,8 @@ bdr_get_remote_status(PGconn *pgconn, Name dbname)
  * a group of BDR nodes.
  */
 static char
-bdr_set_remote_status(PGconn *pgconn, Name dbname, const char status, const char prev_status)
+bdr_set_remote_status(PGconn *pgconn, Name dbname,
+					  const char status, const char prev_status)
 {
 	PGresult *res;
 	char	*status_str;
@@ -161,7 +168,8 @@ bdr_set_remote_status(PGconn *pgconn, Name dbname, const char status, const char
 		/* No action required (we could check the remote, but meh) */
 		return status;
 
-	PQescapeStringConn(pgconn, &escaped_dbname[0], NameStr(*dbname), NAMEDATALEN, &escape_error);
+	PQescapeStringConn(pgconn, &escaped_dbname[0],
+					   NameStr(*dbname), NAMEDATALEN, &escape_error);
 	if (escape_error)
 		elog(FATAL, "Failed to escape local dbname %s: %s",
 			 NameStr(*dbname), PQerrorMessage(pgconn));
@@ -187,7 +195,10 @@ bdr_set_remote_status(PGconn *pgconn, Name dbname, const char status, const char
 		}
 		if (PQntuples(res) == 0)
 		{
-			/* If prev_status was '\0' we wouldn't be here, so we should've got a returned value */
+			/*
+			 * If prev_status was '\0' we wouldn't be here, so we should've
+			 * got a returned value.
+			 */
 			elog(FATAL, "bdr %s: bdr.bdr_nodes row for node_sysid="
 				 UINT64_FORMAT
 				 ", dbname='%s' missing, expected row with status=%c",
@@ -202,7 +213,8 @@ bdr_set_remote_status(PGconn *pgconn, Name dbname, const char status, const char
 			elog(FATAL, "bdr %s: bdr.bdr_nodes row for node_sysid="
 				 UINT64_FORMAT
 				 ", dbname='%s' had status=%c, expected status=%c",
-				 NameStr(*dbname), sysid, escaped_dbname, (int)new_status, (int)prev_status);
+				 NameStr(*dbname), sysid, escaped_dbname,
+				 (int) new_status, (int) prev_status);
 		}
 
 		PQclear(res);
@@ -258,7 +270,9 @@ bdr_set_remote_status(PGconn *pgconn, Name dbname, const char status, const char
 			PQclear(res);
 			resetStringInfo(&query);
 			appendStringInfo(&query,
-							 "INSERT INTO bdr.bdr_nodes (node_sysid, node_dbname, node_status) VALUES (" UINT64_FORMAT ", '%s', '%c');",
+							 "INSERT INTO bdr.bdr_nodes"
+							 "    (node_sysid, node_dbname, node_status)"
+							 "    VALUES (" UINT64_FORMAT ", '%s', '%c');",
 							 sysid, escaped_dbname, (int)status);
 			res = PQexec(pgconn, query.data);
 
@@ -303,15 +317,15 @@ bdr_get_remote_lsn(PGconn *conn)
 	/* TODO: Less ugly way to do this */
 	lsn = (XLogRecPtr) strtoul(lsn_str, &lsn_str_end, 10);
 	if (*lsn_str_end != '\0')
-		elog(ERROR, "Unable to parse remote LSN value %s as unsigned long int", lsn_str);
+		elog(ERROR, "Unable to parse remote LSN value %s as unsigned long int",
+			 lsn_str);
 	PQclear(res);
 	return lsn;
 }
 
 /*
- * Make sure the bdr extension is installed on the other end. If it's
- * a known extension but not present in the current DB, try to CREATE EXTENSION
- * it.
+ * Make sure the bdr extension is installed on the other end. If it's a known
+ * extension but not present in the current DB, try to CREATE EXTENSION it.
  */
 static void
 bdr_ensure_ext_installed(PGconn *pgconn, Name bdr_conn_name)
@@ -381,8 +395,9 @@ bdr_ensure_ext_installed(PGconn *pgconn, Name bdr_conn_name)
 /*
  * Delete a replication identifier.
  *
- * This should really be in the replication identifier support code in changeset extraction,
- * as DeleteReplicationIdentifier or DropReplicationIdentifier.
+ * This should really be in the replication identifier support code in
+ * changeset extraction, as DeleteReplicationIdentifier or
+ * DropReplicationIdentifier.
  *
  * If no matching identifier is found, takes no action.
  */
@@ -429,7 +444,7 @@ bdr_drop_slot_and_replication_identifier(Name connection_name, Name dbname)
 	RepNodeId   replication_identifier;
 	NameData	slot_name;
 	TimeLineID  timeline;
-	uint64 		sysid;
+	uint64		sysid;
 	PGresult   *res;
 	StringInfoData query;
 	char	   *sqlstate;
@@ -486,7 +501,8 @@ bdr_drop_slot_and_replication_identifier(Name connection_name, Name dbname)
 		{
 			ereport(ERROR,
 					(errmsg("'DROP_REPLICATION_SLOT %s' on bdr connection %s failed with sqlstate %s: %s",
-					 NameStr(slot_name), NameStr(*connection_name), sqlstate, PQresultErrorMessage(res))));
+							NameStr(slot_name), NameStr(*connection_name),
+							sqlstate,PQresultErrorMessage(res))));
 		}
 		else
 		{
@@ -727,7 +743,8 @@ bdr_init_replica(Name dbname)
 	{
 		ereport(FATAL,
 				(errmsg("bdr %s: could not connect to the upstream server in non-replication mode: %s",
-						NameStr(*dbname), PQerrorMessage(nonrepl_init_conn))));
+						NameStr(*dbname),
+						PQerrorMessage(nonrepl_init_conn))));
 	}
 
 	bdr_ensure_ext_installed(nonrepl_init_conn, dbname);
@@ -739,13 +756,14 @@ bdr_init_replica(Name dbname)
 	switch (status)
 	{
 		case '\0':
-			elog(DEBUG2, "bdr %s: initializing from clean state", NameStr(*dbname));
+			elog(DEBUG2, "bdr %s: initializing from clean state",
+				 NameStr(*dbname));
 			break;
 
 		case 'r':
 			/*
-			 * Init has been completed, but we didn't check our local bdr.bdr_nodes,
-			 * or the final update hasn't propagated yet.
+			 * Init has been completed, but we didn't check our local
+			 * bdr.bdr_nodes, or the final update hasn't propagated yet.
 			 *
 			 * All we need to do is catch up, we already replayed enough to be
 			 * consistent and start up in normal mode last time around
@@ -756,14 +774,16 @@ bdr_init_replica(Name dbname)
 
 		case 'c':
 			/*
-			 * We were in catchup mode when we died. We need to resume catchup mode
-			 * up to the expected LSN before switching over.
+			 * We were in catchup mode when we died. We need to resume catchup
+			 * mode up to the expected LSN before switching over.
 			 *
 			 * To do that all we need to do is fall through without doing any
-			 * slot re-creation, dump/apply, etc, and pick up when we do catchup.
+			 * slot re-creation, dump/apply, etc, and pick up when we do
+			 * catchup.
 			 *
-			 * We won't know what the original catchup target point is, but we can
-			 * just catch up to whatever xlog position the server is currently at.
+			 * We won't know what the original catchup target point is, but we
+			 * can just catch up to whatever xlog position the server is
+			 * currently at.
 			 */
 			elog(DEBUG2, "bdr %s: dump applied, need to continue catchup",
 				 NameStr(*dbname));
@@ -771,21 +791,23 @@ bdr_init_replica(Name dbname)
 
 		case 'i':
 			/*
-			 * A previous init attempt seems to have failed. Clean up, then fall through
-			 * to start setup again.
+			 * A previous init attempt seems to have failed. Clean up, then
+			 * fall through to start setup again.
 			 *
-			 * We can't just re-use the slot and replication identifier that were created
-			 * last time (if they were), because we have no way of getting the slot's exported
-			 * snapshot after CREATE_REPLICATION_SLOT.
+			 * We can't just re-use the slot and replication identifier that
+			 * were created last time (if they were), because we have no way
+			 * of getting the slot's exported snapshot after
+			 * CREATE_REPLICATION_SLOT.
 			 */
 			elog(DEBUG2, "bdr %s: previous failed initalization detected, cleaning up",
 				 NameStr(*dbname));
 			bdr_drop_slot_and_replication_identifier(init_conn_name, dbname);
-			status = bdr_set_remote_status(nonrepl_init_conn, dbname, '\0', status);
+			status = bdr_set_remote_status(nonrepl_init_conn, dbname,
+										   '\0', status);
 			break;
 
 		default:
-			Assert(false); // Unhandled case
+			elog(ERROR, "unreachable"); // Unhandled case
 			break;
 	}
 
@@ -799,19 +821,27 @@ bdr_init_replica(Name dbname)
 
 		elog(LOG, "bdr %s: initializing from remote db", NameStr(*dbname));
 
-		/* We're starting from scratch or have cleaned up a previous failed attempt */
-		status = bdr_set_remote_status(nonrepl_init_conn, dbname, 'i', status);
+		/*
+		 * We're starting from scratch or have cleaned up a previous failed
+		 * attempt.
+		 */
+		status = bdr_set_remote_status(nonrepl_init_conn, dbname,
+									   'i', status);
 
 		my_conn_idxs = (int*)palloc(sizeof(Size) * bdr_max_workers);
 
-		/*
-		 * Collect a list of connections to make slots for.
-		 */
+		/* Collect a list of connections to make slots for. */
 		LWLockAcquire(BdrWorkerCtl->lock, LW_SHARED);
 		for (off = 0; off < bdr_max_workers; off++)
-			if (BdrWorkerCtl->slots[off].worker_type == BDR_WORKER_APPLY
-				&& (strcmp(NameStr(BdrWorkerCtl->slots[off].worker_data.apply_worker.dbname), NameStr(*dbname)) == 0))
+		{
+			BdrWorker *worker = &BdrWorkerCtl->slots[off];
+			const char *worker_name =
+				NameStr(worker->worker_data.apply_worker.dbname);
+
+			if (worker->worker_type == BDR_WORKER_APPLY
+				&& strcmp(worker_name, NameStr(*dbname)) == 0)
 				my_conn_idxs[n_conns++] = off;
+		}
 		LWLockRelease(BdrWorkerCtl->lock);
 
 		elog(DEBUG2, "bdr %s: creating slots for %d nodes",
@@ -820,11 +850,12 @@ bdr_init_replica(Name dbname)
 		/*
 		 * For each connection, ensure its slot exists.
 		 *
-		 * Do it one by one rather than fiddling with async libpq queries. If this
-		 * needs to be parallelized later, it should probably be done by launching
-		 * each apply worker and letting them create their own slots, then having
-		 * them wait until signalled/unlatched before proceeding with actual
-		 * replication. That'll save us another round of connections too.
+		 * Do it one by one rather than fiddling with async libpq queries. If
+		 * this needs to be parallelized later, it should probably be done by
+		 * launching each apply worker and letting them create their own
+		 * slots, then having them wait until signalled/unlatched before
+		 * proceeding with actual replication. That'll save us another round
+		 * of connections too.
 		 *
 		 * We don't attempt any cleanup if slot creation fails, we just bail out
 		 * and leave any already-created slots in place.
@@ -847,7 +878,10 @@ bdr_init_replica(Name dbname)
 			 * are all discarded; they're not needed here, and will be obtained
 			 * again by the apply workers when they're launched after init.
 			 */
-			conn = bdr_establish_connection_and_slot(&w->worker_data.apply_worker.name, &slot_name, &sysid, &timeline, &replication_identifier, &snapshot);
+			conn = bdr_establish_connection_and_slot(
+				&w->worker_data.apply_worker.name, &slot_name,
+				&sysid, &timeline, &replication_identifier, &snapshot);
+
 			/* Always throws rather than returning failure */
 			Assert(conn);
 
@@ -871,8 +905,9 @@ bdr_init_replica(Name dbname)
 			else
 			{
 				/*
-				 * Just throw the returned info away; we only needed to create the slot
-				 * so its replication identifier can be advanced during catchup.
+				 * Just throw the returned info away; we only needed to create
+				 * the slot so its replication identifier can be advanced
+				 * during catchup.
 				 */
 				if (snapshot)
 					pfree(snapshot);
@@ -958,8 +993,11 @@ bdr_catchup_to_lsn(PGconn *conn, Name dbname, Name conn_name, XLogRecPtr target_
 	/* Create the shm entry for the catchup worker */
 	LWLockAcquire(BdrWorkerCtl->lock, LW_SHARED);
 	for (worker_shmem_idx = 0; worker_shmem_idx < bdr_max_workers; worker_shmem_idx++)
-		if (BdrWorkerCtl->slots[worker_shmem_idx].worker_type == BDR_WORKER_EMPTY_SLOT)
+	{
+		BdrWorker *worker = &BdrWorkerCtl->slots[worker_shmem_idx];
+		if (worker->worker_type == BDR_WORKER_EMPTY_SLOT)
 			break;
+	}
 	if (worker_shmem_idx == bdr_max_workers)
 	{
 		LWLockRelease(BdrWorkerCtl->lock);
@@ -1012,7 +1050,7 @@ bdr_catchup_to_lsn(PGconn *conn, Name dbname, Name conn_name, XLogRecPtr target_
 		snprintf(bgw.bgw_name, BGW_MAXLEN,
 				 "bdr %s: catchup apply to %X/%X on %s",
 				 NameStr(*dbname),
-				 (uint32)(target_lsn>>32), (uint32)target_lsn,
+				 (uint32)(target_lsn >> 32), (uint32)target_lsn,
 				 NameStr(*conn_name));
 		bgw.bgw_name[BGW_MAXLEN-1] = '\0';
 
@@ -1023,9 +1061,9 @@ bdr_catchup_to_lsn(PGconn *conn, Name dbname, Name conn_name, XLogRecPtr target_
 
 		/*
 		 * Sleep on our latch until we're woken by SIGUSR1 on bgworker state
-		 * change, or by timeout. (We need a timeout because there's a race between
-		 * bgworker start and our setting the latch; if it starts and dies again
-		 * quickly we'll miss it and sleep forever w/o a timeout).
+		 * change, or by timeout. (We need a timeout because there's a race
+		 * between bgworker start and our setting the latch; if it starts and
+		 * dies again quickly we'll miss it and sleep forever w/o a timeout).
 		 */
 		while (bgw_status == BGWH_STARTED && bgw_pid == prev_bgw_pid)
 		{
@@ -1065,10 +1103,11 @@ bdr_catchup_to_lsn(PGconn *conn, Name dbname, Name conn_name, XLogRecPtr target_
 		pfree(bgw_handle);
 
 		/*
-		 * Stopped doesn't mean *successful*. The worker might've errored out. We
-		 * have no way of getting its exit status, so we have to rely on it setting
-		 * something in shmem on successful exit. In this case it will set
-		 * replay_stop_lsn to InvalidXLogRecPtr to indicate that replay is done.
+		 * Stopped doesn't mean *successful*. The worker might've errored
+		 * out. We have no way of getting its exit status, so we have to rely
+		 * on it setting something in shmem on successful exit. In this case
+		 * it will set replay_stop_lsn to InvalidXLogRecPtr to indicate that
+		 * replay is done.
 		 */
 		if (catchup_worker->replay_stop_lsn != InvalidXLogRecPtr)
 		{
