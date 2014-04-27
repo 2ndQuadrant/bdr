@@ -16,22 +16,15 @@
 
 #include "bdr.h"
 
-/* These are always necessary for a bgworker */
+#include "funcapi.h"
+#include "libpq-fe.h"
 #include "miscadmin.h"
-#include "postmaster/bgworker.h"
-#include "storage/ipc.h"
-#include "storage/latch.h"
-#include "storage/lwlock.h"
-#include "storage/proc.h"
-#include "storage/shmem.h"
-
 #include "pgstat.h"
 
 #include "access/committs.h"
 #include "access/heapam.h"
 #include "access/htup_details.h"
 #include "access/relscan.h"
-#include "access/sysattr.h"
 #include "access/xact.h"
 
 #include "catalog/dependency.h"
@@ -39,15 +32,9 @@
 #include "catalog/namespace.h"
 #include "catalog/pg_type.h"
 
-#include "executor/spi.h"
 #include "executor/executor.h"
 
-#include "funcapi.h"
-
 #include "libpq/pqformat.h"
-#include "libpq-fe.h"
-
-#include "miscadmin.h"
 
 #include "parser/parse_relation.h"
 #include "parser/parse_type.h"
@@ -57,6 +44,7 @@
 
 #include "storage/bufmgr.h"
 #include "storage/lmgr.h"
+#include "storage/lwlock.h"
 
 #include "tcop/pquery.h"
 #include "tcop/tcopprot.h"

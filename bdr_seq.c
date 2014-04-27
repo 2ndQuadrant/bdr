@@ -16,21 +16,25 @@
 
 #include "bdr.h"
 
-/* sequencer */
 #include "miscadmin.h"
 #include "pgstat.h"
 
 #include "access/reloptions.h"
-#include "access/transam.h"
 #include "access/seqam.h"
+#include "access/transam.h"
 #include "access/xact.h"
-#include "catalog/pg_type.h"
+
 #include "catalog/namespace.h"
+#include "catalog/pg_type.h"
+
 #include "commands/sequence.h"
+
 #include "executor/spi.h"
+
 #include "utils/builtins.h"
-#include "utils/snapmgr.h"
 #include "utils/lsyscache.h"
+#include "utils/snapmgr.h"
+
 #include "storage/bufmgr.h"
 #include "storage/ipc.h"
 #include "storage/latch.h"
