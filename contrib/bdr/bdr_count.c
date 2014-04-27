@@ -27,8 +27,8 @@
 
 #include "storage/fd.h"
 #include "storage/ipc.h"
-#include "storage/spin.h"
 #include "storage/lwlock.h"
+#include "storage/spin.h"
 
 #include "utils/builtins.h"
 #include "utils/syscache.h"

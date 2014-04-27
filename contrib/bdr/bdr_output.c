@@ -12,15 +12,15 @@
  */
 #include "postgres.h"
 
+#include "bdr.h"
+
 #include "access/sysattr.h"
 #include "access/tuptoaster.h"
 
-#include "bdr.h"
-
+#include "catalog/index.h"
 #include "catalog/pg_class.h"
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_type.h"
-#include "catalog/index.h"
 
 #include "libpq/pqformat.h"
 
@@ -28,14 +28,13 @@
 
 #include "nodes/parsenodes.h"
 
-#include "replication/output_plugin.h"
 #include "replication/logical.h"
+#include "replication/output_plugin.h"
 
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
-#include "utils/relcache.h"
 #include "utils/syscache.h"
 #include "utils/timestamp.h"
 #include "utils/typcache.h"
