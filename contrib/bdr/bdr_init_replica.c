@@ -16,38 +16,36 @@
  */
 #include "postgres.h"
 
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <sys/errno.h>
+#include <sys/stat.h>
+
 #include "bdr.h"
 
-/* These are always necessary for a bgworker */
+#include "libpq-fe.h"
 #include "miscadmin.h"
+
+#include "libpq/pqformat.h"
+
+#include "access/heapam.h"
+#include "access/xact.h"
+
+#include "replication/replication_identifier.h"
+#include "replication/walreceiver.h"
+
 #include "postmaster/bgworker.h"
+#include "postmaster/bgwriter.h"
+
 #include "storage/ipc.h"
 #include "storage/latch.h"
 #include "storage/lwlock.h"
 #include "storage/proc.h"
 #include "storage/shmem.h"
 
-#include "libpq/pqformat.h"
-#include "libpq-fe.h"
-
-#include "access/heapam.h"
-#include "access/xact.h"
-
-#include "replication/walreceiver.h"
-#include "replication/replication_identifier.h"
-
-#include "postmaster/bgwriter.h"
-
 #include "utils/builtins.h"
 #include "utils/syscache.h"
-
-/* bdr_init_replica */
-#include <unistd.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <sys/errno.h>
-#include <sys/stat.h>
-#include "postmaster/postmaster.h"
 
 char *bdr_temp_dump_directory = NULL;
 
