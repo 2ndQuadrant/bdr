@@ -16,10 +16,10 @@
  */
 #include "postgres.h"
 
+#include <errno.h>
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <sys/errno.h>
 #include <sys/stat.h>
 
 #include "bdr.h"
