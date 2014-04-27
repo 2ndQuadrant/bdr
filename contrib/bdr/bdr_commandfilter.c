@@ -13,13 +13,18 @@
  */
 #include "postgres.h"
 
-#include "access/heapam.h"
 #include "bdr.h"
-#include "catalog/namespace.h"
-#include "commands/dbcommands.h"
+
 #include "fmgr.h"
-#include "miscadmin.h"
+
+#include "access/heapam.h"
+
+#include "catalog/namespace.h"
+
+#include "commands/dbcommands.h"
+
 #include "tcop/utility.h"
+
 #include "utils/guc.h"
 #include "utils/rel.h"
 

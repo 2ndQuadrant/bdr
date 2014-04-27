@@ -16,32 +16,37 @@
 
 #include "bdr.h"
 
-/* These are always necessary for a bgworker */
+#include "libpq-fe.h"
 #include "miscadmin.h"
+#include "pgstat.h"
+#include "port.h"
+
+#include "access/committs.h"
+#include "access/heapam.h"
+#include "access/xact.h"
+
+#include "catalog/catversion.h"
+#include "catalog/namespace.h"
+#include "catalog/pg_extension.h"
+
+#include "commands/extension.h"
+
+#include "lib/stringinfo.h"
+
+#include "libpq/pqformat.h"
+
+#include "mb/pg_wchar.h"
+
 #include "postmaster/bgworker.h"
+
+#include "replication/replication_identifier.h"
+
 #include "storage/ipc.h"
 #include "storage/latch.h"
 #include "storage/lwlock.h"
 #include "storage/proc.h"
 #include "storage/shmem.h"
 
-/* these headers are used by this particular worker's code */
-#include "pgstat.h"
-
-#include "port.h"
-#include "access/committs.h"
-#include "access/heapam.h"
-#include "access/xact.h"
-#include "catalog/namespace.h"
-#include "catalog/pg_extension.h"
-#include "catalog/pg_index.h"
-#include "catalog/catversion.h"
-#include "commands/extension.h"
-#include "lib/stringinfo.h"
-#include "libpq/pqformat.h"
-#include "mb/pg_wchar.h"
-#include "postmaster/bgwriter.h"
-#include "replication/replication_identifier.h"
 #include "utils/builtins.h"
 #include "utils/guc.h"
 #include "utils/lsyscache.h"
@@ -49,13 +54,6 @@
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
 #include "utils/timestamp.h"
-
-/* sequencer */
-#include "commands/extension.h"
-
-/* apply */
-#include "libpq-fe.h"
-
 
 #define MAXCONNINFO		1024
 
