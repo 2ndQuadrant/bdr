@@ -189,6 +189,12 @@ BEGIN
     IF pg_replication_identifier_is_replaying() THEN
        RETURN;
     END IF;
+    IF current_setting('bdr.skip_ddl_replication')::boolean THEN
+        -- If we're doing a pg_restore from a remote BDR node's
+        -- state, we must not create truncate triggers etc because
+        -- they'll get copied over in the dump.
+        RETURN;
+    END IF;
 
     FOR r IN SELECT * FROM pg_event_trigger_get_creation_commands()
     LOOP
