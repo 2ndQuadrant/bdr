@@ -70,6 +70,7 @@ static char *connections = NULL;
 static char *bdr_synchronous_commit = NULL;
 int bdr_default_apply_delay;
 int bdr_max_workers;
+static bool bdr_skip_ddl_replication;
 
 /* TODO: Remove when bdr_apply_main moved into bdr_apply.c */
 extern BdrApplyWorker *bdr_apply_worker;
@@ -1443,6 +1444,15 @@ _PG_init(void)
 							   "/tmp", PGC_SIGHUP,
 							   0,
 							   NULL, NULL, NULL);
+
+	DefineCustomBoolVariable("bdr.skip_ddl_replication",
+							 "Internal. Set during local restore during init_replica only",
+							 NULL,
+							 &bdr_skip_ddl_replication,
+							 false,
+							 PGC_BACKEND,
+							 0,
+							 NULL, NULL, NULL);
 
 	/* if nothing is configured, we're done */
 	if (connections == NULL)

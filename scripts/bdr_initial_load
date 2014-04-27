@@ -65,7 +65,7 @@ if ! pg_dump -j $JOBS $SNAP -F d -f $TMPDIR "$SOURCE"; then
 fi
 
 echo "Restoring dump to local DB \"$TARGET\" with $JOBS concurrent workers from \"$TMPDIR\""
-if ! PGOPTIONS="-c bdr.permit_unsafe_ddl_commands=true" pg_restore --exit-on-error --single-transaction -j $JOBS -F d -d "$TARGET" $TMPDIR; then
+if ! PGOPTIONS="-c bdr.permit_unsafe_ddl_commands=true -c bdr.skip_ddl_replication=true" pg_restore --exit-on-error --single-transaction -j $JOBS -F d -d "$TARGET" $TMPDIR; then
     echo "pg_restore to "$TARGET" failed, aborting"
     exit 2
 fi
