@@ -2865,7 +2865,8 @@ getObjectIdentityParts(const ObjectAddress *object,
 		case OCLASS_PROC:
 			appendStringInfoString(&buffer,
 							   format_procedure_qualified(object->objectId));
-			format_procedure_parts(object->objectId, objname, objargs);
+			if (objname)
+				format_procedure_parts(object->objectId, objname, objargs);
 			break;
 
 		case OCLASS_TYPE:
@@ -2899,8 +2900,9 @@ getObjectIdentityParts(const ObjectAddress *object,
 							  format_type_be_qualified(castForm->castsource),
 							 format_type_be_qualified(castForm->casttarget));
 
-				*objname = list_make2(format_type_be_qualified(castForm->castsource),
-									  format_type_be_qualified(castForm->casttarget));
+				if (objname)
+					*objname = list_make2(format_type_be_qualified(castForm->castsource),
+										  format_type_be_qualified(castForm->casttarget));
 
 				heap_close(castRel, AccessShareLock);
 				break;
@@ -3056,7 +3058,8 @@ getObjectIdentityParts(const ObjectAddress *object,
 		case OCLASS_OPERATOR:
 			appendStringInfoString(&buffer,
 								format_operator_qualified(object->objectId));
-			format_operator_parts(object->objectId, objname, objargs);
+			if (objname)
+				format_operator_parts(object->objectId, objname, objargs);
 			break;
 
 		case OCLASS_OPCLASS:
