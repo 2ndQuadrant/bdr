@@ -170,8 +170,8 @@ extern int  bdr_node_count(void);
 extern void bdr_sequencer_wakeup(void);
 extern void bdr_schedule_eoxact_sequencer_wakeup(void);
 
-extern void bdr_sequence_alloc(PG_FUNCTION_ARGS);
-extern void bdr_sequence_setval(PG_FUNCTION_ARGS);
+extern Datum bdr_sequence_alloc(PG_FUNCTION_ARGS);
+extern Datum bdr_sequence_setval(PG_FUNCTION_ARGS);
 extern Datum bdr_sequence_options(PG_FUNCTION_ARGS);
 
 /* statistic functions */
