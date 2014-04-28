@@ -348,7 +348,7 @@ bdr_ensure_ext_installed(PGconn *pgconn, Name bdr_conn_name)
 
 	if (PQntuples(res) == 1)
 	{
-		char *default_version;
+		char *default_version PG_USED_FOR_ASSERTS_ONLY;
 		/*
 		 * bdr ext is known to Pg, check install state.
 		 *
