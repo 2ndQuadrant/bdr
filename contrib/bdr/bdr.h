@@ -10,8 +10,10 @@
 #ifndef BDR_H
 #define BDR_H
 
-#include "replication/logical.h"
 #include "access/xlogdefs.h"
+#include "libpq-fe.h"
+#include "postmaster/bgworker.h"
+#include "replication/logical.h"
 #include "utils/resowner.h"
 
 #define BDR_VERSION_NUM 500
@@ -19,10 +21,6 @@
 #define BDR_NODE_ID_FORMAT "bdr_"UINT64_FORMAT"_%u_%u_%u_%s"
 
 #define BDR_INIT_REPLICA_CMD "bdr_initial_load"
-
-/* forward delcs from other headers */
-typedef struct BackgroundWorkerHandle BackgroundWorkerHandle;
-typedef struct pg_conn PGconn;
 
 /*
  * Flags to indicate which fields are present in a commit record sent by the
