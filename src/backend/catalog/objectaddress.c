@@ -442,6 +442,7 @@ ObjectTypeMap[] =
 	{ "materialized view", OBJECT_MATVIEW },
 	{ "composite type", OBJECT_COMPOSITE },
 	{ "foreign table", OBJECT_FOREIGN_TABLE },
+	{ "table column", OBJECT_COLUMN },
 	/* OCLASS_PROC */
 	{ "aggregate", OBJECT_AGGREGATE },
 	{ "function", OBJECT_FUNCTION },
@@ -1566,7 +1567,7 @@ unstringify_objtype(const char *objtype)
 	ObjectType	type;
 	int			i;
 
-	for (i = 0; i < sizeof(ObjectTypeMap); i++)
+	for (i = 0; i < lengthof(ObjectTypeMap); i++)
 	{
 		if (strcmp(ObjectTypeMap[i].tm_name, objtype) == 0)
 		{
@@ -1574,7 +1575,7 @@ unstringify_objtype(const char *objtype)
 			break;
 		}
 	}
-	if (i >= sizeof(ObjectTypeMap))
+	if (i >= lengthof(ObjectTypeMap))
 		ereport(ERROR,
 			   (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 				errmsg("unrecognized object type \"%s\"", objtype)));
