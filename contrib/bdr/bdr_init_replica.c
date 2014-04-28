@@ -24,6 +24,7 @@
 
 #include "bdr.h"
 
+#include "fmgr.h"
 #include "libpq-fe.h"
 #include "miscadmin.h"
 
@@ -31,6 +32,8 @@
 
 #include "access/heapam.h"
 #include "access/xact.h"
+
+#include "catalog/pg_type.h"
 
 #include "replication/replication_identifier.h"
 #include "replication/walreceiver.h"
@@ -45,6 +48,7 @@
 #include "storage/shmem.h"
 
 #include "utils/builtins.h"
+#include "utils/pg_lsn.h"
 #include "utils/syscache.h"
 
 char *bdr_temp_dump_directory = NULL;
@@ -101,30 +105,34 @@ find_init_replica_worker(Name dbname)
 static char
 bdr_get_remote_status(PGconn *pgconn, Name dbname)
 {
-	PGresult *res;
-	char status;
-	StringInfoData query;
-	char escaped_dbname[NAMEDATALEN*2+1];
-	int escape_error;
+	PGresult 		   *res;
+	char 				status;
+	static const int	n_params = 2;
+	Oid 				param_types[] = {NUMERICOID, TEXTOID};
+	const char 		   *param_values[n_params];
+	const int			sysid_str_length = 33;
+	char				sysid_str[sysid_str_length];
 
-	initStringInfo(&query);
+	snprintf(sysid_str, sysid_str_length, UINT64_FORMAT,
+			 GetSystemIdentifier());
+	sysid_str[sysid_str_length-1] = '\0';
 
-	PQescapeStringConn(pgconn, &escaped_dbname[0], NameStr(*dbname),
-					   NAMEDATALEN, &escape_error);
-	if (escape_error)
-		elog(FATAL, "Failed to escape local dbname %s: %s",
-			 NameStr(*dbname), PQerrorMessage(pgconn));
+	param_values[0] = sysid_str;
+	param_types[0] = NUMERICOID;
 
-	appendStringInfo(&query,
-					 "SELECT node_status FROM bdr.bdr_nodes"
-					 "WHERE node_sysid = " UINT64_FORMAT
-					 "    AND node_dbname = '%s' FOR UPDATE",
-					 GetSystemIdentifier(), escaped_dbname);
-	res = PQexec(pgconn, query.data);
+	param_values[1] = NameStr(*dbname);
+	param_types[1] = TEXTOID;
+
+	res = PQexecParams(pgconn,
+					   "SELECT node_status FROM bdr.bdr_nodes "
+					   "WHERE node_sysid = $1 AND node_dbname = $2 "
+					   "FOR UPDATE",
+					   2, param_types, param_values, NULL, NULL, 0);
 	if (PQresultStatus(res) != PGRES_TUPLES_OK)
 	{
-		elog(FATAL, "bdr %s: query failed during bdr init - \"%s\": status %s: %s\n",
-			 NameStr(*dbname), query.data, PQresStatus(PQresultStatus(res)),
+		elog(FATAL, "bdr %s: Failed to get remote status during bdr init: "
+			 "state %s: %s\n", NameStr(*dbname),
+			 PQresStatus(PQresultStatus(res)),
 			 PQresultErrorMessage(res));
 	}
 	if (PQntuples(res) == 0)
@@ -155,43 +163,42 @@ static char
 bdr_set_remote_status(PGconn *pgconn, Name dbname,
 					  const char status, const char prev_status)
 {
-	PGresult *res;
-	char	*status_str;
-	StringInfoData query;
-	char escaped_dbname[NAMEDATALEN*2+1];
-	int escape_error;
-	const uint64 sysid = GetSystemIdentifier();
-
-	initStringInfo(&query);
+	PGresult 		   *res;
+	char			   *status_str;
+	const uint64		sysid = GetSystemIdentifier();
+	const int			sysid_str_length = 33;
+	char 				sysid_str[sysid_str_length];
 
 	if (status == prev_status)
 		/* No action required (we could check the remote, but meh) */
 		return status;
 
-	PQescapeStringConn(pgconn, &escaped_dbname[0],
-					   NameStr(*dbname), NAMEDATALEN, &escape_error);
-	if (escape_error)
-		elog(FATAL, "Failed to escape local dbname %s: %s",
-			 NameStr(*dbname), PQerrorMessage(pgconn));
+	snprintf(sysid_str, sysid_str_length, UINT64_FORMAT,
+			 GetSystemIdentifier());
+	sysid_str[sysid_str_length-1] = '\0';
 
 	if (status == '\0')
 	{
-		char    new_status;
-		appendStringInfo(&query,
-						 "DELETE FROM bdr.bdr_nodes WHERE node_sysid = "
-						 UINT64_FORMAT
-						 " AND node_dbname = '%s' RETURNING node_status",
-						 sysid, escaped_dbname);
-		res = PQexec(pgconn, query.data);
+		Oid			param_types[] = {NUMERICOID, TEXTOID};
+		const char *param_values[2];
+		char    	new_status;
+
+		param_values[0] = sysid_str;
+		param_values[1] = NameStr(*dbname);
+
+		res = PQexecParams(pgconn,
+						   "DELETE FROM bdr.bdr_nodes WHERE node_sysid = $1"
+						   " AND node_dbname = $2 RETURNING node_status",
+						   2, param_types, param_values, NULL, NULL, 0);
 
 		elog(DEBUG2, "bdr %s: deleting bdr_nodes row with id " UINT64_FORMAT
-			 " and node_dbname %s ", NameStr(*dbname), sysid, escaped_dbname);
+			 " and node_dbname %s ", NameStr(*dbname), sysid, NameStr(*dbname));
 
 		if (PQresultStatus(res) != PGRES_TUPLES_OK)
 		{
-			elog(FATAL, "bdr %s: query failed during bdr init - \"%s\": status %s: %s\n",
-				 NameStr(*dbname), query.data,
-				 PQresStatus(PQresultStatus(res)), PQresultErrorMessage(res));
+			elog(FATAL, "bdr %s: Failed to delete row from bdr_nodes: status %s: %s\n",
+				 NameStr(*dbname), PQresStatus(PQresultStatus(res)),
+				 PQresultErrorMessage(res));
 		}
 		if (PQntuples(res) == 0)
 		{
@@ -202,7 +209,7 @@ bdr_set_remote_status(PGconn *pgconn, Name dbname,
 			elog(FATAL, "bdr %s: bdr.bdr_nodes row for node_sysid="
 				 UINT64_FORMAT
 				 ", dbname='%s' missing, expected row with status=%c",
-				 NameStr(*dbname), sysid, escaped_dbname, (int)prev_status);
+				 NameStr(*dbname), sysid, NameStr(*dbname), (int)prev_status);
 		}
 		status_str = PQgetvalue(res, 0, 0);
 		Assert(strlen(status_str) == 1);
@@ -213,7 +220,7 @@ bdr_set_remote_status(PGconn *pgconn, Name dbname,
 			elog(FATAL, "bdr %s: bdr.bdr_nodes row for node_sysid="
 				 UINT64_FORMAT
 				 ", dbname='%s' had status=%c, expected status=%c",
-				 NameStr(*dbname), sysid, escaped_dbname,
+				 NameStr(*dbname), sysid, NameStr(*dbname),
 				 (int) new_status, (int) prev_status);
 		}
 
@@ -221,44 +228,50 @@ bdr_set_remote_status(PGconn *pgconn, Name dbname,
 	}
 	else
 	{
-		char    new_status;
-		appendStringInfo(&query,
-						 "UPDATE bdr.bdr_nodes "
-						 "SET node_status = '%c' "
-						 "WHERE node_sysid = " UINT64_FORMAT
-						 " AND node_dbname = '%s' RETURNING ("
-						 "SELECT node_status FROM bdr.bdr_nodes "
-						 "WHERE node_sysid = " UINT64_FORMAT
-						 " AND node_dbname = '%s')",
-						 (int)status, sysid, escaped_dbname, sysid,
-						 escaped_dbname);
+		Oid			param_types[] = {CHAROID, NUMERICOID, TEXTOID};
+		const char *param_values[3];
+		char		new_status;
+		char		status_str[2];
 
-		res = PQexec(pgconn, query.data);
+		snprintf(status_str, 2, "%c", (int)status);
+		param_values[0] = status_str;
+		param_values[1] = sysid_str;
+		param_values[2] = NameStr(*dbname);
+
+		res = PQexecParams(pgconn,
+						   "UPDATE bdr.bdr_nodes "
+						   "SET node_status = $1 "
+						   "WHERE node_sysid = $2 AND node_dbname = $3 "
+						   "RETURNING ("
+						   "SELECT node_status FROM bdr.bdr_nodes "
+						   "WHERE node_sysid = $2 AND node_dbname = $3)",
+						   3, param_types, param_values, NULL, NULL, 0);
 
 		elog(DEBUG2, "bdr %s: update row with id "
 			 UINT64_FORMAT
 			 " and node_dbname %s from %c to %c",
-			 NameStr(*dbname), sysid, escaped_dbname, prev_status, status);
+			 NameStr(*dbname), sysid, NameStr(*dbname), prev_status, status);
 
 		if (PQresultStatus(res) != PGRES_TUPLES_OK)
 		{
 			elog(FATAL,
-				 "bdr %s: query failed during bdr init - \"%s\": status %s: %s\n",
-				 NameStr(*dbname), query.data,
+				 "bdr %s: Failed to update bdr.nodes row: status %s: %s\n",
+				 NameStr(*dbname),
 				 PQresStatus(PQresultStatus(res)), PQresultErrorMessage(res));
 		}
 		if (PQntuples(res) != 0)
 		{
+			char *new_status_str;
 			/* Updated a row */
-			status_str = PQgetvalue(res, 0, 0);
+			new_status_str = PQgetvalue(res, 0, 0);
 			Assert(strlen(status_str) == 1);
-			new_status = status_str[0];
+			new_status = new_status_str[0];
 			if (new_status != prev_status)
 			{
 				elog(FATAL,
 					 "bdr %s: bdr.bdr_nodes row for node_sysid=" UINT64_FORMAT
 					 ", dbname='%s' had status=%c, expected status=%c",
-					 NameStr(*dbname), sysid, escaped_dbname, (int)new_status,
+					 NameStr(*dbname), sysid, NameStr(*dbname), (int)new_status,
 					 (int)prev_status);
 			}
 
@@ -266,26 +279,24 @@ bdr_set_remote_status(PGconn *pgconn, Name dbname,
 		}
 		else
 		{
-			/* No rows affected, insert a new row instead */
+			/* No rows affected, insert a new row instead. We re-use the previous
+			 * query parameters. */
 			PQclear(res);
-			resetStringInfo(&query);
-			appendStringInfo(&query,
-							 "INSERT INTO bdr.bdr_nodes"
-							 "    (node_sysid, node_dbname, node_status)"
-							 "    VALUES (" UINT64_FORMAT ", '%s', '%c');",
-							 sysid, escaped_dbname, (int)status);
-			res = PQexec(pgconn, query.data);
+			res = PQexecParams(pgconn,
+							   "INSERT INTO bdr.bdr_nodes"
+							   "    (node_status, node_sysid, node_dbname)"
+							   "    VALUES ($1, $2, $3);",
+							   3, param_types, param_values, NULL, NULL, 0);
 
 			elog(DEBUG2, "bdr %s: insert row with id " UINT64_FORMAT
 				 " and node_dbname %s from %c to %c",
-				 NameStr(*dbname), sysid, escaped_dbname, prev_status, status);
+				 NameStr(*dbname), sysid, NameStr(*dbname), prev_status, status);
 
 			if (PQresultStatus(res) != PGRES_COMMAND_OK)
 			{
 				elog(FATAL,
-					 "bdr %s: query failed during bdr init - \"%s\": status %s: %s\n",
-					 NameStr(*dbname), query.data,
-					 PQresStatus(PQresultStatus(res)),
+					 "bdr %s: Failed to insert row into bdr.bdr_nodes: status %s: %s\n",
+					 NameStr(*dbname), PQresStatus(PQresultStatus(res)),
 					 PQresultErrorMessage(res));
 			}
 			PQclear(res);
@@ -298,34 +309,27 @@ bdr_set_remote_status(PGconn *pgconn, Name dbname,
 static XLogRecPtr
 bdr_get_remote_lsn(PGconn *conn)
 {
-	const char *query =
-		"SELECT pg_xlog_location_diff(pg_current_xlog_insert_location(), '0/0')";
-	char	   *lsn_str;
-	char       *lsn_str_end;
 	XLogRecPtr  lsn;
 	PGresult   *res;
 
-	res = PQexec(conn, query);
+	res = PQexec(conn, "SELECT pg_current_xlog_insert_location()");
 	if (PQresultStatus(res) != PGRES_TUPLES_OK)
 	{
-		elog(ERROR, "Unable to get remote LSN, query %s failed with status %s: %s\n",
-			query, PQresStatus(PQresultStatus(res)), PQresultErrorMessage(res));
+		elog(ERROR, "Unable to get remote LSN: status %s: %s\n",
+			 PQresStatus(PQresultStatus(res)), PQresultErrorMessage(res));
 	}
 	Assert(PQntuples(res) == 1);
-	lsn_str = PQgetvalue(res, 0, 0);
-	/* lsn_str's remote type is numeric, but we know it has to fit in an XLogRecPtr */
-	/* TODO: Less ugly way to do this */
-	lsn = (XLogRecPtr) strtoul(lsn_str, &lsn_str_end, 10);
-	if (*lsn_str_end != '\0')
-		elog(ERROR, "Unable to parse remote LSN value %s as unsigned long int",
-			 lsn_str);
+	Assert(!PQgetisnull(res, 0, 0));
+	lsn = DatumGetLSN(DirectFunctionCall1Coll(pg_lsn_in, InvalidOid,
+					  CStringGetDatum(PQgetvalue(res, 0, 0))));
 	PQclear(res);
 	return lsn;
 }
 
 /*
  * Make sure the bdr extension is installed on the other end. If it's a known
- * extension but not present in the current DB, try to CREATE EXTENSION it.
+ * extension but not present in the current DB error out and tell the user to
+ * activate BDR then try again.
  */
 static void
 bdr_ensure_ext_installed(PGconn *pgconn, Name bdr_conn_name)
@@ -346,36 +350,20 @@ bdr_ensure_ext_installed(PGconn *pgconn, Name bdr_conn_name)
 	{
 		char *default_version;
 		/*
-		 * bdr ext is known to Pg, check install state, install if missing.
+		 * bdr ext is known to Pg, check install state.
 		 *
-		 * Right now we don't check the installed version or try to upgrade.
+		 * Right now we don't check the installed version or try to install/upgrade.
 		 */
 		default_version = PQgetvalue(res, 0, 0);
 		Assert(default_version != NULL);
 		if (PQgetisnull(res, 0, 1))
 		{
-			/* bdr ext present but not installed; try to create */
-			PQclear(res);
-
-			res = PQexec(pgconn, "CREATE EXTENSION IF NOT EXISTS btree_gist;");
-			if (PQresultStatus(res) != PGRES_COMMAND_OK)
-			{
-				ereport(ERROR,
-						(errmsg("Unable to 'CREATE EXTENSION btree_gist;' on bdr connection %s: state %s: %s",
-						 NameStr(*bdr_conn_name), PQresStatus(PQresultStatus(res)), PQresultErrorMessage(res)),
-						 errhint("CREATE EXTENSION btree_gist; as a superuser.")));
-			}
-			PQclear(res);
-
-			res = PQexec(pgconn, "CREATE EXTENSION bdr;");
-			if (PQresultStatus(res) != PGRES_COMMAND_OK)
-			{
-				ereport(ERROR,
-						(errmsg("Unable to 'CREATE EXTENSION bdr;' on bdr connection %s: state %s: %s",
-						 NameStr(*bdr_conn_name), PQresStatus(PQresultStatus(res)), PQresultErrorMessage(res)),
-						 errhint("Make sure BDR is in shared_preload_libraries and CREATE EXTENSION bdr; as superuser.")));
-			}
-			PQclear(res);
+			ereport(ERROR,
+					(errmsg("Remote database for BDR connection %s does not have the bdr extension active",
+					 NameStr(*bdr_conn_name)),
+					 errdetail("no entry with name 'bdr' in pg_extensions"),
+					 errhint("add 'bdr' to shared_preload_libraries in postgresql.conf "
+					 		 "on the target server and restart it.")));
 		}
 	}
 	else if (PQntuples(res) == 0)
