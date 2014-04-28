@@ -1683,7 +1683,7 @@ retry:
 
 		if (TransactionIdIsValid(xwait))
 		{
-			XactLockTableWait(xwait);
+			XactLockTableWait(xwait, NULL, NULL, XLTW_None);
 			goto retry;
 		}
 	}
