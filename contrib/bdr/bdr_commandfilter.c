@@ -147,11 +147,13 @@ bdr_commandfilter(Node *parsetree,
 						/*
 						 * allowed for now:
 						 */
-					case AT_AddColumn:	/* add column */
-
+					case AT_AddColumn:
+					case AT_DropColumn:
+					case AT_DropNotNull:
+					case AT_SetNotNull:
 					case AT_ColumnDefault:		/* ALTER COLUMN DEFAULT */
 
-					case AT_ClusterOn:	/* CLUSTER ON */
+					case AT_ClusterOn:			/* CLUSTER ON */
 					case AT_DropCluster:		/* SET WITHOUT CLUSTER */
 
 					case AT_SetRelOptions:		/* SET (...) */
