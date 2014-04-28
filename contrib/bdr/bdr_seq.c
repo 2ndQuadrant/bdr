@@ -1037,7 +1037,7 @@ bdr_sequencer_fill_sequences(void)
 #define SEQ_LOG_VALS	32
 
 PG_FUNCTION_INFO_V1(bdr_sequence_alloc);
-void
+Datum
 bdr_sequence_alloc(PG_FUNCTION_ARGS)
 {
 	Relation	seqrel = (Relation) PG_GETARG_POINTER(0);
@@ -1182,10 +1182,12 @@ bdr_sequence_alloc(PG_FUNCTION_ARGS)
 
 	/* schedule wakeup as soon as other xacts can see the seuqence */
 	bdr_schedule_eoxact_sequencer_wakeup();
+
+	PG_RETURN_VOID();
 }
 
 PG_FUNCTION_INFO_V1(bdr_sequence_setval);
-void
+Datum
 bdr_sequence_setval(PG_FUNCTION_ARGS)
 {
 	Relation	seqrel = (Relation) PG_GETARG_POINTER(0);
@@ -1212,6 +1214,8 @@ bdr_sequence_setval(PG_FUNCTION_ARGS)
 
 	/* schedule wakeup as soon as other xacts can see the seuqence */
 	bdr_schedule_eoxact_sequencer_wakeup();
+
+	PG_RETURN_VOID();
 }
 
 PG_FUNCTION_INFO_V1(bdr_sequence_options);
@@ -1230,4 +1234,6 @@ bdr_sequence_options(PG_FUNCTION_ARGS)
 
 	/* schedule wakeup as soon as other xacts can see the seuqence */
 	bdr_schedule_eoxact_sequencer_wakeup();
+
+	PG_RETURN_VOID();
 }
