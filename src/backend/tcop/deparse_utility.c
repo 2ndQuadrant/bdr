@@ -3343,16 +3343,14 @@ deparse_utility_command(StashedCommand *cmd)
 
 	PopOverrideSearchPath();
 
+	/*
+	 * XXX to avoid the pstrdup we could have the routines return the
+	 * ObjTree and do the jsonize_objtree() here after changing cxt ...
+	 */
+	MemoryContextSwitchTo(oldcxt);
 	if (command != NULL)
-	{
-		/*
-		 * XXX to avoid the pstrdup we could have the routines return the
-		 * ObjTree and do the jsonize_objtree() here after changing cxt ...
-		 */
-		MemoryContextSwitchTo(oldcxt);
 		command = pstrdup(command);
-		MemoryContextReset(tmpcxt);
-	}
+	MemoryContextDelete(tmpcxt);
 
 	return command;
 }
