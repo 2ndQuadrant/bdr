@@ -165,7 +165,7 @@ DECLARE
     ident TEXT;
 BEGIN
 
-    ident := TG_ARGV[0];
+    ident := quote_ident(TG_TABLE_SCHEMA)||'.'||quote_ident(TG_TABLE_NAME);
 
     INSERT INTO bdr.bdr_queued_commands
         (obj_type, obj_identity, command, executed)
@@ -214,9 +214,7 @@ BEGIN
         IF TG_TAG = 'CREATE TABLE' and r.object_type = 'table' THEN
             EXECUTE 'CREATE TRIGGER truncate_trigger AFTER TRUNCATE ON ' ||
                     r.identity ||
-                    ' FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate(' ||
-                    quote_literal(r.identity) ||
-                    ')';
+                    ' FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()';
         END IF;
     END LOOP;
 END;
