@@ -107,15 +107,15 @@ bdr_get_remote_status(PGconn *pgconn, Name dbname)
 {
 	PGresult 		   *res;
 	char 				status;
-	static const int	n_params = 2;
+	const int			n_params = 2;
 	Oid 				param_types[] = {NUMERICOID, TEXTOID};
 	const char 		   *param_values[n_params];
-	const int			sysid_str_length = 33;
-	char				sysid_str[sysid_str_length];
+	/* Needs to fit max length of UINT64_FORMAT */
+	char				sysid_str[33];
 
-	snprintf(sysid_str, sysid_str_length, UINT64_FORMAT,
+	snprintf(sysid_str, sizeof(sysid_str), UINT64_FORMAT,
 			 GetSystemIdentifier());
-	sysid_str[sysid_str_length-1] = '\0';
+	sysid_str[sizeof(sysid_str)-1] = '\0';
 
 	param_values[0] = sysid_str;
 	param_types[0] = NUMERICOID;
@@ -166,16 +166,16 @@ bdr_set_remote_status(PGconn *pgconn, Name dbname,
 	PGresult 		   *res;
 	char			   *status_str;
 	const uint64		sysid = GetSystemIdentifier();
-	const int			sysid_str_length = 33;
-	char 				sysid_str[sysid_str_length];
+	/* Needs to fit max length of UINT64_FORMAT */
+	char 				sysid_str[33];
 
 	if (status == prev_status)
 		/* No action required (we could check the remote, but meh) */
 		return status;
 
-	snprintf(sysid_str, sysid_str_length, UINT64_FORMAT,
+	snprintf(sysid_str, sizeof(sysid_str), UINT64_FORMAT,
 			 GetSystemIdentifier());
-	sysid_str[sysid_str_length-1] = '\0';
+	sysid_str[sizeof(sysid_str)-1] = '\0';
 
 	if (status == '\0')
 	{
