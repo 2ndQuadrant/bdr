@@ -260,6 +260,7 @@ check_ddl_tag(const char *tag)
 		pg_strcasecmp(tag, "REFRESH MATERIALIZED VIEW") == 0 ||
 		pg_strcasecmp(tag, "ALTER DEFAULT PRIVILEGES") == 0 ||
 		pg_strcasecmp(tag, "ALTER LARGE OBJECT") == 0 ||
+		pg_strcasecmp(tag, "ALTER TABLESPACE MOVE") == 0 ||
 		pg_strcasecmp(tag, "DROP OWNED") == 0)
 		return EVENT_TRIGGER_COMMAND_TAG_OK;
 
@@ -1398,7 +1399,7 @@ EventTriggerStashCommand(Oid objectId, ObjectType objtype, Node *parsetree)
  * commands at this level?
  */
 void
-EventTriggerStartRecordingSubcmds(Oid objectId, Node *parsetree)
+EventTriggerComplexCmdStart(Node *parsetree)
 {
 	MemoryContext	oldcxt;
 	StashedCommand *stashed;
@@ -1408,13 +1409,19 @@ EventTriggerStartRecordingSubcmds(Oid objectId, Node *parsetree)
 	stashed = palloc(sizeof(StashedCommand));
 
 	stashed->objtype = OBJECT_TABLE;	/* XXX fix this? */
-	stashed->objectId = objectId;
+	stashed->objectId = InvalidOid;
 	stashed->subcmds = NIL;
 	stashed->parsetree = copyObject(parsetree);
 
 	currentEventTriggerState->curcmd = stashed;
 
 	MemoryContextSwitchTo(oldcxt);
+}
+
+void
+EventTriggerComplexCmdSetOid(Oid objectId)
+{
+	currentEventTriggerState->curcmd->objectId = objectId;
 }
 
 /*
@@ -1432,6 +1439,7 @@ EventTriggerRecordSubcmd(Node *subcmd, AttrNumber attnum, Oid newoid)
 	StashedATSubcmd *newsub;
 
 	Assert(IsA(subcmd, AlterTableCmd));
+	Assert(OidIsValid(currentEventTriggerState->curcmd->objectId));
 
 	oldcxt = MemoryContextSwitchTo(currentEventTriggerState->cxt);
 
@@ -1455,7 +1463,7 @@ EventTriggerRecordSubcmd(Node *subcmd, AttrNumber attnum, Oid newoid)
  * AtEOSubXact_EventTriggers() to fix this.
  */
 void
-EventTriggerEndRecordingSubcmds(void)
+EventTriggerComplexCmdEnd(void)
 {
 	currentEventTriggerState->stash =
 		lappend(currentEventTriggerState->stash,
