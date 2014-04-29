@@ -2860,7 +2860,6 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 			case AT_ValidateConstraintRecurse:
 			case AT_DropConstraintRecurse:
 			case AT_AddOidsRecurse:
-			case AT_AddIndex:
 			case AT_AddIndexConstraint:
 			case AT_ReAddIndex:
 			case AT_ReAddConstraint:
@@ -2942,6 +2941,30 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 									 2, "type", ObjTypeString, "drop column",
 								 "column", ObjTypeString, subcmd->name);
 				subcmds = lappend(subcmds, new_object_object(NULL, tmp));
+				break;
+
+			case AT_AddIndex:
+				{
+					Oid			constrOid;
+					IndexStmt  *istmt;
+					const char *idxname;
+
+					if (!istmt->isconstraint)
+						break;
+
+					istmt = (IndexStmt *) subcmd->def;
+					idxname = istmt->idxname;
+
+					constrOid = get_relation_constraint_oid(
+						cmd->objectId, idxname, false);
+
+					tmp = new_objtree_VA("ADD CONSTRAINT %{name}I %{definition}s",
+										 3, "type", ObjTypeString, "add constraint",
+										 "name", ObjTypeString, idxname,
+										 "definition", ObjTypeString,
+										 pg_get_constraintdef_string(constrOid, false));
+					subcmds = lappend(subcmds, new_object_object(NULL, tmp));
+				}
 				break;
 
 			case AT_AddConstraint:
