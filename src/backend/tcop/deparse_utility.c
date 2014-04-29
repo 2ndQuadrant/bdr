@@ -1178,6 +1178,8 @@ deparseTableElements(Relation relation, List *tableElements, List *dpcontext,
  * the given elements list.  The updated list is returned.
  *
  * This works for typed tables, regular tables, and domains.
+ *
+ * Note that CONSTRAINT_FOREIGN constraints are always ignored.
  */
 static List *
 obtainConstraints(List *elements, Oid relationId, Oid domainId)
@@ -1235,8 +1237,7 @@ obtainConstraints(List *elements, Oid relationId, Oid domainId)
 				contype = "check";
 				break;
 			case CONSTRAINT_FOREIGN:
-				contype = "foreign key";
-				break;
+				continue;	/* not here */
 			case CONSTRAINT_PRIMARY:
 				contype = "primary key";
 				break;
