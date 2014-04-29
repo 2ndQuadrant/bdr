@@ -506,11 +506,6 @@ standard_ProcessUtility(Node *parsetree,
 			AlterTableSpaceOptions((AlterTableSpaceOptionsStmt *) parsetree);
 			break;
 
-		case T_AlterTableSpaceMoveStmt:
-			/* no event triggers for global objects */
-			AlterTableSpaceMove((AlterTableSpaceMoveStmt *) parsetree);
-			break;
-
 		case T_TruncateStmt:
 			ExecuteTruncate((TruncateStmt *) parsetree);
 			break;
@@ -1304,6 +1299,10 @@ ProcessUtilitySlow(Node *parsetree,
 				ExecAlterObjectSchemaStmt((AlterObjectSchemaStmt *) parsetree);
 				break;
 
+			case T_AlterTableSpaceMoveStmt:
+				AlterTableSpaceMove((AlterTableSpaceMoveStmt *) parsetree);
+				break;
+
 			case T_AlterOwnerStmt:
 				ExecAlterOwnerStmt((AlterOwnerStmt *) parsetree);
 				break;
@@ -1806,7 +1805,7 @@ CreateCommandTag(Node *parsetree)
 			break;
 
 		case T_AlterTableSpaceMoveStmt:
-			tag = "ALTER TABLESPACE";
+			tag = "ALTER TABLESPACE MOVE";
 			break;
 
 		case T_CreateExtensionStmt:
