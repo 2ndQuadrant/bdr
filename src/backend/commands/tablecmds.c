@@ -2728,6 +2728,8 @@ AlterTableInternal(Oid relid, List *cmds, bool recurse)
 
 	rel = relation_open(relid, lockmode);
 
+	EventTriggerComplexCmdSetOid(relid);
+
 	ATController(rel, cmds, recurse, lockmode);
 }
 

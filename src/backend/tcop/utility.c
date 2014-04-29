@@ -988,7 +988,8 @@ ProcessUtilitySlow(Node *parsetree,
 														queryString);
 
 						/* ... ensure we have an event trigger context ... */
-						EventTriggerStartRecordingSubcmds(relid, parsetree);
+						EventTriggerComplexCmdStart(parsetree);
+						EventTriggerComplexCmdSetOid(relid);
 
 						/* ... and do it */
 						foreach(l, stmts)
@@ -1011,14 +1012,15 @@ ProcessUtilitySlow(Node *parsetree,
 								 * commands is consistent with the way they are
 								 * executed here.
 								 */
-								EventTriggerEndRecordingSubcmds();
+								EventTriggerComplexCmdEnd();
 								ProcessUtility(stmt,
 											   queryString,
 											   PROCESS_UTILITY_SUBCOMMAND,
 											   params,
 											   None_Receiver,
 											   NULL);
-								EventTriggerStartRecordingSubcmds(relid, parsetree);
+								EventTriggerComplexCmdStart(parsetree);
+								EventTriggerComplexCmdSetOid(relid);
 							}
 
 							/* Need CCI between commands */
@@ -1027,7 +1029,7 @@ ProcessUtilitySlow(Node *parsetree,
 						}
 
 						/* done */
-						EventTriggerEndRecordingSubcmds();
+						EventTriggerComplexCmdEnd();
 					}
 					else
 						ereport(NOTICE,
@@ -1176,6 +1178,7 @@ ProcessUtilitySlow(Node *parsetree,
 					stmt = transformIndexStmt(relid, stmt, queryString);
 
 					/* ... and do it */
+					EventTriggerComplexCmdStart(parsetree);
 					objectId =
 						DefineIndex(relid,	/* OID of heap relation */
 									stmt,
@@ -1186,6 +1189,7 @@ ProcessUtilitySlow(Node *parsetree,
 									false); /* quiet */
 					EventTriggerStashCommand(objectId, OBJECT_INDEX,
 											 parsetree);
+					EventTriggerComplexCmdEnd();
 				}
 				break;
 
@@ -1263,8 +1267,10 @@ ProcessUtilitySlow(Node *parsetree,
 				break;
 
 			case T_ViewStmt:	/* CREATE VIEW */
+				EventTriggerComplexCmdStart(parsetree);
 				objectId = DefineView((ViewStmt *) parsetree, queryString);
 				EventTriggerStashCommand(objectId, OBJECT_VIEW, parsetree);
+				EventTriggerComplexCmdEnd();
 				break;
 
 			case T_CreateFunctionStmt:	/* CREATE FUNCTION */
@@ -1391,7 +1397,9 @@ ProcessUtilitySlow(Node *parsetree,
 				break;
 
 			case T_AlterTableSpaceMoveStmt:
+				EventTriggerComplexCmdStart(parsetree);
 				AlterTableSpaceMove((AlterTableSpaceMoveStmt *) parsetree);
+				EventTriggerComplexCmdEnd();
 				break;
 
 			case T_AlterOwnerStmt:
