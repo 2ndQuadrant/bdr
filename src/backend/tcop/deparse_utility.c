@@ -2949,10 +2949,12 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 					IndexStmt  *istmt;
 					const char *idxname;
 
+					Assert(IsA(subcmd->def, IndexStmt));
+					istmt = (IndexStmt *) subcmd->def;
+
 					if (!istmt->isconstraint)
 						break;
 
-					istmt = (IndexStmt *) subcmd->def;
 					idxname = istmt->idxname;
 
 					constrOid = get_relation_constraint_oid(
