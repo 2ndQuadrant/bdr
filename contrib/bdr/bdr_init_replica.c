@@ -107,9 +107,8 @@ bdr_get_remote_status(PGconn *pgconn, Name dbname)
 {
 	PGresult 		   *res;
 	char 				status;
-	const int			n_params = 2;
 	Oid 				param_types[] = {NUMERICOID, TEXTOID};
-	const char 		   *param_values[n_params];
+	const char 		   *param_values[2];
 	/* Needs to fit max length of UINT64_FORMAT */
 	char				sysid_str[33];
 
