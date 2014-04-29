@@ -521,6 +521,7 @@ bdr_init_replica_cleanup_tmpdir(int errcode, Datum tmpdir)
 static void
 bdr_exec_init_replica(Name conn_name, char *snapshot)
 {
+#ifndef WIN32
 	pid_t pid;
 	char *bindir;
 	char *tmpdir;
@@ -664,6 +665,18 @@ bdr_exec_init_replica(Name conn_name, char *snapshot)
 	pfree(replica_local_dsn);
 	pfree(remote_dsn);
 	pfree(tmpdir);
+#else
+	/*
+	 * On Windows we should be using CreateProcessEx instead of fork() and
+	 * exec().  We should add an abstraction for this to port/ eventually,
+	 * so this code doesn't have to care about the platform.
+	 *
+	 * TODO
+	 */
+	ereport(ERROR,
+			(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+			 errmsg("init_replica isn't supported on Windows yet")));
+#endif
 }
 
 /*
