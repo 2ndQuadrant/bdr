@@ -1535,9 +1535,10 @@ pg_event_trigger_get_creation_commands(PG_FUNCTION_ARGS)
 		 */
 		if (command != NULL)
 		{
-			Datum		values[7];
-			bool		nulls[7];
+			Datum		values[8];
+			bool		nulls[8];
 			ObjectAddress addr;
+			const char *tag;
 			char	   *identity;
 			char	   *type;
 			char	   *schema = NULL;
@@ -1548,6 +1549,7 @@ pg_event_trigger_get_creation_commands(PG_FUNCTION_ARGS)
 			addr.objectSubId = 0;
 			type = getObjectTypeDescription(&addr);
 			identity = getObjectIdentity(&addr);
+			tag = CreateCommandTag(cmd->parsetree);
 
 			/*
 			 * Obtain schema name, if any ("pg_temp" if a temp object)
@@ -1592,6 +1594,8 @@ pg_event_trigger_get_creation_commands(PG_FUNCTION_ARGS)
 			values[i++] = ObjectIdGetDatum(addr.objectId);
 			/* objsubid */
 			values[i++] = Int32GetDatum(addr.objectSubId);
+			/* command tag */
+			values[i++] = CStringGetTextDatum(tag);
 			/* object_type */
 			values[i++] = CStringGetTextDatum(type);
 			/* schema */
