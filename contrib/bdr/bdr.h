@@ -11,7 +11,6 @@
 #define BDR_H
 
 #include "access/xlogdefs.h"
-#include "libpq-fe.h"
 #include "postmaster/bgworker.h"
 #include "replication/logical.h"
 #include "utils/resowner.h"
@@ -21,6 +20,12 @@
 #define BDR_NODE_ID_FORMAT "bdr_"UINT64_FORMAT"_%u_%u_%u_%s"
 
 #define BDR_INIT_REPLICA_CMD "bdr_initial_load"
+
+/*
+ * Don't include libpq here, msvc infrastructure requires linking to libpq
+ * otherwise.
+ */
+struct pg_conn;
 
 /*
  * Flags to indicate which fields are present in a commit record sent by the
@@ -207,13 +212,13 @@ extern void init_bdr_commandfilter(void);
 extern void bdr_apply_main(Datum main_arg);
 
 /* helpers shared by multiple worker types */
-extern PGconn*
+extern struct pg_conn *
 bdr_connect(char *conninfo_repl,
 			char* remote_ident, size_t remote_ident_length,
 			NameData* slot_name,
 			uint64* remote_sysid_i, TimeLineID *remote_tlid_i);
 
-extern PGconn*
+extern struct pg_conn *
 bdr_establish_connection_and_slot(Name connection_name, Name out_slot_name,
 	uint64 *out_sysid, TimeLineID* out_timeline, RepNodeId
 	*out_replication_identifier, char **out_snapshot);
