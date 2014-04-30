@@ -162,6 +162,7 @@ bdr_commandfilter(Node *parsetree,
 						break;
 
 					case AT_AddConstraint:
+					case AT_ProcessedConstraint:
 						if (IsA(stmt->def, Constraint))
 						{
 							con = (Constraint *) stmt->def;
