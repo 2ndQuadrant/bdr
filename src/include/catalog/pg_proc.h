@@ -4976,7 +4976,7 @@ DESCR("peek at binary changes from replication slot");
 /* event triggers */
 DATA(insert OID = 3566 (  pg_event_trigger_dropped_objects		PGNSP PGUID 12 10 100 0 0 f f f f t t s 0 0 2249 "" "{26,26,23,25,25,25,25}" "{o,o,o,o,o,o,o}" "{classid, objid, objsubid, object_type, schema_name, object_name, object_identity}" _null_ pg_event_trigger_dropped_objects _null_ _null_ _null_ ));
 DESCR("list objects dropped by the current command");
-DATA(insert OID = 3564 (  pg_event_trigger_get_creation_commands PGNSP PGUID 12 10 100 0 0 f f f f t t s 0 0 2249 "" "{26,26,23,25,25,25,25,114}" "{o,o,o,o,o,o,o,o}" "{classid,objid,objsubid,command_tag,object_type,schema,identity,command}" _null_ pg_event_trigger_get_creation_commands _null_ _null_ _null_ ));
+DATA(insert OID = 3564 (  pg_event_trigger_get_creation_commands PGNSP PGUID 12 10 100 0 0 f f f f t t s 0 0 2249 "" "{26,26,23,25,25,25,25,16,114}" "{o,o,o,o,o,o,o,o,o}" "{classid,objid,objsubid,command_tag,object_type,schema,identity,in_extension,command}" _null_ pg_event_trigger_get_creation_commands _null_ _null_ _null_ ));
 DESCR("list JSON-formatted commands executed by the current command");
 DATA(insert OID = 3565 (  pg_event_trigger_expand_command PGNSP PGUID 12 10 0 0 0 f f f f t f s 1 0 25 "114" _null_ _null_ _null_ _null_ pg_event_trigger_expand_command _null_ _null_ _null_ ));
 DESCR("format JSON command");

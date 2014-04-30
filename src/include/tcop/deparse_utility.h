@@ -37,6 +37,7 @@ typedef struct StashedCommand
 	Oid			objectId;
 	List	   *subcmds;	/* list of StashedATSubcmd */
 	Node	   *parsetree;
+	bool		in_extension;
 } StashedCommand;
 
 extern char *deparse_utility_command(StashedCommand *cmd);
