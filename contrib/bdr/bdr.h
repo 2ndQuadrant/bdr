@@ -44,11 +44,11 @@ typedef enum BdrOutputCommitFlags
  */
 typedef struct BdrApplyWorker
 {
-	/* local & remote database name */
-	NameData dbname;
-
-	/* connection name specified in configuration */
-	NameData name;
+	/*
+	 * Index in bdr_connection_configs of this workers's GUCs
+	 * and config info (including dbname, name, etc).
+	 */
+	int connection_config_idx;
 
 	/* TODO: Remove these from shm, into bdr worker global state */
 	RepNodeId origin_id;
@@ -116,6 +116,30 @@ typedef struct BdrWorker
 
 } BdrWorker;
 
+/* GUC storage for a configured BDR connection. */
+typedef struct BdrConnectionConfig
+{
+	char *dsn;
+	int   apply_delay;
+	bool  init_replica;
+	char *replica_local_dsn;
+	/*
+	 * These aren't technically GUCs, but are per-connection config
+	 * information obtained from the GUCs.
+	 */
+	NameData name;
+	NameData dbname;
+	/* Connection config might be broken (blank dsn, etc) */
+	bool is_valid;
+} BdrConnectionConfig;
+
+/*
+ * Params for every connection in bdr.connections.
+ *
+ * Contains n=bdr_max_workers elements, may have NULL entries.
+ */
+extern BdrConnectionConfig	**bdr_connection_configs;
+
 /* GUCs */
 extern int	bdr_default_apply_delay;
 extern int bdr_max_workers;
@@ -152,9 +176,6 @@ extern Oid	QueuedDropsRelid;
 extern Oid	BdrSequenceValuesRelid;
 extern Oid	BdrSequenceElectionsRelid;
 extern Oid	BdrVotesRelid;
-
-/* Helpers for accessing configuration */
-const char *bdr_get_worker_option(const char * worker_name, const char * option_name, bool missing_ok);
 
 /* apply support */
 extern void process_remote_begin(StringInfo s);
@@ -219,7 +240,7 @@ bdr_connect(char *conninfo_repl,
 			uint64* remote_sysid_i, TimeLineID *remote_tlid_i);
 
 extern struct pg_conn *
-bdr_establish_connection_and_slot(Name connection_name, Name out_slot_name,
+bdr_establish_connection_and_slot(BdrConnectionConfig *cfg, Name out_slot_name,
 	uint64 *out_sysid, TimeLineID* out_timeline, RepNodeId
 	*out_replication_identifier, char **out_snapshot);
 
