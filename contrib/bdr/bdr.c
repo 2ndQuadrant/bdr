@@ -1498,7 +1498,7 @@ _PG_init(void)
 
 		if (!bdr_create_con_gucs(name, used_databases, &num_used_databases,
 								 database_initcons,
-								 &bdr_connection_configs[connection_config_idx]));
+								 &bdr_connection_configs[connection_config_idx]))
 			continue;
 
 		Assert(bdr_connection_configs[connection_config_idx] != NULL);
