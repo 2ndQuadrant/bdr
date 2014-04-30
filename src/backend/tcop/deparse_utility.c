@@ -2822,7 +2822,7 @@ deparse_AlterEnumStmt(Oid objectId, Node *parsetree)
 static char *
 deparse_AlterTableStmt(StashedCommand *cmd)
 {
-//	AlterTableStmt *node = (AlterTableStmt *) cmd->parsetree;
+	/* AlterTableStmt *node = (AlterTableStmt *) cmd->parsetree; */
 	ObjTree	   *alterTableStmt;
 	ObjTree	   *tmp;
 	ObjTree	   *tmp2;
