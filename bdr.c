@@ -1502,6 +1502,7 @@ _PG_init(void)
 			continue;
 
 		Assert(bdr_connection_configs[connection_config_idx] != NULL);
+		connection_config_idx++;
 	}
 
 	/*
