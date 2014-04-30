@@ -53,9 +53,9 @@
 
 char *bdr_temp_dump_directory = NULL;
 
-static void bdr_exec_init_replica(Name conn_name, char *snapshot);
+static void bdr_exec_init_replica(BdrConnectionConfig *cfg, char *snapshot);
 
-static void bdr_catchup_to_lsn(PGconn *conn, Name dbname, Name conn_name,
+static void bdr_catchup_to_lsn(int cfg_index,
 							   XLogRecPtr target_lsn);
 
 /*
@@ -64,6 +64,7 @@ static void bdr_catchup_to_lsn(PGconn *conn, Name dbname, Name conn_name,
  * ensured there can only be one). If no match is found, return null.
  *
  * Must be called with at least a share lock on BdrWorkerCtl->lock
+ *
  */
 static BdrWorker*
 find_init_replica_worker(Name dbname)
@@ -74,23 +75,19 @@ find_init_replica_worker(Name dbname)
 	/* Check whether one of our connections has init_replica set */
 	for (off = 0; off < bdr_max_workers; off++)
 	{
-		BdrApplyWorker *aw;
+		BdrApplyWorker 	       *aw;
+		BdrConnectionConfig	   *cfg;
 
 		if (BdrWorkerCtl->slots[off].worker_type != BDR_WORKER_APPLY)
 			continue;
 
 		aw = &BdrWorkerCtl->slots[off].worker_data.apply_worker;
+		cfg = bdr_connection_configs[aw->connection_config_idx];
 
-		if (strcmp(NameStr(aw->dbname), NameStr(*dbname)) == 0)
+		if ((strcmp(NameStr(cfg->dbname), NameStr(*dbname)) == 0)
+			&& cfg->init_replica)
 		{
-			const char *init_replica_str;
-			bool init_replica = false;
-			init_replica_str = bdr_get_worker_option(NameStr(aw->name),
-													 "init_replica", true);
-			if (init_replica_str
-				&& parse_bool(init_replica_str, &init_replica)
-				&& init_replica)
-				return &BdrWorkerCtl->slots[off];
+			return &BdrWorkerCtl->slots[off];
 		}
 	}
 	return NULL;
@@ -421,11 +418,10 @@ bdr_delete_replication_identifier(RepNodeId repid)
 }
 
 static void
-bdr_drop_slot_and_replication_identifier(Name connection_name, Name dbname)
+bdr_drop_slot_and_replication_identifier(BdrConnectionConfig *cfg)
 {
 
 	char		conninfo_repl[MAXCONNINFO + 75];
-	const char *dsn;
 	char		remote_ident[256];
 	PGconn	   *streamConn;
 	RepNodeId   replication_identifier;
@@ -437,12 +433,11 @@ bdr_drop_slot_and_replication_identifier(Name connection_name, Name dbname)
 	char	   *sqlstate;
 
 	elog(LOG, "bdr %s: Dropping slot and local ident from connection %s",
-		 NameStr(*dbname), NameStr(*connection_name));
+		 NameStr(cfg->dbname), NameStr(cfg->name));
 
-	dsn = bdr_get_worker_option(NameStr(*connection_name), "dsn", false);
 	snprintf(conninfo_repl, sizeof(conninfo_repl),
 			 "%s replication=database fallback_application_name=bdr",
-			 dsn);
+			 cfg->dsn);
 
 	/* Establish BDR conn and IDENTIFY_SYSTEM */
 	streamConn = bdr_connect(
@@ -458,13 +453,13 @@ bdr_drop_slot_and_replication_identifier(Name connection_name, Name dbname)
 	{
 		/* Local replication identifier exists and must be dropped. */
 		elog(DEBUG2, "bdr %s: Deleting local replication identifier %hu",
-			 NameStr(*dbname), replication_identifier);
+			 NameStr(cfg->dbname), replication_identifier);
 		bdr_delete_replication_identifier(replication_identifier);
 	}
 	else
 	{
 		elog(DEBUG2, "bdr %s: No local replication identifier to delete",
-			 NameStr(*dbname));
+			 NameStr(cfg->dbname));
 	}
 
 	/*
@@ -478,7 +473,7 @@ bdr_drop_slot_and_replication_identifier(Name connection_name, Name dbname)
 	if (PQresultStatus(res) == PGRES_COMMAND_OK)
 	{
 		elog(DEBUG2, "bdr %s: remote replication slot %s deleted",
-			 NameStr(*dbname), NameStr(slot_name));
+			 NameStr(cfg->dbname), NameStr(slot_name));
 	}
 	else
 	{
@@ -488,12 +483,12 @@ bdr_drop_slot_and_replication_identifier(Name connection_name, Name dbname)
 		{
 			ereport(ERROR,
 					(errmsg("'DROP_REPLICATION_SLOT %s' on bdr connection %s failed with sqlstate %s: %s",
-							NameStr(slot_name), NameStr(*connection_name),
+							NameStr(slot_name), NameStr(cfg->name),
 							sqlstate,PQresultErrorMessage(res))));
 		}
 		else
 		{
-			elog(DEBUG2, "bdr %s: No slot to delete", NameStr(*dbname));
+			elog(DEBUG2, "bdr %s: No slot to delete", NameStr(cfg->dbname));
 		}
 	}
 	CommitTransactionCommand();
@@ -518,14 +513,12 @@ bdr_init_replica_cleanup_tmpdir(int errcode, Datum tmpdir)
  * replica from an existing node.
  */
 static void
-bdr_exec_init_replica(Name conn_name, char *snapshot)
+bdr_exec_init_replica(BdrConnectionConfig *cfg, char *snapshot)
 {
 #ifndef WIN32
 	pid_t pid;
 	char *bindir;
 	char *tmpdir;
-	char *remote_dsn;
-	char *replica_local_dsn;
 	char  bdr_init_replica_script_path[MAXPGPATH];
 	const char *envvar;
 	StringInfoData path;
@@ -536,9 +529,6 @@ bdr_exec_init_replica(Name conn_name, char *snapshot)
 	bindir = pstrdup(my_exec_path);
 	get_parent_directory(bindir);
 
-	replica_local_dsn = pstrdup(bdr_get_worker_option(NameStr(*conn_name), "replica_local_dsn", false));
-	remote_dsn  = pstrdup(bdr_get_worker_option(NameStr(*conn_name), "dsn", false));
-
 	if (!find_other_exec(my_exec_path, BDR_INIT_REPLICA_CMD,
 						 BDR_INIT_REPLICA_CMD " " PG_VERSION,
 						 &bdr_init_replica_script_path[0]))
@@ -548,7 +538,7 @@ bdr_exec_init_replica(Name conn_name, char *snapshot)
 			 PG_VERSION);
 	}
 
-	if (!replica_local_dsn)
+	if (cfg->replica_local_dsn == NULL)
 		elog(FATAL, "bdr init_replica: no replica_local_dsn specified");
 
 	tmpdir = palloc(strlen(bdr_temp_dump_directory)+32);
@@ -589,8 +579,8 @@ bdr_exec_init_replica(Name conn_name, char *snapshot)
 		char *const argv[] = {
 			bdr_init_replica_script_path,
 			"--snapshot", snapshot,
-			"--source", remote_dsn,
-			"--target", replica_local_dsn,
+			"--source", cfg->dsn,
+			"--target", cfg->replica_local_dsn,
 			"--tmp-directory", tmpdir,
 			NULL
 		};
@@ -606,8 +596,8 @@ bdr_exec_init_replica(Name conn_name, char *snapshot)
 		envp[0] = path.data;
 
 		elog(LOG, "Creating replica with: %s --snapshot %s --source \"%s\" --target \"%s\" --tmp-directory \"%s\"",
-			 bdr_init_replica_script_path, snapshot, remote_dsn,
-			 replica_local_dsn, tmpdir);
+			 bdr_init_replica_script_path, snapshot, cfg->dsn,
+			 cfg->replica_local_dsn, tmpdir);
 
 		n = execve(bdr_init_replica_script_path, argv, envp);
 		if (n < 0)
@@ -661,8 +651,6 @@ bdr_exec_init_replica(Name conn_name, char *snapshot)
 		bdr_init_replica_cleanup_tmpdir(0, CStringGetDatum(tmpdir));
 	}
 
-	pfree(replica_local_dsn);
-	pfree(remote_dsn);
 	pfree(tmpdir);
 #else
 	/*
@@ -685,13 +673,12 @@ bdr_exec_init_replica(Name conn_name, char *snapshot)
 void
 bdr_init_replica(Name dbname)
 {
-	const char *connstr;
 	char status;
 	XLogRecPtr min_remote_lsn;
 	PGconn *nonrepl_init_conn;
 	StringInfoData query;
 	BdrWorker  *init_replica_worker;
-	Name init_conn_name;
+	BdrConnectionConfig *init_replica_config;
 
 	initStringInfo(&query);
 
@@ -716,9 +703,10 @@ bdr_init_replica(Name dbname)
 		return;
 	}
 
-	init_conn_name = &init_replica_worker->worker_data.apply_worker.name;
+	init_replica_config = bdr_connection_configs
+		[init_replica_worker->worker_data.apply_worker.connection_config_idx];
 	elog(DEBUG2, "bdr %s: bdr_init_replica init from connection %s",
-		 NameStr(*dbname), NameStr(*init_conn_name));
+		 NameStr(*dbname), NameStr(init_replica_config->name));
 
 	/*
 	 * Check the local bdr.bdr_nodes over SPI or direct scan to see if
@@ -737,8 +725,7 @@ bdr_init_replica(Name dbname)
 	 * system identifier. If there is, that'll tell us what stage of startup
 	 * we are up to and let us resume an incomplete start.
 	 */
-	connstr = bdr_get_worker_option(NameStr(*init_conn_name), "dsn", false);
-	nonrepl_init_conn = PQconnectdb(connstr);
+	nonrepl_init_conn = PQconnectdb(init_replica_config->dsn);
 	if (PQstatus(nonrepl_init_conn) != CONNECTION_OK)
 	{
 		ereport(FATAL,
@@ -801,7 +788,7 @@ bdr_init_replica(Name dbname)
 			 */
 			elog(DEBUG2, "bdr %s: previous failed initalization detected, cleaning up",
 				 NameStr(*dbname));
-			bdr_drop_slot_and_replication_identifier(init_conn_name, dbname);
+			bdr_drop_slot_and_replication_identifier(init_replica_config);
 			status = bdr_set_remote_status(nonrepl_init_conn, dbname,
 										   '\0', status);
 			break;
@@ -834,12 +821,14 @@ bdr_init_replica(Name dbname)
 		LWLockAcquire(BdrWorkerCtl->lock, LW_SHARED);
 		for (off = 0; off < bdr_max_workers; off++)
 		{
-			BdrWorker *worker = &BdrWorkerCtl->slots[off];
-			const char *worker_name =
-				NameStr(worker->worker_data.apply_worker.dbname);
+			BdrWorker 			   *worker = &BdrWorkerCtl->slots[off];
+			BdrConnectionConfig	   *cfg;
+
+			cfg = bdr_connection_configs
+				[worker->worker_data.apply_worker.connection_config_idx];
 
 			if (worker->worker_type == BDR_WORKER_APPLY
-				&& strcmp(worker_name, NameStr(*dbname)) == 0)
+				&& strcmp(NameStr(cfg->dbname), NameStr(*dbname)) == 0)
 				my_conn_idxs[n_conns++] = off;
 		}
 		LWLockRelease(BdrWorkerCtl->lock);
@@ -863,6 +852,7 @@ bdr_init_replica(Name dbname)
 		for (off = 0; off < n_conns; off++)
 		{
 			BdrWorker *w = &BdrWorkerCtl->slots[my_conn_idxs[off]];
+			BdrConnectionConfig *cfg;
 			char *snapshot = NULL;
 			PGconn *conn = NULL;
 			RepNodeId replication_identifier;
@@ -870,17 +860,19 @@ bdr_init_replica(Name dbname)
 			uint64 sysid;
 			TimeLineID timeline;
 
+			cfg = bdr_connection_configs
+				[w->worker_data.apply_worker.connection_config_idx];
+
 			elog(DEBUG1, "bdr %s: checking/creating slot for %s",
-				 NameStr(*dbname), NameStr(w->worker_data.apply_worker.name));
+				 NameStr(*dbname), NameStr(cfg->name));
 			/*
 			 * Create the slot on the remote. The returned remote sysid and
 			 * timeline, the slot name, and the local replication identifier
 			 * are all discarded; they're not needed here, and will be obtained
 			 * again by the apply workers when they're launched after init.
 			 */
-			conn = bdr_establish_connection_and_slot(
-				&w->worker_data.apply_worker.name, &slot_name,
-				&sysid, &timeline, &replication_identifier, &snapshot);
+			conn = bdr_establish_connection_and_slot(cfg, &slot_name, &sysid,
+				&timeline, &replication_identifier, &snapshot);
 
 			/* Always throws rather than returning failure */
 			Assert(conn);
@@ -929,8 +921,8 @@ bdr_init_replica(Name dbname)
 		 * copied over.
 		 */
 		elog(LOG, "bdr %s: creating and restoring dump for %s",
-			 NameStr(*dbname), NameStr(*init_conn_name));
-		bdr_exec_init_replica(init_conn_name, init_snapshot);
+			 NameStr(*dbname), NameStr(init_replica_config->name));
+		bdr_exec_init_replica(init_replica_config, init_snapshot);
 		PQfinish(init_repl_conn);
 
 		pfree(init_snapshot);
@@ -942,7 +934,9 @@ bdr_init_replica(Name dbname)
 	/* Launch the catchup worker and wait for it to finish */
 	elog(LOG, "bdr %s: launching catchup mode apply worker", NameStr(*dbname));
 	min_remote_lsn = bdr_get_remote_lsn(nonrepl_init_conn);
-	bdr_catchup_to_lsn(nonrepl_init_conn, dbname, init_conn_name, min_remote_lsn);
+	bdr_catchup_to_lsn(
+		init_replica_worker->worker_data.apply_worker.connection_config_idx,
+		min_remote_lsn);
 	status = bdr_set_remote_status(nonrepl_init_conn, dbname, 'r', status);
 
 	elog(LOG, "bdr %s: catchup worker finished, ready for normal replication",
@@ -975,9 +969,17 @@ bdr_catchup_to_lsn_cleanup(int code, Datum offset)
  * When we finish applying and the worker exits, we'll be caught up with the
  * remote and in a consistent state where all our local replication identifiers
  * are consistent with the actual state of the local DB.
+ *
+ * Arguments:
+ *
+ * cfg_index: Index of the bdr connection for this dbname with init_worker=t
+ * set within bdr_connection_configs. Used to start the worker.
+ *
+ * target_lsn: LSN of immediate origin node at which catchup should stop.
  */
 static void
-bdr_catchup_to_lsn(PGconn *conn, Name dbname, Name conn_name, XLogRecPtr target_lsn)
+bdr_catchup_to_lsn(int cfg_index,
+				   XLogRecPtr target_lsn)
 {
 	int worker_shmem_idx;
 	pid_t bgw_pid;
@@ -985,12 +987,17 @@ bdr_catchup_to_lsn(PGconn *conn, Name dbname, Name conn_name, XLogRecPtr target_
 	BackgroundWorker bgw;
 	BackgroundWorkerHandle *bgw_handle;
 	BgwHandleStatus bgw_status;
+	BdrConnectionConfig *cfg;
+
+	cfg = bdr_connection_configs[cfg_index];
+	Assert(cfg != NULL);
+	Assert(cfg->init_replica);
 
 	elog(DEBUG1, "Registering bdr apply catchup worker %s for db %s to lsn %X/%X",
-		 NameStr(*conn_name), NameStr(*dbname),
+		 NameStr(cfg->name), NameStr(cfg->dbname),
 		 (uint32)(target_lsn>>32), (uint32)target_lsn);
 
-	/* Create the shm entry for the catchup worker */
+	/* Create the shmem entry for the catchup worker */
 	LWLockAcquire(BdrWorkerCtl->lock, LW_SHARED);
 	for (worker_shmem_idx = 0; worker_shmem_idx < bdr_max_workers; worker_shmem_idx++)
 	{
@@ -1009,21 +1016,22 @@ bdr_catchup_to_lsn(PGconn *conn, Name dbname, Name conn_name, XLogRecPtr target_
 	LWLockRelease(BdrWorkerCtl->lock);
 
 	/*
-	 * Make sure we free the shmem slot for the catchup worker even if we
-	 * hit an error.
+	 * Launch the catchup worker, ensuring that we free the shmem slot for the
+	 * catchup worker even if we hit an error.
 	 *
 	 * There's a small race between claiming the worker and entering the ensure
-	 * cleanup block.  Real consequences, pretty much nil, since this is really
-	 * just startup code.
+	 * cleanup block. The real consequences are pretty much nil, since this is
+	 * really just startup code and all we leak is one shmem slot.
 	 */
 	PG_ENSURE_ERROR_CLEANUP(bdr_catchup_to_lsn_cleanup,
 							Int32GetDatum(worker_shmem_idx));
 	{
 		pid_t prev_bgw_pid = 0;
 
+		/* Make sure the catchup worker can find its bdr.xxx_ GUCs */
+		catchup_worker->connection_config_idx = cfg_index;
+
 		/* Set up the BdrApplyWorker struct in shmem */
-		strncpy(NameStr(catchup_worker->name), NameStr(*conn_name), NAMEDATALEN);
-		strncpy(NameStr(catchup_worker->dbname), NameStr(*dbname), NAMEDATALEN);
 		catchup_worker->origin_id = InvalidRepNodeId;
 		catchup_worker->sysid = 0;
 		catchup_worker->timeline = 0;
@@ -1049,9 +1057,9 @@ bdr_catchup_to_lsn(PGconn *conn, Name dbname, Name conn_name, XLogRecPtr target_
 
 		snprintf(bgw.bgw_name, BGW_MAXLEN,
 				 "bdr %s: catchup apply to %X/%X on %s",
-				 NameStr(*dbname),
+				 NameStr(cfg->dbname),
 				 (uint32)(target_lsn >> 32), (uint32)target_lsn,
-				 NameStr(*conn_name));
+				 NameStr(cfg->name));
 		bgw.bgw_name[BGW_MAXLEN-1] = '\0';
 
 		/* Launch the catchup worker and wait for it to start */
@@ -1114,13 +1122,13 @@ bdr_catchup_to_lsn(PGconn *conn, Name dbname, Name conn_name, XLogRecPtr target_
 			/* Worker must've died before it finished */
 			elog(ERROR,
 				 "bdr %s: catchup worker exited before catching up to target LSN %X/%X",
-				 NameStr(*dbname),
+				 NameStr(cfg->dbname),
 				 (uint32)(target_lsn>>32), (uint32)target_lsn);
 		}
 		else
 		{
 			elog(DEBUG1, "bdr %s: catchup worker caught up to target LSN",
-				 NameStr(*dbname));
+				 NameStr(cfg->dbname));
 		}
 	}
 	PG_END_ENSURE_ERROR_CLEANUP(bdr_catchup_to_lsn_cleanup,
