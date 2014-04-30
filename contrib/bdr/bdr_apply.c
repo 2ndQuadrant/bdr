@@ -910,7 +910,7 @@ process_queued_ddl_command(HeapTuple cmdtup, bool tx_just_started)
 	cmdsrel = heap_open(QueuedDDLCommandsRelid, NoLock);
 
 	/* fetch the object type */
-	datum = heap_getattr(cmdtup, 1,
+	datum = heap_getattr(cmdtup, 3,
 						 RelationGetDescr(cmdsrel),
 						 &isnull);
 	if (isnull)
@@ -919,7 +919,7 @@ process_queued_ddl_command(HeapTuple cmdtup, bool tx_just_started)
 	type = TextDatumGetCString(datum);
 
 	/* fetch the object identity */
-	datum = heap_getattr(cmdtup, 2,
+	datum = heap_getattr(cmdtup, 4,
 						 RelationGetDescr(cmdsrel),
 						 &isnull);
 	if (isnull)
@@ -929,7 +929,7 @@ process_queued_ddl_command(HeapTuple cmdtup, bool tx_just_started)
 	identstr = TextDatumGetCString(datum);
 
 	/* finally fetch and execute the command */
-	datum = heap_getattr(cmdtup, 3,
+	datum = heap_getattr(cmdtup, 5,
 						 RelationGetDescr(cmdsrel),
 						 &isnull);
 	if (isnull)
@@ -1024,7 +1024,7 @@ process_queued_drop(HeapTuple cmdtup)
 	ObjectAddresses *addresses;
 
 	cmdsrel = heap_open(QueuedDropsRelid, AccessShareLock);
-	arrayDatum = heap_getattr(cmdtup, 1,
+	arrayDatum = heap_getattr(cmdtup, 3,
 							  RelationGetDescr(cmdsrel),
 							  &null);
 	if (null)
