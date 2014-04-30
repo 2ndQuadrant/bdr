@@ -52,6 +52,7 @@ typedef struct EventTriggerQueryState
 	MemoryContext cxt;
 	StashedCommand *curcmd;
 	List	   *stash;		/* list of StashedCommand; see deparse_utility.h */
+	bool		in_extension;
 	struct EventTriggerQueryState *previous;
 } EventTriggerQueryState;
 
@@ -1047,6 +1048,7 @@ EventTriggerBeginCompleteQuery(void)
 	state->in_sql_drop = false;
 	state->curcmd = NULL;
 	state->stash = NIL;
+	state->in_extension = currentEventTriggerState ? currentEventTriggerState->in_extension : false;
 
 	state->previous = currentEventTriggerState;
 	currentEventTriggerState = state;
@@ -1379,6 +1381,7 @@ EventTriggerStashCommand(Oid objectId, ObjectType objtype, Node *parsetree)
 	stashed->objtype = objtype;
 	stashed->subcmds = NIL;
 	stashed->parsetree = copyObject(parsetree);
+	stashed->in_extension = currentEventTriggerState->in_extension;
 
 	currentEventTriggerState->stash = lappend(currentEventTriggerState->stash,
 											  stashed);
@@ -1412,10 +1415,24 @@ EventTriggerComplexCmdStart(Node *parsetree)
 	stashed->objectId = InvalidOid;
 	stashed->subcmds = NIL;
 	stashed->parsetree = copyObject(parsetree);
+	stashed->in_extension = currentEventTriggerState->in_extension;
 
 	currentEventTriggerState->curcmd = stashed;
 
 	MemoryContextSwitchTo(oldcxt);
+}
+
+void
+EventTriggerStashExtensionStart(void)
+{
+	currentEventTriggerState->in_extension = true;
+}
+
+void
+EventTriggerStashExtensionStop(void)
+{
+	if (currentEventTriggerState)
+		currentEventTriggerState->in_extension = false;
 }
 
 void
@@ -1543,8 +1560,8 @@ pg_event_trigger_get_creation_commands(PG_FUNCTION_ARGS)
 		 */
 		if (command != NULL)
 		{
-			Datum		values[8];
-			bool		nulls[8];
+			Datum		values[9];
+			bool		nulls[9];
 			ObjectAddress addr;
 			const char *tag;
 			char	   *identity;
@@ -1613,6 +1630,8 @@ pg_event_trigger_get_creation_commands(PG_FUNCTION_ARGS)
 				values[i++] = CStringGetTextDatum(schema);
 			/* identity */
 			values[i++] = CStringGetTextDatum(identity);
+			/* in_extension */
+			values[i++] = BoolGetDatum(cmd->in_extension);
 			/* command */
 			values[i++] = CStringGetTextDatum(command);
 
@@ -1988,7 +2007,7 @@ expand_jsonval_strlit(StringInfo buf, Datum jsonval)
 	char   *str;
 	char   *unquoted;
 	StringInfoData dqdelim;
-	static const char dqsuffixes[] = "_XXXXXXX";
+	static const char dqsuffixes[] = "_XYZZYX_";
 	int         dqnextchar = 0;
 
 	/* obtain the string, and remove the JSON quotes and stuff */
@@ -1997,7 +2016,7 @@ expand_jsonval_strlit(StringInfo buf, Datum jsonval)
 
 	/* Find a useful dollar-quote delimiter */
 	initStringInfo(&dqdelim);
-	appendStringInfoString(&dqdelim, "$dprs_");
+	appendStringInfoString(&dqdelim, "$");
 	while (strstr(unquoted, dqdelim.data) != NULL)
 	{
 		appendStringInfoChar(&dqdelim, dqsuffixes[dqnextchar++]);

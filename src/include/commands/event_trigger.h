@@ -59,5 +59,7 @@ extern void EventTriggerComplexCmdStart(Node *parsetree);
 extern void EventTriggerComplexCmdSetOid(Oid objectId);
 extern void EventTriggerRecordSubcmd(Node *subcmd, AttrNumber attnum, Oid newoid);
 extern void EventTriggerComplexCmdEnd(void);
+extern void EventTriggerStashExtensionStart(void);
+extern void EventTriggerStashExtensionStop(void);
 
 #endif   /* EVENT_TRIGGER_H */
