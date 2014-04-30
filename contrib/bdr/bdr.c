@@ -1390,7 +1390,7 @@ _PG_init(void)
 							NULL, NULL, NULL);
 
 	DefineCustomIntVariable("bdr.default_apply_delay",
-							NULL,
+							"default replication apply delay, can be overwritten per connection",
 							NULL,
 							&bdr_default_apply_delay,
 							0, 0, INT_MAX,
