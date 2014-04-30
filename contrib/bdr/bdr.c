@@ -62,6 +62,7 @@ static int   n_configured_bdr_nodes = 0;
 ResourceOwner bdr_saved_resowner;
 static bool bdr_is_restart = false;
 Oid   BdrNodesRelid;
+BdrConnectionConfig  **bdr_connection_configs;
 
 /* GUC storage */
 static char *connections = NULL;
@@ -70,43 +71,20 @@ int bdr_default_apply_delay;
 int bdr_max_workers;
 static bool bdr_skip_ddl_replication;
 
-/* TODO: Remove when bdr_apply_main moved into bdr_apply.c */
+/*
+ * These globals are valid only for apply bgworkers, not for
+ * bdr running in the postmaster or for per-db workers.
+ *
+ * TODO: move into bdr_apply.c when bdr_apply_main moved.
+ */
 extern BdrApplyWorker *bdr_apply_worker;
+extern BdrConnectionConfig *bdr_apply_config;
 
 /* shmem init hook to chain to on startup, if any */
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
 
 /* shortcut for finding the the worker shmem block */
 BdrWorkerControl *BdrWorkerCtl = NULL;
-
-/*
- * Used only in postmaster to pass data from _PG_init during
- * shared_preload_libraries into the shared memory startup hook.
- */
-typedef struct BdrStartupContext
-{
-	/* List of palloc'd BdrApplyWorker instances to copy into shmem */
-	List    *workers;
-} BdrStartupContext;
-
-static BdrStartupContext *bdr_startup_context;
-
-/*
- * We need somewhere to store config options for each bdr apply worker when
- * we're creating the GUCs for each worker in the postmaster during startup.
- *
- * This isn't directly accessible to workers as we don't keep a pointer to it
- * anywhere, and in EXEC_BACKEND cases it'd be useless because it wouldn't be
- * preserved across fork() anyway. Workers have to use GetConfigOption to
- * access these values.
- */
-typedef struct BdrApplyWorkerConfigOptions
-{
-	char *dsn;
-	int   apply_delay;
-	bool  bdr_init_replica;
-	char *replica_local_dsn;
-} BdrApplyWorkerConfigOptions;
 
 PG_MODULE_MAGIC;
 
@@ -466,35 +444,6 @@ bdr_worker_init(char *dbname)
 }
 
 /*
- * GetConfigOption wrapper that gets an option name qualified by the worker's
- * name.
- *
- * The returned string is *not* modifiable and will only be valid until the
- * next GUC-related call.
- */
-const char *
-bdr_get_worker_option(const char * worker_name, const char * option_name,
-					  bool missing_ok)
-{
-	char	   *gucname;
-	size_t      namelen;
-	const char *optval;
-
-	/* Option names should omit leading underscore */
-	Assert(option_name[0] != '_');
-
-	namelen = sizeof("bdr.") + strlen(worker_name) + strlen(option_name) + 3;
-	gucname = palloc(namelen);
-	snprintf(gucname, namelen, "bdr.%s_%s", worker_name, option_name);
-
-	optval = GetConfigOption(gucname, missing_ok, false);
-
-	pfree(gucname);
-
-	return optval;
-}
-
-/*
  *----------------------
  * Connect to the BDR remote end, IDENTIFY_SYSTEM, and CREATE_SLOT if necessary.
  * Generates slot name, replication identifier.
@@ -516,19 +465,17 @@ bdr_get_worker_option(const char * worker_name, const char * option_name,
  *----------------------
  */
 PGconn*
-bdr_establish_connection_and_slot(Name connection_name, Name out_slot_name,
+bdr_establish_connection_and_slot(BdrConnectionConfig *cfg, Name out_slot_name,
 	uint64 *out_sysid, TimeLineID* out_timeline, RepNodeId
 	*out_replication_identifier, char **out_snapshot)
 {
 	char		conninfo_repl[MAXCONNINFO + 75];
-	const char *dsn;
 	char		remote_ident[256];
 	PGconn	   *streamConn;
 
-	dsn = bdr_get_worker_option(NameStr(*connection_name), "dsn", false);
 	snprintf(conninfo_repl, sizeof(conninfo_repl),
 			 "%s replication=database fallback_application_name=bdr",
-			 dsn);
+			 cfg->dsn);
 
 	/* Establish BDR conn and IDENTIFY_SYSTEM */
 	streamConn = bdr_connect(
@@ -597,16 +544,19 @@ bdr_apply_main(Datum main_arg)
 	Assert(bdr_worker_slot->worker_type == BDR_WORKER_APPLY);
 	bdr_apply_worker = &bdr_worker_slot->worker_data.apply_worker;
 
-	bdr_worker_init(NameStr(bdr_apply_worker->dbname));
+	bdr_apply_config = bdr_connection_configs[bdr_apply_worker->connection_config_idx];
+	Assert(bdr_apply_config != NULL);
+
+	bdr_worker_init(NameStr(bdr_apply_config->dbname));
 
 	CurrentResourceOwner = ResourceOwnerCreate(NULL, "bdr apply top-level resource owner");
 	bdr_saved_resowner = CurrentResourceOwner;
 
 	elog(LOG, "%s initialized on %s",
-		 MyBgworkerEntry->bgw_name, NameStr(bdr_apply_worker->dbname));
+		 MyBgworkerEntry->bgw_name, NameStr(bdr_apply_config->dbname));
 
 	streamConn = bdr_establish_connection_and_slot(
-		&bdr_apply_worker->name, &slot_name, &bdr_apply_worker->sysid,
+		bdr_apply_config, &slot_name, &bdr_apply_worker->sysid,
 		&bdr_apply_worker->timeline, &replication_identifier, NULL);
 
 	bdr_apply_worker->origin_id = replication_identifier;
@@ -821,36 +771,39 @@ bdr_apply_main(Datum main_arg)
  *  num_used_databases
  *  Number of distinct databases named in conns
  *
- *	out_worker
- *	Initialize this BdrApplyWorker with the name and dbname found.
+ *	out_config
+ *  Assigned a palloc'd pointer to GUC storage for this config'd connection
  *
- * TODO At some point we'll have to make the GUC setup dynamic so we can
- * handle workers being added/removed with a config reload SIGHUP.
+ * out_config is set even if false is returned, as the GUCs have still been
+ * created. Test out_config->is_valid to see whether the connection is usable.
  */
 static bool
 bdr_create_con_gucs(char  *name,
 					char **used_databases,
 					Size  *num_used_databases,
 					char **database_initcons,
-					BdrApplyWorker *out_worker)
+					BdrConnectionConfig **out_config)
 {
 	int			off;
 	char	   *errmsg = NULL;
 	PQconninfoOption *options;
 	PQconninfoOption *cur_option;
-	BdrApplyWorkerConfigOptions *opts;
+	BdrConnectionConfig *opts;
 
 	/* don't free, referenced by the guc machinery! */
 	char	   *optname_dsn = palloc(strlen(name) + 30);
 	char	   *optname_delay = palloc(strlen(name) + 30);
 	char	   *optname_replica = palloc(strlen(name) + 30);
 	char	   *optname_local_dsn = palloc(strlen(name) + 30);
-	opts = palloc(sizeof(BdrApplyWorkerConfigOptions));
 
 	Assert(process_shared_preload_libraries_in_progress);
 
-	strncpy(NameStr(out_worker->name), name, NAMEDATALEN);
-	NameStr(out_worker->name)[NAMEDATALEN-1] = '\0';
+	opts = palloc0(sizeof(BdrConnectionConfig));
+	opts->is_valid = false;
+	*out_config = opts;
+
+	strncpy(NameStr(opts->name), name, NAMEDATALEN);
+	NameStr(opts->name)[NAMEDATALEN-1] = '\0';
 
 	sprintf(optname_dsn, "bdr.%s_dsn", name);
 	DefineCustomStringVariable(optname_dsn,
@@ -875,7 +828,7 @@ bdr_create_con_gucs(char  *name,
 	DefineCustomBoolVariable(optname_replica,
 							 optname_replica,
 							 NULL,
-							 &opts->bdr_init_replica,
+							 &opts->init_replica,
 							 false,
 							 PGC_SIGHUP,
 							 0,
@@ -892,11 +845,11 @@ bdr_create_con_gucs(char  *name,
 
 	if (!opts->dsn)
 	{
-		elog(WARNING, "no connection information for %s", name);
+		elog(WARNING, "bdr %s: no connection information", name);
 		return false;
 	}
 
-	elog(LOG, "bgworkers, connection: %s", opts->dsn);
+	elog(DEBUG2, "bdr %s: dsn=%s", name, opts->dsn);
 
 	options = PQconninfoParse(opts->dsn, &errmsg);
 	if (errmsg != NULL)
@@ -913,17 +866,18 @@ bdr_create_con_gucs(char  *name,
 		if (strcmp(cur_option->keyword, "dbname") == 0)
 		{
 			if (cur_option->val == NULL)
-				elog(ERROR, "no dbname set");
+				elog(ERROR, "bdr %s: no dbname set", name);
 
-			strncpy(NameStr(out_worker->dbname), cur_option->val,
+			strncpy(NameStr(opts->dbname), cur_option->val,
 					NAMEDATALEN);
-			NameStr(out_worker->dbname)[NAMEDATALEN-1] = '\0';
+			NameStr(opts->dbname)[NAMEDATALEN-1] = '\0';
+			elog(DEBUG2, "bdr %s: dbname=%s", name, NameStr(opts->dbname));
 		}
 
 		if (cur_option->val != NULL)
 		{
-			elog(LOG, "option: %s, val: %s",
-				 cur_option->keyword, cur_option->val);
+			elog(DEBUG3, "bdr %s: opt %s, val: %s",
+				 name, cur_option->keyword, cur_option->val);
 		}
 		cur_option++;
 	}
@@ -937,7 +891,7 @@ bdr_create_con_gucs(char  *name,
 	 */
 	for (off = 0; off < *num_used_databases; off++)
 	{
-		if (strcmp(NameStr(out_worker->dbname), used_databases[off]) == 0)
+		if (strcmp(NameStr(opts->dbname), used_databases[off]) == 0)
 			break;
 	}
 
@@ -945,15 +899,18 @@ bdr_create_con_gucs(char  *name,
 	{
 		/* Didn't find a match, add new db name */
 		used_databases[(*num_used_databases)++] =
-			pstrdup(NameStr(out_worker->dbname));
+			pstrdup(NameStr(opts->dbname));
+		elog(DEBUG2, "bdr %s: Saw new database %s, now %i known dbs",
+			 name, NameStr(opts->dbname), (int)(*num_used_databases));
 	}
 
 	/*
 	 * Make sure that at most one of the worker configs for each DB can be
 	 * configured to run initialization.
 	 */
-	if (opts->bdr_init_replica)
+	if (opts->init_replica)
 	{
+		elog(DEBUG2, "bdr %s: has init_replica=t", name);
 		if (database_initcons[off] != NULL)
 			elog(ERROR, "Connections %s and %s on database %s both have bdr_init_replica enabled, cannot continue",
 				name, database_initcons[off], used_databases[off]);
@@ -961,7 +918,9 @@ bdr_create_con_gucs(char  *name,
 			database_initcons[off] = name; /* no need to pstrdup, see _PG_init */
 	}
 
-	/* optname vars and opts intentionally leaked, see above */
+	opts->is_valid = true;
+
+	/* optname vars intentionally leaked, see above */
 	return true;
 }
 
@@ -1014,22 +973,25 @@ bdr_launch_apply_workers(char *dbname)
 			case BDR_WORKER_APPLY:
 				{
 					BdrApplyWorker *con = &worker->worker_data.apply_worker;
-					if ( strcmp(NameStr(con->dbname), dbname) == 0 )
+					BdrConnectionConfig *cfg =
+						bdr_connection_configs[con->connection_config_idx];
+					Assert(cfg != NULL);
+					if ( strcmp(NameStr(cfg->dbname), dbname) == 0 )
 					{
 						/* It's an apply worker for our DB; register it */
 						BackgroundWorkerHandle *bgw_handle;
 
 						snprintf(apply_worker.bgw_name, BGW_MAXLEN,
-								 "bdr apply: %s", NameStr(con->name));
+								 "bdr apply: %s", NameStr(cfg->name));
 						apply_worker.bgw_main_arg = Int32GetDatum(i);
 
 						if (!RegisterDynamicBackgroundWorker(&apply_worker,
 															 &bgw_handle))
 						{
-							/* FIXME better error */
-							elog(ERROR, "Failed to register background worker");
+							elog(ERROR, "bdr: Failed to register background worker"
+								 " %s, see previous log messages",
+								 NameStr(cfg->name));
 						}
-						elog(LOG, "Registered worker");
 						apply_workers = lcons(bgw_handle, apply_workers);
 					}
 				}
@@ -1253,31 +1215,36 @@ bdr_worker_shmem_startup(void)
  *
  * The shm segment is initialized now, so do that.
  */
-/*
- * TODO: Do the required GUC parsing, etc in bdr_worker_shmem_create_workers
- * instead of in _PG_init.
- */
 static void
 bdr_worker_shmem_create_workers(void)
 {
-	ListCell *c;
+	int off;
 
 	/*
-	 * Copy the BdrApplyWorker configs created in _PG_init into shared memory,
-	 * then free the palloc'd original.
+	 * Create a BdrApplyWorker for each valid BdrConnectionConfig found during
+	 * _PG_init so that the per-db worker will register it for startup after
+	 * performing any BDR initialisation work.
 	 *
-	 * This is necessary on EXEC_BACKEND (Windows) where postmaster memory
-	 * isn't accessible by other backends, and is also required when launching
-	 * one bgworker from another.
+	 * Use of shared memory for this is required for EXEC_BACKEND (windows)
+	 * where we can't share postmaster memory, and for when we're launching a
+	 * bgworker from another bgworker where the fork() from postmaster doesn't
+	 * provide access to the launching bgworker's memory.
 	 */
-	foreach(c, bdr_startup_context->workers)
+	for (off = 0; off < bdr_max_workers; off++)
 	{
-		BdrApplyWorker *worker = (BdrApplyWorker *) lfirst(c);
+		BdrConnectionConfig *cfg = bdr_connection_configs[off];
 		BdrWorker	   *shmworker;
+		BdrApplyWorker *worker;
+
+		if (cfg == NULL || !cfg->is_valid)
+			continue;
 
 		shmworker = (BdrWorker *) bdr_worker_shmem_alloc(BDR_WORKER_APPLY);
 		Assert(shmworker->worker_type == BDR_WORKER_APPLY);
-		memcpy(&shmworker->worker_data, worker, sizeof(BdrApplyWorker));
+		worker = &shmworker->worker_data.apply_worker;
+		worker->connection_config_idx = off;
+		worker->replay_stop_lsn = InvalidXLogRecPtr;
+		worker->forward_changesets = false;
 		n_configured_bdr_nodes++;
 	}
 
@@ -1379,6 +1346,7 @@ _PG_init(void)
 	char	  **used_databases;
 	char      **database_initcons;
 	Size		num_used_databases = 0;
+	int			connection_config_idx;
 
 	if (!process_shared_preload_libraries_in_progress)
 		elog(ERROR, "bdr can only be loaded via shared_preload_libraries");
@@ -1496,12 +1464,13 @@ _PG_init(void)
 	 *
 	 * This registers a hook on shm initialization, bdr_worker_shmem_startup(),
 	 * which populates the shm segment with configured apply workers using data
-	 * in bdr_startup_context.
+	 * in bdr_connection_configs.
 	 */
 	bdr_worker_alloc_shmem_segment();
 
-	/* Prepare storage to pass data into our shared memory startup hook */
-	bdr_startup_context = (BdrStartupContext *) palloc0(sizeof(BdrStartupContext));
+	/* Allocate space for BDR connection GUCs */
+	bdr_connection_configs = (BdrConnectionConfig**)
+		palloc0(bdr_max_workers * sizeof(BdrConnectionConfig*));
 
 	/* Names of all databases we're going to be doing BDR for */
 	used_databases = palloc0(sizeof(char *) * list_length(connames));
@@ -1516,10 +1485,11 @@ _PG_init(void)
 	 * parameters and sanity checking as we go. The structs are palloc'd, but
 	 * will be copied into shared memory and free'd during shm init.
 	 */
+	connection_config_idx = 0;
 	foreach(c, connames)
 	{
+		char		   *name;
 		BdrApplyWorker *apply_worker;
-		char *name;
 
 		apply_worker = (BdrApplyWorker *) palloc0(sizeof(BdrApplyWorker));
 		apply_worker->forward_changesets = false;
@@ -1527,10 +1497,11 @@ _PG_init(void)
 		name = (char *) lfirst(c);
 
 		if (!bdr_create_con_gucs(name, used_databases, &num_used_databases,
-								 database_initcons, apply_worker))
+								 database_initcons,
+								 &bdr_connection_configs[connection_config_idx]));
 			continue;
-		apply_worker->origin_id = InvalidRepNodeId;
-		bdr_startup_context->workers = lcons(apply_worker, bdr_startup_context->workers);
+
+		Assert(bdr_connection_configs[connection_config_idx] != NULL);
 	}
 
 	/*
