@@ -1944,7 +1944,7 @@ expand_jsonval_strlit(StringInfo buf, Datum jsonval)
 	char   *str;
 	char   *unquoted;
 	StringInfoData dqdelim;
-	static const char dqsuffixes[] = "_XXXXXXX";
+	static const char dqsuffixes[] = "_XYZZYX_";
 	int         dqnextchar = 0;
 
 	/* obtain the string, and remove the JSON quotes and stuff */
@@ -1953,7 +1953,7 @@ expand_jsonval_strlit(StringInfo buf, Datum jsonval)
 
 	/* Find a useful dollar-quote delimiter */
 	initStringInfo(&dqdelim);
-	appendStringInfoString(&dqdelim, "$dprs_");
+	appendStringInfoString(&dqdelim, "$");
 	while (strstr(unquoted, dqdelim.data) != NULL)
 	{
 		appendStringInfoChar(&dqdelim, dqsuffixes[dqnextchar++]);
