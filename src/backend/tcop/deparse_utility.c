@@ -41,6 +41,7 @@
 #include "catalog/pg_language.h"
 #include "catalog/pg_operator.h"
 #include "catalog/pg_opclass.h"
+#include "catalog/pg_opfamily.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_range.h"
 #include "catalog/pg_rewrite.h"
@@ -1755,9 +1756,6 @@ deparse_CreateFunction(Oid objectId, Node *parsetree)
 	Oid		   *typarray;
 	Form_pg_language langForm;
 	int			i;
-	StringInfoData dqdelim;
-	static const char dqsuffixes[] = "_XXXXXXX";
-	int			dqnextchar = 0;
 	bool		isnull;
 
 	/* get the pg_proc tuple */
@@ -1775,18 +1773,8 @@ deparse_CreateFunction(Oid objectId, Node *parsetree)
 	langForm = (Form_pg_language) GETSTRUCT(langTup);
 
 	/*
-	 * Find a useful string literal delimiter.  Note that, as opposed to what
-	 * pg_dump does, we always use dollar quoting even when there are no quotes
-	 * or backslashes in the source, because it seems more practical in case
-	 * the source is modified and some quotes or backslashes are added.  This
-	 * is not 100% robust because a string might be added in the function
-	 * source that matches the dollar quote delimiter we have chosen.
-	 *
-	 * Note we use the dollar quoting delimiter for both prosrc and probin.
-	 * It's not really likely to be a problem for probin ...
-	 *
-	 * XXX this might be subject to somebody attacking by modifying the
-	 * function body to clash with the chosen dollar quote.
+	 * Determine useful values for prosrc and probin.  We cope with probin
+	 * being either NULL or "-", but prosrc must have a valid value.
 	 */
 	tmpdatum = SysCacheGetAttr(PROCOID, procTup,
 							   Anum_pg_proc_prosrc, &isnull);
@@ -1809,26 +1797,13 @@ deparse_CreateFunction(Oid objectId, Node *parsetree)
 		}
 	}
 
-	initStringInfo(&dqdelim);
-	appendStringInfoString(&dqdelim, "$dep_");
-	while (strstr(source, dqdelim.data) != NULL ||
-		   (PointerIsValid(probin) && strstr(probin, dqdelim.data) != NULL))
-	{
-		appendStringInfoChar(&dqdelim, dqsuffixes[dqnextchar++]);
-		dqnextchar %= sizeof(dqsuffixes) - 1;
-	}
-	/* add trailing $ */
-	appendStringInfoChar(&dqdelim, '$');
-
 	if (probin == NULL)
-		definition = psprintf("%s%%{definition}s%s",
-							  dqdelim.data, dqdelim.data);
+		definition = "%{definition}L";
 	else
-		definition = psprintf("%1$s%%{objfile}s%1$s, %1$s%%{symbol}s%1$s)",
-							  dqdelim.data);
+		definition = "%{objfile}L, %{symbol}L";
 
 	fmt = psprintf("CREATE %%{or_replace}s FUNCTION %%{signature}s "
-				   "RETURNS %%{rettype}T LANGUAGE %%{language}I "
+				   "RETURNS %%{setof}s %%{rettype}T LANGUAGE %%{language}I "
 				   "%%{window}s %%{volatility}s %%{leakproof}s "
 				   "%%{strict}s %%{security_definer}s %%{cost}s %%{rows}s "
 				   "%%{set_options: }s "
@@ -1955,6 +1930,8 @@ deparse_CreateFunction(Oid objectId, Node *parsetree)
 													 objectId));
 	append_object_object(createFunc, "signature", sign);
 
+	append_string_object(createFunc, "setof",
+						 procForm->proretset ? "SETOF" : "");
 	append_object_object(createFunc, "rettype",
 						 new_objtree_for_type(procForm->prorettype, -1));
 
@@ -2820,9 +2797,47 @@ deparse_AlterEnumStmt(Oid objectId, Node *parsetree)
 }
 
 static char *
+deparse_CreateOpFamily(Oid objectId, Node *parsetree)
+{
+	HeapTuple   opfTup;
+	HeapTuple   amTup;
+	Form_pg_opfamily opfForm;
+	Form_pg_am  amForm;
+	ObjTree	   *copfStmt;
+	ObjTree	   *tmp;
+	char	   *command;
+
+	opfTup = SearchSysCache1(OPFAMILYOID, ObjectIdGetDatum(objectId));
+	if (!HeapTupleIsValid(opfTup))
+		elog(ERROR, "cache lookup failed for operator family with OID %u", objectId);
+	opfForm = (Form_pg_opfamily) GETSTRUCT(opfTup);
+
+	amTup = SearchSysCache1(AMOID, ObjectIdGetDatum(opfForm->opfmethod));
+	if (!HeapTupleIsValid(amTup))
+		elog(ERROR, "cache lookup failed for access method %u",
+			 opfForm->opfmethod);
+	amForm = (Form_pg_am) GETSTRUCT(amTup);
+
+	copfStmt = new_objtree_VA("CREATE OPERATOR FAMILY %{identity}D USING %{amname}s",
+							  0);
+
+	tmp = new_objtree_for_qualname(opfForm->opfnamespace,
+								   NameStr(opfForm->opfname));
+	append_object_object(copfStmt, "identity", tmp);
+	append_string_object(copfStmt, "amname", NameStr(amForm->amname));
+
+	command = jsonize_objtree(copfStmt);
+	free_objtree(copfStmt);
+
+	ReleaseSysCache(amTup);
+	ReleaseSysCache(opfTup);
+
+	return command;
+}
+
+static char *
 deparse_AlterTableStmt(StashedCommand *cmd)
 {
-//	AlterTableStmt *node = (AlterTableStmt *) cmd->parsetree;
 	ObjTree	   *alterTableStmt;
 	ObjTree	   *tmp;
 	ObjTree	   *tmp2;
@@ -3326,8 +3341,11 @@ deparse_utility_command(StashedCommand *cmd)
 		case T_CreateConversionStmt:
 		case T_CreateCastStmt:
 		case T_CreateOpClassStmt:
-		case T_CreateOpFamilyStmt:
 			command = NULL;
+			break;
+
+		case T_CreateOpFamilyStmt:
+			command = deparse_CreateOpFamily(objectId, parsetree);
 			break;
 
 			/* matviews */

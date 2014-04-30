@@ -1784,9 +1784,22 @@ dequote_jsonval(char *jsonval)
 		 * sequences in place.	Are there other cases we need to handle
 		 * specially?
 		 */
-		if (jsonval[i] == '\\' &&
-			jsonval[i + 1] == '"')
-			continue;
+		if (jsonval[i] == '\\')
+		{
+			if (jsonval[i + 1] == 'n')
+			{
+				result[j++] = '\n';
+				i++;
+				continue;
+			}
+			else if (jsonval[i + 1] == 't')
+			{
+				result[j++] = '\t';
+				i++;
+				continue;
+			}
+			i++;
+		}
 
 		result[j++] = jsonval[i];
 	}
@@ -1974,12 +1987,31 @@ expand_jsonval_strlit(StringInfo buf, Datum jsonval)
 {
 	char   *str;
 	char   *unquoted;
+	StringInfoData dqdelim;
+	static const char dqsuffixes[] = "_XXXXXXX";
+	int         dqnextchar = 0;
 
+	/* obtain the string, and remove the JSON quotes and stuff */
 	str = TextDatumGetCString(jsonval);
 	unquoted = dequote_jsonval(str);
-	appendStringInfo(buf, "'%s'", unquoted);
+
+	/* Find a useful dollar-quote delimiter */
+	initStringInfo(&dqdelim);
+	appendStringInfoString(&dqdelim, "$dprs_");
+	while (strstr(unquoted, dqdelim.data) != NULL)
+	{
+		appendStringInfoChar(&dqdelim, dqsuffixes[dqnextchar++]);
+		dqnextchar %= sizeof(dqsuffixes) - 1;
+	}
+	/* add trailing $ */
+	appendStringInfoChar(&dqdelim, '$');
+
+	/* And finally produce the quoted literal into the output StringInfo */
+	appendStringInfo(buf, "%s%s%s", dqdelim.data, unquoted, dqdelim.data);
+
 	pfree(str);
 	pfree(unquoted);
+	pfree(dqdelim.data);
 }
 
 /*
