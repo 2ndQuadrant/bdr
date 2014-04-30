@@ -1194,17 +1194,23 @@ ProcessUtilitySlow(Node *parsetree,
 				break;
 
 			case T_CreateExtensionStmt:
+				EventTriggerStashExtensionStart();
 				objectId = CreateExtension((CreateExtensionStmt *) parsetree);
+				EventTriggerStashExtensionStop();
 				EventTriggerStashCommand(objectId, OBJECT_EXTENSION, parsetree);
 				break;
 
 			case T_AlterExtensionStmt:
+				EventTriggerStashExtensionStart();
 				objectId = ExecAlterExtensionStmt((AlterExtensionStmt *) parsetree);
+				EventTriggerStashExtensionStop();
 				EventTriggerStashCommand(objectId, OBJECT_EXTENSION, parsetree);
 				break;
 
 			case T_AlterExtensionContentsStmt:
+				EventTriggerStashExtensionStart();
 				ExecAlterExtensionContentsStmt((AlterExtensionContentsStmt *) parsetree);
+				EventTriggerStashExtensionStop();
 				break;
 
 			case T_CreateFdwStmt:
