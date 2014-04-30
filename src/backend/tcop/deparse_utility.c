@@ -41,6 +41,7 @@
 #include "catalog/pg_language.h"
 #include "catalog/pg_operator.h"
 #include "catalog/pg_opclass.h"
+#include "catalog/pg_opfamily.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_range.h"
 #include "catalog/pg_rewrite.h"
@@ -2846,6 +2847,45 @@ deparse_AlterEnumStmt(Oid objectId, Node *parsetree)
 }
 
 static char *
+deparse_CreateOpFamily(Oid objectId, Node *parsetree)
+{
+	HeapTuple   opfTup;
+	HeapTuple   amTup;
+	Form_pg_opfamily opfForm;
+	Form_pg_am  amForm;
+	ObjTree	   *copfStmt;
+	ObjTree	   *tmp;
+	char	   *command;
+
+	opfTup = SearchSysCache1(OPFAMILYOID, ObjectIdGetDatum(objectId));
+	if (!HeapTupleIsValid(opfTup))
+		elog(ERROR, "cache lookup failed for operator family with OID %u", objectId);
+	opfForm = (Form_pg_opfamily) GETSTRUCT(opfTup);
+
+	amTup = SearchSysCache1(AMOID, ObjectIdGetDatum(opfForm->opfmethod));
+	if (!HeapTupleIsValid(amTup))
+		elog(ERROR, "cache lookup failed for access method %u",
+			 opfForm->opfmethod);
+	amForm = (Form_pg_am) GETSTRUCT(amTup);
+
+	copfStmt = new_objtree_VA("CREATE OPERATOR FAMILY %{identity}D USING %{amname}s",
+							  0);
+
+	tmp = new_objtree_for_qualname(opfForm->opfnamespace,
+								   NameStr(opfForm->opfname));
+	append_object_object(copfStmt, "identity", tmp);
+	append_string_object(copfStmt, "amname", NameStr(amForm->amname));
+
+	command = jsonize_objtree(copfStmt);
+	free_objtree(copfStmt);
+
+	ReleaseSysCache(amTup);
+	ReleaseSysCache(opfTup);
+
+	return command;
+}
+
+static char *
 deparse_AlterTableStmt(StashedCommand *cmd)
 {
 	ObjTree	   *alterTableStmt;
@@ -3338,8 +3378,11 @@ deparse_parsenode_cmd(StashedCommand *cmd)
 		case T_CreateConversionStmt:
 		case T_CreateCastStmt:
 		case T_CreateOpClassStmt:
-		case T_CreateOpFamilyStmt:
 			command = NULL;
+			break;
+
+		case T_CreateOpFamilyStmt:
+			command = deparse_CreateOpFamily(objectId, parsetree);
 			break;
 
 			/* matviews */
