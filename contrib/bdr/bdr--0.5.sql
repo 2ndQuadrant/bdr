@@ -151,6 +151,8 @@ VALUES (
 );
 
 CREATE TABLE bdr_queued_commands (
+    lsn pg_lsn NOT NULL,
+    queued_at timestamptz NOT NULL,
     obj_type text,
     obj_identity text,
     command text,
@@ -167,14 +169,17 @@ BEGIN
 
     ident := quote_ident(TG_TABLE_SCHEMA)||'.'||quote_ident(TG_TABLE_NAME);
 
-    INSERT INTO bdr.bdr_queued_commands
-        (obj_type, obj_identity, command, executed)
-        VALUES
-            ('table',
+    INSERT INTO bdr.bdr_queued_commands (
+        lsn, queued_at,
+        obj_type, obj_identity, command, executed
+    )
+        VALUES (
+            pg_current_xlog_location(),
+            NOW(),
+            'table',
             ident,
             'TRUNCATE TABLE ONLY ' || ident,
             'false');
-
     RETURN NULL;
 END;
 $function$;
@@ -203,10 +208,14 @@ BEGIN
             CONTINUE;
         END IF;
 
-        INSERT INTO bdr.bdr_queued_commands
-            (obj_type, obj_identity, command, executed)
-            VALUES
-                (r.object_type,
+        INSERT INTO bdr.bdr_queued_commands(
+            lsn, queued_at,
+            obj_type, obj_identity, command, executed
+        )
+            VALUES (
+                pg_current_xlog_location(),
+                NOW(),
+                r.object_type,
                 r.identity,
                 pg_catalog.pg_event_trigger_expand_command(r.command),
                 'false');
@@ -252,8 +261,11 @@ SELECT pg_catalog.pg_extension_config_dump('bdr_nodes', '');
 CREATE TYPE bdr.dropped_object AS
   (objtype text, objnames text[], objargs text[]);
 
-CREATE TABLE bdr.bdr_queued_drops
- (dropped_objects bdr.dropped_object[] NOT NULL);
+CREATE TABLE bdr.bdr_queued_drops(
+    lsn pg_lsn NOT NULL,
+    queued_at timestamptz NOT NULL,
+    dropped_objects bdr.dropped_object[] NOT NULL
+);
 
 CREATE OR REPLACE FUNCTION bdr.queue_dropped_objects()
  RETURNS event_trigger
@@ -276,8 +288,13 @@ BEGIN
 	END LOOP;
 
 	IF otherobjs <> '{}' THEN
-		INSERT INTO bdr.bdr_queued_drops
-			(dropped_objects) VALUES (otherobjs);
+		INSERT INTO bdr.bdr_queued_drops (
+			lsn, queued_at, dropped_objects
+		)
+		VALUES (pg_current_xlog_location(),
+			NOW(),
+			otherobjs
+		);
 	END IF;
 END;
 $function$;
