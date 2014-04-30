@@ -35,6 +35,7 @@
 #include "catalog/pg_class.h"
 #include "catalog/pg_collation.h"
 #include "catalog/pg_constraint.h"
+#include "catalog/pg_conversion.h"
 #include "catalog/pg_depend.h"
 #include "catalog/pg_extension.h"
 #include "catalog/pg_inherits.h"
@@ -2789,6 +2790,43 @@ deparse_AlterEnumStmt(Oid objectId, Node *parsetree)
 }
 
 static char *
+deparse_CreateConversion(Oid objectId, Node *parsetree)
+{
+	HeapTuple   conTup;
+	Form_pg_conversion conForm;
+	ObjTree	   *ccStmt;
+	char	   *command;
+
+	conTup = SearchSysCache1(CONDEFAULT, ObjectIdGetDatum(objectId));
+	if (!HeapTupleIsValid(conTup))
+		elog(ERROR, "cache lookup failed for conversion with OID %u", objectId);
+	conForm = (Form_pg_conversion) GETSTRUCT(conTup);
+
+	ccStmt = new_objtree_VA("CREATE %{default}s CONVERSION %{identity}D FOR "
+							"%{source}T TO %{dest}T FROM %{function}D", 0);
+
+	append_string_object(ccStmt, "default",
+						 conForm->condefault ? "DEFAULT" : "");
+	append_object_object(ccStmt, "identity",
+						 new_objtree_for_qualname(conForm->connamespace,
+												  NameStr(conForm->conname)));
+	append_string_object(ccStmt, "source",
+						 pg_encoding_to_char(conForm->conforencoding));
+	append_string_object(ccStmt, "dest",
+						 pg_encoding_to_char(conForm->contoencoding));
+	append_object_object(ccStmt, "function",
+						 new_objtree_for_qualname_id(ProcedureRelationId,
+													 conForm->conproc));
+
+	command = jsonize_objtree(ccStmt);
+	free_objtree(ccStmt);
+
+	ReleaseSysCache(conTup);
+
+	return command;
+}
+
+static char *
 deparse_CreateOpFamily(Oid objectId, Node *parsetree)
 {
 	HeapTuple   opfTup;
@@ -3330,10 +3368,13 @@ deparse_utility_command(StashedCommand *cmd)
 
 		case T_CreateTableAsStmt:
 		case T_CreatePLangStmt:
-		case T_CreateConversionStmt:
 		case T_CreateCastStmt:
 		case T_CreateOpClassStmt:
 			command = NULL;
+			break;
+
+		case T_CreateConversionStmt:
+			command = deparse_CreateConversion(objectId, parsetree);
 			break;
 
 		case T_CreateOpFamilyStmt:
