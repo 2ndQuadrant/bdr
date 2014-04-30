@@ -807,7 +807,7 @@ bdr_init_replica(Name dbname)
 			break;
 
 		default:
-			elog(ERROR, "unreachable"); // Unhandled case
+			elog(ERROR, "unreachable"); /* Unhandled case */
 			break;
 	}
 
