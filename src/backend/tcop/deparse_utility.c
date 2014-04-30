@@ -53,6 +53,7 @@
 #include "funcapi.h"
 #include "lib/ilist.h"
 #include "lib/stringinfo.h"
+#include "mb/pg_wchar.h"
 #include "nodes/makefuncs.h"
 #include "nodes/parsenodes.h"
 #include "parser/analyze.h"
@@ -2810,9 +2811,9 @@ deparse_CreateConversion(Oid objectId, Node *parsetree)
 	append_object_object(ccStmt, "identity",
 						 new_objtree_for_qualname(conForm->connamespace,
 												  NameStr(conForm->conname)));
-	append_string_object(ccStmt, "source",
+	append_string_object(ccStmt, "source", (char *)
 						 pg_encoding_to_char(conForm->conforencoding));
-	append_string_object(ccStmt, "dest",
+	append_string_object(ccStmt, "dest", (char *)
 						 pg_encoding_to_char(conForm->contoencoding));
 	append_object_object(ccStmt, "function",
 						 new_objtree_for_qualname_id(ProcedureRelationId,
