@@ -2803,7 +2803,7 @@ deparse_CreateConversion(Oid objectId, Node *parsetree)
 	conForm = (Form_pg_conversion) GETSTRUCT(conTup);
 
 	ccStmt = new_objtree_VA("CREATE %{default}s CONVERSION %{identity}D FOR "
-							"%{source}T TO %{dest}T FROM %{function}D", 0);
+							"%{source}L TO %{dest}L FROM %{function}D", 0);
 
 	append_string_object(ccStmt, "default",
 						 conForm->condefault ? "DEFAULT" : "");
