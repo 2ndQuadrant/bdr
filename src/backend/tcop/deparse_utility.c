@@ -3000,9 +3000,11 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 
 			case AT_AddIndex:
 				{
-					Oid			constrOid;
+					Oid			idxOid = substashed->oid;
 					IndexStmt  *istmt;
+					Relation	idx;
 					const char *idxname;
+					Oid			constrOid;
 
 					Assert(IsA(subcmd->def, IndexStmt));
 					istmt = (IndexStmt *) subcmd->def;
@@ -3010,7 +3012,8 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 					if (!istmt->isconstraint)
 						break;
 
-					idxname = istmt->idxname;
+					idx = relation_open(idxOid, AccessShareLock);
+					idxname = RelationGetRelationName(idx);
 
 					constrOid = get_relation_constraint_oid(
 						cmd->objectId, idxname, false);
@@ -3021,6 +3024,8 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 										 "definition", ObjTypeString,
 										 pg_get_constraintdef_string(constrOid, false));
 					subcmds = lappend(subcmds, new_object_object(NULL, tmp));
+
+					relation_close(idx, AccessShareLock);
 				}
 				break;
 

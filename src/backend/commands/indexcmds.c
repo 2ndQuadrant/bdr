@@ -608,9 +608,6 @@ DefineIndex(Oid relationId,
 					 skip_build || stmt->concurrent,
 					 stmt->concurrent, !check_rights);
 
-	stmt->indexOid = indexRelationId;
-	stmt->idxname = indexRelationName;
-
 	/* Add any requested comment */
 	if (stmt->idxcomment != NULL)
 		CreateComments(indexRelationId, RelationRelationId, 0,
