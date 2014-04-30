@@ -84,6 +84,12 @@ Oid			QueuedDropsRelid = InvalidOid;
  */
 BdrApplyWorker *bdr_apply_worker = NULL;
 
+/*
+ * GUCs for this apply worker - again, this is fixed for the lifetime of the
+ * worker so we can stash it in a global.
+ */
+BdrConnectionConfig *bdr_apply_config = NULL;
+
 static void build_index_scan_keys(EState *estate, ScanKey *scan_keys, TupleTableSlot *slot);
 static void build_index_scan_key(ScanKey skey, Relation rel, Relation idx_rel, TupleTableSlot *slot);
 static bool find_pkey_tuple(ScanKey skey, Relation rel, Relation idx_rel, TupleTableSlot *slot,
@@ -119,8 +125,7 @@ process_remote_begin(StringInfo s)
 	TimestampTz		committime;
 	TimestampTz		current;
 	char			statbuf[100];
-	int				apply_delay = -1;
-	const char     *apply_delay_str;
+	int				apply_delay = bdr_apply_config->apply_delay;
 
 	Assert(bdr_apply_worker != NULL);
 
@@ -135,18 +140,13 @@ process_remote_begin(StringInfo s)
 
 	snprintf(statbuf, sizeof(statbuf),
 			"bdr_apply: BEGIN origin(source, orig_lsn, timestamp): %s, %X/%X, %s",
-			 NameStr(bdr_apply_worker->name),
+			 NameStr(bdr_apply_config->name),
 			(uint32) (origlsn >> 32), (uint32) origlsn,
 			timestamptz_to_str(committime));
 
 	elog(LOG, "%s", statbuf);
 
 	pgstat_report_activity(STATE_RUNNING, statbuf);
-
-	apply_delay_str = bdr_get_worker_option(NameStr(bdr_apply_worker->name), "apply_delay", true);
-	if (apply_delay_str)
-		/* This is an integer GUC, so parsing as an int can't fail */
-		(void) parse_int(apply_delay_str, &apply_delay, 0, NULL);
 
 	if (apply_delay == -1)
 		apply_delay = bdr_default_apply_delay;
@@ -259,7 +259,7 @@ process_remote_commit(StringInfo s)
 	{
 		ereport(LOG,
 				(errmsg("bdr apply %s finished processing; replayed to %X/%X of required %X/%X",
-				 NameStr(bdr_apply_worker->name),
+				 NameStr(bdr_apply_config->name),
 				 (uint32)(end_lsn>>32), (uint32)end_lsn,
 				 (uint32)(bdr_apply_worker->replay_stop_lsn>>32), (uint32)bdr_apply_worker->replay_stop_lsn)));
 		/*
