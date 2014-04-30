@@ -208,6 +208,11 @@ BEGIN
             CONTINUE;
         END IF;
 
+        /* ignore objects that are part of an extension */
+        IF r.in_extension THEN
+            CONTINUE;
+        END IF;
+
         INSERT INTO bdr.bdr_queued_commands(
             lsn, queued_at,
             obj_type, obj_identity, command, executed
