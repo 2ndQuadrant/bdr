@@ -347,10 +347,10 @@ process_remote_insert(StringInfo s)
 		IndexInfo  *ii = relinfo->ri_IndexRelationInfo[i];
 		bool found = false;
 
-		Assert(ii->ii_Expressions == NIL);
-
 		if (!ii->ii_Unique)
 			continue;
+
+		Assert(ii->ii_Expressions == NIL);
 
 		/* if conflict: wait */
 		found = find_pkey_tuple(index_keys[i],
