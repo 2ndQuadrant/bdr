@@ -918,10 +918,6 @@ bdr_sequencer_fill_sequence(Oid seqoid, char *seqschema, char *seqname)
 		VARDATA_ANY(DatumGetByteaP(values[SEQ_COL_AMDATA - 1]));
 	curval = firstval;
 
-	START_CRIT_SECTION();
-
-	MarkBufferDirty(buf);
-
 	for (i = 0; i < 10; i ++)
 	{
 		if (curval->next_value == curval->end_value)
@@ -948,8 +944,11 @@ bdr_sequencer_fill_sequence(Oid seqoid, char *seqschema, char *seqname)
 
 	/* special requirements for sequence tuples */
 	HeapTupleHeaderSetXmin(newtup->t_data, FrozenTransactionId);
-	newtup->t_data->t_infomask |= HEAP_XMIN_COMMITTED;
+	HeapTupleHeaderSetXminFrozen(newtup->t_data);
+	HeapTupleHeaderSetCmin(newtup->t_data, FirstCommandId);
+	HeapTupleHeaderSetXmax(newtup->t_data, InvalidTransactionId);
 	newtup->t_data->t_infomask |= HEAP_XMAX_INVALID;
+	ItemPointerSet(&newtup->t_data->t_ctid, 0, FirstOffsetNumber);
 
 	page = BufferGetPage(buf);
 	temppage = PageGetTempPage(page);
@@ -966,14 +965,19 @@ bdr_sequencer_fill_sequence(Oid seqoid, char *seqschema, char *seqname)
 
 	PageSetLSN(temppage, PageGetLSN(page));
 
+	START_CRIT_SECTION();
+
+	MarkBufferDirty(buf);
+
 	memcpy(page, temppage, BufferGetPageSize(buf));
 
 	seqtuple.t_len = newtup->t_len;
 
 	log_sequence_tuple(rel, &seqtuple, page);
 
-done_with_sequence:
 	END_CRIT_SECTION();
+
+done_with_sequence:
 
 	UnlockReleaseBuffer(buf);
 	heap_close(rel, NoLock);
