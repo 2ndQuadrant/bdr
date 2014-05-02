@@ -503,7 +503,9 @@ new_objtree_for_type(Oid typeId, int32 typmod)
 	format_type_detailed(typeId, typmod,
 						 &typnspid, &typename, &typmodstr, &is_array);
 
-	if (isAnyTempNamespace(typnspid))
+	if (!OidIsValid(typnspid))
+		typnsp = pstrdup("");
+	else if (isAnyTempNamespace(typnspid))
 		typnsp = pstrdup("pg_temp");
 	else
 		typnsp = get_namespace_name(typnspid);
@@ -1752,12 +1754,14 @@ deparse_CreateFunction(Oid objectId, Node *parsetree)
 	List	   *defaults;
 	ListCell   *cell;
 	ListCell   *curdef;
+	ListCell   *table_params = NULL;
 	HeapTuple	procTup;
 	Form_pg_proc procForm;
 	HeapTuple	langTup;
 	Oid		   *typarray;
 	Form_pg_language langForm;
 	int			i;
+	int			typnum;
 	bool		isnull;
 
 	/* get the pg_proc tuple */
@@ -1805,7 +1809,7 @@ deparse_CreateFunction(Oid objectId, Node *parsetree)
 		definition = "%{objfile}L, %{symbol}L";
 
 	fmt = psprintf("CREATE %%{or_replace}s FUNCTION %%{signature}s "
-				   "RETURNS %%{setof}s %%{rettype}T LANGUAGE %%{language}I "
+				   "RETURNS %%{return_type}s LANGUAGE %%{language}I "
 				   "%%{window}s %%{volatility}s %%{leakproof}s "
 				   "%%{strict}s %%{security_definer}s %%{cost}s %%{rows}s "
 				   "%%{set_options: }s "
@@ -1873,12 +1877,24 @@ deparse_CreateFunction(Oid objectId, Node *parsetree)
 	 * parameters array.
 	 */
 	params = NIL;
-	i = 0;
+	typnum = 0;
 	foreach(cell, node->parameters)
 	{
 		FunctionParameter *param = (FunctionParameter *) lfirst(cell);
 		ObjTree	   *tmp2;
 		ObjTree	   *tmp3;
+
+		/*
+		 * A PARAM_TABLE parameter indicates end of input arguments; the
+		 * following parameters are part of the return type.  We ignore them
+		 * here, but keep track of the current position in the list so that
+		 * we can easily produce the return type below.
+		 */
+		if (param->mode == FUNC_PARAM_TABLE)
+		{
+			table_params = cell;
+			break;
+		}
 
 		/*
 		 * Note that %{name}s is a string here, not an identifier; the reason
@@ -1893,7 +1909,6 @@ deparse_CreateFunction(Oid objectId, Node *parsetree)
 							 param->mode == FUNC_PARAM_OUT ? "OUT" :
 							 param->mode == FUNC_PARAM_INOUT ? "INOUT" :
 							 param->mode == FUNC_PARAM_VARIADIC ? "VARIADIC" :
-							 param->mode == FUNC_PARAM_TABLE ? "TABLE" :
 							 "INVALID MODE");
 
 		/* optional wholesale suppression of "name" occurs here */
@@ -1921,7 +1936,7 @@ deparse_CreateFunction(Oid objectId, Node *parsetree)
 		append_object_object(tmp2, "default", tmp3);
 
 		append_object_object(tmp2, "type",
-							 new_objtree_for_type(typarray[i++], -1));
+							 new_objtree_for_type(typarray[typnum++], -1));
 
 		params = lappend(params,
 						 new_object_object(NULL, tmp2));
@@ -1932,10 +1947,43 @@ deparse_CreateFunction(Oid objectId, Node *parsetree)
 													 objectId));
 	append_object_object(createFunc, "signature", sign);
 
-	append_string_object(createFunc, "setof",
-						 procForm->proretset ? "SETOF" : "");
-	append_object_object(createFunc, "rettype",
-						 new_objtree_for_type(procForm->prorettype, -1));
+	/*
+	 * A return type can adopt one of two forms: either a [SETOF] some_type, or
+	 * a TABLE(list-of-types).  We can tell the second form because we saw a
+	 * table param above while scanning the argument list.
+	 */
+	if (table_params == NULL)
+	{
+		tmp = new_objtree_VA("%{setof}s %{rettype}T", 0);
+		append_string_object(tmp, "setof",
+							 procForm->proretset ? "SETOF" : "");
+		append_object_object(tmp, "rettype",
+							 new_objtree_for_type(procForm->prorettype, -1));
+		append_string_object(tmp, "return_form", "plain");
+	}
+	else
+	{
+		List	   *rettypes = NIL;
+		ObjTree	   *tmp2;
+
+		tmp = new_objtree_VA("TABLE (%{rettypes:, }s)", 0);
+		for (; table_params != NULL; table_params = lnext(table_params))
+		{
+			FunctionParameter *param = lfirst(table_params);
+
+			tmp2 = new_objtree_VA("%{name}I %{type}T", 0);
+			append_string_object(tmp2, "name", param->name);
+			append_object_object(tmp2, "type",
+								 new_objtree_for_type(typarray[typnum++], -1));
+			rettypes = lappend(rettypes,
+							   new_object_object(NULL, tmp2));
+		}
+
+		append_array_object(tmp, "rettypes", rettypes);
+		append_string_object(tmp, "return_form", "table");
+	}
+
+	append_object_object(createFunc, "return_type", tmp);
 
 	append_string_object(createFunc, "language",
 						 NameStr(langForm->lanname));
