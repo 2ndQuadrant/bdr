@@ -270,9 +270,9 @@ typedef struct
  * ----------
  */
 static SPIPlanPtr plan_getrulebyoid = NULL;
-static const char *query_getrulebyoid = "SELECT * FROM pg_catalog.pg_rewrite WHERE oid = $1";
+static const char *query_getrulebyoid = "SELECT * FROM pg_catalog.pg_rewrite WHERE oid OPERATOR(pg_catalog.=) $1";
 static SPIPlanPtr plan_getviewrule = NULL;
-static const char *query_getviewrule = "SELECT * FROM pg_catalog.pg_rewrite WHERE ev_class = $1 AND rulename = $2";
+static const char *query_getviewrule = "SELECT * FROM pg_catalog.pg_rewrite WHERE ev_class OPERATOR(pg_catalog.=) $1 AND rulename OPERATOR(pg_catalog.=) $2";
 
 /* GUC parameters */
 bool		quote_all_identifiers = false;
