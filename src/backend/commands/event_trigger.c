@@ -1853,10 +1853,20 @@ expand_jsonval_typename(StringInfo buf, Datum jsonval)
 	is_array = expand_get_boolval(jsonval, "is_array", &array_isnull);
 	schema = expand_get_strval(jsonval, "schemaname");
 
-	/* schema might be NULL or empty here, beware */
-	if (schema == NULL || schema[0] == '\0')
+	/*
+	 * If schema is NULL, then don't schema qualify, but do quote the type
+	 * name; if the schema is empty instead, then we don't quote the type name.
+	 * This is our (admittedly quite ugly) way of dealing with type names that
+	 * might require special treatment.
+	 */
+	if (schema == NULL)
 		appendStringInfo(buf, "%s%s%s",
 						 quote_identifier(typename),
+						 typmodstr ? typmodstr : "",
+						 is_array ? "[]" : "");
+	else if (schema[0] == '\0')
+		appendStringInfo(buf, "%s%s%s",
+						 typename,
 						 typmodstr ? typmodstr : "",
 						 is_array ? "[]" : "");
 	else
