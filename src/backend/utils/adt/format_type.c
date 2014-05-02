@@ -361,6 +361,26 @@ format_type_detailed(Oid type_oid, int32 typemod,
 	typeform = (Form_pg_type) GETSTRUCT(tuple);
 
 	/*
+	 * Special-case crock for INTERVAL.  The typmod here is so awful that
+	 * there's no way to cope with the regular code path.
+	 */
+	if (type_oid == INTERVALOID)
+	{
+		*typname = pstrdup("INTERVAL");
+		*nspid = InvalidOid;
+
+		if (typemod > 0)
+			*typemodstr = printTypmod(NULL, typemod, typeform->typmodout);
+		else
+			*typemodstr = pstrdup("");	/* XXX ?? */
+
+		*is_array = false;
+
+		ReleaseSysCache(tuple);
+		return;
+	}
+
+	/*
 	 * Check if it's a regular (variable length) array type.  As above,
 	 * fixed-length array types such as "name" shouldn't get deconstructed.
 	 */
