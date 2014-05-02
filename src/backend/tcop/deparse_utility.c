@@ -503,7 +503,9 @@ new_objtree_for_type(Oid typeId, int32 typmod)
 	format_type_detailed(typeId, typmod,
 						 &typnspid, &typename, &typmodstr, &is_array);
 
-	if (isAnyTempNamespace(typnspid))
+	if (!OidIsValid(typnspid))
+		typnsp = pstrdup("");
+	else if (isAnyTempNamespace(typnspid))
 		typnsp = pstrdup("pg_temp");
 	else
 		typnsp = get_namespace_name(typnspid);
