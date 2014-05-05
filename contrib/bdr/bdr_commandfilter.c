@@ -26,6 +26,8 @@
 #include "commands/extension.h"
 #include "commands/tablecmds.h"
 
+#include "parser/parse_utilcmd.h"
+
 #include "tcop/utility.h"
 
 #include "utils/guc.h"
@@ -120,105 +122,130 @@ filter_CreateStmt(Node *parsetree,
 
 static void
 filter_AlterTableStmt(Node *parsetree,
-				   char *completionTag)
+					  char *completionTag,
+					  const char *queryString)
 {
 	AlterTableStmt *astmt;
-	ListCell   *cell;
+	ListCell   *cell,
+			   *cell1;
 	bool		hasInvalid;
+	List	   *stmts;
+	Oid			relid;
+	LOCKMODE	lockmode;
 
 	astmt = (AlterTableStmt *) parsetree;
 	hasInvalid = false;
 
-	foreach(cell, astmt->cmds)
+	lockmode = AlterTableGetLockLevel(astmt->cmds);
+	relid = AlterTableLookupRelation(astmt, lockmode);
+
+	stmts = transformAlterTableStmt(relid, astmt, queryString);
+
+	foreach(cell, stmts)
 	{
-		AlterTableCmd *stmt;
+		Node	   *node = (Node *) lfirst(cell);
+		AlterTableStmt *at_stmt;
 
-		Assert(IsA(lfirst(cell), AlterTableCmd));
-		stmt = (AlterTableCmd *) lfirst(cell);
+		/*
+		 * we ignore all nodes which are not AlterTableCmd statements since
+		 * the standard utility hook will recurse and thus call our handler
+		 * again
+		 */
+		if (!IsA(node, AlterTableStmt))
+			continue;
 
-		switch (stmt->subtype)
+		at_stmt = (AlterTableStmt *) node;
+
+		foreach(cell1, at_stmt->cmds)
 		{
-			/*
-			 * allowed for now:
-			 */
-			case AT_AddColumn:
-				{
-					ColumnDef *def = (ColumnDef *) stmt->def;
-					ListCell   *cell;
+			AlterTableCmd *stmt = (AlterTableCmd *) lfirst(cell1);
 
+			switch (stmt->subtype)
+			{
 					/*
-					 * Error out if there's a default for the new
-					 * column, that requires a table rewrite which
-					 * might be nondeterministic.
+					 * allowed for now:
 					 */
-					if (def->raw_default != NULL ||
-						def->cooked_default != NULL)
+				case AT_AddColumn:
 					{
-						error_on_persistent_rv(
-							astmt->relation,
-							"ALTER TABLE ... ADD COLUMN ... DEFAULT",
-							AlterTableGetLockLevel(astmt->cmds),
-							astmt->missing_ok);
-					}
+						ColumnDef  *def = (ColumnDef *) stmt->def;
+						ListCell   *cell;
 
-					/*
-					 * Column defaults can also be represented as
-					 * constraints.
-					 */
-					foreach(cell, def->constraints)
-					{
-						Constraint *con;
-
-						Assert(IsA(lfirst(cell), Constraint));
-						con = (Constraint *) lfirst(cell);
-
-						if (con->contype == CONSTR_DEFAULT)
+						/*
+						 * Error out if there's a default for the new column,
+						 * that requires a table rewrite which might be
+						 * nondeterministic.
+						 */
+						if (def->raw_default != NULL ||
+							def->cooked_default != NULL)
+						{
 							error_on_persistent_rv(
-								astmt->relation,
-								"ALTER TABLE ... ADD COLUMN ... DEFAULT",
-								AlterTableGetLockLevel(astmt->cmds),
-								astmt->missing_ok);
+												   astmt->relation,
+									"ALTER TABLE ... ADD COLUMN ... DEFAULT",
+										 AlterTableGetLockLevel(astmt->cmds),
+												   astmt->missing_ok);
+						}
+
+						/*
+						 * Column defaults can also be represented as
+						 * constraints.
+						 */
+						foreach(cell, def->constraints)
+						{
+							Constraint *con;
+
+							Assert(IsA(lfirst(cell), Constraint));
+							con = (Constraint *) lfirst(cell);
+
+							if (con->contype == CONSTR_DEFAULT)
+								error_on_persistent_rv(
+													   astmt->relation,
+									"ALTER TABLE ... ADD COLUMN ... DEFAULT",
+										 AlterTableGetLockLevel(astmt->cmds),
+													   astmt->missing_ok);
+						}
 					}
-				}
-			case AT_DropColumn:
-			case AT_DropNotNull:
-			case AT_SetNotNull:
-			case AT_ColumnDefault:		/* ALTER COLUMN DEFAULT */
+				case AT_AddIndex: /* produced by for example ALTER TABLE … ADD
+								   * CONSTRAINT … PRIMARY KEY */
+				case AT_DropColumn:
+				case AT_DropNotNull:
+				case AT_SetNotNull:
+				case AT_ColumnDefault:	/* ALTER COLUMN DEFAULT */
 
-			case AT_ClusterOn:			/* CLUSTER ON */
-			case AT_DropCluster:		/* SET WITHOUT CLUSTER */
+				case AT_ClusterOn:		/* CLUSTER ON */
+				case AT_DropCluster:	/* SET WITHOUT CLUSTER */
 
-			case AT_SetRelOptions:		/* SET (...) */
-			case AT_ResetRelOptions:	/* RESET (...) */
-			case AT_ReplaceRelOptions:	/* replace reloption list */
-			case AT_ReplicaIdentity:
-			case AT_ChangeOwner:
-			case AT_SetStorage:
-				break;
+				case AT_SetRelOptions:	/* SET (...) */
+				case AT_ResetRelOptions:		/* RESET (...) */
+				case AT_ReplaceRelOptions:		/* replace reloption list */
+				case AT_ReplicaIdentity:
+				case AT_ChangeOwner:
+				case AT_SetStorage:
+					break;
 
-			case AT_DropConstraint:
-				break;
+				case AT_DropConstraint:
+					break;
 
-			case AT_SetTableSpace:
-				break;
+				case AT_SetTableSpace:
+					break;
 
-			case AT_AddConstraint:
-			case AT_ProcessedConstraint:
-				if (IsA(stmt->def, Constraint))
-				{
-					Constraint *con = (Constraint *) stmt->def;
+				case AT_AddConstraint:
+				case AT_ProcessedConstraint:
+					if (IsA(stmt->def, Constraint))
+					{
+						Constraint *con = (Constraint *) stmt->def;
 
-					if (con->contype == CONSTR_EXCLUSION)
-						error_on_persistent_rv(astmt->relation,
-											   "ALTER TABLE ... ADD CONSTRAINT ... EXCLUDE",
-											   AlterTableGetLockLevel(astmt->cmds),
-											   astmt->missing_ok);
-				}
-				break;
+						if (con->contype == CONSTR_EXCLUSION)
+							error_on_persistent_rv(astmt->relation,
+								"ALTER TABLE ... ADD CONSTRAINT ... EXCLUDE",
+										 AlterTableGetLockLevel(astmt->cmds),
+												   astmt->missing_ok);
+					}
+					break;
 
-			default:
-				hasInvalid = true;
-				break;
+				default:
+					hasInvalid = true;
+					break;
+			}
 		}
 	}
 
@@ -347,7 +374,7 @@ bdr_commandfilter(Node *parsetree,
 			break;
 
 		case T_AlterTableStmt:
-			filter_AlterTableStmt(parsetree, completionTag);
+			filter_AlterTableStmt(parsetree, completionTag, queryString);
 			break;
 
 		case T_AlterDomainStmt:
