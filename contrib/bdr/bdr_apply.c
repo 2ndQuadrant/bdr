@@ -77,7 +77,7 @@ Oid			QueuedDropsRelid = InvalidOid;
 bool		exit_worker = false;
 
 /* During apply, holds xid of remote transaction */
-static TransactionId replication_origin_xid = InvalidTransactionId;
+TransactionId replication_origin_xid = InvalidTransactionId;
 
 /*
  * This code only runs within an apply bgworker, so we can stash a pointer to our
@@ -103,7 +103,8 @@ static void tuple_to_stringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple
 static void check_apply_update(RepNodeId local_node_id, TimestampTz local_ts,
 				   BDRRelation *rel, HeapTuple local_tuple,
 				   HeapTuple remote_tuple, HeapTuple *new_tuple,
-				   bool *perform_update, bool *log_update);
+				   bool *perform_update, bool *log_update,
+				   BdrConflictResolution *resolution);
 static void do_log_update(RepNodeId local_node_id, bool apply_update,
 			  TimestampTz ts, Relation idxrel, BDRRelation *rel,
 			  HeapTuple old_key, HeapTuple user_tuple);
@@ -400,25 +401,26 @@ process_remote_insert(StringInfo s)
 		bool		apply_update;
 		bool		log_update;
 		CommitExtraData local_node_id_raw;
+		BdrConflictResolution resolution;
 
 		/* refetch tuple, check for old commit ts & origin */
 		xmin = HeapTupleHeaderGetXmin(oldslot->tts_tuple->t_data);
 
 		/*
-		 * We now need to determine whether to keep the original version of
-		 * the row, or apply the insert (as an update) we received.  We use
-		 * the last-update-wins strategy for this, except when the new update
-		 * comes from the same node that originated the previous version of
-		 * the tuple.
+		 * Use conflict triggers and/or last-update-wins to decide which tuple
+		 * to retain.
 		 */
 		TransactionIdGetCommitTsData(xmin, &local_ts, &local_node_id_raw);
 		local_node_id = local_node_id_raw;
 
 		check_apply_update(local_node_id, local_ts, rel,
-						   NULL, NULL, NULL, &apply_update, &log_update);
+						   NULL, NULL, NULL, &apply_update, &log_update,
+						   &resolution);
 
-		elog(LOG, "insert vs insert conflict: %s",
-			 apply_update ? "update" : "ignore");
+		if (log_update)
+			/* TODO: Roll into conflict logging code */
+			elog(DEBUG2, "bdr: insert vs insert conflict: %s",
+				 apply_update ? "update" : "ignore");
 
 		if (apply_update)
 		{
@@ -427,6 +429,13 @@ process_remote_insert(StringInfo s)
 							   slot->tts_tuple);
 			/* races will be resolved by abort/retry */
 			UserTableUpdateOpenIndexes(estate, slot);
+		}
+
+		if (log_update)
+		{
+			bdr_conflict_log(BdrConflictType_InsertInsert, resolution,
+							 replication_origin_xid, rel, oldslot,
+							 local_node_id, slot, NULL /*no error*/);
 		}
 	}
 	else
@@ -590,6 +599,7 @@ process_remote_update(StringInfo s)
 		RepNodeId	local_node_id;
 		bool		apply_update;
 		bool		log_update;
+		BdrConflictResolution resolution;
 
 		CommitExtraData local_node_id_raw;
 
@@ -614,18 +624,15 @@ process_remote_update(StringInfo s)
 		xmin = HeapTupleHeaderGetXmin(oldslot->tts_tuple->t_data);
 
 		/*
-		 * We now need to determine whether to keep the original version of
-		 * the row, or apply the update we received.  We use the
-		 * last-update-wins strategy for this, except when the new update
-		 * comes from the same node that originated the previous version of
-		 * the tuple.
+		 * Use conflict triggers and/or last-update-wins to decide which tuple
+		 * to retain.
 		 */
 		TransactionIdGetCommitTsData(xmin, &local_ts, &local_node_id_raw);
 		local_node_id = local_node_id_raw;
 
 		check_apply_update(local_node_id, local_ts, rel, oldslot->tts_tuple,
 						   remote_tuple, &user_tuple, &apply_update,
-						   &log_update);
+						   &log_update, &resolution);
 
 		if (log_update)
 			do_log_update(local_node_id, apply_update, local_ts,
@@ -653,6 +660,11 @@ process_remote_update(StringInfo s)
 	}
 	else
 	{
+		/*
+		 * Update target is missing. We don't know if this is an update-vs-delete
+		 * conflict or if the target tuple came from some 3rd node and hasn't yet
+		 * been applied to the local node.
+		 */
 		initStringInfo(&o);
 		tuple_to_stringinfo(&o, RelationGetDescr(rel->rel),
 							oldslot->tts_tuple);
@@ -782,15 +794,22 @@ process_remote_delete(StringInfo s)
 }
 
 /*
- * Check whether a remote update conflicts with the local row version.
+ * Check whether a remote insert or update conflicts with the local row
+ * version.
+ *
+ * User-defined conflict triggers get invoked here.
  *
  * perform_update, log_update is set to true if the update should be performed
  * and logged respectively
+ *
+ * resolution is set to indicate how the conflict was resolved if log_update
+ * is true. Its value is undefined if log_update is false.
  */
 static void
 check_apply_update(RepNodeId local_node_id, TimestampTz local_ts,
 				 BDRRelation *rel, HeapTuple local_tuple, HeapTuple remote_tuple,
-				HeapTuple *new_tuple, bool *perform_update, bool *log_update)
+				HeapTuple *new_tuple, bool *perform_update, bool *log_update,
+				BdrConflictResolution *resolution)
 {
 	uint64		local_sysid,
 				remote_sysid;
@@ -823,19 +842,24 @@ check_apply_update(RepNodeId local_node_id, TimestampTz local_ts,
 	else
 	{
 		/*
-		 * Decide what update wins based on transaction timestamp difference.
-		 * The later transaction wins.	If the timestamps compare equal, use
-		 * sysid + TLI to discern.
+		 * Decide whether to keep the remote or local tuple based on a conflict
+		 * trigger (if defined) or last-update-wins.
+		 *
+		 * If the caller doesn't provide storage for the conflict handler to
+		 * store a new tuple in, don't fire any conflict triggers.
 		 */
+		*log_update = true;
 
 		if (new_tuple)
 		{
 			/*
-			 * We let users decide how the conflict should be resolved; if no
-			 * trigger could be found or if the trigger decided not to care,
-			 * we fall back to „last update wins“
+			 * --------------
+			 * Conflict trigger conflict handling - let the user decide whether to:
+			 * - Ignore the remote update;
+			 * - Supply a new tuple to replace the current tuple; or
+			 * - Take no action and fall through to the next handling option
+			 * --------------
 			 */
-
 			TimestampDifference(replication_origin_timestamp, local_ts,
 								&secs, &microsecs);
 
@@ -848,16 +872,15 @@ check_apply_update(RepNodeId local_node_id, TimestampTz local_ts,
 			if (skip)
 			{
 				*perform_update = false;
-				*log_update = false;
+				*resolution = BdrConflictResolution_ConflictTriggerSkipChange;
 				return;
 			}
 			else if (*new_tuple)
 			{
 				*perform_update = true;
-				*log_update = true;
+				*resolution = BdrConflictResolution_ConflictTriggerReturnedTuple;
 				return;
 			}
-
 
 			/*
 			 * if user decided not to skip the conflict but didn't provide a
@@ -865,26 +888,36 @@ check_apply_update(RepNodeId local_node_id, TimestampTz local_ts,
 			 */
 		}
 
-
+		/* Last update wins conflict handling */
 		cmp = timestamptz_cmp_internal(replication_origin_timestamp, local_ts);
-
 		if (cmp > 0)
 		{
+			/* The most recent update is the remote one; apply it */
 			*perform_update = true;
-			*log_update = false;
+			*resolution = BdrConflictResolution_LastUpdateWins_KeepRemote;
+			return;
+		}
+		else if (cmp < 0)
+		{
+			/* The most recent update is the local one; retain it */
+			*perform_update = false;
+			*resolution = BdrConflictResolution_LastUpdateWins_KeepLocal;
 			return;
 		}
 		else if (cmp == 0)
 		{
+			/*
+			 * Timestamps are equal. Use sysid + timeline id to decide which
+			 * tuple to retain.
+			 */
 			fetch_sysid_via_node_id(local_node_id,
 									&local_sysid, &local_tli);
 			fetch_sysid_via_node_id(bdr_apply_worker->origin_id,
 									&remote_sysid, &remote_tli);
 
 			/*
-			 * Always ignore this update if the user decides to; otherwise
-			 * apply the user tuple or, if none supplied, fall back to „last
-			 * update wins“
+			 * Apply the user tuple or, if none supplied, fall back to "last
+			 * update wins"
 			 */
 			if (local_sysid < remote_sysid)
 				*perform_update = true;
@@ -898,13 +931,16 @@ check_apply_update(RepNodeId local_node_id, TimestampTz local_ts,
 				/* shouldn't happen */
 				elog(ERROR, "unsuccessful node comparison");
 
-			*log_update = true;
-			return;
-		}
-		else
-		{
-			*perform_update = false;
-			*log_update = true;
+			/*
+			 * We don't log whether we used timestamp, sysid or timeline id to
+			 * decide which tuple to retain. That'll be in the log record
+			 * anyway, so we can reconstruct the decision from the log record
+			 * later.
+			 */
+			if (*perform_update)
+				*resolution = BdrConflictResolution_LastUpdateWins_KeepRemote;
+			else
+				*resolution = BdrConflictResolution_LastUpdateWins_KeepLocal;
 
 			return;
 		}

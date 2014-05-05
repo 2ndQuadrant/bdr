@@ -34,7 +34,6 @@ struct EState; /* from nodes/execnodes.h */
 struct ScanKeyData; /* from access/skey.h for ScanKey */
 enum LockTupleMode; /* from access/heapam.h */
 
-
 /*
  * Flags to indicate which fields are present in a commit record sent by the
  * output plugin.
@@ -51,6 +50,57 @@ typedef enum BDRConflictHandlerType
 	BDRInsertInsertConflictHandler,
 	BDRInsertUpdateConflictHandler
 }	BDRConflictHandlerType;
+
+/*
+ * BDR conflict detection: type of conflict that was identified.
+ *
+ * Must correspond to bdr.bdr_conflict_type SQL enum and
+ * bdr_conflict_type_get_datum (...)
+ */
+typedef enum BdrConflictType
+{
+	BdrConflictType_InsertInsert,
+	BdrConflictType_UpdateUpdate,
+	BdrConflictType_UpdateDelete,
+	BdrConflictType_UnhandledTxAbort
+} BdrConflictType;
+
+/*
+ * BDR conflict detection: how the conflict was resolved (if it was).
+ *
+ * Must correspond to bdr.bdr_conflict_resolution SQL enum and
+ * bdr_conflict_resolution_get_datum(...)
+ */
+typedef enum BdrConflictResolution
+{
+	BdrConflictResolution_ConflictTriggerSkipChange,
+	BdrConflictResolution_ConflictTriggerReturnedTuple,
+	BdrConflictResolution_LastUpdateWins_KeepLocal,
+	BdrConflictResolution_LastUpdateWins_KeepRemote,
+	BdrConflictResolution_UnhandledTxAbort
+} BdrConflictResolution;
+
+typedef struct BDRConflictHandler
+{
+	Oid			handler_oid;
+	BDRConflictHandlerType handler_type;
+	uint64		timeframe;
+}	BDRConflictHandler;
+
+/*
+ * This structure is for caching relation specific information, such as
+ * conflict handlers.
+ */
+typedef struct BDRRelation
+{
+	/* hash key */
+	Oid			reloid;
+
+	Relation	rel;
+
+	BDRConflictHandler *conflict_handlers;
+	size_t		conflict_handlers_len;
+} BDRRelation;
 
 /*
  * BdrApplyWorker describes a BDR worker connection.
@@ -96,7 +146,6 @@ typedef struct BdrPerdbWorker
 	size_t seq_slot;
 
 } BdrPerdbWorker;
-
 
 /*
  * Type of BDR worker in a BdrWorker struct
@@ -149,29 +198,6 @@ typedef struct BdrConnectionConfig
 	bool is_valid;
 } BdrConnectionConfig;
 
-typedef struct BDRConflictHandler
-{
-	Oid			handler_oid;
-	BDRConflictHandlerType handler_type;
-	uint64		timeframe;
-}	BDRConflictHandler;
-
-/*
- * This structure is for caching relation specific information, such as
- * conflict handlers.
- */
-typedef struct BDRRelation
-{
-	/* hash key */
-	Oid			reloid;
-
-	Relation	rel;
-
-	BDRConflictHandler *conflict_handlers;
-	size_t		conflict_handlers_len;
-}	BDRRelation;
-
-
 /*
  * Params for every connection in bdr.connections.
  *
@@ -206,6 +232,7 @@ extern ResourceOwner bdr_saved_resowner;
 
 /* bdr_nodes table oid */
 extern Oid	BdrNodesRelid;
+extern Oid  BdrConflictHistoryRelId;
 
 /* DDL replication support */
 extern Oid	QueuedDDLCommandsRelid;
@@ -236,6 +263,19 @@ extern void build_index_scan_key(struct ScanKeyData *skey, Relation rel,
 extern bool find_pkey_tuple(struct ScanKeyData *skey, BDRRelation *rel,
 							Relation idxrel, struct TupleTableSlot *slot, bool
 							lock, enum LockTupleMode mode);
+
+/* conflict logging (usable in apply only) */
+extern void bdr_conflict_logging_startup(void);
+extern void bdr_conflict_logging_create_gucs(void);
+
+extern void
+bdr_conflict_log(BdrConflictType conflict_type,
+				 BdrConflictResolution resolution, TransactionId remote_txid,
+				 BDRRelation *conflict_relation,
+				 struct TupleTableSlot *local_tuple,
+				 RepNodeId local_tuple_origin_id,
+				 struct TupleTableSlot *remote_tuple,
+				 struct ErrorData *apply_error);
 
 /* sequence support */
 extern void bdr_sequencer_shmem_init(int nnodes, int sequencers);

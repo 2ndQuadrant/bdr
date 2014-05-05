@@ -521,7 +521,7 @@ sub mkvcbuild
 			     'bdr_commandfilter.c', 'bdr_compat.c',
 			     'bdr_count.c', 'bdr_seq.c', 'bdr_init_replica.c',
 			     'bdr_relcache.c', 'bdr_conflict_handlers.c',
-                 'bdr_executor.c');
+                 'bdr_conflict_logging.c', 'bdr_executor.c');
 	$bdr_apply->AddReference($postgres);
 	$bdr_apply->AddLibrary('wsock32.lib');
 	$bdr_apply->AddIncludeDir('src\interfaces\libpq');
