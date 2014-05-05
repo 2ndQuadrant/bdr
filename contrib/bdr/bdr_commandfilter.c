@@ -83,7 +83,7 @@ error_unsupported_command(const char *cmdtag)
 {
 	ereport(ERROR,
 			(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-			 errmsg("%s is not support when bdr is active",
+			 errmsg("%s is not supported when bdr is active",
 					cmdtag)));
 }
 
@@ -338,8 +338,10 @@ bdr_commandfilter(Node *parsetree,
 	{
 		case T_CreateSchemaStmt:
 			break;
+
 		case T_CreateStmt:
 			filter_CreateStmt(parsetree, completionTag);
+			break;
 
 		case T_CreateForeignTableStmt:
 			break;
