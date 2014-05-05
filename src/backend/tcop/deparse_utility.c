@@ -47,6 +47,7 @@
 #include "catalog/pg_range.h"
 #include "catalog/pg_rewrite.h"
 #include "catalog/pg_trigger.h"
+#include "catalog/pg_ts_dict.h"
 #include "catalog/pg_ts_parser.h"
 #include "catalog/pg_ts_template.h"
 #include "catalog/pg_type.h"
@@ -820,6 +821,55 @@ deparse_DefineStmt_TSParser(Oid objectId, DefineStmt *define)
 }
 
 static ObjTree *
+deparse_DefineStmt_TSDictionary(Oid objectId, DefineStmt *define)
+{
+	HeapTuple   tsdTup;
+	ObjTree	   *stmt;
+	ObjTree	   *tmp;
+	List	   *list;
+	Datum		options;
+	bool		isnull;
+	Form_pg_ts_dict tsdForm;
+
+	tsdTup = SearchSysCache1(TSDICTOID, ObjectIdGetDatum(objectId));
+	if (!HeapTupleIsValid(tsdTup))
+		elog(ERROR, "cache lookup failed for text search dictionary "
+			 "with OID %u", objectId);
+	tsdForm = (Form_pg_ts_dict) GETSTRUCT(tsdTup);
+
+	stmt = new_objtree_VA("CREATE TEXT SEARCH DICTIONARY %{identity}D "
+						  "(%{elems:, }s)", 0);
+
+	append_object_object(stmt, "identity",
+						 new_objtree_for_qualname(tsdForm->dictnamespace,
+												  NameStr(tsdForm->dictname)));
+
+	list = NIL;
+
+	tmp = new_objtree_VA("TEMPLATE=%{template}D", 0);
+	append_object_object(tmp, "template",
+						 new_objtree_for_qualname_id(TSTemplateRelationId,
+													 tsdForm->dicttemplate));
+	list = lappend(list, new_object_object(NULL, tmp));
+
+	options = SysCacheGetAttr(TSDICTOID, tsdTup,
+							  Anum_pg_ts_dict_dictinitoption,
+							  &isnull);
+	if (!isnull)
+	{
+		tmp = new_objtree_VA("%{options}s", 0);
+		append_string_object(tmp, "options", TextDatumGetCString(options));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	append_array_object(stmt, "elems", list);
+
+	ReleaseSysCache(tsdTup);
+
+	return stmt;
+}
+
+static ObjTree *
 deparse_DefineStmt_TSTemplate(Oid objectId, DefineStmt *define)
 {
 	HeapTuple   tstTup;
@@ -886,6 +936,10 @@ deparse_DefineStmt(Oid objectId, Node *parsetree)
 			defStmt = deparse_DefineStmt_TSParser(objectId, define);
 			break;
 
+		case OBJECT_TSDICTIONARY:
+			defStmt = deparse_DefineStmt_TSDictionary(objectId, define);
+			break;
+
 		case OBJECT_TSTEMPLATE:
 			defStmt = deparse_DefineStmt_TSTemplate(objectId, define);
 			break;
@@ -893,7 +947,6 @@ deparse_DefineStmt(Oid objectId, Node *parsetree)
 		default:
 		case OBJECT_AGGREGATE:
 		case OBJECT_TYPE:
-		case OBJECT_TSDICTIONARY:
 		case OBJECT_TSCONFIGURATION:
 			elog(ERROR, "unsupported object kind");
 			return NULL;
