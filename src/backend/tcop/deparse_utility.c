@@ -47,6 +47,7 @@
 #include "catalog/pg_range.h"
 #include "catalog/pg_rewrite.h"
 #include "catalog/pg_trigger.h"
+#include "catalog/pg_ts_template.h"
 #include "catalog/pg_type.h"
 #include "commands/defrem.h"
 #include "commands/sequence.h"
@@ -751,6 +752,52 @@ deparse_DefineStmt_Operator(Oid objectId, DefineStmt *define)
 	return stmt;
 }
 
+static ObjTree *
+deparse_DefineStmt_TSTemplate(Oid objectId, DefineStmt *define)
+{
+	HeapTuple   tstTup;
+	ObjTree	   *stmt;
+	ObjTree	   *tmp;
+	List	   *list;
+	Form_pg_ts_template tstForm;
+
+	tstTup = SearchSysCache1(TSTEMPLATEOID, ObjectIdGetDatum(objectId));
+	if (!HeapTupleIsValid(tstTup))
+		elog(ERROR, "cache lookup failed for text search template with OID %u",
+			 objectId);
+	tstForm = (Form_pg_ts_template) GETSTRUCT(tstTup);
+
+	stmt = new_objtree_VA("CREATE TEXT SEARCH TEMPLATE %{identity}D "
+						  "(%{elems:, }s)", 0);
+
+	append_object_object(stmt, "identity",
+						 new_objtree_for_qualname(tstForm->tmplnamespace,
+												  NameStr(tstForm->tmplname)));
+
+	list = NIL;
+
+	if (OidIsValid(tstForm->tmplinit))
+	{
+		tmp = new_objtree_VA("INIT=%{procedure}D", 0);
+		append_object_object(tmp, "procedure",
+							 new_objtree_for_qualname_id(ProcedureRelationId,
+														 tstForm->tmplinit));
+		list = lappend(list, tmp);
+	}
+
+	tmp = new_objtree_VA("LEXIZE=%{procedure}D", 0);
+	append_object_object(tmp, "procedure",
+						 new_objtree_for_qualname_id(ProcedureRelationId,
+													 tstForm->tmpllexize));
+	list = lappend(list, tmp);
+
+	append_array_object(stmt, "elems", list);
+
+	ReleaseSysCache(tstTup);
+
+	return stmt;
+}
+
 static char *
 deparse_DefineStmt(Oid objectId, Node *parsetree)
 {
@@ -768,12 +815,15 @@ deparse_DefineStmt(Oid objectId, Node *parsetree)
 			defStmt = deparse_DefineStmt_Operator(objectId, define);
 			break;
 
+		case OBJECT_TSTEMPLATE:
+			defStmt = deparse_DefineStmt_TSTemplate(objectId, define);
+			break;
+
 		default:
 		case OBJECT_AGGREGATE:
 		case OBJECT_TYPE:
 		case OBJECT_TSPARSER:
 		case OBJECT_TSDICTIONARY:
-		case OBJECT_TSTEMPLATE:
 		case OBJECT_TSCONFIGURATION:
 			elog(ERROR, "unsupported object kind");
 			return NULL;
