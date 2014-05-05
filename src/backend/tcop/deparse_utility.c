@@ -47,6 +47,7 @@
 #include "catalog/pg_range.h"
 #include "catalog/pg_rewrite.h"
 #include "catalog/pg_trigger.h"
+#include "catalog/pg_ts_parser.h"
 #include "catalog/pg_ts_template.h"
 #include "catalog/pg_type.h"
 #include "commands/defrem.h"
@@ -753,6 +754,70 @@ deparse_DefineStmt_Operator(Oid objectId, DefineStmt *define)
 }
 
 static ObjTree *
+deparse_DefineStmt_TSParser(Oid objectId, DefineStmt *define)
+{
+	HeapTuple   tspTup;
+	ObjTree	   *stmt;
+	ObjTree	   *tmp;
+	List	   *list;
+	Form_pg_ts_parser tspForm;
+
+	tspTup = SearchSysCache1(TSPARSEROID, ObjectIdGetDatum(objectId));
+	if (!HeapTupleIsValid(tspTup))
+		elog(ERROR, "cache lookup failed for text search parser with OID %u",
+			 objectId);
+	tspForm = (Form_pg_ts_parser) GETSTRUCT(tspTup);
+
+	stmt = new_objtree_VA("CREATE TEXT SEARCH PARSER %{identity}D "
+						  "(%{elems:, }s)", 0);
+
+	append_object_object(stmt, "identity",
+						 new_objtree_for_qualname(tspForm->prsnamespace,
+												  NameStr(tspForm->prsname)));
+
+	list = NIL;
+
+	tmp = new_objtree_VA("START=%{procedure}D", 0);
+	append_object_object(tmp, "procedure",
+						 new_objtree_for_qualname_id(ProcedureRelationId,
+													 tspForm->prsstart));
+	list = lappend(list, tmp);
+
+	tmp = new_objtree_VA("GETTOKEN=%{procedure}D", 0);
+	append_object_object(tmp, "procedure",
+						 new_objtree_for_qualname_id(ProcedureRelationId,
+													 tspForm->prstoken));
+	list = lappend(list, tmp);
+
+	tmp = new_objtree_VA("END=%{procedure}D", 0);
+	append_object_object(tmp, "procedure",
+						 new_objtree_for_qualname_id(ProcedureRelationId,
+													 tspForm->prsend));
+	list = lappend(list, tmp);
+
+	tmp = new_objtree_VA("LEXTYPES=%{procedure}D", 0);
+	append_object_object(tmp, "procedure",
+						 new_objtree_for_qualname_id(ProcedureRelationId,
+													 tspForm->prslextype));
+	list = lappend(list, tmp);
+
+	if (OidIsValid(tspForm->prsheadline))
+	{
+		tmp = new_objtree_VA("HEADLINE=%{procedure}D", 0);
+		append_object_object(tmp, "procedure",
+							 new_objtree_for_qualname_id(ProcedureRelationId,
+														 tspForm->prsheadline));
+		list = lappend(list, tmp);
+	}
+
+	append_array_object(stmt, "elems", list);
+
+	ReleaseSysCache(tspTup);
+
+	return stmt;
+}
+
+static ObjTree *
 deparse_DefineStmt_TSTemplate(Oid objectId, DefineStmt *define)
 {
 	HeapTuple   tstTup;
@@ -815,6 +880,10 @@ deparse_DefineStmt(Oid objectId, Node *parsetree)
 			defStmt = deparse_DefineStmt_Operator(objectId, define);
 			break;
 
+		case OBJECT_TSPARSER:
+			defStmt = deparse_DefineStmt_TSParser(objectId, define);
+			break;
+
 		case OBJECT_TSTEMPLATE:
 			defStmt = deparse_DefineStmt_TSTemplate(objectId, define);
 			break;
@@ -822,7 +891,6 @@ deparse_DefineStmt(Oid objectId, Node *parsetree)
 		default:
 		case OBJECT_AGGREGATE:
 		case OBJECT_TYPE:
-		case OBJECT_TSPARSER:
 		case OBJECT_TSDICTIONARY:
 		case OBJECT_TSCONFIGURATION:
 			elog(ERROR, "unsupported object kind");
