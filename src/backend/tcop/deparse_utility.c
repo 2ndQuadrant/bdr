@@ -915,6 +915,211 @@ deparse_DefineStmt_TSTemplate(Oid objectId, DefineStmt *define)
 	return stmt;
 }
 
+static ObjTree *
+deparse_DefineStmt_Type(Oid objectId, DefineStmt *define)
+{
+	HeapTuple   typTup;
+	ObjTree	   *stmt;
+	ObjTree	   *tmp;
+	List	   *list;
+	char	   *str;
+	Datum		dflt;
+	bool		isnull;
+	Form_pg_type typForm;
+
+	typTup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(objectId));
+	if (!HeapTupleIsValid(typTup))
+		elog(ERROR, "cache lookup failed for type with OID %u", objectId);
+	typForm = (Form_pg_type) GETSTRUCT(typTup);
+
+	/* Shortcut processing for shell types. */
+	if (!typForm->typisdefined)
+	{
+		stmt = new_objtree_VA("CREATE TYPE %{identity}D", 0);
+		append_object_object(stmt, "identity",
+							 new_objtree_for_qualname(typForm->typnamespace,
+													  NameStr(typForm->typname)));
+		ReleaseSysCache(typTup);
+		return stmt;
+	}
+
+	stmt = new_objtree_VA("CREATE TYPE %{identity}D (%{elems:, }s)", 0);
+
+	append_object_object(stmt, "identity",
+						 new_objtree_for_qualname(typForm->typnamespace,
+												  NameStr(typForm->typname)));
+
+	list = NIL;
+
+	/* INPUT */
+	tmp = new_objtree_VA("INPUT=%{procedure}D", 0);
+	append_object_object(tmp, "procedure",
+						 new_objtree_for_qualname_id(ProcedureRelationId,
+													 typForm->typinput));
+	list = lappend(list, new_object_object(NULL, tmp));
+
+	/* OUTPUT */
+	tmp = new_objtree_VA("OUTPUT=%{procedure}D", 0);
+	append_object_object(tmp, "procedure",
+						 new_objtree_for_qualname_id(ProcedureRelationId,
+													 typForm->typoutput));
+	list = lappend(list, new_object_object(NULL, tmp));
+
+	/* RECEIVE */
+	if (OidIsValid(typForm->typreceive))
+	{
+		tmp = new_objtree_VA("RECEIVE=%{procedure}D", 0);
+		append_object_object(tmp, "procedure",
+							 new_objtree_for_qualname_id(ProcedureRelationId,
+														 typForm->typreceive));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	/* SEND */
+	if (OidIsValid(typForm->typsend))
+	{
+		tmp = new_objtree_VA("SEND=%{procedure}D", 0);
+		append_object_object(tmp, "procedure",
+							 new_objtree_for_qualname_id(ProcedureRelationId,
+														 typForm->typsend));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	/* TYPMOD_IN */
+	if (OidIsValid(typForm->typmodin))
+	{
+		tmp = new_objtree_VA("TYPMOD_IN=%{procedure}D", 0);
+		append_object_object(tmp, "procedure",
+							 new_objtree_for_qualname_id(ProcedureRelationId,
+														 typForm->typmodin));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	/* TYPMOD_OUT */
+	if (OidIsValid(typForm->typmodout))
+	{
+		tmp = new_objtree_VA("TYPMOD_OUT=%{procedure}D", 0);
+		append_object_object(tmp, "procedure",
+							 new_objtree_for_qualname_id(ProcedureRelationId,
+														 typForm->typmodout));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	/* ANALYZE */
+	if (OidIsValid(typForm->typanalyze))
+	{
+		tmp = new_objtree_VA("ANALYZE=%{procedure}D", 0);
+		append_object_object(tmp, "procedure",
+							 new_objtree_for_qualname_id(ProcedureRelationId,
+														 typForm->typanalyze));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	/* INTERNALLENGTH */
+	tmp = new_objtree_VA("INTERNALLENGTH=%{typlen}s", 0);
+	if (typForm->typlen == -1)
+		append_string_object(tmp, "typlen", "VARIABLE");
+	else
+		append_string_object(tmp, "typlen",
+							 psprintf("%d", typForm->typlen));
+	list = lappend(list, new_object_object(NULL, tmp));
+
+	/* PASSEDBYVALUE */
+	if (typForm->typbyval)
+		list = lappend(list, new_object_object(NULL, new_objtree_VA("PASSEDBYVALUE", 0)));
+
+	/* ALIGNMENT */
+	tmp = new_objtree_VA("ALIGNMENT=%{align}s", 0);
+	switch (typForm->typalign)
+	{
+		case 'd':
+			str = "pg_catalog.float8";
+			break;
+		case 'i':
+			str = "pg_catalog.int4";
+			break;
+		case 's':
+			str = "pg_catalog.int2";
+			break;
+		case 'c':
+			str = "pg_catalog.bpchar";
+			break;
+		default:
+			elog(ERROR, "invalid alignment %c", typForm->typalign);
+	}
+	append_string_object(tmp, "align", str);
+	list = lappend(list, new_object_object(NULL, tmp));
+
+	tmp = new_objtree_VA("STORAGE=%{storage}s", 0);
+	switch (typForm->typstorage)
+	{
+		case 'p':
+			str = "plain";
+			break;
+		case 'e':
+			str = "external";
+			break;
+		case 'x':
+			str = "extended";
+			break;
+		case 'm':
+			str = "main";
+			break;
+		default:
+			elog(ERROR, "invalid storage specifier %c", typForm->typstorage);
+	}
+	append_string_object(tmp, "storage", str);
+	list = lappend(list, new_object_object(NULL, tmp));
+
+	/* CATEGORY */
+	tmp = new_objtree_VA("CATEGORY=%{category}L", 0);
+	append_string_object(tmp, "category",
+						 psprintf("%c", typForm->typcategory));
+	list = lappend(list, new_object_object(NULL, tmp));
+
+	/* PREFERRED */
+	if (typForm->typispreferred)
+		list = lappend(list, new_object_object(NULL, new_objtree_VA("PREFERRED=true", 0)));
+
+	/* DEFAULT */
+	dflt = SysCacheGetAttr(TYPEOID, typTup,
+						   Anum_pg_type_typdefault,
+						   &isnull);
+	if (!isnull)
+	{
+		tmp = new_objtree_VA("DEFAULT=%{default}L", 0);
+		append_string_object(tmp, "default", TextDatumGetCString(dflt));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	/* ELEMENT */
+	if (OidIsValid(typForm->typelem))
+	{
+		tmp = new_objtree_VA("ELEMENT=%{elem}T", 0);
+		append_object_object(tmp, "elem",
+							 new_objtree_for_type(typForm->typelem, -1));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	/* DELIMITER */
+	tmp = new_objtree_VA("DELIMITER=%{delim}L", 0);
+	append_string_object(tmp, "delim",
+						 psprintf("%c", typForm->typdelim));
+	list = lappend(list, new_object_object(NULL, tmp));
+
+	/* COLLATABLE */
+	if (OidIsValid(typForm->typcollation))
+		list = lappend(list,
+					   new_object_object(NULL,
+										 new_objtree_VA("COLLATABLE=true", 0)));
+
+	append_array_object(stmt, "elems", list);
+
+	ReleaseSysCache(typTup);
+
+	return stmt;
+}
+
 static char *
 deparse_DefineStmt(Oid objectId, Node *parsetree)
 {
@@ -944,9 +1149,12 @@ deparse_DefineStmt(Oid objectId, Node *parsetree)
 			defStmt = deparse_DefineStmt_TSTemplate(objectId, define);
 			break;
 
+		case OBJECT_TYPE:
+			defStmt = deparse_DefineStmt_Type(objectId, define);
+			break;
+
 		default:
 		case OBJECT_AGGREGATE:
-		case OBJECT_TYPE:
 		case OBJECT_TSCONFIGURATION:
 			elog(ERROR, "unsupported object kind");
 			return NULL;
