@@ -633,6 +633,33 @@ get_persistence_str(char persistence)
 }
 
 static ObjTree *
+deparse_DefineStmt_Collation(Oid objectId, DefineStmt *define)
+{
+	HeapTuple   colTup;
+	ObjTree	   *stmt;
+	Form_pg_collation colForm;
+
+	colTup = SearchSysCache1(COLLOID, ObjectIdGetDatum(objectId));
+	if (!HeapTupleIsValid(colTup))
+		elog(ERROR, "cache lookup failed for collation with OID %u", objectId);
+	colForm = (Form_pg_collation) GETSTRUCT(colTup);
+
+	stmt = new_objtree_VA("CREATE COLLATION %{identity}O "
+						  "(LC_COLLATE = %{collate}L,"
+						  " LC_CTYPE = %{ctype}L)", 0);
+
+	append_object_object(stmt, "identity",
+						 new_objtree_for_qualname(colForm->collnamespace,
+												  NameStr(colForm->collname)));
+	append_string_object(stmt, "collate", NameStr(colForm->collcollate));
+	append_string_object(stmt, "ctype", NameStr(colForm->collctype));
+
+	ReleaseSysCache(colTup);
+
+	return stmt;
+}
+
+static ObjTree *
 deparse_DefineStmt_Operator(Oid objectId, DefineStmt *define)
 {
 	HeapTuple   oprTup;
@@ -735,6 +762,10 @@ deparse_DefineStmt(Oid objectId, Node *parsetree)
 
 	switch (define->kind)
 	{
+		case OBJECT_COLLATION:
+			defStmt = deparse_DefineStmt_Collation(objectId, define);
+			break;
+
 		case OBJECT_OPERATOR:
 			defStmt = deparse_DefineStmt_Operator(objectId, define);
 			break;
@@ -746,7 +777,6 @@ deparse_DefineStmt(Oid objectId, Node *parsetree)
 		case OBJECT_TSDICTIONARY:
 		case OBJECT_TSTEMPLATE:
 		case OBJECT_TSCONFIGURATION:
-		case OBJECT_COLLATION:
 			elog(ERROR, "unsupported object kind");
 			return NULL;
 	}
