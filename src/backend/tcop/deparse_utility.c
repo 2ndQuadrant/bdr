@@ -848,7 +848,7 @@ deparse_DefineStmt_TSDictionary(Oid objectId, DefineStmt *define)
 	append_object_object(tmp, "template",
 						 new_objtree_for_qualname_id(TSTemplateRelationId,
 													 tsdForm->dicttemplate));
-	list = lappend(list, tmp);
+	list = lappend(list, new_object_object(NULL, tmp));
 
 	options = SysCacheGetAttr(TSDICTOID, tsdTup,
 							  Anum_pg_ts_dict_dictinitoption,
@@ -857,7 +857,7 @@ deparse_DefineStmt_TSDictionary(Oid objectId, DefineStmt *define)
 	{
 		tmp = new_objtree_VA("%{options}s", 0);
 		append_string_object(tmp, "options", TextDatumGetCString(options));
-		list = lappend(list, tmp);
+		list = lappend(list, new_object_object(NULL, tmp));
 	}
 
 	append_array_object(stmt, "elems", list);
