@@ -632,6 +632,131 @@ get_persistence_str(char persistence)
 	}
 }
 
+static ObjTree *
+deparse_DefineStmt_Operator(Oid objectId, DefineStmt *define)
+{
+	HeapTuple   oprTup;
+	ObjTree	   *stmt;
+	ObjTree	   *tmp;
+	List	   *list;
+	Form_pg_operator oprForm;
+
+	oprTup = SearchSysCache1(OPEROID, ObjectIdGetDatum(objectId));
+	if (!HeapTupleIsValid(oprTup))
+		elog(ERROR, "cache lookup failed for operator with OID %u", objectId);
+	oprForm = (Form_pg_operator) GETSTRUCT(oprTup);
+
+	stmt = new_objtree_VA("CREATE OPERATOR %{identity}O (%{elems:, }s)", 0);
+
+	append_object_object(stmt, "identity",
+						 new_objtree_for_qualname(oprForm->oprnamespace,
+												  NameStr(oprForm->oprname)));
+
+	list = NIL;
+
+	tmp = new_objtree_VA("PROCEDURE=%{procedure}D", 0);
+	append_object_object(tmp, "procedure",
+						 new_objtree_for_qualname_id(ProcedureRelationId,
+													 oprForm->oprcode));
+	list = lappend(list, new_object_object(NULL, tmp));
+
+	if (OidIsValid(oprForm->oprleft))
+	{
+		tmp = new_objtree_VA("LEFTARG=%{type}T", 0);
+		append_object_object(tmp, "type",
+							 new_objtree_for_type(oprForm->oprleft, -1));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	if (OidIsValid(oprForm->oprright))
+	{
+		tmp = new_objtree_VA("RIGHTARG=%{type}T", 0);
+		append_object_object(tmp, "type",
+							 new_objtree_for_type(oprForm->oprright, -1));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	if (OidIsValid(oprForm->oprcom))
+	{
+		tmp = new_objtree_VA("COMMUTATOR=%{oper}O", 0);
+		append_object_object(tmp, "oper",
+							 new_objtree_for_qualname_id(OperatorRelationId,
+														 oprForm->oprcom));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	if (OidIsValid(oprForm->oprnegate))
+	{
+		tmp = new_objtree_VA("NEGATOR=%{oper}O", 0);
+		append_object_object(tmp, "oper",
+							 new_objtree_for_qualname_id(OperatorRelationId,
+														 oprForm->oprnegate));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	if (OidIsValid(oprForm->oprrest))
+	{
+		tmp = new_objtree_VA("RESTRICT=%{procedure}D", 0);
+		append_object_object(tmp, "procedure",
+							 new_objtree_for_qualname_id(ProcedureRelationId,
+														 oprForm->oprrest));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	if (OidIsValid(oprForm->oprjoin))
+	{
+		tmp = new_objtree_VA("JOIN=%{procedure}D", 0);
+		append_object_object(tmp, "procedure",
+							 new_objtree_for_qualname_id(ProcedureRelationId,
+														 oprForm->oprjoin));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	if (oprForm->oprcanmerge)
+		list = lappend(list, new_object_object(NULL,
+											   new_objtree_VA("MERGES", 0)));
+	if (oprForm->oprcanhash)
+		list = lappend(list, new_object_object(NULL,
+											   new_objtree_VA("HASHES", 0)));
+
+	append_array_object(stmt, "elems", list);
+
+	ReleaseSysCache(oprTup);
+
+	return stmt;
+}
+
+static char *
+deparse_DefineStmt(Oid objectId, Node *parsetree)
+{
+	DefineStmt *define = (DefineStmt *) parsetree;
+	ObjTree	   *defStmt;
+	char	   *command;
+
+	switch (define->kind)
+	{
+		case OBJECT_OPERATOR:
+			defStmt = deparse_DefineStmt_Operator(objectId, define);
+			break;
+
+		default:
+		case OBJECT_AGGREGATE:
+		case OBJECT_TYPE:
+		case OBJECT_TSPARSER:
+		case OBJECT_TSDICTIONARY:
+		case OBJECT_TSTEMPLATE:
+		case OBJECT_TSCONFIGURATION:
+		case OBJECT_COLLATION:
+			elog(ERROR, "unsupported object kind");
+			return NULL;
+	}
+
+	command = jsonize_objtree(defStmt);
+	free_objtree(defStmt);
+
+	return command;
+}
+
 /*
  * deparse_CreateExtensionStmt
  *		deparse a CreateExtensionStmt
@@ -3381,7 +3506,7 @@ deparse_parsenode_cmd(StashedCommand *cmd)
 
 			/* other local objects */
 		case T_DefineStmt:
-			command = NULL;
+			command = deparse_DefineStmt(objectId, parsetree);
 			break;
 
 		case T_CreateExtensionStmt:
