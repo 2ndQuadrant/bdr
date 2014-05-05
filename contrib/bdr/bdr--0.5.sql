@@ -321,6 +321,99 @@ COMMENT ON COLUMN bdr_nodes.node_status IS 'Readiness of the node: [i]nitializin
 
 SELECT pg_catalog.pg_extension_config_dump('bdr_nodes', '');
 
+CREATE TYPE bdr_conflict_type AS ENUM
+(
+    'insert_insert',
+    'update_update',
+    'update_delete',
+    'unhandled_tx_abort'
+);
+
+COMMENT ON TYPE bdr_conflict_type IS 'The nature of a BDR apply conflict - concurrent updates (update_update), conflicting inserts, etc.';
+
+CREATE TYPE bdr_conflict_resolution AS ENUM
+(
+    'conflict_trigger_skip_change',
+    'conflict_trigger_returned_tuple',
+    'last_update_wins_keep_local',
+    'last_update_wins_keep_remote',
+    'unhandled_tx_abort'
+);
+
+COMMENT ON TYPE bdr_conflict_resolution IS 'Resolution of a bdr conflict - if a conflict was resolved by a conflict trigger, by last-update-wins tests on commit timestamps, etc.';
+
+--
+-- bdr_conflict_history records apply conflicts so they can be queried and
+-- analysed by administrators.
+--
+-- This must remain in sync with bdr_log_handled_conflict(...) and
+-- struct BdrApplyConflict
+--
+CREATE SEQUENCE bdr_conflict_history_id_seq;
+
+CREATE TABLE bdr_conflict_history (
+    conflict_id         bigint not null default nextval('bdr_conflict_history_id_seq'),
+    local_node_sysid    text not null, -- really uint64 but we don't have the type for it
+    PRIMARY KEY (local_node_sysid, conflict_id),
+
+    local_conflict_xid  xid not null,     -- xid of conflicting apply tx
+    local_conflict_lsn  pg_lsn not null,  -- lsn of local node at the time the conflict was detected
+    local_conflict_time timestamptz not null,
+    object_schema       text,
+    object_name         text,
+    remote_node_sysid   text not null, -- again, really uint64
+    remote_txid         xid not null,
+    remote_commit_time  timestamptz not null,
+    remote_commit_lsn   pg_lsn not null,
+    conflict_type       bdr_conflict_type not null,
+    conflict_resolution bdr_conflict_resolution not null,
+    local_tuple         json,
+    remote_tuple        json,
+    local_tuple_xmin    xid,
+    local_tuple_origin_sysid text,        -- also really uint64
+
+    -- The following apply only for unhandled apply errors and
+    -- correspond to fields in ErrorData in elog.h .
+    error_message       text,
+    error_sqlstate      text CHECK (length(error_sqlstate) = 5),
+    error_querystring   text,
+    error_cursorpos     integer,
+    error_detail        text,
+    error_hint          text,
+    error_context       text,
+    error_columnname    text, -- schema and table in object_schema, object_name above
+    error_typename      text,
+    error_constraintname text,
+    error_filename      text,
+    error_lineno        integer,
+    error_funcname      text
+);
+
+ALTER SEQUENCE bdr_conflict_history_id_seq OWNED BY bdr_conflict_history.conflict_id;
+
+COMMENT ON TABLE bdr_conflict_history IS 'Log of all conflicts in this BDR group';
+COMMENT ON COLUMN bdr_conflict_history.local_node_sysid IS 'sysid of the local node where the apply conflict occurred';
+COMMENT ON COLUMN bdr_conflict_history.remote_node_sysid IS 'sysid of the remote node the conflicting transaction originated from';
+COMMENT ON COLUMN bdr_conflict_history.object_schema IS 'Schema of the object involved in the conflict';
+COMMENT ON COLUMN bdr_conflict_history.object_name IS 'Name of the object (table, etc) involved in the conflict';
+COMMENT ON COLUMN bdr_conflict_history.local_conflict_xid IS 'Transaction ID of the apply transaction that encountered the conflict';
+COMMENT ON COLUMN bdr_conflict_history.local_conflict_lsn IS 'xlog position at the time the conflict occured on the applying node';
+COMMENT ON COLUMN bdr_conflict_history.local_conflict_time IS 'The time the conflict was detected on the applying node';
+COMMENT ON COLUMN bdr_conflict_history.remote_txid IS 'xid of the remote transaction involved in the conflict';
+COMMENT ON COLUMN bdr_conflict_history.remote_commit_time IS 'The time the remote transaction involved in this conflict committed';
+COMMENT ON COLUMN bdr_conflict_history.remote_commit_lsn IS 'LSN on remote node at which conflicting transaction committed';
+COMMENT ON COLUMN bdr_conflict_history.conflict_type IS 'Nature of the conflict - insert/insert, update/delete, etc';
+COMMENT ON COLUMN bdr_conflict_history.local_tuple IS 'For DML conflicts, the conflicting tuple from the local DB (as json), if logged';
+COMMENT ON COLUMN bdr_conflict_history.local_tuple_xmin IS 'If local_tuple is set, the xmin of the conflicting local tuple';
+COMMENT ON COLUMN bdr_conflict_history.local_tuple_origin_sysid IS 'The node id for the true origin of the local tuple. Differs from local_node_sysid if the tuple was originally replicated from another node.';
+COMMENT ON COLUMN bdr_conflict_history.remote_tuple IS 'For DML conflicts, the conflicting tuple from the remote DB (as json), if logged';
+COMMENT ON COLUMN bdr_conflict_history.conflict_resolution IS 'How the conflict was resolved/handled; see the enum definition';
+COMMENT ON COLUMN bdr_conflict_history.error_message IS 'On apply error, the error message from ereport/elog. Other error fields match.';
+
+SELECT pg_catalog.pg_extension_config_dump('bdr_conflict_history', '');
+REVOKE ALL ON TABLE bdr_conflict_history FROM PUBLIC;
+
+
 -- This type is tailored to use as input to get_object_address
 CREATE TYPE bdr.dropped_object AS
   (objtype text, objnames text[], objargs text[]);

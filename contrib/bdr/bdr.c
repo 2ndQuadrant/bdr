@@ -48,6 +48,7 @@
 #include "storage/shmem.h"
 
 #include "utils/builtins.h"
+#include "utils/elog.h"
 #include "utils/guc.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
@@ -64,6 +65,7 @@ static int   n_configured_bdr_nodes = 0;
 ResourceOwner bdr_saved_resowner;
 static bool bdr_is_restart = false;
 Oid   BdrNodesRelid;
+Oid   BdrConflictHistoryRelId;
 BdrConnectionConfig  **bdr_connection_configs;
 
 /* GUC storage */
@@ -583,6 +585,8 @@ bdr_apply_main(Datum main_arg)
 										   ALLOCSET_DEFAULT_MINSIZE,
 										   ALLOCSET_DEFAULT_INITSIZE,
 										   ALLOCSET_DEFAULT_MAXSIZE);
+
+	bdr_conflict_logging_startup();
 
 	while (!exit_worker)
 	{
@@ -1387,6 +1391,8 @@ _PG_init(void)
 							 0,
 							 NULL, NULL, NULL);
 
+	bdr_conflict_logging_create_gucs();
+
 	/* if nothing is configured, we're done */
 	if (connections == NULL)
 	{
@@ -1629,6 +1635,8 @@ bdr_maintain_schema(void)
 		BdrVotesRelid = bdr_lookup_relid("bdr_votes", schema_oid);
 
 		BdrNodesRelid = bdr_lookup_relid("bdr_nodes", schema_oid);
+
+		BdrConflictHistoryRelId = bdr_lookup_relid("bdr_conflict_history", schema_oid);
 
 		QueuedDropsRelid = bdr_lookup_relid("bdr_queued_drops", schema_oid);
 	}
