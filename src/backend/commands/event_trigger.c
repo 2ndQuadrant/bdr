@@ -1961,6 +1961,14 @@ expand_jsonval_strlit(StringInfo buf, Datum jsonval)
 	str = TextDatumGetCString(jsonval);
 	unquoted = dequote_jsonval(str);
 
+	/* easy case: if there are no ' and no \, just use a single quote */
+	if (strchr(unquoted, '\'') == NULL &&
+		strchr(unquoted, '\\') == NULL)
+	{
+		appendStringInfo(buf, "'%s'", unquoted);
+		return;
+	}
+
 	/* Find a useful dollar-quote delimiter */
 	initStringInfo(&dqdelim);
 	appendStringInfoString(&dqdelim, "$");
@@ -1974,10 +1982,6 @@ expand_jsonval_strlit(StringInfo buf, Datum jsonval)
 
 	/* And finally produce the quoted literal into the output StringInfo */
 	appendStringInfo(buf, "%s%s%s", dqdelim.data, unquoted, dqdelim.data);
-
-	pfree(str);
-	pfree(unquoted);
-	pfree(dqdelim.data);
 }
 
 /*
