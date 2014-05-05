@@ -931,7 +931,6 @@ deparse_DefineStmt_Type(Oid objectId, DefineStmt *define)
 	typForm = (Form_pg_type) GETSTRUCT(typTup);
 
 	/* Shortcut processing for shell types. */
-
 	if (!typForm->typisdefined)
 	{
 		stmt = new_objtree_VA("CREATE TYPE %{identity}D", 0);
@@ -950,74 +949,84 @@ deparse_DefineStmt_Type(Oid objectId, DefineStmt *define)
 
 	list = NIL;
 
+	/* INPUT */
 	tmp = new_objtree_VA("INPUT=%{procedure}D", 0);
 	append_object_object(tmp, "procedure",
 						 new_objtree_for_qualname_id(ProcedureRelationId,
 													 typForm->typinput));
-	list = lappend(list, tmp);
+	list = lappend(list, new_object_object(NULL, tmp));
 
-	tmp = new_objtree_VA("OUTPUT=%{procedure}d", 0);
+	/* OUTPUT */
+	tmp = new_objtree_VA("OUTPUT=%{procedure}D", 0);
 	append_object_object(tmp, "procedure",
 						 new_objtree_for_qualname_id(ProcedureRelationId,
 													 typForm->typoutput));
-	list = lappend(list, tmp);
+	list = lappend(list, new_object_object(NULL, tmp));
 
+	/* RECEIVE */
 	if (OidIsValid(typForm->typreceive))
 	{
 		tmp = new_objtree_VA("RECEIVE=%{procedure}D", 0);
 		append_object_object(tmp, "procedure",
 							 new_objtree_for_qualname_id(ProcedureRelationId,
 														 typForm->typreceive));
-		list = lappend(list, tmp);
+		list = lappend(list, new_object_object(NULL, tmp));
 	}
 
+	/* SEND */
 	if (OidIsValid(typForm->typsend))
 	{
 		tmp = new_objtree_VA("SEND=%{procedure}D", 0);
 		append_object_object(tmp, "procedure",
 							 new_objtree_for_qualname_id(ProcedureRelationId,
 														 typForm->typsend));
-		list = lappend(list, tmp);
+		list = lappend(list, new_object_object(NULL, tmp));
 	}
 
+	/* TYPMOD_IN */
 	if (OidIsValid(typForm->typmodin))
 	{
 		tmp = new_objtree_VA("TYPMOD_IN=%{procedure}D", 0);
 		append_object_object(tmp, "procedure",
 							 new_objtree_for_qualname_id(ProcedureRelationId,
 														 typForm->typmodin));
-		list = lappend(list, tmp);
+		list = lappend(list, new_object_object(NULL, tmp));
 	}
 
+	/* TYPMOD_OUT */
 	if (OidIsValid(typForm->typmodout))
 	{
 		tmp = new_objtree_VA("TYPMOD_OUT=%{procedure}D", 0);
 		append_object_object(tmp, "procedure",
 							 new_objtree_for_qualname_id(ProcedureRelationId,
 														 typForm->typmodout));
-		list = lappend(list, tmp);
+		list = lappend(list, new_object_object(NULL, tmp));
 	}
 
+	/* ANALYZE */
 	if (OidIsValid(typForm->typanalyze))
 	{
 		tmp = new_objtree_VA("ANALYZE=%{procedure}D", 0);
 		append_object_object(tmp, "procedure",
 							 new_objtree_for_qualname_id(ProcedureRelationId,
 														 typForm->typanalyze));
-		list = lappend(list, tmp);
+		list = lappend(list, new_object_object(NULL, tmp));
 	}
 
+	/* INTERNALLENGTH */
 	tmp = new_objtree_VA("INTERNALLENGTH=%{typlen}s", 0);
 	if (typForm->typlen == -1)
 		append_string_object(tmp, "typlen", "VARIABLE");
 	else
 		append_string_object(tmp, "typlen",
 							 psprintf("%d", typForm->typlen));
-	list = lappend(list, tmp);
+	list = lappend(list, new_object_object(NULL, tmp));
 
+	/* PASSEDBYVALUE */
 	if (typForm->typbyval)
-		list = lappend(list, new_objtree_VA("PASSEDBYVALUE", 0));
+		list = lappend(list, new_object_object(NULL, new_objtree_VA("PASSEDBYVALUE", 0)));
 
+	/* ALIGNMENT */
 	tmp = new_objtree_VA("ALIGNMENT=%{align}s", 0);
 	switch (typForm->typalign)
 	{
@@ -1033,12 +1042,14 @@ deparse_DefineStmt_Type(Oid objectId, DefineStmt *define)
 		case 'c':
 			str = "pg_catalog.bpchar";
 			break;
+		default:
+			elog(ERROR, "invalid alignment %c", typForm->typalign);
 	}
 	append_string_object(tmp, "align", str);
-	list = lappend(list, tmp);
+	list = lappend(list, new_object_object(NULL, tmp));
 
 	tmp = new_objtree_VA("STORAGE=%{storage}s", 0);
-	switch (typForm->typalign)
+	switch (typForm->typstorage)
 	{
 		case 'p':
 			str = "plain";
@@ -1052,18 +1063,23 @@ deparse_DefineStmt_Type(Oid objectId, DefineStmt *define)
 		case 'm':
 			str = "main";
 			break;
+		default:
+			elog(ERROR, "invalid storage specifier %c", typForm->typstorage);
 	}
 	append_string_object(tmp, "storage", str);
-	list = lappend(list, tmp);
+	list = lappend(list, new_object_object(NULL, tmp));
 
+	/* CATEGORY */
 	tmp = new_objtree_VA("CATEGORY=%{category}L", 0);
 	append_string_object(tmp, "category",
 						 psprintf("%c", typForm->typcategory));
-	list = lappend(list, tmp);
+	list = lappend(list, new_object_object(NULL, tmp));
 
+	/* PREFERRED */
 	if (typForm->typispreferred)
-		list = lappend(list, new_objtree_VA("PREFERRED=true", 0));
+		list = lappend(list, new_object_object(NULL, new_objtree_VA("PREFERRED=true", 0)));
 
+	/* DEFAULT */
 	dflt = SysCacheGetAttr(TYPEOID, typTup,
 						   Anum_pg_type_typdefault,
 						   &isnull);
@@ -1071,24 +1087,29 @@ deparse_DefineStmt_Type(Oid objectId, DefineStmt *define)
 	{
 		tmp = new_objtree_VA("DEFAULT=%{default}L", 0);
 		append_string_object(tmp, "default", TextDatumGetCString(dflt));
-		list = lappend(list, tmp);
+		list = lappend(list, new_object_object(NULL, tmp));
 	}
 
+	/* ELEMENT */
 	if (OidIsValid(typForm->typelem))
 	{
 		tmp = new_objtree_VA("ELEMENT=%{elem}T", 0);
 		append_object_object(tmp, "elem",
 							 new_objtree_for_type(typForm->typelem, -1));
-		list = lappend(list, tmp);
+		list = lappend(list, new_object_object(NULL, tmp));
 	}
 
+	/* DELIMITER */
 	tmp = new_objtree_VA("DELIMITER=%{delim}L", 0);
 	append_string_object(tmp, "delim",
 						 psprintf("%c", typForm->typdelim));
-	list = lappend(list, tmp);
+	list = lappend(list, new_object_object(NULL, tmp));
 
+	/* COLLATABLE */
 	if (OidIsValid(typForm->typcollation))
-		list = lappend(list, new_objtree_VA("COLLATABLE=true", 0));
+		list = lappend(list,
+					   new_object_object(NULL,
+										 new_objtree_VA("COLLATABLE=true", 0)));
 
 	append_array_object(stmt, "elems", list);
 
