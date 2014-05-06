@@ -2903,42 +2903,56 @@ stringify_objtype(ObjectType objtype)
 {
 	switch (objtype)
 	{
-		case OBJECT_TABLE:
-			return "TABLE";
-		case OBJECT_SEQUENCE:
-			return "SEQUENCE";
-		case OBJECT_VIEW:
-			return "VIEW";
-		case OBJECT_MATVIEW:
-			return "MATERIALIZED VIEW";
-		case OBJECT_INDEX:
-			return "INDEX";
-		case OBJECT_FOREIGN_TABLE:
-			return "FOREIGN TABLE";
-		case OBJECT_TYPE:
-			return "TYPE";
-		case OBJECT_SCHEMA:
-			return "SCHEMA";
-		case OBJECT_FDW:
-			return "FOREIGN DATA WRAPPER";
-		case OBJECT_LANGUAGE:
-			return "LANGUAGE";
-		case OBJECT_FOREIGN_SERVER:
-			return "SERVER";
+		case OBJECT_AGGREGATE:
+			return "AGGREGATE";
+		case OBJECT_DOMAIN:
+			return "DOMAIN";
 		case OBJECT_COLLATION:
 			return "COLLATION";
 		case OBJECT_CONVERSION:
 			return "CONVERSION";
-		case OBJECT_DOMAIN:
-			return "DOMAIN";
+		case OBJECT_FDW:
+			return "FOREIGN DATA WRAPPER";
+		case OBJECT_FOREIGN_SERVER:
+			return "SERVER";
+		case OBJECT_FOREIGN_TABLE:
+			return "FOREIGN TABLE";
+		case OBJECT_FUNCTION:
+			return "FUNCTION";
+		case OBJECT_INDEX:
+			return "INDEX";
+		case OBJECT_LANGUAGE:
+			return "LANGUAGE";
+		case OBJECT_LARGEOBJECT:
+			return "LARGE OBJECT";
+		case OBJECT_MATVIEW:
+			return "MATERIALIZED VIEW";
+		case OBJECT_OPERATOR:
+			return "OPERATOR";
+		case OBJECT_OPCLASS:
+			return "OPERATOR CLASS";
+		case OBJECT_OPFAMILY:
+			return "OPERATOR FAMILY";
+		case OBJECT_SCHEMA:
+			return "SCHEMA";
+		case OBJECT_TABLE:
+			return "TABLE";
+		case OBJECT_TSCONFIGURATION:
+			return "TEXT SEARCH CONFIGURATION";
 		case OBJECT_TSDICTIONARY:
 			return "TEXT SEARCH DICTIONARY";
 		case OBJECT_TSPARSER:
 			return "TEXT SEARCH PARSER";
 		case OBJECT_TSTEMPLATE:
 			return "TEXT SEARCH TEMPLATE";
-		case OBJECT_TSCONFIGURATION:
-			return "TEXT SEARCH CONFIGURATION";
+		case OBJECT_TYPE:
+			return "TYPE";
+		case OBJECT_SCHEMA:
+			return "SCHEMA";
+		case OBJECT_SEQUENCE:
+			return "SEQUENCE";
+		case OBJECT_VIEW:
+			return "VIEW";
 
 		default:
 			elog(ERROR, "unsupported objtype %d", objtype);
@@ -3691,6 +3705,33 @@ deparse_AlterEnumStmt(Oid objectId, Node *parsetree)
 }
 
 static char *
+deparse_AlterOwnerStmt(Oid objectId, Node *parsetree)
+{
+	AlterOwnerStmt *node = (AlterOwnerStmt *) parsetree;
+	ObjTree	   *ownerStmt;
+	ObjectAddress addr;
+	char	   *fmt;
+	char	   *command;
+
+	fmt = psprintf("ALTER %s %%{identity}s OWNER TO %%{newname}I",
+				   stringify_objtype(node->objectType));
+	ownerStmt = new_objtree_VA(fmt, 0);
+	append_string_object(ownerStmt, "newname", node->newowner);
+
+	addr.classId = get_objtype_catalog_oid(node->objectType);
+	addr.objectId = objectId;
+	addr.objectSubId = 0;
+
+	append_string_object(ownerStmt, "identity",
+						 getObjectIdentity(&addr));
+
+	command = jsonize_objtree(ownerStmt);
+	free_objtree(ownerStmt);
+
+	return command;
+}
+
+static char *
 deparse_CreateConversion(Oid objectId, Node *parsetree)
 {
 	HeapTuple   conTup;
@@ -4298,6 +4339,10 @@ deparse_utility_command(StashedCommand *cmd)
 
 		case T_AlterEnumStmt:
 			command = deparse_AlterEnumStmt(objectId, parsetree);
+			break;
+
+		case T_AlterOwnerStmt:
+			command = deparse_AlterOwnerStmt(objectId, parsetree);
 			break;
 
 		default:
