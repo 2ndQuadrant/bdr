@@ -688,14 +688,14 @@ deparse_DefineStmt_Operator(Oid objectId, DefineStmt *define)
 	append_object_object(tmp, "procedure",
 						 new_objtree_for_qualname_id(ProcedureRelationId,
 													 oprForm->oprcode));
-	list = lappend(list, tmp);
+	list = lappend(list, new_object_object(NULL, tmp));
 
 	if (OidIsValid(oprForm->oprleft))
 	{
 		tmp = new_objtree_VA("LEFTARG=%{type}T", 0);
 		append_object_object(tmp, "type",
 							 new_objtree_for_type(oprForm->oprleft, -1));
-		list = lappend(list, tmp);
+		list = lappend(list, new_object_object(NULL, tmp));
 	}
 
 	if (OidIsValid(oprForm->oprright))
@@ -703,7 +703,7 @@ deparse_DefineStmt_Operator(Oid objectId, DefineStmt *define)
 		tmp = new_objtree_VA("RIGHTARG=%{type}T", 0);
 		append_object_object(tmp, "type",
 							 new_objtree_for_type(oprForm->oprright, -1));
-		list = lappend(list, tmp);
+		list = lappend(list, new_object_object(NULL, tmp));
 	}
 
 	if (OidIsValid(oprForm->oprcom))
@@ -712,7 +712,7 @@ deparse_DefineStmt_Operator(Oid objectId, DefineStmt *define)
 		append_object_object(tmp, "oper",
 							 new_objtree_for_qualname_id(OperatorRelationId,
 														 oprForm->oprcom));
-		list = lappend(list, tmp);
+		list = lappend(list, new_object_object(NULL, tmp));
 	}
 
 	if (OidIsValid(oprForm->oprnegate))
@@ -721,7 +721,7 @@ deparse_DefineStmt_Operator(Oid objectId, DefineStmt *define)
 		append_object_object(tmp, "oper",
 							 new_objtree_for_qualname_id(OperatorRelationId,
 														 oprForm->oprnegate));
-		list = lappend(list, tmp);
+		list = lappend(list, new_object_object(NULL, tmp));
 	}
 
 	if (OidIsValid(oprForm->oprrest))
@@ -730,7 +730,7 @@ deparse_DefineStmt_Operator(Oid objectId, DefineStmt *define)
 		append_object_object(tmp, "procedure",
 							 new_objtree_for_qualname_id(ProcedureRelationId,
 														 oprForm->oprrest));
-		list = lappend(list, tmp);
+		list = lappend(list, new_object_object(NULL, tmp));
 	}
 
 	if (OidIsValid(oprForm->oprjoin))
@@ -739,13 +739,15 @@ deparse_DefineStmt_Operator(Oid objectId, DefineStmt *define)
 		append_object_object(tmp, "procedure",
 							 new_objtree_for_qualname_id(ProcedureRelationId,
 														 oprForm->oprjoin));
-		list = lappend(list, tmp);
+		list = lappend(list, new_object_object(NULL, tmp));
 	}
 
 	if (oprForm->oprcanmerge)
-		list = lappend(list, new_objtree_VA("MERGES", 0));
+		list = lappend(list, new_object_object(NULL,
+											   new_objtree_VA("MERGES", 0)));
 	if (oprForm->oprcanhash)
-		list = lappend(list, new_objtree_VA("HASHES", 0));
+		list = lappend(list, new_object_object(NULL,
+											   new_objtree_VA("HASHES", 0)));
 
 	append_array_object(stmt, "elems", list);
 
@@ -782,25 +784,25 @@ deparse_DefineStmt_TSParser(Oid objectId, DefineStmt *define)
 	append_object_object(tmp, "procedure",
 						 new_objtree_for_qualname_id(ProcedureRelationId,
 													 tspForm->prsstart));
-	list = lappend(list, tmp);
+	list = lappend(list, new_object_object(NULL, tmp));
 
 	tmp = new_objtree_VA("GETTOKEN=%{procedure}D", 0);
 	append_object_object(tmp, "procedure",
 						 new_objtree_for_qualname_id(ProcedureRelationId,
 													 tspForm->prstoken));
-	list = lappend(list, tmp);
+	list = lappend(list, new_object_object(NULL, tmp));
 
 	tmp = new_objtree_VA("END=%{procedure}D", 0);
 	append_object_object(tmp, "procedure",
 						 new_objtree_for_qualname_id(ProcedureRelationId,
 													 tspForm->prsend));
-	list = lappend(list, tmp);
+	list = lappend(list, new_object_object(NULL, tmp));
 
 	tmp = new_objtree_VA("LEXTYPES=%{procedure}D", 0);
 	append_object_object(tmp, "procedure",
 						 new_objtree_for_qualname_id(ProcedureRelationId,
 													 tspForm->prslextype));
-	list = lappend(list, tmp);
+	list = lappend(list, new_object_object(NULL, tmp));
 
 	if (OidIsValid(tspForm->prsheadline))
 	{
@@ -808,7 +810,7 @@ deparse_DefineStmt_TSParser(Oid objectId, DefineStmt *define)
 		append_object_object(tmp, "procedure",
 							 new_objtree_for_qualname_id(ProcedureRelationId,
 														 tspForm->prsheadline));
-		list = lappend(list, tmp);
+		list = lappend(list, new_object_object(NULL, tmp));
 	}
 
 	append_array_object(stmt, "elems", list);
@@ -897,14 +899,14 @@ deparse_DefineStmt_TSTemplate(Oid objectId, DefineStmt *define)
 		append_object_object(tmp, "procedure",
 							 new_objtree_for_qualname_id(ProcedureRelationId,
 														 tstForm->tmplinit));
-		list = lappend(list, tmp);
+		list = lappend(list, new_object_object(NULL, tmp));
 	}
 
 	tmp = new_objtree_VA("LEXIZE=%{procedure}D", 0);
 	append_object_object(tmp, "procedure",
 						 new_objtree_for_qualname_id(ProcedureRelationId,
 													 tstForm->tmpllexize));
-	list = lappend(list, tmp);
+	list = lappend(list, new_object_object(NULL, tmp));
 
 	append_array_object(stmt, "elems", list);
 
