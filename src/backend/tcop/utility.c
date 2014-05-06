@@ -1402,7 +1402,10 @@ ProcessUtilitySlow(Node *parsetree,
 				break;
 
 			case T_AlterOwnerStmt:
-				ExecAlterOwnerStmt((AlterOwnerStmt *) parsetree);
+				objectId = ExecAlterOwnerStmt((AlterOwnerStmt *) parsetree);
+				EventTriggerStashCommand(objectId,
+										 ((AlterOwnerStmt *) parsetree)->objectType,
+										 parsetree);
 				break;
 
 			case T_GrantStmt:
