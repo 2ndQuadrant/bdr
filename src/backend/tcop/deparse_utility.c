@@ -3610,6 +3610,29 @@ deparse_AlterEnumStmt(Oid objectId, Node *parsetree)
 }
 
 static ObjTree *
+deparse_AlterOwnerStmt(Oid objectId, Node *parsetree)
+{
+	AlterOwnerStmt *node = (AlterOwnerStmt *) parsetree;
+	ObjTree	   *ownerStmt;
+	ObjectAddress addr;
+	char	   *fmt;
+
+	fmt = psprintf("ALTER %s %%{identity}s OWNER TO %%{newname}I",
+				   stringify_objtype(node->objectType));
+	ownerStmt = new_objtree_VA(fmt, 0);
+	append_string_object(ownerStmt, "newname", node->newowner);
+
+	addr.classId = get_objtype_catalog_oid(node->objectType);
+	addr.objectId = objectId;
+	addr.objectSubId = 0;
+
+	append_string_object(ownerStmt, "identity",
+						 getObjectIdentity(&addr));
+
+	return ownerStmt;
+}
+
+static ObjTree *
 deparse_CreateConversion(Oid objectId, Node *parsetree)
 {
 	HeapTuple   conTup;
@@ -4262,7 +4285,7 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_AlterOwnerStmt:
-			command = NULL;
+			command = deparse_AlterOwnerStmt(objectId, parsetree);
 			break;
 
 		case T_CommentStmt:
