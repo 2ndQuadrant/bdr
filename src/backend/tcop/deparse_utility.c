@@ -661,17 +661,72 @@ deparse_DefineStmt_Aggregate(Oid objectId, DefineStmt *define)
 			 agg->aggfnoid);
 	proc = (Form_pg_proc) GETSTRUCT(procTup);
 
-	stmt = new_objtree_VA("CREATE AGGREGATE %{identity}D (%{signature}s) "
+	stmt = new_objtree_VA("CREATE AGGREGATE %{identity}D (%{types:, }s) "
 						  "(%{elems:, }s)", 0);
 
 	append_object_object(stmt, "identity",
 						 new_objtree_for_qualname(proc->pronamespace,
 												  NameStr(proc->proname)));
 
+	list = NIL;
+
 	if (proc->pronargs == 0)
-		append_string_object(stmt, "signature", "*");
+		list = lappend(list, new_object_object(NULL, new_objtree_VA("*", 0)));
 	else
-		append_string_object(stmt, "signature", "XXX");
+	{
+		/*
+		 * We expect zero or more direct argument types, optionally
+		 * followed by "ORDER BY" and one or more ordered argument
+		 * types. There are no OUT or TABLE parameters, nor names,
+		 * nor default values.
+		 */
+		int			i;
+		bool		isnull;
+		Datum		proargmodes;
+		char	   *modes = NULL;
+
+		proargmodes = SysCacheGetAttr(PROCOID, procTup,
+									  Anum_pg_proc_proargmodes,
+									  &isnull);
+
+		if (!isnull)
+		{
+			ArrayType *arr = DatumGetArrayTypeP(proargmodes);
+			if (ARR_NDIM(arr) != 1 ||
+				ARR_DIMS(arr)[0] != proc->pronargs ||
+				ARR_HASNULL(arr) ||
+				ARR_ELEMTYPE(arr) != CHAROID)
+				elog(ERROR, "proargmodes is not a 1-D char array");
+			modes = (char *) palloc(proc->pronargs * sizeof(char));
+			memcpy(modes, ARR_DATA_PTR(arr),
+				   proc->pronargs * sizeof(char));
+		}
+
+		for (i = 0; i < proc->pronargs; i++)
+		{
+			Oid type = proc->proargtypes.values[i];
+
+			tmp = new_objtree_VA("%{order}s%{mode}s %{type}T", 0);
+
+			if (i == agg->aggnumdirectargs && i < proc->pronargs-1)
+				append_string_object(tmp, "order", "ORDER BY ");
+			else
+				append_string_object(tmp, "order", "");
+
+			if (modes)
+				append_string_object(tmp, "mode",
+									 modes[i] == 'v' ? "VARIADIC" : "");
+			else
+				append_string_object(tmp, "mode", "");
+
+			append_object_object(tmp, "type",
+								 new_objtree_for_type(type, -1));
+
+			list = lappend(list, new_object_object(NULL, tmp));
+		}
+	}
+
+	append_array_object(stmt, "types", list);
 
 	list = NIL;
 
