@@ -437,6 +437,7 @@ process_remote_insert(StringInfo s)
 		HeapTuple ht;
 		LockRelId	lockid = rel->rd_lockInfo.lockRelId;
 		TransactionId oldxid = GetTopTransactionId();
+		Oid relid = RelationGetRelid(rel);
 
 		/* there never should be conflicts on these */
 		Assert(!conflict);
@@ -453,9 +454,9 @@ process_remote_insert(StringInfo s)
 		ExecResetTupleTable(estate->es_tupleTable, true);
 		FreeExecutorState(estate);
 
-		if (RelationGetRelid(rel) == QueuedDDLCommandsRelid)
+		if (relid == QueuedDDLCommandsRelid)
 			process_queued_ddl_command(ht, started_tx);
-		if (RelationGetRelid(rel) == QueuedDropsRelid)
+		if (relid == QueuedDropsRelid)
 			process_queued_drop(ht);
 
 		rel = heap_open(QueuedDDLCommandsRelid, RowExclusiveLock);
