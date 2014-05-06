@@ -638,6 +638,183 @@ get_persistence_str(char persistence)
 }
 
 static ObjTree *
+deparse_DefineStmt_Aggregate(Oid objectId, DefineStmt *define)
+{
+	HeapTuple   aggTup;
+	HeapTuple   procTup;
+	ObjTree	   *stmt;
+	ObjTree	   *tmp;
+	List	   *list;
+	Datum		initval;
+	bool		isnull;
+	Form_pg_aggregate agg;
+	Form_pg_proc proc;
+
+	aggTup = SearchSysCache1(AGGFNOID, ObjectIdGetDatum(objectId));
+	if (!HeapTupleIsValid(aggTup))
+		elog(ERROR, "cache lookup failed for aggregate with OID %u", objectId);
+	agg = (Form_pg_aggregate) GETSTRUCT(aggTup);
+
+	procTup = SearchSysCache1(PROCOID, ObjectIdGetDatum(agg->aggfnoid));
+	if (!HeapTupleIsValid(procTup))
+		elog(ERROR, "cache lookup failed for procedure with OID %u",
+			 agg->aggfnoid);
+	proc = (Form_pg_proc) GETSTRUCT(procTup);
+
+	stmt = new_objtree_VA("CREATE AGGREGATE %{identity}D (%{signature}s) "
+						  "(%{elems:, }s)", 0);
+
+	append_object_object(stmt, "identity",
+						 new_objtree_for_qualname(proc->pronamespace,
+												  NameStr(proc->proname)));
+
+	if (proc->pronargs == 0)
+		append_string_object(stmt, "signature", "*");
+	else
+		append_string_object(stmt, "signature", "XXX");
+
+	list = NIL;
+
+	tmp = new_objtree_VA("SFUNC=%{procedure}D", 0);
+	append_object_object(tmp, "procedure",
+						 new_objtree_for_qualname_id(ProcedureRelationId,
+													 agg->aggtransfn));
+	list = lappend(list, new_object_object(NULL, tmp));
+
+	tmp = new_objtree_VA("STYPE=%{type}T", 0);
+	append_object_object(tmp, "type",
+						 new_objtree_for_type(agg->aggtranstype, -1));
+	list = lappend(list, new_object_object(NULL, tmp));
+
+	if (agg->aggtransspace != 0)
+	{
+		tmp = new_objtree_VA("SSPACE=%{space}s", 1,
+							 "space", ObjTypeString,
+							 psprintf("%d", agg->aggtransspace));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	if (OidIsValid(agg->aggfinalfn))
+	{
+		tmp = new_objtree_VA("FINALFUNC=%{procedure}D", 0);
+		append_object_object(tmp, "procedure",
+							 new_objtree_for_qualname_id(ProcedureRelationId,
+														 agg->aggfinalfn));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	if (agg->aggfinalextra)
+	{
+		tmp = new_objtree_VA("FINALFUNC_EXTRA=true", 0);
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	initval = SysCacheGetAttr(AGGFNOID, aggTup,
+							  Anum_pg_aggregate_agginitval,
+							  &isnull);
+	if (!isnull)
+	{
+		tmp = new_objtree_VA("INITCOND=%{initval}L",
+							 1, "initval", ObjTypeString,
+							 TextDatumGetCString(initval));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	if (OidIsValid(agg->aggmtransfn))
+	{
+		tmp = new_objtree_VA("MSFUNC=%{procedure}D", 0);
+		append_object_object(tmp, "procedure",
+							 new_objtree_for_qualname_id(ProcedureRelationId,
+														 agg->aggmtransfn));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	if (OidIsValid(agg->aggmtranstype))
+	{
+		tmp = new_objtree_VA("MSTYPE=%{type}T", 0);
+		append_object_object(tmp, "type",
+							 new_objtree_for_type(agg->aggmtranstype, -1));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	if (agg->aggmtransspace != 0)
+	{
+		tmp = new_objtree_VA("SSPACE=%{space}s", 1,
+							 "space", ObjTypeString,
+							 psprintf("%d", agg->aggmtransspace));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	if (OidIsValid(agg->aggminvtransfn))
+	{
+		tmp = new_objtree_VA("MINVFUNC=%{procedure}D", 0);
+		append_object_object(tmp, "procedure",
+							 new_objtree_for_qualname_id(ProcedureRelationId,
+														 agg->aggminvtransfn));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	if (OidIsValid(agg->aggmfinalfn))
+	{
+		tmp = new_objtree_VA("MFINALFUNC=%{procedure}D", 0);
+		append_object_object(tmp, "procedure",
+							 new_objtree_for_qualname_id(ProcedureRelationId,
+														 agg->aggmfinalfn));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	if (agg->aggmfinalextra)
+	{
+		tmp = new_objtree_VA("MFINALFUNC_EXTRA=true", 0);
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	initval = SysCacheGetAttr(AGGFNOID, aggTup,
+							  Anum_pg_aggregate_aggminitval,
+							  &isnull);
+	if (!isnull)
+	{
+		tmp = new_objtree_VA("MINITCOND=%{initval}L",
+							 1, "initval", ObjTypeString,
+							 TextDatumGetCString(initval));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	if (agg->aggkind == AGGKIND_HYPOTHETICAL)
+	{
+		tmp = new_objtree_VA("HYPOTHETICAL=true", 0);
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	if (OidIsValid(agg->aggsortop))
+	{
+		Oid sortop = agg->aggsortop;
+		Form_pg_operator op;
+		HeapTuple tup;
+
+		tup = SearchSysCache1(OPEROID, ObjectIdGetDatum(sortop));
+		if (!HeapTupleIsValid(tup))
+			elog(ERROR, "cache lookup failed for operator with OID %u", sortop);
+		op = (Form_pg_operator) GETSTRUCT(tup);
+
+		tmp = new_objtree_VA("SORTOP=%{operator}O", 0);
+		append_object_object(tmp, "operator",
+							 new_objtree_for_qualname(op->oprnamespace,
+													  NameStr(op->oprname)));
+		list = lappend(list, new_object_object(NULL, tmp));
+
+		ReleaseSysCache(tup);
+	}
+
+	append_array_object(stmt, "elems", list);
+
+	ReleaseSysCache(procTup);
+	ReleaseSysCache(aggTup);
+
+	return stmt;
+}
+
+static ObjTree *
 deparse_DefineStmt_Collation(Oid objectId, DefineStmt *define)
 {
 	HeapTuple   colTup;
@@ -1209,6 +1386,10 @@ deparse_DefineStmt(Oid objectId, Node *parsetree)
 
 	switch (define->kind)
 	{
+		case OBJECT_AGGREGATE:
+			defStmt = deparse_DefineStmt_Aggregate(objectId, define);
+			break;
+
 		case OBJECT_COLLATION:
 			defStmt = deparse_DefineStmt_Collation(objectId, define);
 			break;
@@ -1238,7 +1419,6 @@ deparse_DefineStmt(Oid objectId, Node *parsetree)
 			break;
 
 		default:
-		case OBJECT_AGGREGATE:
 			elog(ERROR, "unsupported object kind");
 			return NULL;
 	}
