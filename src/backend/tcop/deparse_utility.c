@@ -3880,6 +3880,24 @@ deparse_AlterEnumStmt(Oid objectId, Node *parsetree)
 }
 
 static ObjTree *
+deparse_AlterOwnerStmt(ObjectAddress address, Node *parsetree)
+{
+	AlterOwnerStmt *node = (AlterOwnerStmt *) parsetree;
+	ObjTree	   *ownerStmt;
+	char	   *fmt;
+
+	fmt = psprintf("ALTER %s %%{identity}s OWNER TO %%{newowner}I",
+				   stringify_objtype(node->objectType));
+	ownerStmt = new_objtree_VA(fmt, 0);
+	append_string_object(ownerStmt, "newowner", node->newowner);
+
+	append_string_object(ownerStmt, "identity",
+						 getObjectIdentity(&address));
+
+	return ownerStmt;
+}
+
+static ObjTree *
 deparse_CreateConversion(Oid objectId, Node *parsetree)
 {
 	HeapTuple   conTup;
@@ -4637,7 +4655,7 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_AlterOwnerStmt:
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			command = deparse_AlterOwnerStmt(cmd->d.simple.address, parsetree);
 			break;
 
 		case T_CommentStmt:
