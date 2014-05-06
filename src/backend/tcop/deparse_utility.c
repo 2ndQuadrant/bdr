@@ -47,6 +47,8 @@
 #include "catalog/pg_range.h"
 #include "catalog/pg_rewrite.h"
 #include "catalog/pg_trigger.h"
+#include "catalog/pg_ts_config.h"
+#include "catalog/pg_ts_config_map.h"
 #include "catalog/pg_ts_dict.h"
 #include "catalog/pg_ts_parser.h"
 #include "catalog/pg_ts_template.h"
@@ -757,6 +759,85 @@ deparse_DefineStmt_Operator(Oid objectId, DefineStmt *define)
 }
 
 static ObjTree *
+deparse_DefineStmt_TSConfig(Oid objectId, DefineStmt *define)
+{
+	HeapTuple   tscTup;
+	HeapTuple   tspTup;
+	ObjTree	   *stmt;
+	Form_pg_ts_config tscForm;
+	Form_pg_ts_parser tspForm;
+
+	tscTup = SearchSysCache1(TSCONFIGOID, ObjectIdGetDatum(objectId));
+	if (!HeapTupleIsValid(tscTup))
+		elog(ERROR, "cache lookup failed for text search configuration "
+			 "with OID %u", objectId);
+	tscForm = (Form_pg_ts_config) GETSTRUCT(tscTup);
+
+	tspTup = SearchSysCache1(TSPARSEROID, ObjectIdGetDatum(tscForm->cfgparser));
+	if (!HeapTupleIsValid(tspTup))
+		elog(ERROR, "cache lookup failed for text search parser with OID %u",
+			 tscForm->cfgparser);
+	tspForm = (Form_pg_ts_parser) GETSTRUCT(tspTup);
+
+	stmt = new_objtree_VA("CREATE TEXT SEARCH CONFIGURATION %{identity}D "
+						  "(PARSER=%{parser}s)", 0);
+
+	append_object_object(stmt, "identity",
+						 new_objtree_for_qualname(tscForm->cfgnamespace,
+												  NameStr(tscForm->cfgname)));
+	append_object_object(stmt, "parser",
+						 new_objtree_for_qualname(tspForm->prsnamespace,
+												  NameStr(tspForm->prsname)));
+
+	/*
+	 * If this text search configuration was created by copying another
+	 * one with "CREATE TEXT SEARCH CONFIGURATION x (COPY=y)", then y's
+	 * PARSER selection is copied along with its mappings of tokens to
+	 * dictionaries (created with ALTER … ADD MAPPING …).
+	 *
+	 * Unfortunately, there's no way to define these mappings in the
+	 * CREATE command, so if they exist for the configuration we're
+	 * deparsing, we must detect them and fail.
+	 */
+
+	{
+		ScanKeyData skey;
+		SysScanDesc scan;
+		HeapTuple	tup;
+		Relation	map;
+		bool		has_mapping;
+
+		map = heap_open(TSConfigMapRelationId, AccessShareLock);
+
+		ScanKeyInit(&skey,
+					Anum_pg_ts_config_map_mapcfg,
+					BTEqualStrategyNumber, F_OIDEQ,
+					ObjectIdGetDatum(objectId));
+
+		scan = systable_beginscan(map, TSConfigMapIndexId, true,
+								  NULL, 1, &skey);
+
+		while (HeapTupleIsValid((tup = systable_getnext(scan))))
+		{
+			has_mapping = true;
+			break;
+		}
+
+		systable_endscan(scan);
+		heap_close(map, AccessShareLock);
+
+		if (has_mapping)
+			ereport(ERROR,
+					(errmsg("can't recreate text search configuration with mappings")));
+	}
+
+	ReleaseSysCache(tspTup);
+	ReleaseSysCache(tscTup);
+
+	return stmt;
+}
+
+static ObjTree *
 deparse_DefineStmt_TSParser(Oid objectId, DefineStmt *define)
 {
 	HeapTuple   tspTup;
@@ -1137,6 +1218,10 @@ deparse_DefineStmt(Oid objectId, Node *parsetree)
 			defStmt = deparse_DefineStmt_Operator(objectId, define);
 			break;
 
+		case OBJECT_TSCONFIGURATION:
+			defStmt = deparse_DefineStmt_TSConfig(objectId, define);
+			break;
+
 		case OBJECT_TSPARSER:
 			defStmt = deparse_DefineStmt_TSParser(objectId, define);
 			break;
@@ -1155,7 +1240,6 @@ deparse_DefineStmt(Oid objectId, Node *parsetree)
 
 		default:
 		case OBJECT_AGGREGATE:
-		case OBJECT_TSCONFIGURATION:
 			elog(ERROR, "unsupported object kind");
 			return NULL;
 	}
