@@ -1,5 +1,5 @@
-conninfo "d1" "port=5433 dbname=postgres"
-conninfo "d2" "port=5434 dbname=postgres"
+conninfo "d1" "port=5432 dbname=test_db host=localhost"
+conninfo "d2" "port=5433 dbname=test_db host=localhost"
 
 session "s1"
 connection "d1"
