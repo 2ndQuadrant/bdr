@@ -3013,6 +3013,10 @@ pg_xlog_wait_remote_apply(PG_FUNCTION_ARGS)
 	int32 pid = PG_GETARG_INT32(1);
 
 	XLogRecPtr startpos = text_to_xlogrecptr(pos);
+
+	if (GetTopTransactionIdIfAny() != InvalidTransactionId)
+		elog(ERROR, "waiting in xact with dml");
+
 	wait_for_remote_lsn(pid, startpos, true);
 
 	PG_RETURN_VOID();
