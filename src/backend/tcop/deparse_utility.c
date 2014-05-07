@@ -2449,8 +2449,7 @@ deparse_CreateRangeStmt(Oid objectId, Node *parsetree)
 
 	rangeForm = (Form_pg_range) GETSTRUCT(rangeTup);
 
-	range = new_objtree_VA("CREATE RANGE %{identity}D AS RANGE (%{definition:, }s",
-						   0);
+	range = new_objtree_VA("CREATE TYPE %{identity}D AS RANGE (%{definition:, }s)", 0);
 	tmp = new_objtree_for_qualname_id(TypeRelationId, objectId);
 	append_object_object(range, "identity", tmp);
 
