@@ -2422,7 +2422,6 @@ deparse_CreateEnumStmt(Oid objectId, Node *parsetree)
 static char *
 deparse_CreateRangeStmt(Oid objectId, Node *parsetree)
 {
-	/* CreateRangeStmt *node = (CreateRangeStmt *) parsetree; */
 	ObjTree	   *range;
 	ObjTree	   *tmp;
 	List	   *definition = NIL;
@@ -2505,7 +2504,7 @@ deparse_CreateRangeStmt(Oid objectId, Node *parsetree)
 	{
 		tmp = new_objtree_for_qualname_id(ProcedureRelationId,
 										  rangeForm->rngsubdiff);
-		tmp = new_objtree_VA("SUBTYPE_DIFF = %{diff}D",
+		tmp = new_objtree_VA("SUBTYPE_DIFF = %{subtype_diff}D",
 							 2,
 							 "clause", ObjTypeString, "subtype_diff",
 							 "subtype_diff", ObjTypeObject, tmp);
