@@ -2933,8 +2933,6 @@ stringify_objtype(ObjectType objtype)
 			return "OPERATOR CLASS";
 		case OBJECT_OPFAMILY:
 			return "OPERATOR FAMILY";
-		case OBJECT_SCHEMA:
-			return "SCHEMA";
 		case OBJECT_TABLE:
 			return "TABLE";
 		case OBJECT_TSCONFIGURATION:
