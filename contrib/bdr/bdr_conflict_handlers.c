@@ -147,7 +147,7 @@ bdr_conflict_handlers_check_access(Oid reloid)
 				(errmsg("Access to relation %d denied",
 						reloid)));
 
-	if (!allowSystemTableMods && IsSystemClass(reloid, classform))
+	if (IsSystemClass(reloid, classform))
 		ereport(ERROR,
 				(errmsg("Access to relation %d denied because it is a system relation",
 						reloid)));
