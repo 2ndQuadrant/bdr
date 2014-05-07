@@ -387,7 +387,7 @@ bdr_commandfilter(Node *parsetree,
 
 		case T_DefineStmt:
 			/* XXX: we could support some of these, primarily CREATE TYPE */
-			error_unsupported_command(completionTag);
+			error_unsupported_command(CreateCommandTag(parsetree));
 			break;
 
 		case T_IndexStmt:
@@ -439,7 +439,7 @@ bdr_commandfilter(Node *parsetree,
 			break;
 
 		case T_CreateTableAsStmt:
-			error_unsupported_command(completionTag);
+			error_unsupported_command(CreateCommandTag(parsetree));
 			break;
 
 		case T_RefreshMatViewStmt:
