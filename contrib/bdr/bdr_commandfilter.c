@@ -242,6 +242,9 @@ filter_AlterTableStmt(Node *parsetree,
 					}
 					break;
 
+				case AT_ValidateConstraint: /* VALIDATE CONSTRAINT */
+					break;
+
 				default:
 					hasInvalid = true;
 					break;
