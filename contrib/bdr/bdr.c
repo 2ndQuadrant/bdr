@@ -57,7 +57,9 @@
 
 #define MAXCONNINFO		1024
 
-static bool exit_worker = false;
+/* Really should be private to bdr_apply.c */
+extern bool exit_worker;
+
 static int   n_configured_bdr_nodes = 0;
 ResourceOwner bdr_saved_resowner;
 static bool bdr_is_restart = false;
@@ -188,46 +190,6 @@ bdr_sighup(SIGNAL_ARGS)
 		SetLatch(&MyProc->procLatch);
 
 	errno = save_errno;
-}
-
-/*
- * Read a remote action type and process the action record.
- *
- * May set exit_worker to stop processing before next record.
- */
-static void
-bdr_process_remote_action(StringInfo s)
-{
-	char		action;
-
-	action = pq_getmsgbyte(s);
-
-	switch (action)
-	{
-			/* BEGIN */
-		case 'B':
-			process_remote_begin(s);
-			break;
-			/* COMMIT */
-		case 'C':
-			if (!process_remote_commit(s))
-				exit_worker = true;
-			break;
-			/* INSERT */
-		case 'I':
-			process_remote_insert(s);
-			break;
-			/* UPDATE */
-		case 'U':
-			process_remote_update(s);
-			break;
-			/* DELETE */
-		case 'D':
-			process_remote_delete(s);
-			break;
-		default:
-			elog(ERROR, "unknown action of type %c", action);
-	}
 }
 
 /*
