@@ -473,8 +473,26 @@ bdr_commandfilter(Node *parsetree,
 			break;
 
 		case T_DropStmt:
+			break;
+
 		case T_RenameStmt:
-			/* FIXME: catch unsupported rename operations */
+			{
+				RenameStmt *n = (RenameStmt *)parsetree;
+
+				switch(n->renameType)
+				{
+				case OBJECT_AGGREGATE:
+				case OBJECT_COLLATION:
+				case OBJECT_CONVERSION:
+				case OBJECT_OPCLASS:
+				case OBJECT_OPFAMILY:
+					error_unsupported_command(CreateCommandTag(parsetree));
+					break;
+
+				default:
+					break;
+				}
+			}
 			break;
 
 		case T_AlterObjectSchemaStmt:
@@ -482,7 +500,7 @@ bdr_commandfilter(Node *parsetree,
 			break;
 
 		case T_AlterTableSpaceMoveStmt:
-			/* XXX: forbid? */
+			error_unsupported_command("ALTER TABLESPACE ... MOVE");
 			break;
 
 		case T_AlterOwnerStmt:
