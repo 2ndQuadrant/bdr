@@ -288,7 +288,6 @@ bdr_commandfilter(Node *parsetree,
 		case T_AlterTableSpaceOptionsStmt:
 		case T_TruncateStmt:
 		case T_CommentStmt: /* XXX: we could replicate these */;
-		case T_SecLabelStmt: /* XXX: we could replicate these */;
 		case T_CopyStmt:
 		case T_PrepareStmt:
 		case T_ExecuteStmt:
