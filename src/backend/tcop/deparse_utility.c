@@ -1563,6 +1563,52 @@ deparse_CreateExtensionStmt(Oid objectId, Node *parsetree)
 	return command;
 }
 
+static char *
+deparse_AlterExtensionStmt(Oid objectId, Node *parsetree)
+{
+	AlterExtensionStmt *node = (AlterExtensionStmt *) parsetree;
+	Relation    pg_extension;
+	HeapTuple   extTup;
+	Form_pg_extension extForm;
+	ObjTree	   *stmt;
+	char	   *command;
+	char	   *version;
+	ListCell   *cell;
+
+	pg_extension = heap_open(ExtensionRelationId, AccessShareLock);
+	extTup = get_catalog_object_by_oid(pg_extension, objectId);
+	if (!HeapTupleIsValid(extTup))
+		elog(ERROR, "cache lookup failed for extension with OID %u",
+			 objectId);
+	extForm = (Form_pg_extension) GETSTRUCT(extTup);
+
+	stmt = new_objtree_VA("ALTER EXTENSION %{identity}I UPDATE%{to}s", 1,
+						  "identity", ObjTypeString,
+						  NameStr(extForm->extname));
+
+	foreach(cell, node->options)
+	{
+		DefElem *opt = (DefElem *) lfirst(cell);
+
+		if (strcmp(opt->defname, "new_version") == 0)
+			version = defGetString(opt);
+		else
+			elog(ERROR, "unsupported option %s", opt->defname);
+	}
+
+	if (version)
+		append_string_object(stmt, "to", psprintf(" TO '%s'", version));
+	else
+		append_string_object(stmt, "to", "");
+
+	heap_close(pg_extension, AccessShareLock);
+
+	command = jsonize_objtree(stmt);
+	free_objtree(stmt);
+
+	return command;
+}
+
 /*
  * deparse_ViewStmt
  *		deparse a ViewStmt
@@ -4283,6 +4329,10 @@ deparse_utility_command(StashedCommand *cmd)
 
 		case T_CreateExtensionStmt:
 			command = deparse_CreateExtensionStmt(objectId, parsetree);
+			break;
+
+		case T_AlterExtensionStmt:
+			command = deparse_AlterExtensionStmt(objectId, parsetree);
 			break;
 
 		case T_CompositeTypeStmt:		/* CREATE TYPE (composite) */
