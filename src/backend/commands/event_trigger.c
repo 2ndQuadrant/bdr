@@ -1430,9 +1430,15 @@ EventTriggerRecordSubcmd(Node *subcmd, Oid relid, AttrNumber attnum,
 void
 EventTriggerComplexCmdEnd(void)
 {
-	currentEventTriggerState->stash =
-		lappend(currentEventTriggerState->stash,
-				currentEventTriggerState->curcmd);
+	/* If no subcommands, don't stash anything */
+	if (list_length(currentEventTriggerState->curcmd->subcmds) != 0)
+	{
+		currentEventTriggerState->stash =
+			lappend(currentEventTriggerState->stash,
+					currentEventTriggerState->curcmd);
+	}
+	else
+		pfree(currentEventTriggerState->curcmd);
 
 	currentEventTriggerState->curcmd = NULL;
 }
