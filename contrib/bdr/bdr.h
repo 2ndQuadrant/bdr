@@ -179,11 +179,9 @@ extern Oid	BdrSequenceElectionsRelid;
 extern Oid	BdrVotesRelid;
 
 /* apply support */
-extern void process_remote_begin(StringInfo s);
-extern bool process_remote_commit(StringInfo s);
-extern void process_remote_insert(StringInfo s);
-extern void process_remote_update(StringInfo s);
-extern void process_remote_delete(StringInfo s);
+extern void bdr_process_remote_action(StringInfo s);
+extern void fetch_sysid_via_node_id(RepNodeId node_id, uint64 *sysid,
+									TimeLineID *tli);
 
 /* sequence support */
 extern void bdr_sequencer_shmem_init(int nnodes, int sequencers);
