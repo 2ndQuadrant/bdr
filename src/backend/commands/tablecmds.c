@@ -3555,7 +3555,8 @@ ATExecCmd(List **wqueue, AlteredTableInfo *tab, Relation rel,
 			break;
 	}
 
-	EventTriggerRecordSubcmd((Node *) cmd, colno, newoid);
+	EventTriggerRecordSubcmd((Node *) cmd, RelationGetRelid(rel),
+							 colno, newoid);
 
 	/*
 	 * Bump the command counter to ensure the next subcommand in the sequence

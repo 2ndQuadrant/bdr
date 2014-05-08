@@ -1387,13 +1387,24 @@ EventTriggerComplexCmdSetOid(Oid objectId)
  * actually parsed as ALTER TABLE, so there is no difference at this level.)
  */
 void
-EventTriggerRecordSubcmd(Node *subcmd, AttrNumber attnum, Oid newoid)
+EventTriggerRecordSubcmd(Node *subcmd, Oid relid, AttrNumber attnum,
+						 Oid newoid)
 {
 	MemoryContext	oldcxt;
 	StashedATSubcmd *newsub;
 
 	Assert(IsA(subcmd, AlterTableCmd));
 	Assert(OidIsValid(currentEventTriggerState->curcmd->objectId));
+
+	/*
+	 * If we receive a subcommand intended for a relation other than the one
+	 * we've started the complex command for, ignore it.  This is chiefly
+	 * concerned with inheritance situations: in such cases, alter table
+	 * would dispatch multiple copies of the same command for various things,
+	 * but we're only concerned with the one for the main table.
+	 */
+	if (relid != currentEventTriggerState->curcmd->objectId)
+		return;
 
 	oldcxt = MemoryContextSwitchTo(currentEventTriggerState->cxt);
 
