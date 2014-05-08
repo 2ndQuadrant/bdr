@@ -164,9 +164,6 @@ typedef struct ReorderBufferTXN
 	RepNodeId origin_id;
 	XLogRecPtr origin_lsn;
 
-	/* did the TX have catalog changes */
-	bool		does_timetravel;
-
 	/*
 	 * Commit time, only known when we read the actual commit record.
 	 */
