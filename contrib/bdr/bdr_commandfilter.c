@@ -381,7 +381,7 @@ bdr_commandfilter(Node *parsetree,
 
 		case T_AlterDomainStmt:
 			/* XXX: we could support this */
-			error_unsupported_command(completionTag);
+			error_unsupported_command(CreateCommandTag(parsetree));
 			break;
 
 		case T_DefineStmt:
@@ -457,19 +457,19 @@ bdr_commandfilter(Node *parsetree,
 			break;
 
 		case T_CreateConversionStmt:
-			error_unsupported_command(completionTag);
+			error_unsupported_command(CreateCommandTag(parsetree));
 			break;
 
 		case T_CreateCastStmt:
 		case T_CreateOpClassStmt:
 		case T_CreateOpFamilyStmt:
 		case T_AlterOpFamilyStmt:
-			error_unsupported_command(completionTag);
+			error_unsupported_command(CreateCommandTag(parsetree));
 			break;
 
 		case T_AlterTSDictionaryStmt:
 		case T_AlterTSConfigurationStmt:
-			error_unsupported_command(completionTag);
+			error_unsupported_command(CreateCommandTag(parsetree));
 			break;
 
 		case T_DropStmt:
@@ -478,7 +478,7 @@ bdr_commandfilter(Node *parsetree,
 			break;
 
 		case T_AlterObjectSchemaStmt:
-			error_unsupported_command(completionTag);
+			error_unsupported_command(CreateCommandTag(parsetree));
 			break;
 
 		case T_AlterTableSpaceMoveStmt:
@@ -490,14 +490,14 @@ bdr_commandfilter(Node *parsetree,
 			break;
 
 		case T_DropOwnedStmt:
-			error_unsupported_command(completionTag);
+			error_unsupported_command(CreateCommandTag(parsetree));
 			break;
 
 		case T_AlterDefaultPrivilegesStmt:
 			break;
 
 		case T_SecLabelStmt:
-			error_unsupported_command(completionTag);
+			error_unsupported_command(CreateCommandTag(parsetree));
 			break;
 
 		default:
