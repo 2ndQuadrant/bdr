@@ -76,6 +76,12 @@ bool		started_transaction = false;
 Oid			QueuedDDLCommandsRelid = InvalidOid;
 Oid			QueuedDropsRelid = InvalidOid;
 
+/*
+ * this should really be a static in bdr_apply.c, but bdr.c needs it for
+ * bdr_apply_main currently.
+ */
+bool		exit_worker = false;
+
 /* During apply, holds xid of remote transaction */
 static TransactionId replication_origin_xid = InvalidTransactionId;
 
@@ -118,14 +124,19 @@ static void do_log_update(RepNodeId local_node_id, bool apply_update,
 			  HeapTuple old_key, HeapTuple user_tuple);
 static void do_apply_update(BDRRelation *rel, EState *estate, TupleTableSlot *oldslot,
 				TupleTableSlot *newslot);
-static void fetch_sysid_via_node_id(RepNodeId node_id, uint64 *sysid, TimeLineID *tli);
 
 static void check_sequencer_wakeup(BDRRelation *rel);
 static HeapTuple process_queued_drop(HeapTuple cmdtup);
 static void process_queued_ddl_command(HeapTuple cmdtup, bool tx_just_started);
 static bool bdr_performing_work(void);
 
-void
+static void process_remote_begin(StringInfo s);
+static bool process_remote_commit(StringInfo s);
+static void process_remote_insert(StringInfo s);
+static void process_remote_update(StringInfo s);
+static void process_remote_delete(StringInfo s);
+
+static void
 process_remote_begin(StringInfo s)
 {
 	XLogRecPtr		origlsn;
@@ -193,7 +204,7 @@ process_remote_begin(StringInfo s)
  * Returns true if apply should continue with the next record, false if replay
  * should stop after this record.
  */
-bool
+static bool
 process_remote_commit(StringInfo s)
 {
 	XLogRecPtr		commit_lsn;
@@ -288,7 +299,7 @@ process_remote_commit(StringInfo s)
 		return true;
 }
 
-void
+static void
 process_remote_insert(StringInfo s)
 {
 	char		action;
@@ -496,7 +507,7 @@ process_remote_insert(StringInfo s)
 	CommandCounterIncrement();
 }
 
-void
+static void
 process_remote_update(StringInfo s)
 {
 	char		action;
@@ -682,7 +693,7 @@ process_remote_update(StringInfo s)
 	CommandCounterIncrement();
 }
 
-void
+static void
 process_remote_delete(StringInfo s)
 {
 #ifdef VERBOSE_DELETE
@@ -1318,7 +1329,7 @@ process_queued_drop(HeapTuple cmdtup)
 	return newtup;
 }
 
-static void
+void
 fetch_sysid_via_node_id(RepNodeId node_id, uint64 *sysid, TimeLineID *tli)
 {
 	if (node_id == InvalidRepNodeId)
@@ -1830,4 +1841,42 @@ retry:
 	index_endscan(scan);
 
 	return found;
+}
+
+
+/*
+ * Read a remote action type and process the action record.
+ *
+ * May set exit_worker to stop processing before next record.
+ */
+void
+bdr_process_remote_action(StringInfo s)
+{
+	char action = pq_getmsgbyte(s);
+	switch (action)
+	{
+			/* BEGIN */
+		case 'B':
+			process_remote_begin(s);
+			break;
+			/* COMMIT */
+		case 'C':
+			if (!process_remote_commit(s))
+				exit_worker = true;
+			break;
+			/* INSERT */
+		case 'I':
+			process_remote_insert(s);
+			break;
+			/* UPDATE */
+		case 'U':
+			process_remote_update(s);
+			break;
+			/* DELETE */
+		case 'D':
+			process_remote_delete(s);
+			break;
+		default:
+			elog(ERROR, "unknown action of type %c", action);
+	}
 }
