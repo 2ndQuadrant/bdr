@@ -1780,17 +1780,10 @@ retry:
 
 	if ((scantuple = index_getnext(scan, ForwardScanDirection)) != NULL)
 	{
-		HeapTuple ht;
-
 		found = true;
-		/*
-		 * Ugly trick to track the HeapTupleData pointing into a buffer in the
-		 * slot.
-		 */
-		ht = MemoryContextAllocZero(slot->tts_mcxt, sizeof(HeapTupleData));
-		memcpy(ht, scantuple, sizeof(HeapTupleData));
-		ExecStoreTuple(ht, slot, scan->xs_cbuf, false);
-		slot->tts_shouldFree = true;
+		/* FIXME: Improve TupleSlot to not require copying the whole tuple */
+		ExecStoreTuple(scantuple, slot, InvalidBuffer, false);
+		ExecMaterializeSlot(slot);
 
 		xwait = TransactionIdIsValid(snap.xmin) ?
 			snap.xmin : snap.xmax;
