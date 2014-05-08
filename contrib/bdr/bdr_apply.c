@@ -76,6 +76,9 @@ bool		started_transaction = false;
 Oid			QueuedDDLCommandsRelid = InvalidOid;
 Oid			QueuedDropsRelid = InvalidOid;
 
+/* During apply, holds xid of remote transaction */
+static TransactionId replication_origin_xid = InvalidTransactionId;
+
 /*
  * This code only runs within an apply bgworker, so we can stash a pointer to our
  * state in shm in a global for convenient access.
@@ -128,6 +131,7 @@ process_remote_begin(StringInfo s)
 	XLogRecPtr		origlsn;
 	TimestampTz		committime;
 	TimestampTz		current;
+	TransactionId	remote_xid;
 	char			statbuf[100];
 	int				apply_delay = bdr_apply_config->apply_delay;
 
@@ -137,10 +141,14 @@ process_remote_begin(StringInfo s)
 
 	origlsn = pq_getmsgint64(s);
 	committime = pq_getmsgint64(s);
+	remote_xid = pq_getmsgint(s, 4);
 
 	/* setup state for commit and conflict detection */
 	replication_origin_lsn = origlsn;
 	replication_origin_timestamp = committime;
+
+	/* store remote xid for logging and debugging */
+	replication_origin_xid = remote_xid;
 
 	snprintf(statbuf, sizeof(statbuf),
 			"bdr_apply: BEGIN origin(source, orig_lsn, timestamp): %s, %X/%X, %s",
@@ -253,6 +261,8 @@ process_remote_commit(StringInfo s)
 	CurrentResourceOwner = bdr_saved_resowner;
 
 	bdr_count_commit();
+
+	replication_origin_xid = InvalidTransactionId;
 
 	/*
 	 * Stop replay if we're doing limited replay and we've replayed up to the
