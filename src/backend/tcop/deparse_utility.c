@@ -3866,9 +3866,9 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 	ListCell   *cell;
 	char	   *command;
 
-	rel = heap_open(cmd->objectId, AccessShareLock);
+	rel = heap_open(cmd->d.alterTable.objectId, AccessShareLock);
 	dpcontext = deparse_context_for(RelationGetRelationName(rel),
-									cmd->objectId);
+									cmd->d.alterTable.objectId);
 
 	alterTableStmt =
 		new_objtree_VA("ALTER TABLE %{identity}D %{subcmds:, }s", 0);
@@ -3876,7 +3876,7 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 								   RelationGetRelationName(rel));
 	append_object_object(alterTableStmt, "identity", tmp);
 
-	foreach(cell, cmd->subcmds)
+	foreach(cell, cmd->d.alterTable.subcmds)
 	{
 		StashedATSubcmd	*substashed = (StashedATSubcmd *) lfirst(cell);
 		AlterTableCmd	*subcmd = (AlterTableCmd *) substashed->parsetree;
@@ -4004,7 +4004,7 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 					idxname = RelationGetRelationName(idx);
 
 					constrOid = get_relation_constraint_oid(
-						cmd->objectId, idxname, false);
+						cmd->d.alterTable.objectId, idxname, false);
 
 					tmp = new_objtree_VA("ADD CONSTRAINT %{name}I %{definition}s",
 										 3, "type", ObjTypeString, "add constraint",
@@ -4258,8 +4258,8 @@ deparse_utility_command(StashedCommand *cmd)
 	MemoryContext	tmpcxt;
 	OverrideSearchPath *overridePath;
 	char	   *command;
-	Oid			objectId = cmd->objectId;
-	Node	   *parsetree = cmd->parsetree;
+	Oid			objectId;
+	Node	   *parsetree;
 
 	/*
 	 * Allocate everything done by the deparsing routines into a temp context,
@@ -4285,6 +4285,20 @@ deparse_utility_command(StashedCommand *cmd)
 	overridePath->addCatalog = false;
 	overridePath->addTemp = false;
 	PushOverrideSearchPath(overridePath);
+
+	parsetree = cmd->parsetree;
+
+	switch (cmd->type)
+	{
+		case SCT_Basic:
+			objectId = cmd->d.basic.objectId;
+			break;
+		case SCT_AlterTable:
+			objectId = cmd->d.alterTable.objectId;
+			break;
+		default:
+			elog(ERROR, "unexpected deparse node type %d", cmd->type);
+	}
 
 	switch (nodeTag(parsetree))
 	{
@@ -4326,6 +4340,8 @@ deparse_utility_command(StashedCommand *cmd)
 		case T_CreateFdwStmt:
 		case T_CreateForeignServerStmt:
 		case T_CreateUserMappingStmt:
+			command = NULL;
+			break;
 
 			/* other local objects */
 		case T_DefineStmt:

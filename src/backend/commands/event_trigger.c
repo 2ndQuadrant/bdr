@@ -1314,11 +1314,12 @@ EventTriggerStashCommand(Oid objectId, ObjectType objtype, Node *parsetree)
 
 	stashed = palloc(sizeof(StashedCommand));
 
-	stashed->objectId = objectId;
-	stashed->objtype = objtype;
-	stashed->subcmds = NIL;
-	stashed->parsetree = copyObject(parsetree);
+	stashed->type = SCT_Basic;
 	stashed->in_extension = currentEventTriggerState->in_extension;
+
+	stashed->d.basic.objectId = objectId;
+	stashed->d.basic.objtype = objtype;
+	stashed->parsetree = copyObject(parsetree);
 
 	currentEventTriggerState->stash = lappend(currentEventTriggerState->stash,
 											  stashed);
@@ -1339,7 +1340,7 @@ EventTriggerStashCommand(Oid objectId, ObjectType objtype, Node *parsetree)
  * commands at this level?
  */
 void
-EventTriggerComplexCmdStart(Node *parsetree)
+EventTriggerComplexCmdStart(Node *parsetree, ObjectType objtype)
 {
 	MemoryContext	oldcxt;
 	StashedCommand *stashed;
@@ -1348,11 +1349,14 @@ EventTriggerComplexCmdStart(Node *parsetree)
 
 	stashed = palloc(sizeof(StashedCommand));
 
-	stashed->objtype = OBJECT_TABLE;	/* XXX fix this? */
-	stashed->objectId = InvalidOid;
-	stashed->subcmds = NIL;
-	stashed->parsetree = copyObject(parsetree);
+	stashed->type = SCT_AlterTable;
 	stashed->in_extension = currentEventTriggerState->in_extension;
+
+	stashed->d.alterTable.objectId = InvalidOid;
+	stashed->d.alterTable.objtype = objtype;
+	stashed->d.alterTable.subcmds = NIL;
+	/* XXX is it necessary to have the whole parsetree? probably not ... */
+	stashed->parsetree = copyObject(parsetree);
 
 	currentEventTriggerState->curcmd = stashed;
 
@@ -1375,7 +1379,7 @@ EventTriggerStashExtensionStop(void)
 void
 EventTriggerComplexCmdSetOid(Oid objectId)
 {
-	currentEventTriggerState->curcmd->objectId = objectId;
+	currentEventTriggerState->curcmd->d.alterTable.objectId = objectId;
 }
 
 /*
@@ -1394,7 +1398,7 @@ EventTriggerRecordSubcmd(Node *subcmd, Oid relid, AttrNumber attnum,
 	StashedATSubcmd *newsub;
 
 	Assert(IsA(subcmd, AlterTableCmd));
-	Assert(OidIsValid(currentEventTriggerState->curcmd->objectId));
+	Assert(OidIsValid(currentEventTriggerState->curcmd->d.alterTable.objectId));
 
 	/*
 	 * If we receive a subcommand intended for a relation other than the one
@@ -1403,7 +1407,7 @@ EventTriggerRecordSubcmd(Node *subcmd, Oid relid, AttrNumber attnum,
 	 * would dispatch multiple copies of the same command for various things,
 	 * but we're only concerned with the one for the main table.
 	 */
-	if (relid != currentEventTriggerState->curcmd->objectId)
+	if (relid != currentEventTriggerState->curcmd->d.alterTable.objectId)
 		return;
 
 	oldcxt = MemoryContextSwitchTo(currentEventTriggerState->cxt);
@@ -1413,8 +1417,8 @@ EventTriggerRecordSubcmd(Node *subcmd, Oid relid, AttrNumber attnum,
 	newsub->oid = newoid;
 	newsub->parsetree = copyObject(subcmd);
 
-	currentEventTriggerState->curcmd->subcmds =
-		lappend(currentEventTriggerState->curcmd->subcmds, newsub);
+	currentEventTriggerState->curcmd->d.alterTable.subcmds =
+		lappend(currentEventTriggerState->curcmd->d.alterTable.subcmds, newsub);
 
 	MemoryContextSwitchTo(oldcxt);
 }
@@ -1431,7 +1435,7 @@ void
 EventTriggerComplexCmdEnd(void)
 {
 	/* If no subcommands, don't stash anything */
-	if (list_length(currentEventTriggerState->curcmd->subcmds) != 0)
+	if (list_length(currentEventTriggerState->curcmd->d.alterTable.subcmds) != 0)
 	{
 		currentEventTriggerState->stash =
 			lappend(currentEventTriggerState->stash,
@@ -1503,7 +1507,8 @@ pg_event_trigger_get_creation_commands(PG_FUNCTION_ARGS)
 		 * might be different from the one that created the object in the first
 		 * place, we might not end up in a consistent state anyway.
 		 */
-		if (!OidIsValid(cmd->objectId))
+		if (cmd->type == SCT_Basic &&
+			!OidIsValid(cmd->d.basic.objectId))
 			continue;
 
 		command = deparse_utility_command(cmd);
@@ -1512,10 +1517,14 @@ pg_event_trigger_get_creation_commands(PG_FUNCTION_ARGS)
 		 * Some parse trees return NULL when deparse is attempted; we don't
 		 * emit anything for them.
 		 */
-		if (command != NULL)
+		if (command != NULL &&
+			(cmd->type == SCT_Basic ||
+			 cmd->type == SCT_AlterTable))
 		{
 			Datum		values[9];
 			bool		nulls[9];
+			Oid			classId;
+			Oid			objId;
 			ObjectAddress addr;
 			const char *tag;
 			char	   *identity;
@@ -1523,12 +1532,23 @@ pg_event_trigger_get_creation_commands(PG_FUNCTION_ARGS)
 			char	   *schema = NULL;
 			int			i = 0;
 
-			addr.classId = get_objtype_catalog_oid(cmd->objtype);
-			addr.objectId = cmd->objectId;
+			if (cmd->type == SCT_Basic)
+			{
+				classId = get_objtype_catalog_oid(cmd->d.basic.objtype);
+				objId = cmd->d.basic.objectId;
+			}
+			else if (cmd->type == SCT_AlterTable)
+			{
+				classId = get_objtype_catalog_oid(cmd->d.alterTable.objtype);
+				objId = cmd->d.alterTable.objectId;
+			}
+			tag = CreateCommandTag(cmd->parsetree);
+			addr.classId = classId;
+			addr.objectId = objId;
 			addr.objectSubId = 0;
+
 			type = getObjectTypeDescription(&addr);
 			identity = getObjectIdentity(&addr);
-			tag = CreateCommandTag(cmd->parsetree);
 
 			/*
 			 * Obtain schema name, if any ("pg_temp" if a temp object)
