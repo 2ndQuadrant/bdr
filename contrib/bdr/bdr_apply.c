@@ -832,6 +832,44 @@ check_apply_update(RepNodeId local_node_id, TimestampTz local_ts,
 		 * sysid + TLI to discern.
 		 */
 
+		if (new_tuple)
+		{
+			/*
+			 * We let users decide how the conflict should be resolved; if no
+			 * trigger could be found or if the trigger decided not to care,
+			 * we fall back to „last update wins“
+			 */
+
+			TimestampDifference(replication_origin_timestamp, local_ts,
+								&secs, &microsecs);
+
+			*new_tuple = bdr_conflict_handlers_resolve(rel, local_tuple,
+													   remote_tuple, "UPDATE",
+													   BDRUpdateUpdateConflictHandler,
+													   abs(secs) * 1000000 + abs(microsecs),
+													   &skip);
+
+			if (skip)
+			{
+				*perform_update = false;
+				*log_update = false;
+				return;
+			}
+			else if (*new_tuple)
+			{
+				*perform_update = true;
+				*log_update = true;
+				return;
+			}
+
+
+			/*
+			 * if user decided not to skip the conflict but didn't provide a
+			 * resolving tuple we fall back to default handling
+			 */
+		}
+
+
 		cmp = timestamptz_cmp_internal(replication_origin_timestamp, local_ts);
 
 		if (cmp > 0)
@@ -848,71 +886,28 @@ check_apply_update(RepNodeId local_node_id, TimestampTz local_ts,
 									&remote_sysid, &remote_tli);
 
 			/*
-			 * We let users decide how the conflict should be resolved; if no
-			 * trigger could be found or if the trigger decided not to care,
-			 * we fall back to „last update wins“
-			 *
-			 * Since the comparison of the two timestamps is 0 we simply give
-			 * 0 as the timeframe as well.
-			 */
-			if (new_tuple)
-				*new_tuple = bdr_conflict_handlers_resolve(rel, local_tuple,
-													  remote_tuple, "UPDATE",
-											  BDRUpdateUpdateConflictHandler,
-														   0, &skip);
-
-			/*
 			 * Always ignore this update if the user decides to; otherwise
 			 * apply the user tuple or, if none supplied, fall back to „last
 			 * update wins“
 			 */
-			if (!skip)
-			{
-				if (new_tuple == NULL || *new_tuple == NULL)
-				{
-					if (local_sysid < remote_sysid)
-						*perform_update = true;
-					else if (local_sysid > remote_sysid)
-						*perform_update = false;
-					else if (local_tli < remote_tli)
-						*perform_update = true;
-					else if (local_tli > remote_tli)
-						*perform_update = false;
-					else
-						/* shouldn't happen */
-						elog(ERROR, "unsuccessful node comparison");
-				}
-				else
-					*perform_update = true;
-			}
-			else
+			if (local_sysid < remote_sysid)
+				*perform_update = true;
+			else if (local_sysid > remote_sysid)
 				*perform_update = false;
+			else if (local_tli < remote_tli)
+				*perform_update = true;
+			else if (local_tli > remote_tli)
+				*perform_update = false;
+			else
+				/* shouldn't happen */
+				elog(ERROR, "unsuccessful node comparison");
 
 			*log_update = true;
 			return;
 		}
 		else
 		{
-			TimestampDifference(replication_origin_timestamp, local_ts,
-								&secs, &microsecs);
-
-			/*
-			 * We let users decide how the conflict should be resolved; if no
-			 * trigger could be found or if the triggers decide not to care,
-			 * we fall back to „last update wins“
-			 */
-			if (new_tuple)
-				*new_tuple = bdr_conflict_handlers_resolve(rel, local_tuple,
-													  remote_tuple, "UPDATE",
-											  BDRUpdateUpdateConflictHandler,
-										abs(secs) * 1000000 + abs(microsecs),
-														   &skip);
-
-			if (new_tuple == NULL || *new_tuple == NULL || skip)
-				*perform_update = false;
-			else
-				*perform_update = true;
-
+			*perform_update = false;
 			*log_update = true;
 
 			return;
