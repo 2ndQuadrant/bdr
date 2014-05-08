@@ -353,6 +353,7 @@ pg_decode_begin_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *txn)
 	pq_sendbyte(ctx->out, 'B');		/* BEGIN */
 	pq_sendint64(ctx->out, txn->final_lsn);
 	pq_sendint64(ctx->out, txn->commit_time);
+	pq_sendint(ctx->out, txn->xid, 4);
 	OutputPluginWrite(ctx, true);
 	return;
 }
