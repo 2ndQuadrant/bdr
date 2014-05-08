@@ -12,6 +12,8 @@
 #ifndef DEPARSE_UTILITY_H
 #define DEPARSE_UTILITY_H
 
+#include "access/attnum.h"
+#include "nodes/nodes.h"
 
 /*
  * Support for keeping track of a command to deparse.
@@ -20,6 +22,12 @@
  * deparsing; deparse_utility_command can later be used to obtain a usable
  * representation of it.
  */
+
+typedef enum StashedCommandType
+{
+	SCT_Basic,
+	SCT_AlterTable
+} StashedCommandType;
 
 /*
  * For ALTER TABLE commands, we keep a list of the subcommands therein.
@@ -33,11 +41,25 @@ typedef struct StashedATSubcmd
 
 typedef struct StashedCommand
 {
-	ObjectType	objtype;
-	Oid			objectId;
-	List	   *subcmds;	/* list of StashedATSubcmd */
-	Node	   *parsetree;
+	StashedCommandType type;
 	bool		in_extension;
+	Node	   *parsetree;
+
+	union
+	{
+		struct BasicCommand
+		{
+			Oid			objectId;
+			ObjectType	objtype;
+		} basic;
+
+		struct AlterTableCommand
+		{
+			Oid		objectId;
+			ObjectType objtype;
+			List   *subcmds;
+		} alterTable;
+	} d;
 } StashedCommand;
 
 extern char *deparse_utility_command(StashedCommand *cmd);

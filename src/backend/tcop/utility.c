@@ -988,7 +988,7 @@ ProcessUtilitySlow(Node *parsetree,
 														queryString);
 
 						/* ... ensure we have an event trigger context ... */
-						EventTriggerComplexCmdStart(parsetree);
+						EventTriggerComplexCmdStart(parsetree, atstmt->relkind);
 						EventTriggerComplexCmdSetOid(relid);
 
 						/* ... and do it */
@@ -1019,7 +1019,7 @@ ProcessUtilitySlow(Node *parsetree,
 											   params,
 											   None_Receiver,
 											   NULL);
-								EventTriggerComplexCmdStart(parsetree);
+								EventTriggerComplexCmdStart(parsetree, atstmt->relkind);
 								EventTriggerComplexCmdSetOid(relid);
 							}
 
@@ -1178,7 +1178,7 @@ ProcessUtilitySlow(Node *parsetree,
 					stmt = transformIndexStmt(relid, stmt, queryString);
 
 					/* ... and do it */
-					EventTriggerComplexCmdStart(parsetree);
+					EventTriggerComplexCmdStart(parsetree, OBJECT_INDEX);	/* relkind? */
 					objectId =
 						DefineIndex(relid,	/* OID of heap relation */
 									stmt,
@@ -1273,7 +1273,7 @@ ProcessUtilitySlow(Node *parsetree,
 				break;
 
 			case T_ViewStmt:	/* CREATE VIEW */
-				EventTriggerComplexCmdStart(parsetree);
+				EventTriggerComplexCmdStart(parsetree, OBJECT_VIEW);	/* XXX relkind? */
 				objectId = DefineView((ViewStmt *) parsetree, queryString);
 				EventTriggerStashCommand(objectId, OBJECT_VIEW, parsetree);
 				EventTriggerComplexCmdEnd();
@@ -1403,7 +1403,7 @@ ProcessUtilitySlow(Node *parsetree,
 				break;
 
 			case T_AlterTableSpaceMoveStmt:
-				EventTriggerComplexCmdStart(parsetree);
+				EventTriggerComplexCmdStart(parsetree, OBJECT_TABLE);	/* XXX relkind? */
 				AlterTableSpaceMove((AlterTableSpaceMoveStmt *) parsetree);
 				EventTriggerComplexCmdEnd();
 				break;
