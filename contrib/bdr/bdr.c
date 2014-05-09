@@ -785,7 +785,7 @@ bdr_create_con_gucs(char  *name,
 					BdrConnectionConfig **out_config)
 {
 	Size		off;
-	char	   *errmsg = NULL;
+	char	   *errormsg = NULL;
 	PQconninfoOption *options;
 	PQconninfoOption *cur_option;
 	BdrConnectionConfig *opts;
@@ -851,13 +851,14 @@ bdr_create_con_gucs(char  *name,
 
 	elog(DEBUG2, "bdr %s: dsn=%s", name, opts->dsn);
 
-	options = PQconninfoParse(opts->dsn, &errmsg);
-	if (errmsg != NULL)
+	options = PQconninfoParse(opts->dsn, &errormsg);
+	if (errormsg != NULL)
 	{
-		char	   *str = pstrdup(errmsg);
+		char	   *str = pstrdup(errormsg);
 
-		PQfreemem(errmsg);
-		elog(ERROR, "msg: %s", str);
+		PQfreemem(errormsg);
+		ereport(ERROR,
+				(errmsg("bdr %s: error in dsn: %s", name, str)));
 	}
 
 	cur_option = options;
