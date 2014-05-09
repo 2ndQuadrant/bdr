@@ -265,12 +265,12 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 			data->client_sizeof_datum != sizeof(Datum))
 		{
 			data->allow_binary_protocol = false;
-			elog(LOG, "disabling binary protocol because of sizeof differences");
+			elog(DEBUG1, "disabling binary protocol because of sizeof differences");
 		}
 		else if (data->client_bigendian != bdr_get_bigendian())
 		{
 			data->allow_binary_protocol = false;
-			elog(LOG, "disabling binary protocol because of endianess difference");
+			elog(DEBUG1, "disabling binary protocol because of endianess difference");
 		}
 
 		/*
@@ -315,7 +315,7 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 			if (data->bdr_conflict_handlers_reloid == InvalidOid)
 				elog(ERROR, "cache lookup for relation bdr.bdr_conflict_handlers failed");
 			else
-				elog(LOG, "bdr.bdr_conflict_handlers OID set to %u",
+				elog(DEBUG1, "bdr.bdr_conflict_handlers OID set to %u",
 					 data->bdr_conflict_handlers_reloid);
 		}
 		else
@@ -635,9 +635,7 @@ write_tuple(BdrOutputData *data, StringInfo out, Relation rel,
 
 			}
 			else
-			{
 				elog(ERROR, "unsupported tuple type");
-			}
 		}
 		else if (use_sendrecv)
 		{

@@ -150,7 +150,7 @@ bdr_send_feedback(PGconn *conn, XLogRecPtr blockpos, int64 now, bool replyReques
 	replybuf[len] = replyRequested ? 1 : 0;		/* replyRequested */
 	len += 1;
 
-	elog(LOG, "sending feedback (force %d, reply requested %d) to %X/%X",
+	elog(DEBUG1, "sending feedback (force %d, reply requested %d) to %X/%X",
 		 force, replyRequested,
 		 (uint32) (blockpos >> 32), (uint32) blockpos);
 
@@ -158,8 +158,9 @@ bdr_send_feedback(PGconn *conn, XLogRecPtr blockpos, int64 now, bool replyReques
 
 	if (PQputCopyData(conn, replybuf, len) <= 0 || PQflush(conn))
 	{
-		elog(ERROR, "could not send feedback packet: %s",
-			 PQerrorMessage(conn));
+		ereport(ERROR,
+				(errmsg("could not send feedback packet: %s",
+						PQerrorMessage(conn))));
 		return false;
 	}
 
@@ -313,7 +314,7 @@ bdr_connect(char *conninfo_repl,
 				 errdetail("Both system identifiers are %s.", remote_sysid)));
 	}
 	else
-		elog(LOG, "local sysid %s, remote: %s",
+		elog(DEBUG1, "local sysid %s, remote: %s",
 			 local_sysid, remote_sysid);
 
 	/*
@@ -399,7 +400,7 @@ bdr_create_slot(PGconn *streamConn, Name slot_name,
 	/* now commit local identifier */
 	CommitTransactionCommand();
 	CurrentResourceOwner = bdr_saved_resowner;
-	elog(LOG, "created replication identifier %u", *replication_identifier);
+	elog(DEBUG1, "created replication identifier %u", *replication_identifier);
 
 	if (snapshot)
 		*snapshot = pstrdup(PQgetvalue(res, 0, 2));
@@ -490,7 +491,7 @@ bdr_establish_connection_and_slot(BdrConnectionConfig *cfg, Name out_slot_name,
 
 	if (OidIsValid(*out_replication_identifier))
 	{
-		elog(LOG, "found valid replication identifier %u",
+		elog(DEBUG1, "found valid replication identifier %u",
 			 *out_replication_identifier);
 		if (out_snapshot)
 			*out_snapshot = NULL;
@@ -506,7 +507,7 @@ bdr_establish_connection_and_slot(BdrConnectionConfig *cfg, Name out_slot_name,
 		 */
 
 		/* create local replication identifier and a remote slot */
-		elog(LOG, "Creating new slot %s", NameStr(*out_slot_name));
+		elog(DEBUG1, "Creating new slot %s", NameStr(*out_slot_name));
 		bdr_create_slot(streamConn, out_slot_name, remote_ident,
 						out_replication_identifier, out_snapshot);
 	}
@@ -552,7 +553,7 @@ bdr_apply_main(Datum main_arg)
 	CurrentResourceOwner = ResourceOwnerCreate(NULL, "bdr apply top-level resource owner");
 	bdr_saved_resowner = CurrentResourceOwner;
 
-	elog(LOG, "%s initialized on %s",
+	elog(DEBUG1, "%s initialized on %s",
 		 MyBgworkerEntry->bgw_name, NameStr(bdr_apply_config->dbname));
 
 	streamConn = bdr_establish_connection_and_slot(
@@ -576,7 +577,7 @@ bdr_apply_main(Datum main_arg)
 	 */
 	start_from = RemoteCommitFromCachedReplicationIdentifier();
 
-	elog(LOG, "starting up replication at %u from %X/%X",
+	elog(INFO, "starting up replication at %u from %X/%X",
 		 replication_identifier,
 		 (uint32) (start_from >> 32), (uint32) start_from);
 
@@ -663,7 +664,7 @@ bdr_apply_main(Datum main_arg)
 
 			if (r == -1)
 			{
-				elog(LOG, "data stream ended");
+				elog(DEBUG1, "data stream ended");
 				return;
 			}
 			else if (r == -2)
@@ -867,7 +868,7 @@ bdr_create_con_gucs(char  *name,
 		if (strcmp(cur_option->keyword, "dbname") == 0)
 		{
 			if (cur_option->val == NULL)
-				elog(ERROR, "bdr %s: no dbname set", name);
+				ereport(ERROR, (errmsg("bdr %s: no dbname set", name)));
 
 			strncpy(NameStr(opts->dbname), cur_option->val,
 					NAMEDATALEN);
@@ -913,8 +914,9 @@ bdr_create_con_gucs(char  *name,
 	{
 		elog(DEBUG2, "bdr %s: has init_replica=t", name);
 		if (database_initcons[off] != NULL)
-			elog(ERROR, "Connections %s and %s on database %s both have bdr_init_replica enabled, cannot continue",
-				name, database_initcons[off], used_databases[off]);
+			ereport(ERROR,
+					(errmsg("Connections %s and %s on database %s both have bdr_init_replica enabled, cannot continue",
+							name, database_initcons[off], used_databases[off])));
 		else
 			database_initcons[off] = name; /* no need to pstrdup, see _PG_init */
 	}
@@ -989,9 +991,10 @@ bdr_launch_apply_workers(char *dbname)
 						if (!RegisterDynamicBackgroundWorker(&apply_worker,
 															 &bgw_handle))
 						{
-							elog(ERROR, "bdr: Failed to register background worker"
-								 " %s, see previous log messages",
-								 NameStr(cfg->name));
+							ereport(ERROR,
+									(errmsg("bdr: Failed to register background worker"
+											" %s, see previous log messages",
+											NameStr(cfg->name))));
 						}
 						apply_workers = lcons(bgw_handle, apply_workers);
 					}
@@ -1063,7 +1066,7 @@ bdr_perdb_worker_main(Datum main_arg)
 	/* Do we need to init the local DB from a remote node? */
 	bdr_init_replica(&bdr_perdb_worker->dbname);
 
-	elog(LOG, "Starting bdr apply workers for db %s", NameStr(bdr_perdb_worker->dbname));
+	elog(DEBUG1, "Starting bdr apply workers for db %s", NameStr(bdr_perdb_worker->dbname));
 
 	/* Launch the apply workers */
 	apply_workers = bdr_launch_apply_workers(NameStr(bdr_perdb_worker->dbname));
@@ -1078,7 +1081,7 @@ bdr_perdb_worker_main(Datum main_arg)
 		pfree(h);
 	}
 
-	elog(LOG, "BDR starting sequencer on db \"%s\"",
+	elog(DEBUG1, "BDR starting sequencer on db \"%s\"",
 		 NameStr(bdr_perdb_worker->dbname));
 
 	/* initialize sequencer */
@@ -1350,7 +1353,8 @@ _PG_init(void)
 	int			connection_config_idx;
 
 	if (!process_shared_preload_libraries_in_progress)
-		elog(ERROR, "bdr can only be loaded via shared_preload_libraries");
+		ereport(ERROR,
+				(errmsg("bdr can only be loaded via shared_preload_libraries")));
 
 	if (!commit_ts_enabled)
 		ereport(ERROR,
@@ -1452,7 +1456,7 @@ _PG_init(void)
 	if (bdr_max_workers == -1)
 	{
 		bdr_max_workers = list_length(connames) * 2;
-		elog(LOG, "bdr: bdr_max_workers unset, configuring for %d workers",
+		elog(DEBUG1, "bdr: bdr_max_workers unset, configuring for %d workers",
 				bdr_max_workers);
 	}
 
@@ -1553,7 +1557,7 @@ _PG_init(void)
 
 		con->seq_slot = off;
 
-		elog(LOG, "starting bdr database worker for db %s", NameStr(con->dbname));
+		elog(DEBUG1, "starting bdr database worker for db %s", NameStr(con->dbname));
 		snprintf(perdb_worker.bgw_name, BGW_MAXLEN,
 				 "bdr: %s", NameStr(con->dbname));
 		perdb_worker.bgw_main_arg = PointerGetDatum(con);
@@ -1669,8 +1673,8 @@ bdr_maintain_schema(void)
 	else
 		elog(ERROR, "cache lookup failed for schema bdr");
 
-	elog(LOG, "bdr.bdr_queued_commands OID set to %u", QueuedDDLCommandsRelid);
-	elog(LOG, "bdr.bdr_queued_drops OID set to %u", QueuedDropsRelid);
+	elog(DEBUG1, "bdr.bdr_queued_commands OID set to %u", QueuedDDLCommandsRelid);
+	elog(DEBUG1, "bdr.bdr_queued_drops OID set to %u", QueuedDropsRelid);
 
 	bdr_conflict_handlers_init();
 
