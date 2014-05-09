@@ -670,10 +670,35 @@ process_remote_update(StringInfo s)
 		 * conflict or if the target tuple came from some 3rd node and hasn't yet
 		 * been applied to the local node.
 		 */
+
+		long secs;
+		int microsecs;
+		bool skip = false;
+
+		remote_tuple = heap_form_tuple(RelationGetDescr(rel->rel),
+									   new_tuple.values,
+									   new_tuple.isnull);
+
+		ExecStoreTuple(remote_tuple, newslot, InvalidBuffer, true);
+
+		TimestampDifference(replication_origin_timestamp, GetCurrentTimestamp(),
+							&secs, &microsecs);
+
+		user_tuple = bdr_conflict_handlers_resolve(rel, NULL,
+												   remote_tuple, "UPDATE",
+												   BdrConflictType_UpdateDelete,
+												   abs(secs) * 1000000 + abs(microsecs),
+												   &skip);
+
 		initStringInfo(&o);
 		tuple_to_stringinfo(&o, RelationGetDescr(rel->rel),
 							oldslot->tts_tuple);
 		bdr_count_update_conflict();
+
+		if (user_tuple)
+			ereport(ERROR,
+					(errmsg("UPDATE vs DELETE handler returned a row which"
+							" isn't allowed for now")));
 
 		ereport(LOG,
 				(errcode(ERRCODE_INTEGRITY_CONSTRAINT_VIOLATION),
