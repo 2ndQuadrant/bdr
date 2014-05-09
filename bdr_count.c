@@ -300,7 +300,8 @@ pg_stat_get_bdr(PG_FUNCTION_ARGS)
 	size_t		current_offset;
 
 	if (!superuser())
-		elog(ERROR, "blarg");
+		ereport(ERROR,
+				(errmsg("Access to pg_stat_get_bdr() denied as non-superuser")));
 
 	if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo))
 		ereport(ERROR,
