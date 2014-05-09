@@ -549,11 +549,6 @@ standard_ProcessUtility(Node *parsetree,
 			DeallocateQuery((DeallocateStmt *) parsetree);
 			break;
 
-		case T_GrantStmt:
-			/* no event triggers for global objects */
-			ExecuteGrantStmt((GrantStmt *) parsetree);
-			break;
-
 		case T_GrantRoleStmt:
 			/* no event triggers for global objects */
 			GrantRole((GrantRoleStmt *) parsetree);
@@ -1305,6 +1300,11 @@ ProcessUtilitySlow(Node *parsetree,
 
 			case T_AlterOwnerStmt:
 				ExecAlterOwnerStmt((AlterOwnerStmt *) parsetree);
+				break;
+
+			case T_GrantStmt:
+				/* command is stashed in ExecuteGrantStmt_oids */
+				ExecuteGrantStmt((GrantStmt *) parsetree);
 				break;
 
 			case T_DropOwnedStmt:
