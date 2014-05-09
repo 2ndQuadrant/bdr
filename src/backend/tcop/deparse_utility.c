@@ -1059,7 +1059,8 @@ deparse_DefineStmt_TSConfig(Oid objectId, DefineStmt *define)
 		heap_close(map, AccessShareLock);
 
 		if (has_mapping)
-			elog(ERROR, "can't deparse text search configuration with mappings");
+			ereport(ERROR,
+					(errmsg("can't recreate text search configuration with mappings")));
 	}
 
 	ReleaseSysCache(tspTup);
