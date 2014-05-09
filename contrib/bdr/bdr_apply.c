@@ -156,7 +156,7 @@ process_remote_begin(StringInfo s)
 			(uint32) (origlsn >> 32), (uint32) origlsn,
 			timestamptz_to_str(committime));
 
-	elog(LOG, "%s", statbuf);
+	elog(DEBUG1, "%s", statbuf);
 
 	pgstat_report_activity(STATE_RUNNING, statbuf);
 
@@ -218,7 +218,7 @@ process_remote_commit(StringInfo s)
 		origin_lsn = pq_getmsgint64(s);
 	}
 
-	elog(LOG, "COMMIT origin(lsn, end, timestamp): %X/%X, %X/%X, %s",
+	elog(DEBUG1, "COMMIT origin(lsn, end, timestamp): %X/%X, %X/%X, %s",
 		 (uint32) (commit_lsn >> 32), (uint32) commit_lsn,
 		 (uint32) (end_lsn >> 32), (uint32) end_lsn,
 		 timestamptz_to_str(committime));
@@ -341,7 +341,7 @@ process_remote_insert(StringInfo s)
 #ifdef VERBOSE_INSERT
 	initStringInfo(&o);
 	tuple_to_stringinfo(&o, RelationGetDescr(rel), slot->tts_tuple);
-	elog(LOG, "INSERT:%s", o.data);
+	elog(DEBUG1, "INSERT:%s", o.data);
 	resetStringInfo(&o);
 #endif
 
@@ -610,7 +610,7 @@ process_remote_update(StringInfo s)
 		tuple_to_stringinfo(&o, RelationGetDescr(rel), oldslot->tts_tuple);
 		appendStringInfo(&o, " to");
 		tuple_to_stringinfo(&o, RelationGetDescr(rel), remote_tuple);
-		elog(LOG, "UPDATE:%s", o.data);
+		elog(DEBUG1, "UPDATE:%s", o.data);
 		resetStringInfo(&o);
 #endif
 
@@ -643,7 +643,7 @@ process_remote_update(StringInfo s)
 #ifdef VERBOSE_UPDATE
 				initStringInfo(&o);
 				tuple_to_stringinfo(&o, RelationGetDescr(rel), user_tuple);
-				elog(LOG, "USER tuple:%s", o.data);
+				elog(DEBUG1, "USER tuple:%s", o.data);
 				resetStringInfo(&o);
 #endif
 
@@ -662,7 +662,7 @@ process_remote_update(StringInfo s)
 							oldslot->tts_tuple);
 		bdr_count_update_conflict();
 
-		ereport(ERROR,
+		ereport(LOG,
 				(errcode(ERRCODE_INTEGRITY_CONSTRAINT_VIOLATION),
 				 errmsg("CONFLICT: could not find existing tuple for pkey %s",
 						o.data)));
@@ -741,7 +741,7 @@ process_remote_delete(StringInfo s)
 #ifdef VERBOSE_DELETE
 	initStringInfo(&o);
 	tuple_to_stringinfo(&o, RelationGetDescr(idxrel), slot->tts_tuple);
-	elog(LOG, "DELETE old-key:%s", o.data);
+	elog(DEBUG1, "DELETE old-key:%s", o.data);
 	resetStringInfo(&o);
 #endif
 
@@ -1654,7 +1654,8 @@ UserTableUpdateOpenIndexes(EState *estate, TupleTableSlot *slot)
 											   estate);
 
 		if (recheckIndexes != NIL)
-			elog(ERROR, "bdr doesn't don't support index rechecks");
+			ereport(ERROR,
+					(errmsg("bdr doesn't support index rechecks")));
 	}
 
 	/* FIXME: recheck the indexes */
