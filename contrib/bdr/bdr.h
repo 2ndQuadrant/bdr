@@ -28,6 +28,13 @@
  */
 struct pg_conn;
 
+/* Forward declarations */
+struct TupleTableSlot; /* from executor/tuptable.h */
+struct EState; /* from nodes/execnodes.h */
+struct ScanKeyData; /* from access/skey.h for ScanKey */
+enum LockTupleMode; /* from access/heapam.h */
+
+
 /*
  * Flags to indicate which fields are present in a commit record sent by the
  * output plugin.
@@ -36,6 +43,14 @@ typedef enum BdrOutputCommitFlags
 {
 	BDR_OUTPUT_COMMIT_HAS_ORIGIN = 1
 } BdrOutputCommitFlags;
+
+typedef enum BDRConflictHandlerType
+{
+	BDRUpdateUpdateConflictHandler,
+	BDRUpdateDeleteConflictHandler,
+	BDRInsertInsertConflictHandler,
+	BDRInsertUpdateConflictHandler
+}	BDRConflictHandlerType;
 
 /*
  * BdrApplyWorker describes a BDR worker connection.
@@ -134,6 +149,29 @@ typedef struct BdrConnectionConfig
 	bool is_valid;
 } BdrConnectionConfig;
 
+typedef struct BDRConflictHandler
+{
+	Oid			handler_oid;
+	BDRConflictHandlerType handler_type;
+	uint64		timeframe;
+}	BDRConflictHandler;
+
+/*
+ * This structure is for caching relation specific information, such as
+ * conflict handlers.
+ */
+typedef struct BDRRelation
+{
+	/* hash key */
+	Oid			reloid;
+
+	Relation	rel;
+
+	BDRConflictHandler *conflict_handlers;
+	size_t		conflict_handlers_len;
+}	BDRRelation;
+
+
 /*
  * Params for every connection in bdr.connections.
  *
@@ -182,6 +220,22 @@ extern Oid	BdrVotesRelid;
 extern void bdr_process_remote_action(StringInfo s);
 extern void fetch_sysid_via_node_id(RepNodeId node_id, uint64 *sysid,
 									TimeLineID *tli);
+
+/* Index maintenance, heap access, etc */
+extern struct EState * bdr_create_rel_estate(Relation rel);
+extern void UserTableUpdateIndexes(struct EState *estate,
+								   struct TupleTableSlot *slot);
+extern void UserTableUpdateOpenIndexes(struct EState *estate,
+									   struct TupleTableSlot *slot);
+extern void build_index_scan_keys(struct EState *estate,
+								  struct ScanKeyData **scan_keys,
+								  struct TupleTableSlot *slot);
+extern void build_index_scan_key(struct ScanKeyData *skey, Relation rel,
+								 Relation idxrel,
+								 struct TupleTableSlot *slot);
+extern bool find_pkey_tuple(struct ScanKeyData *skey, BDRRelation *rel,
+							Relation idxrel, struct TupleTableSlot *slot, bool
+							lock, enum LockTupleMode mode);
 
 /* sequence support */
 extern void bdr_sequencer_shmem_init(int nnodes, int sequencers);
@@ -242,36 +296,6 @@ extern struct pg_conn *
 bdr_establish_connection_and_slot(BdrConnectionConfig *cfg, Name out_slot_name,
 	uint64 *out_sysid, TimeLineID* out_timeline, RepNodeId
 	*out_replication_identifier, char **out_snapshot);
-
-typedef enum BDRConflictHandlerType
-{
-	BDRUpdateUpdateConflictHandler,
-	BDRUpdateDeleteConflictHandler,
-	BDRInsertInsertConflictHandler,
-	BDRInsertUpdateConflictHandler
-}	BDRConflictHandlerType;
-
-typedef struct BDRConflictHandler
-{
-	Oid			handler_oid;
-	BDRConflictHandlerType handler_type;
-	uint64		timeframe;
-}	BDRConflictHandler;
-
-/*
- * This structure is for caching relation specific information, such as
- * conflict handlers.
- */
-typedef struct BDRRelation
-{
-	/* hash key */
-	Oid			reloid;
-
-	Relation	rel;
-
-	BDRConflictHandler *conflict_handlers;
-	size_t		conflict_handlers_len;
-}	BDRRelation;
 
 /* use instead of heap_open()/heap_close() */
 extern BDRRelation *bdr_heap_open(Oid reloid, LOCKMODE lockmode);
