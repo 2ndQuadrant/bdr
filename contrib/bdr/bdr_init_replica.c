@@ -806,7 +806,7 @@ bdr_init_replica(Name dbname)
 		char	   *init_snapshot = NULL;
 		PGconn	   *init_repl_conn = NULL;
 
-		elog(DEBUG1, "bdr %s: initializing from remote db", NameStr(*dbname));
+		elog(LOG, "bdr %s: initializing from remote db", NameStr(*dbname));
 
 		/*
 		 * We're starting from scratch or have cleaned up a previous failed
