@@ -1592,7 +1592,8 @@ bdr_lookup_relid(const char *relname, Oid schema_oid)
 	relid = get_relname_relid(relname, schema_oid);
 
 	if (!relid)
-		elog(ERROR, "cache lookup failed for relation public.%s", relname);
+		elog(ERROR, "cache lookup failed for relation %s.%s",
+			 get_namespace_name(schema_oid), relname);
 
 	return relid;
 }
