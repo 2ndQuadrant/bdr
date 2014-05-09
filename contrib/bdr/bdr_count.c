@@ -297,7 +297,7 @@ pg_stat_get_bdr(PG_FUNCTION_ARGS)
 	Tuplestorestate *tupstore;
 	MemoryContext per_query_ctx;
 	MemoryContext oldcontext;
-	int			current_offset;
+	size_t		current_offset;
 
 	if (!superuser())
 		elog(ERROR, "blarg");
@@ -453,7 +453,7 @@ bdr_count_unserialize(void)
 	int			fd;
 	const char *path = "global/bdr.stat";
 	BdrCountSerialize serial;
-	Size		read_size;
+	ssize_t		read_size;
 
 	if (BdrCountCtl == NULL)
 		elog(ERROR, "cannot use bdr statistics function without loading bdr");
