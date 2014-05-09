@@ -547,11 +547,6 @@ standard_ProcessUtility(Node *parsetree,
 			DeallocateQuery((DeallocateStmt *) parsetree);
 			break;
 
-		case T_GrantStmt:
-			/* no event triggers for global objects */
-			ExecuteGrantStmt((GrantStmt *) parsetree);
-			break;
-
 		case T_GrantRoleStmt:
 			/* no event triggers for global objects */
 			GrantRole((GrantRoleStmt *) parsetree);
@@ -780,6 +775,18 @@ standard_ProcessUtility(Node *parsetree,
 			 * The following statements are supported by Event Triggers only
 			 * in some cases, so we "fast path" them in the other cases.
 			 */
+
+		case T_GrantStmt:
+			{
+				GrantStmt  *stmt = (GrantStmt *) parsetree;
+
+				if (EventTriggerSupportsGrantObjectType(stmt->objtype))
+					ProcessUtilitySlow(parsetree, queryString,
+									   context, params,
+									   dest, completionTag);
+				else
+					ExecuteGrantStmt((GrantStmt *) parsetree);
+			}
 
 		case T_DropStmt:
 			{
@@ -1311,6 +1318,10 @@ ProcessUtilitySlow(Node *parsetree,
 
 			case T_AlterOwnerStmt:
 				ExecAlterOwnerStmt((AlterOwnerStmt *) parsetree);
+				break;
+
+			case T_GrantStmt:
+				ExecuteGrantStmt((GrantStmt *) parsetree);
 				break;
 
 			case T_DropOwnedStmt:
