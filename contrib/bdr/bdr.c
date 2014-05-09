@@ -784,7 +784,7 @@ bdr_create_con_gucs(char  *name,
 					char **database_initcons,
 					BdrConnectionConfig **out_config)
 {
-	int			off;
+	Size		off;
 	char	   *errmsg = NULL;
 	PQconninfoOption *options;
 	PQconninfoOption *cur_option;

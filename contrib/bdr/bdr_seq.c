@@ -526,7 +526,7 @@ bdr_sequencer_shmem_init(int nnodes, int sequencers)
 void
 bdr_sequencer_wakeup(void)
 {
-	int off;
+	size_t off;
 	BdrSequencerSlot *slot;
 
 

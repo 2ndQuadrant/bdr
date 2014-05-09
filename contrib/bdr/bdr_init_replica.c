@@ -69,7 +69,7 @@ static void bdr_catchup_to_lsn(int cfg_index,
 static BdrWorker*
 find_init_replica_worker(Name dbname)
 {
-	Size off;
+	int off;
 
 	Assert(LWLockHeldByMe(BdrWorkerCtl->lock));
 	/* Check whether one of our connections has init_replica set */
