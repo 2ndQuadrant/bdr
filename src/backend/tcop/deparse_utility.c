@@ -32,14 +32,19 @@
 #include "catalog/index.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_aggregate.h"
+#include "catalog/pg_authid.h"
 #include "catalog/pg_class.h"
 #include "catalog/pg_collation.h"
 #include "catalog/pg_constraint.h"
 #include "catalog/pg_conversion.h"
 #include "catalog/pg_depend.h"
 #include "catalog/pg_extension.h"
+#include "catalog/pg_foreign_data_wrapper.h"
+#include "catalog/pg_foreign_server.h"
 #include "catalog/pg_inherits.h"
 #include "catalog/pg_language.h"
+#include "catalog/pg_largeobject.h"
+#include "catalog/pg_namespace.h"
 #include "catalog/pg_operator.h"
 #include "catalog/pg_opclass.h"
 #include "catalog/pg_opfamily.h"
@@ -3855,6 +3860,218 @@ deparse_CreateOpFamily(Oid objectId, Node *parsetree)
 }
 
 static char *
+deparse_GrantStmt(StashedCommand *cmd)
+{
+	InternalGrant *istmt;
+	ObjTree	   *grantStmt;
+	char	   *command;
+	char	   *fmt;
+	char	   *objtype;
+	List	   *list;
+	ListCell   *cell;
+	Oid			classId;
+	ObjTree	   *tmp;
+
+	istmt = cmd->d.grant.istmt;
+
+	switch (istmt->objtype)
+	{
+		case ACL_OBJECT_COLUMN:
+		case ACL_OBJECT_RELATION:
+			objtype = "TABLE";
+			classId = RelationRelationId;
+			break;
+		case ACL_OBJECT_SEQUENCE:
+			objtype = "SEQUENCE";
+			classId = RelationRelationId;
+			break;
+		case ACL_OBJECT_DOMAIN:
+			objtype = "DOMAIN";
+			classId = TypeRelationId;
+			break;
+		case ACL_OBJECT_FDW:
+			objtype = "FOREIGN DATA WRAPPER";
+			classId = ForeignDataWrapperRelationId;
+			break;
+		case ACL_OBJECT_FOREIGN_SERVER:
+			objtype = "SERVER";
+			classId = ForeignServerRelationId;
+			break;
+		case ACL_OBJECT_FUNCTION:
+			objtype = "FUNCTION";
+			classId = ProcedureRelationId;
+			break;
+		case ACL_OBJECT_LANGUAGE:
+			objtype = "LANGUAGE";
+			classId = LanguageRelationId;
+			break;
+		case ACL_OBJECT_LARGEOBJECT:
+			objtype = "LARGE OBJECT";
+			classId = LargeObjectRelationId;
+			break;
+		case ACL_OBJECT_NAMESPACE:
+			objtype = "SCHEMA";
+			classId = NamespaceRelationId;
+			break;
+		case ACL_OBJECT_TYPE:
+			objtype = "TYPE";
+			classId = TypeRelationId;
+			break;
+		case ACL_OBJECT_DATABASE:
+		case ACL_OBJECT_TABLESPACE:
+			objtype = "";
+			classId = InvalidOid;
+			elog(ERROR, "global objects not supported");
+		default:
+			elog(ERROR, "invalid ACL_OBJECT value %d", istmt->objtype);
+	}
+
+	/* GRANT TO or REVOKE FROM */
+	if (istmt->is_grant)
+		fmt = psprintf("GRANT %%{privileges:, }s ON %s %%{privtarget:, }s "
+					   "TO %%{grantees:, }s %%{grant_option}s",
+					   objtype);
+	else
+		fmt = psprintf("REVOKE %%{grant_option}s %%{privileges:, }s ON %s %%{privtarget:, }s "
+					   "FROM %%{grantees:, }s %%{cascade}s",
+					   objtype);
+
+	grantStmt = new_objtree_VA(fmt, 0);
+
+	/* build list of privileges to grant/revoke */
+	if (istmt->all_privs)
+	{
+		tmp = new_objtree_VA("ALL PRIVILEGES", 0);
+		list = list_make1(new_object_object(NULL, tmp));
+	}
+	else
+	{
+		list = NIL;
+
+		if (istmt->privileges & ACL_INSERT)
+			list = lappend(list, new_string_object(NULL, "INSERT"));
+		if (istmt->privileges & ACL_SELECT)
+			list = lappend(list, new_string_object(NULL, "SELECT"));
+		if (istmt->privileges & ACL_UPDATE)
+			list = lappend(list, new_string_object(NULL, "UPDATE"));
+		if (istmt->privileges & ACL_DELETE)
+			list = lappend(list, new_string_object(NULL, "DELETE"));
+		if (istmt->privileges & ACL_TRUNCATE)
+			list = lappend(list, new_string_object(NULL, "TRUNCATE"));
+		if (istmt->privileges & ACL_REFERENCES)
+			list = lappend(list, new_string_object(NULL, "REFERENCES"));
+		if (istmt->privileges & ACL_TRIGGER)
+			list = lappend(list, new_string_object(NULL, "TRIGGER"));
+		if (istmt->privileges & ACL_EXECUTE)
+			list = lappend(list, new_string_object(NULL, "EXECUTE"));
+		if (istmt->privileges & ACL_USAGE)
+			list = lappend(list, new_string_object(NULL, "USAGE"));
+		if (istmt->privileges & ACL_CREATE)
+			list = lappend(list, new_string_object(NULL, "CREATE"));
+		if (istmt->privileges & ACL_CREATE_TEMP)
+			list = lappend(list, new_string_object(NULL, "TEMPORARY"));
+		if (istmt->privileges & ACL_CONNECT)
+			list = lappend(list, new_string_object(NULL, "CONNECT"));
+
+		if (istmt->col_privs != NIL)
+		{
+			ListCell   *ocell;
+
+			foreach(ocell, istmt->col_privs)
+			{
+				AccessPriv *priv = lfirst(ocell);
+				List   *cols = NIL;
+
+				tmp = new_objtree_VA("%{priv}s (%{cols:, }I)", 0);
+				foreach(cell, priv->cols)
+				{
+					Value *colname = lfirst(cell);
+
+					cols = lappend(cols,
+								   new_string_object(NULL,
+													 strVal(colname)));
+				}
+				append_array_object(tmp, "cols", cols);
+				if (priv->priv_name == NULL)
+					append_string_object(tmp, "priv", "ALL PRIVILEGES");
+				else
+					append_string_object(tmp, "priv", priv->priv_name);
+
+				list = lappend(list, new_object_object(NULL, tmp));
+			}
+		}
+	}
+	append_array_object(grantStmt, "privileges", list);
+
+	/* target objects.  We use object identities here */
+	list = NIL;
+	foreach(cell, istmt->objects)
+	{
+		Oid		objid = lfirst_oid(cell);
+		ObjectAddress addr;
+
+		addr.classId = classId;
+		addr.objectId = objid;
+		addr.objectSubId = 0;
+
+		tmp = new_objtree_VA("%{identity}s", 0);
+		append_string_object(tmp, "identity",
+							 getObjectIdentity(&addr));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+	append_array_object(grantStmt, "privtarget", list);
+
+	/* list of grantees */
+	list = NIL;
+	foreach(cell, istmt->grantees)
+	{
+		Oid		grantee = lfirst_oid(cell);
+
+		if (grantee == ACL_ID_PUBLIC)
+			tmp = new_objtree_VA("PUBLIC", 0);
+		else
+		{
+			HeapTuple	roltup;
+			char	   *rolname;
+
+			roltup = SearchSysCache1(AUTHOID, ObjectIdGetDatum(grantee));
+			if (!HeapTupleIsValid(roltup))
+				ereport(ERROR,
+						(errcode(ERRCODE_UNDEFINED_OBJECT),
+						 errmsg("role with OID %u does not exist", grantee)));
+
+			tmp = new_objtree_VA("%{name}I", 0);
+			rolname = NameStr(((Form_pg_authid) GETSTRUCT(roltup))->rolname);
+			append_string_object(tmp, "name", pstrdup(rolname));
+			ReleaseSysCache(roltup);
+		}
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+	append_array_object(grantStmt, "grantees", list);
+
+	/* the wording of the grant option is variable ... */
+	if (istmt->is_grant)
+		append_string_object(grantStmt, "grant_option",
+							 istmt->grant_option ?  "WITH GRANT OPTION" : "");
+	else
+		append_string_object(grantStmt, "grant_option",
+							 istmt->grant_option ?  "GRANT OPTION FOR" : "");
+
+	if (!istmt->is_grant)
+	{
+	   	if (istmt->behavior == DROP_CASCADE)
+			append_string_object(grantStmt, "cascade", "CASCADE");
+		else
+			append_string_object(grantStmt, "cascade", "");
+	}
+
+	command = jsonize_objtree(grantStmt);
+	free_objtree(grantStmt);
+
+	return command;
+}
+
+static char *
 deparse_AlterTableStmt(StashedCommand *cmd)
 {
 	ObjTree	   *alterTableStmt;
@@ -4244,47 +4461,12 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 	return command;
 }
 
-/*
- * Given a utility command parsetree and the OID of the corresponding object,
- * return a JSON representation of the command.
- *
- * The command is expanded fully, so that there are no ambiguities even in the
- * face of search_path changes.
- */
-char *
-deparse_utility_command(StashedCommand *cmd)
+static char *
+deparse_parsenode_cmd(StashedCommand *cmd)
 {
-	MemoryContext	oldcxt;
-	MemoryContext	tmpcxt;
-	OverrideSearchPath *overridePath;
-	char	   *command;
 	Oid			objectId;
 	Node	   *parsetree;
-
-	/*
-	 * Allocate everything done by the deparsing routines into a temp context,
-	 * to avoid having to sprinkle them with memory handling code
-	 */
-	tmpcxt = AllocSetContextCreate(CurrentMemoryContext,
-								   "deparse ctx",
-								   ALLOCSET_DEFAULT_MINSIZE,
-								   ALLOCSET_DEFAULT_INITSIZE,
-								   ALLOCSET_DEFAULT_MAXSIZE);
-	oldcxt = MemoryContextSwitchTo(tmpcxt);
-
-	/*
-	 * Many routines underlying this one will invoke ruleutils.c functionality
-	 * in order to obtain deparsed versions of expressions.  In such results,
-	 * we want all object names to be qualified, so that results are "portable"
-	 * to environments with different search_path settings.  Rather than inject
-	 * what would be repetitive calls to override search path all over the
-	 * place, we do it centrally here.
-	 */
-	overridePath = GetOverrideSearchPath(CurrentMemoryContext);
-	overridePath->schemas = NIL;
-	overridePath->addCatalog = false;
-	overridePath->addTemp = false;
-	PushOverrideSearchPath(overridePath);
+	char	   *command;
 
 	parsetree = cmd->parsetree;
 
@@ -4294,6 +4476,7 @@ deparse_utility_command(StashedCommand *cmd)
 			objectId = cmd->d.basic.objectId;
 			break;
 		case SCT_AlterTable:
+			/* XXX needed? */
 			objectId = cmd->d.alterTable.objectId;
 			break;
 		default:
@@ -4412,10 +4595,70 @@ deparse_utility_command(StashedCommand *cmd)
 			command = deparse_AlterOwnerStmt(objectId, parsetree);
 			break;
 
+		case T_GrantStmt:
+			elog(ERROR, "unexpected node type T_GrantStmt");
+			break;
+
 		default:
 			command = NULL;
 			elog(LOG, "unrecognized node type: %d",
 				 (int) nodeTag(parsetree));
+	}
+
+	return command;
+}
+
+/*
+ * Given a utility command parsetree and the OID of the corresponding object,
+ * return a JSON representation of the command.
+ *
+ * The command is expanded fully, so that there are no ambiguities even in the
+ * face of search_path changes.
+ */
+char *
+deparse_utility_command(StashedCommand *cmd)
+{
+	MemoryContext	oldcxt;
+	MemoryContext	tmpcxt;
+	OverrideSearchPath *overridePath;
+	char	   *command;
+
+	/*
+	 * Allocate everything done by the deparsing routines into a temp context,
+	 * to avoid having to sprinkle them with memory handling code
+	 */
+	tmpcxt = AllocSetContextCreate(CurrentMemoryContext,
+								   "deparse ctx",
+								   ALLOCSET_DEFAULT_MINSIZE,
+								   ALLOCSET_DEFAULT_INITSIZE,
+								   ALLOCSET_DEFAULT_MAXSIZE);
+	oldcxt = MemoryContextSwitchTo(tmpcxt);
+
+	/*
+	 * Many routines underlying this one will invoke ruleutils.c functionality
+	 * in order to obtain deparsed versions of expressions.  In such results,
+	 * we want all object names to be qualified, so that results are "portable"
+	 * to environments with different search_path settings.  Rather than inject
+	 * what would be repetitive calls to override search path all over the
+	 * place, we do it centrally here.
+	 */
+	overridePath = GetOverrideSearchPath(CurrentMemoryContext);
+	overridePath->schemas = NIL;
+	overridePath->addCatalog = false;
+	overridePath->addTemp = false;
+	PushOverrideSearchPath(overridePath);
+
+	switch (cmd->type)
+	{
+		case SCT_Basic:
+		case SCT_AlterTable:
+			command = deparse_parsenode_cmd(cmd);
+			break;
+		case SCT_Grant:
+			command = deparse_GrantStmt(cmd);
+			break;
+		default:
+			elog(ERROR, "unexpected deparse node type %d", cmd->type);
 	}
 
 	PopOverrideSearchPath();

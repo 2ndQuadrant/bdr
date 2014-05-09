@@ -1449,6 +1449,47 @@ EventTriggerComplexCmdEnd(void)
 	currentEventTriggerState->curcmd = NULL;
 }
 
+/*
+ * EventTriggerStashGrant
+ * 		Save data about a GRANT/REVOKE command being executed
+ *
+ * This function creates a copy of the InternalGrant, as the original might
+ * not have the right lifetime.
+ */
+void
+EventTriggerStashGrant(InternalGrant *istmt)
+{
+	MemoryContext oldcxt;
+	StashedCommand *stashed;
+	InternalGrant  *icopy;
+	ListCell	   *cell;
+
+	oldcxt = MemoryContextSwitchTo(currentEventTriggerState->cxt);
+
+	/*
+	 * copying the node is moderately challenging ... XXX should we consider
+	 * changing InternalGrant into a full-fledged node instead?
+	 */
+	icopy = palloc(sizeof(InternalGrant));
+	memcpy(icopy, istmt, sizeof(InternalGrant));
+	icopy->objects = list_copy(istmt->objects);
+	icopy->grantees = list_copy(istmt->grantees);
+	icopy->col_privs = NIL;
+	foreach(cell, istmt->col_privs)
+		icopy->col_privs = lappend(icopy->col_privs, copyObject(lfirst(cell)));
+
+	stashed = palloc(sizeof(StashedCommand));
+	stashed->type = SCT_Grant;
+	stashed->in_extension = currentEventTriggerState->in_extension;
+
+	stashed->d.grant.istmt = icopy;
+	stashed->parsetree = NULL;
+
+	currentEventTriggerState->stash = lappend(currentEventTriggerState->stash,
+											  stashed);
+
+	MemoryContextSwitchTo(oldcxt);
+}
 
 Datum
 pg_event_trigger_get_creation_commands(PG_FUNCTION_ARGS)
@@ -1519,97 +1560,124 @@ pg_event_trigger_get_creation_commands(PG_FUNCTION_ARGS)
 		 * Some parse trees return NULL when deparse is attempted; we don't
 		 * emit anything for them.
 		 */
-		if (command != NULL &&
-			(cmd->type == SCT_Basic ||
-			 cmd->type == SCT_AlterTable))
+		if (command != NULL)
 		{
 			Datum		values[9];
 			bool		nulls[9];
-			Oid			classId;
-			Oid			objId;
 			ObjectAddress addr;
-			const char *tag;
-			char	   *identity;
-			char	   *type;
-			char	   *schema = NULL;
 			int			i = 0;
-
-			if (cmd->type == SCT_Basic)
-			{
-				classId = get_objtype_catalog_oid(cmd->d.basic.objtype);
-				objId = cmd->d.basic.objectId;
-			}
-			else if (cmd->type == SCT_AlterTable)
-			{
-				classId = get_objtype_catalog_oid(cmd->d.alterTable.objtype);
-				objId = cmd->d.alterTable.objectId;
-			}
-			tag = CreateCommandTag(cmd->parsetree);
-			addr.classId = classId;
-			addr.objectId = objId;
-			addr.objectSubId = 0;
-
-			type = getObjectTypeDescription(&addr);
-			identity = getObjectIdentity(&addr);
-
-			/*
-			 * Obtain schema name, if any ("pg_temp" if a temp object)
-			 */
-			if (is_objectclass_supported(addr.classId))
-			{
-				AttrNumber	nspAttnum;
-
-				nspAttnum = get_object_attnum_namespace(addr.classId);
-				if (nspAttnum != InvalidAttrNumber)
-				{
-					Relation	catalog;
-					HeapTuple	objtup;
-					Oid			schema_oid;
-					bool		isnull;
-
-					catalog = heap_open(addr.classId, AccessShareLock);
-					objtup = get_catalog_object_by_oid(catalog,
-													   addr.objectId);
-					if (!HeapTupleIsValid(objtup))
-						elog(ERROR, "cache lookup failed for object %u/%u",
-							 addr.classId, addr.objectId);
-					schema_oid = heap_getattr(objtup, nspAttnum,
-											  RelationGetDescr(catalog), &isnull);
-					if (isnull)
-						elog(ERROR, "invalid null namespace in object %u/%u/%d",
-							 addr.classId, addr.objectId, addr.objectSubId);
-					if (isAnyTempNamespace(schema_oid))
-						schema = pstrdup("pg_temp");
-					else
-						schema = get_namespace_name(schema_oid);
-
-					heap_close(catalog, AccessShareLock);
-				}
-			}
 
 			MemSet(nulls, 0, sizeof(nulls));
 
-			/* classid */
-			values[i++] = ObjectIdGetDatum(addr.classId);
-			/* objid */
-			values[i++] = ObjectIdGetDatum(addr.objectId);
-			/* objsubid */
-			values[i++] = Int32GetDatum(addr.objectSubId);
-			/* command tag */
-			values[i++] = CStringGetTextDatum(tag);
-			/* object_type */
-			values[i++] = CStringGetTextDatum(type);
-			/* schema */
-			if (schema == NULL)
-				nulls[i++] = true;
+			if (cmd->type == SCT_Basic ||
+				cmd->type == SCT_AlterTable)
+			{
+				Oid			classId;
+				Oid			objId;
+				const char *tag;
+				char	   *identity;
+				char	   *type;
+				char	   *schema = NULL;
+
+				if (cmd->type == SCT_Basic)
+				{
+					classId = get_objtype_catalog_oid(cmd->d.basic.objtype);
+					objId = cmd->d.basic.objectId;
+				}
+				else if (cmd->type == SCT_AlterTable)
+				{
+					classId = get_objtype_catalog_oid(cmd->d.alterTable.objtype);
+					objId = cmd->d.alterTable.objectId;
+				}
+
+				tag = CreateCommandTag(cmd->parsetree);
+				addr.classId = classId;
+				addr.objectId = objId;
+				addr.objectSubId = 0;
+
+				type = getObjectTypeDescription(&addr);
+				identity = getObjectIdentity(&addr);
+
+				/*
+				 * Obtain schema name, if any ("pg_temp" if a temp object)
+				 */
+				if (is_objectclass_supported(addr.classId))
+				{
+					AttrNumber	nspAttnum;
+
+					nspAttnum = get_object_attnum_namespace(addr.classId);
+					if (nspAttnum != InvalidAttrNumber)
+					{
+						Relation	catalog;
+						HeapTuple	objtup;
+						Oid			schema_oid;
+						bool		isnull;
+
+						catalog = heap_open(addr.classId, AccessShareLock);
+						objtup = get_catalog_object_by_oid(catalog,
+														   addr.objectId);
+						if (!HeapTupleIsValid(objtup))
+							elog(ERROR, "cache lookup failed for object %u/%u",
+								 addr.classId, addr.objectId);
+						schema_oid = heap_getattr(objtup, nspAttnum,
+												  RelationGetDescr(catalog), &isnull);
+						if (isnull)
+							elog(ERROR, "invalid null namespace in object %u/%u/%d",
+								 addr.classId, addr.objectId, addr.objectSubId);
+						if (isAnyTempNamespace(schema_oid))
+							schema = pstrdup("pg_temp");
+						else
+							schema = get_namespace_name(schema_oid);
+
+						heap_close(catalog, AccessShareLock);
+					}
+				}
+
+				/* classid */
+				values[i++] = ObjectIdGetDatum(addr.classId);
+				/* objid */
+				values[i++] = ObjectIdGetDatum(addr.objectId);
+				/* objsubid */
+				values[i++] = Int32GetDatum(addr.objectSubId);
+				/* command tag */
+				values[i++] = CStringGetTextDatum(tag);
+				/* object_type */
+				values[i++] = CStringGetTextDatum(type);
+				/* schema */
+				if (schema == NULL)
+					nulls[i++] = true;
+				else
+					values[i++] = CStringGetTextDatum(schema);
+				/* identity */
+				values[i++] = CStringGetTextDatum(identity);
+				/* in_extension */
+				values[i++] = BoolGetDatum(cmd->in_extension);
+				/* command */
+				values[i++] = CStringGetTextDatum(command);
+			}
 			else
-				values[i++] = CStringGetTextDatum(schema);
-			/* identity */
-			values[i++] = CStringGetTextDatum(identity);
-			/* in_extension */
-			values[i++] = BoolGetDatum(cmd->in_extension);
-			/* command */
-			values[i++] = CStringGetTextDatum(command);
+			{
+				Assert(cmd->type == SCT_Grant);
+
+				/* classid */
+				nulls[i++] = true;
+				/* objid */
+				nulls[i++] = true;
+				/* objsubid */
+				nulls[i++] = true;
+				/* command tag */
+				values[i++] = CStringGetTextDatum("GRANT");	/* XXX maybe REVOKE or something else */
+				/* object_type */
+				values[i++] = CStringGetTextDatum("TABLE"); /* XXX maybe something else */
+				/* schema */
+				nulls[i++] = true;
+				/* identity */
+				nulls[i++] = true;
+				/* in_extension */
+				values[i++] = BoolGetDatum(cmd->in_extension);
+				/* command */
+				values[i++] = CStringGetTextDatum(command);
+			}
 
 			tuplestore_putvalues(tupstore, tupdesc, values, nulls);
 		}

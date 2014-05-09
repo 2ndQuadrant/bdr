@@ -14,6 +14,8 @@
 
 #include "access/attnum.h"
 #include "nodes/nodes.h"
+#include "utils/aclchk.h"
+
 
 /*
  * Support for keeping track of a command to deparse.
@@ -26,7 +28,8 @@
 typedef enum StashedCommandType
 {
 	SCT_Basic,
-	SCT_AlterTable
+	SCT_AlterTable,
+	SCT_Grant
 } StashedCommandType;
 
 /*
@@ -59,6 +62,11 @@ typedef struct StashedCommand
 			ObjectType objtype;
 			List   *subcmds;
 		} alterTable;
+
+		struct GrantCommand
+		{
+			InternalGrant *istmt;
+		} grant;
 	} d;
 } StashedCommand;
 
