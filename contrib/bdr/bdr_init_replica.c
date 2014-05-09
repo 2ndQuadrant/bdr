@@ -432,7 +432,7 @@ bdr_drop_slot_and_replication_identifier(BdrConnectionConfig *cfg)
 	StringInfoData query;
 	char	   *sqlstate;
 
-	elog(LOG, "bdr %s: Dropping slot and local ident from connection %s",
+	elog(DEBUG1, "bdr %s: Dropping slot and local ident from connection %s",
 		 NameStr(cfg->dbname), NameStr(cfg->name));
 
 	snprintf(conninfo_repl, sizeof(conninfo_repl),
@@ -595,7 +595,7 @@ bdr_exec_init_replica(BdrConnectionConfig *cfg, char *snapshot)
 		}
 		envp[0] = path.data;
 
-		elog(LOG, "Creating replica with: %s --snapshot %s --source \"%s\" --target \"%s\" --tmp-directory \"%s\"",
+		elog(DEBUG1, "Creating replica with: %s --snapshot %s --source \"%s\" --target \"%s\" --tmp-directory \"%s\"",
 			 bdr_init_replica_script_path, snapshot, cfg->dsn,
 			 cfg->replica_local_dsn, tmpdir);
 
@@ -806,7 +806,7 @@ bdr_init_replica(Name dbname)
 		char	   *init_snapshot = NULL;
 		PGconn	   *init_repl_conn = NULL;
 
-		elog(LOG, "bdr %s: initializing from remote db", NameStr(*dbname));
+		elog(DEBUG1, "bdr %s: initializing from remote db", NameStr(*dbname));
 
 		/*
 		 * We're starting from scratch or have cleaned up a previous failed
@@ -920,7 +920,7 @@ bdr_init_replica(Name dbname)
 		 * ask to be included in dumps. In particular, bdr.bdr_nodes will get
 		 * copied over.
 		 */
-		elog(LOG, "bdr %s: creating and restoring dump for %s",
+		elog(DEBUG1, "bdr %s: creating and restoring dump for %s",
 			 NameStr(*dbname), NameStr(init_replica_config->name));
 		bdr_exec_init_replica(init_replica_config, init_snapshot);
 		PQfinish(init_repl_conn);
@@ -932,14 +932,14 @@ bdr_init_replica(Name dbname)
 	Assert(status == 'c');
 
 	/* Launch the catchup worker and wait for it to finish */
-	elog(LOG, "bdr %s: launching catchup mode apply worker", NameStr(*dbname));
+	elog(DEBUG1, "bdr %s: launching catchup mode apply worker", NameStr(*dbname));
 	min_remote_lsn = bdr_get_remote_lsn(nonrepl_init_conn);
 	bdr_catchup_to_lsn(
 		init_replica_worker->worker_data.apply_worker.connection_config_idx,
 		min_remote_lsn);
 	status = bdr_set_remote_status(nonrepl_init_conn, dbname, 'r', status);
 
-	elog(LOG, "bdr %s: catchup worker finished, ready for normal replication",
+	elog(INFO, "bdr %s: catchup worker finished, ready for normal replication",
 		 NameStr(*dbname));
 	PQfinish(nonrepl_init_conn);
 }
@@ -1008,8 +1008,9 @@ bdr_catchup_to_lsn(int cfg_index,
 	if (worker_shmem_idx == bdr_max_workers)
 	{
 		LWLockRelease(BdrWorkerCtl->lock);
-		elog(ERROR, "No free bdr worker slots, bdr_max_workers=%d too low",
-			 bdr_max_workers);
+		ereport(ERROR,
+				(errmsg("No free bdr worker slots, bdr_max_workers=%d too low",
+						bdr_max_workers)));
 	}
 	BdrWorkerCtl->slots[worker_shmem_idx].worker_type = BDR_WORKER_APPLY;
 	catchup_worker = &BdrWorkerCtl->slots[worker_shmem_idx].worker_data.apply_worker;

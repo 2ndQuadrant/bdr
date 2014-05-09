@@ -655,7 +655,7 @@ again:
 	if (ret != SPI_OK_INSERT)
 		elog(ERROR, "expected SPI state %u, got %u", SPI_OK_INSERT, ret);
 	my_processed = SPI_processed;
-	elog(LOG, "started %d votes", my_processed);
+	elog(DEBUG1, "started %d votes", my_processed);
 
 	if (my_processed > 0)
 		goto again;
@@ -712,7 +712,7 @@ bdr_sequencer_start_elections(void)
 	if (ret != SPI_OK_INSERT_RETURNING)
 		elog(ERROR, "expected SPI state %u, got %u", SPI_OK_INSERT_RETURNING, ret);
 
-	elog(LOG, "started %d elections", SPI_processed);
+	elog(DEBUG1, "started %d elections", SPI_processed);
 
 	PopActiveSnapshot();
 	SPI_finish();
@@ -769,7 +769,7 @@ bdr_sequencer_tally(void)
 	if (ret != SPI_OK_SELECT)
 		elog(ERROR, "expected SPI state %u, got %u", SPI_OK_SELECT, ret);
 
-	elog(LOG, "tallied %d elections", SPI_processed);
+	elog(DEBUG1, "tallied %d elections", SPI_processed);
 
 	PopActiveSnapshot();
 	SPI_finish();
@@ -894,7 +894,7 @@ bdr_sequencer_fill_sequence(Oid seqoid, char *seqschema, char *seqname)
 	int i;
 	bool acquired_new = false;
 
-	elog(LOG, "checking sequence %u: %s.%s",
+	elog(DEBUG1, "checking sequence %u: %s.%s",
 		 seqoid, seqschema, seqname);
 
 	/* lock page, fill heaptup */
@@ -923,9 +923,9 @@ bdr_sequencer_fill_sequence(Oid seqoid, char *seqschema, char *seqname)
 		if (curval->next_value == curval->end_value)
 		{
 			if (curval->end_value > 0)
-				elog(LOG, "used up old chunk");
+				elog(DEBUG1, "used up old chunk");
 
-			elog(LOG, "need new batch %i", i);
+			elog(DEBUG1, "need new batch %i", i);
 			if (bdr_sequencer_fill_chunk(seqoid, seqschema, seqname, curval))
 				acquired_new = true;
 			else
