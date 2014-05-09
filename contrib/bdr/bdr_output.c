@@ -265,12 +265,12 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 			data->client_sizeof_datum != sizeof(Datum))
 		{
 			data->allow_binary_protocol = false;
-			elog(DEBUG1, "disabling binary protocol because of sizeof differences");
+			elog(LOG, "disabling binary protocol because of sizeof differences");
 		}
 		else if (data->client_bigendian != bdr_get_bigendian())
 		{
 			data->allow_binary_protocol = false;
-			elog(DEBUG1, "disabling binary protocol because of endianess difference");
+			elog(LOG, "disabling binary protocol because of endianess difference");
 		}
 
 		/*
