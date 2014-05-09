@@ -670,59 +670,63 @@ deparse_DefineStmt_Aggregate(Oid objectId, DefineStmt *define)
 
 	list = NIL;
 
+	/*
+	 * An aggregate may have no arguments, in which case its signature
+	 * is (*), to match count(*). If it's not an ordered-set aggregate,
+	 * it may have a non-zero number of arguments. Otherwise it may have
+	 * zero or more direct arguments and zero or more ordered arguments.
+	 * There are no defaults or table parameters, and the only mode that
+	 * we need to consider is VARIADIC.
+	 */
+
 	if (proc->pronargs == 0)
 		list = lappend(list, new_object_object(NULL, new_objtree_VA("*", 0)));
 	else
 	{
-		/*
-		 * We expect zero or more direct argument types, optionally
-		 * followed by "ORDER BY" and one or more ordered argument
-		 * types. There are no OUT or TABLE parameters, nor names,
-		 * nor default values.
-		 */
 		int			i;
-		bool		isnull;
-		Datum		proargmodes;
-		char	   *modes = NULL;
+		int			nargs;
+		Oid		   *types;
+		char	   *modes;
+		char	  **names;
+		int			insertorderbyat = -1;
 
-		proargmodes = SysCacheGetAttr(PROCOID, procTup,
-									  Anum_pg_proc_proargmodes,
-									  &isnull);
+		nargs = get_func_arg_info(procTup, &types, &names, &modes);
 
-		if (!isnull)
+		if (AGGKIND_IS_ORDERED_SET(agg->aggkind))
+			insertorderbyat = agg->aggnumdirectargs;
+
+		for (i = 0; i < nargs; i++)
 		{
-			ArrayType *arr = DatumGetArrayTypeP(proargmodes);
-			if (ARR_NDIM(arr) != 1 ||
-				ARR_DIMS(arr)[0] != proc->pronargs ||
-				ARR_HASNULL(arr) ||
-				ARR_ELEMTYPE(arr) != CHAROID)
-				elog(ERROR, "proargmodes is not a 1-D char array");
-			modes = (char *) palloc(proc->pronargs * sizeof(char));
-			memcpy(modes, ARR_DATA_PTR(arr),
-				   proc->pronargs * sizeof(char));
-		}
+			tmp = new_objtree_VA("%{order}s%{mode}s%{name}s%{type}T", 0);
 
-		for (i = 0; i < proc->pronargs; i++)
-		{
-			Oid type = proc->proargtypes.values[i];
-
-			tmp = new_objtree_VA("%{order}s%{mode}s %{type}T", 0);
-
-			if (i == agg->aggnumdirectargs && i < proc->pronargs-1)
+			if (i == insertorderbyat)
 				append_string_object(tmp, "order", "ORDER BY ");
 			else
 				append_string_object(tmp, "order", "");
 
 			if (modes)
 				append_string_object(tmp, "mode",
-									 modes[i] == 'v' ? "VARIADIC" : "");
+									 modes[i] == 'v' ? "VARIADIC " : "");
 			else
 				append_string_object(tmp, "mode", "");
 
+			if (names)
+				append_string_object(tmp, "name", names[i]);
+			else
+				append_string_object(tmp, "name", " ");
+
 			append_object_object(tmp, "type",
-								 new_objtree_for_type(type, -1));
+								 new_objtree_for_type(types[i], -1));
 
 			list = lappend(list, new_object_object(NULL, tmp));
+
+			/*
+			 * For variadic ordered-set aggregates, we have to repeat
+			 * the last argument. This nasty hack is copied from
+			 * print_function_arguments in ruleutils.c
+			 */
+			if (i == insertorderbyat && i == nargs-1)
+				list = lappend(list, new_object_object(NULL, tmp));
 		}
 	}
 
