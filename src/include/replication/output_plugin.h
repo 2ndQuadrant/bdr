@@ -81,6 +81,16 @@ typedef void (*LogicalDecodeShutdownCB) (
 );
 
 /*
+ * Called for messages sent by C code.
+ */
+typedef void (*LogicalDecodeMessageCB) (
+											 struct LogicalDecodingContext *,
+											 ReorderBufferTXN *txn,
+											 XLogRecPtr message_lsn,
+											 bool transactional, Size sz,
+											 const char *message);
+
+/*
  * Output plugin callbacks
  */
 typedef struct OutputPluginCallbacks
@@ -90,6 +100,7 @@ typedef struct OutputPluginCallbacks
 	LogicalDecodeChangeCB change_cb;
 	LogicalDecodeCommitCB commit_cb;
 	LogicalDecodeShutdownCB shutdown_cb;
+	LogicalDecodeMessageCB message_cb;
 } OutputPluginCallbacks;
 
 void OutputPluginPrepareWrite(struct LogicalDecodingContext *ctx, bool last_write);

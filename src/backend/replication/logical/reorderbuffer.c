@@ -420,6 +420,11 @@ ReorderBufferReturnChange(ReorderBuffer *rb, ReorderBufferChange *change)
 				change->data.tp.oldtuple = NULL;
 			}
 			break;
+		case REORDER_BUFFER_CHANGE_MESSAGE:
+			if (change->data.msg.message != NULL)
+				pfree(change->data.msg.message);
+			change->data.msg.message = NULL;
+			break;
 		case REORDER_BUFFER_CHANGE_INTERNAL_SNAPSHOT:
 			if (change->data.snapshot)
 			{
@@ -603,6 +608,38 @@ ReorderBufferQueueChange(ReorderBuffer *rb, TransactionId xid, XLogRecPtr lsn,
 
 	ReorderBufferCheckSerializeTXN(rb, txn);
 }
+
+void
+ReorderBufferQueueMessage(ReorderBuffer *rb, TransactionId xid, XLogRecPtr lsn,
+						  bool transactional, Size sz, const char *msg)
+{
+	ReorderBufferTXN *txn = NULL;
+
+	if (xid != InvalidTransactionId)
+		txn = ReorderBufferTXNByXid(rb, xid, true, NULL, lsn, true);
+
+	if (transactional)
+	{
+		ReorderBufferChange *change;
+
+		Assert(xid != InvalidTransactionId);
+		Assert(txn != NULL);
+
+		change = ReorderBufferGetChange(rb);
+		change->action = REORDER_BUFFER_CHANGE_MESSAGE;
+		change->data.msg.transactional = true;
+		change->data.msg.sz = sz;
+		change->data.msg.message = palloc(sz);
+		memcpy(change->data.msg.message, msg, sz);
+
+		ReorderBufferQueueChange(rb, xid, lsn, change);
+	}
+	else
+	{
+		rb->message(rb, txn, lsn, transactional, sz, msg);
+	}
+}
+
 
 static void
 AssertTXNLsnOrder(ReorderBuffer *rb)
@@ -1411,6 +1448,12 @@ ReorderBufferCommit(ReorderBuffer *rb, TransactionId xid,
 					}
 					RelationClose(relation);
 					break;
+				case REORDER_BUFFER_CHANGE_MESSAGE:
+					rb->message(rb, txn, change->lsn,
+								change->data.msg.transactional,
+								change->data.msg.sz,
+								change->data.msg.message);
+					break;
 				case REORDER_BUFFER_CHANGE_INTERNAL_SNAPSHOT:
 					/* get rid of the old */
 					TeardownHistoricSnapshot(false);
@@ -2045,6 +2088,18 @@ ReorderBufferSerializeChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
 				}
 				break;
 			}
+		case REORDER_BUFFER_CHANGE_MESSAGE:
+			{
+				char	   *data;
+
+				sz += change->data.msg.sz;
+				ReorderBufferSerializeReserve(rb, sz);
+
+				data = ((char *) rb->outbuf) + sizeof(ReorderBufferDiskChange);
+				memcpy(data, change->data.msg.message,
+					   change->data.msg.sz);
+				break;
+			}
 		case REORDER_BUFFER_CHANGE_INTERNAL_SNAPSHOT:
 			{
 				Snapshot	snap;
@@ -2288,6 +2343,14 @@ ReorderBufferRestoreChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
 				data += len;
 			}
 			break;
+		case REORDER_BUFFER_CHANGE_MESSAGE:
+			{
+				Size		len = change->data.msg.sz;
+				change->data.msg.message = palloc(len);
+				memcpy(change->data.msg.message, data, len);
+
+				data += len;
+			}
 		case REORDER_BUFFER_CHANGE_INTERNAL_SNAPSHOT:
 			{
 				Snapshot	oldsnap;

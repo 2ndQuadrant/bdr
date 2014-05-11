@@ -346,6 +346,20 @@ DecodeStandbyOp(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			break;
 		case XLOG_STANDBY_LOCK:
 			break;
+		case XLOG_STANDBY_MESSAGE:
+			{
+				xl_standby_message *message = (xl_standby_message *) buf->record_data;
+				if (message->transactional &&
+					!SnapBuildProcessChange(builder, r->xl_xid, buf->origptr))
+					break;
+				else if(!message->transactional &&
+						SnapBuildXactNeedsSkip(builder, buf->origptr))
+					break;
+
+				ReorderBufferQueueMessage(ctx->reorder, r->xl_xid, buf->endptr,
+										  message->transactional, message->size, message->message);
+				break;
+			}
 		default:
 			elog(ERROR, "unexpected RM_STANDBY_ID record type: %u", info);
 	}
