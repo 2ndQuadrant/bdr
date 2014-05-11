@@ -455,9 +455,12 @@ pg_logical_slot_get_changes_guts(FunctionCallInfo fcinfo, bool confirm, bool bin
 	/*
 	 * Next time, start where we left off. (Hunting things, the family
 	 * business..)
+	 *
+	 * Mark the last byte of the last record as processed. EndRecPtr points to
+	 * the first byte of the next one...
 	 */
 	if (ctx->reader->EndRecPtr != InvalidXLogRecPtr && confirm)
-		LogicalConfirmReceivedLocation(ctx->reader->EndRecPtr);
+		LogicalConfirmReceivedLocation(ctx->reader->EndRecPtr - 1);
 
 	/* free context, call shutdown callback */
 	FreeDecodingContext(ctx);
