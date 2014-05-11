@@ -55,6 +55,7 @@ extern void StandbyReleaseOldLocks(int nxids, TransactionId *xids);
  */
 #define XLOG_STANDBY_LOCK			0x00
 #define XLOG_RUNNING_XACTS			0x10
+#define XLOG_STANDBY_MESSAGE		0x20
 
 typedef struct xl_standby_locks
 {
@@ -79,6 +80,14 @@ typedef struct xl_running_xacts
 
 #define MinSizeOfXactRunningXacts offsetof(xl_running_xacts, xids)
 
+typedef struct xl_standby_message
+{
+	size_t		size;
+	bool		transactional;
+	char		message[FLEXIBLE_ARRAY_MEMBER];
+} xl_standby_message;
+
+#define SizeOfStandbyMessage	(offsetof(xl_standby_message, message))
 
 /* Recovery handlers for the Standby Rmgr (RM_STANDBY_ID) */
 extern void standby_redo(XLogRecPtr lsn, XLogRecord *record);
@@ -114,5 +123,6 @@ extern void LogAccessExclusiveLock(Oid dbOid, Oid relOid);
 extern void LogAccessExclusiveLockPrepare(void);
 
 extern XLogRecPtr LogStandbySnapshot(void);
+extern XLogRecPtr LogStandbyMessage(const char *message, size_t size, bool transactional);
 
 #endif   /* STANDBY_H */

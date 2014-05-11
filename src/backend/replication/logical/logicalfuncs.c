@@ -21,6 +21,8 @@
 #include "funcapi.h"
 #include "miscadmin.h"
 
+#include "access/xact.h"
+
 #include "catalog/pg_type.h"
 
 #include "nodes/makefuncs.h"
@@ -40,6 +42,7 @@
 #include "replication/logicalfuncs.h"
 
 #include "storage/fd.h"
+#include "storage/standby.h"
 
 /* private date for writing out data */
 typedef struct DecodingOutputState
@@ -514,4 +517,26 @@ pg_logical_slot_peek_binary_changes(PG_FUNCTION_ARGS)
 	Datum		ret = pg_logical_slot_get_changes_guts(fcinfo, false, true);
 
 	return ret;
+}
+
+
+/*
+ * SQL function returning the changestream in binary, only peeking ahead.
+ */
+Datum
+pg_logical_send_message_bytea(PG_FUNCTION_ARGS)
+{
+	bool transactional = PG_GETARG_BOOL(0);
+	bytea *data = PG_GETARG_BYTEA_PP(1);
+	XLogRecPtr lsn;
+
+	lsn = LogStandbyMessage(VARDATA_ANY(data), VARSIZE_ANY_EXHDR(data), transactional);
+	PG_RETURN_LSN(lsn);
+}
+
+Datum
+pg_logical_send_message_text(PG_FUNCTION_ARGS)
+{
+	/* bytea and text are compatible */
+	return pg_logical_send_message_bytea(fcinfo);
 }

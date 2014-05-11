@@ -21,4 +21,6 @@ extern Datum pg_logical_slot_get_binary_changes(PG_FUNCTION_ARGS);
 extern Datum pg_logical_slot_peek_changes(PG_FUNCTION_ARGS);
 extern Datum pg_logical_slot_peek_binary_changes(PG_FUNCTION_ARGS);
 
+extern Datum pg_logical_send_message_bytea(PG_FUNCTION_ARGS);
+extern Datum pg_logical_send_message_text(PG_FUNCTION_ARGS);
 #endif
