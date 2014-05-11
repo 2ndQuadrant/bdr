@@ -794,6 +794,10 @@ standby_redo(XLogRecPtr lsn, XLogRecord *record)
 
 		ProcArrayApplyRecoveryInfo(&running);
 	}
+	else if (info == XLOG_STANDBY_MESSAGE)
+	{
+		/* Only interesting to logical decoding. Check decode.c */
+	}
 	else
 		elog(PANIC, "standby_redo: unknown op code %u", info);
 }
@@ -1053,4 +1057,35 @@ LogAccessExclusiveLockPrepare(void)
 	 * InvalidTransactionId which we later assert cannot happen.
 	 */
 	(void) GetTopTransactionId();
+}
+
+XLogRecPtr
+LogStandbyMessage(const char *message, size_t size, bool transactional)
+{
+	xl_standby_message xlrec;
+	XLogRecData		rdata[2];
+
+	/*
+	 * Force xid to be allocated if we're sending a transactional message.
+	 */
+	if (transactional)
+	{
+		Assert(IsTransactionState());
+		GetCurrentTransactionId();
+	}
+
+	xlrec.size = size;
+	xlrec.transactional = transactional;
+
+	rdata[0].data = (char *) &xlrec;
+	rdata[0].len = SizeOfStandbyMessage;
+	rdata[0].buffer = InvalidBuffer;
+	rdata[0].next = &rdata[1];
+
+	rdata[1].data = (char *) message;
+	rdata[1].len = size;
+	rdata[1].buffer = InvalidBuffer;
+	rdata[1].next = NULL;
+
+	return XLogInsert(RM_STANDBY_ID, XLOG_STANDBY_MESSAGE, rdata);
 }

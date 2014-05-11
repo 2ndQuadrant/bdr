@@ -60,6 +60,10 @@ static void pg_decode_commit_txn(LogicalDecodingContext *ctx,
 static void pg_decode_change(LogicalDecodingContext *ctx,
 				 ReorderBufferTXN *txn, Relation rel,
 				 ReorderBufferChange *change);
+static void pg_decode_message(LogicalDecodingContext *ctx,
+							  ReorderBufferTXN *txn, XLogRecPtr message_lsn,
+							  bool transactional, Size sz,
+							  const char *message);
 
 void
 _PG_init(void)
@@ -78,6 +82,7 @@ _PG_output_plugin_init(OutputPluginCallbacks *cb)
 	cb->change_cb = pg_decode_change;
 	cb->commit_cb = pg_decode_commit_txn;
 	cb->shutdown_cb = pg_decode_shutdown;
+	cb->message_cb = pg_decode_message;
 }
 
 
@@ -442,5 +447,18 @@ pg_decode_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 	MemoryContextSwitchTo(old);
 	MemoryContextReset(data->context);
 
+	OutputPluginWrite(ctx, true);
+}
+
+static void
+pg_decode_message(LogicalDecodingContext *ctx,
+				  ReorderBufferTXN *txn, XLogRecPtr lsn,
+				  bool transactional, Size sz,
+				  const char *message)
+{
+	OutputPluginPrepareWrite(ctx, true);
+	appendStringInfo(ctx->out, "message: lsn: %X/%X transactional: %d sz: %zu content:",
+					 (uint32)(lsn >> 32), (uint32)lsn, transactional, sz);
+	appendBinaryStringInfo(ctx->out, message, sz);
 	OutputPluginWrite(ctx, true);
 }
