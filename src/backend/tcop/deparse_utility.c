@@ -1582,7 +1582,7 @@ deparse_AlterExtensionStmt(Oid objectId, Node *parsetree)
 	Form_pg_extension extForm;
 	ObjTree	   *stmt;
 	char	   *command;
-	char	   *version;
+	char	   *version = NULL;
 	ListCell   *cell;
 
 	pg_extension = heap_open(ExtensionRelationId, AccessShareLock);
