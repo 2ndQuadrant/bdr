@@ -212,8 +212,7 @@ CREATE VIEW bdr_list_conflict_handlers(ch_name, ch_type, ch_reloid, ch_fun) AS
 CREATE TABLE bdr_queued_commands (
     lsn pg_lsn NOT NULL,
     queued_at timestamptz NOT NULL,
-    obj_type text,
-    obj_identity text,
+    command_tag text,
     command text,
     executed bool
 );
@@ -230,13 +229,12 @@ BEGIN
 
     INSERT INTO bdr.bdr_queued_commands (
         lsn, queued_at,
-        obj_type, obj_identity, command, executed
+        command_tag, command, executed
     )
         VALUES (
             pg_current_xlog_location(),
             NOW(),
-            'table',
-            ident,
+            'TRUNCATE (automatic)',
             'TRUNCATE TABLE ONLY ' || ident,
             'false');
     RETURN NULL;
@@ -274,13 +272,12 @@ BEGIN
 
         INSERT INTO bdr.bdr_queued_commands(
             lsn, queued_at,
-            obj_type, obj_identity, command, executed
+            command_tag, command, executed
         )
             VALUES (
                 pg_current_xlog_location(),
                 NOW(),
-                r.object_type,
-                r.identity,
+                r.command_tag,
                 pg_catalog.pg_event_trigger_expand_command(r.command),
                 'false');
 
