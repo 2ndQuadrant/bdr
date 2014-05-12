@@ -7,6 +7,8 @@ CREATE SCHEMA bdr;
 GRANT USAGE ON SCHEMA bdr TO public;
 
 SET LOCAL search_path = bdr;
+-- We must be able to use exclusion constraints for global sequences
+SET bdr.permit_unsafe_ddl_commands=true;
 
 CREATE FUNCTION pg_stat_get_bdr(
     OUT rep_node_id oid,
@@ -30,8 +32,6 @@ REVOKE ALL ON FUNCTION pg_stat_get_bdr() FROM PUBLIC;
 
 CREATE VIEW pg_stat_bdr AS SELECT * FROM pg_stat_get_bdr();
 
--- We must be able to use exclusion constraints for global sequences
-SET bdr.permit_unsafe_ddl_commands=true;
 
 CREATE TABLE bdr_sequence_values
 (
@@ -59,11 +59,8 @@ CREATE TABLE bdr_sequence_values
     EXCLUDE USING gist(seqschema WITH =, seqname WITH =, seqrange WITH &&) WHERE (confirmed),
     PRIMARY KEY(owning_sysid, owning_tlid, owning_dboid, owning_riname, seqschema, seqname, seqrange)
 );
-SELECT pg_catalog.pg_extension_config_dump('bdr_sequence_values', '');
-
-SET bdr.permit_unsafe_ddl_commands=false;
-
 REVOKE ALL ON TABLE bdr_sequence_values FROM PUBLIC;
+SELECT pg_catalog.pg_extension_config_dump('bdr_sequence_values', '');
 
 CREATE INDEX bdr_sequence_values_chunks ON bdr_sequence_values(seqschema, seqname, seqrange);
 CREATE INDEX bdr_sequence_values_newchunk ON bdr_sequence_values(seqschema, seqname, upper(seqrange));
@@ -89,9 +86,8 @@ CREATE TABLE bdr_sequence_elections
 
     PRIMARY KEY(owning_sysid, owning_tlid, owning_dboid, owning_riname, seqschema, seqname, seqrange)
 );
-SELECT pg_catalog.pg_extension_config_dump('bdr_sequence_elections', '');
 REVOKE ALL ON TABLE bdr_sequence_values FROM PUBLIC;
-
+SELECT pg_catalog.pg_extension_config_dump('bdr_sequence_elections', '');
 
 CREATE TABLE bdr_votes
 (
@@ -110,8 +106,8 @@ CREATE TABLE bdr_votes
     reason text CHECK (reason IS NULL OR vote = false),
     UNIQUE(vote_sysid, vote_tlid, vote_dboid, vote_riname, vote_election_id, voter_sysid, voter_tlid, voter_dboid, voter_riname)
 );
-SELECT pg_catalog.pg_extension_config_dump('bdr_votes', '');
 REVOKE ALL ON TABLE bdr_votes FROM PUBLIC;
+SELECT pg_catalog.pg_extension_config_dump('bdr_votes', '');
 
 CREATE OR REPLACE FUNCTION bdr_sequence_alloc(INTERNAL)
 RETURNS INTERNAL
@@ -150,10 +146,10 @@ VALUES (
     'bdr_sequence_options'
 );
 
-
-CREATE TYPE bdr.bdr_handler_types
-    AS ENUM('UPDATE_VS_UPDATE', 'UPDATE_VS_DELETE',
-        'INSERT_VS_INSERT', 'INSERT_VS_UPDATE');
+CREATE TYPE bdr.bdr_handler_types AS ENUM(
+    'UPDATE_VS_UPDATE', 'UPDATE_VS_DELETE',
+    'INSERT_VS_INSERT', 'INSERT_VS_UPDATE'
+);
 
 CREATE TYPE bdr.bdr_conflict_handler_action
     AS ENUM('IGNORE', 'ROW', 'SKIP');
@@ -166,18 +162,18 @@ CREATE TABLE bdr.bdr_conflict_handlers (
     ch_timeframe INTERVAL,
     PRIMARY KEY(ch_reloid, ch_name)
 ) WITH OIDS;
-SELECT pg_catalog.pg_extension_config_dump('bdr_conflict_handlers', '');
 REVOKE ALL ON TABLE bdr_conflict_handlers FROM PUBLIC;
+SELECT pg_catalog.pg_extension_config_dump('bdr_conflict_handlers', '');
 
 CREATE INDEX bdr_conflict_handlers_ch_type_reloid_idx
     ON bdr_conflict_handlers(ch_reloid, ch_type);
 
 CREATE FUNCTION bdr.bdr_create_conflict_handler(
-        ch_rel REGCLASS,
-        ch_name NAME,
-        ch_proc REGPROCEDURE,
-        ch_type bdr.bdr_handler_types,
-        ch_timeframe INTERVAL
+    ch_rel REGCLASS,
+    ch_name NAME,
+    ch_proc REGPROCEDURE,
+    ch_type bdr.bdr_handler_types,
+    ch_timeframe INTERVAL
 )
 RETURNS VOID
 LANGUAGE C
@@ -186,10 +182,10 @@ AS 'MODULE_PATHNAME'
 ;
 
 CREATE FUNCTION bdr.bdr_create_conflict_handler(
-        ch_rel REGCLASS,
-        ch_name NAME,
-        ch_proc REGPROCEDURE,
-        ch_type bdr.bdr_handler_types
+    ch_rel REGCLASS,
+    ch_name NAME,
+    ch_proc REGPROCEDURE,
+    ch_type bdr.bdr_handler_types
 )
 RETURNS VOID
 LANGUAGE C
@@ -206,117 +202,9 @@ AS 'MODULE_PATHNAME'
 
 CREATE VIEW bdr_list_conflict_handlers(ch_name, ch_type, ch_reloid, ch_fun) AS
     SELECT ch_name, ch_type, ch_reloid, ch_fun, ch_timeframe
-        FROM bdr.bdr_conflict_handlers;
+    FROM bdr.bdr_conflict_handlers
+;
 
-
-CREATE TABLE bdr_queued_commands (
-    lsn pg_lsn NOT NULL,
-    queued_at timestamptz NOT NULL,
-    command_tag text,
-    command text,
-    executed bool
-);
-
-CREATE OR REPLACE FUNCTION bdr.queue_truncate()
- RETURNS TRIGGER
- LANGUAGE plpgsql
-AS $function$
-DECLARE
-    ident TEXT;
-BEGIN
-
-    ident := quote_ident(TG_TABLE_SCHEMA)||'.'||quote_ident(TG_TABLE_NAME);
-
-    INSERT INTO bdr.bdr_queued_commands (
-        lsn, queued_at,
-        command_tag, command, executed
-    )
-        VALUES (
-            pg_current_xlog_location(),
-            NOW(),
-            'TRUNCATE (automatic)',
-            'TRUNCATE TABLE ONLY ' || ident,
-            'false');
-    RETURN NULL;
-END;
-$function$;
-
-CREATE OR REPLACE FUNCTION bdr.queue_commands()
- RETURNS event_trigger
- LANGUAGE plpgsql
-AS $function$
-DECLARE
-    r RECORD;
-BEGIN
-    IF pg_replication_identifier_is_replaying() THEN
-       RETURN;
-    END IF;
-    IF current_setting('bdr.skip_ddl_replication')::boolean THEN
-        -- If we're doing a pg_restore from a remote BDR node's
-        -- state, we must not create truncate triggers etc because
-        -- they'll get copied over in the dump.
-        RETURN;
-    END IF;
-
-    FOR r IN SELECT * FROM pg_event_trigger_get_creation_commands()
-    LOOP
-        /* ignore temporary objects */
-        IF r.schema = 'pg_temp' THEN
-            CONTINUE;
-        END IF;
-
-        /* ignore objects that are part of an extension */
-        IF r.in_extension THEN
-            CONTINUE;
-        END IF;
-
-        INSERT INTO bdr.bdr_queued_commands(
-            lsn, queued_at,
-            command_tag, command, executed
-        )
-            VALUES (
-                pg_current_xlog_location(),
-                NOW(),
-                r.command_tag,
-                pg_catalog.pg_event_trigger_expand_command(r.command),
-                'false');
-
-        IF r.command_tag = 'CREATE TABLE' and r.object_type = 'table' THEN
-            EXECUTE 'CREATE TRIGGER truncate_trigger AFTER TRUNCATE ON ' ||
-                    r.identity ||
-                    ' FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()';
-        END IF;
-    END LOOP;
-END;
-$function$;
-
-
-
--- The bdr_nodes table tracks members of a BDR group; it's only concerned with
--- one database, so the local and foreign database names are implicit.  All we
--- care about is the sysid.
---
--- The sysid must be a numeric (or string) because PostgreSQL has no uint64 SQL
--- type.
---
--- In future we may support different local dbnames, so store the dbname too.
--- It's even possible we might replicate from one local DB to another (though
--- who knows why we'd want to) so the PK should be the (dbname, sysid) tuple.
---
-CREATE TABLE bdr_nodes (
-    node_sysid numeric,
-    node_dbname name not null,
-    node_status "char" not null,
-    primary key(node_sysid, node_dbname),
-    check (node_status in ('i', 'c', 'r'))
-);
-
-COMMENT ON TABLE bdr_nodes IS 'All known nodes in this BDR group.';
-COMMENT ON COLUMN bdr_nodes.node_sysid IS 'system_identifier from the control file of the node';
-COMMENT ON COLUMN bdr_nodes.node_dbname IS 'local database name on the node';
-COMMENT ON COLUMN bdr_nodes.node_status IS 'Readiness of the node: [i]nitializing, [c]atchup, [r]eady. Doesn''t indicate connected/disconnected.';
-
-SELECT pg_catalog.pg_extension_config_dump('bdr_nodes', '');
 
 CREATE TYPE bdr_conflict_type AS ENUM
 (
@@ -385,6 +273,8 @@ CREATE TABLE bdr_conflict_history (
     error_lineno        integer,
     error_funcname      text
 );
+REVOKE ALL ON TABLE bdr_conflict_history FROM PUBLIC;
+SELECT pg_catalog.pg_extension_config_dump('bdr_conflict_history', '');
 
 ALTER SEQUENCE bdr_conflict_history_id_seq OWNED BY bdr_conflict_history.conflict_id;
 
@@ -407,49 +297,159 @@ COMMENT ON COLUMN bdr_conflict_history.remote_tuple IS 'For DML conflicts, the c
 COMMENT ON COLUMN bdr_conflict_history.conflict_resolution IS 'How the conflict was resolved/handled; see the enum definition';
 COMMENT ON COLUMN bdr_conflict_history.error_message IS 'On apply error, the error message from ereport/elog. Other error fields match.';
 
-SELECT pg_catalog.pg_extension_config_dump('bdr_conflict_history', '');
-REVOKE ALL ON TABLE bdr_conflict_history FROM PUBLIC;
+-- The bdr_nodes table tracks members of a BDR group; it's only concerned with
+-- one database, so the local and foreign database names are implicit.  All we
+-- care about is the sysid.
+--
+-- The sysid must be a numeric (or string) because PostgreSQL has no uint64 SQL
+-- type.
+--
+-- In future we may support different local dbnames, so store the dbname too.
+-- It's even possible we might replicate from one local DB to another (though
+-- who knows why we'd want to) so the PK should be the (dbname, sysid) tuple.
+--
+CREATE TABLE bdr_nodes (
+    node_sysid numeric not null,
+    node_dbname name not null,
+    node_status "char" not null,
+    primary key(node_sysid, node_dbname),
+    check (node_status in ('i', 'c', 'r'))
+);
+REVOKE ALL ON TABLE bdr_nodes FROM PUBLIC;
+SELECT pg_catalog.pg_extension_config_dump('bdr_nodes', '');
 
+COMMENT ON TABLE bdr_nodes IS 'All known nodes in this BDR group.';
+COMMENT ON COLUMN bdr_nodes.node_sysid IS 'system_identifier from the control file of the node';
+COMMENT ON COLUMN bdr_nodes.node_dbname IS 'local database name on the node';
+COMMENT ON COLUMN bdr_nodes.node_status IS 'Readiness of the node: [i]nitializing, [c]atchup, [r]eady. Doesn''t indicate connected/disconnected.';
+
+CREATE TABLE bdr_queued_commands (
+    lsn pg_lsn NOT NULL,
+    queued_at timestamptz NOT NULL,
+    command_tag text,
+    command text,
+    executed bool
+);
+REVOKE ALL ON TABLE bdr_queued_commands FROM PUBLIC;
+SELECT pg_catalog.pg_extension_config_dump('bdr_queued_commands', '');
+
+CREATE OR REPLACE FUNCTION bdr.queue_truncate()
+    RETURNS TRIGGER
+    LANGUAGE plpgsql
+    AS $function$
+DECLARE
+    ident TEXT;
+BEGIN
+    ident := quote_ident(TG_TABLE_SCHEMA)||'.'||quote_ident(TG_TABLE_NAME);
+
+    INSERT INTO bdr.bdr_queued_commands (
+        lsn, queued_at,
+        command_tag, command, executed
+    )
+    VALUES (
+        pg_current_xlog_location(),
+        NOW(),
+        'TRUNCATE (automatic)',
+        'TRUNCATE TABLE ONLY ' || ident,
+        'false');
+    RETURN NULL;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION bdr.queue_commands()
+RETURNS event_trigger
+LANGUAGE plpgsql
+AS $function$
+DECLARE
+    r RECORD;
+BEGIN
+    IF pg_replication_identifier_is_replaying() THEN
+       RETURN;
+    END IF;
+    IF current_setting('bdr.skip_ddl_replication')::boolean THEN
+        -- If we're doing a pg_restore from a remote BDR node's
+        -- state, we must not create truncate triggers etc because
+        -- they'll get copied over in the dump.
+        RETURN;
+    END IF;
+
+    FOR r IN SELECT * FROM pg_event_trigger_get_creation_commands()
+    LOOP
+        /* ignore temporary objects */
+        IF r.schema = 'pg_temp' THEN
+            CONTINUE;
+        END IF;
+
+        /* ignore objects that are part of an extension */
+        IF r.in_extension THEN
+            CONTINUE;
+        END IF;
+
+        INSERT INTO bdr.bdr_queued_commands(
+            lsn, queued_at,
+            command_tag, command, executed
+        )
+        VALUES (
+            pg_current_xlog_location(),
+            NOW(),
+            r.command_tag,
+            pg_catalog.pg_event_trigger_expand_command(r.command),
+            'false'
+        );
+
+        IF r.command_tag = 'CREATE TABLE' and r.object_type = 'table' THEN
+            EXECUTE 'CREATE TRIGGER truncate_trigger AFTER TRUNCATE ON ' ||
+                r.identity ||
+                ' FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()';
+        END IF;
+    END LOOP;
+END;
+$function$;
 
 -- This type is tailored to use as input to get_object_address
-CREATE TYPE bdr.dropped_object AS
-  (objtype text, objnames text[], objargs text[]);
+CREATE TYPE bdr.dropped_object AS (
+    objtype text,
+    objnames text[],
+    objargs text[]
+);
 
-CREATE TABLE bdr.bdr_queued_drops(
+CREATE TABLE bdr.bdr_queued_drops (
     lsn pg_lsn NOT NULL,
     queued_at timestamptz NOT NULL,
     dropped_objects bdr.dropped_object[] NOT NULL
 );
+REVOKE ALL ON TABLE bdr_queued_drops FROM PUBLIC;
+SELECT pg_catalog.pg_extension_config_dump('bdr_queued_drops', '');
 
 CREATE OR REPLACE FUNCTION bdr.queue_dropped_objects()
- RETURNS event_trigger
- LANGUAGE plpgsql
+RETURNS event_trigger
+LANGUAGE plpgsql
 AS $function$
 DECLARE
     r RECORD;
-	dropped bdr.dropped_object;
-	otherobjs bdr.dropped_object[] = '{}';
+    dropped bdr.dropped_object;
+    otherobjs bdr.dropped_object[] = '{}';
 BEGIN
-	FOR r IN SELECT * FROM pg_event_trigger_dropped_objects()
-	LOOP
-		IF r.original OR r.normal THEN
-			dropped.objtype = r.object_type;
-			dropped.objnames = r.address_names;
-			dropped.objargs = r.address_args;
-			otherobjs := otherobjs || dropped;
-			RAISE LOG 'object is: %', dropped;
-		END IF;
-	END LOOP;
+    FOR r IN SELECT * FROM pg_event_trigger_dropped_objects()
+    LOOP
+        IF r.original OR r.normal THEN
+            dropped.objtype = r.object_type;
+            dropped.objnames = r.address_names;
+            dropped.objargs = r.address_args;
+            otherobjs := otherobjs || dropped;
+            RAISE LOG 'object is: %', dropped;
+        END IF;
+    END LOOP;
 
-	IF otherobjs <> '{}' THEN
-		INSERT INTO bdr.bdr_queued_drops (
-			lsn, queued_at, dropped_objects
-		)
-		VALUES (pg_current_xlog_location(),
-			NOW(),
-			otherobjs
-		);
-	END IF;
+    IF otherobjs <> '{}' THEN
+        INSERT INTO bdr.bdr_queued_drops (
+            lsn, queued_at, dropped_objects
+        )
+        VALUES (pg_current_xlog_location(),
+            NOW(),
+            otherobjs
+        );
+    END IF;
 END;
 $function$;
 
@@ -475,9 +475,19 @@ AS 'MODULE_PATHNAME'
 
 CREATE EVENT TRIGGER queue_commands
 ON ddl_command_end
-WHEN tag IN ('create table', 'create index', 'create sequence',
-     'create schema', 'alter sequence', 'create function',
-     'create trigger', 'alter table', 'create extension', 'create type')
+WHEN tag IN (
+    'alter sequence',
+    'alter table',
+    'create extension',
+    'create function',
+    'create index',
+    'create schema',
+    'create sequence',
+    'create table',
+    'create trigger',
+    'create type'
+)
 EXECUTE PROCEDURE bdr.queue_commands();
 
+SET bdr.permit_unsafe_ddl_commands = false;
 RESET search_path;
