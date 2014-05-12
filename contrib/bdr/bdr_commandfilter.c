@@ -16,6 +16,7 @@
 #include "bdr.h"
 
 #include "fmgr.h"
+#include "miscadmin.h"
 
 #include "access/heapam.h"
 
@@ -267,6 +268,10 @@ bdr_commandfilter(Node *parsetree,
 				  DestReceiver *dest,
 				  char *completionTag)
 {
+	/* don't filter in single user mode */
+	if (!IsUnderPostmaster)
+		goto done;
+
 	/* don't filter if explicitly told so */
 	if (bdr_permit_unsafe_commands)
 		goto done;
