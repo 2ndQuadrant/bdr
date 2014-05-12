@@ -483,18 +483,6 @@ AS 'MODULE_PATHNAME'
 
 CREATE EVENT TRIGGER queue_commands
 ON ddl_command_end
-WHEN tag IN (
-    'alter sequence',
-    'alter table',
-    'create extension',
-    'create function',
-    'create index',
-    'create schema',
-    'create sequence',
-    'create table',
-    'create trigger',
-    'create type'
-)
 EXECUTE PROCEDURE bdr.queue_commands();
 
 SET bdr.permit_unsafe_ddl_commands = false;
