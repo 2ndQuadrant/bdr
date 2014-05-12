@@ -961,8 +961,8 @@ bool
 function_parse_error_transpose(const char *prosrc)
 {
 	int			origerrposition;
-	int			newerrposition;
-	const char *queryText;
+	int			newerrposition = -1;
+	const char *queryText = "";
 
 	/*
 	 * Nothing to do unless we are dealing with a syntax error that has a
@@ -979,12 +979,14 @@ function_parse_error_transpose(const char *prosrc)
 			return false;
 	}
 
-	/* We can get the original query text from the active portal (hack...) */
-	Assert(ActivePortal && ActivePortal->status == PORTAL_ACTIVE);
-	queryText = ActivePortal->sourceText;
+	/* Try to get the original query text from the active portal (hack...) */
+	if (ActivePortal != NULL && ActivePortal->status == PORTAL_ACTIVE)
+	{
+		queryText =  ActivePortal->sourceText;
 
-	/* Try to locate the prosrc in the original text */
-	newerrposition = match_prosrc_to_query(prosrc, queryText, origerrposition);
+		/* Try to locate the prosrc in the original text */
+		newerrposition = match_prosrc_to_query(prosrc, queryText, origerrposition);
+	}
 
 	if (newerrposition > 0)
 	{
