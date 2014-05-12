@@ -1579,8 +1579,9 @@ bdr_lookup_relid(const char *relname, Oid schema_oid)
 static void
 bdr_maintain_schema(void)
 {
-	Relation extrel;
-	Oid		extoid;
+	Relation	extrel;
+	Oid			btree_gist_oid;
+	Oid			bdr_oid;
 	Oid			schema_oid;
 
 	StartTransactionCommand();
@@ -1589,19 +1590,35 @@ bdr_maintain_schema(void)
 	/* make sure we're operating without other bdr workers interfering */
 	extrel = heap_open(ExtensionRelationId, ShareUpdateExclusiveLock);
 
-	extoid = get_extension_oid("bdr", true);
+	btree_gist_oid = get_extension_oid("btree_gist", true);
+	bdr_oid = get_extension_oid("bdr", true);
 
 	/* create required extension if they don't exists yet */
-	if (extoid == InvalidOid)
+	if (btree_gist_oid == InvalidOid)
 	{
 		CreateExtensionStmt create_stmt;
 
-		create_stmt.if_not_exists = true;
+		create_stmt.if_not_exists = false;
 		create_stmt.options = NIL;
 		create_stmt.extname = (char *)"btree_gist";
-
 		CreateExtension(&create_stmt);
+	}
+	else
+	{
+		AlterExtensionStmt alter_stmt;
 
+		/* TODO: only do this if necessary */
+		alter_stmt.options = NIL;
+		alter_stmt.extname = (char *)"btree_gist";
+		ExecAlterExtensionStmt(&alter_stmt);
+	}
+
+	if (bdr_oid == InvalidOid)
+	{
+		CreateExtensionStmt create_stmt;
+
+		create_stmt.if_not_exists = false;
+		create_stmt.options = NIL;
 		create_stmt.extname = (char *)"bdr";
 		CreateExtension(&create_stmt);
 	}
@@ -1609,10 +1626,8 @@ bdr_maintain_schema(void)
 	{
 		AlterExtensionStmt alter_stmt;
 
+		/* TODO: only do this if necessary */
 		alter_stmt.options = NIL;
-		alter_stmt.extname = (char *)"btree_gist";
-		ExecAlterExtensionStmt(&alter_stmt);
-
 		alter_stmt.extname = (char *)"bdr";
 		ExecAlterExtensionStmt(&alter_stmt);
 	}
@@ -1621,30 +1636,30 @@ bdr_maintain_schema(void)
 
 	/* setup initial queued_cmds OID */
 	schema_oid = get_namespace_oid("bdr", false);
-	if (schema_oid != InvalidOid)
-	{
-		QueuedDDLCommandsRelid = bdr_lookup_relid("bdr_queued_commands",
-											  schema_oid);
+	Assert(schema_oid != InvalidOid);
 
-		BdrSequenceValuesRelid = bdr_lookup_relid("bdr_sequence_values",
-											  schema_oid);
+	QueuedDDLCommandsRelid =
+		bdr_lookup_relid("bdr_queued_commands", schema_oid);
 
-		BdrSequenceElectionsRelid = bdr_lookup_relid("bdr_sequence_elections",
-												 schema_oid);
+	BdrSequenceValuesRelid =
+		bdr_lookup_relid("bdr_sequence_values", schema_oid);
 
-		BdrVotesRelid = bdr_lookup_relid("bdr_votes", schema_oid);
+	BdrSequenceElectionsRelid =
+		bdr_lookup_relid("bdr_sequence_elections", schema_oid);
 
-		BdrNodesRelid = bdr_lookup_relid("bdr_nodes", schema_oid);
+	BdrVotesRelid = bdr_lookup_relid("bdr_votes", schema_oid);
 
-		BdrConflictHistoryRelId = bdr_lookup_relid("bdr_conflict_history", schema_oid);
+	BdrNodesRelid = bdr_lookup_relid("bdr_nodes", schema_oid);
 
-		QueuedDropsRelid = bdr_lookup_relid("bdr_queued_drops", schema_oid);
-	}
-	else
-		elog(ERROR, "cache lookup failed for schema bdr");
+	BdrConflictHistoryRelId =
+		bdr_lookup_relid("bdr_conflict_history", schema_oid);
 
-	elog(DEBUG1, "bdr.bdr_queued_commands OID set to %u", QueuedDDLCommandsRelid);
-	elog(DEBUG1, "bdr.bdr_queued_drops OID set to %u", QueuedDropsRelid);
+	QueuedDropsRelid = bdr_lookup_relid("bdr_queued_drops", schema_oid);
+
+	elog(DEBUG1, "bdr.bdr_queued_commands OID set to %u",
+		 QueuedDDLCommandsRelid);
+	elog(DEBUG1, "bdr.bdr_queued_drops OID set to %u",
+		 QueuedDropsRelid);
 
 	bdr_conflict_handlers_init();
 
