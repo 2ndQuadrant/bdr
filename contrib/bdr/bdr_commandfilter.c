@@ -367,6 +367,15 @@ bdr_commandfilter(Node *parsetree,
 			break;
 	}
 
+	/*
+	 * Don't filter if this database isn't using bdr. Check after the above
+	 * fasts tests as this can be comparatively expensive. This also requires
+	 * to be in a transaction and thus isn't admissible for transaction
+	 * control commands.
+	 */
+	if (!bdr_is_bdr_activated_db())
+		goto done;
+
 	/* all commands handled by ProcessUtilitySlow() */
 	switch (nodeTag(parsetree))
 	{

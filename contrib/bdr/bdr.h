@@ -311,6 +311,7 @@ extern void bdr_init_replica(Name dbname);
 extern BdrWorker* bdr_worker_shmem_alloc(BdrWorkerType worker_type,
 										 uint32 *ctl_idx);
 extern void bdr_worker_shmem_release(BdrWorker* worker, BackgroundWorkerHandle *handle);
+extern bool bdr_is_bdr_activated_db(void);
 
 /* forbid commands we do not support currently (or never will) */
 extern void init_bdr_commandfilter(void);
