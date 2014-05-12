@@ -1028,8 +1028,7 @@ process_queued_ddl_command(HeapTuple cmdtup, bool tx_just_started)
 	HeapTuple	newtup;
 #endif
 	Datum		datum;
-	char	   *type;
-	char	   *identstr;
+	char	   *command_tag;
 	char	   *cmdstr;
 	bool		isnull;
 
@@ -1050,31 +1049,21 @@ process_queued_ddl_command(HeapTuple cmdtup, bool tx_just_started)
 
 	cmdsrel = heap_open(QueuedDDLCommandsRelid, NoLock);
 
-	/* fetch the object type */
+	/* fetch the command tag */
 	datum = heap_getattr(cmdtup, 3,
 						 RelationGetDescr(cmdsrel),
 						 &isnull);
 	if (isnull)
-		elog(ERROR, "null object type in command tuple in \"%s\"",
+		elog(ERROR, "null command tag in command tuple in \"%s\"",
 			 RelationGetRelationName(cmdsrel));
-	type = TextDatumGetCString(datum);
+	command_tag = TextDatumGetCString(datum);
 
-	/* fetch the object identity */
+	/* finally fetch and execute the command */
 	datum = heap_getattr(cmdtup, 4,
 						 RelationGetDescr(cmdsrel),
 						 &isnull);
 	if (isnull)
-		elog(ERROR, "null identity in command tuple for object of type %s",
-			 RelationGetRelationName(cmdsrel));
-
-	identstr = TextDatumGetCString(datum);
-
-	/* finally fetch and execute the command */
-	datum = heap_getattr(cmdtup, 5,
-						 RelationGetDescr(cmdsrel),
-						 &isnull);
-	if (isnull)
-		elog(ERROR, "null command in tuple for %s \"%s\"", type, identstr);
+		elog(ERROR, "null command for \"%s\" command tuple", command_tag);
 
 	cmdstr = TextDatumGetCString(datum);
 
@@ -1087,7 +1076,7 @@ process_queued_ddl_command(HeapTuple cmdtup, bool tx_just_started)
 
 	/*
 	 * Do a limited amount of safety checking against CONCURRENTLY commands
-	 * executed in situations where they aren't allowed. The sender side shoul
+	 * executed in situations where they aren't allowed. The sender side should
 	 * provide protection, but better be safe than sorry.
 	 */
 	isTopLevel = (list_length(commands) == 1) && tx_just_started;
