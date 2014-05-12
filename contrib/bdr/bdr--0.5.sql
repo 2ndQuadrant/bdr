@@ -205,7 +205,7 @@ AS 'MODULE_PATHNAME'
 ;
 
 CREATE VIEW bdr_list_conflict_handlers(ch_name, ch_type, ch_reloid, ch_fun) AS
-    SELECT ch_name, ch_type, ch_reloid, ch_fun
+    SELECT ch_name, ch_type, ch_reloid, ch_fun, ch_timeframe
         FROM bdr.bdr_conflict_handlers;
 
 
