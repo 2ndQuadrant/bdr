@@ -340,6 +340,11 @@ CREATE OR REPLACE FUNCTION bdr.queue_truncate()
 DECLARE
     ident TEXT;
 BEGIN
+    -- don't recursively log truncation commands
+    IF pg_replication_identifier_is_replaying() THEN
+       RETURN NULL;
+    END IF;
+
     ident := quote_ident(TG_TABLE_SCHEMA)||'.'||quote_ident(TG_TABLE_NAME);
 
     INSERT INTO bdr.bdr_queued_commands (
@@ -363,9 +368,11 @@ AS $function$
 DECLARE
     r RECORD;
 BEGIN
+    -- don't recursively log ddl commands
     IF pg_replication_identifier_is_replaying() THEN
        RETURN;
     END IF;
+
     IF current_setting('bdr.skip_ddl_replication')::boolean THEN
         -- If we're doing a pg_restore from a remote BDR node's
         -- state, we must not create truncate triggers etc because
@@ -430,6 +437,11 @@ DECLARE
     dropped bdr.dropped_object;
     otherobjs bdr.dropped_object[] = '{}';
 BEGIN
+    -- don't recursively log drop commands
+    IF pg_replication_identifier_is_replaying() THEN
+       RETURN;
+    END IF;
+
     FOR r IN SELECT * FROM pg_event_trigger_dropped_objects()
     LOOP
         IF r.original OR r.normal THEN
