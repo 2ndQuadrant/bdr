@@ -29,10 +29,12 @@
 #include "catalog/namespace.h"
 #include "catalog/pg_extension.h"
 
+#include "commands/dbcommands.h"
 #include "commands/extension.h"
 
 #include "lib/stringinfo.h"
 
+#include "libpq/libpq-be.h"
 #include "libpq/pqformat.h"
 
 #include "mb/pg_wchar.h"
@@ -1393,6 +1395,59 @@ bdr_worker_shmem_release(BdrWorker* worker, BackgroundWorkerHandle *handle)
 		memset(worker, 0, sizeof(BdrWorker));
 	}
 	LWLockRelease(BdrWorkerCtl->lock);
+}
+
+/*
+ * Is the current database configured for bdr?
+ */
+bool
+bdr_is_bdr_activated_db(void)
+{
+	const char *mydb;
+	static int	is_bdr_db = -1;
+	int			i;
+
+	/* won't know until we've forked/execed */
+	Assert(IsUnderPostmaster);
+
+	/* potentially need to access syscaches */
+	Assert(IsTransactionState());
+
+	/* fast path after the first call */
+	if (is_bdr_db != -1)
+		return is_bdr_db;
+
+	/*
+	 * Accessing the database name via MyProcPort is faster, but only works in
+	 * user initiated connections. Not background workers.
+	 */
+	if (MyProcPort != NULL)
+		mydb = MyProcPort->database_name;
+	else
+		mydb = get_database_name(MyDatabaseId);
+
+	/* look for the perdb worker's entries, they have the database name */
+	for (i = 0; i < bdr_max_workers; i++)
+	{
+		BdrWorker *worker;
+		const char *workerdb;
+
+		worker = &BdrWorkerCtl->slots[i];
+
+		if (worker->worker_type != BDR_WORKER_PERDB)
+			continue;
+
+		workerdb = NameStr(worker->worker_data.perdb_worker.dbname);
+
+		if (strcmp(mydb, workerdb) == 0)
+		{
+			is_bdr_db = true;
+			return true;
+		}
+	}
+
+	is_bdr_db = false;
+	return false;
 }
 
 /*
