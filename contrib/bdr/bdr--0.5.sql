@@ -440,12 +440,11 @@ BEGIN
 
     FOR r IN SELECT * FROM pg_event_trigger_dropped_objects()
     LOOP
-        IF r.original OR r.normal THEN
+        IF true THEN
             dropped.objtype = r.object_type;
             dropped.objnames = r.address_names;
             dropped.objargs = r.address_args;
             otherobjs := otherobjs || dropped;
-            RAISE LOG 'object is: %', dropped;
         END IF;
     END LOOP;
 
