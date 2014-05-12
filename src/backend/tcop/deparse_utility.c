@@ -32,14 +32,19 @@
 #include "catalog/index.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_aggregate.h"
+#include "catalog/pg_authid.h"
 #include "catalog/pg_class.h"
 #include "catalog/pg_collation.h"
 #include "catalog/pg_constraint.h"
 #include "catalog/pg_conversion.h"
 #include "catalog/pg_depend.h"
 #include "catalog/pg_extension.h"
+#include "catalog/pg_foreign_data_wrapper.h"
+#include "catalog/pg_foreign_server.h"
 #include "catalog/pg_inherits.h"
 #include "catalog/pg_language.h"
+#include "catalog/pg_largeobject.h"
+#include "catalog/pg_namespace.h"
 #include "catalog/pg_operator.h"
 #include "catalog/pg_opclass.h"
 #include "catalog/pg_opfamily.h"
@@ -47,6 +52,11 @@
 #include "catalog/pg_range.h"
 #include "catalog/pg_rewrite.h"
 #include "catalog/pg_trigger.h"
+#include "catalog/pg_ts_config.h"
+#include "catalog/pg_ts_config_map.h"
+#include "catalog/pg_ts_dict.h"
+#include "catalog/pg_ts_parser.h"
+#include "catalog/pg_ts_template.h"
 #include "catalog/pg_type.h"
 #include "commands/defrem.h"
 #include "commands/sequence.h"
@@ -632,6 +642,858 @@ get_persistence_str(char persistence)
 	}
 }
 
+static ObjTree *
+deparse_DefineStmt_Aggregate(Oid objectId, DefineStmt *define)
+{
+	HeapTuple   aggTup;
+	HeapTuple   procTup;
+	ObjTree	   *stmt;
+	ObjTree	   *tmp;
+	List	   *list;
+	Datum		initval;
+	bool		isnull;
+	Form_pg_aggregate agg;
+	Form_pg_proc proc;
+
+	aggTup = SearchSysCache1(AGGFNOID, ObjectIdGetDatum(objectId));
+	if (!HeapTupleIsValid(aggTup))
+		elog(ERROR, "cache lookup failed for aggregate with OID %u", objectId);
+	agg = (Form_pg_aggregate) GETSTRUCT(aggTup);
+
+	procTup = SearchSysCache1(PROCOID, ObjectIdGetDatum(agg->aggfnoid));
+	if (!HeapTupleIsValid(procTup))
+		elog(ERROR, "cache lookup failed for procedure with OID %u",
+			 agg->aggfnoid);
+	proc = (Form_pg_proc) GETSTRUCT(procTup);
+
+	stmt = new_objtree_VA("CREATE AGGREGATE %{identity}D (%{types:, }s) "
+						  "(%{elems:, }s)", 0);
+
+	append_object_object(stmt, "identity",
+						 new_objtree_for_qualname(proc->pronamespace,
+												  NameStr(proc->proname)));
+
+	list = NIL;
+
+	/*
+	 * An aggregate may have no arguments, in which case its signature
+	 * is (*), to match count(*). If it's not an ordered-set aggregate,
+	 * it may have a non-zero number of arguments. Otherwise it may have
+	 * zero or more direct arguments and zero or more ordered arguments.
+	 * There are no defaults or table parameters, and the only mode that
+	 * we need to consider is VARIADIC.
+	 */
+
+	if (proc->pronargs == 0)
+		list = lappend(list, new_object_object(NULL, new_objtree_VA("*", 0)));
+	else
+	{
+		int			i;
+		int			nargs;
+		Oid		   *types;
+		char	   *modes;
+		char	  **names;
+		int			insertorderbyat = -1;
+
+		nargs = get_func_arg_info(procTup, &types, &names, &modes);
+
+		if (AGGKIND_IS_ORDERED_SET(agg->aggkind))
+			insertorderbyat = agg->aggnumdirectargs;
+
+		for (i = 0; i < nargs; i++)
+		{
+			tmp = new_objtree_VA("%{order}s%{mode}s%{name}s%{type}T", 0);
+
+			if (i == insertorderbyat)
+				append_string_object(tmp, "order", "ORDER BY ");
+			else
+				append_string_object(tmp, "order", "");
+
+			if (modes)
+				append_string_object(tmp, "mode",
+									 modes[i] == 'v' ? "VARIADIC " : "");
+			else
+				append_string_object(tmp, "mode", "");
+
+			if (names)
+				append_string_object(tmp, "name", names[i]);
+			else
+				append_string_object(tmp, "name", " ");
+
+			append_object_object(tmp, "type",
+								 new_objtree_for_type(types[i], -1));
+
+			list = lappend(list, new_object_object(NULL, tmp));
+
+			/*
+			 * For variadic ordered-set aggregates, we have to repeat
+			 * the last argument. This nasty hack is copied from
+			 * print_function_arguments in ruleutils.c
+			 */
+			if (i == insertorderbyat && i == nargs-1)
+				list = lappend(list, new_object_object(NULL, tmp));
+		}
+	}
+
+	append_array_object(stmt, "types", list);
+
+	list = NIL;
+
+	tmp = new_objtree_VA("SFUNC=%{procedure}D", 0);
+	append_object_object(tmp, "procedure",
+						 new_objtree_for_qualname_id(ProcedureRelationId,
+													 agg->aggtransfn));
+	list = lappend(list, new_object_object(NULL, tmp));
+
+	tmp = new_objtree_VA("STYPE=%{type}T", 0);
+	append_object_object(tmp, "type",
+						 new_objtree_for_type(agg->aggtranstype, -1));
+	list = lappend(list, new_object_object(NULL, tmp));
+
+	if (agg->aggtransspace != 0)
+	{
+		tmp = new_objtree_VA("SSPACE=%{space}s", 1,
+							 "space", ObjTypeString,
+							 psprintf("%d", agg->aggtransspace));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	if (OidIsValid(agg->aggfinalfn))
+	{
+		tmp = new_objtree_VA("FINALFUNC=%{procedure}D", 0);
+		append_object_object(tmp, "procedure",
+							 new_objtree_for_qualname_id(ProcedureRelationId,
+														 agg->aggfinalfn));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	if (agg->aggfinalextra)
+	{
+		tmp = new_objtree_VA("FINALFUNC_EXTRA=true", 0);
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	initval = SysCacheGetAttr(AGGFNOID, aggTup,
+							  Anum_pg_aggregate_agginitval,
+							  &isnull);
+	if (!isnull)
+	{
+		tmp = new_objtree_VA("INITCOND=%{initval}L",
+							 1, "initval", ObjTypeString,
+							 TextDatumGetCString(initval));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	if (OidIsValid(agg->aggmtransfn))
+	{
+		tmp = new_objtree_VA("MSFUNC=%{procedure}D", 0);
+		append_object_object(tmp, "procedure",
+							 new_objtree_for_qualname_id(ProcedureRelationId,
+														 agg->aggmtransfn));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	if (OidIsValid(agg->aggmtranstype))
+	{
+		tmp = new_objtree_VA("MSTYPE=%{type}T", 0);
+		append_object_object(tmp, "type",
+							 new_objtree_for_type(agg->aggmtranstype, -1));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	if (agg->aggmtransspace != 0)
+	{
+		tmp = new_objtree_VA("SSPACE=%{space}s", 1,
+							 "space", ObjTypeString,
+							 psprintf("%d", agg->aggmtransspace));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	if (OidIsValid(agg->aggminvtransfn))
+	{
+		tmp = new_objtree_VA("MINVFUNC=%{procedure}D", 0);
+		append_object_object(tmp, "procedure",
+							 new_objtree_for_qualname_id(ProcedureRelationId,
+														 agg->aggminvtransfn));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	if (OidIsValid(agg->aggmfinalfn))
+	{
+		tmp = new_objtree_VA("MFINALFUNC=%{procedure}D", 0);
+		append_object_object(tmp, "procedure",
+							 new_objtree_for_qualname_id(ProcedureRelationId,
+														 agg->aggmfinalfn));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	if (agg->aggmfinalextra)
+	{
+		tmp = new_objtree_VA("MFINALFUNC_EXTRA=true", 0);
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	initval = SysCacheGetAttr(AGGFNOID, aggTup,
+							  Anum_pg_aggregate_aggminitval,
+							  &isnull);
+	if (!isnull)
+	{
+		tmp = new_objtree_VA("MINITCOND=%{initval}L",
+							 1, "initval", ObjTypeString,
+							 TextDatumGetCString(initval));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	if (agg->aggkind == AGGKIND_HYPOTHETICAL)
+	{
+		tmp = new_objtree_VA("HYPOTHETICAL=true", 0);
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	if (OidIsValid(agg->aggsortop))
+	{
+		Oid sortop = agg->aggsortop;
+		Form_pg_operator op;
+		HeapTuple tup;
+
+		tup = SearchSysCache1(OPEROID, ObjectIdGetDatum(sortop));
+		if (!HeapTupleIsValid(tup))
+			elog(ERROR, "cache lookup failed for operator with OID %u", sortop);
+		op = (Form_pg_operator) GETSTRUCT(tup);
+
+		tmp = new_objtree_VA("SORTOP=%{operator}O", 0);
+		append_object_object(tmp, "operator",
+							 new_objtree_for_qualname(op->oprnamespace,
+													  NameStr(op->oprname)));
+		list = lappend(list, new_object_object(NULL, tmp));
+
+		ReleaseSysCache(tup);
+	}
+
+	append_array_object(stmt, "elems", list);
+
+	ReleaseSysCache(procTup);
+	ReleaseSysCache(aggTup);
+
+	return stmt;
+}
+
+static ObjTree *
+deparse_DefineStmt_Collation(Oid objectId, DefineStmt *define)
+{
+	HeapTuple   colTup;
+	ObjTree	   *stmt;
+	Form_pg_collation colForm;
+
+	colTup = SearchSysCache1(COLLOID, ObjectIdGetDatum(objectId));
+	if (!HeapTupleIsValid(colTup))
+		elog(ERROR, "cache lookup failed for collation with OID %u", objectId);
+	colForm = (Form_pg_collation) GETSTRUCT(colTup);
+
+	stmt = new_objtree_VA("CREATE COLLATION %{identity}O "
+						  "(LC_COLLATE = %{collate}L,"
+						  " LC_CTYPE = %{ctype}L)", 0);
+
+	append_object_object(stmt, "identity",
+						 new_objtree_for_qualname(colForm->collnamespace,
+												  NameStr(colForm->collname)));
+	append_string_object(stmt, "collate", NameStr(colForm->collcollate));
+	append_string_object(stmt, "ctype", NameStr(colForm->collctype));
+
+	ReleaseSysCache(colTup);
+
+	return stmt;
+}
+
+static ObjTree *
+deparse_DefineStmt_Operator(Oid objectId, DefineStmt *define)
+{
+	HeapTuple   oprTup;
+	ObjTree	   *stmt;
+	ObjTree	   *tmp;
+	List	   *list;
+	Form_pg_operator oprForm;
+
+	oprTup = SearchSysCache1(OPEROID, ObjectIdGetDatum(objectId));
+	if (!HeapTupleIsValid(oprTup))
+		elog(ERROR, "cache lookup failed for operator with OID %u", objectId);
+	oprForm = (Form_pg_operator) GETSTRUCT(oprTup);
+
+	stmt = new_objtree_VA("CREATE OPERATOR %{identity}O (%{elems:, }s)", 0);
+
+	append_object_object(stmt, "identity",
+						 new_objtree_for_qualname(oprForm->oprnamespace,
+												  NameStr(oprForm->oprname)));
+
+	list = NIL;
+
+	tmp = new_objtree_VA("PROCEDURE=%{procedure}D", 0);
+	append_object_object(tmp, "procedure",
+						 new_objtree_for_qualname_id(ProcedureRelationId,
+													 oprForm->oprcode));
+	list = lappend(list, new_object_object(NULL, tmp));
+
+	if (OidIsValid(oprForm->oprleft))
+	{
+		tmp = new_objtree_VA("LEFTARG=%{type}T", 0);
+		append_object_object(tmp, "type",
+							 new_objtree_for_type(oprForm->oprleft, -1));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	if (OidIsValid(oprForm->oprright))
+	{
+		tmp = new_objtree_VA("RIGHTARG=%{type}T", 0);
+		append_object_object(tmp, "type",
+							 new_objtree_for_type(oprForm->oprright, -1));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	if (OidIsValid(oprForm->oprcom))
+	{
+		tmp = new_objtree_VA("COMMUTATOR=%{oper}O", 0);
+		append_object_object(tmp, "oper",
+							 new_objtree_for_qualname_id(OperatorRelationId,
+														 oprForm->oprcom));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	if (OidIsValid(oprForm->oprnegate))
+	{
+		tmp = new_objtree_VA("NEGATOR=%{oper}O", 0);
+		append_object_object(tmp, "oper",
+							 new_objtree_for_qualname_id(OperatorRelationId,
+														 oprForm->oprnegate));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	if (OidIsValid(oprForm->oprrest))
+	{
+		tmp = new_objtree_VA("RESTRICT=%{procedure}D", 0);
+		append_object_object(tmp, "procedure",
+							 new_objtree_for_qualname_id(ProcedureRelationId,
+														 oprForm->oprrest));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	if (OidIsValid(oprForm->oprjoin))
+	{
+		tmp = new_objtree_VA("JOIN=%{procedure}D", 0);
+		append_object_object(tmp, "procedure",
+							 new_objtree_for_qualname_id(ProcedureRelationId,
+														 oprForm->oprjoin));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	if (oprForm->oprcanmerge)
+		list = lappend(list, new_object_object(NULL,
+											   new_objtree_VA("MERGES", 0)));
+	if (oprForm->oprcanhash)
+		list = lappend(list, new_object_object(NULL,
+											   new_objtree_VA("HASHES", 0)));
+
+	append_array_object(stmt, "elems", list);
+
+	ReleaseSysCache(oprTup);
+
+	return stmt;
+}
+
+static ObjTree *
+deparse_DefineStmt_TSConfig(Oid objectId, DefineStmt *define)
+{
+	HeapTuple   tscTup;
+	HeapTuple   tspTup;
+	ObjTree	   *stmt;
+	Form_pg_ts_config tscForm;
+	Form_pg_ts_parser tspForm;
+
+	tscTup = SearchSysCache1(TSCONFIGOID, ObjectIdGetDatum(objectId));
+	if (!HeapTupleIsValid(tscTup))
+		elog(ERROR, "cache lookup failed for text search configuration "
+			 "with OID %u", objectId);
+	tscForm = (Form_pg_ts_config) GETSTRUCT(tscTup);
+
+	tspTup = SearchSysCache1(TSPARSEROID, ObjectIdGetDatum(tscForm->cfgparser));
+	if (!HeapTupleIsValid(tspTup))
+		elog(ERROR, "cache lookup failed for text search parser with OID %u",
+			 tscForm->cfgparser);
+	tspForm = (Form_pg_ts_parser) GETSTRUCT(tspTup);
+
+	stmt = new_objtree_VA("CREATE TEXT SEARCH CONFIGURATION %{identity}D "
+						  "(PARSER=%{parser}s)", 0);
+
+	append_object_object(stmt, "identity",
+						 new_objtree_for_qualname(tscForm->cfgnamespace,
+												  NameStr(tscForm->cfgname)));
+	append_object_object(stmt, "parser",
+						 new_objtree_for_qualname(tspForm->prsnamespace,
+												  NameStr(tspForm->prsname)));
+
+	/*
+	 * If this text search configuration was created by copying another
+	 * one with "CREATE TEXT SEARCH CONFIGURATION x (COPY=y)", then y's
+	 * PARSER selection is copied along with its mappings of tokens to
+	 * dictionaries (created with ALTER … ADD MAPPING …).
+	 *
+	 * Unfortunately, there's no way to define these mappings in the
+	 * CREATE command, so if they exist for the configuration we're
+	 * deparsing, we must detect them and fail.
+	 */
+
+	{
+		ScanKeyData skey;
+		SysScanDesc scan;
+		HeapTuple	tup;
+		Relation	map;
+		bool		has_mapping;
+
+		map = heap_open(TSConfigMapRelationId, AccessShareLock);
+
+		ScanKeyInit(&skey,
+					Anum_pg_ts_config_map_mapcfg,
+					BTEqualStrategyNumber, F_OIDEQ,
+					ObjectIdGetDatum(objectId));
+
+		scan = systable_beginscan(map, TSConfigMapIndexId, true,
+								  NULL, 1, &skey);
+
+		while (HeapTupleIsValid((tup = systable_getnext(scan))))
+		{
+			has_mapping = true;
+			break;
+		}
+
+		systable_endscan(scan);
+		heap_close(map, AccessShareLock);
+
+		if (has_mapping)
+			ereport(ERROR,
+					(errmsg("can't recreate text search configuration with mappings")));
+	}
+
+	ReleaseSysCache(tspTup);
+	ReleaseSysCache(tscTup);
+
+	return stmt;
+}
+
+static ObjTree *
+deparse_DefineStmt_TSParser(Oid objectId, DefineStmt *define)
+{
+	HeapTuple   tspTup;
+	ObjTree	   *stmt;
+	ObjTree	   *tmp;
+	List	   *list;
+	Form_pg_ts_parser tspForm;
+
+	tspTup = SearchSysCache1(TSPARSEROID, ObjectIdGetDatum(objectId));
+	if (!HeapTupleIsValid(tspTup))
+		elog(ERROR, "cache lookup failed for text search parser with OID %u",
+			 objectId);
+	tspForm = (Form_pg_ts_parser) GETSTRUCT(tspTup);
+
+	stmt = new_objtree_VA("CREATE TEXT SEARCH PARSER %{identity}D "
+						  "(%{elems:, }s)", 0);
+
+	append_object_object(stmt, "identity",
+						 new_objtree_for_qualname(tspForm->prsnamespace,
+												  NameStr(tspForm->prsname)));
+
+	list = NIL;
+
+	tmp = new_objtree_VA("START=%{procedure}D", 0);
+	append_object_object(tmp, "procedure",
+						 new_objtree_for_qualname_id(ProcedureRelationId,
+													 tspForm->prsstart));
+	list = lappend(list, new_object_object(NULL, tmp));
+
+	tmp = new_objtree_VA("GETTOKEN=%{procedure}D", 0);
+	append_object_object(tmp, "procedure",
+						 new_objtree_for_qualname_id(ProcedureRelationId,
+													 tspForm->prstoken));
+	list = lappend(list, new_object_object(NULL, tmp));
+
+	tmp = new_objtree_VA("END=%{procedure}D", 0);
+	append_object_object(tmp, "procedure",
+						 new_objtree_for_qualname_id(ProcedureRelationId,
+													 tspForm->prsend));
+	list = lappend(list, new_object_object(NULL, tmp));
+
+	tmp = new_objtree_VA("LEXTYPES=%{procedure}D", 0);
+	append_object_object(tmp, "procedure",
+						 new_objtree_for_qualname_id(ProcedureRelationId,
+													 tspForm->prslextype));
+	list = lappend(list, new_object_object(NULL, tmp));
+
+	if (OidIsValid(tspForm->prsheadline))
+	{
+		tmp = new_objtree_VA("HEADLINE=%{procedure}D", 0);
+		append_object_object(tmp, "procedure",
+							 new_objtree_for_qualname_id(ProcedureRelationId,
+														 tspForm->prsheadline));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	append_array_object(stmt, "elems", list);
+
+	ReleaseSysCache(tspTup);
+
+	return stmt;
+}
+
+static ObjTree *
+deparse_DefineStmt_TSDictionary(Oid objectId, DefineStmt *define)
+{
+	HeapTuple   tsdTup;
+	ObjTree	   *stmt;
+	ObjTree	   *tmp;
+	List	   *list;
+	Datum		options;
+	bool		isnull;
+	Form_pg_ts_dict tsdForm;
+
+	tsdTup = SearchSysCache1(TSDICTOID, ObjectIdGetDatum(objectId));
+	if (!HeapTupleIsValid(tsdTup))
+		elog(ERROR, "cache lookup failed for text search dictionary "
+			 "with OID %u", objectId);
+	tsdForm = (Form_pg_ts_dict) GETSTRUCT(tsdTup);
+
+	stmt = new_objtree_VA("CREATE TEXT SEARCH DICTIONARY %{identity}D "
+						  "(%{elems:, }s)", 0);
+
+	append_object_object(stmt, "identity",
+						 new_objtree_for_qualname(tsdForm->dictnamespace,
+												  NameStr(tsdForm->dictname)));
+
+	list = NIL;
+
+	tmp = new_objtree_VA("TEMPLATE=%{template}D", 0);
+	append_object_object(tmp, "template",
+						 new_objtree_for_qualname_id(TSTemplateRelationId,
+													 tsdForm->dicttemplate));
+	list = lappend(list, new_object_object(NULL, tmp));
+
+	options = SysCacheGetAttr(TSDICTOID, tsdTup,
+							  Anum_pg_ts_dict_dictinitoption,
+							  &isnull);
+	if (!isnull)
+	{
+		tmp = new_objtree_VA("%{options}s", 0);
+		append_string_object(tmp, "options", TextDatumGetCString(options));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	append_array_object(stmt, "elems", list);
+
+	ReleaseSysCache(tsdTup);
+
+	return stmt;
+}
+
+static ObjTree *
+deparse_DefineStmt_TSTemplate(Oid objectId, DefineStmt *define)
+{
+	HeapTuple   tstTup;
+	ObjTree	   *stmt;
+	ObjTree	   *tmp;
+	List	   *list;
+	Form_pg_ts_template tstForm;
+
+	tstTup = SearchSysCache1(TSTEMPLATEOID, ObjectIdGetDatum(objectId));
+	if (!HeapTupleIsValid(tstTup))
+		elog(ERROR, "cache lookup failed for text search template with OID %u",
+			 objectId);
+	tstForm = (Form_pg_ts_template) GETSTRUCT(tstTup);
+
+	stmt = new_objtree_VA("CREATE TEXT SEARCH TEMPLATE %{identity}D "
+						  "(%{elems:, }s)", 0);
+
+	append_object_object(stmt, "identity",
+						 new_objtree_for_qualname(tstForm->tmplnamespace,
+												  NameStr(tstForm->tmplname)));
+
+	list = NIL;
+
+	if (OidIsValid(tstForm->tmplinit))
+	{
+		tmp = new_objtree_VA("INIT=%{procedure}D", 0);
+		append_object_object(tmp, "procedure",
+							 new_objtree_for_qualname_id(ProcedureRelationId,
+														 tstForm->tmplinit));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	tmp = new_objtree_VA("LEXIZE=%{procedure}D", 0);
+	append_object_object(tmp, "procedure",
+						 new_objtree_for_qualname_id(ProcedureRelationId,
+													 tstForm->tmpllexize));
+	list = lappend(list, new_object_object(NULL, tmp));
+
+	append_array_object(stmt, "elems", list);
+
+	ReleaseSysCache(tstTup);
+
+	return stmt;
+}
+
+static ObjTree *
+deparse_DefineStmt_Type(Oid objectId, DefineStmt *define)
+{
+	HeapTuple   typTup;
+	ObjTree	   *stmt;
+	ObjTree	   *tmp;
+	List	   *list;
+	char	   *str;
+	Datum		dflt;
+	bool		isnull;
+	Form_pg_type typForm;
+
+	typTup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(objectId));
+	if (!HeapTupleIsValid(typTup))
+		elog(ERROR, "cache lookup failed for type with OID %u", objectId);
+	typForm = (Form_pg_type) GETSTRUCT(typTup);
+
+	/* Shortcut processing for shell types. */
+	if (!typForm->typisdefined)
+	{
+		stmt = new_objtree_VA("CREATE TYPE %{identity}D", 0);
+		append_object_object(stmt, "identity",
+							 new_objtree_for_qualname(typForm->typnamespace,
+													  NameStr(typForm->typname)));
+		ReleaseSysCache(typTup);
+		return stmt;
+	}
+
+	stmt = new_objtree_VA("CREATE TYPE %{identity}D (%{elems:, }s)", 0);
+
+	append_object_object(stmt, "identity",
+						 new_objtree_for_qualname(typForm->typnamespace,
+												  NameStr(typForm->typname)));
+
+	list = NIL;
+
+	/* INPUT */
+	tmp = new_objtree_VA("INPUT=%{procedure}D", 0);
+	append_object_object(tmp, "procedure",
+						 new_objtree_for_qualname_id(ProcedureRelationId,
+													 typForm->typinput));
+	list = lappend(list, new_object_object(NULL, tmp));
+
+	/* OUTPUT */
+	tmp = new_objtree_VA("OUTPUT=%{procedure}D", 0);
+	append_object_object(tmp, "procedure",
+						 new_objtree_for_qualname_id(ProcedureRelationId,
+													 typForm->typoutput));
+	list = lappend(list, new_object_object(NULL, tmp));
+
+	/* RECEIVE */
+	if (OidIsValid(typForm->typreceive))
+	{
+		tmp = new_objtree_VA("RECEIVE=%{procedure}D", 0);
+		append_object_object(tmp, "procedure",
+							 new_objtree_for_qualname_id(ProcedureRelationId,
+														 typForm->typreceive));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	/* SEND */
+	if (OidIsValid(typForm->typsend))
+	{
+		tmp = new_objtree_VA("SEND=%{procedure}D", 0);
+		append_object_object(tmp, "procedure",
+							 new_objtree_for_qualname_id(ProcedureRelationId,
+														 typForm->typsend));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	/* TYPMOD_IN */
+	if (OidIsValid(typForm->typmodin))
+	{
+		tmp = new_objtree_VA("TYPMOD_IN=%{procedure}D", 0);
+		append_object_object(tmp, "procedure",
+							 new_objtree_for_qualname_id(ProcedureRelationId,
+														 typForm->typmodin));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	/* TYPMOD_OUT */
+	if (OidIsValid(typForm->typmodout))
+	{
+		tmp = new_objtree_VA("TYPMOD_OUT=%{procedure}D", 0);
+		append_object_object(tmp, "procedure",
+							 new_objtree_for_qualname_id(ProcedureRelationId,
+														 typForm->typmodout));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	/* ANALYZE */
+	if (OidIsValid(typForm->typanalyze))
+	{
+		tmp = new_objtree_VA("ANALYZE=%{procedure}D", 0);
+		append_object_object(tmp, "procedure",
+							 new_objtree_for_qualname_id(ProcedureRelationId,
+														 typForm->typanalyze));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	/* INTERNALLENGTH */
+	tmp = new_objtree_VA("INTERNALLENGTH=%{typlen}s", 0);
+	if (typForm->typlen == -1)
+		append_string_object(tmp, "typlen", "VARIABLE");
+	else
+		append_string_object(tmp, "typlen",
+							 psprintf("%d", typForm->typlen));
+	list = lappend(list, new_object_object(NULL, tmp));
+
+	/* PASSEDBYVALUE */
+	if (typForm->typbyval)
+		list = lappend(list, new_object_object(NULL, new_objtree_VA("PASSEDBYVALUE", 0)));
+
+	/* ALIGNMENT */
+	tmp = new_objtree_VA("ALIGNMENT=%{align}s", 0);
+	switch (typForm->typalign)
+	{
+		case 'd':
+			str = "pg_catalog.float8";
+			break;
+		case 'i':
+			str = "pg_catalog.int4";
+			break;
+		case 's':
+			str = "pg_catalog.int2";
+			break;
+		case 'c':
+			str = "pg_catalog.bpchar";
+			break;
+		default:
+			elog(ERROR, "invalid alignment %c", typForm->typalign);
+	}
+	append_string_object(tmp, "align", str);
+	list = lappend(list, new_object_object(NULL, tmp));
+
+	tmp = new_objtree_VA("STORAGE=%{storage}s", 0);
+	switch (typForm->typstorage)
+	{
+		case 'p':
+			str = "plain";
+			break;
+		case 'e':
+			str = "external";
+			break;
+		case 'x':
+			str = "extended";
+			break;
+		case 'm':
+			str = "main";
+			break;
+		default:
+			elog(ERROR, "invalid storage specifier %c", typForm->typstorage);
+	}
+	append_string_object(tmp, "storage", str);
+	list = lappend(list, new_object_object(NULL, tmp));
+
+	/* CATEGORY */
+	tmp = new_objtree_VA("CATEGORY=%{category}L", 0);
+	append_string_object(tmp, "category",
+						 psprintf("%c", typForm->typcategory));
+	list = lappend(list, new_object_object(NULL, tmp));
+
+	/* PREFERRED */
+	if (typForm->typispreferred)
+		list = lappend(list, new_object_object(NULL, new_objtree_VA("PREFERRED=true", 0)));
+
+	/* DEFAULT */
+	dflt = SysCacheGetAttr(TYPEOID, typTup,
+						   Anum_pg_type_typdefault,
+						   &isnull);
+	if (!isnull)
+	{
+		tmp = new_objtree_VA("DEFAULT=%{default}L", 0);
+		append_string_object(tmp, "default", TextDatumGetCString(dflt));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	/* ELEMENT */
+	if (OidIsValid(typForm->typelem))
+	{
+		tmp = new_objtree_VA("ELEMENT=%{elem}T", 0);
+		append_object_object(tmp, "elem",
+							 new_objtree_for_type(typForm->typelem, -1));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+
+	/* DELIMITER */
+	tmp = new_objtree_VA("DELIMITER=%{delim}L", 0);
+	append_string_object(tmp, "delim",
+						 psprintf("%c", typForm->typdelim));
+	list = lappend(list, new_object_object(NULL, tmp));
+
+	/* COLLATABLE */
+	if (OidIsValid(typForm->typcollation))
+		list = lappend(list,
+					   new_object_object(NULL,
+										 new_objtree_VA("COLLATABLE=true", 0)));
+
+	append_array_object(stmt, "elems", list);
+
+	ReleaseSysCache(typTup);
+
+	return stmt;
+}
+
+static char *
+deparse_DefineStmt(Oid objectId, Node *parsetree)
+{
+	DefineStmt *define = (DefineStmt *) parsetree;
+	ObjTree	   *defStmt;
+	char	   *command;
+
+	switch (define->kind)
+	{
+		case OBJECT_AGGREGATE:
+			defStmt = deparse_DefineStmt_Aggregate(objectId, define);
+			break;
+
+		case OBJECT_COLLATION:
+			defStmt = deparse_DefineStmt_Collation(objectId, define);
+			break;
+
+		case OBJECT_OPERATOR:
+			defStmt = deparse_DefineStmt_Operator(objectId, define);
+			break;
+
+		case OBJECT_TSCONFIGURATION:
+			defStmt = deparse_DefineStmt_TSConfig(objectId, define);
+			break;
+
+		case OBJECT_TSPARSER:
+			defStmt = deparse_DefineStmt_TSParser(objectId, define);
+			break;
+
+		case OBJECT_TSDICTIONARY:
+			defStmt = deparse_DefineStmt_TSDictionary(objectId, define);
+			break;
+
+		case OBJECT_TSTEMPLATE:
+			defStmt = deparse_DefineStmt_TSTemplate(objectId, define);
+			break;
+
+		case OBJECT_TYPE:
+			defStmt = deparse_DefineStmt_Type(objectId, define);
+			break;
+
+		default:
+			elog(ERROR, "unsupported object kind");
+			return NULL;
+	}
+
+	command = jsonize_objtree(defStmt);
+	free_objtree(defStmt);
+
+	return command;
+}
+
 /*
  * deparse_CreateExtensionStmt
  *		deparse a CreateExtensionStmt
@@ -707,6 +1569,52 @@ deparse_CreateExtensionStmt(Oid objectId, Node *parsetree)
 
 	command = jsonize_objtree(extStmt);
 	free_objtree(extStmt);
+
+	return command;
+}
+
+static char *
+deparse_AlterExtensionStmt(Oid objectId, Node *parsetree)
+{
+	AlterExtensionStmt *node = (AlterExtensionStmt *) parsetree;
+	Relation    pg_extension;
+	HeapTuple   extTup;
+	Form_pg_extension extForm;
+	ObjTree	   *stmt;
+	char	   *command;
+	char	   *version = NULL;
+	ListCell   *cell;
+
+	pg_extension = heap_open(ExtensionRelationId, AccessShareLock);
+	extTup = get_catalog_object_by_oid(pg_extension, objectId);
+	if (!HeapTupleIsValid(extTup))
+		elog(ERROR, "cache lookup failed for extension with OID %u",
+			 objectId);
+	extForm = (Form_pg_extension) GETSTRUCT(extTup);
+
+	stmt = new_objtree_VA("ALTER EXTENSION %{identity}I UPDATE%{to}s", 1,
+						  "identity", ObjTypeString,
+						  NameStr(extForm->extname));
+
+	foreach(cell, node->options)
+	{
+		DefElem *opt = (DefElem *) lfirst(cell);
+
+		if (strcmp(opt->defname, "new_version") == 0)
+			version = defGetString(opt);
+		else
+			elog(ERROR, "unsupported option %s", opt->defname);
+	}
+
+	if (version)
+		append_string_object(stmt, "to", psprintf(" TO '%s'", version));
+	else
+		append_string_object(stmt, "to", "");
+
+	heap_close(pg_extension, AccessShareLock);
+
+	command = jsonize_objtree(stmt);
+	free_objtree(stmt);
 
 	return command;
 }
@@ -1570,7 +2478,6 @@ deparse_CreateEnumStmt(Oid objectId, Node *parsetree)
 static char *
 deparse_CreateRangeStmt(Oid objectId, Node *parsetree)
 {
-	/* CreateRangeStmt *node = (CreateRangeStmt *) parsetree; */
 	ObjTree	   *range;
 	ObjTree	   *tmp;
 	List	   *definition = NIL;
@@ -1598,8 +2505,7 @@ deparse_CreateRangeStmt(Oid objectId, Node *parsetree)
 
 	rangeForm = (Form_pg_range) GETSTRUCT(rangeTup);
 
-	range = new_objtree_VA("CREATE RANGE %{identity}D AS RANGE (%{definition:, }s",
-						   0);
+	range = new_objtree_VA("CREATE TYPE %{identity}D AS RANGE (%{definition:, }s)", 0);
 	tmp = new_objtree_for_qualname_id(TypeRelationId, objectId);
 	append_object_object(range, "identity", tmp);
 
@@ -1653,7 +2559,7 @@ deparse_CreateRangeStmt(Oid objectId, Node *parsetree)
 	{
 		tmp = new_objtree_for_qualname_id(ProcedureRelationId,
 										  rangeForm->rngsubdiff);
-		tmp = new_objtree_VA("SUBTYPE_DIFF = %{diff}D",
+		tmp = new_objtree_VA("SUBTYPE_DIFF = %{subtype_diff}D",
 							 2,
 							 "clause", ObjTypeString, "subtype_diff",
 							 "subtype_diff", ObjTypeObject, tmp);
@@ -2051,42 +2957,54 @@ stringify_objtype(ObjectType objtype)
 {
 	switch (objtype)
 	{
-		case OBJECT_TABLE:
-			return "TABLE";
-		case OBJECT_SEQUENCE:
-			return "SEQUENCE";
-		case OBJECT_VIEW:
-			return "VIEW";
-		case OBJECT_MATVIEW:
-			return "MATERIALIZED VIEW";
-		case OBJECT_INDEX:
-			return "INDEX";
-		case OBJECT_FOREIGN_TABLE:
-			return "FOREIGN TABLE";
-		case OBJECT_TYPE:
-			return "TYPE";
-		case OBJECT_SCHEMA:
-			return "SCHEMA";
-		case OBJECT_FDW:
-			return "FOREIGN DATA WRAPPER";
-		case OBJECT_LANGUAGE:
-			return "LANGUAGE";
-		case OBJECT_FOREIGN_SERVER:
-			return "SERVER";
+		case OBJECT_AGGREGATE:
+			return "AGGREGATE";
+		case OBJECT_DOMAIN:
+			return "DOMAIN";
 		case OBJECT_COLLATION:
 			return "COLLATION";
 		case OBJECT_CONVERSION:
 			return "CONVERSION";
-		case OBJECT_DOMAIN:
-			return "DOMAIN";
+		case OBJECT_FDW:
+			return "FOREIGN DATA WRAPPER";
+		case OBJECT_FOREIGN_SERVER:
+			return "SERVER";
+		case OBJECT_FOREIGN_TABLE:
+			return "FOREIGN TABLE";
+		case OBJECT_FUNCTION:
+			return "FUNCTION";
+		case OBJECT_INDEX:
+			return "INDEX";
+		case OBJECT_LANGUAGE:
+			return "LANGUAGE";
+		case OBJECT_LARGEOBJECT:
+			return "LARGE OBJECT";
+		case OBJECT_MATVIEW:
+			return "MATERIALIZED VIEW";
+		case OBJECT_OPERATOR:
+			return "OPERATOR";
+		case OBJECT_OPCLASS:
+			return "OPERATOR CLASS";
+		case OBJECT_OPFAMILY:
+			return "OPERATOR FAMILY";
+		case OBJECT_TABLE:
+			return "TABLE";
+		case OBJECT_TSCONFIGURATION:
+			return "TEXT SEARCH CONFIGURATION";
 		case OBJECT_TSDICTIONARY:
 			return "TEXT SEARCH DICTIONARY";
 		case OBJECT_TSPARSER:
 			return "TEXT SEARCH PARSER";
 		case OBJECT_TSTEMPLATE:
 			return "TEXT SEARCH TEMPLATE";
-		case OBJECT_TSCONFIGURATION:
-			return "TEXT SEARCH CONFIGURATION";
+		case OBJECT_TYPE:
+			return "TYPE";
+		case OBJECT_SCHEMA:
+			return "SCHEMA";
+		case OBJECT_SEQUENCE:
+			return "SEQUENCE";
+		case OBJECT_VIEW:
+			return "VIEW";
 
 		default:
 			elog(ERROR, "unsupported objtype %d", objtype);
@@ -2847,6 +3765,33 @@ deparse_AlterEnumStmt(Oid objectId, Node *parsetree)
 }
 
 static char *
+deparse_AlterOwnerStmt(Oid objectId, Node *parsetree)
+{
+	AlterOwnerStmt *node = (AlterOwnerStmt *) parsetree;
+	ObjTree	   *ownerStmt;
+	ObjectAddress addr;
+	char	   *fmt;
+	char	   *command;
+
+	fmt = psprintf("ALTER %s %%{identity}s OWNER TO %%{newname}I",
+				   stringify_objtype(node->objectType));
+	ownerStmt = new_objtree_VA(fmt, 0);
+	append_string_object(ownerStmt, "newname", node->newowner);
+
+	addr.classId = get_objtype_catalog_oid(node->objectType);
+	addr.objectId = objectId;
+	addr.objectSubId = 0;
+
+	append_string_object(ownerStmt, "identity",
+						 getObjectIdentity(&addr));
+
+	command = jsonize_objtree(ownerStmt);
+	free_objtree(ownerStmt);
+
+	return command;
+}
+
+static char *
 deparse_CreateConversion(Oid objectId, Node *parsetree)
 {
 	HeapTuple   conTup;
@@ -2923,6 +3868,203 @@ deparse_CreateOpFamily(Oid objectId, Node *parsetree)
 }
 
 static char *
+deparse_GrantStmt(StashedCommand *cmd)
+{
+	InternalGrant *istmt;
+	ObjTree	   *grantStmt;
+	char	   *command;
+	char	   *fmt;
+	char	   *objtype;
+	List	   *list;
+	ListCell   *cell;
+	Oid			classId;
+	ObjTree	   *tmp;
+
+	istmt = cmd->d.grant.istmt;
+
+	switch (istmt->objtype)
+	{
+		case ACL_OBJECT_COLUMN:
+		case ACL_OBJECT_RELATION:
+			objtype = "TABLE";
+			classId = RelationRelationId;
+			break;
+		case ACL_OBJECT_SEQUENCE:
+			objtype = "SEQUENCE";
+			classId = RelationRelationId;
+			break;
+		case ACL_OBJECT_DOMAIN:
+			objtype = "DOMAIN";
+			classId = TypeRelationId;
+			break;
+		case ACL_OBJECT_FDW:
+			objtype = "FOREIGN DATA WRAPPER";
+			classId = ForeignDataWrapperRelationId;
+			break;
+		case ACL_OBJECT_FOREIGN_SERVER:
+			objtype = "SERVER";
+			classId = ForeignServerRelationId;
+			break;
+		case ACL_OBJECT_FUNCTION:
+			objtype = "FUNCTION";
+			classId = ProcedureRelationId;
+			break;
+		case ACL_OBJECT_LANGUAGE:
+			objtype = "LANGUAGE";
+			classId = LanguageRelationId;
+			break;
+		case ACL_OBJECT_LARGEOBJECT:
+			objtype = "LARGE OBJECT";
+			classId = LargeObjectRelationId;
+			break;
+		case ACL_OBJECT_NAMESPACE:
+			objtype = "SCHEMA";
+			classId = NamespaceRelationId;
+			break;
+		case ACL_OBJECT_TYPE:
+			objtype = "TYPE";
+			classId = TypeRelationId;
+			break;
+		case ACL_OBJECT_DATABASE:
+		case ACL_OBJECT_TABLESPACE:
+			objtype = "";
+			classId = InvalidOid;
+			elog(ERROR, "global objects not supported");
+		default:
+			elog(ERROR, "invalid ACL_OBJECT value %d", istmt->objtype);
+	}
+
+	/* GRANT TO or REVOKE FROM */
+	fmt = psprintf("%s %%{privileges:, }s ON %s %%{privtarget:, }s %s "
+				   "%%{grantees:, }s %%{grant_option}s",
+				   istmt->is_grant ? "GRANT" : "REVOKE",
+				   objtype,
+				   istmt->is_grant ? "TO" : "FROM");
+	grantStmt = new_objtree_VA(fmt, 0);
+
+	/* build list of privileges to grant/revoke */
+	if (istmt->all_privs)
+	{
+		tmp = new_objtree_VA("ALL PRIVILEGES", 0);
+		list = list_make1(new_object_object(NULL, tmp));
+	}
+	else
+	{
+		list = NIL;
+
+		if (istmt->privileges & ACL_INSERT)
+			list = lappend(list, new_string_object(NULL, "INSERT"));
+		if (istmt->privileges & ACL_SELECT)
+			list = lappend(list, new_string_object(NULL, "SELECT"));
+		if (istmt->privileges & ACL_UPDATE)
+			list = lappend(list, new_string_object(NULL, "UPDATE"));
+		if (istmt->privileges & ACL_DELETE)
+			list = lappend(list, new_string_object(NULL, "DELETE"));
+		if (istmt->privileges & ACL_TRUNCATE)
+			list = lappend(list, new_string_object(NULL, "TRUNCATE"));
+		if (istmt->privileges & ACL_REFERENCES)
+			list = lappend(list, new_string_object(NULL, "REFERENCES"));
+		if (istmt->privileges & ACL_TRIGGER)
+			list = lappend(list, new_string_object(NULL, "TRIGGER"));
+		if (istmt->privileges & ACL_EXECUTE)
+			list = lappend(list, new_string_object(NULL, "EXECUTE"));
+		if (istmt->privileges & ACL_USAGE)
+			list = lappend(list, new_string_object(NULL, "USAGE"));
+		if (istmt->privileges & ACL_CREATE)
+			list = lappend(list, new_string_object(NULL, "CREATE"));
+		if (istmt->privileges & ACL_CREATE_TEMP)
+			list = lappend(list, new_string_object(NULL, "TEMPORARY"));
+		if (istmt->privileges & ACL_CONNECT)
+			list = lappend(list, new_string_object(NULL, "CONNECT"));
+
+		if (istmt->col_privs != NIL)
+		{
+			ListCell   *ocell;
+
+			foreach(ocell, istmt->col_privs)
+			{
+				AccessPriv *priv = lfirst(ocell);
+				List   *cols = NIL;
+
+				tmp = new_objtree_VA("%{priv}s (%{cols:, }I)", 0);
+				foreach(cell, priv->cols)
+				{
+					Value *colname = lfirst(cell);
+
+					cols = lappend(cols,
+								   new_string_object(NULL,
+													 strVal(colname)));
+				}
+				append_array_object(tmp, "cols", cols);
+				if (priv->priv_name == NULL)
+					append_string_object(tmp, "priv", "ALL PRIVILEGES");
+				else
+					append_string_object(tmp, "priv", priv->priv_name);
+
+				list = lappend(list, new_object_object(NULL, tmp));
+			}
+		}
+	}
+	append_array_object(grantStmt, "privileges", list);
+
+	/* target objects.  We use object identities here */
+	list = NIL;
+	foreach(cell, istmt->objects)
+	{
+		Oid		objid = lfirst_oid(cell);
+		ObjectAddress addr;
+
+		addr.classId = classId;
+		addr.objectId = objid;
+		addr.objectSubId = 0;
+
+		tmp = new_objtree_VA("%{identity}s", 0);
+		append_string_object(tmp, "identity",
+							 getObjectIdentity(&addr));
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+	append_array_object(grantStmt, "privtarget", list);
+
+	/* list of grantees */
+	list = NIL;
+	foreach(cell, istmt->grantees)
+	{
+		Oid		grantee = lfirst_oid(cell);
+
+		if (grantee == ACL_ID_PUBLIC)
+			tmp = new_objtree_VA("PUBLIC", 0);
+		else
+		{
+			HeapTuple	roltup;
+			char	   *rolname;
+
+			roltup = SearchSysCache1(AUTHOID, ObjectIdGetDatum(grantee));
+			if (!HeapTupleIsValid(roltup))
+				ereport(ERROR,
+						(errcode(ERRCODE_UNDEFINED_OBJECT),
+						 errmsg("role with OID %u does not exist", grantee)));
+
+			tmp = new_objtree_VA("%{name}I", 0);
+			rolname = NameStr(((Form_pg_authid) GETSTRUCT(roltup))->rolname);
+			append_string_object(tmp, "name", pstrdup(rolname));
+			ReleaseSysCache(roltup);
+		}
+		list = lappend(list, new_object_object(NULL, tmp));
+	}
+	append_array_object(grantStmt, "grantees", list);
+
+	append_string_object(grantStmt, "grant_option",
+						 istmt->grant_option ?  "WITH GRANT OPTION" : "");
+
+	command = jsonize_objtree(grantStmt);
+	free_objtree(grantStmt);
+
+	return command;
+}
+
+
+
+static char *
 deparse_AlterTableStmt(StashedCommand *cmd)
 {
 	ObjTree	   *alterTableStmt;
@@ -2934,9 +4076,9 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 	ListCell   *cell;
 	char	   *command;
 
-	rel = heap_open(cmd->objectId, AccessShareLock);
+	rel = heap_open(cmd->d.alterTable.objectId, AccessShareLock);
 	dpcontext = deparse_context_for(RelationGetRelationName(rel),
-									cmd->objectId);
+									cmd->d.alterTable.objectId);
 
 	alterTableStmt =
 		new_objtree_VA("ALTER TABLE %{identity}D %{subcmds:, }s", 0);
@@ -2944,7 +4086,7 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 								   RelationGetRelationName(rel));
 	append_object_object(alterTableStmt, "identity", tmp);
 
-	foreach(cell, cmd->subcmds)
+	foreach(cell, cmd->d.alterTable.subcmds)
 	{
 		StashedATSubcmd	*substashed = (StashedATSubcmd *) lfirst(cell);
 		AlterTableCmd	*subcmd = (AlterTableCmd *) substashed->parsetree;
@@ -3072,7 +4214,7 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 					idxname = RelationGetRelationName(idx);
 
 					constrOid = get_relation_constraint_oid(
-						cmd->objectId, idxname, false);
+						cmd->d.alterTable.objectId, idxname, false);
 
 					tmp = new_objtree_VA("ADD CONSTRAINT %{name}I %{definition}s",
 										 3, "type", ObjTypeString, "add constraint",
@@ -3312,47 +4454,27 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 	return command;
 }
 
-/*
- * Given a utility command parsetree and the OID of the corresponding object,
- * return a JSON representation of the command.
- *
- * The command is expanded fully, so that there are no ambiguities even in the
- * face of search_path changes.
- */
-char *
-deparse_utility_command(StashedCommand *cmd)
+static char *
+deparse_parsenode_cmd(StashedCommand *cmd)
 {
-	MemoryContext	oldcxt;
-	MemoryContext	tmpcxt;
-	OverrideSearchPath *overridePath;
+	Oid			objectId;
+	Node	   *parsetree;
 	char	   *command;
-	Oid			objectId = cmd->objectId;
-	Node	   *parsetree = cmd->parsetree;
 
-	/*
-	 * Allocate everything done by the deparsing routines into a temp context,
-	 * to avoid having to sprinkle them with memory handling code
-	 */
-	tmpcxt = AllocSetContextCreate(CurrentMemoryContext,
-								   "deparse ctx",
-								   ALLOCSET_DEFAULT_MINSIZE,
-								   ALLOCSET_DEFAULT_INITSIZE,
-								   ALLOCSET_DEFAULT_MAXSIZE);
-	oldcxt = MemoryContextSwitchTo(tmpcxt);
+	parsetree = cmd->parsetree;
 
-	/*
-	 * Many routines underlying this one will invoke ruleutils.c functionality
-	 * in order to obtain deparsed versions of expressions.  In such results,
-	 * we want all object names to be qualified, so that results are "portable"
-	 * to environments with different search_path settings.  Rather than inject
-	 * what would be repetitive calls to override search path all over the
-	 * place, we do it centrally here.
-	 */
-	overridePath = GetOverrideSearchPath(CurrentMemoryContext);
-	overridePath->schemas = NIL;
-	overridePath->addCatalog = false;
-	overridePath->addTemp = false;
-	PushOverrideSearchPath(overridePath);
+	switch (cmd->type)
+	{
+		case SCT_Basic:
+			objectId = cmd->d.basic.objectId;
+			break;
+		case SCT_AlterTable:
+			/* XXX needed? */
+			objectId = cmd->d.alterTable.objectId;
+			break;
+		default:
+			elog(ERROR, "unexpected deparse node type %d", cmd->type);
+	}
 
 	switch (nodeTag(parsetree))
 	{
@@ -3394,14 +4516,20 @@ deparse_utility_command(StashedCommand *cmd)
 		case T_CreateFdwStmt:
 		case T_CreateForeignServerStmt:
 		case T_CreateUserMappingStmt:
+			command = NULL;
+			break;
 
 			/* other local objects */
 		case T_DefineStmt:
-			command = NULL;
+			command = deparse_DefineStmt(objectId, parsetree);
 			break;
 
 		case T_CreateExtensionStmt:
 			command = deparse_CreateExtensionStmt(objectId, parsetree);
+			break;
+
+		case T_AlterExtensionStmt:
+			command = deparse_AlterExtensionStmt(objectId, parsetree);
 			break;
 
 		case T_CompositeTypeStmt:		/* CREATE TYPE (composite) */
@@ -3456,10 +4584,74 @@ deparse_utility_command(StashedCommand *cmd)
 			command = deparse_AlterEnumStmt(objectId, parsetree);
 			break;
 
+		case T_AlterOwnerStmt:
+			command = deparse_AlterOwnerStmt(objectId, parsetree);
+			break;
+
+		case T_GrantStmt:
+			elog(ERROR, "unexpected node type T_GrantStmt");
+			break;
+
 		default:
 			command = NULL;
 			elog(LOG, "unrecognized node type: %d",
 				 (int) nodeTag(parsetree));
+	}
+
+	return command;
+}
+
+/*
+ * Given a utility command parsetree and the OID of the corresponding object,
+ * return a JSON representation of the command.
+ *
+ * The command is expanded fully, so that there are no ambiguities even in the
+ * face of search_path changes.
+ */
+char *
+deparse_utility_command(StashedCommand *cmd)
+{
+	MemoryContext	oldcxt;
+	MemoryContext	tmpcxt;
+	OverrideSearchPath *overridePath;
+	char	   *command;
+
+	/*
+	 * Allocate everything done by the deparsing routines into a temp context,
+	 * to avoid having to sprinkle them with memory handling code
+	 */
+	tmpcxt = AllocSetContextCreate(CurrentMemoryContext,
+								   "deparse ctx",
+								   ALLOCSET_DEFAULT_MINSIZE,
+								   ALLOCSET_DEFAULT_INITSIZE,
+								   ALLOCSET_DEFAULT_MAXSIZE);
+	oldcxt = MemoryContextSwitchTo(tmpcxt);
+
+	/*
+	 * Many routines underlying this one will invoke ruleutils.c functionality
+	 * in order to obtain deparsed versions of expressions.  In such results,
+	 * we want all object names to be qualified, so that results are "portable"
+	 * to environments with different search_path settings.  Rather than inject
+	 * what would be repetitive calls to override search path all over the
+	 * place, we do it centrally here.
+	 */
+	overridePath = GetOverrideSearchPath(CurrentMemoryContext);
+	overridePath->schemas = NIL;
+	overridePath->addCatalog = false;
+	overridePath->addTemp = false;
+	PushOverrideSearchPath(overridePath);
+
+	switch (cmd->type)
+	{
+		case SCT_Basic:
+		case SCT_AlterTable:
+			command = deparse_parsenode_cmd(cmd);
+			break;
+		case SCT_Grant:
+			command = deparse_GrantStmt(cmd);
+			break;
+		default:
+			elog(ERROR, "unexpected deparse node type %d", cmd->type);
 	}
 
 	PopOverrideSearchPath();

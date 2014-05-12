@@ -262,6 +262,8 @@ check_ddl_tag(const char *tag)
 		pg_strcasecmp(tag, "ALTER DEFAULT PRIVILEGES") == 0 ||
 		pg_strcasecmp(tag, "ALTER LARGE OBJECT") == 0 ||
 		pg_strcasecmp(tag, "ALTER TABLESPACE MOVE") == 0 ||
+		pg_strcasecmp(tag, "GRANT") == 0 ||
+		pg_strcasecmp(tag, "REVOKE") == 0 ||
 		pg_strcasecmp(tag, "DROP OWNED") == 0)
 		return EVENT_TRIGGER_COMMAND_TAG_OK;
 
@@ -1377,11 +1379,12 @@ EventTriggerStashCommand(Oid objectId, ObjectType objtype, Node *parsetree)
 
 	stashed = palloc(sizeof(StashedCommand));
 
-	stashed->objectId = objectId;
-	stashed->objtype = objtype;
-	stashed->subcmds = NIL;
-	stashed->parsetree = copyObject(parsetree);
+	stashed->type = SCT_Basic;
 	stashed->in_extension = currentEventTriggerState->in_extension;
+
+	stashed->d.basic.objectId = objectId;
+	stashed->d.basic.objtype = objtype;
+	stashed->parsetree = copyObject(parsetree);
 
 	currentEventTriggerState->stash = lappend(currentEventTriggerState->stash,
 											  stashed);
@@ -1402,7 +1405,7 @@ EventTriggerStashCommand(Oid objectId, ObjectType objtype, Node *parsetree)
  * commands at this level?
  */
 void
-EventTriggerComplexCmdStart(Node *parsetree)
+EventTriggerComplexCmdStart(Node *parsetree, ObjectType objtype)
 {
 	MemoryContext	oldcxt;
 	StashedCommand *stashed;
@@ -1411,11 +1414,14 @@ EventTriggerComplexCmdStart(Node *parsetree)
 
 	stashed = palloc(sizeof(StashedCommand));
 
-	stashed->objtype = OBJECT_TABLE;	/* XXX fix this? */
-	stashed->objectId = InvalidOid;
-	stashed->subcmds = NIL;
-	stashed->parsetree = copyObject(parsetree);
+	stashed->type = SCT_AlterTable;
 	stashed->in_extension = currentEventTriggerState->in_extension;
+
+	stashed->d.alterTable.objectId = InvalidOid;
+	stashed->d.alterTable.objtype = objtype;
+	stashed->d.alterTable.subcmds = NIL;
+	/* XXX is it necessary to have the whole parsetree? probably not ... */
+	stashed->parsetree = copyObject(parsetree);
 
 	currentEventTriggerState->curcmd = stashed;
 
@@ -1438,7 +1444,7 @@ EventTriggerStashExtensionStop(void)
 void
 EventTriggerComplexCmdSetOid(Oid objectId)
 {
-	currentEventTriggerState->curcmd->objectId = objectId;
+	currentEventTriggerState->curcmd->d.alterTable.objectId = objectId;
 }
 
 /*
@@ -1450,13 +1456,24 @@ EventTriggerComplexCmdSetOid(Oid objectId)
  * actually parsed as ALTER TABLE, so there is no difference at this level.)
  */
 void
-EventTriggerRecordSubcmd(Node *subcmd, AttrNumber attnum, Oid newoid)
+EventTriggerRecordSubcmd(Node *subcmd, Oid relid, AttrNumber attnum,
+						 Oid newoid)
 {
 	MemoryContext	oldcxt;
 	StashedATSubcmd *newsub;
 
 	Assert(IsA(subcmd, AlterTableCmd));
-	Assert(OidIsValid(currentEventTriggerState->curcmd->objectId));
+	Assert(OidIsValid(currentEventTriggerState->curcmd->d.alterTable.objectId));
+
+	/*
+	 * If we receive a subcommand intended for a relation other than the one
+	 * we've started the complex command for, ignore it.  This is chiefly
+	 * concerned with inheritance situations: in such cases, alter table
+	 * would dispatch multiple copies of the same command for various things,
+	 * but we're only concerned with the one for the main table.
+	 */
+	if (relid != currentEventTriggerState->curcmd->d.alterTable.objectId)
+		return;
 
 	oldcxt = MemoryContextSwitchTo(currentEventTriggerState->cxt);
 
@@ -1465,8 +1482,8 @@ EventTriggerRecordSubcmd(Node *subcmd, AttrNumber attnum, Oid newoid)
 	newsub->oid = newoid;
 	newsub->parsetree = copyObject(subcmd);
 
-	currentEventTriggerState->curcmd->subcmds =
-		lappend(currentEventTriggerState->curcmd->subcmds, newsub);
+	currentEventTriggerState->curcmd->d.alterTable.subcmds =
+		lappend(currentEventTriggerState->curcmd->d.alterTable.subcmds, newsub);
 
 	MemoryContextSwitchTo(oldcxt);
 }
@@ -1482,13 +1499,60 @@ EventTriggerRecordSubcmd(Node *subcmd, AttrNumber attnum, Oid newoid)
 void
 EventTriggerComplexCmdEnd(void)
 {
-	currentEventTriggerState->stash =
-		lappend(currentEventTriggerState->stash,
-				currentEventTriggerState->curcmd);
+	/* If no subcommands, don't stash anything */
+	if (list_length(currentEventTriggerState->curcmd->d.alterTable.subcmds) != 0)
+	{
+		currentEventTriggerState->stash =
+			lappend(currentEventTriggerState->stash,
+					currentEventTriggerState->curcmd);
+	}
+	else
+		pfree(currentEventTriggerState->curcmd);
 
 	currentEventTriggerState->curcmd = NULL;
 }
 
+/*
+ * EventTriggerStashGrant
+ * 		Save data about a GRANT/REVOKE command being executed
+ *
+ * This function creates a copy of the InternalGrant, as the original might
+ * not have the right lifetime.
+ */
+void
+EventTriggerStashGrant(InternalGrant *istmt)
+{
+	MemoryContext oldcxt;
+	StashedCommand *stashed;
+	InternalGrant  *icopy;
+	ListCell	   *cell;
+
+	oldcxt = MemoryContextSwitchTo(currentEventTriggerState->cxt);
+
+	/*
+	 * copying the node is moderately challenging ... XXX should we consider
+	 * changing InternalGrant into a full-fledged node instead?
+	 */
+	icopy = palloc(sizeof(InternalGrant));
+	memcpy(icopy, istmt, sizeof(InternalGrant));
+	icopy->objects = list_copy(istmt->objects);
+	icopy->grantees = list_copy(istmt->grantees);
+	icopy->col_privs = NIL;
+	foreach(cell, istmt->col_privs)
+		icopy->col_privs = lappend(icopy->col_privs, copyObject(lfirst(cell)));
+
+	stashed = palloc(sizeof(StashedCommand));
+	stashed->type = SCT_Grant;
+	stashed->in_extension = currentEventTriggerState->in_extension;
+
+	stashed->d.grant.istmt = icopy;
+	stashed->parsetree = NULL;
+
+	currentEventTriggerState->stash = lappend(currentEventTriggerState->stash,
+											  stashed);
+
+	MemoryContextSwitchTo(oldcxt);
+}
 
 Datum
 pg_event_trigger_get_creation_commands(PG_FUNCTION_ARGS)
@@ -1549,7 +1613,8 @@ pg_event_trigger_get_creation_commands(PG_FUNCTION_ARGS)
 		 * might be different from the one that created the object in the first
 		 * place, we might not end up in a consistent state anyway.
 		 */
-		if (!OidIsValid(cmd->objectId))
+		if (cmd->type == SCT_Basic &&
+			!OidIsValid(cmd->d.basic.objectId))
 			continue;
 
 		command = deparse_utility_command(cmd);
@@ -1563,77 +1628,119 @@ pg_event_trigger_get_creation_commands(PG_FUNCTION_ARGS)
 			Datum		values[9];
 			bool		nulls[9];
 			ObjectAddress addr;
-			const char *tag;
-			char	   *identity;
-			char	   *type;
-			char	   *schema = NULL;
 			int			i = 0;
-
-			addr.classId = get_objtype_catalog_oid(cmd->objtype);
-			addr.objectId = cmd->objectId;
-			addr.objectSubId = 0;
-			type = getObjectTypeDescription(&addr);
-			identity = getObjectIdentity(&addr);
-			tag = CreateCommandTag(cmd->parsetree);
-
-			/*
-			 * Obtain schema name, if any ("pg_temp" if a temp object)
-			 */
-			if (is_objectclass_supported(addr.classId))
-			{
-				AttrNumber	nspAttnum;
-
-				nspAttnum = get_object_attnum_namespace(addr.classId);
-				if (nspAttnum != InvalidAttrNumber)
-				{
-					Relation	catalog;
-					HeapTuple	objtup;
-					Oid			schema_oid;
-					bool		isnull;
-
-					catalog = heap_open(addr.classId, AccessShareLock);
-					objtup = get_catalog_object_by_oid(catalog,
-													   addr.objectId);
-					if (!HeapTupleIsValid(objtup))
-						elog(ERROR, "cache lookup failed for object %u/%u",
-							 addr.classId, addr.objectId);
-					schema_oid = heap_getattr(objtup, nspAttnum,
-											  RelationGetDescr(catalog), &isnull);
-					if (isnull)
-						elog(ERROR, "invalid null namespace in object %u/%u/%d",
-							 addr.classId, addr.objectId, addr.objectSubId);
-					if (isAnyTempNamespace(schema_oid))
-						schema = pstrdup("pg_temp");
-					else
-						schema = get_namespace_name(schema_oid);
-
-					heap_close(catalog, AccessShareLock);
-				}
-			}
 
 			MemSet(nulls, 0, sizeof(nulls));
 
-			/* classid */
-			values[i++] = ObjectIdGetDatum(addr.classId);
-			/* objid */
-			values[i++] = ObjectIdGetDatum(addr.objectId);
-			/* objsubid */
-			values[i++] = Int32GetDatum(addr.objectSubId);
-			/* command tag */
-			values[i++] = CStringGetTextDatum(tag);
-			/* object_type */
-			values[i++] = CStringGetTextDatum(type);
-			/* schema */
-			if (schema == NULL)
-				nulls[i++] = true;
+			if (cmd->type == SCT_Basic ||
+				cmd->type == SCT_AlterTable)
+			{
+				Oid			classId;
+				Oid			objId;
+				const char *tag;
+				char	   *identity;
+				char	   *type;
+				char	   *schema = NULL;
+
+				if (cmd->type == SCT_Basic)
+				{
+					classId = get_objtype_catalog_oid(cmd->d.basic.objtype);
+					objId = cmd->d.basic.objectId;
+				}
+				else if (cmd->type == SCT_AlterTable)
+				{
+					classId = get_objtype_catalog_oid(cmd->d.alterTable.objtype);
+					objId = cmd->d.alterTable.objectId;
+				}
+
+				tag = CreateCommandTag(cmd->parsetree);
+				addr.classId = classId;
+				addr.objectId = objId;
+				addr.objectSubId = 0;
+
+				type = getObjectTypeDescription(&addr);
+				identity = getObjectIdentity(&addr);
+
+				/*
+				 * Obtain schema name, if any ("pg_temp" if a temp object)
+				 */
+				if (is_objectclass_supported(addr.classId))
+				{
+					AttrNumber	nspAttnum;
+
+					nspAttnum = get_object_attnum_namespace(addr.classId);
+					if (nspAttnum != InvalidAttrNumber)
+					{
+						Relation	catalog;
+						HeapTuple	objtup;
+						Oid			schema_oid;
+						bool		isnull;
+
+						catalog = heap_open(addr.classId, AccessShareLock);
+						objtup = get_catalog_object_by_oid(catalog,
+														   addr.objectId);
+						if (!HeapTupleIsValid(objtup))
+							elog(ERROR, "cache lookup failed for object %u/%u",
+								 addr.classId, addr.objectId);
+						schema_oid = heap_getattr(objtup, nspAttnum,
+												  RelationGetDescr(catalog), &isnull);
+						if (isnull)
+							elog(ERROR, "invalid null namespace in object %u/%u/%d",
+								 addr.classId, addr.objectId, addr.objectSubId);
+						if (isAnyTempNamespace(schema_oid))
+							schema = pstrdup("pg_temp");
+						else
+							schema = get_namespace_name(schema_oid);
+
+						heap_close(catalog, AccessShareLock);
+					}
+				}
+
+				/* classid */
+				values[i++] = ObjectIdGetDatum(addr.classId);
+				/* objid */
+				values[i++] = ObjectIdGetDatum(addr.objectId);
+				/* objsubid */
+				values[i++] = Int32GetDatum(addr.objectSubId);
+				/* command tag */
+				values[i++] = CStringGetTextDatum(tag);
+				/* object_type */
+				values[i++] = CStringGetTextDatum(type);
+				/* schema */
+				if (schema == NULL)
+					nulls[i++] = true;
+				else
+					values[i++] = CStringGetTextDatum(schema);
+				/* identity */
+				values[i++] = CStringGetTextDatum(identity);
+				/* in_extension */
+				values[i++] = BoolGetDatum(cmd->in_extension);
+				/* command */
+				values[i++] = CStringGetTextDatum(command);
+			}
 			else
-				values[i++] = CStringGetTextDatum(schema);
-			/* identity */
-			values[i++] = CStringGetTextDatum(identity);
-			/* in_extension */
-			values[i++] = BoolGetDatum(cmd->in_extension);
-			/* command */
-			values[i++] = CStringGetTextDatum(command);
+			{
+				Assert(cmd->type == SCT_Grant);
+
+				/* classid */
+				nulls[i++] = true;
+				/* objid */
+				nulls[i++] = true;
+				/* objsubid */
+				nulls[i++] = true;
+				/* command tag */
+				values[i++] = CStringGetTextDatum("GRANT");	/* XXX maybe REVOKE or something else */
+				/* object_type */
+				values[i++] = CStringGetTextDatum("TABLE"); /* XXX maybe something else */
+				/* schema */
+				nulls[i++] = true;
+				/* identity */
+				nulls[i++] = true;
+				/* in_extension */
+				values[i++] = BoolGetDatum(cmd->in_extension);
+				/* command */
+				values[i++] = CStringGetTextDatum(command);
+			}
 
 			tuplestore_putvalues(tupstore, tupdesc, values, nulls);
 		}
@@ -2024,6 +2131,14 @@ expand_jsonval_strlit(StringInfo buf, Datum jsonval)
 	str = TextDatumGetCString(jsonval);
 	unquoted = dequote_jsonval(str);
 
+	/* easy case: if there are no ' and no \, just use a single quote */
+	if (strchr(unquoted, '\'') == NULL &&
+		strchr(unquoted, '\\') == NULL)
+	{
+		appendStringInfo(buf, "'%s'", unquoted);
+		return;
+	}
+
 	/* Find a useful dollar-quote delimiter */
 	initStringInfo(&dqdelim);
 	appendStringInfoString(&dqdelim, "$");
@@ -2037,10 +2152,6 @@ expand_jsonval_strlit(StringInfo buf, Datum jsonval)
 
 	/* And finally produce the quoted literal into the output StringInfo */
 	appendStringInfo(buf, "%s%s%s", dqdelim.data, unquoted, dqdelim.data);
-
-	pfree(str);
-	pfree(unquoted);
-	pfree(dqdelim.data);
 }
 
 /*
