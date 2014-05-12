@@ -3927,11 +3927,15 @@ deparse_GrantStmt(StashedCommand *cmd)
 	}
 
 	/* GRANT TO or REVOKE FROM */
-	fmt = psprintf("%s %%{privileges:, }s ON %s %%{privtarget:, }s %s "
-				   "%%{grantees:, }s %%{grant_option}s",
-				   istmt->is_grant ? "GRANT" : "REVOKE",
-				   objtype,
-				   istmt->is_grant ? "TO" : "FROM");
+	if (istmt->is_grant)
+		fmt = psprintf("GRANT %%{privileges:, }s ON %s %%{privtarget:, }s "
+					   "TO %%{grantees:, }s %%{grant_option}s",
+					   objtype);
+	else
+		fmt = psprintf("REVOKE %%{grant_option}s %%{privileges:, }s ON %s %%{privtarget:, }s "
+					   "FROM %%{grantees:, }s %%{cascade}s",
+					   objtype);
+
 	grantStmt = new_objtree_VA(fmt, 0);
 
 	/* build list of privileges to grant/revoke */
@@ -4045,16 +4049,27 @@ deparse_GrantStmt(StashedCommand *cmd)
 	}
 	append_array_object(grantStmt, "grantees", list);
 
-	append_string_object(grantStmt, "grant_option",
-						 istmt->grant_option ?  "WITH GRANT OPTION" : "");
+	/* the wording of the grant option is variable ... */
+	if (istmt->is_grant)
+		append_string_object(grantStmt, "grant_option",
+							 istmt->grant_option ?  "WITH GRANT OPTION" : "");
+	else
+		append_string_object(grantStmt, "grant_option",
+							 istmt->grant_option ?  "GRANT OPTION FOR" : "");
+
+	if (!istmt->is_grant)
+	{
+	   	if (istmt->behavior == DROP_CASCADE)
+			append_string_object(grantStmt, "cascade", "CASCADE");
+		else
+			append_string_object(grantStmt, "cascade", "");
+	}
 
 	command = jsonize_objtree(grantStmt);
 	free_objtree(grantStmt);
 
 	return command;
 }
-
-
 
 static char *
 deparse_AlterTableStmt(StashedCommand *cmd)
