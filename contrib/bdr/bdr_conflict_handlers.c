@@ -55,8 +55,8 @@ const char *drop_handler_get_tbl_oid_sql =
 "SELECT oid FROM bdr.bdr_conflict_handlers WHERE ch_name = $1 AND ch_reloid = $2";
 
 const char *handler_queued_table_sql =
-"INSERT INTO bdr.bdr_queued_commands (obj_type, lsn, queued_at, obj_identity, command, executed)\n" \
-"   VALUES ('table', pg_current_xlog_location(), NOW(), $1, $2, false)";
+"INSERT INTO bdr.bdr_queued_commands (lsn, queued_at, command_tag, command, executed)\n" \
+"   VALUES (pg_current_xlog_location(), NOW(), 'SELECT', $1, false)";
 
 const char *get_conflict_handlers_for_table_sql =
 "SELECT ch_fun, ch_type::text ch_type, ch_timeframe FROM bdr.bdr_conflict_handlers" \
@@ -320,13 +320,9 @@ bdr_create_conflict_handler(PG_FUNCTION_ARGS)
 
 		argtypes[0] = TEXTOID;
 		nulls[0] = false;
-		values[0] = CStringGetTextDatum(buf.data);
+		values[0] = CStringGetTextDatum(query.data);
 
-		argtypes[1] = TEXTOID;
-		nulls[1] = false;
-		values[1] = CStringGetTextDatum(query.data);
-
-		ret = SPI_execute_with_args(handler_queued_table_sql, 2, argtypes,
+		ret = SPI_execute_with_args(handler_queued_table_sql, 1, argtypes,
 									values, nulls, false, 0);
 
 		if (ret != SPI_OK_INSERT)
@@ -451,13 +447,9 @@ bdr_drop_conflict_handler(PG_FUNCTION_ARGS)
 
 		argtypes[0] = TEXTOID;
 		nulls[0] = false;
-		values[0] = CStringGetTextDatum("bdr.bdr_conflict_handlers");
+		values[0] = CStringGetTextDatum(query.data);
 
-		argtypes[1] = TEXTOID;
-		nulls[1] = false;
-		values[1] = CStringGetTextDatum(query.data);
-
-		ret = SPI_execute_with_args(handler_queued_table_sql, 2, argtypes,
+		ret = SPI_execute_with_args(handler_queued_table_sql, 1, argtypes,
 									values, nulls, false, 0);
 
 		if (ret != SPI_OK_INSERT)
