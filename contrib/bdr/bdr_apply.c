@@ -153,7 +153,7 @@ process_remote_begin(StringInfo s)
 
 	snprintf(statbuf, sizeof(statbuf),
 			"bdr_apply: BEGIN origin(source, orig_lsn, timestamp): %s, %X/%X, %s",
-			 NameStr(bdr_apply_config->name),
+			 bdr_apply_config->name,
 			(uint32) (origlsn >> 32), (uint32) origlsn,
 			timestamptz_to_str(committime));
 
@@ -275,7 +275,7 @@ process_remote_commit(StringInfo s)
 	{
 		ereport(LOG,
 				(errmsg("bdr apply %s finished processing; replayed to %X/%X of required %X/%X",
-				 NameStr(bdr_apply_config->name),
+				 bdr_apply_config->name,
 				 (uint32)(end_lsn>>32), (uint32)end_lsn,
 				 (uint32)(bdr_apply_worker->replay_stop_lsn>>32), (uint32)bdr_apply_worker->replay_stop_lsn)));
 		/*
