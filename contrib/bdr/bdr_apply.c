@@ -870,7 +870,7 @@ check_apply_update(RepNodeId local_node_id, TimestampTz local_ts,
 
 			*new_tuple = bdr_conflict_handlers_resolve(rel, local_tuple,
 													   remote_tuple, "UPDATE",
-													   BDRUpdateUpdateConflictHandler,
+													   BdrConflictType_UpdateUpdate,
 													   abs(secs) * 1000000 + abs(microsecs),
 													   &skip);
 
