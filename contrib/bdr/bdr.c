@@ -526,13 +526,13 @@ bdr_apply_main(Datum main_arg)
 	bdr_apply_config = bdr_connection_configs[bdr_apply_worker->connection_config_idx];
 	Assert(bdr_apply_config != NULL);
 
-	bdr_worker_init(NameStr(bdr_apply_config->dbname));
+	bdr_worker_init(bdr_apply_config->dbname);
 
 	CurrentResourceOwner = ResourceOwnerCreate(NULL, "bdr apply top-level resource owner");
 	bdr_saved_resowner = CurrentResourceOwner;
 
 	elog(DEBUG1, "%s initialized on %s",
-		 MyBgworkerEntry->bgw_name, NameStr(bdr_apply_config->dbname));
+		 MyBgworkerEntry->bgw_name, bdr_apply_config->dbname);
 
 	streamConn = bdr_establish_connection_and_slot(
 		bdr_apply_config, &slot_name, &origin_sysid,
@@ -784,8 +784,7 @@ bdr_create_con_gucs(char  *name,
 	opts->is_valid = false;
 	*out_config = opts;
 
-	strncpy(NameStr(opts->name), name, NAMEDATALEN);
-	NameStr(opts->name)[NAMEDATALEN-1] = '\0';
+	opts->name = pstrdup(name);
 
 	sprintf(optname_dsn, "bdr.%s_dsn", name);
 	DefineCustomStringVariable(optname_dsn,
@@ -854,10 +853,8 @@ bdr_create_con_gucs(char  *name,
 						(errcode(ERRCODE_CONFIG_FILE_ERROR),
 						 errmsg("bdr %s: no dbname set", name)));
 
-			strncpy(NameStr(opts->dbname), cur_option->val,
-					NAMEDATALEN);
-			NameStr(opts->dbname)[NAMEDATALEN-1] = '\0';
-			elog(DEBUG2, "bdr %s: dbname=%s", name, NameStr(opts->dbname));
+			opts->dbname = pstrdup(cur_option->val);
+			elog(DEBUG2, "bdr %s: dbname=%s", name, opts->dbname);
 		}
 
 		if (cur_option->val != NULL)
@@ -877,7 +874,7 @@ bdr_create_con_gucs(char  *name,
 	 */
 	for (off = 0; off < *num_used_databases; off++)
 	{
-		if (strcmp(NameStr(opts->dbname), used_databases[off]) == 0)
+		if (strcmp(opts->dbname, used_databases[off]) == 0)
 			break;
 	}
 
@@ -885,9 +882,9 @@ bdr_create_con_gucs(char  *name,
 	{
 		/* Didn't find a match, add new db name */
 		used_databases[(*num_used_databases)++] =
-			pstrdup(NameStr(opts->dbname));
+			pstrdup(opts->dbname);
 		elog(DEBUG2, "bdr %s: Saw new database %s, now %i known dbs",
-			 name, NameStr(opts->dbname), (int)(*num_used_databases));
+			 name, opts->dbname, (int)(*num_used_databases));
 	}
 
 	/*
@@ -952,7 +949,7 @@ bdr_launch_apply_workers(char *dbname)
 					BdrConnectionConfig *cfg =
 						bdr_connection_configs[con->connection_config_idx];
 					Assert(cfg != NULL);
-					if ( strcmp(NameStr(cfg->dbname), dbname) == 0 )
+					if ( strcmp(cfg->dbname, dbname) == 0 )
 					{
 						/* It's an apply worker for our DB; register it */
 						BackgroundWorkerHandle *bgw_handle;
@@ -966,7 +963,7 @@ bdr_launch_apply_workers(char *dbname)
 							continue;
 
 						snprintf(apply_worker.bgw_name, BGW_MAXLEN,
-								 "bdr apply: %s", NameStr(cfg->name));
+								 "bdr apply: %s", cfg->name);
 						apply_worker.bgw_main_arg = Int32GetDatum(i);
 
 						if (!RegisterDynamicBackgroundWorker(&apply_worker,
@@ -975,7 +972,7 @@ bdr_launch_apply_workers(char *dbname)
 							ereport(ERROR,
 									(errmsg("bdr: Failed to register background worker"
 											" %s, see previous log messages",
-											NameStr(cfg->name))));
+											cfg->name)));
 						}
 						/* We've launched this one, don't do it again */
 						con->bgw_is_registered = true;
