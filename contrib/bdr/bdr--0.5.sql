@@ -309,7 +309,7 @@ COMMENT ON COLUMN bdr_conflict_history.error_message IS 'On apply error, the err
 -- who knows why we'd want to) so the PK should be the (dbname, sysid) tuple.
 --
 CREATE TABLE bdr_nodes (
-    node_sysid numeric,
+    node_sysid numeric not null,
     node_dbname name not null,
     node_status "char" not null,
     primary key(node_sysid, node_dbname),
