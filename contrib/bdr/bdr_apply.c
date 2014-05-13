@@ -671,8 +671,6 @@ process_remote_update(StringInfo s)
 		 * been applied to the local node.
 		 */
 
-		long secs;
-		int microsecs;
 		bool skip = false;
 
 		remote_tuple = heap_form_tuple(RelationGetDescr(rel->rel),
@@ -681,14 +679,10 @@ process_remote_update(StringInfo s)
 
 		ExecStoreTuple(remote_tuple, newslot, InvalidBuffer, true);
 
-		TimestampDifference(replication_origin_timestamp, GetCurrentTimestamp(),
-							&secs, &microsecs);
-
 		user_tuple = bdr_conflict_handlers_resolve(rel, NULL,
 												   remote_tuple, "UPDATE",
 												   BdrConflictType_UpdateDelete,
-												   abs(secs) * 1000000 + abs(microsecs),
-												   &skip);
+												   0, &skip);
 
 		initStringInfo(&o);
 		tuple_to_stringinfo(&o, RelationGetDescr(rel->rel),
