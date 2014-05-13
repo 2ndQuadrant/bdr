@@ -146,6 +146,9 @@ bdr_conflict_type_get_datum(BdrConflictType conflict_type)
 		case BdrConflictType_InsertInsert:
 			enumname = "insert_insert";
 			break;
+		case BdrConflictType_InsertUpdate:
+			enumname = "insert_update";
+			break;
 		case BdrConflictType_UpdateUpdate:
 			enumname = "update_update";
 			break;
