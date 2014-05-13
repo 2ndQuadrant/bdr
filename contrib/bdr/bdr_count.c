@@ -301,7 +301,8 @@ pg_stat_get_bdr(PG_FUNCTION_ARGS)
 
 	if (!superuser())
 		ereport(ERROR,
-				(errmsg("Access to pg_stat_get_bdr() denied as non-superuser")));
+				(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+				 errmsg("Access to pg_stat_get_bdr() denied as non-superuser")));
 
 	if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo))
 		ereport(ERROR,
