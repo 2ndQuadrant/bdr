@@ -777,6 +777,7 @@ bdr_create_con_gucs(char  *name,
 	char	   *optname_delay = palloc(strlen(name) + 30);
 	char	   *optname_replica = palloc(strlen(name) + 30);
 	char	   *optname_local_dsn = palloc(strlen(name) + 30);
+	char	   *optname_local_dbname = palloc(strlen(name) + 30);
 
 	Assert(process_shared_preload_libraries_in_progress);
 
@@ -824,6 +825,16 @@ bdr_create_con_gucs(char  *name,
 							   GUC_NOT_IN_SAMPLE,
 							   NULL, NULL, NULL);
 
+	sprintf(optname_local_dbname, "bdr.%s_local_dbname", name);
+	DefineCustomStringVariable(optname_local_dbname,
+							   optname_local_dbname,
+							   NULL,
+							   &opts->dbname,
+							   NULL, PGC_POSTMASTER,
+							   GUC_NOT_IN_SAMPLE,
+							   NULL, NULL, NULL);
+
+
 	if (!opts->dsn)
 	{
 		elog(WARNING, "bdr %s: no connection information", name);
@@ -843,26 +854,29 @@ bdr_create_con_gucs(char  *name,
 				 errmsg("bdr %s: error in dsn: %s", name, str)));
 	}
 
-	cur_option = options;
-	while (cur_option->keyword != NULL)
+	if (opts->dbname == NULL)
 	{
-		if (strcmp(cur_option->keyword, "dbname") == 0)
+		cur_option = options;
+		while (cur_option->keyword != NULL)
 		{
-			if (cur_option->val == NULL)
-				ereport(ERROR,
-						(errcode(ERRCODE_CONFIG_FILE_ERROR),
-						 errmsg("bdr %s: no dbname set", name)));
+			if (strcmp(cur_option->keyword, "dbname") == 0)
+			{
+				if (cur_option->val == NULL)
+					ereport(ERROR,
+							(errcode(ERRCODE_CONFIG_FILE_ERROR),
+							 errmsg("bdr %s: no dbname set", name)));
 
-			opts->dbname = pstrdup(cur_option->val);
-			elog(DEBUG2, "bdr %s: dbname=%s", name, opts->dbname);
-		}
+				opts->dbname = pstrdup(cur_option->val);
+				elog(DEBUG2, "bdr %s: dbname=%s", name, opts->dbname);
+			}
 
-		if (cur_option->val != NULL)
-		{
-			elog(DEBUG3, "bdr %s: opt %s, val: %s",
-				 name, cur_option->keyword, cur_option->val);
+			if (cur_option->val != NULL)
+			{
+				elog(DEBUG3, "bdr %s: opt %s, val: %s",
+					 name, cur_option->keyword, cur_option->val);
+			}
+			cur_option++;
 		}
-		cur_option++;
 	}
 
 	/* cleanup */
