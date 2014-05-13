@@ -43,14 +43,6 @@ typedef enum BdrOutputCommitFlags
 	BDR_OUTPUT_COMMIT_HAS_ORIGIN = 1
 } BdrOutputCommitFlags;
 
-typedef enum BDRConflictHandlerType
-{
-	BDRUpdateUpdateConflictHandler,
-	BDRUpdateDeleteConflictHandler,
-	BDRInsertInsertConflictHandler,
-	BDRInsertUpdateConflictHandler
-}	BDRConflictHandlerType;
-
 /*
  * BDR conflict detection: type of conflict that was identified.
  *
@@ -60,6 +52,7 @@ typedef enum BDRConflictHandlerType
 typedef enum BdrConflictType
 {
 	BdrConflictType_InsertInsert,
+	BdrConflictType_InsertUpdate,
 	BdrConflictType_UpdateUpdate,
 	BdrConflictType_UpdateDelete,
 	BdrConflictType_UnhandledTxAbort
@@ -83,7 +76,7 @@ typedef enum BdrConflictResolution
 typedef struct BDRConflictHandler
 {
 	Oid			handler_oid;
-	BDRConflictHandlerType handler_type;
+	BdrConflictType handler_type;
 	uint64		timeframe;
 }	BDRConflictHandler;
 
@@ -342,7 +335,7 @@ extern void bdr_conflict_handlers_init(void);
 
 extern HeapTuple bdr_conflict_handlers_resolve(BDRRelation * rel, const HeapTuple local,
 							  const HeapTuple remote, const char *command_tag,
-							  BDRConflictHandlerType event_type,
+							  BdrConflictType event_type,
 							  uint64 timeframe, bool *skip);
 
 #endif   /* BDR_H */

@@ -64,7 +64,7 @@ const char *get_conflict_handlers_for_table_sql =
 
 static void bdr_conflict_handlers_check_handler_fun(Relation rel, Oid proc_oid);
 static void bdr_conflict_handlers_check_access(Oid reloid);
-static const char *bdr_conflict_handlers_event_type_name(BDRConflictHandlerType event_type);
+static const char *bdr_conflict_handlers_event_type_name(BdrConflictType event_type);
 
 static Oid	bdr_conflict_handler_table_oid = InvalidOid;
 static Oid	bdr_conflict_handler_type_oid = InvalidOid;
@@ -107,7 +107,7 @@ bdr_conflict_handlers_init(void)
 		elog(ERROR, "cache lookup failed for relation bdr.bdr_conflict_handlers");
 
 	bdr_conflict_handler_type_oid =
-		GetSysCacheOidError2(TYPENAMENSP, PointerGetDatum("bdr_handler_types"),
+		GetSysCacheOidError2(TYPENAMENSP, PointerGetDatum("bdr_conflict_type"),
 							 ObjectIdGetDatum(schema_oid));
 
 	bdr_conflict_handler_action_oid =
@@ -532,7 +532,7 @@ bdr_conflict_handlers_check_handler_fun(Relation rel, Oid proc_oid)
 	if (failed)
 		ereport(ERROR,
 				(errmsg("handler function is expected to accept " \
-		"tablerow IN, tablerow IN, text IN, text IN, bdr_handler_types IN," \
+		"tablerow IN, tablerow IN, text IN, text IN, bdr_conflict_type IN," \
 						"tablerow OUT, bdr_conflict_handler_action OUT")));
 }
 
@@ -616,14 +616,14 @@ bdr_get_conflict_handlers(BDRRelation * rel)
 
 			htype = TextDatumGetCString(dat);
 
-			if (strcmp(htype, "UPDATE_VS_UPDATE") == 0)
-				rel->conflict_handlers[i].handler_type = BDRUpdateUpdateConflictHandler;
-			else if (strcmp(htype, "UPDATE_VS_DELETE") == 0)
-				rel->conflict_handlers[i].handler_type = BDRUpdateDeleteConflictHandler;
-			else if (strcmp(htype, "INSERT_VS_INSERT") == 0)
-				rel->conflict_handlers[i].handler_type = BDRInsertInsertConflictHandler;
-			else if (strcmp(htype, "INSERT_VS_UPDATE") == 0)
-				rel->conflict_handlers[i].handler_type = BDRInsertUpdateConflictHandler;
+			if (strcmp(htype, "update_update") == 0)
+				rel->conflict_handlers[i].handler_type = BdrConflictType_UpdateUpdate;
+			else if (strcmp(htype, "update_delete") == 0)
+				rel->conflict_handlers[i].handler_type = BdrConflictType_UpdateDelete;
+			else if (strcmp(htype, "insert_insert") == 0)
+				rel->conflict_handlers[i].handler_type = BdrConflictType_InsertInsert;
+			else if (strcmp(htype, "insert_update") == 0)
+				rel->conflict_handlers[i].handler_type = BdrConflictType_InsertUpdate;
 			else
 				elog(ERROR, "unknown handler type: %s", htype);
 
@@ -649,18 +649,25 @@ bdr_get_conflict_handlers(BDRRelation * rel)
 }
 
 static const char *
-bdr_conflict_handlers_event_type_name(BDRConflictHandlerType event_type)
+bdr_conflict_handlers_event_type_name(BdrConflictType event_type)
 {
 	switch (event_type)
 	{
-		case BDRUpdateUpdateConflictHandler:
-			return "UPDATE_VS_UPDATE";
-		case BDRUpdateDeleteConflictHandler:
-			return "UPDATE_VS_DELETE";
-		case BDRInsertInsertConflictHandler:
-			return "INSERT_VS_INSERT";
-		case BDRInsertUpdateConflictHandler:
-			return "INSERT_VS_UPDATE";
+		case BdrConflictType_InsertInsert:
+			return "insert_insert";
+		case BdrConflictType_InsertUpdate:
+			return "insert_update";
+		case BdrConflictType_UpdateUpdate:
+			return "update_update";
+		case BdrConflictType_UpdateDelete:
+			return "update_delete";
+		case BdrConflictType_UnhandledTxAbort:
+			return "unhandled_tx_abort";
+
+		default:
+			elog(ERROR,
+				 "wrong value for event type, possibly corrupted memory: %d",
+				event_type);
 	}
 
 	return "(unknown)";
@@ -673,7 +680,7 @@ bdr_conflict_handlers_event_type_name(BDRConflictHandlerType event_type)
 HeapTuple
 bdr_conflict_handlers_resolve(BDRRelation * rel, const HeapTuple local,
 							  const HeapTuple remote, const char *command_tag,
-							  BDRConflictHandlerType event_type,
+							  BdrConflictType event_type,
 							  uint64 timeframe, bool *skip)
 {
 	size_t		i;
