@@ -355,7 +355,8 @@ bdr_ensure_ext_installed(PGconn *pgconn, Name bdr_conn_name)
 		if (PQgetisnull(res, 0, 1))
 		{
 			ereport(ERROR,
-					(errmsg("Remote database for BDR connection %s does not have the bdr extension active",
+					(errcode(ERRCODE_CONFIG_FILE_ERROR),
+					 errmsg("Remote database for BDR connection %s does not have the bdr extension active",
 					 NameStr(*bdr_conn_name)),
 					 errdetail("no entry with name 'bdr' in pg_extensions"),
 					 errhint("add 'bdr' to shared_preload_libraries in postgresql.conf "
@@ -366,7 +367,8 @@ bdr_ensure_ext_installed(PGconn *pgconn, Name bdr_conn_name)
 	{
 		/* bdr ext is not known to Pg at all */
 		ereport(ERROR,
-				(errmsg("Remote PostgreSQL install for bdr connection %s does not have bdr extension installed",
+				(errcode(ERRCODE_CONFIG_FILE_ERROR),
+				 errmsg("Remote PostgreSQL install for bdr connection %s does not have bdr extension installed",
 				 NameStr(*bdr_conn_name)),
 				 errdetail("no entry with name 'bdr' in pg_available_extensions; did you install BDR?")));
 	}
@@ -1009,7 +1011,8 @@ bdr_catchup_to_lsn(int cfg_index,
 	{
 		LWLockRelease(BdrWorkerCtl->lock);
 		ereport(ERROR,
-				(errmsg("No free bdr worker slots, bdr_max_workers=%d too low",
+				(errcode(ERRCODE_CONFIGURATION_LIMIT_EXCEEDED),
+				 errmsg("No free bdr worker slots, bdr_max_workers=%d too low",
 						bdr_max_workers)));
 	}
 	BdrWorkerCtl->slots[worker_shmem_idx].worker_type = BDR_WORKER_APPLY;
