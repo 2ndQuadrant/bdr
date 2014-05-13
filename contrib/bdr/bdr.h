@@ -253,21 +253,21 @@ extern void build_index_scan_key(struct ScanKeyData *skey, Relation rel,
 								 Relation idxrel,
 								 struct TupleTableSlot *slot);
 extern bool find_pkey_tuple(struct ScanKeyData *skey, BDRRelation *rel,
-							Relation idxrel, struct TupleTableSlot *slot, bool
-							lock, enum LockTupleMode mode);
+							Relation idxrel, struct TupleTableSlot *slot,
+							bool lock, enum LockTupleMode mode);
 
 /* conflict logging (usable in apply only) */
 extern void bdr_conflict_logging_startup(void);
 extern void bdr_conflict_logging_create_gucs(void);
 
-extern void
-bdr_conflict_log(BdrConflictType conflict_type,
-				 BdrConflictResolution resolution, TransactionId remote_txid,
-				 BDRRelation *conflict_relation,
-				 struct TupleTableSlot *local_tuple,
-				 RepNodeId local_tuple_origin_id,
-				 struct TupleTableSlot *remote_tuple,
-				 struct ErrorData *apply_error);
+extern void bdr_conflict_log(BdrConflictType conflict_type,
+							 BdrConflictResolution resolution,
+							 TransactionId remote_txid,
+							 BDRRelation *conflict_relation,
+							 struct TupleTableSlot *local_tuple,
+							 RepNodeId local_tuple_origin_id,
+							 struct TupleTableSlot *remote_tuple,
+							 struct ErrorData *apply_error);
 
 /* sequence support */
 extern void bdr_sequencer_shmem_init(int nnodes, int sequencers);
@@ -324,16 +324,20 @@ extern char bdr_nodes_get_local_status(uint64 sysid, Name dbname);
 extern void bdr_nodes_set_local_status(uint64 sysid, Name dbname, char status);
 
 /* helpers shared by multiple worker types */
-extern struct pg_conn *
-bdr_connect(char *conninfo_repl,
-			char* remote_ident, size_t remote_ident_length,
-			NameData* slot_name,
-			uint64* remote_sysid_i, TimeLineID *remote_tlid_i);
+extern struct pg_conn* bdr_connect(char *conninfo_repl,
+								   char* remote_ident,
+								   size_t remote_ident_length,
+								   NameData* slot_name,
+								   uint64* remote_sysid_i,
+								   TimeLineID *remote_tlid_i);
 
 extern struct pg_conn *
-bdr_establish_connection_and_slot(BdrConnectionConfig *cfg, Name out_slot_name,
-	uint64 *out_sysid, TimeLineID* out_timeline, RepNodeId
-	*out_replication_identifier, char **out_snapshot);
+bdr_establish_connection_and_slot(BdrConnectionConfig *cfg,
+								  Name out_slot_name,
+								  uint64 *out_sysid,
+								  TimeLineID *out_timeline,
+								  RepNodeId *out_replication_identifier,
+								  char **out_snapshot);
 
 /* use instead of heap_open()/heap_close() */
 extern BDRRelation *bdr_heap_open(Oid reloid, LOCKMODE lockmode);
@@ -342,9 +346,11 @@ extern void bdr_heap_close(BDRRelation * rel, LOCKMODE lockmode);
 /* conflict handlers API */
 extern void bdr_conflict_handlers_init(void);
 
-extern HeapTuple bdr_conflict_handlers_resolve(BDRRelation * rel, const HeapTuple local,
-							  const HeapTuple remote, const char *command_tag,
-							  BdrConflictType event_type,
-							  uint64 timeframe, bool *skip);
+extern HeapTuple bdr_conflict_handlers_resolve(BDRRelation * rel,
+											   const HeapTuple local,
+											   const HeapTuple remote,
+											   const char *command_tag,
+											   BdrConflictType event_type,
+											   uint64 timeframe, bool *skip);
 
 #endif   /* BDR_H */
