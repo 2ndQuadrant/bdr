@@ -58,8 +58,11 @@
 
 #define MAXCONNINFO		1024
 
-/* Really should be private to bdr_apply.c */
-extern bool exit_worker;
+/* TODO: move to bdr_apply.c when bdr_apply_main is moved */
+extern bool			exit_worker;
+extern uint64		origin_sysid;
+extern TimeLineID	origin_timeline;
+/* end externs for bdr apply state */
 
 static int   n_configured_bdr_nodes = 0;
 ResourceOwner bdr_saved_resowner;
@@ -524,10 +527,8 @@ bdr_apply_main(Datum main_arg)
 		 MyBgworkerEntry->bgw_name, NameStr(bdr_apply_config->dbname));
 
 	streamConn = bdr_establish_connection_and_slot(
-		bdr_apply_config, &slot_name, &bdr_apply_worker->sysid,
-		&bdr_apply_worker->timeline, &replication_identifier, NULL);
-
-	bdr_apply_worker->origin_id = replication_identifier;
+		bdr_apply_config, &slot_name, &origin_sysid,
+		&origin_timeline, &replication_identifier, NULL);
 
 	/* initialize stat subsystem, our id won't change further */
 	bdr_count_set_current_node(replication_identifier);
