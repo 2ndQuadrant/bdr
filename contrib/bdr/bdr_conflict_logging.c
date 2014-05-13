@@ -488,7 +488,7 @@ bdr_conflict_log(BdrConflictType conflict_type,
 	}
 
 	/* TODO: May make sense to cache the remote sysid in a global too... */
-	fetch_sysid_via_node_id(bdr_apply_worker->origin_id,
+	fetch_sysid_via_node_id(replication_origin_id,
 			&conflict.remote_sysid, &tli);
 	conflict.remote_commit_time = replication_origin_timestamp;
 	conflict.remote_txid = remote_txid;
