@@ -72,7 +72,7 @@ Oid   BdrConflictHistoryRelId;
 BdrConnectionConfig  **bdr_connection_configs;
 /* All databases for which BDR is configured, valid after _PG_init */
 char **bdr_distinct_dbnames;
-uint32_t bdr_distinct_dbnames_count = 0;
+uint32 bdr_distinct_dbnames_count = 0;
 
 /* GUC storage */
 static char *connections = NULL;
@@ -1194,7 +1194,7 @@ bdr_worker_shmem_startup(void)
 static void
 bdr_worker_shmem_create_workers(void)
 {
-	uint32_t off;
+	uint32 off;
 
 	/*
 	 * Create a BdrPerdbWorker for each distinct database found during
@@ -1220,7 +1220,7 @@ bdr_worker_shmem_create_workers(void)
 	{
 		BdrWorker	   *shmworker;
 		BdrPerdbWorker *perdb;
-		uint32_t		ctl_idx;
+		uint32		ctl_idx;
 
 		shmworker = (BdrWorker *) bdr_worker_shmem_alloc(BDR_WORKER_PERDB, &ctl_idx);
 		Assert(shmworker->worker_type == BDR_WORKER_PERDB);
@@ -1287,9 +1287,9 @@ bdr_worker_shmem_create_workers(void)
  * To release a block, use bdr_worker_shmem_release(...)
  */
 BdrWorker*
-bdr_worker_shmem_alloc(BdrWorkerType worker_type, uint32_t *ctl_idx)
+bdr_worker_shmem_alloc(BdrWorkerType worker_type, uint32 *ctl_idx)
 {
-	uint32_t i;
+	uint32 i;
 	LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
 	for (i = 0; i < bdr_max_workers; i++)
 	{
@@ -1371,7 +1371,7 @@ _PG_init(void)
 	Size		num_used_databases = 0;
 	int			connection_config_idx;
 	BackgroundWorker bgw;
-	uint32_t	off;
+	uint32		off;
 
 	if (!process_shared_preload_libraries_in_progress)
 		ereport(ERROR,
