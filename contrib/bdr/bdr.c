@@ -169,7 +169,8 @@ bdr_send_feedback(PGconn *conn, XLogRecPtr blockpos, int64 now, bool replyReques
 	if (PQputCopyData(conn, replybuf, len) <= 0 || PQflush(conn))
 	{
 		ereport(ERROR,
-				(errmsg("could not send feedback packet: %s",
+				(errcode(ERRCODE_CONNECTION_FAILURE),
+				 errmsg("could not send feedback packet: %s",
 						PQerrorMessage(conn))));
 		return false;
 	}
@@ -242,7 +243,8 @@ bdr_connect(char *conninfo_repl,
 	if (PQstatus(streamConn) != CONNECTION_OK)
 	{
 		ereport(FATAL,
-				(errmsg("could not connect to the primary server: %s",
+				(errcode(ERRCODE_CONNECTION_FAILURE),
+				 errmsg("could not connect to the primary server: %s",
 						PQerrorMessage(streamConn))));
 	}
 
@@ -280,7 +282,8 @@ bdr_connect(char *conninfo_repl,
 	if (strcmp(remote_sysid, local_sysid) == 0)
 	{
 		ereport(FATAL,
-				(errmsg("system identifiers must differ between the nodes"),
+				(errcode(ERRCODE_INVALID_NAME),
+				 errmsg("system identifiers must differ between the nodes"),
 				 errdetail("Both system identifiers are %s.", remote_sysid)));
 	}
 	else
@@ -829,7 +832,8 @@ bdr_create_con_gucs(char  *name,
 
 		PQfreemem(errormsg);
 		ereport(ERROR,
-				(errmsg("bdr %s: error in dsn: %s", name, str)));
+				(errcode(ERRCODE_CONFIG_FILE_ERROR),
+				 errmsg("bdr %s: error in dsn: %s", name, str)));
 	}
 
 	cur_option = options;
@@ -838,7 +842,9 @@ bdr_create_con_gucs(char  *name,
 		if (strcmp(cur_option->keyword, "dbname") == 0)
 		{
 			if (cur_option->val == NULL)
-				ereport(ERROR, (errmsg("bdr %s: no dbname set", name)));
+				ereport(ERROR,
+						(errcode(ERRCODE_CONFIG_FILE_ERROR),
+						 errmsg("bdr %s: no dbname set", name)));
 
 			strncpy(NameStr(opts->dbname), cur_option->val,
 					NAMEDATALEN);
@@ -885,7 +891,8 @@ bdr_create_con_gucs(char  *name,
 		elog(DEBUG2, "bdr %s: has init_replica=t", name);
 		if (database_initcons[off] != NULL)
 			ereport(ERROR,
-					(errmsg("Connections %s and %s on database %s both have bdr_init_replica enabled, cannot continue",
+					(errcode(ERRCODE_CONFIG_FILE_ERROR),
+					 errmsg("Connections %s and %s on database %s both have bdr_init_replica enabled, cannot continue",
 							name, database_initcons[off], used_databases[off])));
 		else
 			database_initcons[off] = name; /* no need to pstrdup, see _PG_init */
@@ -1375,7 +1382,8 @@ _PG_init(void)
 
 	if (!process_shared_preload_libraries_in_progress)
 		ereport(ERROR,
-				(errmsg("bdr can only be loaded via shared_preload_libraries")));
+				(errcode(ERRCODE_CONFIG_FILE_ERROR),
+				 errmsg("bdr can only be loaded via shared_preload_libraries")));
 
 	if (!commit_ts_enabled)
 		ereport(ERROR,
