@@ -66,18 +66,22 @@ typedef struct BDRTupleData
 	bool		changed[MaxTupleAttributeNumber];
 } BDRTupleData;
 
-bool		started_transaction = false;
+/* Relation oid cache; initialized then left unchanged */
 Oid			QueuedDDLCommandsRelid = InvalidOid;
 Oid			QueuedDropsRelid = InvalidOid;
+
+/* Global apply worker state */
+uint64		origin_sysid;
+TimeLineID	origin_timeline;
+bool		started_transaction = false;
+/* During apply, holds xid of remote transaction */
+TransactionId replication_origin_xid = InvalidTransactionId;
 
 /*
  * this should really be a static in bdr_apply.c, but bdr.c needs it for
  * bdr_apply_main currently.
  */
 bool		exit_worker = false;
-
-/* During apply, holds xid of remote transaction */
-TransactionId replication_origin_xid = InvalidTransactionId;
 
 /*
  * This code only runs within an apply bgworker, so we can stash a pointer to our
@@ -197,8 +201,8 @@ process_remote_commit(StringInfo s)
 	TimestampTz		committime;
 	TimestampTz		end_lsn;
 	int				flags;
-	RepNodeId		origin_id = InvalidRepNodeId;
-	XLogRecPtr		origin_lsn = InvalidXLogRecPtr;
+	RepNodeId		remote_origin_id = InvalidRepNodeId;
+	XLogRecPtr		remote_origin_lsn = InvalidXLogRecPtr;
 
 	Assert(bdr_apply_worker != NULL);
 
@@ -211,8 +215,8 @@ process_remote_commit(StringInfo s)
 
 	if (flags & BDR_OUTPUT_COMMIT_HAS_ORIGIN)
 	{
-		origin_id = pq_getmsgint(s, 2);
-		origin_lsn = pq_getmsgint64(s);
+		remote_origin_id = pq_getmsgint(s, 2);
+		remote_origin_lsn = pq_getmsgint64(s);
 	}
 
 	elog(DEBUG1, "COMMIT origin(lsn, end, timestamp): %X/%X, %X/%X, %s",
@@ -236,12 +240,12 @@ process_remote_commit(StringInfo s)
 	 *
 	 * We always advance the local replication identifier for the origin node,
 	 * even if we're really replaying a commit that's been forwarded from
-	 * another node (per origin_id below). This is necessary to make sure we
-	 * don't replay the same forwarded commit multiple times.
+	 * another node (per remote_origin_id below). This is necessary to make
+	 * sure we don't replay the same forwarded commit multiple times.
 	 */
 	AdvanceCachedReplicationIdentifier(end_lsn, XactLastCommitEnd);
 
-	if (origin_id != InvalidRepNodeId)
+	if (remote_origin_id != InvalidRepNodeId)
 	{
 		/*
 		 * We're replaying a record that's been forwarded from another node, so
@@ -249,10 +253,11 @@ process_remote_commit(StringInfo s)
 		 * replay directly from that node will start from the correct LSN when
 		 * we replicate directly.
 		 *
-		 * If it was from the immediate origin node, origin_id would be set to
-		 * InvalidRepNodeId by the remote end's output plugin.
+		 * If it was from the immediate origin node, remote_origin_id would be
+		 * set to InvalidRepNodeId by the remote end's output plugin.
 		 */
-		AdvanceReplicationIdentifier(origin_id, origin_lsn, XactLastCommitEnd);
+		AdvanceReplicationIdentifier(remote_origin_id, remote_origin_lsn,
+									 XactLastCommitEnd);
 	}
 
 	CurrentResourceOwner = bdr_saved_resowner;
@@ -827,7 +832,7 @@ check_apply_update(RepNodeId local_node_id, TimestampTz local_ts,
 	if (new_tuple)
 		*new_tuple = NULL;
 
-	if (local_node_id == bdr_apply_worker->origin_id)
+	if (local_node_id == replication_origin_id)
 	{
 		/*
 		 * If the row got updated twice within a single node, just apply the
@@ -912,7 +917,7 @@ check_apply_update(RepNodeId local_node_id, TimestampTz local_ts,
 			 */
 			fetch_sysid_via_node_id(local_node_id,
 									&local_sysid, &local_tli);
-			fetch_sysid_via_node_id(bdr_apply_worker->origin_id,
+			fetch_sysid_via_node_id(replication_origin_id,
 									&remote_sysid, &remote_tli);
 
 			/*
@@ -967,11 +972,11 @@ do_log_update(RepNodeId local_node_id, bool apply_update, TimestampTz ts,
 
 	fetch_sysid_via_node_id(local_node_id,
 							&local_sysid, &local_tli);
-	fetch_sysid_via_node_id(bdr_apply_worker->origin_id,
+	fetch_sysid_via_node_id(replication_origin_id,
 							&remote_sysid, &remote_tli);
 
-	Assert(remote_sysid == bdr_apply_worker->sysid);
-	Assert(remote_tli == bdr_apply_worker->timeline);
+	Assert(remote_sysid == origin_sysid);
+	Assert(remote_tli == origin_timeline);
 
 	memcpy(remote_ts, timestamptz_to_str(replication_origin_timestamp),
 		   MAXDATELEN);

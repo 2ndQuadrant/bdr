@@ -1032,10 +1032,6 @@ bdr_catchup_to_lsn(int cfg_index,
 		/* Make sure the catchup worker can find its bdr.xxx_ GUCs */
 		catchup_worker->connection_config_idx = cfg_index;
 
-		/* Set up the BdrApplyWorker struct in shmem */
-		catchup_worker->origin_id = InvalidRepNodeId;
-		catchup_worker->sysid = 0;
-		catchup_worker->timeline = 0;
 		/* Special parameters for a catchup worker only */
 		catchup_worker->replay_stop_lsn = target_lsn;
 		catchup_worker->forward_changesets = true;
