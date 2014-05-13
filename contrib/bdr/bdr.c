@@ -1296,7 +1296,7 @@ bdr_worker_shmem_create_workers(void)
 BdrWorker*
 bdr_worker_shmem_alloc(BdrWorkerType worker_type, uint32 *ctl_idx)
 {
-	uint32 i;
+	int i;
 	LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
 	for (i = 0; i < bdr_max_workers; i++)
 	{
