@@ -1694,11 +1694,12 @@ deparse_CreateTrigStmt(Oid objectId, Node *parsetree)
 					   "constraint", ObjTypeString,
 					   node->isconstraint ? "CONSTRAINT" : "");
 
+	/* FIXME does this need to use macros? */
 	if (node->timing == TRIGGER_TYPE_BEFORE)
 		append_string_object(trigger, "time", "BEFORE");
 	else if (node->timing == TRIGGER_TYPE_AFTER)
 		append_string_object(trigger, "time", "AFTER");
-	else if (node->timing == TRIGGER_TYPE_INSERT)
+	else if (node->timing == TRIGGER_TYPE_INSTEAD)
 		append_string_object(trigger, "time", "INSTEAD OF");
 	else
 		elog(ERROR, "unrecognized trigger timing value %d", node->timing);
