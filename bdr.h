@@ -186,8 +186,8 @@ typedef struct BdrConnectionConfig
 	 * These aren't technically GUCs, but are per-connection config
 	 * information obtained from the GUCs.
 	 */
-	NameData name;
-	NameData dbname;
+	char *name;
+	char *dbname;
 	/* Connection config might be broken (blank dsn, etc) */
 	bool is_valid;
 } BdrConnectionConfig;
