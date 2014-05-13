@@ -116,11 +116,6 @@ typedef struct BdrApplyWorker
 	 */
 	int connection_config_idx;
 
-	/* TODO: Remove these from shm, into bdr worker global state */
-	RepNodeId origin_id;
-	uint64 sysid;
-	TimeLineID timeline;
-
 	/*
 	 * If not InvalidXLogRecPtr, stop replay at this point and exit.
 	 *
