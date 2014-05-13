@@ -316,7 +316,8 @@ extern bool bdr_get_bigendian(void);
 extern void bdr_init_replica(Name dbname);
 
 /* shared memory management */
-extern BdrWorker* bdr_worker_shmem_alloc(BdrWorkerType worker_type);
+extern BdrWorker* bdr_worker_shmem_alloc(BdrWorkerType worker_type,
+										 uint32_t *ctl_idx);
 extern void bdr_worker_shmem_release(BdrWorker* worker, BackgroundWorkerHandle *handle);
 
 /* forbid commands we do not support currently (or never will) */
