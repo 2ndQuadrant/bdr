@@ -86,7 +86,8 @@ UserTableUpdateOpenIndexes(EState *estate, TupleTableSlot *slot)
 
 		if (recheckIndexes != NIL)
 			ereport(ERROR,
-					(errmsg("bdr doesn't support index rechecks")));
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 errmsg("bdr doesn't support index rechecks")));
 	}
 
 	/* FIXME: recheck the indexes */
