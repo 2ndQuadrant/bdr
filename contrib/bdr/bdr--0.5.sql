@@ -146,17 +146,23 @@ VALUES (
     'bdr_sequence_options'
 );
 
-CREATE TYPE bdr.bdr_handler_types AS ENUM(
-    'UPDATE_VS_UPDATE', 'UPDATE_VS_DELETE',
-    'INSERT_VS_INSERT', 'INSERT_VS_UPDATE'
+CREATE TYPE bdr_conflict_type AS ENUM
+(
+    'insert_insert',
+    'insert_update',
+    'update_update',
+    'update_delete',
+    'unhandled_tx_abort'
 );
+
+COMMENT ON TYPE bdr_conflict_type IS 'The nature of a BDR apply conflict - concurrent updates (update_update), conflicting inserts, etc.';
 
 CREATE TYPE bdr.bdr_conflict_handler_action
     AS ENUM('IGNORE', 'ROW', 'SKIP');
 
 CREATE TABLE bdr.bdr_conflict_handlers (
     ch_name NAME NOT NULL,
-    ch_type bdr.bdr_handler_types NOT NULL,
+    ch_type bdr.bdr_conflict_type NOT NULL,
     ch_reloid Oid NOT NULL,
     ch_fun regprocedure NOT NULL,
     ch_timeframe INTERVAL,
@@ -172,7 +178,7 @@ CREATE FUNCTION bdr.bdr_create_conflict_handler(
     ch_rel REGCLASS,
     ch_name NAME,
     ch_proc REGPROCEDURE,
-    ch_type bdr.bdr_handler_types,
+    ch_type bdr.bdr_conflict_type,
     ch_timeframe INTERVAL
 )
 RETURNS VOID
@@ -185,7 +191,7 @@ CREATE FUNCTION bdr.bdr_create_conflict_handler(
     ch_rel REGCLASS,
     ch_name NAME,
     ch_proc REGPROCEDURE,
-    ch_type bdr.bdr_handler_types
+    ch_type bdr.bdr_conflict_type
 )
 RETURNS VOID
 LANGUAGE C
@@ -205,16 +211,6 @@ CREATE VIEW bdr_list_conflict_handlers(ch_name, ch_type, ch_reloid, ch_fun) AS
     FROM bdr.bdr_conflict_handlers
 ;
 
-
-CREATE TYPE bdr_conflict_type AS ENUM
-(
-    'insert_insert',
-    'update_update',
-    'update_delete',
-    'unhandled_tx_abort'
-);
-
-COMMENT ON TYPE bdr_conflict_type IS 'The nature of a BDR apply conflict - concurrent updates (update_update), conflicting inserts, etc.';
 
 CREATE TYPE bdr_conflict_resolution AS ENUM
 (
