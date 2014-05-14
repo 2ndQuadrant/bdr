@@ -1229,6 +1229,13 @@ process_queued_drop(HeapTuple cmdtup)
 		type = TextDatumGetCString(datum);
 		objtype = unstringify_objtype(type);
 
+		/*
+		 * ignore objects that don't unstringify properly; those are
+		 * "internal" objects anyway.
+		 */
+		if (objtype == -1)
+			continue;
+
 		if (objtype == OBJECT_TYPE ||
 			objtype == OBJECT_DOMAIN)
 		{
