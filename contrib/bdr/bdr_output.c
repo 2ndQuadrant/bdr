@@ -647,7 +647,7 @@ decide_datum_transfer(BdrOutputData *data,
 					  Form_pg_attribute att, Form_pg_type typclass,
 					  bool *use_binary, bool *use_sendrecv)
 {
-	/* builtin type */
+	/* always disallow fancyness if there's type representation mismatches */
 	if (data->int_datetime_mismatch &&
 		(att->atttypid == TIMESTAMPOID || att->atttypid == TIMESTAMPTZOID ||
 		 att->atttypid == TIMEOID))
@@ -655,6 +655,9 @@ decide_datum_transfer(BdrOutputData *data,
 		*use_binary = false;
 		*use_sendrecv = false;
 	}
+	/*
+	 * Use the binary protocol, if allowed, for builtin & plain datatypes.
+	 */
 	else if (data->allow_binary_protocol &&
 		typclass->typtype == 'b' &&
 		att->atttypid < FirstNormalObjectId &&
@@ -662,8 +665,16 @@ decide_datum_transfer(BdrOutputData *data,
 	{
 		*use_binary = true;
 	}
+	/*
+	 * Use send/recv, if allowed, if the type is plain or builtin.
+	 *
+	 * XXX: we can't use send/recv for array or composite types for now due to
+	 * the embedded oids.
+	 */
 	else if (data->allow_sendrecv_protocol &&
-			 OidIsValid(typclass->typreceive))
+			 OidIsValid(typclass->typreceive) &&
+			 (att->atttypid < FirstNormalObjectId || typclass->typtype != 'c') &&
+			 (att->atttypid < FirstNormalObjectId || typclass->typelem == InvalidOid))
 	{
 		*use_sendrecv = true;
 	}
