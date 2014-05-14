@@ -1092,7 +1092,7 @@ bdr_perdb_worker_main(Datum main_arg)
 		 */
 		rc = WaitLatch(&MyProc->procLatch,
 					   WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
-					   5000L);
+					   180000L);
 
 		ResetLatch(&MyProc->procLatch);
 
