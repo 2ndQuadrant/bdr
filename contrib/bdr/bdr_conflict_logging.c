@@ -87,27 +87,16 @@ bdr_conflict_logging_startup()
 
 	schema_oid = get_namespace_oid("bdr", false);
 
-	BdrConflictTypeOid = GetSysCacheOid2(TYPENAMENSP,
+	BdrConflictTypeOid = GetSysCacheOidError2(TYPENAMENSP,
 		CStringGetDatum("bdr_conflict_type"), ObjectIdGetDatum(schema_oid));
 
-	if (BdrConflictTypeOid == InvalidOid)
-		elog(ERROR, "Type cache lookup failed for bdr_conflict_type in schema %d",
-			 schema_oid);
-
-	BdrConflictResolutionOid = GetSysCacheOid2(TYPENAMENSP,
+	BdrConflictResolutionOid = GetSysCacheOidError2(TYPENAMENSP,
 		CStringGetDatum("bdr_conflict_resolution"),
 		ObjectIdGetDatum(schema_oid));
 
-	if (BdrConflictResolutionOid == InvalidOid)
-		elog(ERROR, "Type cache lookup failed for bdr_conflict_resolution in schema %d",
-			 schema_oid);
-
-	BdrConflictHistorySeqId = get_relname_relid("bdr_conflict_history_id_seq",
+	BdrConflictHistorySeqId = GetSysCacheOidError2(RELNAMENSP,
+		CStringGetDatum("bdr_conflict_history_id_seq"),
 		ObjectIdGetDatum(schema_oid));
-
-	if (BdrConflictHistorySeqId == InvalidOid)
-		elog(ERROR, "Relcache lookup failed for bdr_conflict_history_id_seq in schema %d",
-			 schema_oid);
 
 	CommitTransactionCommand();
 }
