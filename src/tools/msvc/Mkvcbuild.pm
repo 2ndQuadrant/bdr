@@ -512,7 +512,8 @@ sub mkvcbuild
 
 	# so is bdr
 	my $bdr_output = $solution->AddProject('bdr_output', 'dll', 'misc');
-	$bdr_output->AddFiles('contrib\bdr', 'bdr_compat.c', 'bdr_output.c');
+	$bdr_output->AddFiles('contrib\bdr', 'bdr_compat.c', 'bdr_output.c',
+						  'bdr_catalogs.c');
 	$bdr_output->AddReference($postgres);
 	$bdr_output->AddLibrary('wsock32.lib');
 
@@ -521,7 +522,8 @@ sub mkvcbuild
 			     'bdr_commandfilter.c', 'bdr_compat.c',
 			     'bdr_count.c', 'bdr_seq.c', 'bdr_init_replica.c',
 			     'bdr_relcache.c', 'bdr_conflict_handlers.c',
-                 'bdr_conflict_logging.c', 'bdr_executor.c');
+                 'bdr_conflict_logging.c', 'bdr_executor.c',
+				 'bdr_catalogs.c');
 	$bdr_apply->AddReference($postgres);
 	$bdr_apply->AddLibrary('wsock32.lib');
 	$bdr_apply->AddIncludeDir('src\interfaces\libpq');
