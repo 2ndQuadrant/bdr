@@ -73,28 +73,6 @@ static Oid	bdr_conflict_handler_action_ignore_oid = InvalidOid;
 static Oid	bdr_conflict_handler_action_row_oid = InvalidOid;
 static Oid	bdr_conflict_handler_action_skip_oid = InvalidOid;
 
-/* GetSysCacheOid equivalent that errors out if nothing is found */
-static Oid
-GetSysCacheOidError(int cacheId,
-					Datum key1,
-					Datum key2,
-					Datum key3,
-					Datum key4)
-{
-	HeapTuple	tuple;
-	Oid			result;
-
-	tuple = SearchSysCache(cacheId, key1, key2, key3, key4);
-	if (!HeapTupleIsValid(tuple))
-		elog(ERROR, "cache lookup failure in cache %d", cacheId);
-	result = HeapTupleGetOid(tuple);
-	ReleaseSysCache(tuple);
-	return result;
-}
-
-#define GetSysCacheOidError2(cacheId, key1, key2) \
-	GetSysCacheOidError(cacheId, key1, key2, 0, 0)
-
 void
 bdr_conflict_handlers_init(void)
 {
