@@ -25,6 +25,7 @@
 #include "executor/spi.h"
 
 #include "utils/builtins.h"
+#include "utils/syscache.h"
 
 /*
  * Get the bdr.bdr_nodes status value for the current local node from the local
@@ -43,11 +44,26 @@ bdr_nodes_get_local_status(uint64 sysid, Name dbname)
 	bool		isnull;
 	char        status;
 	char		sysid_str[33];
+	Oid			schema_oid;
 
 	Assert(IsTransactionState());
 
 	snprintf(sysid_str, sizeof(sysid_str), UINT64_FORMAT, sysid);
 	sysid_str[sizeof(sysid_str)-1] = '\0';
+
+	/*
+	 * Determine if BDR is present on this DB. The output plugin can
+	 * be started on a db that doesn't actually have BDR active, but
+	 * we don't want to allow that.
+	 *
+	 * Check for a bdr schema.
+	 */
+	schema_oid = GetSysCacheOid1(NAMESPACENAME, CStringGetDatum("bdr"));
+	if (schema_oid == InvalidOid)
+		ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				errmsg("No bdr schema is present in database %s, cannot create a bdr_output slot",
+					   NameStr(*dbname)),
+				errhint("There is no bdr.bdr_connections entry for this database on the target node or bdr is not in shared_preload_libraries")));
 
 	values[0] = DirectFunctionCall3Coll(numeric_in, InvalidOid,
 										CStringGetDatum(sysid_str),
