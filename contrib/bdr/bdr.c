@@ -281,7 +281,7 @@ bdr_connect(char *conninfo_repl,
 	snprintf(local_sysid, sizeof(local_sysid), UINT64_FORMAT,
 			 GetSystemIdentifier());
 
-	if (strcmp(remote_sysid, local_sysid) == 0)
+	if (strcmp(remote_sysid, local_sysid) == 0 && MyDatabaseId == remote_dboid_i)
 	{
 		ereport(FATAL,
 				(errcode(ERRCODE_INVALID_NAME),
