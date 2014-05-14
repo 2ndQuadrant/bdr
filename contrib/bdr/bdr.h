@@ -120,6 +120,12 @@ typedef struct BdrApplyWorker
 	/* Request that the remote forward all changes from other nodes */
 	bool forward_changesets;
 
+	/*
+	 * Ensure this worker doesn't get registered a second time if there's a
+	 * perdb worker restart or postmaster restart. Ideally we'd store the
+	 * BackgroundWorkerHandle, but it's an opaque struct.
+	 */
+	bool bgw_is_registered;
 } BdrApplyWorker;
 
 /*
@@ -206,8 +212,6 @@ typedef struct BdrWorkerControl
 {
 	/* Must hold this lock when writing to BdrWorkerControl members */
 	LWLockId     lock;
-	/* Required only for bgworker restart issues: */
-	bool		 launch_workers;
 	/* Set/unset by bdr_apply_pause()/_replay(). */
 	bool		 pause_apply;
 	/* Array members, of size bdr_max_workers */

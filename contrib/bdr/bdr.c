@@ -936,18 +936,6 @@ bdr_launch_apply_workers(char *dbname)
 	{
 		BdrWorker *worker = &BdrWorkerCtl->slots[i];
 
-		/*
-		 * Work around issue described in
-		 * http://www.postgresql.org/message-id/534E250F.2060705@2ndquadrant.com by
-		 * suppressing bgworker relaunch if shm was re-initialized after a
-		 * postmaster restart.
-		 *
-		 * FIXME remove after bgworker behaviour change to auto unregister
-		 * bgworkers on restart.
-		 */
-		if (!BdrWorkerCtl->launch_workers)
-			break;
-
 		switch(worker->worker_type)
 		{
 			case BDR_WORKER_APPLY:
@@ -961,6 +949,14 @@ bdr_launch_apply_workers(char *dbname)
 						/* It's an apply worker for our DB; register it */
 						BackgroundWorkerHandle *bgw_handle;
 
+						if (con->bgw_is_registered)
+							/*
+							 * This worker was registered on a previous pass;
+							 * this is probably a restart of the per-db worker.
+							 * Don't register a duplicate.
+							 */
+							continue;
+
 						snprintf(apply_worker.bgw_name, BGW_MAXLEN,
 								 "bdr apply: %s", NameStr(cfg->name));
 						apply_worker.bgw_main_arg = Int32GetDatum(i);
@@ -973,6 +969,8 @@ bdr_launch_apply_workers(char *dbname)
 											" %s, see previous log messages",
 											NameStr(cfg->name))));
 						}
+						/* We've launched this one, don't do it again */
+						con->bgw_is_registered = true;
 						apply_workers = lcons(bgw_handle, apply_workers);
 					}
 				}
@@ -1080,7 +1078,7 @@ bdr_perdb_worker_main(Datum main_arg)
 		 */
 		rc = WaitLatch(&MyProc->procLatch,
 					   WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
-					   180000L);
+					   5000L);
 
 		ResetLatch(&MyProc->procLatch);
 
@@ -1172,15 +1170,14 @@ bdr_worker_shmem_startup(void)
 		/* Init shm segment header after postmaster start or restart */
 		memset(BdrWorkerCtl, 0, bdr_worker_shmem_size());
 		BdrWorkerCtl->lock = LWLockAssign();
-		/* If it's a restart, don't actually re-register bgworkers */
-		BdrWorkerCtl->launch_workers = !bdr_is_restart;
-		/* Any subsequent execution must now be a restart */
-		bdr_is_restart = true;
 
 		/*
 		 * Now that the shm segment is initialized, we can populate it with
 		 * BdrWorker entries for the connections we created GUCs for during
 		 * _PG_init.
+		 *
+		 * We must do this whether it's initial launch or a postmaster restart,
+		 * as shmem gets cleared on postmaster restart.
 		 */
 		bdr_worker_shmem_create_workers();
 	}
@@ -1207,7 +1204,8 @@ bdr_worker_shmem_create_workers(void)
 	 * Create a BdrPerdbWorker for each distinct database found during
 	 * _PG_init. The bgworker for each has already been registered and assigned
 	 * a slot position during _PG_init, but the slot doesn't have anything
-	 * useful in it yet.
+	 * useful in it yet. Because it was already registered we don't need
+	 * any protection against duplicate launches on restart here.
 	 *
 	 * Because these slots are pre-assigned before shmem is bought up they
 	 * MUST be reserved first, before any shmem entries are allocated, so
@@ -1249,14 +1247,17 @@ bdr_worker_shmem_create_workers(void)
 	}
 
 	/*
-	 * Create a BdrApplyWorker for each valid BdrConnectionConfig found during
-	 * _PG_init so that the per-db worker will register it for startup after
-	 * performing any BDR initialisation work.
+	 * Populate shmem with a BdrApplyWorker for each valid BdrConnectionConfig
+	 * found during _PG_init so that the per-db worker will register it for
+	 * startup after performing any BDR initialisation work.
 	 *
 	 * Use of shared memory for this is required for EXEC_BACKEND (windows)
 	 * where we can't share postmaster memory, and for when we're launching a
 	 * bgworker from another bgworker where the fork() from postmaster doesn't
 	 * provide access to the launching bgworker's memory.
+	 *
+	 * The workers aren't actually launched here, they get launched by
+	 * launch_apply_workers(), called by the database's per-db static worker.
 	 */
 	for (off = 0; off < bdr_max_workers; off++)
 	{
@@ -1273,8 +1274,20 @@ bdr_worker_shmem_create_workers(void)
 		worker->connection_config_idx = off;
 		worker->replay_stop_lsn = InvalidXLogRecPtr;
 		worker->forward_changesets = false;
+		/*
+		 * If this is a postmaster restart, don't register the worker a second
+		 * time when the per-db worker starts up.
+		 */
+		worker->bgw_is_registered = bdr_is_restart;
 		n_configured_bdr_nodes++;
 	}
+
+	/*
+	 * Make sure that we don't register workers if the postmaster restarts and
+	 * clears shmem, by keeping a record that we've asked for registration once
+	 * already.
+	 */
+	bdr_is_restart = true;
 
 	/*
 	 * We might need to re-populate shared memory after a postmaster restart.
@@ -1570,6 +1583,9 @@ _PG_init(void)
 	/*
 	 * Register the per-db workers and assign them an index in shmem. The
 	 * memory doesn't actually exist yet, it'll be allocated in shmem init.
+	 *
+	 * No protection against multiple launches is requried because this
+	 * only runs once, in _PG_init.
 	 */
 	bgw.bgw_flags = BGWORKER_SHMEM_ACCESS |
 		BGWORKER_BACKEND_DATABASE_CONNECTION;
