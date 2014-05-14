@@ -318,6 +318,10 @@ extern void init_bdr_commandfilter(void);
 /* background workers */
 extern void bdr_apply_main(Datum main_arg);
 
+/* manipulation of bdr catalogs */
+extern char bdr_nodes_get_local_status(uint64 sysid, Name dbname);
+extern void bdr_nodes_set_local_status(uint64 sysid, Name dbname, char status);
+
 /* helpers shared by multiple worker types */
 extern struct pg_conn *
 bdr_connect(char *conninfo_repl,

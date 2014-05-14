@@ -35,6 +35,8 @@
 
 #include "catalog/pg_type.h"
 
+#include "executor/spi.h"
+
 #include "replication/replication_identifier.h"
 #include "replication/walreceiver.h"
 
@@ -681,11 +683,41 @@ bdr_init_replica(Name dbname)
 	StringInfoData query;
 	BdrWorker  *init_replica_worker;
 	BdrConnectionConfig *init_replica_config;
+	int spi_ret;
 
 	initStringInfo(&query);
 
 	elog(DEBUG2, "bdr %s: bdr_init_replica",
 		 NameStr(*dbname));
+
+	/*
+	 * The local SPI transaction we're about to perform must do any writes as a
+	 * local transaction, not as a changeset application from a remote node.
+	 * That allows rows to be repliated to other nodes. So no replication_origin_id
+	 * may be set.
+	 */
+	Assert(replication_origin_id == InvalidRepNodeId);
+
+	/*
+	 * Check the local bdr.bdr_nodes over SPI or direct scan to see if
+	 * there's an entry for ourselves in ready mode already.
+	 *
+	 * Note that we don't have to explicitly SPI_finish(...) on error paths;
+	 * that's taken care of for us.
+	 */
+	StartTransactionCommand();
+	spi_ret = SPI_connect();
+	if (spi_ret != SPI_OK_CONNECT)
+		elog(ERROR, "SPI already connected; this shouldn't be possible");
+
+	status = bdr_nodes_get_local_status(GetSystemIdentifier(), dbname);
+	if (status == 'r')
+	{
+		/* Already in ready state, nothing more to do */
+		SPI_finish();
+		CommitTransactionCommand();
+		return;
+	}
 
 	/*
 	 * Before starting workers we must determine if we need to copy
@@ -697,30 +729,52 @@ bdr_init_replica(Name dbname)
 	LWLockAcquire(BdrWorkerCtl->lock, LW_SHARED);
 	init_replica_worker = find_init_replica_worker(dbname);
 	LWLockRelease(BdrWorkerCtl->lock);
-	/* No connections have init_replica=t, nothing to do */
 	if (!init_replica_worker)
 	{
-		elog(DEBUG2, "bdr %s: nothing to do in bdr_init_replica",
-			 NameStr(*dbname));
-		return;
+		if (status != '\0')
+		{
+			/*
+			 * Even though there's no init_replica worker, the local bdr.bdr_nodes table
+			 * has an entry for our (sysid,dbname) and it isn't status=r (checked above),
+			 * we must've had an init_replica configured before, then removed.
+			 */
+			ereport(ERROR, (errmsg("bdr.bdr_nodes row with (sysid="
+					UINT64_FORMAT ", dbname=%s) exists and has status=%c, but "
+					"no connection with init_replica=t is configured for this "
+					"database. ",
+					GetSystemIdentifier(), NameStr(*dbname), status),
+					errdetail("You probably configured initial setup with "
+					"init_replica on a connection, then removed or changed that "
+					"connection before setup completed properly. "),
+					errhint("DROP and re-create the database if it has no "
+					"existing content of value, or add the init_replica setting "
+					"to one of the connections.")));
+		}
+		/*
+		 * No connections have init_replica=t, so there's no remote copy to do.
+		 * We still have to ensure that bdr.bdr_nodes.status is 'r' for this
+		 * node so that slot creation is permitted.
+		 */
+		bdr_nodes_set_local_status(GetSystemIdentifier(), dbname, 'r');
 	}
+	/*
+	 * We no longer require the transaction for SPI; further work gets done on
+	 * the remote machine's bdr.bdr_nodes table and replicated back to us via
+	 * pg_dump/pg_restore, or over the walsender protocol once we start
+	 * replay. If we aren't just about to exit anyway.
+	 */
+	SPI_finish();
+	CommitTransactionCommand();
+
+	if (!init_replica_worker)
+		/* Cleanup done and nothing more to do */
+		return;
+
 
 	init_replica_config = bdr_connection_configs
 		[init_replica_worker->worker_data.apply_worker.connection_config_idx];
 	elog(DEBUG2, "bdr %s: bdr_init_replica init from connection %s",
 		 NameStr(*dbname), NameStr(init_replica_config->name));
-
-	/*
-	 * Check the local bdr.bdr_nodes over SPI or direct scan to see if
-	 * there's an entry for ourselves in ready mode already.
-	 *
-	 * This is an optimisation we don't need to do yet...
-	 */
-	/*TODO
-	(status, min_remote_lsn) = get_node_status_from_local();
-	if (status == 'r')
-		return;
-	*/
 
 	/*
 	 * Test to see if there's an entry in the remote's bdr.bdr_nodes for our
