@@ -323,6 +323,14 @@ extern void bdr_apply_main(Datum main_arg);
 extern char bdr_nodes_get_local_status(uint64 sysid, Name dbname);
 extern void bdr_nodes_set_local_status(uint64 sysid, Name dbname, char status);
 
+extern Oid GetSysCacheOidError(int cacheId, Datum key1, Datum key2, Datum key3,
+							   Datum key4);
+
+#define GetSysCacheOidError2(cacheId, key1, key2) \
+	GetSysCacheOidError(cacheId, key1, key2, 0, 0)
+
+
+
 /* helpers shared by multiple worker types */
 extern struct pg_conn* bdr_connect(char *conninfo_repl,
 								   char* remote_ident,
