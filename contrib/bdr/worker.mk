@@ -3,7 +3,7 @@
 MODULE_big = bdr
 OBJS = bdr.o bdr_apply.o bdr_compat.o bdr_commandfilter.o bdr_count.o \
 	bdr_seq.o bdr_init_replica.o bdr_relcache.o bdr_conflict_handlers.o \
-	bdr_conflict_logging.o bdr_executor.o
+	bdr_conflict_logging.o bdr_executor.o bdr_catalogs.o
 
 EXTENSION = bdr
 DATA = bdr--0.5.sql
