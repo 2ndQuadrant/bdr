@@ -1048,7 +1048,13 @@ bdr_perdb_worker_main(Datum main_arg)
 	CurrentResourceOwner = ResourceOwnerCreate(NULL, "bdr seq top-level resource owner");
 	bdr_saved_resowner = CurrentResourceOwner;
 
-	/* Do we need to init the local DB from a remote node? */
+	/*
+	 * Do we need to init the local DB from a remote node?
+	 *
+	 * Checks bdr.bdr_nodes.status, does any remote initialization required if
+	 * there's an init_replica connection, and ensures that
+	 * bdr.bdr_nodes.status=r for our entry before continuing.
+	 */
 	bdr_init_replica(&bdr_perdb_worker->dbname);
 
 	elog(DEBUG1, "Starting bdr apply workers for db %s", NameStr(bdr_perdb_worker->dbname));

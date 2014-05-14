@@ -13,6 +13,7 @@
 #include "postgres.h"
 
 #include "bdr.h"
+#include "miscadmin.h"
 
 #include "access/sysattr.h"
 #include "access/tuptoaster.h"
@@ -22,8 +23,13 @@
 
 #include "catalog/namespace.h"
 #include "catalog/pg_class.h"
+#include "catalog/pg_database.h"
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_type.h"
+
+#include "commands/dbcommands.h"
+
+#include "executor/spi.h"
 
 #include "libpq/pqformat.h"
 
@@ -163,6 +169,116 @@ bdr_req_param(const char *param)
 			(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 			 errmsg("missing value for for parameter \"%s\"",
 					param)));
+}
+
+/*
+ * Check bdr.bdr_nodes entry in local DB and if status != r,
+ * raise an error.
+ *
+ * If this function returns it's safe to begin replay.
+ */
+static void
+bdr_ensure_node_ready()
+{
+	int spi_ret;
+	const uint64 sysid = GetSystemIdentifier();
+	char status;
+	HeapTuple tuple;
+	NameData dbname;
+
+	StartTransactionCommand();
+
+	tuple = SearchSysCache1(DATABASEOID, ObjectIdGetDatum(MyDatabaseId));
+	if (!HeapTupleIsValid(tuple))
+		elog(ERROR, "Could not get name of local DB");
+	namecpy( &dbname, &((Form_pg_database) GETSTRUCT(tuple))->datname );
+	ReleaseSysCache(tuple);
+
+	/*
+	 * Refuse to begin replication if the local node isn't yet ready to
+	 * send data. Check the status in bdr.bdr_nodes.
+	 */
+	spi_ret = SPI_connect();
+	if (spi_ret != SPI_OK_CONNECT)
+		elog(ERROR, "Local SPI connect failed; shouldn't happen");
+
+	status = bdr_nodes_get_local_status(sysid, &dbname);
+
+	SPI_finish();
+
+	CommitTransactionCommand();
+
+	/* Complain if node isn't ready. */
+	/* TODO: Allow soft error so caller can sleep and recheck? */
+	if (status != 'r')
+	{
+		const char * const base_msg =
+			"bdr.bdr_nodes entry for local node (sysid=" UINT64_FORMAT
+			", dbname=%s): %s";
+		switch (status)
+		{
+			case 'r':
+				break; /* unreachable */
+			case '\0':
+				/*
+				 * Can't allow replay when BDR hasn't started yet, as
+				 * replica init might still need to run, causing a dump to
+				 * be applied, catchup from a remote node, etc.
+				 *
+				 * If there's no init_replica set, the bdr extension will
+				 * create a bdr.bdr_nodes entry with 'r' state shortly
+				 * after it starts, so we won't hit this.
+				 */
+				ereport(ERROR,
+						(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+						 errmsg(base_msg, sysid, NameStr(dbname),
+								"row missing, bdr not active on this "
+								"database or is initializing."),
+						 errhint("Add bdr to shared_preload_libraries and "
+								 "check logs for bdr startup errors.")));
+				break;
+			case 'c':
+				/*
+				 * Can't allow replay while still catching up. We get the
+				 * real origin node ID and LSN over the protocol in catchup
+				 * mode, but changes are written to WAL with the ID and LSN
+				 * of the immediate origin node. So if we cascade them to
+				 * another node now, they'll incorrectly see the immediate
+				 * origin node ID and LSN, not the true original ones.
+				 *
+				 * It should be possible to lift this restriction later,
+				 * if we write the original node id and lsn in WAL.
+				 */
+				ereport(ERROR,
+						(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+						 errmsg(base_msg, sysid, NameStr(dbname), "status='c'"
+								", bdr still starting up: "
+								"catching up from remote node"),
+						 errhint("Monitor pg_stat_replication on the "
+								 "remote node, watch the logs and wait "
+								 "until the node has caught up")));
+				break;
+			case 'i':
+				/*
+				 * Can't allow replay while still applying a dump because the
+				 * origin_id and origin_lsn are not preserved on the dump, so
+				 * we'd replay all the changes. If the connections are from
+				 * nodes that already have that data (or the origin node),
+				 * that'll create a right mess.
+				 */
+				ereport(ERROR,
+						(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+						 errmsg(base_msg, sysid, NameStr(dbname),
+								"status='i', bdr still starting up: applying "
+								"initial dump of remote node"),
+						 errhint("Monitor pg_stat_activity and the logs, "
+								 "wait until the node has caught up")));
+				break;
+			default:
+				elog(ERROR, "Unhandled case status=%c", status);
+				break;
+		}
+	}
 }
 
 
@@ -313,7 +429,6 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 		if (data->client_pg_version / 100 != PG_VERSION_NUM / 100)
 			data->allow_sendrecv_protocol = false;
 
-
 		if (!IsTransactionState())
 		{
 			tx_started = false;
@@ -337,6 +452,12 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 
 		if (!tx_started)
 			CommitTransactionCommand();
+
+		/*
+		 * Make sure it's safe to begin playing changes to the remote end.
+		 * This'll ERROR out if we're not ready.
+		 */
+		bdr_ensure_node_ready();
 	}
 }
 
