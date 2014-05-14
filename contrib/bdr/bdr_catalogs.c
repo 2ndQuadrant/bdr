@@ -27,6 +27,28 @@
 #include "utils/builtins.h"
 #include "utils/syscache.h"
 
+/* GetSysCacheOid equivalent that errors out if nothing is found */
+Oid
+GetSysCacheOidError(int cacheId,
+					Datum key1,
+					Datum key2,
+					Datum key3,
+					Datum key4)
+{
+	HeapTuple	tuple;
+	Oid			result;
+
+	tuple = SearchSysCache(cacheId, key1, key2, key3, key4);
+	if (!HeapTupleIsValid(tuple))
+		elog(ERROR, "cache lookup failure in cache %d", cacheId);
+	result = HeapTupleGetOid(tuple);
+	ReleaseSysCache(tuple);
+	return result;
+}
+
+#define GetSysCacheOidError2(cacheId, key1, key2) \
+	GetSysCacheOidError(cacheId, key1, key2, 0, 0)
+
 /*
  * Get the bdr.bdr_nodes status value for the current local node from the local
  * database via SPI, if any such row exists.
@@ -134,3 +156,5 @@ bdr_nodes_set_local_status(uint64 sysid, Name dbname, char status)
 					"SPI error %d",
 					status, sysid, NameStr(*dbname), spi_ret);
 }
+
+
