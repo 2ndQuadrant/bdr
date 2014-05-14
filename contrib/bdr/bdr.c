@@ -248,6 +248,8 @@ bdr_connect(char *conninfo_repl,
 						PQerrorMessage(streamConn))));
 	}
 
+	elog(DEBUG3, "Sending replication command: IDENTIFY_SYSTEM");
+
 	res = PQexec(streamConn, "IDENTIFY_SYSTEM");
 	if (PQresultStatus(res) != PGRES_TUPLES_OK)
 	{
@@ -356,6 +358,9 @@ bdr_create_slot(PGconn *streamConn, Name slot_name,
 	resetStringInfo(&query);
 	appendStringInfo(&query, "CREATE_REPLICATION_SLOT \"%s\" LOGICAL %s",
 					 NameStr(*slot_name), "bdr_output");
+
+	elog(DEBUG3, "Sending replication command: %s", query.data);
+
 	res = PQexec(streamConn, query.data);
 
 	if (PQresultStatus(res) != PGRES_TUPLES_OK)
@@ -572,6 +577,9 @@ bdr_apply_main(Datum main_arg)
 		appendStringInfo(&query, ", forward_changesets 't'");
 
 	appendStringInfoChar(&query, ')');
+
+	elog(DEBUG3, "Sending replication command: %s", query.data);
+
 	res = PQexec(streamConn, query.data);
 
 	sqlstate = PQresultErrorField(res, PG_DIAG_SQLSTATE);
