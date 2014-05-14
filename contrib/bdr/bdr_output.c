@@ -105,10 +105,22 @@ _PG_output_plugin_init(OutputPluginCallbacks *cb)
 	cb->shutdown_cb = NULL;
 }
 
+/* Ensure a bdr_parse_... arg is non-null */
+static void
+bdr_parse_notnull(DefElem *elem, const char *paramtype)
+{
+	if (elem->arg == NULL || strVal(elem->arg) == NULL)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("%s parameter \"%s\" had no value",
+				 paramtype, elem->defname)));
+}
+
 
 static void
 bdr_parse_uint32(DefElem *elem, uint32 *res)
 {
+	bdr_parse_notnull(elem, "uint32");
 	errno = 0;
 	*res = strtoul(strVal(elem->arg), NULL, 0);
 
@@ -122,6 +134,7 @@ bdr_parse_uint32(DefElem *elem, uint32 *res)
 static void
 bdr_parse_size_t(DefElem *elem, size_t *res)
 {
+	bdr_parse_notnull(elem, "size_t");
 	errno = 0;
 	*res = strtoull(strVal(elem->arg), NULL, 0);
 
@@ -135,6 +148,7 @@ bdr_parse_size_t(DefElem *elem, size_t *res)
 static void
 bdr_parse_bool(DefElem *elem, bool *res)
 {
+	bdr_parse_notnull(elem, "bool");
 	if (!parse_bool(strVal(elem->arg), res))
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
