@@ -317,6 +317,29 @@ COMMENT ON COLUMN bdr_nodes.node_timeline IS 'timeline ID of this node';
 COMMENT ON COLUMN bdr_nodes.node_dboid IS 'local database oid on the cluster (node_sysid, node_timeline)';
 COMMENT ON COLUMN bdr_nodes.node_status IS 'Readiness of the node: [i]nitializing, [c]atchup, [r]eady. Doesn''t indicate connected/disconnected.';
 
+CREATE TABLE bdr_global_locks(
+    locktype text NOT NULL,
+
+    owning_sysid text NOT NULL,
+    owning_timeline oid NOT NULL,
+    owning_datid oid NOT NULL,
+
+    owner_created_lock_at pg_lsn NOT NULL,
+
+    acquired_sysid text NOT NULL,
+    acquired_timeline oid NOT NULL,
+    acquired_datid oid NOT NULL,
+
+    acquired_lock_at pg_lsn,
+
+    state text NOT NULL
+);
+REVOKE ALL ON TABLE bdr_global_locks FROM PUBLIC;
+SELECT pg_catalog.pg_extension_config_dump('bdr_global_locks', '');
+
+CREATE UNIQUE INDEX bdr_global_locks_byowner
+ON bdr_global_locks(locktype, owning_sysid, owning_timeline, owning_datid);
+
 CREATE TABLE bdr_queued_commands (
     lsn pg_lsn NOT NULL,
     queued_at TIMESTAMP WITH TIME ZONE NOT NULL,

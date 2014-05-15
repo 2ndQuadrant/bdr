@@ -12,6 +12,7 @@ OBJS = \
 	bdr_count.o \
 	bdr_executor.o \
 	bdr_init_replica.o \
+	bdr_locks.o \
 	bdr_relcache.o \
 	bdr_seq.o
 
