@@ -1,0 +1,485 @@
+SELECT pg_sleep(5);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+CREATE TABLE test_tbl(pk int primary key, dropping_col1 text, dropping_col2 text);
+ALTER TABLE test_tbl ADD COLUMN col1 text;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\c postgres
+\d+ test_tbl
+                           Table "public.test_tbl"
+    Column     |  Type   | Modifiers | Storage  | Stats target | Description 
+---------------+---------+-----------+----------+--------------+-------------
+ pk            | integer | not null  | plain    |              | 
+ dropping_col1 | text    |           | extended |              | 
+ dropping_col2 | text    |           | extended |              | 
+ col1          | text    |           | extended |              | 
+Indexes:
+    "test_tbl_pkey" PRIMARY KEY, btree (pk)
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+ALTER TABLE test_tbl ADD COLUMN col2 text;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\c regression
+\d+ test_tbl
+                           Table "public.test_tbl"
+    Column     |  Type   | Modifiers | Storage  | Stats target | Description 
+---------------+---------+-----------+----------+--------------+-------------
+ pk            | integer | not null  | plain    |              | 
+ dropping_col1 | text    |           | extended |              | 
+ dropping_col2 | text    |           | extended |              | 
+ col1          | text    |           | extended |              | 
+ col2          | text    |           | extended |              | 
+Indexes:
+    "test_tbl_pkey" PRIMARY KEY, btree (pk)
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+ALTER TABLE test_tbl ADD COLUMN serial_col_node1 SERIAL;
+ERROR:  ALTER TABLE ... ADD COLUMN ... DEFAULT may only affect UNLOGGED or TEMPORARY tables when BDR is active; test_tbl is a regular table
+ALTER TABLE test_tbl DROP COLUMN dropping_col1;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\c postgres
+\d+ test_tbl
+                           Table "public.test_tbl"
+    Column     |  Type   | Modifiers | Storage  | Stats target | Description 
+---------------+---------+-----------+----------+--------------+-------------
+ pk            | integer | not null  | plain    |              | 
+ dropping_col2 | text    |           | extended |              | 
+ col1          | text    |           | extended |              | 
+ col2          | text    |           | extended |              | 
+Indexes:
+    "test_tbl_pkey" PRIMARY KEY, btree (pk)
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+ALTER TABLE test_tbl DROP COLUMN dropping_col2;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\c regression
+\d+ test_tbl
+                       Table "public.test_tbl"
+ Column |  Type   | Modifiers | Storage  | Stats target | Description 
+--------+---------+-----------+----------+--------------+-------------
+ pk     | integer | not null  | plain    |              | 
+ col1   | text    |           | extended |              | 
+ col2   | text    |           | extended |              | 
+Indexes:
+    "test_tbl_pkey" PRIMARY KEY, btree (pk)
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+ALTER TABLE test_tbl ALTER COLUMN col1 SET NOT NULL;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\c postgres
+\d+ test_tbl
+                       Table "public.test_tbl"
+ Column |  Type   | Modifiers | Storage  | Stats target | Description 
+--------+---------+-----------+----------+--------------+-------------
+ pk     | integer | not null  | plain    |              | 
+ col1   | text    | not null  | extended |              | 
+ col2   | text    |           | extended |              | 
+Indexes:
+    "test_tbl_pkey" PRIMARY KEY, btree (pk)
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+ALTER TABLE test_tbl ALTER COLUMN col2 SET NOT NULL;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\c regression
+\d+ test_tbl
+                       Table "public.test_tbl"
+ Column |  Type   | Modifiers | Storage  | Stats target | Description 
+--------+---------+-----------+----------+--------------+-------------
+ pk     | integer | not null  | plain    |              | 
+ col1   | text    | not null  | extended |              | 
+ col2   | text    | not null  | extended |              | 
+Indexes:
+    "test_tbl_pkey" PRIMARY KEY, btree (pk)
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+ALTER TABLE test_tbl ALTER COLUMN col1 DROP NOT NULL;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\c postgres
+\d+ test_tbl
+                       Table "public.test_tbl"
+ Column |  Type   | Modifiers | Storage  | Stats target | Description 
+--------+---------+-----------+----------+--------------+-------------
+ pk     | integer | not null  | plain    |              | 
+ col1   | text    |           | extended |              | 
+ col2   | text    | not null  | extended |              | 
+Indexes:
+    "test_tbl_pkey" PRIMARY KEY, btree (pk)
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+ALTER TABLE test_tbl ALTER COLUMN col2 DROP NOT NULL;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\c regression
+\d+ test_tbl
+                       Table "public.test_tbl"
+ Column |  Type   | Modifiers | Storage  | Stats target | Description 
+--------+---------+-----------+----------+--------------+-------------
+ pk     | integer | not null  | plain    |              | 
+ col1   | text    |           | extended |              | 
+ col2   | text    |           | extended |              | 
+Indexes:
+    "test_tbl_pkey" PRIMARY KEY, btree (pk)
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+ALTER TABLE test_tbl ALTER COLUMN col1 SET DEFAULT 'abc';
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\c postgres
+\d+ test_tbl
+                            Table "public.test_tbl"
+ Column |  Type   |      Modifiers      | Storage  | Stats target | Description 
+--------+---------+---------------------+----------+--------------+-------------
+ pk     | integer | not null            | plain    |              | 
+ col1   | text    | default 'abc'::text | extended |              | 
+ col2   | text    |                     | extended |              | 
+Indexes:
+    "test_tbl_pkey" PRIMARY KEY, btree (pk)
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+ALTER TABLE test_tbl ALTER COLUMN col2 SET DEFAULT 'abc';
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\c regression
+\d+ test_tbl
+                            Table "public.test_tbl"
+ Column |  Type   |      Modifiers      | Storage  | Stats target | Description 
+--------+---------+---------------------+----------+--------------+-------------
+ pk     | integer | not null            | plain    |              | 
+ col1   | text    | default 'abc'::text | extended |              | 
+ col2   | text    | default 'abc'::text | extended |              | 
+Indexes:
+    "test_tbl_pkey" PRIMARY KEY, btree (pk)
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+ALTER TABLE test_tbl ALTER COLUMN col1 DROP DEFAULT;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\c postgres
+\d+ test_tbl
+                            Table "public.test_tbl"
+ Column |  Type   |      Modifiers      | Storage  | Stats target | Description 
+--------+---------+---------------------+----------+--------------+-------------
+ pk     | integer | not null            | plain    |              | 
+ col1   | text    |                     | extended |              | 
+ col2   | text    | default 'abc'::text | extended |              | 
+Indexes:
+    "test_tbl_pkey" PRIMARY KEY, btree (pk)
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+ALTER TABLE test_tbl ALTER COLUMN col2 DROP DEFAULT;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\c regression
+\d+ test_tbl
+                       Table "public.test_tbl"
+ Column |  Type   | Modifiers | Storage  | Stats target | Description 
+--------+---------+-----------+----------+--------------+-------------
+ pk     | integer | not null  | plain    |              | 
+ col1   | text    |           | extended |              | 
+ col2   | text    |           | extended |              | 
+Indexes:
+    "test_tbl_pkey" PRIMARY KEY, btree (pk)
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+ALTER TABLE test_tbl ADD CONSTRAINT test_const CHECK (true);
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\c postgres
+\d+ test_tbl
+                       Table "public.test_tbl"
+ Column |  Type   | Modifiers | Storage  | Stats target | Description 
+--------+---------+-----------+----------+--------------+-------------
+ pk     | integer | not null  | plain    |              | 
+ col1   | text    |           | extended |              | 
+ col2   | text    |           | extended |              | 
+Indexes:
+    "test_tbl_pkey" PRIMARY KEY, btree (pk)
+Check constraints:
+    "test_const" CHECK (true)
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+ALTER TABLE test_tbl ADD CONSTRAINT test_const1 CHECK (true);
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\c regression
+\d+ test_tbl
+                       Table "public.test_tbl"
+ Column |  Type   | Modifiers | Storage  | Stats target | Description 
+--------+---------+-----------+----------+--------------+-------------
+ pk     | integer | not null  | plain    |              | 
+ col1   | text    |           | extended |              | 
+ col2   | text    |           | extended |              | 
+Indexes:
+    "test_tbl_pkey" PRIMARY KEY, btree (pk)
+Check constraints:
+    "test_const" CHECK (true)
+    "test_const1" CHECK (true)
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+ALTER TABLE test_tbl DROP CONSTRAINT test_const;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\c postgres
+\d+ test_tbl
+                       Table "public.test_tbl"
+ Column |  Type   | Modifiers | Storage  | Stats target | Description 
+--------+---------+-----------+----------+--------------+-------------
+ pk     | integer | not null  | plain    |              | 
+ col1   | text    |           | extended |              | 
+ col2   | text    |           | extended |              | 
+Indexes:
+    "test_tbl_pkey" PRIMARY KEY, btree (pk)
+Check constraints:
+    "test_const1" CHECK (true)
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+ALTER TABLE test_tbl DROP CONSTRAINT test_const1;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\c regression
+\d+ test_tbl
+                       Table "public.test_tbl"
+ Column |  Type   | Modifiers | Storage  | Stats target | Description 
+--------+---------+-----------+----------+--------------+-------------
+ pk     | integer | not null  | plain    |              | 
+ col1   | text    |           | extended |              | 
+ col2   | text    |           | extended |              | 
+Indexes:
+    "test_tbl_pkey" PRIMARY KEY, btree (pk)
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+ALTER TABLE test_tbl ALTER COLUMN col1 SET NOT NULL;
+CREATE UNIQUE INDEX test_idx ON test_tbl(col1);
+ALTER TABLE test_tbl REPLICA IDENTITY USING INDEX test_idx;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\c postgres
+\d+ test_tbl
+                       Table "public.test_tbl"
+ Column |  Type   | Modifiers | Storage  | Stats target | Description 
+--------+---------+-----------+----------+--------------+-------------
+ pk     | integer | not null  | plain    |              | 
+ col1   | text    | not null  | extended |              | 
+ col2   | text    |           | extended |              | 
+Indexes:
+    "test_tbl_pkey" PRIMARY KEY, btree (pk)
+    "test_idx" UNIQUE, btree (col1) REPLICA IDENTITY
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+ALTER TABLE test_tbl ALTER COLUMN col2 SET NOT NULL;
+CREATE UNIQUE INDEX test_idx1 ON test_tbl(col2);
+ALTER TABLE test_tbl REPLICA IDENTITY USING INDEX test_idx1;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\c regression
+\d+ test_tbl
+                       Table "public.test_tbl"
+ Column |  Type   | Modifiers | Storage  | Stats target | Description 
+--------+---------+-----------+----------+--------------+-------------
+ pk     | integer | not null  | plain    |              | 
+ col1   | text    | not null  | extended |              | 
+ col2   | text    | not null  | extended |              | 
+Indexes:
+    "test_tbl_pkey" PRIMARY KEY, btree (pk)
+    "test_idx" UNIQUE, btree (col1)
+    "test_idx1" UNIQUE, btree (col2) REPLICA IDENTITY
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+ALTER TABLE test_tbl REPLICA IDENTITY DEFAULT;
+DROP INDEX test_idx;
+DROP INDEX test_idx1;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\c postgres
+\d+ test_tbl
+                       Table "public.test_tbl"
+ Column |  Type   | Modifiers | Storage  | Stats target | Description 
+--------+---------+-----------+----------+--------------+-------------
+ pk     | integer | not null  | plain    |              | 
+ col1   | text    | not null  | extended |              | 
+ col2   | text    | not null  | extended |              | 
+Indexes:
+    "test_tbl_pkey" PRIMARY KEY, btree (pk)
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+CREATE UNIQUE INDEX test_idx ON test_tbl(col1);
+ALTER TABLE test_tbl REPLICA IDENTITY USING INDEX test_idx;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+DROP INDEX test_idx;
+\d+ test_tbl
+                       Table "public.test_tbl"
+ Column |  Type   | Modifiers | Storage  | Stats target | Description 
+--------+---------+-----------+----------+--------------+-------------
+ pk     | integer | not null  | plain    |              | 
+ col1   | text    | not null  | extended |              | 
+ col2   | text    | not null  | extended |              | 
+Indexes:
+    "test_tbl_pkey" PRIMARY KEY, btree (pk)
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+\c regression
+\d+ test_tbl
+                       Table "public.test_tbl"
+ Column |  Type   | Modifiers | Storage  | Stats target | Description 
+--------+---------+-----------+----------+--------------+-------------
+ pk     | integer | not null  | plain    |              | 
+ col1   | text    | not null  | extended |              | 
+ col2   | text    | not null  | extended |              | 
+Indexes:
+    "test_tbl_pkey" PRIMARY KEY, btree (pk)
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+CREATE USER test_user;
+ALTER TABLE test_tbl OWNER TO test_user;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\c postgres
+\d+ test_tbl
+                       Table "public.test_tbl"
+ Column |  Type   | Modifiers | Storage  | Stats target | Description 
+--------+---------+-----------+----------+--------------+-------------
+ pk     | integer | not null  | plain    |              | 
+ col1   | text    | not null  | extended |              | 
+ col2   | text    | not null  | extended |              | 
+Indexes:
+    "test_tbl_pkey" PRIMARY KEY, btree (pk)
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
