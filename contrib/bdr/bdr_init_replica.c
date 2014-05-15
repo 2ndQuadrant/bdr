@@ -106,26 +106,30 @@ bdr_get_remote_status(PGconn *pgconn, Name dbname)
 {
 	PGresult 		   *res;
 	char 				status;
-	Oid 				param_types[] = {NUMERICOID, TEXTOID};
-	const char 		   *param_values[2];
+	Oid 				param_types[] = {TEXTOID, OIDOID, NAMEOID};
+	const char 		   *param_values[3];
 	/* Needs to fit max length of UINT64_FORMAT */
 	char				sysid_str[33];
+	char				tlid_str[33];
 
 	snprintf(sysid_str, sizeof(sysid_str), UINT64_FORMAT,
 			 GetSystemIdentifier());
 	sysid_str[sizeof(sysid_str)-1] = '\0';
 
-	param_values[0] = sysid_str;
-	param_types[0] = NUMERICOID;
+	snprintf(tlid_str, sizeof(tlid_str), "%u",
+			 ThisTimeLineID);
+	tlid_str[sizeof(tlid_str)-1] = '\0';
 
-	param_values[1] = NameStr(*dbname);
-	param_types[1] = TEXTOID;
+	param_values[0] = sysid_str;
+	param_values[1] = tlid_str;
+	param_values[2] = NameStr(*dbname);
 
 	res = PQexecParams(pgconn,
 					   "SELECT node_status FROM bdr.bdr_nodes "
-					   "WHERE node_sysid = $1 AND node_dbname = $2 "
+					   "WHERE node_sysid = $1 AND node_timeline = $2 "
+					   "AND node_dbname = $3 "
 					   "FOR UPDATE",
-					   2, param_types, param_values, NULL, NULL, 0);
+					   3, param_types, param_values, NULL, NULL, 0);
 	if (PQresultStatus(res) != PGRES_TUPLES_OK)
 	{
 		elog(FATAL, "bdr %s: Failed to get remote status during bdr init: "
@@ -166,6 +170,7 @@ bdr_set_remote_status(PGconn *pgconn, Name dbname,
 	const uint64		sysid = GetSystemIdentifier();
 	/* Needs to fit max length of UINT64_FORMAT */
 	char 				sysid_str[33];
+	char				tlid_str[33];
 
 	if (status == prev_status)
 		/* No action required (we could check the remote, but meh) */
@@ -175,22 +180,25 @@ bdr_set_remote_status(PGconn *pgconn, Name dbname,
 			 GetSystemIdentifier());
 	sysid_str[sizeof(sysid_str)-1] = '\0';
 
+	snprintf(tlid_str, sizeof(tlid_str), "%u",
+			 ThisTimeLineID);
+	tlid_str[sizeof(tlid_str)-1] = '\0';
+
 	if (status == '\0')
 	{
-		Oid			param_types[] = {NUMERICOID, TEXTOID};
-		const char *param_values[2];
+		Oid			param_types[] = {TEXTOID, OIDOID, NAMEOID};
+		const char *param_values[3];
 		char    	new_status;
 
 		param_values[0] = sysid_str;
-		param_values[1] = NameStr(*dbname);
+		param_values[1] = tlid_str;
+		param_values[2] = NameStr(*dbname);
 
 		res = PQexecParams(pgconn,
 						   "DELETE FROM bdr.bdr_nodes WHERE node_sysid = $1"
-						   " AND node_dbname = $2 RETURNING node_status",
-						   2, param_types, param_values, NULL, NULL, 0);
-
-		elog(DEBUG2, "bdr %s: deleting bdr_nodes row with id " UINT64_FORMAT
-			 " and node_dbname %s ", NameStr(*dbname), sysid, NameStr(*dbname));
+						   " AND node_timeline = $2 AND node_dbname = $3 "
+						   "RETURNING node_status",
+						   3, param_types, param_values, NULL, NULL, 0);
 
 		if (PQresultStatus(res) != PGRES_TUPLES_OK)
 		{
@@ -204,10 +212,10 @@ bdr_set_remote_status(PGconn *pgconn, Name dbname,
 			 * If prev_status was '\0' we wouldn't be here, so we should've
 			 * got a returned value.
 			 */
-			elog(FATAL, "bdr %s: bdr.bdr_nodes row for node_sysid="
-				 UINT64_FORMAT
-				 ", dbname='%s' missing, expected row with status=%c",
-				 NameStr(*dbname), sysid, NameStr(*dbname), (int)prev_status);
+			elog(FATAL, "bdr %s: bdr.bdr_nodes row for sysid=" UINT64_FORMAT
+						", tlid=%u, dbname='%s' missing, expected row with status=%c",
+				 NameStr(*dbname), sysid, ThisTimeLineID, NameStr(*dbname),
+				 (int)prev_status);
 		}
 		status_str = PQgetvalue(res, 0, 0);
 		Assert(strlen(status_str) == 1);
@@ -215,10 +223,9 @@ bdr_set_remote_status(PGconn *pgconn, Name dbname,
 
 		if (new_status != prev_status)
 		{
-			elog(FATAL, "bdr %s: bdr.bdr_nodes row for node_sysid="
-				 UINT64_FORMAT
-				 ", dbname='%s' had status=%c, expected status=%c",
-				 NameStr(*dbname), sysid, NameStr(*dbname),
+			elog(FATAL, "bdr %s: bdr.bdr_nodes row for node_sysid=" UINT64_FORMAT
+						", timeline=%u, dbname='%s' had status=%c, expected status=%c",
+				 NameStr(*dbname), sysid, ThisTimeLineID, NameStr(*dbname),
 				 (int) new_status, (int) prev_status);
 		}
 
@@ -226,29 +233,28 @@ bdr_set_remote_status(PGconn *pgconn, Name dbname,
 	}
 	else
 	{
-		Oid			param_types[] = {CHAROID, NUMERICOID, TEXTOID};
-		const char *param_values[3];
+		Oid			param_types[] = {CHAROID, TEXTOID, OIDOID, NAMEOID};
+		const char *param_values[4];
 		char		new_status;
 		char		status_str[2];
 
 		snprintf(status_str, 2, "%c", (int)status);
 		param_values[0] = status_str;
 		param_values[1] = sysid_str;
-		param_values[2] = NameStr(*dbname);
+		param_values[2] = tlid_str;
+		param_values[3] = NameStr(*dbname);
 
 		res = PQexecParams(pgconn,
 						   "UPDATE bdr.bdr_nodes "
 						   "SET node_status = $1 "
-						   "WHERE node_sysid = $2 AND node_dbname = $3 "
+						   "WHERE node_sysid = $2 AND node_timeline = $3 "
+						   "AND node_dbname = $4 "
 						   "RETURNING ("
-						   "SELECT node_status FROM bdr.bdr_nodes "
-						   "WHERE node_sysid = $2 AND node_dbname = $3)",
-						   3, param_types, param_values, NULL, NULL, 0);
-
-		elog(DEBUG2, "bdr %s: update row with id "
-			 UINT64_FORMAT
-			 " and node_dbname %s from %c to %c",
-			 NameStr(*dbname), sysid, NameStr(*dbname), prev_status, status);
+						   "  SELECT node_status FROM bdr.bdr_nodes "
+						   "  WHERE node_sysid = $2 AND node_timeline = $3 "
+						   "  AND node_dbname = $4"
+						   ")",
+						   4, param_types, param_values, NULL, NULL, 0);
 
 		if (PQresultStatus(res) != PGRES_TUPLES_OK)
 		{
@@ -268,9 +274,9 @@ bdr_set_remote_status(PGconn *pgconn, Name dbname,
 			{
 				elog(FATAL,
 					 "bdr %s: bdr.bdr_nodes row for node_sysid=" UINT64_FORMAT
-					 ", dbname='%s' had status=%c, expected status=%c",
-					 NameStr(*dbname), sysid, NameStr(*dbname), (int)new_status,
-					 (int)prev_status);
+					 ", timeline=%u, dbname='%s' had status=%c, expected status=%c",
+					 NameStr(*dbname), sysid, ThisTimeLineID, NameStr(*dbname),
+					 (int)new_status, (int)prev_status);
 			}
 
 			PQclear(res);
@@ -282,13 +288,9 @@ bdr_set_remote_status(PGconn *pgconn, Name dbname,
 			PQclear(res);
 			res = PQexecParams(pgconn,
 							   "INSERT INTO bdr.bdr_nodes"
-							   "    (node_status, node_sysid, node_dbname)"
-							   "    VALUES ($1, $2, $3);",
-							   3, param_types, param_values, NULL, NULL, 0);
-
-			elog(DEBUG2, "bdr %s: insert row with id " UINT64_FORMAT
-				 " and node_dbname %s from %c to %c",
-				 NameStr(*dbname), sysid, NameStr(*dbname), prev_status, status);
+							   " (node_status, node_sysid, node_timeline, node_dbname)"
+							   " VALUES ($1, $2, $3, $4);",
+							   4, param_types, param_values, NULL, NULL, 0);
 
 			if (PQresultStatus(res) != PGRES_COMMAND_OK)
 			{
@@ -710,7 +712,8 @@ bdr_init_replica(Name dbname)
 	if (spi_ret != SPI_OK_CONNECT)
 		elog(ERROR, "SPI already connected; this shouldn't be possible");
 
-	status = bdr_nodes_get_local_status(GetSystemIdentifier(), dbname);
+	status = bdr_nodes_get_local_status(GetSystemIdentifier(), ThisTimeLineID,
+										dbname);
 	if (status == 'r')
 	{
 		/* Already in ready state, nothing more to do */
@@ -755,7 +758,7 @@ bdr_init_replica(Name dbname)
 		 * We still have to ensure that bdr.bdr_nodes.status is 'r' for this
 		 * node so that slot creation is permitted.
 		 */
-		bdr_nodes_set_local_status(GetSystemIdentifier(), dbname, 'r');
+		bdr_nodes_set_local_status(dbname, 'r');
 	}
 	/*
 	 * We no longer require the transaction for SPI; further work gets done on
@@ -878,14 +881,15 @@ bdr_init_replica(Name dbname)
 		for (off = 0; off < bdr_max_workers; off++)
 		{
 			BdrWorker 			   *worker = &BdrWorkerCtl->slots[off];
-			BdrConnectionConfig	   *cfg;
 
-			cfg = bdr_connection_configs
-				[worker->worker_data.apply_worker.connection_config_idx];
+			if (worker->worker_type == BDR_WORKER_APPLY)
+			{
+				BdrConnectionConfig * const cfg = bdr_connection_configs
+					[worker->worker_data.apply_worker.connection_config_idx];
 
-			if (worker->worker_type == BDR_WORKER_APPLY
-				&& strcmp(cfg->dbname, NameStr(*dbname)) == 0)
-				my_conn_idxs[n_conns++] = off;
+				if (strcmp(cfg->dbname, NameStr(*dbname)) == 0)
+					my_conn_idxs[n_conns++] = off;
+			}
 		}
 		LWLockRelease(BdrWorkerCtl->lock);
 

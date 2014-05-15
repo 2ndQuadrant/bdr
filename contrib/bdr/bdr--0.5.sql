@@ -305,10 +305,11 @@ COMMENT ON COLUMN bdr_conflict_history.error_message IS 'On apply error, the err
 -- who knows why we'd want to) so the PK should be the (dbname, sysid) tuple.
 --
 CREATE TABLE bdr_nodes (
-    node_sysid numeric not null,
+    node_sysid text not null, -- Really a uint64 but we have no type for that
+    node_timeline oid not null,
     node_dbname name not null,
     node_status "char" not null,
-    primary key(node_sysid, node_dbname),
+    primary key(node_sysid, node_timeline, node_dbname),
     check (node_status in ('i', 'c', 'r'))
 );
 REVOKE ALL ON TABLE bdr_nodes FROM PUBLIC;
@@ -316,6 +317,7 @@ SELECT pg_catalog.pg_extension_config_dump('bdr_nodes', '');
 
 COMMENT ON TABLE bdr_nodes IS 'All known nodes in this BDR group.';
 COMMENT ON COLUMN bdr_nodes.node_sysid IS 'system_identifier from the control file of the node';
+COMMENT ON COLUMN bdr_nodes.node_timeline IS 'timeline ID of this node';
 COMMENT ON COLUMN bdr_nodes.node_dbname IS 'local database name on the node';
 COMMENT ON COLUMN bdr_nodes.node_status IS 'Readiness of the node: [i]nitializing, [c]atchup, [r]eady. Doesn''t indicate connected/disconnected.';
 
