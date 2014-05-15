@@ -50,19 +50,19 @@ GetSysCacheOidError(int cacheId,
 	GetSysCacheOidError(cacheId, key1, key2, 0, 0)
 
 /*
- * Get the bdr.bdr_nodes status value for the current local node from the local
- * database via SPI, if any such row exists.
+ * Get the bdr.bdr_nodes status value for the specififed node from the local
+ * bdr.bdr_nodes table via SPI.
  *
  * Returns the status value, or '\0' if no such row exists.
  *
  * SPI must be initialized, and you must be in a running transaction.
  */
 char
-bdr_nodes_get_local_status(uint64 sysid, Name dbname)
+bdr_nodes_get_local_status(uint64 sysid, TimeLineID tli, Name dbname)
 {
 	int			spi_ret;
-	Oid			argtypes[] = { NUMERICOID, NAMEOID };
-	Datum		values[2];
+	Oid			argtypes[] = { TEXTOID, OIDOID, NAMEOID };
+	Datum		values[3];
 	bool		isnull;
 	char        status;
 	char		sysid_str[33];
@@ -87,15 +87,14 @@ bdr_nodes_get_local_status(uint64 sysid, Name dbname)
 					   NameStr(*dbname)),
 				errhint("There is no bdr.bdr_connections entry for this database on the target node or bdr is not in shared_preload_libraries")));
 
-	values[0] = DirectFunctionCall3Coll(numeric_in, InvalidOid,
-										CStringGetDatum(sysid_str),
-										InvalidOid, Int32GetDatum(-1));
-	values[1] = NameGetDatum(dbname);
+	values[0] = CStringGetTextDatum(sysid_str);
+	values[1] = ObjectIdGetDatum(tli);
+	values[2] = NameGetDatum(dbname);
 
 	spi_ret = SPI_execute_with_args(
 			"SELECT node_status FROM bdr.bdr_nodes "
-			"WHERE node_sysid = $1 AND node_dbname = $2",
-			2, argtypes, values, NULL, false, 1);
+			"WHERE node_sysid = $1 AND node_timeline = $2 AND node_dbname = $3",
+			3, argtypes, values, NULL, false, 1);
 
 	if (spi_ret != SPI_OK_SELECT)
 		elog(ERROR, "Unable to query bdr.bdr_nodes, SPI error %d", spi_ret);
@@ -119,15 +118,18 @@ bdr_nodes_get_local_status(uint64 sysid, Name dbname)
  * Unlike bdr_set_remote_status, '\0' may not be passed to delete the row, and
  * no upsert is performed. This is a simple insert only.
  *
+ * Unlike bdr_nodes_get_local_status, only the status of the local node may
+ * be set.
+ *
  * SPI must be initialized, and you must be in a running transaction that is
  * not bound to any remote node replication state.
  */
 void
-bdr_nodes_set_local_status(uint64 sysid, Name dbname, char status)
+bdr_nodes_set_local_status(Name dbname, char status)
 {
 	int			spi_ret;
-	Oid			argtypes[] = { CHAROID, NUMERICOID, NAMEOID };
-	Datum		values[3];
+	Oid			argtypes[] = { CHAROID, TEXTOID, OIDOID, NAMEOID };
+	Datum		values[4];
 	char		sysid_str[33];
 
 	Assert(status != '\0'); /* Cannot pass \0 to delete */
@@ -135,26 +137,27 @@ bdr_nodes_set_local_status(uint64 sysid, Name dbname, char status)
 	/* Cannot have replication apply state set in this tx */
 	Assert(replication_origin_id == InvalidRepNodeId);
 
-	snprintf(sysid_str, sizeof(sysid_str), UINT64_FORMAT, sysid);
+	snprintf(sysid_str, sizeof(sysid_str), UINT64_FORMAT,
+			 GetSystemIdentifier());
 	sysid_str[sizeof(sysid_str)-1] = '\0';
 
 	values[0] = CharGetDatum(status);
-	values[1] = DirectFunctionCall3Coll(numeric_in, InvalidOid,
-										CStringGetDatum(sysid_str),
-										InvalidOid, Int32GetDatum(-1));
-	values[2] = NameGetDatum(dbname);
+	values[1] = CStringGetTextDatum(sysid_str);
+	values[2] = ObjectIdGetDatum(ThisTimeLineID);
+	values[3] = NameGetDatum(dbname);
 
 	spi_ret = SPI_execute_with_args(
 							   "INSERT INTO bdr.bdr_nodes"
-							   "    (node_status, node_sysid, node_dbname)"
-							   "    VALUES ($1, $2, $3);",
-							   3, argtypes, values, NULL, false, 0);
+							   " (node_status, node_sysid, node_timeline, node_dbname)"
+							   " VALUES ($1, $2, $3, $4);",
+							   4, argtypes, values, NULL, false, 0);
 
 	if (spi_ret != SPI_OK_INSERT)
 		elog(ERROR, "Unable to insert row (status=%c, node_sysid="
-					UINT64_FORMAT ", node_dbname=%s) into bdr.bdr_nodes, "
-					"SPI error %d",
-					status, sysid, NameStr(*dbname), spi_ret);
+					UINT64_FORMAT ", node_timeline=%u, node_dbname=%s) "
+					"into bdr.bdr_nodes: SPI error %d",
+					status, GetSystemIdentifier(), ThisTimeLineID,
+					NameStr(*dbname), spi_ret);
 }
 
 
