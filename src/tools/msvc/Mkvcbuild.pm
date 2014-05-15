@@ -529,7 +529,7 @@ sub mkvcbuild
 			     'bdr_conflict_handlers.c',
 			     'bdr_conflict_logging.c',
 			     'bdr_count.c',
-			     'bdr_executor.c'
+			     'bdr_executor.c',
 			     'bdr_init_replica.c',
 			     'bdr_relcache.c',
 			     'bdr_seq.c');
