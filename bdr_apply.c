@@ -36,6 +36,7 @@
 #include "parser/parse_type.h"
 
 #include "replication/logical.h"
+#include "replication/replication_identifier.h"
 
 #include "storage/lmgr.h"
 #include "storage/lwlock.h"
