@@ -15,6 +15,7 @@
 #include "postgres.h"
 
 #include "bdr.h"
+#include "bdr_locks.h"
 
 #include "libpq-fe.h"
 #include "miscadmin.h"
@@ -72,6 +73,9 @@ ResourceOwner bdr_saved_resowner;
 static bool bdr_is_restart = false;
 Oid   BdrNodesRelid;
 Oid   BdrConflictHistoryRelId;
+Oid   BdrLocksRelid;
+Oid   BdrLocksByOwnerRelid;
+
 BdrConnectionConfig  **bdr_connection_configs;
 /* All databases for which BDR is configured, valid after _PG_init */
 char **bdr_distinct_dbnames;
@@ -422,7 +426,9 @@ bdr_worker_init(char *dbname)
 	BackgroundWorkerInitializeConnection(dbname, NULL);
 
 	/* make sure BDR extension exists */
+	bdr_locks_always_allow_writes(true);
 	bdr_maintain_schema();
+	bdr_locks_always_allow_writes(false);
 
 	/* always work in our own schema */
 	SetConfigOption("search_path", "bdr, pg_catalog",
@@ -1108,6 +1114,10 @@ bdr_perdb_worker_main(Datum main_arg)
 	CurrentResourceOwner = ResourceOwnerCreate(NULL, "bdr seq top-level resource owner");
 	bdr_saved_resowner = CurrentResourceOwner;
 
+	/* need to be able to perform writes ourselves */
+	bdr_locks_always_allow_writes(true);
+	bdr_locks_startup();
+
 	/*
 	 * Do we need to init the local DB from a remote node?
 	 *
@@ -1633,9 +1643,6 @@ _PG_init(void)
 				bdr_max_workers);
 	}
 
-	/* Set up a ProcessUtility_hook to stop unsupported commands being run */
-	init_bdr_commandfilter();
-
 	/*
 	 * Allocate a shared memory segment to store the bgworker connection
 	 * information we must pass to each worker we launch.
@@ -1745,6 +1752,9 @@ out:
 	/* register a slot for every remote node */
 	bdr_count_shmem_init(bdr_max_workers);
 	bdr_sequencer_shmem_init(bdr_max_workers, bdr_distinct_dbnames_count);
+	bdr_locks_shmem_init(bdr_distinct_dbnames_count);
+	/* Set up a ProcessUtility_hook to stop unsupported commands being run */
+	init_bdr_commandfilter();
 
 	MemoryContextSwitchTo(old_context);
 }
@@ -1848,6 +1858,9 @@ bdr_maintain_schema(void)
 		bdr_lookup_relid("bdr_conflict_history", schema_oid);
 
 	QueuedDropsRelid = bdr_lookup_relid("bdr_queued_drops", schema_oid);
+
+	BdrLocksRelid = bdr_lookup_relid("bdr_global_locks", schema_oid);
+	BdrLocksByOwnerRelid = bdr_lookup_relid("bdr_global_locks_byowner", schema_oid);
 
 	elog(DEBUG1, "bdr.bdr_queued_commands OID set to %u",
 		 QueuedDDLCommandsRelid);

@@ -15,6 +15,7 @@
 #include "postgres.h"
 
 #include "bdr.h"
+#include "bdr_locks.h"
 
 #include "funcapi.h"
 #include "libpq-fe.h"
@@ -137,6 +138,7 @@ static bool process_remote_commit(StringInfo s);
 static void process_remote_insert(StringInfo s);
 static void process_remote_update(StringInfo s);
 static void process_remote_delete(StringInfo s);
+static void process_remote_message(StringInfo s);
 
 static void
 process_remote_begin(StringInfo s)
@@ -1060,6 +1062,126 @@ check_apply_update(RepNodeId local_node_id, TimestampTz local_ts,
 }
 
 static void
+process_remote_message(StringInfo s)
+{
+	StringInfoData message;
+	bool		transactional;
+	int			chanlen;
+	const char *chan;
+	int			type;
+	uint64		origin_sysid;
+	TimeLineID	origin_tlid;
+	Oid			origin_datid;
+	int			origin_namelen;
+	XLogRecPtr	lsn;
+
+	initStringInfo(&message);
+
+	transactional = pq_getmsgbyte(s);
+	lsn = pq_getmsgint64(s);
+
+	message.len = pq_getmsgint(s, 4);
+	message.data = (char *) pq_getmsgbytes(s, message.len);
+
+	chanlen = pq_getmsgint(&message, 4);
+	chan = pq_getmsgbytes(&message, chanlen);
+
+	if (strncmp(chan, "bdr", chanlen) != 0)
+	{
+		elog(LOG, "ignoring message in channel %s",
+			 pnstrdup(chan, chanlen));
+		return;
+	}
+
+	type = pq_getmsgint(&message, 4);
+	origin_sysid = pq_getmsgint64(&message);
+	origin_tlid = pq_getmsgint(&message, 4);
+	origin_datid = pq_getmsgint(&message, 4);
+	origin_namelen = pq_getmsgint(&message, 4);
+	if (origin_namelen != 0)
+		elog(ERROR, "no names expected yet");
+
+	elog(LOG, "message type %d from "UINT64_FORMAT":%u database %u at %X/%X",
+		 type, origin_sysid, origin_tlid, origin_datid,
+		 (uint32) (lsn >> 32),
+		 (uint32) lsn);
+
+	if (type == BDR_MESSAGE_START)
+	{
+		bdr_locks_process_remote_startup(
+			origin_sysid, origin_tlid, origin_datid);
+	}
+	else if (type == BDR_MESSAGE_ACQUIRE_LOCK)
+	{
+		bdr_process_acquire_ddl_lock(
+			origin_sysid, origin_tlid, origin_datid);
+	}
+	else if (type == BDR_MESSAGE_RELEASE_LOCK)
+	{
+		uint64		lock_sysid;
+		TimeLineID	lock_tlid;
+		Oid			lock_datid;
+
+		lock_sysid = pq_getmsgint64(&message);
+		lock_tlid = pq_getmsgint(&message, 4);
+		lock_datid = pq_getmsgint(&message, 4);
+
+		bdr_process_release_ddl_lock(
+			origin_sysid, origin_tlid, origin_datid,
+			lock_sysid, lock_tlid, lock_datid);
+	}
+	else if (type == BDR_MESSAGE_CONFIRM_LOCK)
+	{
+		uint64		lock_sysid;
+		TimeLineID	lock_tlid;
+		Oid			lock_datid;
+
+		lock_sysid = pq_getmsgint64(&message);
+		lock_tlid = pq_getmsgint(&message, 4);
+		lock_datid = pq_getmsgint(&message, 4);
+
+		bdr_process_confirm_ddl_lock(
+			origin_sysid, origin_tlid, origin_datid,
+			lock_sysid, lock_tlid, lock_datid);
+	}
+	else if (type == BDR_MESSAGE_DECLINE_LOCK)
+	{
+		uint64		lock_sysid;
+		TimeLineID	lock_tlid;
+		Oid			lock_datid;
+
+		lock_sysid = pq_getmsgint64(&message);
+		lock_tlid = pq_getmsgint(&message, 4);
+		lock_datid = pq_getmsgint(&message, 4);
+
+		bdr_process_decline_ddl_lock(
+			origin_sysid, origin_tlid, origin_datid,
+			lock_sysid, lock_tlid, lock_datid);
+	}
+	else if (type == BDR_MESSAGE_REQUEST_REPLAY_CONFIRM)
+	{
+		XLogRecPtr confirm_lsn;
+		confirm_lsn = pq_getmsgint64(&message);
+
+		bdr_process_request_replay_confirm(
+			origin_sysid, origin_tlid, origin_datid, confirm_lsn);
+	}
+	else if (type == BDR_MESSAGE_REPLAY_CONFIRM)
+	{
+		XLogRecPtr confirm_lsn;
+		confirm_lsn = pq_getmsgint64(&message);
+
+		bdr_process_replay_confirm(
+			origin_sysid, origin_tlid, origin_datid, confirm_lsn);
+	}
+	else
+		elog(LOG, "unknown message type %d", type);
+
+	if (!transactional)
+		AdvanceCachedReplicationIdentifier(lsn, InvalidXLogRecPtr);
+}
+
+static void
 do_log_update(RepNodeId local_node_id, bool apply_update, TimestampTz ts,
 			  Relation idxrel, BDRRelation *rel, HeapTuple old_key,
 			  HeapTuple user_tuple)
@@ -1749,6 +1871,9 @@ bdr_process_remote_action(StringInfo s)
 			/* DELETE */
 		case 'D':
 			process_remote_delete(s);
+			break;
+		case 'M':
+			process_remote_message(s);
 			break;
 		default:
 			elog(ERROR, "unknown action of type %c", action);
