@@ -36,11 +36,15 @@ submake-btree_gist:
 	$(MAKE) -C $(top_builddir)/contrib/btree_gist
 
 check: all | submake-regress submake-btree_gist regresscheck
+
+REGRESS_DDL_CHECKS=ddl/create ddl/alter_table
+
+regresscheck:
 	$(pg_regress_check) \
-	    --temp-config $(top_srcdir)/contrib/bdr/bdr.conf \
+	    --temp-config $(top_srcdir)/contrib/bdr/bdr_ddlregress.conf \
 	    --temp-install=./tmp_check \
 	    --extra-install=contrib/btree_gist \
 	    --extra-install=contrib/bdr \
-	    extension
+	    $(REGRESS_DDL_CHECKS)
 
 PHONY: submake-regress
