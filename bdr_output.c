@@ -184,15 +184,14 @@ bdr_ensure_node_ready()
 	const uint64 sysid = GetSystemIdentifier();
 	char status;
 	HeapTuple tuple;
-	NameData dbname;
+	const char *dbname;
 
 	StartTransactionCommand();
 
-	tuple = SearchSysCache1(DATABASEOID, ObjectIdGetDatum(MyDatabaseId));
-	if (!HeapTupleIsValid(tuple))
-		elog(ERROR, "Could not get name of local DB");
-	namecpy( &dbname, &((Form_pg_database) GETSTRUCT(tuple))->datname );
-	ReleaseSysCache(tuple);
+	dbname = get_database_name(MyDatabaseId);
+	if (dbname == NULL)
+		/* Shouldn't happen as logical rep requires a db */
+		elog(ERROR, "Failed to get name of local database");
 
 	/*
 	 * Refuse to begin replication if the local node isn't yet ready to
@@ -231,7 +230,7 @@ bdr_ensure_node_ready()
 				 */
 				ereport(ERROR,
 						(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-						 errmsg(base_msg, sysid, NameStr(dbname),
+						 errmsg(base_msg, sysid, dbname,
 								"row missing, bdr not active on this "
 								"database or is initializing."),
 						 errhint("Add bdr to shared_preload_libraries and "
@@ -251,7 +250,7 @@ bdr_ensure_node_ready()
 				 */
 				ereport(ERROR,
 						(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-						 errmsg(base_msg, sysid, NameStr(dbname), "status='c'"
+						 errmsg(base_msg, sysid, dbname, "status='c'"
 								", bdr still starting up: "
 								"catching up from remote node"),
 						 errhint("Monitor pg_stat_replication on the "
@@ -268,7 +267,7 @@ bdr_ensure_node_ready()
 				 */
 				ereport(ERROR,
 						(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-						 errmsg(base_msg, sysid, NameStr(dbname),
+						 errmsg(base_msg, sysid, dbname,
 								"status='i', bdr still starting up: applying "
 								"initial dump of remote node"),
 						 errhint("Monitor pg_stat_activity and the logs, "
@@ -279,6 +278,8 @@ bdr_ensure_node_ready()
 				break;
 		}
 	}
+
+	pfree(dbname);
 }
 
 
