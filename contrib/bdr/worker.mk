@@ -35,7 +35,7 @@ submake-regress:
 submake-btree_gist:
 	$(MAKE) -C $(top_builddir)/contrib/btree_gist
 
-check: all | submake-regress submake-btree_gist
+check: all | submake-regress submake-btree_gist regresscheck
 	$(pg_regress_check) \
 	    --temp-config $(top_srcdir)/contrib/bdr/bdr.conf \
 	    --temp-install=./tmp_check \
