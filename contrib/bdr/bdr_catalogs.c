@@ -17,6 +17,7 @@
 #include "postgres.h"
 
 #include "bdr.h"
+#include "miscadmin.h"
 
 #include "access/xact.h"
 
@@ -164,15 +165,18 @@ bdr_nodes_set_local_status(Name dbname, char status)
 
 /*
  * Given a node's local RepNodeId, get its globally unique identifier
- * (sysid, timeline id)
+ * (sysid, timeline id, database oid)
  */
 void
-fetch_sysid_via_node_id(RepNodeId node_id, uint64 *sysid, TimeLineID *tli)
+bdr_fetch_sysid_via_node_id(RepNodeId node_id, uint64 *sysid, TimeLineID *tli,
+							Oid *dboid)
 {
 	if (node_id == InvalidRepNodeId)
 	{
+		/* It's the local node */
 		*sysid = GetSystemIdentifier();
 		*tli = ThisTimeLineID;
+		*dboid = MyDatabaseId;
 	}
 	else
 	{
@@ -201,5 +205,6 @@ fetch_sysid_via_node_id(RepNodeId node_id, uint64 *sysid, TimeLineID *tli)
 
 		*sysid = remote_sysid;
 		*tli = remote_tli;
+		*dboid = remote_dboid;
 	}
 }

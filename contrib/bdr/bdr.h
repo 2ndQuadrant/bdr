@@ -237,8 +237,8 @@ extern Oid	BdrVotesRelid;
 
 /* apply support */
 extern void bdr_process_remote_action(StringInfo s);
-extern void fetch_sysid_via_node_id(RepNodeId node_id, uint64 *sysid,
-									TimeLineID *tli);
+extern void bdr_fetch_sysid_via_node_id(RepNodeId node_id, uint64 *sysid,
+										TimeLineID *tli, Oid *remote_dboid);
 
 /* Index maintenance, heap access, etc */
 extern struct EState * bdr_create_rel_estate(Relation rel);
