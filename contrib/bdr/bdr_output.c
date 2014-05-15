@@ -183,15 +183,16 @@ bdr_ensure_node_ready()
 	int spi_ret;
 	const uint64 sysid = GetSystemIdentifier();
 	char status;
-	HeapTuple tuple;
-	const char *dbname;
+	NameData dbname;
+	char *tmp_dbname;
 
 	StartTransactionCommand();
 
-	dbname = get_database_name(MyDatabaseId);
-	if (dbname == NULL)
-		/* Shouldn't happen as logical rep requires a db */
-		elog(ERROR, "Failed to get name of local database");
+	/* We need dbname valid outside this transaction, so copy it */
+	tmp_dbname = get_database_name(MyDatabaseId);
+	strncpy(NameStr(dbname), tmp_dbname, NAMEDATALEN);
+	NameStr(dbname)[NAMEDATALEN-1] = '\0';
+	pfree(tmp_dbname);
 
 	/*
 	 * Refuse to begin replication if the local node isn't yet ready to
@@ -201,7 +202,7 @@ bdr_ensure_node_ready()
 	if (spi_ret != SPI_OK_CONNECT)
 		elog(ERROR, "Local SPI connect failed; shouldn't happen");
 
-	status = bdr_nodes_get_local_status(sysid, &dbname);
+	status = bdr_nodes_get_local_status(sysid, ThisTimeLineID, &dbname);
 
 	SPI_finish();
 
@@ -230,7 +231,7 @@ bdr_ensure_node_ready()
 				 */
 				ereport(ERROR,
 						(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-						 errmsg(base_msg, sysid, dbname,
+						 errmsg(base_msg, sysid, NameStr(dbname),
 								"row missing, bdr not active on this "
 								"database or is initializing."),
 						 errhint("Add bdr to shared_preload_libraries and "
@@ -250,7 +251,7 @@ bdr_ensure_node_ready()
 				 */
 				ereport(ERROR,
 						(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-						 errmsg(base_msg, sysid, dbname, "status='c'"
+						 errmsg(base_msg, sysid, NameStr(dbname), "status='c'"
 								", bdr still starting up: "
 								"catching up from remote node"),
 						 errhint("Monitor pg_stat_replication on the "
@@ -267,7 +268,7 @@ bdr_ensure_node_ready()
 				 */
 				ereport(ERROR,
 						(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-						 errmsg(base_msg, sysid, dbname,
+						 errmsg(base_msg, sysid, NameStr(dbname),
 								"status='i', bdr still starting up: applying "
 								"initial dump of remote node"),
 						 errhint("Monitor pg_stat_activity and the logs, "
@@ -278,8 +279,6 @@ bdr_ensure_node_ready()
 				break;
 		}
 	}
-
-	pfree(dbname);
 }
 
 
