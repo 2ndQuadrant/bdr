@@ -4,6 +4,7 @@ MODULE_big = bdr_output
 OBJS = \
 	bdr_catalogs.o \
 	bdr_compat.o \
+	bdr_locks.o \
 	bdr_output.o
 
 PG_CPPFLAGS = -I$(libpq_srcdir)

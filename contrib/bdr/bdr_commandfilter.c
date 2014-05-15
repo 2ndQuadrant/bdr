@@ -14,6 +14,7 @@
 #include "postgres.h"
 
 #include "bdr.h"
+#include "bdr_locks.h"
 
 #include "fmgr.h"
 #include "miscadmin.h"
@@ -28,6 +29,8 @@
 #include "commands/tablecmds.h"
 
 #include "parser/parse_utilcmd.h"
+
+#include "storage/standby.h"
 
 #include "tcop/utility.h"
 
@@ -278,6 +281,10 @@ bdr_commandfilter(Node *parsetree,
 
 	/* extension contents aren't individually replicated */
 	if (creating_extension)
+		goto done;
+
+	/* don't perform filtering while replaying */
+	if (replication_origin_id != InvalidRepNodeId)
 		goto done;
 
 	/* statements handled directly in standard_ProcessUtility */
@@ -537,6 +544,9 @@ bdr_commandfilter(Node *parsetree,
 				 (int) nodeTag(parsetree));
 			break;
 	}
+
+	/* now lock other nodes in the bdr flock against ddl */
+	bdr_acquire_ddl_lock();
 
 done:
 	if (next_ProcessUtility_hook)

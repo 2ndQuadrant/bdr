@@ -75,6 +75,7 @@ typedef struct
 	bool client_int_datetime;
 	char *client_db_encoding;
 	Oid bdr_conflict_handlers_reloid;
+	Oid bdr_locks_reloid;
 } BdrOutputData;
 
 /* These must be available to pg_dlsym() */
@@ -87,6 +88,10 @@ static void pg_decode_commit_txn(LogicalDecodingContext *ctx,
 static void pg_decode_change(LogicalDecodingContext *ctx,
 				 ReorderBufferTXN *txn, Relation rel,
 				 ReorderBufferChange *change);
+static void pg_decode_message(LogicalDecodingContext *ctx,
+							  ReorderBufferTXN *txn, XLogRecPtr message_lsn,
+							  bool transactional, Size sz,
+							  const char *message);
 
 /* private prototypes */
 static void write_rel(StringInfo out, Relation rel);
@@ -108,6 +113,7 @@ _PG_output_plugin_init(OutputPluginCallbacks *cb)
 	cb->begin_cb = pg_decode_begin_txn;
 	cb->change_cb = pg_decode_change;
 	cb->commit_cb = pg_decode_commit_txn;
+	cb->message_cb = pg_decode_message;
 	cb->shutdown_cb = NULL;
 }
 
@@ -296,6 +302,7 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 	opt->output_type = OUTPUT_PLUGIN_BINARY_OUTPUT;
 
 	data->bdr_conflict_handlers_reloid = InvalidOid;
+	data->bdr_locks_reloid = InvalidOid;
 
 	/* parse options passed in by the client */
 
@@ -439,6 +446,11 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 			else
 				elog(DEBUG1, "bdr.bdr_conflict_handlers OID set to %u",
 					 data->bdr_conflict_handlers_reloid);
+
+			data->bdr_locks_reloid =
+				get_relname_relid("bdr_global_locks", schema_oid);
+			Assert(data->bdr_locks_reloid != InvalidOid); /* FIXME */
+
 		}
 		else
 			elog(WARNING, "cache lookup for schema bdr failed");
@@ -581,8 +593,8 @@ pg_decode_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 	if (!should_forward_changeset(ctx, txn))
 		return;
 
-	if(data->bdr_conflict_handlers_reloid != InvalidOid &&
-	   RelationGetRelid(relation) == data->bdr_conflict_handlers_reloid)
+	if(RelationGetRelid(relation) == data->bdr_conflict_handlers_reloid ||
+	   RelationGetRelid(relation) == data->bdr_locks_reloid)
 		return;
 
 	OutputPluginPrepareWrite(ctx, true);
@@ -832,4 +844,22 @@ write_tuple(BdrOutputData *data, StringInfo out, Relation rel,
 
 		ReleaseSysCache(typtup);
 	}
+}
+
+static void
+pg_decode_message(LogicalDecodingContext *ctx,
+				  ReorderBufferTXN *txn, XLogRecPtr lsn,
+				  bool transactional, Size sz,
+				  const char *message)
+{
+	/*
+	 * TODO: at some point we'll need several channels and filtering here..
+	 */
+	OutputPluginPrepareWrite(ctx, true);
+	pq_sendbyte(ctx->out, 'M');	/* message follows */
+	pq_sendbyte(ctx->out, transactional);
+	pq_sendint64(ctx->out, lsn);
+	pq_sendint(ctx->out, sz, 4);
+	pq_sendbytes(ctx->out, message, sz);
+	OutputPluginWrite(ctx, true);
 }
