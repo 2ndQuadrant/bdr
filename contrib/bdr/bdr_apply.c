@@ -73,6 +73,7 @@ Oid			QueuedDropsRelid = InvalidOid;
 /* Global apply worker state */
 uint64		origin_sysid;
 TimeLineID	origin_timeline;
+Oid			origin_dboid;
 bool		started_transaction = false;
 /* During apply, holds xid of remote transaction */
 TransactionId replication_origin_xid = InvalidTransactionId;
@@ -835,10 +836,6 @@ check_apply_update(RepNodeId local_node_id, TimestampTz local_ts,
 				HeapTuple *new_tuple, bool *perform_update, bool *log_update,
 				BdrConflictResolution *resolution)
 {
-	uint64		local_sysid,
-				remote_sysid;
-	TimeLineID	local_tli,
-				remote_tli;
 	int			cmp, microsecs;
 	long		secs;
 
@@ -930,18 +927,29 @@ check_apply_update(RepNodeId local_node_id, TimestampTz local_ts,
 		}
 		else if (cmp == 0)
 		{
+			uint64		local_sysid,
+						remote_sysid;
+			TimeLineID	local_tli,
+						remote_tli;
+			Oid			local_dboid,
+						remote_dboid;
 			/*
 			 * Timestamps are equal. Use sysid + timeline id to decide which
 			 * tuple to retain.
 			 */
-			fetch_sysid_via_node_id(local_node_id,
-									&local_sysid, &local_tli);
-			fetch_sysid_via_node_id(replication_origin_id,
-									&remote_sysid, &remote_tli);
+			bdr_fetch_sysid_via_node_id(local_node_id,
+										&local_sysid, &local_tli,
+										&local_dboid);
+			bdr_fetch_sysid_via_node_id(replication_origin_id,
+										&remote_sysid, &remote_tli,
+										&remote_dboid);
 
 			/*
-			 * Apply the user tuple or, if none supplied, fall back to "last
-			 * update wins"
+			 * As the timestamps were equal, we have to break the tie in a
+			 * consistent manner that'll match across all nodes.
+			 *
+			 * Use the ordering of the node's unique identifier, the tuple of
+			 * (sysid, timelineid, dboid).
 			 */
 			if (local_sysid < remote_sysid)
 				*perform_update = true;
@@ -950,6 +958,10 @@ check_apply_update(RepNodeId local_node_id, TimestampTz local_ts,
 			else if (local_tli < remote_tli)
 				*perform_update = true;
 			else if (local_tli > remote_tli)
+				*perform_update = false;
+			else if (local_dboid < remote_dboid)
+				*perform_update = true;
+			else if (local_dboid > remote_dboid)
 				*perform_update = false;
 			else
 				/* shouldn't happen */
@@ -987,15 +999,20 @@ do_log_update(RepNodeId local_node_id, bool apply_update, TimestampTz ts,
 				remote_sysid;
 	TimeLineID	local_tli,
 				remote_tli;
+	Oid			local_dboid,
+				remote_dboid;
 
 
-	fetch_sysid_via_node_id(local_node_id,
-							&local_sysid, &local_tli);
-	fetch_sysid_via_node_id(replication_origin_id,
-							&remote_sysid, &remote_tli);
+	bdr_fetch_sysid_via_node_id(local_node_id,
+								&local_sysid, &local_tli,
+								&local_dboid);
+	bdr_fetch_sysid_via_node_id(replication_origin_id,
+								&remote_sysid, &remote_tli,
+								&remote_dboid);
 
 	Assert(remote_sysid == origin_sysid);
 	Assert(remote_tli == origin_timeline);
+	Assert(remote_dboid == origin_dboid);
 
 	memcpy(remote_ts, timestamptz_to_str(replication_origin_timestamp),
 		   MAXDATELEN);
@@ -1013,9 +1030,9 @@ do_log_update(RepNodeId local_node_id, bool apply_update, TimestampTz ts,
 
 		ereport(LOG,
 				(errcode(ERRCODE_INTEGRITY_CONSTRAINT_VIOLATION),
-				 errmsg("CONFLICT: %s remote update originating at node " UINT64_FORMAT ":%u at ts %s; row was previously updated at %s node " UINT64_FORMAT ":%u at ts %s. PKEY:%s, resolved by user tuple:%s",
+				 errmsg("CONFLICT: %s remote update originating at node " UINT64_FORMAT ":%u:%u at ts %s; row was previously updated at %s node " UINT64_FORMAT ":%u at ts %s. PKEY:%s, resolved by user tuple:%s",
 						apply_update ? "applying" : "skipping",
-						remote_sysid, remote_tli, remote_ts,
+						remote_sysid, remote_tli, remote_dboid, remote_ts,
 						local_node_id == InvalidRepNodeId ? "local" : "remote",
 						local_sysid, local_tli, local_ts, s_key.data,
 						s_user_tuple.data)));
@@ -1024,9 +1041,9 @@ do_log_update(RepNodeId local_node_id, bool apply_update, TimestampTz ts,
 	{
 		ereport(LOG,
 				(errcode(ERRCODE_INTEGRITY_CONSTRAINT_VIOLATION),
-				 errmsg("CONFLICT: %s remote update originating at node " UINT64_FORMAT ":%u at ts %s; row was previously updated at %s node " UINT64_FORMAT ":%u at ts %s. PKEY:%s",
+				 errmsg("CONFLICT: %s remote update originating at node " UINT64_FORMAT ":%u:%u at ts %s; row was previously updated at %s node " UINT64_FORMAT ":%u at ts %s. PKEY:%s",
 						apply_update ? "applying" : "skipping",
-						remote_sysid, remote_tli, remote_ts,
+						remote_sysid, remote_tli, remote_dboid, remote_ts,
 						local_node_id == InvalidRepNodeId ? "local" : "remote",
 						local_sysid, local_tli, local_ts, s_key.data)));
 	}
