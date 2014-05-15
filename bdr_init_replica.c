@@ -773,7 +773,6 @@ bdr_init_replica(Name dbname)
 		/* Cleanup done and nothing more to do */
 		return;
 
-
 	init_replica_config = bdr_connection_configs
 		[init_replica_worker->worker_data.apply_worker.connection_config_idx];
 	elog(DEBUG2, "bdr %s: bdr_init_replica init from connection %s",
@@ -874,6 +873,10 @@ bdr_init_replica(Name dbname)
 		status = bdr_set_remote_status(nonrepl_init_conn, dbname,
 									   'i', status);
 
+		/*
+		 * A list of all connections to make slots for, as indexes into
+		 * BdrWorkerCtl.
+		 */
 		my_conn_idxs = (int*)palloc(sizeof(Size) * bdr_max_workers);
 
 		/* Collect a list of connections to make slots for. */
@@ -937,7 +940,7 @@ bdr_init_replica(Name dbname)
 			/* Always throws rather than returning failure */
 			Assert(conn);
 
-			if (&BdrWorkerCtl->slots[off] == init_replica_worker)
+			if (w == init_replica_worker)
 			{
 				/*
 				 * We need to keep the snapshot ID returned by CREATE SLOT so
