@@ -515,6 +515,7 @@ sub mkvcbuild
 	$bdr_output->AddFiles('contrib\bdr',
 			      'bdr_compat.c',
 			      'bdr_catalogs.c',
+			      'bdr_locks.c',
 			      'bdr_output.c');
 	$bdr_output->AddReference($postgres);
 	$bdr_output->AddLibrary('wsock32.lib');
@@ -531,6 +532,7 @@ sub mkvcbuild
 			     'bdr_count.c',
 			     'bdr_executor.c',
 			     'bdr_init_replica.c',
+			     'bdr_locks.c',
 			     'bdr_relcache.c',
 			     'bdr_seq.c');
 	$bdr_apply->AddReference($postgres);
