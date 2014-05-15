@@ -251,10 +251,15 @@ extern Oid	BdrSequenceValuesRelid;
 extern Oid	BdrSequenceElectionsRelid;
 extern Oid	BdrVotesRelid;
 
+extern Oid	BdrLocksRelid;
+extern Oid	BdrLocksByOwnerRelid;
+
+
 /* apply support */
 extern void bdr_process_remote_action(StringInfo s);
 extern void bdr_fetch_sysid_via_node_id(RepNodeId node_id, uint64 *sysid,
 										TimeLineID *tli, Oid *remote_dboid);
+extern RepNodeId bdr_fetch_node_id_via_sysid(uint64 sysid, TimeLineID tli, Oid dboid);
 
 /* Index maintenance, heap access, etc */
 extern struct EState * bdr_create_rel_estate(Relation rel);
@@ -331,6 +336,9 @@ extern bool bdr_is_bdr_activated_db(void);
 
 /* forbid commands we do not support currently (or never will) */
 extern void init_bdr_commandfilter(void);
+
+extern void bdr_locks_shmem_init(Size num_used_databases);
+extern void bdr_locks_always_allow_writes(bool always_allow);
 
 /* background workers */
 extern void bdr_apply_main(Datum main_arg);

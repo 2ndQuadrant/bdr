@@ -211,3 +211,16 @@ bdr_fetch_sysid_via_node_id(RepNodeId node_id, uint64 *sysid, TimeLineID *tli,
 		*dboid = remote_dboid;
 	}
 }
+
+
+RepNodeId
+bdr_fetch_node_id_via_sysid(uint64 sysid, TimeLineID tli, Oid dboid)
+{
+	char		ident[256];
+
+	snprintf(ident, sizeof(ident),
+			 BDR_NODE_ID_FORMAT,
+			 sysid, tli, dboid, MyDatabaseId,
+			 "");
+	return GetReplicationIdentifier(ident, false);
+}
