@@ -13,6 +13,9 @@ all:
 
 clean: all
 
+check: all
+
+
 # phony target...
 
 .PHONY: all
