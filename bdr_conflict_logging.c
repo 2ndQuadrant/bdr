@@ -444,6 +444,7 @@ bdr_conflict_log(BdrConflictType conflict_type,
 	MemoryContext	log_context, old_context;
 	BdrApplyConflict conflict;
 	TimeLineID tli;
+	Oid dboid;
 
 	if (IsAbortedTransactionBlockState())
 		elog(ERROR, "bdr: attempt to log conflict in aborted transaction");
@@ -480,8 +481,8 @@ bdr_conflict_log(BdrConflictType conflict_type,
 	}
 
 	/* TODO: May make sense to cache the remote sysid in a global too... */
-	fetch_sysid_via_node_id(replication_origin_id,
-			&conflict.remote_sysid, &tli);
+	bdr_fetch_sysid_via_node_id(replication_origin_id,
+			&conflict.remote_sysid, &tli, &dboid);
 	conflict.remote_commit_time = replication_origin_timestamp;
 	conflict.remote_txid = remote_txid;
 	conflict.remote_commit_lsn = replication_origin_lsn;
@@ -508,8 +509,9 @@ bdr_conflict_log(BdrConflictType conflict_type,
 
 	if (local_tuple_origin_id != InvalidRepNodeId)
 	{
-		fetch_sysid_via_node_id(local_tuple_origin_id,
-								&conflict.local_tuple_origin_sysid, &tli);
+		bdr_fetch_sysid_via_node_id(local_tuple_origin_id,
+									&conflict.local_tuple_origin_sysid, &tli,
+									&dboid);
 	}
 	else
 	{
