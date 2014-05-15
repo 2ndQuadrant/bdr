@@ -1,0 +1,515 @@
+SELECT pg_sleep(10);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+CREATE TABLE test_tbl_simple_create(val int);
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\d+ test_tbl_simple_create
+                Table "public.test_tbl_simple_create"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ val    | integer |           | plain   |              | 
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl_simple_create FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+\c postgres
+\d+ test_tbl_simple_create
+                Table "public.test_tbl_simple_create"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ val    | integer |           | plain   |              | 
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl_simple_create FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+DROP TABLE test_tbl_simple_create;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\d+ test_tbl_simple_create
+\c regression
+\d+ test_tbl_simple_create
+CREATE TABLE test_tbl_simple_pk(val int PRIMARY KEY);
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\d+ test_tbl_simple_pk
+                  Table "public.test_tbl_simple_pk"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ val    | integer | not null  | plain   |              | 
+Indexes:
+    "test_tbl_simple_pk_pkey" PRIMARY KEY, btree (val)
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl_simple_pk FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+\c postgres
+\d+ test_tbl_simple_pk
+                  Table "public.test_tbl_simple_pk"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ val    | integer | not null  | plain   |              | 
+Indexes:
+    "test_tbl_simple_pk_pkey" PRIMARY KEY, btree (val)
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl_simple_pk FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+DROP TABLE test_tbl_simple_pk;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\d+ test_tbl_simple_pk
+\c regression
+\d+ test_tbl_simple_pk
+CREATE TABLE test_tbl_combined_pk(val int, val1 int, PRIMARY KEY (val, val1));
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\d+ test_tbl_combined_pk
+                 Table "public.test_tbl_combined_pk"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ val    | integer | not null  | plain   |              | 
+ val1   | integer | not null  | plain   |              | 
+Indexes:
+    "test_tbl_combined_pk_pkey" PRIMARY KEY, btree (val, val1)
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl_combined_pk FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+\c postgres
+\d+ test_tbl_combined_pk
+                 Table "public.test_tbl_combined_pk"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ val    | integer | not null  | plain   |              | 
+ val1   | integer | not null  | plain   |              | 
+Indexes:
+    "test_tbl_combined_pk_pkey" PRIMARY KEY, btree (val, val1)
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl_combined_pk FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+DROP TABLE test_tbl_combined_pk;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\d+ test_tbl_combined_pk
+\c regression
+\d+ test_tbl_combined_pk
+CREATE TABLE test_tbl_serial(val SERIAL);
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\d+ test_tbl_serial
+                                             Table "public.test_tbl_serial"
+ Column |  Type   |                           Modifiers                           | Storage | Stats target | Description 
+--------+---------+---------------------------------------------------------------+---------+--------------+-------------
+ val    | integer | not null default nextval('test_tbl_serial_val_seq'::regclass) | plain   |              | 
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl_serial FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+\c postgres
+\d+ test_tbl_serial
+                                             Table "public.test_tbl_serial"
+ Column |  Type   |                           Modifiers                           | Storage | Stats target | Description 
+--------+---------+---------------------------------------------------------------+---------+--------------+-------------
+ val    | integer | not null default nextval('test_tbl_serial_val_seq'::regclass) | plain   |              | 
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl_serial FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+DROP TABLE test_tbl_serial;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\d+ test_tbl_serial
+\c regression
+\d+ test_tbl_serial
+CREATE TABLE test_tbl_serial_pk(val SERIAL PRIMARY KEY);
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\d+ test_tbl_serial_pk
+                                             Table "public.test_tbl_serial_pk"
+ Column |  Type   |                            Modifiers                             | Storage | Stats target | Description 
+--------+---------+------------------------------------------------------------------+---------+--------------+-------------
+ val    | integer | not null default nextval('test_tbl_serial_pk_val_seq'::regclass) | plain   |              | 
+Indexes:
+    "test_tbl_serial_pk_pkey" PRIMARY KEY, btree (val)
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl_serial_pk FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+\c postgres
+\d+ test_tbl_serial_pk
+                                             Table "public.test_tbl_serial_pk"
+ Column |  Type   |                            Modifiers                             | Storage | Stats target | Description 
+--------+---------+------------------------------------------------------------------+---------+--------------+-------------
+ val    | integer | not null default nextval('test_tbl_serial_pk_val_seq'::regclass) | plain   |              | 
+Indexes:
+    "test_tbl_serial_pk_pkey" PRIMARY KEY, btree (val)
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl_serial_pk FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+DROP TABLE test_tbl_serial_pk;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\d+ test_tbl_serial_pk
+\c regression
+\d+ test_tbl_serial_pk
+CREATE TABLE test_tbl_serial_combined_pk(val SERIAL, val1 INTEGER, PRIMARY KEY (val, val1));
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\d+ test_tbl_serial_combined_pk
+                                             Table "public.test_tbl_serial_combined_pk"
+ Column |  Type   |                                 Modifiers                                 | Storage | Stats target | Description 
+--------+---------+---------------------------------------------------------------------------+---------+--------------+-------------
+ val    | integer | not null default nextval('test_tbl_serial_combined_pk_val_seq'::regclass) | plain   |              | 
+ val1   | integer | not null                                                                  | plain   |              | 
+Indexes:
+    "test_tbl_serial_combined_pk_pkey" PRIMARY KEY, btree (val, val1)
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl_serial_combined_pk FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+\c postgres
+\d+ test_tbl_serial_combined_pk
+                                             Table "public.test_tbl_serial_combined_pk"
+ Column |  Type   |                                 Modifiers                                 | Storage | Stats target | Description 
+--------+---------+---------------------------------------------------------------------------+---------+--------------+-------------
+ val    | integer | not null default nextval('test_tbl_serial_combined_pk_val_seq'::regclass) | plain   |              | 
+ val1   | integer | not null                                                                  | plain   |              | 
+Indexes:
+    "test_tbl_serial_combined_pk_pkey" PRIMARY KEY, btree (val, val1)
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl_serial_combined_pk FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+CREATE SEQUENCE test_seq USING bdr;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\d+ test_seq
+                Sequence "public.test_seq"
+    Column     |  Type   |        Value        | Storage  
+---------------+---------+---------------------+----------
+ sequence_name | name    | test_seq            | plain
+ last_value    | bigint  | 1                   | plain
+ start_value   | bigint  | 1                   | plain
+ increment_by  | bigint  | 1                   | plain
+ max_value     | bigint  | 9223372036854775807 | plain
+ min_value     | bigint  | 1                   | plain
+ cache_value   | bigint  | 1                   | plain
+ log_cnt       | bigint  | 0                   | plain
+ is_cycled     | boolean | f                   | plain
+ is_called     | boolean | f                   | plain
+ amdata        | bytea   |                     | extended
+
+\c regression
+\d+ test_seq
+                Sequence "public.test_seq"
+    Column     |  Type   |        Value        | Storage  
+---------------+---------+---------------------+----------
+ sequence_name | name    | test_seq            | plain
+ last_value    | bigint  | 1                   | plain
+ start_value   | bigint  | 1                   | plain
+ increment_by  | bigint  | 1                   | plain
+ max_value     | bigint  | 9223372036854775807 | plain
+ min_value     | bigint  | 1                   | plain
+ cache_value   | bigint  | 1                   | plain
+ log_cnt       | bigint  | 0                   | plain
+ is_cycled     | boolean | f                   | plain
+ is_called     | boolean | f                   | plain
+ amdata        | bytea   |                     | extended
+
+DROP SEQUENCE test_seq;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\d+ test_seq;
+\c postgres
+\d+ test_seq
+CREATE TABLE test_tbl_create_index (val int, val2 int);
+CREATE UNIQUE INDEX test1_idx ON test_tbl_create_index(val);
+CREATE INDEX test2_idx ON test_tbl_create_index (lower(val2::text));
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\d+ test_tbl_create_index
+                Table "public.test_tbl_create_index"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ val    | integer |           | plain   |              | 
+ val2   | integer |           | plain   |              | 
+Indexes:
+    "test1_idx" UNIQUE, btree (val)
+    "test2_idx" btree (lower(val2::text))
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl_create_index FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+\c regression
+\d+ test_tbl_create_index
+                Table "public.test_tbl_create_index"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ val    | integer |           | plain   |              | 
+ val2   | integer |           | plain   |              | 
+Indexes:
+    "test1_idx" UNIQUE, btree (val)
+    "test2_idx" btree (lower(val2::text))
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl_create_index FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+DROP INDEX test1_idx;
+DROP INDEX test2_idx;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\d+ test_tbl_create_index
+                Table "public.test_tbl_create_index"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ val    | integer |           | plain   |              | 
+ val2   | integer |           | plain   |              | 
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl_create_index FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+\c postgres
+\d+ test_tbl_create_index
+                Table "public.test_tbl_create_index"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ val    | integer |           | plain   |              | 
+ val2   | integer |           | plain   |              | 
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl_create_index FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+CREATE INDEX test1_idx ON test_tbl_create_index(val, val2);
+CREATE INDEX test2_idx ON test_tbl_create_index USING gist (val, UPPER(val2::text));
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\d+ test_tbl_create_index
+                Table "public.test_tbl_create_index"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ val    | integer |           | plain   |              | 
+ val2   | integer |           | plain   |              | 
+Indexes:
+    "test1_idx" btree (val, val2)
+    "test2_idx" gist (val, upper(val2::text))
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl_create_index FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+\c regression
+\d+ test_tbl_create_index
+                Table "public.test_tbl_create_index"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ val    | integer |           | plain   |              | 
+ val2   | integer |           | plain   |              | 
+Indexes:
+    "test1_idx" btree (val, val2)
+    "test2_idx" gist (val, upper(val2::text))
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl_create_index FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+DROP INDEX test1_idx;
+DROP INDEX test2_idx;
+DROP TABLE test_tbl_create_index;
+CREATE TABLE test_simple_create_with_arrays_tbl(val int[], val1 text[]);
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\d+ test_simple_create_with_arrays_tbl
+           Table "public.test_simple_create_with_arrays_tbl"
+ Column |   Type    | Modifiers | Storage  | Stats target | Description 
+--------+-----------+-----------+----------+--------------+-------------
+ val    | integer[] |           | extended |              | 
+ val1   | text[]    |           | extended |              | 
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_simple_create_with_arrays_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+\c postgres
+\d+ test_simple_create_with_arrays_tbl
+           Table "public.test_simple_create_with_arrays_tbl"
+ Column |   Type    | Modifiers | Storage  | Stats target | Description 
+--------+-----------+-----------+----------+--------------+-------------
+ val    | integer[] |           | extended |              | 
+ val1   | text[]    |           | extended |              | 
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_simple_create_with_arrays_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+DROP TABLE test_simple_create_with_arrays_tbl;
+CREATE TYPE test_t AS ENUM('a','b','c');
+CREATE TABLE test_simple_create_with_enums_tbl(val test_t, val1 test_t);
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\d+ test_simple_create_with_enums_tbl
+          Table "public.test_simple_create_with_enums_tbl"
+ Column |  Type  | Modifiers | Storage | Stats target | Description 
+--------+--------+-----------+---------+--------------+-------------
+ val    | test_t |           | plain   |              | 
+ val1   | test_t |           | plain   |              | 
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_simple_create_with_enums_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+\c regression
+\d+ test_simple_create_with_enums_tbl
+          Table "public.test_simple_create_with_enums_tbl"
+ Column |  Type  | Modifiers | Storage | Stats target | Description 
+--------+--------+-----------+---------+--------------+-------------
+ val    | test_t |           | plain   |              | 
+ val1   | test_t |           | plain   |              | 
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_simple_create_with_enums_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+DROP TABLE test_simple_create_with_enums_tbl;
+DROP TYPE test_t;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\d+ test_simple_create_with_enums_tbl
+\dT+ test_t
+                                List of data types
+ Schema | Name | Internal name | Size | Elements | Access privileges | Description 
+--------+------+---------------+------+----------+-------------------+-------------
+(0 rows)
+
+\c postgres
+\d+ test_simple_create_with_enums_tbl
+\dT+ test_t
+                                List of data types
+ Schema | Name | Internal name | Size | Elements | Access privileges | Description 
+--------+------+---------------+------+----------+-------------------+-------------
+(0 rows)
+
+CREATE TYPE test_t AS (f1 text, f2 float, f3 integer);
+CREATE TABLE test_simple_create_with_composites_tbl(val test_t, val1 test_t);
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\d+ test_simple_create_with_composites_tbl
+        Table "public.test_simple_create_with_composites_tbl"
+ Column |  Type  | Modifiers | Storage  | Stats target | Description 
+--------+--------+-----------+----------+--------------+-------------
+ val    | test_t |           | extended |              | 
+ val1   | test_t |           | extended |              | 
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_simple_create_with_composites_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+\c regression
+\d+ test_simple_create_with_composites_tbl
+        Table "public.test_simple_create_with_composites_tbl"
+ Column |  Type  | Modifiers | Storage  | Stats target | Description 
+--------+--------+-----------+----------+--------------+-------------
+ val    | test_t |           | extended |              | 
+ val1   | test_t |           | extended |              | 
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_simple_create_with_composites_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+DROP TABLE test_simple_create_with_composites_tbl;
+DROP TYPE test_t;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\d+ test_simple_create_with_composites_tbl
+\dT+ test_t
+                                List of data types
+ Schema | Name | Internal name | Size | Elements | Access privileges | Description 
+--------+------+---------------+------+----------+-------------------+-------------
+(0 rows)
+
+\c postgres
+\d+ test_simple_create_with_composites_tbl
+\dT+ test_t
+                                List of data types
+ Schema | Name | Internal name | Size | Elements | Access privileges | Description 
+--------+------+---------------+------+----------+-------------------+-------------
+(0 rows)
+
