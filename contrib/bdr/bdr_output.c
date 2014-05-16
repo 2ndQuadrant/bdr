@@ -202,7 +202,7 @@ bdr_ensure_node_ready()
 	if (spi_ret != SPI_OK_CONNECT)
 		elog(ERROR, "Local SPI connect failed; shouldn't happen");
 
-	status = bdr_nodes_get_local_status(sysid, ThisTimeLineID, &dbname);
+	status = bdr_nodes_get_local_status(sysid, ThisTimeLineID, MyDatabaseId);
 
 	SPI_finish();
 
@@ -214,7 +214,7 @@ bdr_ensure_node_ready()
 	{
 		const char * const base_msg =
 			"bdr.bdr_nodes entry for local node (sysid=" UINT64_FORMAT
-			", dbname=%s): %s";
+			", timelineid=%u, dboid=%u): %s";
 		switch (status)
 		{
 			case 'r':
@@ -231,11 +231,9 @@ bdr_ensure_node_ready()
 				 */
 				ereport(ERROR,
 						(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-						 errmsg(base_msg, sysid, NameStr(dbname),
-								"row missing, bdr not active on this "
-								"database or is initializing."),
-						 errhint("Add bdr to shared_preload_libraries and "
-								 "check logs for bdr startup errors.")));
+						 errmsg(base_msg, sysid, ThisTimeLineID, MyDatabaseId,
+								"row missing, bdr not active on this database or is initializing."),
+						 errhint("Add bdr to shared_preload_libraries and check logs for bdr startup errors.")));
 				break;
 			case 'c':
 				/*
@@ -251,12 +249,9 @@ bdr_ensure_node_ready()
 				 */
 				ereport(ERROR,
 						(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-						 errmsg(base_msg, sysid, NameStr(dbname), "status='c'"
-								", bdr still starting up: "
-								"catching up from remote node"),
-						 errhint("Monitor pg_stat_replication on the "
-								 "remote node, watch the logs and wait "
-								 "until the node has caught up")));
+						 errmsg(base_msg, sysid, ThisTimeLineID, MyDatabaseId,
+								"status='c', bdr still starting up: catching up from remote node"),
+						 errhint("Monitor pg_stat_replication on the remote node, watch the logs and wait until the node has caught up")));
 				break;
 			case 'i':
 				/*
@@ -268,11 +263,9 @@ bdr_ensure_node_ready()
 				 */
 				ereport(ERROR,
 						(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-						 errmsg(base_msg, sysid, NameStr(dbname),
-								"status='i', bdr still starting up: applying "
-								"initial dump of remote node"),
-						 errhint("Monitor pg_stat_activity and the logs, "
-								 "wait until the node has caught up")));
+						 errmsg(base_msg, sysid, ThisTimeLineID, MyDatabaseId,
+								"status='i', bdr still starting up: applying initial dump of remote node"),
+						 errhint("Monitor pg_stat_activity and the logs, wait until the node has caught up")));
 				break;
 			default:
 				elog(ERROR, "Unhandled case status=%c", status);

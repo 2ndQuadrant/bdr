@@ -102,15 +102,16 @@ find_init_replica_worker(Name dbname)
  * If no row is found, '\0' is returned.
  */
 static char
-bdr_get_remote_status(PGconn *pgconn, Name dbname)
+bdr_get_remote_status(PGconn *pgconn)
 {
 	PGresult 		   *res;
 	char 				status;
-	Oid 				param_types[] = {TEXTOID, OIDOID, NAMEOID};
+	Oid 				param_types[] = {TEXTOID, OIDOID, OIDOID};
 	const char 		   *param_values[3];
 	/* Needs to fit max length of UINT64_FORMAT */
 	char				sysid_str[33];
 	char				tlid_str[33];
+	char				mydatabaseid_str[33];
 
 	snprintf(sysid_str, sizeof(sysid_str), UINT64_FORMAT,
 			 GetSystemIdentifier());
@@ -120,22 +121,24 @@ bdr_get_remote_status(PGconn *pgconn, Name dbname)
 			 ThisTimeLineID);
 	tlid_str[sizeof(tlid_str)-1] = '\0';
 
+	snprintf(mydatabaseid_str, sizeof(mydatabaseid_str), "%u",
+			 MyDatabaseId);
+	mydatabaseid_str[sizeof(mydatabaseid_str)-1] = '\0';
+
 	param_values[0] = sysid_str;
 	param_values[1] = tlid_str;
-	param_values[2] = NameStr(*dbname);
+	param_values[2] = mydatabaseid_str;
 
 	res = PQexecParams(pgconn,
 					   "SELECT node_status FROM bdr.bdr_nodes "
 					   "WHERE node_sysid = $1 AND node_timeline = $2 "
-					   "AND node_dbname = $3 "
+					   "AND node_dboid = $3 "
 					   "FOR UPDATE",
 					   3, param_types, param_values, NULL, NULL, 0);
 	if (PQresultStatus(res) != PGRES_TUPLES_OK)
 	{
-		elog(FATAL, "bdr %s: Failed to get remote status during bdr init: "
-			 "state %s: %s\n", NameStr(*dbname),
-			 PQresStatus(PQresultStatus(res)),
-			 PQresultErrorMessage(res));
+		elog(FATAL, "bdr: Failed to get remote status during bdr init: state %s: %s\n",
+			 PQresStatus(PQresultStatus(res)), PQresultErrorMessage(res));
 	}
 	if (PQntuples(res) == 0)
 		/* No row found on remote, we're starting from scratch */
@@ -162,8 +165,8 @@ bdr_get_remote_status(PGconn *pgconn, Name dbname)
  * a group of BDR nodes.
  */
 static char
-bdr_set_remote_status(PGconn *pgconn, Name dbname,
-					  const char status, const char prev_status)
+bdr_set_remote_status(PGconn *pgconn, const char status,
+					  const char prev_status)
 {
 	PGresult 		   *res;
 	char			   *status_str;
@@ -171,6 +174,7 @@ bdr_set_remote_status(PGconn *pgconn, Name dbname,
 	/* Needs to fit max length of UINT64_FORMAT */
 	char 				sysid_str[33];
 	char				tlid_str[33];
+	char				mydatabaseid_str[33];
 
 	if (status == prev_status)
 		/* No action required (we could check the remote, but meh) */
@@ -184,27 +188,30 @@ bdr_set_remote_status(PGconn *pgconn, Name dbname,
 			 ThisTimeLineID);
 	tlid_str[sizeof(tlid_str)-1] = '\0';
 
+	snprintf(mydatabaseid_str, sizeof(mydatabaseid_str), "%u",
+			 MyDatabaseId);
+	mydatabaseid_str[sizeof(mydatabaseid_str)-1] = '\0';
+
 	if (status == '\0')
 	{
-		Oid			param_types[] = {TEXTOID, OIDOID, NAMEOID};
+		Oid			param_types[] = {TEXTOID, OIDOID, OIDOID};
 		const char *param_values[3];
 		char    	new_status;
 
 		param_values[0] = sysid_str;
 		param_values[1] = tlid_str;
-		param_values[2] = NameStr(*dbname);
+		param_values[2] = mydatabaseid_str;
 
 		res = PQexecParams(pgconn,
 						   "DELETE FROM bdr.bdr_nodes WHERE node_sysid = $1"
-						   " AND node_timeline = $2 AND node_dbname = $3 "
+						   " AND node_timeline = $2 AND node_dboid = $3 "
 						   "RETURNING node_status",
 						   3, param_types, param_values, NULL, NULL, 0);
 
 		if (PQresultStatus(res) != PGRES_TUPLES_OK)
 		{
-			elog(FATAL, "bdr %s: Failed to delete row from bdr_nodes: status %s: %s\n",
-				 NameStr(*dbname), PQresStatus(PQresultStatus(res)),
-				 PQresultErrorMessage(res));
+			elog(FATAL, "bdr: Failed to delete row from bdr_nodes: status %s: %s\n",
+				 PQresStatus(PQresultStatus(res)), PQresultErrorMessage(res));
 		}
 		if (PQntuples(res) == 0)
 		{
@@ -212,10 +219,9 @@ bdr_set_remote_status(PGconn *pgconn, Name dbname,
 			 * If prev_status was '\0' we wouldn't be here, so we should've
 			 * got a returned value.
 			 */
-			elog(FATAL, "bdr %s: bdr.bdr_nodes row for sysid=" UINT64_FORMAT
-						", tlid=%u, dbname='%s' missing, expected row with status=%c",
-				 NameStr(*dbname), sysid, ThisTimeLineID, NameStr(*dbname),
-				 (int)prev_status);
+			elog(FATAL, "bdr: bdr.bdr_nodes row for sysid=" UINT64_FORMAT
+						", tlid=%u, dboid=%u missing, expected row with status=%c",
+				 sysid, ThisTimeLineID, MyDatabaseId, (int)prev_status);
 		}
 		status_str = PQgetvalue(res, 0, 0);
 		Assert(strlen(status_str) == 1);
@@ -223,17 +229,17 @@ bdr_set_remote_status(PGconn *pgconn, Name dbname,
 
 		if (new_status != prev_status)
 		{
-			elog(FATAL, "bdr %s: bdr.bdr_nodes row for node_sysid=" UINT64_FORMAT
-						", timeline=%u, dbname='%s' had status=%c, expected status=%c",
-				 NameStr(*dbname), sysid, ThisTimeLineID, NameStr(*dbname),
-				 (int) new_status, (int) prev_status);
+			elog(FATAL, "bdr: bdr.bdr_nodes row for node_sysid=" UINT64_FORMAT
+						", timeline=%u, dboid=%u had status=%c, expected status=%c",
+				 sysid, ThisTimeLineID, MyDatabaseId, (int) new_status,
+				 (int) prev_status);
 		}
 
 		PQclear(res);
 	}
 	else
 	{
-		Oid			param_types[] = {CHAROID, TEXTOID, OIDOID, NAMEOID};
+		Oid			param_types[] = {CHAROID, TEXTOID, OIDOID, OIDOID};
 		const char *param_values[4];
 		char		new_status;
 		char		status_str[2];
@@ -242,25 +248,24 @@ bdr_set_remote_status(PGconn *pgconn, Name dbname,
 		param_values[0] = status_str;
 		param_values[1] = sysid_str;
 		param_values[2] = tlid_str;
-		param_values[3] = NameStr(*dbname);
+		param_values[3] = mydatabaseid_str;
 
 		res = PQexecParams(pgconn,
 						   "UPDATE bdr.bdr_nodes "
 						   "SET node_status = $1 "
 						   "WHERE node_sysid = $2 AND node_timeline = $3 "
-						   "AND node_dbname = $4 "
+						   "AND node_dboid = $4 "
 						   "RETURNING ("
 						   "  SELECT node_status FROM bdr.bdr_nodes "
 						   "  WHERE node_sysid = $2 AND node_timeline = $3 "
-						   "  AND node_dbname = $4"
+						   "  AND node_dboid = $4"
 						   ")",
 						   4, param_types, param_values, NULL, NULL, 0);
 
 		if (PQresultStatus(res) != PGRES_TUPLES_OK)
 		{
 			elog(FATAL,
-				 "bdr %s: Failed to update bdr.nodes row: status %s: %s\n",
-				 NameStr(*dbname),
+				 "bdr: Failed to update bdr.nodes row: status %s: %s\n",
 				 PQresStatus(PQresultStatus(res)), PQresultErrorMessage(res));
 		}
 		if (PQntuples(res) != 0)
@@ -273,10 +278,10 @@ bdr_set_remote_status(PGconn *pgconn, Name dbname,
 			if (new_status != prev_status)
 			{
 				elog(FATAL,
-					 "bdr %s: bdr.bdr_nodes row for node_sysid=" UINT64_FORMAT
-					 ", timeline=%u, dbname='%s' had status=%c, expected status=%c",
-					 NameStr(*dbname), sysid, ThisTimeLineID, NameStr(*dbname),
-					 (int)new_status, (int)prev_status);
+					 "bdr: bdr.bdr_nodes row for node_sysid=" UINT64_FORMAT
+					 ", timeline=%u, dboid=%u had status=%c, expected status=%c",
+					 sysid, ThisTimeLineID, MyDatabaseId, (int)new_status,
+					 (int)prev_status);
 			}
 
 			PQclear(res);
@@ -288,15 +293,15 @@ bdr_set_remote_status(PGconn *pgconn, Name dbname,
 			PQclear(res);
 			res = PQexecParams(pgconn,
 							   "INSERT INTO bdr.bdr_nodes"
-							   " (node_status, node_sysid, node_timeline, node_dbname)"
+							   " (node_status, node_sysid, node_timeline, node_dboid)"
 							   " VALUES ($1, $2, $3, $4);",
 							   4, param_types, param_values, NULL, NULL, 0);
 
 			if (PQresultStatus(res) != PGRES_COMMAND_OK)
 			{
 				elog(FATAL,
-					 "bdr %s: Failed to insert row into bdr.bdr_nodes: status %s: %s\n",
-					 NameStr(*dbname), PQresStatus(PQresultStatus(res)),
+					 "bdr: Failed to insert row into bdr.bdr_nodes: status %s: %s\n",
+					 PQresStatus(PQresultStatus(res)),
 					 PQresultErrorMessage(res));
 			}
 			PQclear(res);
@@ -714,7 +719,7 @@ bdr_init_replica(Name dbname)
 		elog(ERROR, "SPI already connected; this shouldn't be possible");
 
 	status = bdr_nodes_get_local_status(GetSystemIdentifier(), ThisTimeLineID,
-										dbname);
+										MyDatabaseId);
 	if (status == 'r')
 	{
 		/* Already in ready state, nothing more to do */
@@ -759,7 +764,7 @@ bdr_init_replica(Name dbname)
 		 * We still have to ensure that bdr.bdr_nodes.status is 'r' for this
 		 * node so that slot creation is permitted.
 		 */
-		bdr_nodes_set_local_status(dbname, 'r');
+		bdr_nodes_set_local_status('r');
 	}
 	/*
 	 * We no longer require the transaction for SPI; further work gets done on
@@ -798,7 +803,7 @@ bdr_init_replica(Name dbname)
 		 NameStr(*dbname));
 
 	/* Get the bdr.bdr_nodes status field for our node id from the remote */
-	status = bdr_get_remote_status(nonrepl_init_conn, dbname);
+	status = bdr_get_remote_status(nonrepl_init_conn);
 	switch (status)
 	{
 		case '\0':
@@ -848,8 +853,7 @@ bdr_init_replica(Name dbname)
 			elog(DEBUG2, "bdr %s: previous failed initalization detected, cleaning up",
 				 NameStr(*dbname));
 			bdr_drop_slot_and_replication_identifier(init_replica_config);
-			status = bdr_set_remote_status(nonrepl_init_conn, dbname,
-										   '\0', status);
+			status = bdr_set_remote_status(nonrepl_init_conn, '\0', status);
 			break;
 
 		default:
@@ -871,8 +875,7 @@ bdr_init_replica(Name dbname)
 		 * We're starting from scratch or have cleaned up a previous failed
 		 * attempt.
 		 */
-		status = bdr_set_remote_status(nonrepl_init_conn, dbname,
-									   'i', status);
+		status = bdr_set_remote_status(nonrepl_init_conn, 'i', status);
 
 		/*
 		 * A list of all connections to make slots for, as indexes into
@@ -991,7 +994,7 @@ bdr_init_replica(Name dbname)
 		PQfinish(init_repl_conn);
 
 		pfree(init_snapshot);
-		status = bdr_set_remote_status(nonrepl_init_conn, dbname, 'c', status);
+		status = bdr_set_remote_status(nonrepl_init_conn, 'c', status);
 	}
 
 	Assert(status == 'c');
@@ -1002,7 +1005,7 @@ bdr_init_replica(Name dbname)
 	bdr_catchup_to_lsn(
 		init_replica_worker->worker_data.apply_worker.connection_config_idx,
 		min_remote_lsn);
-	status = bdr_set_remote_status(nonrepl_init_conn, dbname, 'r', status);
+	status = bdr_set_remote_status(nonrepl_init_conn, 'r', status);
 
 	elog(INFO, "bdr %s: catchup worker finished, ready for normal replication",
 		 NameStr(*dbname));
