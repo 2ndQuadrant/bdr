@@ -679,8 +679,7 @@ bdr_apply_main(Datum main_arg)
 
 			if (r == -1)
 			{
-				elog(DEBUG1, "data stream ended");
-				return;
+				elog(ERROR, "data stream ended");
 			}
 			else if (r == -2)
 			{
