@@ -327,7 +327,7 @@ extern Oid GetSysCacheOidError(int cacheId, Datum key1, Datum key2, Datum key3,
 							   Datum key4);
 
 #define GetSysCacheOidError2(cacheId, key1, key2) \
-    GetSysCacheOidError(cacheId, key1, key2, 0, 0)
+	GetSysCacheOidError(cacheId, key1, key2, 0, 0)
 
 
 
