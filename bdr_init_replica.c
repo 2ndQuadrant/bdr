@@ -433,6 +433,7 @@ bdr_drop_slot_and_replication_identifier(BdrConnectionConfig *cfg)
 	RepNodeId   replication_identifier;
 	NameData	slot_name;
 	TimeLineID  timeline;
+	Oid			dboid;
 	uint64		sysid;
 	PGresult   *res;
 	StringInfoData query;
@@ -449,7 +450,7 @@ bdr_drop_slot_and_replication_identifier(BdrConnectionConfig *cfg)
 	streamConn = bdr_connect(
 		conninfo_repl,
 		remote_ident, sizeof(remote_ident),
-		&slot_name, &sysid, &timeline
+		&slot_name, &sysid, &timeline, &dboid
 		);
 
 	StartTransactionCommand();
@@ -921,6 +922,7 @@ bdr_init_replica(Name dbname)
 			RepNodeId replication_identifier;
 			NameData slot_name;
 			uint64 sysid;
+			Oid dboid;
 			TimeLineID timeline;
 
 			cfg = bdr_connection_configs
@@ -935,7 +937,7 @@ bdr_init_replica(Name dbname)
 			 * again by the apply workers when they're launched after init.
 			 */
 			conn = bdr_establish_connection_and_slot(cfg, &slot_name, &sysid,
-				&timeline, &replication_identifier, &snapshot);
+				&timeline, &dboid, &replication_identifier, &snapshot);
 
 			/* Always throws rather than returning failure */
 			Assert(conn);
