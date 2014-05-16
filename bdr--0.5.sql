@@ -294,22 +294,18 @@ COMMENT ON COLUMN bdr_conflict_history.conflict_resolution IS 'How the conflict 
 COMMENT ON COLUMN bdr_conflict_history.error_message IS 'On apply error, the error message from ereport/elog. Other error fields match.';
 
 -- The bdr_nodes table tracks members of a BDR group; it's only concerned with
--- one database, so the local and foreign database names are implicit.  All we
--- care about is the sysid.
+-- one bdr group so it only has to track enough to uniquely identify each member
+-- node, which is the (sysid, timeline, dboid) tuple for that node.
 --
 -- The sysid must be a numeric (or string) because PostgreSQL has no uint64 SQL
 -- type.
 --
--- In future we may support different local dbnames, so store the dbname too.
--- It's even possible we might replicate from one local DB to another (though
--- who knows why we'd want to) so the PK should be the (dbname, sysid) tuple.
---
 CREATE TABLE bdr_nodes (
     node_sysid text not null, -- Really a uint64 but we have no type for that
     node_timeline oid not null,
-    node_dbname name not null,
+    node_dboid oid not null,  -- This is an oid local to the node_sysid cluster
     node_status "char" not null,
-    primary key(node_sysid, node_timeline, node_dbname),
+    primary key(node_sysid, node_timeline, node_dboid),
     check (node_status in ('i', 'c', 'r'))
 );
 REVOKE ALL ON TABLE bdr_nodes FROM PUBLIC;
@@ -318,7 +314,7 @@ SELECT pg_catalog.pg_extension_config_dump('bdr_nodes', '');
 COMMENT ON TABLE bdr_nodes IS 'All known nodes in this BDR group.';
 COMMENT ON COLUMN bdr_nodes.node_sysid IS 'system_identifier from the control file of the node';
 COMMENT ON COLUMN bdr_nodes.node_timeline IS 'timeline ID of this node';
-COMMENT ON COLUMN bdr_nodes.node_dbname IS 'local database name on the node';
+COMMENT ON COLUMN bdr_nodes.node_dboid IS 'local database oid on the cluster (node_sysid, node_timeline)';
 COMMENT ON COLUMN bdr_nodes.node_status IS 'Readiness of the node: [i]nitializing, [c]atchup, [r]eady. Doesn''t indicate connected/disconnected.';
 
 CREATE TABLE bdr_queued_commands (
