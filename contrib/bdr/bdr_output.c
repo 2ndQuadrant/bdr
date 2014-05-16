@@ -532,10 +532,21 @@ pg_decode_commit_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 	if (flags & BDR_OUTPUT_COMMIT_HAS_ORIGIN)
 	{
 		/*
-		 * Note that origin_id is InvalidRepNodeIdentifier for locally
-		 * originated commits.
+		 * The RepNodeId in txn->origin_id is our local identifier for the
+		 * origin node, but it's not valid outside our node. It must be
+		 * converted into the (sysid, tlid, dboid) that uniquely identifies the
+		 * node globally so that can be sent.
 		 */
-		pq_sendint(ctx->out, txn->origin_id, 2);
+		uint64		origin_sysid;
+		TimeLineID	origin_tlid;
+		Oid			origin_dboid = InvalidOid;
+
+		bdr_fetch_sysid_via_node_id(txn->origin_id, &origin_sysid,
+									&origin_tlid, &origin_dboid);
+
+		pq_sendint64(ctx->out, origin_sysid);
+		pq_sendint(ctx->out, origin_tlid, 4);
+		pq_sendint(ctx->out, origin_dboid, 4);
 		pq_sendint64(ctx->out, txn->origin_lsn);
 	}
 
