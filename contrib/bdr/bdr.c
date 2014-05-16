@@ -64,6 +64,7 @@
 extern bool			exit_worker;
 extern uint64		origin_sysid;
 extern TimeLineID	origin_timeline;
+extern Oid			origin_dboid;
 /* end externs for bdr apply state */
 
 static int   n_configured_bdr_nodes = 0;
@@ -223,18 +224,16 @@ PGconn*
 bdr_connect(char *conninfo_repl,
 			char* remote_ident, size_t remote_ident_length,
 			NameData* slot_name,
-			uint64* remote_sysid_i, TimeLineID *remote_tlid_i)
+			uint64* remote_sysid_i, TimeLineID *remote_tlid_i,
+			Oid *remote_dboid_i)
 {
 	PGconn	   *streamConn;
 	PGresult   *res;
 	StringInfoData query;
 	char	   *remote_sysid;
 	char	   *remote_tlid;
-#ifdef NOT_USED
 	char	   *remote_dbname;
-#endif
 	char	   *remote_dboid;
-	Oid			remote_dboid_i;
 	char		local_sysid[32];
 	NameData	replication_name;
 
@@ -266,9 +265,7 @@ bdr_connect(char *conninfo_repl,
 
 	remote_sysid = PQgetvalue(res, 0, 0);
 	remote_tlid = PQgetvalue(res, 0, 1);
-#ifdef NOT_USED
 	remote_dbname = PQgetvalue(res, 0, 3);
-#endif
 	remote_dboid = PQgetvalue(res, 0, 4);
 
 	if (sscanf(remote_sysid, UINT64_FORMAT, remote_sysid_i) != 1)
@@ -277,22 +274,26 @@ bdr_connect(char *conninfo_repl,
 	if (sscanf(remote_tlid, "%u", remote_tlid_i) != 1)
 		elog(ERROR, "could not parse remote tlid %s", remote_tlid);
 
-	if (sscanf(remote_dboid, "%u", &remote_dboid_i) != 1)
+	if (sscanf(remote_dboid, "%u", remote_dboid_i) != 1)
 		elog(ERROR, "could not parse remote database OID %s", remote_dboid);
 
 	snprintf(local_sysid, sizeof(local_sysid), UINT64_FORMAT,
 			 GetSystemIdentifier());
 
-	if (strcmp(remote_sysid, local_sysid) == 0 && MyDatabaseId == remote_dboid_i)
+	if (strcmp(remote_sysid, local_sysid) == 0
+		&& ThisTimeLineID == *remote_tlid_i
+		&& MyDatabaseId == *remote_dboid_i)
 	{
 		ereport(FATAL,
 				(errcode(ERRCODE_INVALID_NAME),
-				 errmsg("system identifiers must differ between the nodes"),
-				 errdetail("Both system identifiers are %s.", remote_sysid)));
+				 errmsg("The system identifier, timeline ID and/or database oid must differ between the nodes"),
+				 errdetail("Both keys are (sysid, timelineid, dboid) = (%s,%s,%s)",
+				 remote_sysid, remote_tlid, remote_dbname)));
 	}
 	else
-		elog(DEBUG1, "local sysid %s, remote: %s",
-			 local_sysid, remote_sysid);
+		elog(DEBUG2, "local node (%s,%u,%u), remote node (%s,%s,%s)",
+			 local_sysid, ThisTimeLineID, MyDatabaseId, remote_sysid,
+			 remote_tlid, remote_dboid);
 
 	/*
 	 * build slot name.
@@ -301,7 +302,7 @@ bdr_connect(char *conninfo_repl,
 	 * somewhat longer...
 	 */
 	snprintf(NameStr(*slot_name), NAMEDATALEN, BDR_SLOT_NAME_FORMAT,
-			 remote_dboid_i, local_sysid, ThisTimeLineID,
+			 *remote_dboid_i, local_sysid, ThisTimeLineID,
 			 MyDatabaseId, NameStr(replication_name));
 	NameStr(*slot_name)[NAMEDATALEN - 1] = '\0';
 
@@ -310,7 +311,7 @@ bdr_connect(char *conninfo_repl,
 	 */
 	snprintf(remote_ident, remote_ident_length,
 			 BDR_NODE_ID_FORMAT,
-			 *remote_sysid_i, *remote_tlid_i, remote_dboid_i, MyDatabaseId,
+			 *remote_sysid_i, *remote_tlid_i, *remote_dboid_i, MyDatabaseId,
 			 NameStr(replication_name));
 
 	/* no parts of IDENTIFY_SYSTEM's response needed anymore */
@@ -447,7 +448,7 @@ bdr_worker_init(char *dbname)
  */
 PGconn*
 bdr_establish_connection_and_slot(BdrConnectionConfig *cfg, Name out_slot_name,
-	uint64 *out_sysid, TimeLineID* out_timeline, RepNodeId
+	uint64 *out_sysid, TimeLineID* out_timeline, Oid *out_dboid, RepNodeId
 	*out_replication_identifier, char **out_snapshot)
 {
 	char		conninfo_repl[MAXCONNINFO + 75];
@@ -462,7 +463,7 @@ bdr_establish_connection_and_slot(BdrConnectionConfig *cfg, Name out_slot_name,
 	streamConn = bdr_connect(
 		conninfo_repl,
 		remote_ident, sizeof(remote_ident),
-		out_slot_name, out_sysid, out_timeline
+		out_slot_name, out_sysid, out_timeline, out_dboid
 		);
 
 	StartTransactionCommand();
@@ -538,7 +539,7 @@ bdr_apply_main(Datum main_arg)
 
 	streamConn = bdr_establish_connection_and_slot(
 		bdr_apply_config, &slot_name, &origin_sysid,
-		&origin_timeline, &replication_identifier, NULL);
+		&origin_timeline, &origin_dboid, &replication_identifier, NULL);
 
 	/* initialize stat subsystem, our id won't change further */
 	bdr_count_set_current_node(replication_identifier);
