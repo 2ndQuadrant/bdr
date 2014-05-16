@@ -3232,7 +3232,8 @@ getObjectIdentityParts(const ObjectAddress *object,
 				StringInfoData opfam;
 
 				/* no objname support here */
-				Assert(objname == NULL);
+				if (objname)
+					*objname = NIL;
 
 				amopDesc = heap_open(AccessMethodOperatorRelationId,
 									 AccessShareLock);
@@ -3279,7 +3280,8 @@ getObjectIdentityParts(const ObjectAddress *object,
 				StringInfoData opfam;
 
 				/* no objname support here */
-				Assert(objname == NULL);
+				if (objname)
+					*objname = NIL;
 
 				amprocDesc = heap_open(AccessMethodProcedureRelationId,
 									   AccessShareLock);

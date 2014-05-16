@@ -216,6 +216,8 @@ deleteObjectsInList(ObjectAddresses *targetObjects, Relation *depRel,
 				original = true;
 			if (extra->flags & DEPFLAG_NORMAL)
 				normal = true;
+			if (extra->flags & DEPFLAG_REVERSE)
+				normal = true;
 
 			if (EventTriggerSupportsObjectClass(getObjectClass(thisobj)))
 			{
