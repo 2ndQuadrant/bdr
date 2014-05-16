@@ -23,6 +23,8 @@
 
 #include "catalog/pg_type.h"
 
+#include "commands/dbcommands.h"
+
 #include "executor/spi.h"
 
 #include "replication/replication_identifier.h"
@@ -61,10 +63,10 @@ GetSysCacheOidError(int cacheId,
  * SPI must be initialized, and you must be in a running transaction.
  */
 char
-bdr_nodes_get_local_status(uint64 sysid, TimeLineID tli, Name dbname)
+bdr_nodes_get_local_status(uint64 sysid, TimeLineID tli, Oid dboid)
 {
 	int			spi_ret;
-	Oid			argtypes[] = { TEXTOID, OIDOID, NAMEOID };
+	Oid			argtypes[] = { TEXTOID, OIDOID, OIDOID };
 	Datum		values[3];
 	bool		isnull;
 	char        status;
@@ -87,16 +89,16 @@ bdr_nodes_get_local_status(uint64 sysid, TimeLineID tli, Name dbname)
 	if (schema_oid == InvalidOid)
 		ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				errmsg("No bdr schema is present in database %s, cannot create a bdr_output slot",
-					   NameStr(*dbname)),
+					   get_database_name(MyDatabaseId)),
 				errhint("There is no bdr.bdr_connections entry for this database on the target node or bdr is not in shared_preload_libraries")));
 
 	values[0] = CStringGetTextDatum(sysid_str);
 	values[1] = ObjectIdGetDatum(tli);
-	values[2] = NameGetDatum(dbname);
+	values[2] = ObjectIdGetDatum(dboid);
 
 	spi_ret = SPI_execute_with_args(
 			"SELECT node_status FROM bdr.bdr_nodes "
-			"WHERE node_sysid = $1 AND node_timeline = $2 AND node_dbname = $3",
+			"WHERE node_sysid = $1 AND node_timeline = $2 AND node_dboid = $3",
 			3, argtypes, values, NULL, false, 1);
 
 	if (spi_ret != SPI_OK_SELECT)
@@ -115,8 +117,8 @@ bdr_nodes_get_local_status(uint64 sysid, TimeLineID tli, Name dbname)
 }
 
 /*
- * Insert a row for the local node's (sysid,dbname) with the passed status into
- * bdr.bdr_nodes. No existing row for this key may exist.
+ * Insert a row for the local node's (sysid,tlid,dboid) with the passed status
+ * into bdr.bdr_nodes. No existing row for this key may exist.
  *
  * Unlike bdr_set_remote_status, '\0' may not be passed to delete the row, and
  * no upsert is performed. This is a simple insert only.
@@ -128,10 +130,10 @@ bdr_nodes_get_local_status(uint64 sysid, TimeLineID tli, Name dbname)
  * not bound to any remote node replication state.
  */
 void
-bdr_nodes_set_local_status(Name dbname, char status)
+bdr_nodes_set_local_status(char status)
 {
 	int			spi_ret;
-	Oid			argtypes[] = { CHAROID, TEXTOID, OIDOID, NAMEOID };
+	Oid			argtypes[] = { CHAROID, TEXTOID, OIDOID, OIDOID };
 	Datum		values[4];
 	char		sysid_str[33];
 
@@ -147,20 +149,20 @@ bdr_nodes_set_local_status(Name dbname, char status)
 	values[0] = CharGetDatum(status);
 	values[1] = CStringGetTextDatum(sysid_str);
 	values[2] = ObjectIdGetDatum(ThisTimeLineID);
-	values[3] = NameGetDatum(dbname);
+	values[3] = ObjectIdGetDatum(MyDatabaseId);
 
 	spi_ret = SPI_execute_with_args(
 							   "INSERT INTO bdr.bdr_nodes"
-							   " (node_status, node_sysid, node_timeline, node_dbname)"
+							   " (node_status, node_sysid, node_timeline, node_dboid)"
 							   " VALUES ($1, $2, $3, $4);",
 							   4, argtypes, values, NULL, false, 0);
 
 	if (spi_ret != SPI_OK_INSERT)
 		elog(ERROR, "Unable to insert row (status=%c, node_sysid="
-					UINT64_FORMAT ", node_timeline=%u, node_dbname=%s) "
+					UINT64_FORMAT ", node_timeline=%u, node_dboid=%u) "
 					"into bdr.bdr_nodes: SPI error %d",
 					status, GetSystemIdentifier(), ThisTimeLineID,
-					NameStr(*dbname), spi_ret);
+					MyDatabaseId, spi_ret);
 }
 
 /*
