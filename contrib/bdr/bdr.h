@@ -320,8 +320,8 @@ extern void init_bdr_commandfilter(void);
 extern void bdr_apply_main(Datum main_arg);
 
 /* manipulation of bdr catalogs */
-extern char bdr_nodes_get_local_status(uint64 sysid, TimeLineID tli, Name dbname);
-extern void bdr_nodes_set_local_status(Name dbname, char status);
+extern char bdr_nodes_get_local_status(uint64 sysid, TimeLineID tli, Oid dboid);
+extern void bdr_nodes_set_local_status(char status);
 
 extern Oid GetSysCacheOidError(int cacheId, Datum key1, Datum key2, Datum key3,
 							   Datum key4);
