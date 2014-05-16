@@ -337,13 +337,15 @@ extern struct pg_conn* bdr_connect(char *conninfo_repl,
 								   size_t remote_ident_length,
 								   NameData* slot_name,
 								   uint64* remote_sysid_i,
-								   TimeLineID *remote_tlid_i);
+								   TimeLineID *remote_tlid_i,
+								   Oid *out_dboid_i);
 
 extern struct pg_conn *
 bdr_establish_connection_and_slot(BdrConnectionConfig *cfg,
 								  Name out_slot_name,
 								  uint64 *out_sysid,
 								  TimeLineID *out_timeline,
+								  Oid *out_dboid,
 								  RepNodeId *out_replication_identifier,
 								  char **out_snapshot);
 
