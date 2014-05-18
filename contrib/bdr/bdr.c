@@ -1739,7 +1739,7 @@ out:
 
 	/* register a slot for every remote node */
 	bdr_count_shmem_init(bdr_max_workers);
-	bdr_sequencer_shmem_init(bdr_max_workers, num_used_databases);
+	bdr_sequencer_shmem_init(bdr_max_workers, bdr_distinct_dbnames_count);
 
 	MemoryContextSwitchTo(old_context);
 }
