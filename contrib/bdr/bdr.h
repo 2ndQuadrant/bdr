@@ -20,7 +20,23 @@
 #define BDR_SLOT_NAME_FORMAT "bdr_%u_%s_%u_%u__%s"
 #define BDR_NODE_ID_FORMAT "bdr_"UINT64_FORMAT"_%u_%u_%u_%s"
 
+/* Right now replication_name isn't used; make it easily found for later */
+#define EMPTY_REPLICATION_NAME ""
+
+/*
+ * BDR_LOCALID_FORMAT is used in fallback_application_name. It's distinct from
+ * BDR_NODE_ID_FORMAT in that it doesn't include the remote dboid as that may
+ * not be known yet, just (sysid,tlid,dboid,replication_name) .
+ *
+ * Use BDR_LOCALID_FORMAT_ARGS to sub it in to format strings.
+ */
+#define BDR_LOCALID_FORMAT "bdr ("UINT64_FORMAT",%u,%u,%s)"
+
+#define BDR_LOCALID_FORMAT_ARGS \
+	GetSystemIdentifier(), ThisTimeLineID, MyDatabaseId, EMPTY_REPLICATION_NAME
+
 #define BDR_INIT_REPLICA_CMD "bdr_initial_load"
+
 
 /*
  * Don't include libpq here, msvc infrastructure requires linking to libpq
@@ -342,6 +358,7 @@ extern struct pg_conn* bdr_connect(char *conninfo_repl,
 
 extern struct pg_conn *
 bdr_establish_connection_and_slot(BdrConnectionConfig *cfg,
+								  const char *application_name_suffix,
 								  Name out_slot_name,
 								  uint64 *out_sysid,
 								  TimeLineID *out_timeline,

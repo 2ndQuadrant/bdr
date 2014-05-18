@@ -447,21 +447,25 @@ bdr_worker_init(char *dbname)
  *----------------------
  */
 PGconn*
-bdr_establish_connection_and_slot(BdrConnectionConfig *cfg, Name out_slot_name,
-	uint64 *out_sysid, TimeLineID* out_timeline, Oid *out_dboid, RepNodeId
-	*out_replication_identifier, char **out_snapshot)
+bdr_establish_connection_and_slot(BdrConnectionConfig *cfg,
+	const char *application_name_suffix, Name out_slot_name, uint64 *out_sysid,
+	TimeLineID* out_timeline, Oid *out_dboid,
+	RepNodeId *out_replication_identifier, char **out_snapshot)
 {
-	char		conninfo_repl[MAXCONNINFO + 75];
 	char		remote_ident[256];
 	PGconn	   *streamConn;
+	StringInfoData conninfo_repl;
 
-	snprintf(conninfo_repl, sizeof(conninfo_repl),
-			 "%s replication=database fallback_application_name=bdr",
-			 cfg->dsn);
+	initStringInfo(&conninfo_repl);
+
+	appendStringInfo(&conninfo_repl,
+					 "%s replication=database fallback_application_name='"BDR_LOCALID_FORMAT": %s'",
+					 cfg->dsn, BDR_LOCALID_FORMAT_ARGS,
+					 application_name_suffix);
 
 	/* Establish BDR conn and IDENTIFY_SYSTEM */
 	streamConn = bdr_connect(
-		conninfo_repl,
+		conninfo_repl.data,
 		remote_ident, sizeof(remote_ident),
 		out_slot_name, out_sysid, out_timeline, out_dboid
 		);
@@ -537,9 +541,36 @@ bdr_apply_main(Datum main_arg)
 	elog(DEBUG1, "%s initialized on %s",
 		 MyBgworkerEntry->bgw_name, bdr_apply_config->dbname);
 
-	streamConn = bdr_establish_connection_and_slot(
-		bdr_apply_config, &slot_name, &origin_sysid,
-		&origin_timeline, &origin_dboid, &replication_identifier, NULL);
+	/* Set our local application_name for our SPI connections */
+	resetStringInfo(&query);
+	appendStringInfo(&query, BDR_LOCALID_FORMAT": %s", BDR_LOCALID_FORMAT_ARGS, "apply");
+	if (bdr_apply_worker->forward_changesets)
+		appendStringInfoString(&query, " catchup");
+
+	if (bdr_apply_worker->replay_stop_lsn != InvalidXLogRecPtr)
+		appendStringInfo(&query, " up to %X/%X",
+						 (uint32)(bdr_apply_worker->replay_stop_lsn),
+						 (uint32)(bdr_apply_worker->replay_stop_lsn>>32));
+
+	SetConfigOption("application_name", query.data, PGC_USERSET, PGC_S_SESSION);
+
+	/* Form an application_name string to send to the remote end */
+	resetStringInfo(&query);
+	appendStringInfoString(&query, "receive");
+
+	if (bdr_apply_worker->forward_changesets)
+		appendStringInfoString(&query, " catchup");
+
+	if (bdr_apply_worker->replay_stop_lsn != InvalidXLogRecPtr)
+		appendStringInfo(&query, " up to %X/%X",
+						 (uint32)(bdr_apply_worker->replay_stop_lsn),
+						 (uint32)(bdr_apply_worker->replay_stop_lsn>>32));
+
+	/* Make the replication connection to the remote end */
+	streamConn = bdr_establish_connection_and_slot(bdr_apply_config,
+		query.data, &slot_name, &origin_sysid, &origin_timeline,
+		&origin_dboid, &replication_identifier, NULL);
+
 
 	/* initialize stat subsystem, our id won't change further */
 	bdr_count_set_current_node(replication_identifier);
@@ -980,7 +1011,8 @@ bdr_launch_apply_workers(char *dbname)
 							continue;
 
 						snprintf(apply_worker.bgw_name, BGW_MAXLEN,
-								 "bdr apply: %s", cfg->name);
+								 BDR_LOCALID_FORMAT": %s: apply",
+								 BDR_LOCALID_FORMAT_ARGS, cfg->name);
 						apply_worker.bgw_main_arg = Int32GetDatum(i);
 
 						if (!RegisterDynamicBackgroundWorker(&apply_worker,
@@ -1050,6 +1082,9 @@ bdr_perdb_worker_main(Datum main_arg)
 	ListCell		 *c;
 	BdrPerdbWorker   *bdr_perdb_worker;
 	BdrWorker		 *bdr_worker_slot;
+	StringInfoData	  si;
+
+	initStringInfo(&si);
 
 	Assert(IsBackgroundWorker);
 
@@ -1058,6 +1093,9 @@ bdr_perdb_worker_main(Datum main_arg)
 	bdr_perdb_worker = &bdr_worker_slot->worker_data.perdb_worker;
 
 	bdr_worker_init(NameStr(bdr_perdb_worker->dbname));
+
+	appendStringInfo(&si, BDR_LOCALID_FORMAT": %s", BDR_LOCALID_FORMAT_ARGS, "perdb worker");
+	SetConfigOption("application_name", si.data, PGC_USERSET, PGC_S_SESSION);
 
 	CurrentResourceOwner = ResourceOwnerCreate(NULL, "bdr seq top-level resource owner");
 	bdr_saved_resowner = CurrentResourceOwner;
