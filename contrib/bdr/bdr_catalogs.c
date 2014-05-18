@@ -30,6 +30,7 @@
 #include "replication/replication_identifier.h"
 
 #include "utils/builtins.h"
+#include "utils/guc.h"
 #include "utils/syscache.h"
 
 /* GetSysCacheOid equivalent that errors out if nothing is found */

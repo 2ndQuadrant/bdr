@@ -432,7 +432,6 @@ static void
 bdr_drop_slot_and_replication_identifier(BdrConnectionConfig *cfg)
 {
 
-	char		conninfo_repl[MAXCONNINFO + 75];
 	char		remote_ident[256];
 	PGconn	   *streamConn;
 	RepNodeId   replication_identifier;
@@ -444,16 +443,18 @@ bdr_drop_slot_and_replication_identifier(BdrConnectionConfig *cfg)
 	StringInfoData query;
 	char	   *sqlstate;
 
+	initStringInfo(&query);
+
 	elog(DEBUG1, "bdr %s: Dropping slot and local ident from connection %s",
 		 cfg->dbname, cfg->name);
 
-	snprintf(conninfo_repl, sizeof(conninfo_repl),
-			 "%s replication=database fallback_application_name=bdr",
-			 cfg->dsn);
+	appendStringInfo(&query,
+					 "%s replication=database fallback_application_name='"BDR_LOCALID_FORMAT"': %s: drop slot'",
+					  cfg->dsn, BDR_LOCALID_FORMAT_ARGS, cfg->name);
 
 	/* Establish BDR conn and IDENTIFY_SYSTEM */
 	streamConn = bdr_connect(
-		conninfo_repl,
+		query.data,
 		remote_ident, sizeof(remote_ident),
 		&slot_name, &sysid, &timeline, &dboid
 		);
@@ -479,7 +480,7 @@ bdr_drop_slot_and_replication_identifier(BdrConnectionConfig *cfg)
 	 * whether it exists or not silently over the replication protocol,
 	 * so we just try it and cope if it's missing.
 	 */
-	initStringInfo(&query);
+	resetStringInfo(&query);
 	appendStringInfo(&query, "DROP_REPLICATION_SLOT %s", NameStr(slot_name));
 	res = PQexec(streamConn, query.data);
 	if (PQresultStatus(res) == PGRES_COMMAND_OK)
@@ -534,9 +535,13 @@ bdr_exec_init_replica(BdrConnectionConfig *cfg, char *snapshot)
 	char  bdr_init_replica_script_path[MAXPGPATH];
 	const char *envvar;
 	StringInfoData path;
+	StringInfoData origin_dsn;
+	StringInfoData local_dsn;
 	int   saved_errno;
 
 	initStringInfo(&path);
+	initStringInfo(&origin_dsn);
+	initStringInfo(&local_dsn);
 
 	bindir = pstrdup(my_exec_path);
 	get_parent_directory(bindir);
@@ -550,8 +555,15 @@ bdr_exec_init_replica(BdrConnectionConfig *cfg, char *snapshot)
 			 PG_VERSION);
 	}
 
+	appendStringInfo(&origin_dsn,
+					 "%s fallback_application_name='"BDR_LOCALID_FORMAT": %s: init_replica dump'",
+					 cfg->dsn, BDR_LOCALID_FORMAT_ARGS, cfg->name);
+
 	if (cfg->replica_local_dsn == NULL)
 		elog(FATAL, "bdr init_replica: no replica_local_dsn specified");
+	appendStringInfo(&local_dsn,
+					 "%s fallback_application_name='"BDR_LOCALID_FORMAT": %s: init_replica restore'",
+					 cfg->replica_local_dsn, BDR_LOCALID_FORMAT_ARGS, cfg->name);
 
 	tmpdir = palloc(strlen(bdr_temp_dump_directory)+32);
 	sprintf(tmpdir, "%s/postgres-bdr-%s.%d", bdr_temp_dump_directory,
@@ -591,8 +603,8 @@ bdr_exec_init_replica(BdrConnectionConfig *cfg, char *snapshot)
 		char *const argv[] = {
 			bdr_init_replica_script_path,
 			"--snapshot", snapshot,
-			"--source", cfg->dsn,
-			"--target", cfg->replica_local_dsn,
+			"--source", origin_dsn.data,
+			"--target", local_dsn.data,
 			"--tmp-directory", tmpdir,
 			NULL
 		};
@@ -688,12 +700,12 @@ bdr_init_replica(Name dbname)
 	char status;
 	XLogRecPtr min_remote_lsn;
 	PGconn *nonrepl_init_conn;
-	StringInfoData query;
+	StringInfoData dsn;
 	BdrWorker  *init_replica_worker;
 	BdrConnectionConfig *init_replica_config;
 	int spi_ret;
 
-	initStringInfo(&query);
+	initStringInfo(&dsn);
 
 	elog(DEBUG2, "bdr %s: bdr_init_replica",
 		 NameStr(*dbname));
@@ -784,12 +796,18 @@ bdr_init_replica(Name dbname)
 	elog(DEBUG2, "bdr %s: bdr_init_replica init from connection %s",
 		 NameStr(*dbname), init_replica_config->name);
 
+	resetStringInfo(&dsn);
+	appendStringInfo(&dsn,
+					 "%s fallback_application_name='"BDR_LOCALID_FORMAT": %s: init_replica setup'",
+					 init_replica_config->dsn, BDR_LOCALID_FORMAT_ARGS,
+					 init_replica_config->name);
+
 	/*
 	 * Test to see if there's an entry in the remote's bdr.bdr_nodes for our
 	 * system identifier. If there is, that'll tell us what stage of startup
 	 * we are up to and let us resume an incomplete start.
 	 */
-	nonrepl_init_conn = PQconnectdb(init_replica_config->dsn);
+	nonrepl_init_conn = PQconnectdb(dsn.data);
 	if (PQstatus(nonrepl_init_conn) != CONNECTION_OK)
 	{
 		ereport(FATAL,
@@ -939,8 +957,9 @@ bdr_init_replica(Name dbname)
 			 * are all discarded; they're not needed here, and will be obtained
 			 * again by the apply workers when they're launched after init.
 			 */
-			conn = bdr_establish_connection_and_slot(cfg, &slot_name, &sysid,
-				&timeline, &dboid, &replication_identifier, &snapshot);
+			conn = bdr_establish_connection_and_slot(cfg, "create slot",
+				&slot_name, &sysid, &timeline, &dboid, &replication_identifier,
+				&snapshot);
 
 			/* Always throws rather than returning failure */
 			Assert(conn);
