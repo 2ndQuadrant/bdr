@@ -172,7 +172,7 @@ bdr_create_conflict_handler(PG_FUNCTION_ARGS)
 	bdr_conflict_handlers_check_access(reloid);
 
 	/*
-	 * We lock the relation we're referring to to avoid race conditions with
+	 * We lock the relation we're referring to avoid race conditions with
 	 * DROP.
 	 */
 	rel = heap_open(reloid, ShareUpdateExclusiveLock);
@@ -231,7 +231,7 @@ bdr_create_conflict_handler(PG_FUNCTION_ARGS)
 		elog(ERROR, "expected one processed row, got %u", SPI_processed);
 
 	/*
-	 * set up the dependency relation with ourselfes as „dependend”
+	 * set up the dependency relation with ourselves as "dependent"
 	 */
 
 	myself.classId = bdr_conflict_handler_table_oid;
@@ -252,8 +252,7 @@ bdr_create_conflict_handler(PG_FUNCTION_ARGS)
 	 */
 	if (replication_origin_id == InvalidRepNodeId)
 	{
-		StringInfoData buf,
-					query;
+		StringInfoData query;
 		char	   *proc_name = format_procedure_qualified(proc_oid);
 		char	   *quoted_ch_name = quote_literal_cstr(ch_name),
 				   *quoted_proc_name = quote_literal_cstr(proc_name),
@@ -261,14 +260,11 @@ bdr_create_conflict_handler(PG_FUNCTION_ARGS)
 				   *quoted_rel_name;
 
 		initStringInfo(&query);
-		initStringInfo(&buf);
 
-		appendStringInfo(&buf, "%s.%s",
-						 quote_identifier(
-							  get_namespace_name(RelationGetNamespace(rel))),
-						 quote_identifier(RelationGetRelationName(rel)));
-
-		quoted_rel_name = quote_literal_cstr(buf.data);
+		quoted_rel_name =
+			quote_literal_cstr(quote_qualified_identifier(
+														  get_namespace_name(RelationGetNamespace(rel)),
+														  RelationGetRelationName(rel)));
 
 		if (label)
 		{
@@ -280,8 +276,6 @@ bdr_create_conflict_handler(PG_FUNCTION_ARGS)
 							 quoted_ch_name,
 							 quoted_proc_name,
 							 quoted_label);
-
-			pfree(quoted_label);
 		}
 		else
 			appendStringInfo(&query,
@@ -289,12 +283,6 @@ bdr_create_conflict_handler(PG_FUNCTION_ARGS)
 							 quoted_rel_name,
 							 quoted_ch_name,
 							 quoted_proc_name);
-
-		pfree(proc_name);
-		pfree(quoted_ch_name);
-		pfree(quoted_rel_name);
-		pfree(quoted_proc_name);
-
 
 		argtypes[0] = TEXTOID;
 		nulls[0] = false;
