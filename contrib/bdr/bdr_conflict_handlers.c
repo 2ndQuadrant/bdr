@@ -105,6 +105,12 @@ bdr_conflict_handlers_init(void)
 							 CStringGetDatum("SKIP"));
 }
 
+/*
+ * Verify privileges for the given relation; raise an error if current user is
+ * not the owner of either the table or the schema it belongs it.
+ *
+ * Also raise an error if the relation is a system catalog.
+ */
 static void
 bdr_conflict_handlers_check_access(Oid reloid)
 {
@@ -113,22 +119,20 @@ bdr_conflict_handlers_check_access(Oid reloid)
 
 	tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(reloid));
 	if (!HeapTupleIsValid(tuple))
-		ereport(ERROR,
-				(errmsg("Could not look up relation %d in sys cache",
-						reloid)));
+		elog(ERROR, "cache lookup failed for relation %u", reloid);
 
 	classform = (Form_pg_class) GETSTRUCT(tuple);
 
 	if (!pg_class_ownercheck(reloid, GetUserId()) &&
 		!pg_namespace_ownercheck(classform->relnamespace, GetUserId()))
 		ereport(ERROR,
-				(errmsg("Access to relation %d denied",
-						reloid)));
+				(errmsg("permission denied to relation %s",
+						NameStr(classform->relname))));
 
 	if (IsSystemClass(reloid, classform))
 		ereport(ERROR,
-				(errmsg("Access to relation %d denied because it is a system relation",
-						reloid)));
+				(errmsg("permission denied: %s is a system catalog",
+						NameStr(classform->relname))));
 
 	ReleaseSysCache(tuple);
 }
@@ -160,13 +164,13 @@ bdr_create_conflict_handler(PG_FUNCTION_ARGS)
 	Relation	rel;
 
 	if (PG_NARGS() < 4 || PG_NARGS() > 5)
-		elog(ERROR, "expecting four or five arguments!");
+		elog(ERROR, "expecting four or five arguments, got %d", PG_NARGS());
 
 	if (bdr_conflict_handler_table_oid == InvalidOid)
 		bdr_conflict_handlers_init();
 
 	reloid = PG_GETARG_OID(0);
-	ch_name = PG_GETARG_NAME(1)->data;
+	ch_name = NameStr(*PG_GETARG_NAME(1));
 	proc_oid = PG_GETARG_OID(2);
 
 	bdr_conflict_handlers_check_access(reloid);
@@ -174,10 +178,12 @@ bdr_create_conflict_handler(PG_FUNCTION_ARGS)
 	/*
 	 * We lock the relation we're referring to avoid race conditions with
 	 * DROP.
+	 *
+	 * XXX why SUE?  Wouldn't AccessShare be sufficient for that?
 	 */
 	rel = heap_open(reloid, ShareUpdateExclusiveLock);
 
-	/* ensure that handler function is valid */
+	/* ensure that handler function is good */
 	bdr_conflict_handlers_check_handler_fun(rel, proc_oid);
 
 	/*
@@ -431,22 +437,20 @@ bdr_drop_conflict_handler(PG_FUNCTION_ARGS)
 }
 
 /*
- * check that handler fun seems to be valid and error out if not
+ * Check that the handler function signature is what we expect; error out if not
  */
 static void
 bdr_conflict_handlers_check_handler_fun(Relation rel, Oid proc_oid)
 {
 	HeapTuple	tuple;
-	TupleDesc	retdesc;
-
+	Form_pg_proc proc;
 	char		typtype;
 	int			numargs;
-	Oid		   *fun_argtypes;
-	char	  **fun_argnames;
-	char	   *fun_argmodes;
-	bool		failed = false;
-
-	Form_pg_proc proc;
+	TupleDesc	retdesc;
+	Oid		   *argtypes;
+	char	  **argnames;
+	char	   *argmodes;
+	const char *hint = NULL;
 
 	tuple = SearchSysCache1(PROCOID, ObjectIdGetDatum(proc_oid));
 	if (!HeapTupleIsValid(tuple))
@@ -456,50 +460,81 @@ bdr_conflict_handlers_check_handler_fun(Relation rel, Oid proc_oid)
 	typtype = get_typtype(proc->prorettype);
 
 	numargs = get_func_arg_info(tuple,
-								&fun_argtypes, &fun_argnames, &fun_argmodes);
-
+								&argtypes, &argnames, &argmodes);
 	retdesc = build_function_result_tupdesc_t(tuple);
 
-	ReleaseSysCache(tuple);
+	do
+	{
+		if (typtype != TYPTYPE_PSEUDO || proc->prorettype != RECORDOID)
+		{
+			hint = "Return type is not RECORD.";
+			break;
+		}
 
-	if (typtype != TYPTYPE_PSEUDO || proc->prorettype != RECORDOID)
-		elog(ERROR, "handler function is expected to return a RECORD");
 
-	if (numargs != 7)
-		failed = true;
+		if (numargs != 7)
+		{
+			hint = "Function doesn't have 7 arguments.";
+			break;
+		}
 
-	if (retdesc->natts != 2 ||
-		retdesc->attrs[0]->atttypid != rel->rd_rel->reltype ||
-		retdesc->attrs[1]->atttypid != bdr_conflict_handler_action_oid)
-		failed = true;
+		if (retdesc == NULL || retdesc->natts != 2)
+		{
+			hint = "Function doesn't have 2 OUT arguments";
+			break;
+		}
 
-	if (fun_argtypes[2] != TEXTOID ||
-		fun_argtypes[3] != REGCLASSOID ||
-		fun_argtypes[4] != bdr_conflict_handler_type_oid)
-		failed = true;
+		if (retdesc->attrs[0]->atttypid != rel->rd_rel->reltype ||
+			retdesc->attrs[1]->atttypid != bdr_conflict_handler_action_oid)
+		{
+			hint = "OUT argument are not of the expected types.";
+			break;
+		}
 
-	if (fun_argmodes[0] != PROARGMODE_IN ||
-		fun_argmodes[1] != PROARGMODE_IN ||
-		fun_argmodes[2] != PROARGMODE_IN ||
-		fun_argmodes[3] != PROARGMODE_IN ||
-		fun_argmodes[4] != PROARGMODE_IN ||
-		fun_argmodes[5] != PROARGMODE_OUT ||
-		fun_argmodes[6] != PROARGMODE_OUT)
-		failed = true;
+		if (argtypes[2] != TEXTOID ||
+			argtypes[3] != REGCLASSOID ||
+			argtypes[4] != bdr_conflict_handler_type_oid)
+		{
+			/* XXX ugh */
+			hint = "Three last input arguments are not (text, regclass, bdr.bdr_conflict_type).";
+			break;
+		}
 
-	typtype = get_typtype(fun_argtypes[0]);
-	if (typtype != TYPTYPE_COMPOSITE || fun_argtypes[0] != rel->rd_rel->reltype)
-		failed = true;
+		if (argmodes[0] != PROARGMODE_IN ||
+			argmodes[1] != PROARGMODE_IN ||
+			argmodes[2] != PROARGMODE_IN ||
+			argmodes[3] != PROARGMODE_IN ||
+			argmodes[4] != PROARGMODE_IN ||
+			argmodes[5] != PROARGMODE_OUT ||
+			argmodes[6] != PROARGMODE_OUT)
+		{
+			hint = "There must be five IN arguments and two OUT arguments.";
+			break;
+		}
 
-	typtype = get_typtype(fun_argtypes[1]);
-	if (typtype != TYPTYPE_COMPOSITE || fun_argtypes[1] != rel->rd_rel->reltype)
-		failed = true;
+		typtype = get_typtype(argtypes[0]);
+		if (typtype != TYPTYPE_COMPOSITE || argtypes[0] != rel->rd_rel->reltype)
+		{
+			hint = "First input argument must be of the same type as the table.";
+			break;
+		}
 
-	if (failed)
-		ereport(ERROR,
-				(errmsg("handler function is expected to accept " \
-		"tablerow IN, tablerow IN, text IN, text IN, bdr_conflict_type IN," \
-						"tablerow OUT, bdr_conflict_handler_action OUT")));
+		typtype = get_typtype(argtypes[1]);
+		if (typtype != TYPTYPE_COMPOSITE || argtypes[1] != rel->rd_rel->reltype)
+		{
+			hint = "Second input argument must be of the same type as the table.";
+			break;
+		}
+
+		/* everything seems OK */
+		ReleaseSysCache(tuple);
+		return;
+	} while (false);
+
+	ereport(ERROR,
+			(errmsg("conflict handler function signature must be %s",
+					"(IN tablerow, IN tablerow, IN text, IN regclass, IN bdr.bdr_conflict_type, OUT tablerow, OUT bdr.bdr_conflict_handler_action)"),
+			 hint ? errhint("%s", hint) : 0));
 }
 
 /*
