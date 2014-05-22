@@ -319,10 +319,10 @@ COMMENT ON COLUMN bdr_nodes.node_status IS 'Readiness of the node: [i]nitializin
 
 CREATE TABLE bdr_queued_commands (
     lsn pg_lsn NOT NULL,
-    queued_at timestamptz NOT NULL,
-    command_tag text,
-    command text,
-    executed bool
+    queued_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    perpetrator TEXT NOT NULL,
+    command_tag TEXT NOT NULL,
+    command TEXT NOT NULL
 );
 REVOKE ALL ON TABLE bdr_queued_commands FROM PUBLIC;
 SELECT pg_catalog.pg_extension_config_dump('bdr_queued_commands', '');
@@ -342,70 +342,24 @@ BEGIN
     ident := quote_ident(TG_TABLE_SCHEMA)||'.'||quote_ident(TG_TABLE_NAME);
 
     INSERT INTO bdr.bdr_queued_commands (
-        lsn, queued_at,
-        command_tag, command, executed
+        lsn, queued_at, perpetrator,
+        command_tag, command
     )
     VALUES (
         pg_current_xlog_location(),
-        NOW(),
+        NOW(), CURRENT_USER,
         'TRUNCATE (automatic)',
-        'TRUNCATE TABLE ONLY ' || ident,
-        'false');
+        'TRUNCATE TABLE ONLY ' || ident
+        );
     RETURN NULL;
 END;
 $function$;
 
-CREATE OR REPLACE FUNCTION bdr.queue_commands()
+CREATE OR REPLACE FUNCTION bdr.bdr_queue_ddl_commands()
 RETURNS event_trigger
-LANGUAGE plpgsql
-AS $function$
-DECLARE
-    r RECORD;
-BEGIN
-    -- don't recursively log ddl commands
-    IF pg_replication_identifier_is_replaying() THEN
-       RETURN;
-    END IF;
-
-    IF current_setting('bdr.skip_ddl_replication')::boolean THEN
-        -- If we're doing a pg_restore from a remote BDR node's
-        -- state, we must not create truncate triggers etc because
-        -- they'll get copied over in the dump.
-        RETURN;
-    END IF;
-
-    FOR r IN SELECT * FROM pg_event_trigger_get_creation_commands()
-    LOOP
-        /* ignore temporary objects */
-        IF r.schema = 'pg_temp' THEN
-            CONTINUE;
-        END IF;
-
-        /* ignore objects that are part of an extension */
-        IF r.in_extension THEN
-            CONTINUE;
-        END IF;
-
-        INSERT INTO bdr.bdr_queued_commands(
-            lsn, queued_at,
-            command_tag, command, executed
-        )
-        VALUES (
-            pg_current_xlog_location(),
-            NOW(),
-            r.command_tag,
-            pg_catalog.pg_event_trigger_expand_command(r.command),
-            'false'
-        );
-
-        IF r.command_tag = 'CREATE TABLE' and r.object_type = 'table' THEN
-            EXECUTE 'CREATE TRIGGER truncate_trigger AFTER TRUNCATE ON ' ||
-                r.identity ||
-                ' FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()';
-        END IF;
-    END LOOP;
-END;
-$function$;
+LANGUAGE C
+AS 'MODULE_PATHNAME'
+;
 
 -- This type is tailored to use as input to get_object_address
 CREATE TYPE bdr.dropped_object AS (
@@ -478,9 +432,9 @@ AS 'MODULE_PATHNAME'
 --- this should always be last to avoid replicating our internal schema
 ---
 
-CREATE EVENT TRIGGER queue_commands
+CREATE EVENT TRIGGER bdr_queue_ddl_commands
 ON ddl_command_end
-EXECUTE PROCEDURE bdr.queue_commands();
+EXECUTE PROCEDURE bdr.bdr_queue_ddl_commands();
 
 SET bdr.permit_unsafe_ddl_commands = false;
 RESET search_path;
