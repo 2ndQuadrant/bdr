@@ -1109,14 +1109,11 @@ static void
 process_queued_ddl_command(HeapTuple cmdtup, bool tx_just_started)
 {
 	Relation	cmdsrel;
-#ifdef NOT_YET
-	HeapTuple	newtup;
-#endif
 	Datum		datum;
 	char	   *command_tag;
 	char	   *cmdstr;
 	bool		isnull;
-
+	char       *perpetrator;
 	List	   *commands;
 	ListCell   *command_i;
 	bool		isTopLevel;
@@ -1134,8 +1131,17 @@ process_queued_ddl_command(HeapTuple cmdtup, bool tx_just_started)
 
 	cmdsrel = heap_open(QueuedDDLCommandsRelid, NoLock);
 
-	/* fetch the command tag */
+	/* fetch the perpetrator user identifier */
 	datum = heap_getattr(cmdtup, 3,
+						 RelationGetDescr(cmdsrel),
+						 &isnull);
+	if (isnull)
+		elog(ERROR, "null command perpetrator in command tuple in \"%s\"",
+			 RelationGetRelationName(cmdsrel));
+	perpetrator = TextDatumGetCString(datum);
+
+	/* fetch the command tag */
+	datum = heap_getattr(cmdtup, 4,
 						 RelationGetDescr(cmdsrel),
 						 &isnull);
 	if (isnull)
@@ -1144,7 +1150,7 @@ process_queued_ddl_command(HeapTuple cmdtup, bool tx_just_started)
 	command_tag = TextDatumGetCString(datum);
 
 	/* finally fetch and execute the command */
-	datum = heap_getattr(cmdtup, 4,
+	datum = heap_getattr(cmdtup, 5,
 						 RelationGetDescr(cmdsrel),
 						 &isnull);
 	if (isnull)
@@ -1180,6 +1186,13 @@ process_queued_ddl_command(HeapTuple cmdtup, bool tx_just_started)
 
 		oldcontext = MemoryContextSwitchTo(MessageContext);
 
+		/*
+		 * Set the current role to the user that executed the command on the
+		 * origin server.  NB: there is no need to reset this afterwards, as
+		 * the value will be gone with our transaction.
+		 */
+		SetConfigOption("role", perpetrator, PGC_INTERNAL, PGC_S_OVERRIDE);
+
 		commandTag = CreateCommandTag(command);
 
 		querytree_list = pg_analyze_and_rewrite(
@@ -1210,12 +1223,6 @@ process_queued_ddl_command(HeapTuple cmdtup, bool tx_just_started)
 
 		MemoryContextSwitchTo(oldcontext);
 	}
-
-#ifdef NOT_YET
-	/* FIXME: update tuple to set set "executed" to true */
-	// newtup = heap_modify_tuple( .. );
-	newtup = cmdtup;
-#endif
 }
 
 static HeapTuple
