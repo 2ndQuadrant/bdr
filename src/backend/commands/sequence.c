@@ -435,20 +435,13 @@ AlterSequence(AlterSeqStmt *stmt)
 	/* Note that we do not change the currval() state */
 	elm->cached = elm->last;
 
-	/* Now okay to update the on-disk tuple */
-	START_CRIT_SECTION();
-
 	/* we copy back the tuple, contains new settings but is not yet reset via AM*/
 	Assert(newtuple->t_len == seqtuple.t_len);
 	memcpy(seqtuple.t_data, newtuple->t_data, newtuple->t_len);
 
-	MarkBufferDirty(buf);
-
 	/* call SeqAM, in a crit section since we already modified the tuple */
 	sequence_setval(seqrel, elm, buf, &seqtuple,
 					seq->last_value, seq->is_called);
-
-	END_CRIT_SECTION();
 
 	UnlockReleaseBuffer(buf);
 
