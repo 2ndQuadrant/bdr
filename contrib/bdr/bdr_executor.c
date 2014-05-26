@@ -386,7 +386,7 @@ bdr_queue_ddl_commands(PG_FUNCTION_ARGS)
 
 		newtup = heap_form_tuple(RelationGetDescr(queuedcmds), values, nulls);
 		simple_heap_insert(queuedcmds, newtup);
-		ExecStoreTuple(newtup, slot, InvalidBuffer, true);
+		ExecStoreTuple(newtup, slot, InvalidBuffer, false);
 		UserTableUpdateOpenIndexes(estate, slot);
 
 		/*
