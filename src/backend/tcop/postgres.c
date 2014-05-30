@@ -2806,6 +2806,10 @@ RecoveryConflictInterrupt(ProcSignalReason reason)
 		}
 	}
 
+	/* If we're still here, waken anything waiting on the process latch */
+	if (MyProc)
+		SetLatch(&MyProc->procLatch);
+
 	errno = save_errno;
 }
 
