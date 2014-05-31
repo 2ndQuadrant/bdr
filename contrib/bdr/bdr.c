@@ -1648,19 +1648,13 @@ _PG_init(void)
 	database_initcons = palloc0(sizeof(char *) * list_length(connames));
 
 	/*
-	 * Read all connections and create their BdrApplyWorker structs, validating
-	 * parameters and sanity checking as we go. The structs are palloc'd, but
-	 * will be copied into shared memory and free'd during shm init.
+	 * Read all connections, create/validate parameters for them and do sanity
+	 * checks as we go.
 	 */
 	connection_config_idx = 0;
 	foreach(c, connames)
 	{
 		char		   *name;
-		BdrApplyWorker *apply_worker;
-
-		apply_worker = (BdrApplyWorker *) palloc0(sizeof(BdrApplyWorker));
-		apply_worker->forward_changesets = false;
-		apply_worker->replay_stop_lsn = InvalidXLogRecPtr;
 		name = (char *) lfirst(c);
 
 		if (!bdr_create_con_gucs(name, used_databases, &num_used_databases,
