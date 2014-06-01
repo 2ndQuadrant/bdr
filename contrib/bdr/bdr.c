@@ -1266,6 +1266,8 @@ bdr_worker_shmem_create_workers(void)
 {
 	uint32 off;
 
+	n_configured_bdr_nodes = 0;
+
 	/*
 	 * Create a BdrPerdbWorker for each distinct database found during
 	 * _PG_init. The bgworker for each has already been registered and assigned
