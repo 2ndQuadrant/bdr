@@ -157,7 +157,7 @@ typedef struct ReorderBufferTXN
 	XLogRecPtr	final_lsn;
 
 	/*
-	 * LSN pointing to the last byte of the commit record.
+	 * LSN pointing to the end of the commit record + 1.
 	 */
 	XLogRecPtr	end_lsn;
 

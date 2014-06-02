@@ -85,7 +85,7 @@ LogicalDecodingProcessRecord(LogicalDecodingContext *ctx, XLogRecord *record)
 	XLogRecordBuffer buf;
 
 	buf.origptr = ctx->reader->ReadRecPtr;
-	buf.endptr = ctx->reader->EndRecPtr - 1; /* point to last byte of record */
+	buf.endptr = ctx->reader->EndRecPtr;
 	buf.record = *record;
 	buf.record_data = XLogRecGetData(record);
 
