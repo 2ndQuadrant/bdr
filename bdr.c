@@ -588,7 +588,7 @@ bdr_apply_main(Datum main_arg)
 	 */
 	start_from = RemoteCommitFromCachedReplicationIdentifier();
 
-	elog(INFO, "starting up replication at %u from %X/%X",
+	elog(INFO, "starting up replication from %u at %X/%X",
 		 replication_identifier,
 		 (uint32) (start_from >> 32), (uint32) start_from);
 
