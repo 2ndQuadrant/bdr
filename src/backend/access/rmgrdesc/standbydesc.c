@@ -60,6 +60,14 @@ standby_desc(StringInfo buf, uint8 xl_info, char *rec)
 		appendStringInfoString(buf, "running xacts:");
 		standby_desc_running_xacts(buf, xlrec);
 	}
+	else if (info == XLOG_STANDBY_MESSAGE)
+	{
+		xl_standby_message *xlrec = (xl_standby_message *) rec;
+
+		appendStringInfo(buf, "%s message with %zu bytes",
+						 xlrec->transactional ? "transactional" : "nontransactional",
+						 xlrec->size);
+	}
 	else
 		appendStringInfoString(buf, "UNKNOWN");
 }
