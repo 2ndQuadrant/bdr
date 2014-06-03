@@ -1069,7 +1069,10 @@ LogStandbyMessage(const char *message, size_t size, bool transactional)
 	 * Force xid to be allocated if we're sending a transactional message.
 	 */
 	if (transactional)
+	{
+		Assert(IsTransactionState());
 		GetCurrentTransactionId();
+	}
 
 	xlrec.size = size;
 	xlrec.transactional = transactional;

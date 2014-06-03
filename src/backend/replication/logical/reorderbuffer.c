@@ -608,12 +608,11 @@ ReorderBufferQueueMessage(ReorderBuffer *rb, TransactionId xid, XLogRecPtr lsn,
 {
 	ReorderBufferTXN *txn = NULL;
 
-	if (xid != InvalidTransactionId)
-		txn = ReorderBufferTXNByXid(rb, xid, true, NULL, lsn, true);
-
 	if (transactional)
 	{
 		ReorderBufferChange *change;
+
+		txn = ReorderBufferTXNByXid(rb, xid, true, NULL, lsn, true);
 
 		Assert(xid != InvalidTransactionId);
 		Assert(txn != NULL);
