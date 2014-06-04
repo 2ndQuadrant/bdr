@@ -246,7 +246,8 @@ bdr_connect(char *conninfo_repl,
 		ereport(FATAL,
 				(errcode(ERRCODE_CONNECTION_FAILURE),
 				 errmsg("could not connect to the primary server: %s",
-						PQerrorMessage(streamConn))));
+						PQerrorMessage(streamConn)),
+				 errdetail("Connection string is '%s'", conninfo_repl)));
 	}
 
 	elog(DEBUG3, "Sending replication command: IDENTIFY_SYSTEM");
