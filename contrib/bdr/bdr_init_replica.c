@@ -449,7 +449,7 @@ bdr_drop_slot_and_replication_identifier(BdrConnectionConfig *cfg)
 		 cfg->dbname, cfg->name);
 
 	appendStringInfo(&query,
-					 "%s replication=database fallback_application_name='"BDR_LOCALID_FORMAT"': %s: drop slot'",
+					 "%s replication=database fallback_application_name='"BDR_LOCALID_FORMAT": %s: drop slot'",
 					  cfg->dsn, BDR_LOCALID_FORMAT_ARGS, cfg->name);
 
 	/* Establish BDR conn and IDENTIFY_SYSTEM */
