@@ -465,13 +465,18 @@ should_forward_changeset(LogicalDecodingContext *ctx, ReorderBufferTXN *txn)
 		   || ((BdrOutputData*)ctx->output_plugin_private)->forward_changesets;
 }
 
-/* BEGIN callback */
+/*
+ * BEGIN callback
+ *
+ * If you change this you must also change the corresponding code in
+ * bdr_apply.c . Make sure that any flags are in sync.
+ */
 void
 pg_decode_begin_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *txn)
 {
-#ifdef NOT_YET
 	BdrOutputData *data = ctx->output_plugin_private;
-#endif
+	int flags = 0;
+
 	AssertVariableIsOfType(&pg_decode_begin_txn, LogicalDecodeBeginCB);
 
 	if (!should_forward_changeset(ctx, txn))
@@ -479,57 +484,24 @@ pg_decode_begin_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *txn)
 
 	OutputPluginPrepareWrite(ctx, true);
 	pq_sendbyte(ctx->out, 'B');		/* BEGIN */
-	pq_sendint64(ctx->out, txn->final_lsn);
-	pq_sendint64(ctx->out, txn->commit_time);
-	pq_sendint(ctx->out, txn->xid, 4);
-	OutputPluginWrite(ctx, true);
-	return;
-}
-
-/*
- * COMMIT callback
- *
- * Send the LSN at the time of the commit, the commit time, and the end LSN.
- *
- * The presence of additional records is controlled by a flag field, with
- * records that're present appearing strictly in the order they're listed
- * here. There is no sub-record header or other structure beyond the flags
- * field.
- *
- * If you change this, you'll need to change process_remote_commit(...)
- * too.
- */
-void
-pg_decode_commit_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
-					 XLogRecPtr commit_lsn)
-{
-	BdrOutputData *data = ctx->output_plugin_private;
-
-	int flags = 0;
-
-	if (!should_forward_changeset(ctx, txn))
-		return;
-
-	OutputPluginPrepareWrite(ctx, true);
-	pq_sendbyte(ctx->out, 'C');		/* sending COMMIT */
 
 	/*
 	 * Are we forwarding changesets from other nodes? If so, we must include
-	 * the origin node ID and LSN in commit records.
+	 * the origin node ID and LSN in BEGIN records.
 	 */
 	if (data->forward_changesets)
-		flags |= BDR_OUTPUT_COMMIT_HAS_ORIGIN;
+		flags |= BDR_OUTPUT_TRANSACTION_HAS_ORIGIN;
 
 	/* send the flags field its self */
 	pq_sendint(ctx->out, flags, 4);
 
-	/* Send fixed fields */
-	pq_sendint64(ctx->out, commit_lsn);
-	pq_sendint64(ctx->out, txn->end_lsn);
+	/* fixed fields */
+	pq_sendint64(ctx->out, txn->final_lsn);
 	pq_sendint64(ctx->out, txn->commit_time);
+	pq_sendint(ctx->out, txn->xid, 4);
 
 	/* and optional data selected above */
-	if (flags & BDR_OUTPUT_COMMIT_HAS_ORIGIN)
+	if (flags & BDR_OUTPUT_TRANSACTION_HAS_ORIGIN)
 	{
 		/*
 		 * The RepNodeId in txn->origin_id is our local identifier for the
@@ -549,6 +521,47 @@ pg_decode_commit_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 		pq_sendint(ctx->out, origin_dboid, 4);
 		pq_sendint64(ctx->out, txn->origin_lsn);
 	}
+
+	OutputPluginWrite(ctx, true);
+	return;
+}
+
+/*
+ * COMMIT callback
+ *
+ * Send the LSN at the time of the commit, the commit time, and the end LSN.
+ *
+ * The presence of additional records is controlled by a flag field, with
+ * records that're present appearing strictly in the order they're listed
+ * here. There is no sub-record header or other structure beyond the flags
+ * field.
+ *
+ * If you change this, you'll need to change process_remote_commit(...)
+ * too. Make sure to keep any flags in sync.
+ */
+void
+pg_decode_commit_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
+					 XLogRecPtr commit_lsn)
+{
+#ifdef NOT_YET
+	BdrOutputData *data = ctx->output_plugin_private;
+#endif
+
+	int flags = 0;
+
+	if (!should_forward_changeset(ctx, txn))
+		return;
+
+	OutputPluginPrepareWrite(ctx, true);
+	pq_sendbyte(ctx->out, 'C');		/* sending COMMIT */
+
+	/* send the flags field its self */
+	pq_sendint(ctx->out, flags, 4);
+
+	/* Send fixed fields */
+	pq_sendint64(ctx->out, commit_lsn);
+	pq_sendint64(ctx->out, txn->end_lsn);
+	pq_sendint64(ctx->out, txn->commit_time);
 
 	OutputPluginWrite(ctx, true);
 }

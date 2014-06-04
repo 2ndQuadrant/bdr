@@ -51,13 +51,13 @@ struct ScanKeyData; /* from access/skey.h for ScanKey */
 enum LockTupleMode; /* from access/heapam.h */
 
 /*
- * Flags to indicate which fields are present in a commit record sent by the
+ * Flags to indicate which fields are present in a begin record sent by the
  * output plugin.
  */
-typedef enum BdrOutputCommitFlags
+typedef enum BdrOutputBeginFlags
 {
-	BDR_OUTPUT_COMMIT_HAS_ORIGIN = 1
-} BdrOutputCommitFlags;
+	BDR_OUTPUT_TRANSACTION_HAS_ORIGIN = 1
+} BdrOutputBeginFlags;
 
 /*
  * BDR conflict detection: type of conflict that was identified.
