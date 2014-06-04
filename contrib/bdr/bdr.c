@@ -187,6 +187,14 @@ bdr_sigterm(SIGNAL_ARGS)
 	int			save_errno = errno;
 
 	exit_worker = true;
+	/*
+	 * For now allow to interrupt all queries. It'd be better if we were more
+	 * granular, only allowing to interrupt some things, but that's a bit
+	 * harder than we have time for right now.
+	 */
+	InterruptPending = true;
+	ProcDiePending = true;
+
 	if (MyProc)
 		SetLatch(&MyProc->procLatch);
 
