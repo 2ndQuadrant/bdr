@@ -163,7 +163,7 @@ bdr_send_feedback(PGconn *conn, XLogRecPtr blockpos, int64 now, bool replyReques
 	replybuf[len] = replyRequested ? 1 : 0;		/* replyRequested */
 	len += 1;
 
-	elog(DEBUG1, "sending feedback (force %d, reply requested %d) to %X/%X",
+	elog(DEBUG2, "sending feedback (force %d, reply requested %d) to %X/%X",
 		 force, replyRequested,
 		 (uint32) (blockpos >> 32), (uint32) blockpos);
 
