@@ -338,6 +338,8 @@ process_remote_commit(StringInfo s)
 	bdr_count_commit();
 
 	replication_origin_xid = InvalidTransactionId;
+	replication_origin_lsn = InvalidXLogRecPtr;
+	replication_origin_timestamp = 0;
 
 	/*
 	 * Stop replay if we're doing limited replay and we've replayed up to the
