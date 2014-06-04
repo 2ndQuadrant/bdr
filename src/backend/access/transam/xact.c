@@ -1140,7 +1140,8 @@ RecordTransactionCommit(void)
 				lastrdata = 3;
 			}
 			/* dump transaction origin information */
-			if (replication_origin_id != InvalidRepNodeId)
+			if (replication_origin_id != InvalidRepNodeId &&
+				replication_origin_lsn != InvalidXLogRecPtr)
 			{
 				Assert(replication_origin_lsn != InvalidXLogRecPtr);
 				xlrec.xinfo |= XACT_CONTAINS_ORIGIN;
