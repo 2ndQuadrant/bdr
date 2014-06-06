@@ -68,7 +68,9 @@ static MultiXactId set_mxid = 0;
 static MultiXactOffset set_mxoff = (MultiXactOffset) -1;
 static uint32 minXlogTli = 0;
 static XLogSegNo minXlogSegNo = 0;
+static uint64 set_sysid = 0;
 
+static uint64 GenerateSystemIdentifier(void);
 static bool ReadControlFile(void);
 static void GuessControlValues(void);
 static void PrintControlValues(bool guessed);
@@ -79,7 +81,6 @@ static void KillExistingXLOG(void);
 static void KillExistingArchiveStatus(void);
 static void WriteEmptyXLOG(void);
 static void usage(void);
-
 
 int
 main(int argc, char *argv[])
@@ -112,7 +113,7 @@ main(int argc, char *argv[])
 	}
 
 
-	while ((c = getopt(argc, argv, "fl:m:no:O:x:e:")) != -1)
+	while ((c = getopt(argc, argv, "fl:m:no:O:x:e:s::")) != -1)
 	{
 		switch (c)
 		{
@@ -226,6 +227,22 @@ main(int argc, char *argv[])
 					exit(1);
 				}
 				XLogFromFileName(optarg, &minXlogTli, &minXlogSegNo);
+				break;
+
+			case 's':
+				if (optarg)
+				{
+					if (sscanf(optarg, UINT64_FORMAT, &set_sysid) != 1)
+					{
+						fprintf(stderr, _("%s: invalid argument for option -s\n"), progname);
+						fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
+						exit(1);
+					}
+				}
+				else
+				{
+					set_sysid = GenerateSystemIdentifier();
+				}
 				break;
 
 			default:
@@ -355,6 +372,9 @@ main(int argc, char *argv[])
 	if (minXlogSegNo > newXlogSegNo)
 		newXlogSegNo = minXlogSegNo;
 
+	if (set_sysid != 0)
+		ControlFile.system_identifier = set_sysid;
+
 	/*
 	 * If we had to guess anything, and -f was not given, just print the
 	 * guessed values and exit.  Also print if -n is given.
@@ -392,6 +412,26 @@ main(int argc, char *argv[])
 
 	printf(_("Transaction log reset\n"));
 	return 0;
+}
+
+
+/*
+ * Create a new unique installation identifier.
+ *
+ * See notes in xlog.c about the algorithm.
+ */
+static uint64
+GenerateSystemIdentifier(void)
+{
+	uint64			sysidentifier;
+	struct timeval	tv;
+
+	gettimeofday(&tv, NULL);
+	sysidentifier = ((uint64) tv.tv_sec) << 32;
+	sysidentifier |= ((uint64) tv.tv_usec) << 12;
+	sysidentifier |= getpid() & 0xFFF;
+
+	return sysidentifier;
 }
 
 
@@ -477,7 +517,6 @@ static void
 GuessControlValues(void)
 {
 	uint64		sysidentifier;
-	struct timeval tv;
 
 	/*
 	 * Set up a completely default set of pg_control values.
@@ -490,12 +529,9 @@ GuessControlValues(void)
 
 	/*
 	 * Create a new unique installation identifier, since we can no longer use
-	 * any old XLOG records.  See notes in xlog.c about the algorithm.
+	 * any old XLOG records.
 	 */
-	gettimeofday(&tv, NULL);
-	sysidentifier = ((uint64) tv.tv_sec) << 32;
-	sysidentifier |= ((uint64) tv.tv_usec) << 12;
-	sysidentifier |= getpid() & 0xFFF;
+	sysidentifier = GenerateSystemIdentifier();
 
 	ControlFile.system_identifier = sysidentifier;
 
@@ -1089,6 +1125,7 @@ usage(void)
 	printf(_("  -o OID           set next OID\n"));
 	printf(_("  -O OFFSET        set next multitransaction offset\n"));
 	printf(_("  -V, --version    output version information, then exit\n"));
+	printf(_("  -s [SYSID]       set system identifier (or generate one)\n"));
 	printf(_("  -x XID           set next transaction ID\n"));
 	printf(_("  -?, --help       show this help, then exit\n"));
 	printf(_("\nReport bugs to <pgsql-bugs@postgresql.org>.\n"));
