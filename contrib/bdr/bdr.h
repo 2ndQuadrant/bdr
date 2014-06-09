@@ -16,9 +16,9 @@
 #include "utils/resowner.h"
 #include "storage/lock.h"
 
+#include "bdr_internal.h"
+
 #define BDR_VERSION_NUM 500
-#define BDR_SLOT_NAME_FORMAT "bdr_%u_%s_%u_%u__%s"
-#define BDR_NODE_ID_FORMAT "bdr_"UINT64_FORMAT"_%u_%u_%u_%s"
 
 /* Right now replication_name isn't used; make it easily found for later */
 #define EMPTY_REPLICATION_NAME ""
@@ -191,23 +191,6 @@ typedef struct BdrWorker
 
 } BdrWorker;
 
-/* GUC storage for a configured BDR connection. */
-typedef struct BdrConnectionConfig
-{
-	char *dsn;
-	int   apply_delay;
-	bool  init_replica;
-	char *replica_local_dsn;
-	/*
-	 * These aren't technically GUCs, but are per-connection config
-	 * information obtained from the GUCs.
-	 */
-	char *name;
-	char *dbname;
-	/* Connection config might be broken (blank dsn, etc) */
-	bool is_valid;
-} BdrConnectionConfig;
-
 /*
  * Params for every connection in bdr.connections.
  *
@@ -219,6 +202,7 @@ extern BdrConnectionConfig	**bdr_connection_configs;
 extern int	bdr_default_apply_delay;
 extern int bdr_max_workers;
 extern char *bdr_temp_dump_directory;
+extern bool bdr_init_from_basedump;
 
 /*
  * Header for the shared memory segment ref'd by the BdrWorkerCtl ptr,

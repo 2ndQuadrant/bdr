@@ -54,6 +54,7 @@
 #include "utils/syscache.h"
 
 char *bdr_temp_dump_directory = NULL;
+bool bdr_init_from_basedump = false;
 
 static void bdr_exec_init_replica(BdrConnectionConfig *cfg, char *snapshot);
 
@@ -822,61 +823,69 @@ bdr_init_replica(Name dbname)
 
 	/* Get the bdr.bdr_nodes status field for our node id from the remote */
 	status = bdr_get_remote_status(nonrepl_init_conn);
-	switch (status)
+
+	if (bdr_init_from_basedump)
 	{
-		case '\0':
-			elog(DEBUG2, "bdr %s: initializing from clean state",
-				 NameStr(*dbname));
-			break;
+		status = bdr_set_remote_status(nonrepl_init_conn, 'c', status);
+	}
+	else
+	{
+		switch (status)
+		{
+			case '\0':
+				elog(DEBUG2, "bdr %s: initializing from clean state",
+					 NameStr(*dbname));
+				break;
 
-		case 'r':
-			/*
-			 * Init has been completed, but we didn't check our local
-			 * bdr.bdr_nodes, or the final update hasn't propagated yet.
-			 *
-			 * All we need to do is catch up, we already replayed enough to be
-			 * consistent and start up in normal mode last time around
-			 */
-			elog(DEBUG2, "bdr %s: init already completed, nothing to do",
-				 NameStr(*dbname));
-			return;
+			case 'r':
+				/*
+				 * Init has been completed, but we didn't check our local
+				 * bdr.bdr_nodes, or the final update hasn't propagated yet.
+				 *
+				 * All we need to do is catch up, we already replayed enough to be
+				 * consistent and start up in normal mode last time around
+				 */
+				elog(DEBUG2, "bdr %s: init already completed, nothing to do",
+					 NameStr(*dbname));
+				return;
 
-		case 'c':
-			/*
-			 * We were in catchup mode when we died. We need to resume catchup
-			 * mode up to the expected LSN before switching over.
-			 *
-			 * To do that all we need to do is fall through without doing any
-			 * slot re-creation, dump/apply, etc, and pick up when we do
-			 * catchup.
-			 *
-			 * We won't know what the original catchup target point is, but we
-			 * can just catch up to whatever xlog position the server is
-			 * currently at.
-			 */
-			elog(DEBUG2, "bdr %s: dump applied, need to continue catchup",
-				 NameStr(*dbname));
-			break;
+			case 'c':
+				/*
+				 * We were in catchup mode when we died. We need to resume catchup
+				 * mode up to the expected LSN before switching over.
+				 *
+				 * To do that all we need to do is fall through without doing any
+				 * slot re-creation, dump/apply, etc, and pick up when we do
+				 * catchup.
+				 *
+				 * We won't know what the original catchup target point is, but we
+				 * can just catch up to whatever xlog position the server is
+				 * currently at.
+				 */
+				elog(DEBUG2, "bdr %s: dump applied, need to continue catchup",
+					 NameStr(*dbname));
+				break;
 
-		case 'i':
-			/*
-			 * A previous init attempt seems to have failed. Clean up, then
-			 * fall through to start setup again.
-			 *
-			 * We can't just re-use the slot and replication identifier that
-			 * were created last time (if they were), because we have no way
-			 * of getting the slot's exported snapshot after
-			 * CREATE_REPLICATION_SLOT.
-			 */
-			elog(DEBUG2, "bdr %s: previous failed initalization detected, cleaning up",
-				 NameStr(*dbname));
-			bdr_drop_slot_and_replication_identifier(init_replica_config);
-			status = bdr_set_remote_status(nonrepl_init_conn, '\0', status);
-			break;
+			case 'i':
+				/*
+				 * A previous init attempt seems to have failed. Clean up, then
+				 * fall through to start setup again.
+				 *
+				 * We can't just re-use the slot and replication identifier that
+				 * were created last time (if they were), because we have no way
+				 * of getting the slot's exported snapshot after
+				 * CREATE_REPLICATION_SLOT.
+				 */
+				elog(DEBUG2, "bdr %s: previous failed initalization detected, cleaning up",
+					 NameStr(*dbname));
+				bdr_drop_slot_and_replication_identifier(init_replica_config);
+				status = bdr_set_remote_status(nonrepl_init_conn, '\0', status);
+				break;
 
-		default:
-			elog(ERROR, "unreachable"); /* Unhandled case */
-			break;
+			default:
+				elog(ERROR, "unreachable"); /* Unhandled case */
+				break;
+		}
 	}
 
 	if (status == '\0')
