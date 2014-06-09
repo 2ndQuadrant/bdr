@@ -913,7 +913,7 @@ bdr_process_replay_confirm(uint64 sysid, TimeLineID tli,
 		TimeLineID		replay_tli;
 		Oid				replay_datid;
 		StringInfoData	s;
-		bool			found;
+		bool			found = false;
 
 		initStringInfo(&s);
 
