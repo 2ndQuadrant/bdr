@@ -43,5 +43,6 @@ extern Datum pg_replication_identifier_reset_replaying_from(PG_FUNCTION_ARGS);
 extern Datum pg_replication_identifier_is_replaying(PG_FUNCTION_ARGS);
 extern Datum pg_replication_identifier_setup_tx_origin(PG_FUNCTION_ARGS);
 extern Datum pg_get_replication_identifier_progress(PG_FUNCTION_ARGS);
+extern Datum pg_replication_identifier_advance(PG_FUNCTION_ARGS);
 
 #endif

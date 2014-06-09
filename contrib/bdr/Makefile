@@ -10,6 +10,7 @@ include $(top_srcdir)/contrib/contrib-global.mk
 all:
 	$(MAKE) -f $(top_srcdir)/contrib/bdr/output.mk $(MAKECMDGOALS)
 	$(MAKE) -f $(top_srcdir)/contrib/bdr/worker.mk $(MAKECMDGOALS)
+	$(MAKE) -f $(top_srcdir)/contrib/bdr/bdr_init_copy.mk $(MAKECMDGOALS)
 
 clean: all
 

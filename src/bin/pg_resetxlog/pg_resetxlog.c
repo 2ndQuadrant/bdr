@@ -69,6 +69,7 @@ static MultiXactOffset set_mxoff = (MultiXactOffset) -1;
 static uint32 minXlogTli = 0;
 static XLogSegNo minXlogSegNo = 0;
 static uint64 set_sysid = 0;
+static XLogRecPtr oldCheckPoint = 0;
 
 static uint64 GenerateSystemIdentifier(void);
 static bool ReadControlFile(void);
@@ -80,6 +81,7 @@ static void FindEndOfXLOG(void);
 static void KillExistingXLOG(void);
 static void KillExistingArchiveStatus(void);
 static void WriteEmptyXLOG(void);
+static void UpdateLogicalCheckpoints(void);
 static void usage(void);
 
 int
@@ -375,6 +377,9 @@ main(int argc, char *argv[])
 	if (set_sysid != 0)
 		ControlFile.system_identifier = set_sysid;
 
+	/* Keep the old checkpoint for later use */
+	oldCheckPoint = ControlFile.checkPoint;
+
 	/*
 	 * If we had to guess anything, and -f was not given, just print the
 	 * guessed values and exit.  Also print if -n is given.
@@ -409,6 +414,7 @@ main(int argc, char *argv[])
 	KillExistingXLOG();
 	KillExistingArchiveStatus();
 	WriteEmptyXLOG();
+	UpdateLogicalCheckpoints();
 
 	printf(_("Transaction log reset\n"));
 	return 0;
@@ -1110,6 +1116,64 @@ WriteEmptyXLOG(void)
 	close(fd);
 }
 
+/*
+ * Copy the last logical checkpoint to new name
+ */
+static void
+UpdateLogicalCheckpoints(void)
+{
+	int	 sourcefd;
+	int	 targetfd;
+	char sourcepath[MAXPGPATH];
+	char targetpath[MAXPGPATH];
+	char buffer[8192];
+	size_t len;
+
+	/* Checkpoint didn't change (it was guessed?), return */
+	if (oldCheckPoint == ControlFile.checkPoint)
+		return;
+
+	sprintf(sourcepath, "pg_logical/checkpoints/%X-%X.ckpt",
+		(uint32)(oldCheckPoint >> 32), (uint32)oldCheckPoint);
+
+	sprintf(targetpath, "pg_logical/checkpoints/%X-%X.ckpt",
+		(uint32)(ControlFile.checkPoint >> 32), (uint32)ControlFile.checkPoint);
+
+	/* If there is no checkpoint file, we just silently return */
+	if ((sourcefd = open(sourcepath, O_RDONLY | PG_BINARY, 0)) < 0)
+		return;
+
+	if ((targetfd = open(targetpath, O_RDWR | O_CREAT | O_EXCL | PG_BINARY,
+								S_IRUSR | S_IWUSR)) < 0)
+	{
+		fprintf(stderr, _("%s: could not open file \"%s\": %s\n"),
+				progname, targetpath, strerror(errno));
+		exit(1);
+	}
+
+	while ((len = read(sourcefd, buffer, sizeof(buffer))) > 0)
+	{
+		errno == 0;
+		if (write(targetfd, buffer, len) != len)
+		{
+			/* if write didn't set errno, assume problem is no disk space */
+			if (errno == 0)
+				errno = ENOSPC;
+			fprintf(stderr, _("%s: could not write file \"%s\": %s\n"),
+					progname, targetpath, strerror(errno));
+			exit(1);
+		}
+	}
+
+	close(sourcefd);
+
+	if (fsync(targetfd) != 0)
+	{
+		fprintf(stderr, _("%s: fsync error: %s\n"), progname, strerror(errno));
+		exit(1);
+	}
+	close(targetfd);
+}
 
 static void
 usage(void)
