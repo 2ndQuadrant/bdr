@@ -450,6 +450,52 @@ pg_get_replication_identifier_progress(PG_FUNCTION_ARGS)
 	return (Datum) 0;
 }
 
+Datum
+pg_replication_identifier_advance(PG_FUNCTION_ARGS)
+{
+	text	   *name = PG_GETARG_TEXT_P(0);
+	text	   *remote_lsn = PG_GETARG_TEXT_P(1);
+	text	   *local_lsn = PG_GETARG_TEXT_P(2);
+	char	   *remote_lsn_str;
+	char	   *local_lsn_str;
+	XLogRecPtr remote_commit;
+	XLogRecPtr local_commit;
+	RepNodeId  node;
+	uint32		rhi,
+				lhi,
+				rlo,
+				llo;
+
+	CheckReplicationIdentifierPrerequisites(true);
+
+	node = GetReplicationIdentifier(text_to_cstring(name), false);
+
+	remote_lsn_str = text_to_cstring(remote_lsn);
+	local_lsn_str = text_to_cstring(local_lsn);
+
+	if (sscanf(remote_lsn_str, "%X/%X", &rhi, &rlo) != 2)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("could not parse remote_lsn \"%s\"",
+						remote_lsn_str)));
+
+	if (sscanf(local_lsn_str, "%X/%X", &lhi, &llo) != 2)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("could not parse local_lsn \"%s\"",
+						local_lsn_str)));
+
+	remote_commit = ((uint64) (rhi)) << 32 | (uint64) rlo;
+	local_commit = ((uint64) (lhi)) << 32 | (uint64) llo;
+
+	AdvanceReplicationIdentifier(node, remote_commit, local_commit);
+
+	pfree(remote_lsn_str);
+	pfree(local_lsn_str);
+
+	PG_RETURN_VOID();
+}
+
 Size
 ReplicationIdentifierShmemSize(void)
 {

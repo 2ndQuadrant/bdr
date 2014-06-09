@@ -5085,6 +5085,9 @@ DESCR("replication identifier progress");
 DATA(insert OID = 6009 (  pg_replication_identifier_is_replaying PGNSP PGUID 12 1 0 0 0 f f f f t f v 0 0 16 "" _null_ _null_ _null_ _null_ pg_replication_identifier_is_replaying _null_ _null_ _null_ ));
 DESCR("is a replication identifier setup");
 
+DATA(insert OID = 6010 (  pg_replication_identifier_advance PGNSP PGUID 12 1 0 0 0 f f f f t f v 3 0 2278 "25 25 25" _null_ _null_ _null_ _null_ pg_replication_identifier_advance _null_ _null_ _null_ ));
+DESCR("advance replication itentifier to specific location");
+
 
 /*
  * Symbolic values for provolatile column: these indicate whether the result
