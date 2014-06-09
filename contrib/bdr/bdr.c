@@ -18,6 +18,7 @@
 #include "bdr_locks.h"
 
 #include "libpq-fe.h"
+#include "funcapi.h"
 #include "miscadmin.h"
 #include "pgstat.h"
 #include "port.h"
@@ -39,6 +40,8 @@
 #include "libpq/pqformat.h"
 
 #include "mb/pg_wchar.h"
+
+#include "nodes/execnodes.h"
 
 #include "postmaster/bgworker.h"
 
@@ -112,9 +115,12 @@ static void bdr_worker_shmem_create_workers(void);
 
 Datum bdr_apply_pause(PG_FUNCTION_ARGS);
 Datum bdr_apply_resume(PG_FUNCTION_ARGS);
+Datum bdr_get_connection_config(PG_FUNCTION_ARGS);
 
 PG_FUNCTION_INFO_V1(bdr_apply_pause);
 PG_FUNCTION_INFO_V1(bdr_apply_resume);
+PG_FUNCTION_INFO_V1(bdr_get_connection_config);
+
 
 /*
  * Converts an int64 to network byte order.
@@ -600,6 +606,7 @@ bdr_apply_main(Datum main_arg)
 	 * Check whether we already replayed something so we don't replay it
 	 * multiple times.
 	 */
+
 	start_from = RemoteCommitFromCachedReplicationIdentifier();
 
 	elog(INFO, "starting up replication from %u at %X/%X",
@@ -1606,6 +1613,15 @@ _PG_init(void)
 							 0,
 							 NULL, NULL, NULL);
 
+	DefineCustomBoolVariable("bdr.init_from_basedump",
+							 "Internal. Set during local initialization from basebackup only",
+							 NULL,
+							 &bdr_init_from_basedump,
+							 false,
+							 PGC_BACKEND,
+							 0,
+							 NULL, NULL, NULL);
+
 	bdr_conflict_logging_create_gucs();
 
 	/* if nothing is configured, we're done */
@@ -1638,7 +1654,7 @@ _PG_init(void)
 	 */
 	if (bdr_max_workers == -1)
 	{
-		bdr_max_workers = list_length(connames) * 2;
+		bdr_max_workers = list_length(connames) * 3;
 		elog(DEBUG1, "bdr: bdr_max_workers unset, configuring for %d workers",
 				bdr_max_workers);
 	}
@@ -1885,4 +1901,60 @@ bdr_apply_resume(PG_FUNCTION_ARGS)
 {
 	BdrWorkerCtl->pause_apply = false;
 	PG_RETURN_VOID();
+}
+
+Datum
+bdr_get_connection_config(PG_FUNCTION_ARGS)
+{
+	ReturnSetInfo	*rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+	TupleDesc		 tupdesc;
+	Tuplestorestate	*tupstore;
+	MemoryContext	 per_query_ctx;
+	MemoryContext	 oldcontext;
+	uint32			 off;
+
+	if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo))
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("set-valued function called in context that cannot accept a set")));
+	if (!(rsinfo->allowedModes & SFRM_Materialize))
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("materialize mode required, but it is not allowed in this context")));
+	if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
+		elog(ERROR, "return type must be a row type");
+
+	if (tupdesc->natts != 2)
+		elog(ERROR, "wrong function definition");
+
+	per_query_ctx = rsinfo->econtext->ecxt_per_query_memory;
+	oldcontext = MemoryContextSwitchTo(per_query_ctx);
+
+	tupstore = tuplestore_begin_heap(true, false, work_mem);
+	rsinfo->returnMode = SFRM_Materialize;
+	rsinfo->setResult = tupstore;
+	rsinfo->setDesc = tupdesc;
+
+	MemoryContextSwitchTo(oldcontext);
+
+	for (off = 0; off < bdr_max_workers; off++)
+	{
+		Datum		values[2];
+		bool		nulls[2];
+		BdrConnectionConfig *cfg = bdr_connection_configs[off];
+
+		if (cfg == NULL || !cfg->is_valid)
+			continue;
+
+		memset(values, 0, sizeof(values));
+		memset(nulls, 0, sizeof(nulls));
+
+		values[0] = PointerGetDatum(cfg->dbname);
+		values[1] = PointerGetDatum(cfg->dsn);
+
+		tuplestore_putvalues(tupstore, tupdesc, values, nulls);
+	}
+	tuplestore_donestoring(tupstore);
+
+	return (Datum) 0;
 }
