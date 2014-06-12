@@ -1188,6 +1188,8 @@ extern Datum unique_key_recheck(PG_FUNCTION_ARGS);
 
 /* commands/event_trigger.c */
 extern Datum pg_event_trigger_dropped_objects(PG_FUNCTION_ARGS);
+extern Datum pg_event_trigger_get_creation_commands(PG_FUNCTION_ARGS);
+extern Datum pg_event_trigger_expand_command(PG_FUNCTION_ARGS);
 
 /* commands/extension.c */
 extern Datum pg_available_extensions(PG_FUNCTION_ARGS);
