@@ -288,7 +288,8 @@ format_type_internal(Oid type_oid, int32 typemod,
 
 		case VARCHAROID:
 			if (with_typemod)
-				buf = printTypmod("character varying", typemod, typeform->typmodout);
+				buf = printTypmod("character varying", typemod,
+								  typeform->typmodout);
 			else
 				buf = pstrdup("character varying");
 			break;
@@ -447,7 +448,6 @@ printTypmod(const char *typname, int32 typmod, Oid typmodout)
 
 	return res;
 }
-
 
 /*
  * type_maximum_size --- determine maximum width of a variable-width column
