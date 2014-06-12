@@ -1676,6 +1676,48 @@ EventTriggerComplexCmdEnd(void)
 	currentEventTriggerState->curcmd = NULL;
 }
 
+/*
+ * EventTriggerStashGrant
+ * 		Save data about a GRANT/REVOKE command being executed
+ *
+ * This function creates a copy of the InternalGrant, as the original might
+ * not have the right lifetime.
+ */
+void
+EventTriggerStashGrant(InternalGrant *istmt)
+{
+	MemoryContext oldcxt;
+	StashedCommand *stashed;
+	InternalGrant  *icopy;
+	ListCell	   *cell;
+
+	oldcxt = MemoryContextSwitchTo(currentEventTriggerState->cxt);
+
+	/*
+	 * copying the node is moderately challenging ... XXX should we consider
+	 * changing InternalGrant into a full-fledged node instead?
+	 */
+	icopy = palloc(sizeof(InternalGrant));
+	memcpy(icopy, istmt, sizeof(InternalGrant));
+	icopy->objects = list_copy(istmt->objects);
+	icopy->grantees = list_copy(istmt->grantees);
+	icopy->col_privs = NIL;
+	foreach(cell, istmt->col_privs)
+		icopy->col_privs = lappend(icopy->col_privs, copyObject(lfirst(cell)));
+
+	stashed = palloc(sizeof(StashedCommand));
+	stashed->type = SCT_Grant;
+	stashed->in_extension = creating_extension;
+
+	stashed->d.grant.istmt = icopy;
+	stashed->parsetree = NULL;
+
+	currentEventTriggerState->stash = lappend(currentEventTriggerState->stash,
+											  stashed);
+
+	MemoryContextSwitchTo(oldcxt);
+}
+
 Datum
 pg_event_trigger_get_creation_commands(PG_FUNCTION_ARGS)
 {
@@ -1839,6 +1881,29 @@ pg_event_trigger_get_creation_commands(PG_FUNCTION_ARGS)
 					values[i++] = CStringGetTextDatum(schema);
 				/* identity */
 				values[i++] = CStringGetTextDatum(identity);
+				/* in_extension */
+				values[i++] = BoolGetDatum(cmd->in_extension);
+				/* command */
+				values[i++] = CStringGetTextDatum(command);
+			}
+			else
+			{
+				Assert(cmd->type == SCT_Grant);
+
+				/* classid */
+				nulls[i++] = true;
+				/* objid */
+				nulls[i++] = true;
+				/* objsubid */
+				nulls[i++] = true;
+				/* command tag */
+				values[i++] = CStringGetTextDatum("GRANT");	/* XXX maybe REVOKE or something else */
+				/* object_type */
+				values[i++] = CStringGetTextDatum("TABLE"); /* XXX maybe something else */
+				/* schema */
+				nulls[i++] = true;
+				/* identity */
+				nulls[i++] = true;
 				/* in_extension */
 				values[i++] = BoolGetDatum(cmd->in_extension);
 				/* command */
