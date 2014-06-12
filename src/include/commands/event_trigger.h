@@ -17,6 +17,7 @@
 #include "catalog/objectaddress.h"
 #include "catalog/pg_event_trigger.h"
 #include "nodes/parsenodes.h"
+#include "utils/aclchk.h"
 
 typedef struct EventTriggerData
 {
@@ -70,5 +71,7 @@ extern void EventTriggerAlterTableRelid(Oid objectId);
 extern void EventTriggerAlterTableStashSubcmd(Node *subcmd, Oid relid,
 								  AttrNumber attnum, Oid newoid);
 extern void EventTriggerAlterTableEnd(void);
+
+extern void EventTriggerStashGrant(InternalGrant *istmt);
 
 #endif   /* EVENT_TRIGGER_H */
