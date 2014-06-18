@@ -18,6 +18,7 @@ OBJS = \
 
 EXTENSION = bdr
 DATA = bdr--0.5.sql
+DOCS = bdr.conf.sample README.bdr
 
 SCRIPTS = scripts/bdr_initial_load
 
