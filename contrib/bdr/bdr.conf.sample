@@ -18,17 +18,21 @@ track_commit_timestamp = on
 
 # Maximum number of replication slots that may exist. You should set this to
 # the number of nodes you expect to have, plus a reasonable margin for growth.
-#max_replication_slots = 0
+#
+# This is a suitable setting for a small installation.
+max_replication_slots = 8
 
 # Generally you want to set max_wal_senders to the same value plus a few for
 # pg_basebackup runs, streaming replicas, etc.
-#max_wal_senders = 0
+# 
+# This is a suitable setting for a small installation.
+max_wal_senders = 10
 
 # Do you want to record conflicts to the bdr.bdr_conflict_history table, not
 # just the log file?
 #bdr.log_conflicts_to_table = off
 
-# Configure connections to other BDR nodes:
+# Configure connections to other BDR nodes. See below for a couple of examples.
 bdr.connections = ''
 
 
@@ -50,4 +54,15 @@ bdr.connections = ''
 # bdr.node2_replica_local_dsn="dbname=mydb user=postgres"
 # 
 # bdr.node3_dsn = "host=node3 dbname=mydb"
+#
+
+#-------------------------------------------------------------------------
+# Example connection configuration for BDR between two DBs on the same server
+#-------------------------------------------------------------------------
+#
+#bdr.connections = 'dbone, dbtwo'
+#bdr.dbone_dsn = 'dbname=dbtwo'
+#bdr.dbone_local_dbname='dbone'
+#bdr.dbtwo_dsn = 'dbname=dbone'
+#bdr.dbtwo_local_dbname='dbtwo'
 #
