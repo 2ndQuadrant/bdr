@@ -55,14 +55,3 @@ bdr.connections = ''
 # 
 # bdr.node3_dsn = "host=node3 dbname=mydb"
 #
-
-#-------------------------------------------------------------------------
-# Example connection configuration for BDR between two DBs on the same server
-#-------------------------------------------------------------------------
-#
-#bdr.connections = 'dbone, dbtwo'
-#bdr.dbone_dsn = 'dbname=dbtwo'
-#bdr.dbone_local_dbname='dbone'
-#bdr.dbtwo_dsn = 'dbname=dbone'
-#bdr.dbtwo_local_dbname='dbtwo'
-#
