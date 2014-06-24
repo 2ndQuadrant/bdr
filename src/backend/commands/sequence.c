@@ -89,6 +89,7 @@ Oid
 DefineSequence(CreateSeqStmt *seq)
 {
 	FormData_pg_sequence new;
+	Form_pg_seqam seqamForm;
 	List	   *owned_by;
 	CreateStmt *stmt = makeNode(CreateStmt);
 	Oid			seqoid;
@@ -112,7 +113,16 @@ DefineSequence(CreateSeqStmt *seq)
 
 	/* Check and set all param values */
 	init_params(seq->options, true, &new, &owned_by);
+
 	seqamid = init_options(InvalidOid, seq->accessMethod, seq->amoptions);
+
+	/* change statement to reflect the seqam for deparsing */
+	tuple = SearchSysCache1(SEQAMOID, ObjectIdGetDatum(seqamid));
+	if (!HeapTupleIsValid(tuple))
+		elog(ERROR, "cache lookup failed for relation %u", seqamid);
+	seqamForm = (Form_pg_seqam) GETSTRUCT(tuple);
+	seq->accessMethod = NameStr(seqamForm->seqamname);
+	ReleaseSysCache(tuple);
 
 	/*
 	 * Create relation (and fill value[] and null[] for the tuple)
