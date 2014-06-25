@@ -534,6 +534,7 @@ bdr_apply_main(Datum main_arg)
 {
 	PGconn	   *streamConn;
 	PGresult   *res;
+	char	   *copybuf = NULL;
 	int			fd;
 	StringInfoData query;
 	XLogRecPtr	last_received = InvalidXLogRecPtr;
@@ -664,7 +665,6 @@ bdr_apply_main(Datum main_arg)
 		/* int		 ret; */
 		int			rc;
 		int			r;
-		char	   *copybuf = NULL;
 
 		/*
 		 * Background workers mustn't call usleep() or any direct equivalent:
@@ -678,6 +678,8 @@ bdr_apply_main(Datum main_arg)
 							   fd, 1000L);
 
 		ResetLatch(&MyProc->procLatch);
+
+		MemoryContextSwitchTo(MessageContext);
 
 		/* emergency bailout if postmaster has died */
 		if (rc & WL_POSTMASTER_DEATH)
@@ -696,6 +698,12 @@ bdr_apply_main(Datum main_arg)
 		{
 			if (exit_worker)
 				break;
+
+			if (copybuf != NULL)
+			{
+				PQfreemem(copybuf);
+				copybuf = NULL;
+			}
 
 			r = PQgetCopyData(streamConn, &copybuf, 1);
 
@@ -720,9 +728,12 @@ bdr_apply_main(Datum main_arg)
 				int c;
 				StringInfoData s;
 
+				MemoryContextSwitchTo(MessageContext);
+
 				initStringInfo(&s);
 				s.data = copybuf;
 				s.len = r;
+				s.maxlen = -1;
 
 				c = pq_getmsgbyte(&s);
 
@@ -755,7 +766,6 @@ bdr_apply_main(Datum main_arg)
 				/* other message types are purposefully ignored */
 			}
 
-			MemoryContextResetAndDeleteChildren(MessageContext);
 		}
 
 		/* confirm all writes at once */
@@ -783,6 +793,7 @@ bdr_apply_main(Datum main_arg)
 			ResetLatch(&MyProc->procLatch);
 			rc = WaitLatch(&MyProc->procLatch, WL_TIMEOUT, 1000L);
 		}
+		MemoryContextResetAndDeleteChildren(MessageContext);
 	}
 
 	proc_exit(0);
