@@ -296,9 +296,6 @@ process_remote_commit(StringInfo s)
 		 (uint32) (end_lsn >> 32), (uint32) end_lsn,
 		 timestamptz_to_str(committime));
 
-	elog(LOG, "commit_lsn: "UINT64_FORMAT"; replication_origin_lsn: "UINT64_FORMAT,
-		 commit_lsn, replication_origin_lsn);
-
 	Assert(commit_lsn == replication_origin_lsn);
 	Assert(committime == replication_origin_timestamp);
 
