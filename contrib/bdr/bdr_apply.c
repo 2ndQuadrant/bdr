@@ -392,11 +392,6 @@ process_remote_insert(StringInfo s)
 
 	Assert(bdr_apply_worker != NULL);
 
-	/*
-	 * Read tuple into a context that's long lived enough for CONCURRENTLY
-	 * processing.
-	 */
-	MemoryContextSwitchTo(MessageContext);
 	rel = read_rel(s, RowExclusiveLock);
 
 	action = pq_getmsgbyte(s);
@@ -1594,7 +1589,11 @@ static bool
 bdr_performing_work(void)
 {
 	if (started_transaction)
+	{
+		if (CurrentMemoryContext != TopTransactionContext)
+			MemoryContextSwitchTo(TopTransactionContext);
 		return false;
+	}
 
 	started_transaction = true;
 	StartTransactionCommand();
