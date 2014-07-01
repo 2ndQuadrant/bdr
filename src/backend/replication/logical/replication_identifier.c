@@ -14,6 +14,7 @@
 #include "postgres.h"
 
 #include <unistd.h>
+#include <sys/stat.h>
 
 #include "funcapi.h"
 #include "miscadmin.h"
