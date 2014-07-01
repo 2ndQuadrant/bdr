@@ -116,10 +116,12 @@ static void bdr_worker_shmem_create_workers(void);
 Datum bdr_apply_pause(PG_FUNCTION_ARGS);
 Datum bdr_apply_resume(PG_FUNCTION_ARGS);
 Datum bdr_get_connection_config(PG_FUNCTION_ARGS);
+Datum bdr_version(PG_FUNCTION_ARGS);
 
 PG_FUNCTION_INFO_V1(bdr_apply_pause);
 PG_FUNCTION_INFO_V1(bdr_apply_resume);
 PG_FUNCTION_INFO_V1(bdr_get_connection_config);
+PG_FUNCTION_INFO_V1(bdr_version);
 
 
 /*
@@ -1968,4 +1970,10 @@ bdr_get_connection_config(PG_FUNCTION_ARGS)
 	tuplestore_donestoring(tupstore);
 
 	return (Datum) 0;
+}
+
+Datum
+bdr_version(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_TEXT_P(cstring_to_text(BDR_VERSION_STR));
 }
