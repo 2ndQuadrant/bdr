@@ -10,6 +10,12 @@ SET LOCAL search_path = bdr;
 -- We must be able to use exclusion constraints for global sequences
 SET bdr.permit_unsafe_ddl_commands=true;
 
+CREATE OR REPLACE FUNCTION bdr_version()
+RETURNS TEXT
+LANGUAGE C
+AS 'MODULE_PATHNAME'
+;
+
 CREATE FUNCTION pg_stat_get_bdr(
     OUT rep_node_id oid,
     OUT rilocalid oid,
