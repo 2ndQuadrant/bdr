@@ -18,7 +18,7 @@
 
 #include "bdr_internal.h"
 
-#define BDR_VERSION_NUM 500
+#include "bdr_version.h"
 
 /* Right now replication_name isn't used; make it easily found for later */
 #define EMPTY_REPLICATION_NAME ""
