@@ -259,6 +259,8 @@ static void
 usage(void)
 {
 	printf(_("%s initializes bdr from PostgreSQL instance made using pg_basebackup.\n\n"), progname);
+	printf(_("pg_basebackup -X stream must be used to populate the data directory before\n"));
+	printf(_("running %s to initialize BDR on it.\n\n"), progname);
 	printf(_("Usage:\n"));
 	printf(_("  %s [OPTION]...\n"), progname);
 	printf(_("\nGeneral options:\n"));
