@@ -4,6 +4,12 @@ subdir = contrib/bdr
 top_builddir = ../..
 
 MODULE_big = bdr
+
+EXTENSION = bdr
+DATA = bdr--0.6.sql
+DOCS = bdr.conf.sample README.bdr
+SCRIPTS = scripts/bdr_initial_load bdr_init_copy
+
 PG_CPPFLAGS = -I$(libpq_srcdir)
 SHLIB_LINK = $(libpq)
 SHLIB_PREREQS = submake-libpq
@@ -43,6 +49,17 @@ submake-regress:
 
 submake-btree_gist:
 	$(MAKE) -C $(top_builddir)/contrib/btree_gist
+
+bdr_init_copy: bdr_init_copy.o | submake-libpq submake-libpgport
+	$(CC) $(CFLAGS) $^ $(LDFLAGS) $(LDFLAGS_EX) $(libpq_pgport) $(LIBS) -o $@$(X)
+
+all: bdr_init_copy
+
+clean: additional-clean
+
+additional-clean:
+	rm -f bdr_init_copy$(X) bdr_init_copy.o
+	rm -f bdr_version.h
 
 check: all | submake-regress submake-btree_gist regresscheck
 
