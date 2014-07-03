@@ -254,7 +254,7 @@ extern void UserTableUpdateOpenIndexes(struct EState *estate,
 extern void build_index_scan_keys(struct EState *estate,
 								  struct ScanKeyData **scan_keys,
 								  struct TupleTableSlot *slot);
-extern void build_index_scan_key(struct ScanKeyData *skey, Relation rel,
+extern bool build_index_scan_key(struct ScanKeyData *skey, Relation rel,
 								 Relation idxrel,
 								 struct TupleTableSlot *slot);
 extern bool find_pkey_tuple(struct ScanKeyData *skey, BDRRelation *rel,

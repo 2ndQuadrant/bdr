@@ -123,22 +123,41 @@ build_index_scan_keys(EState *estate, ScanKey *scan_keys, TupleTableSlot *slot)
 	{
 		IndexInfo  *ii = relinfo->ri_IndexRelationInfo[i];
 
-		if (!ii->ii_Unique)
+		/*
+		 * Only unique indexes are of interest here, and we can't deal with
+		 * expression indexes so far. FIXME: predicates should be handled
+		 * better.
+		 */
+		if (!ii->ii_Unique || ii->ii_Expressions != NIL)
+		{
+			scan_keys[i] = NULL;
 			continue;
+		}
 
 		scan_keys[i] = palloc(ii->ii_NumIndexAttrs * sizeof(ScanKeyData));
-		build_index_scan_key(scan_keys[i],
-					   relinfo->ri_RelationDesc,
-					   relinfo->ri_IndexRelationDescs[i],
-					   slot);
+
+		/*
+		 * Only return index if we could build a key without NULLs.
+		 */
+		if (build_index_scan_key(scan_keys[i],
+								  relinfo->ri_RelationDesc,
+								  relinfo->ri_IndexRelationDescs[i],
+								  slot))
+		{
+			pfree(scan_keys[i]);
+			scan_keys[i] = NULL;
+			continue;
+		}
 	}
 }
 
 /*
  * Setup a ScanKey for a search in the relation 'rel' for a tuple 'key' that
  * is setup to match 'rel' (*NOT* idxrel!).
+ *
+ * Returns whether any column contains NULLs.
  */
-void
+bool
 build_index_scan_key(ScanKey skey, Relation rel, Relation idxrel, TupleTableSlot *slot)
 {
 	int			attoff;
@@ -148,6 +167,7 @@ build_index_scan_key(ScanKey skey, Relation rel, Relation idxrel, TupleTableSlot
 	oidvector  *opclass;
 	int2vector  *indkey;
 	HeapTuple	key = slot->tts_tuple;
+	bool		hasnulls = false;
 
 	indclassDatum = SysCacheGetAttr(INDEXRELID, idxrel->rd_indextuple,
 									Anum_pg_index_indclass, &isnull);
@@ -191,8 +211,12 @@ build_index_scan_key(ScanKey skey, Relation rel, Relation idxrel, TupleTableSlot
 					fastgetattr(key, mainattno,
 								RelationGetDescr(rel), &isnull));
 		if (isnull)
-			elog(ERROR, "index tuple with a null column");
+		{
+			hasnulls = true;
+			skey[attoff].sk_flags |= SK_ISNULL;
+		}
 	}
+	return hasnulls;
 }
 
 /*
