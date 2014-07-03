@@ -48,9 +48,6 @@
 #include "utils/timestamp.h"
 #include "utils/typcache.h"
 
-PG_MODULE_MAGIC;
-
-extern void		_PG_init(void);
 extern void		_PG_output_plugin_init(OutputPluginCallbacks *cb);
 
 typedef struct
@@ -97,11 +94,6 @@ static void pg_decode_message(LogicalDecodingContext *ctx,
 static void write_rel(StringInfo out, Relation rel);
 static void write_tuple(BdrOutputData *data, StringInfo out, Relation rel,
 						HeapTuple tuple);
-
-void
-_PG_init(void)
-{
-}
 
 /* specify output plugin callbacks */
 void

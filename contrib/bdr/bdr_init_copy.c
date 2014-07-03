@@ -670,7 +670,7 @@ create_replication_slot(PGconn *conn, Name slot_name)
 	PGresult   *res;
 
 	appendPQExpBuffer(query, "CREATE_REPLICATION_SLOT \"%s\" LOGICAL %s",
-					 NameStr(*slot_name), "bdr_output");
+					 NameStr(*slot_name), "bdr");
 
 	res = PQexec(conn, query->data);
 
