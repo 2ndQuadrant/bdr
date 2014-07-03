@@ -381,7 +381,7 @@ bdr_create_slot(PGconn *streamConn, Name slot_name,
 	/* acquire remote decoding slot */
 	resetStringInfo(&query);
 	appendStringInfo(&query, "CREATE_REPLICATION_SLOT \"%s\" LOGICAL %s",
-					 NameStr(*slot_name), "bdr_output");
+					 NameStr(*slot_name), "bdr");
 
 	elog(DEBUG3, "Sending replication command: %s", query.data);
 
