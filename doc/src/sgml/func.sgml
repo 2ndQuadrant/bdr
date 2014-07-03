@@ -17538,6 +17538,19 @@ FOR EACH ROW EXECUTE PROCEDURE suppress_redundant_updates_trigger();
         <entry>Object sub-id (e.g. attribute number for columns)</entry>
        </row>
        <row>
+        <entry><literal>original</literal></entry>
+        <entry><type>bool</type></entry>
+        <entry>Flag used to identify the root object of the deletion</entry>
+       </row>
+       <row>
+        <entry></literal>normal</literal></entry>
+        <entry><type>bool</type></entry>
+        <entry>
+         Flag indicating that there's a normal dependency relationship
+         in the dependency graph leading to this object
+        </entry>
+       </row>
+       <row>
         <entry><literal>object_type</literal></entry>
         <entry><type>text</type></entry>
         <entry>Type of the object</entry>
@@ -17565,6 +17578,22 @@ FOR EACH ROW EXECUTE PROCEDURE suppress_redundant_updates_trigger();
         <entry>
          Text rendering of the object identity, schema-qualified. Each and every
          identifier present in the identity is quoted if necessary.
+        </entry>
+       </row>
+       <row>
+        <entry><literal>address_names</literal></entry>
+        <entry><type>text[]</type></entry>
+        <entry>
+         An array that, together with <literal>address_args</literal>,
+         can be used by the C-language function getObjectAddress() to
+         recreate the object address in a remote server containing a similar object.
+        <entry>
+       </row>
+       <row>
+        <entry><literal>address_args</literal></entry>
+        <entry><type>text[]</type></entry>
+        <entry>
+         See <literal>address_names</literal> above.
         </entry>
        </row>
       </tbody>
