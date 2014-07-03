@@ -244,14 +244,18 @@ bdr_locks_startup(void)
 	HeapTuple		tuple;
 
 	XLogRecPtr	lsn;
-	static bool initialized = false;
 	StringInfoData s;
 
 	Assert(IsUnderPostmaster);
 	Assert(!IsTransactionState());
 
-	/* FIXME: should be in shmem to handle perdb restarts */
-	if (initialized)
+	bdr_locks_find_my_database();
+
+	/*
+	 * Don't initialize database level lock state twice. An crash requiring
+	 * that has to be severe enough to trigger a crash-restart cycle.
+	 */
+	if (bdr_my_locks_database->locked_and_loaded)
 		return;
 
 	initStringInfo(&s);
@@ -338,8 +342,6 @@ bdr_locks_startup(void)
 	/* allow local DML */
 	bdr_locks_find_my_database();
 	bdr_my_locks_database->locked_and_loaded = true;
-
-	initialized = true;
 }
 
 
