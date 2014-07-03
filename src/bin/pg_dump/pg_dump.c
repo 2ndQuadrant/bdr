@@ -693,7 +693,7 @@ main(int argc, char **argv)
 		  "Run with --no-synchronized-snapshots instead if you do not need\n"
 					  "synchronized snapshots.\n");
 
-	if (fout->remoteVersion < 90200)
+	if (dumpsnapshot && fout->remoteVersion < 90200)
 		exit_horribly(NULL,
 					  "Exported snapshots are not supported by this server version.\n");
 
