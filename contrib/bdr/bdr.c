@@ -1622,7 +1622,7 @@ _PG_init(void)
 							 NULL,
 							 &bdr_skip_ddl_replication,
 							 false,
-							 PGC_BACKEND,
+							 PGC_SUSET,
 							 0,
 							 NULL, NULL, NULL);
 

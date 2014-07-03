@@ -894,9 +894,6 @@ bdr_sequencer_fill_sequence(Oid seqoid, char *seqschema, char *seqname)
 	int i;
 	bool acquired_new = false;
 
-	elog(DEBUG1, "checking sequence %u: %s.%s",
-		 seqoid, seqschema, seqname);
-
 	/* lock page, fill heaptup */
 	init_sequence(seqoid, &elm, &rel);
 	(void) read_seq_tuple(elm, rel, &buf, &seqtuple);
@@ -923,9 +920,11 @@ bdr_sequencer_fill_sequence(Oid seqoid, char *seqschema, char *seqname)
 		if (curval->next_value == curval->end_value)
 		{
 			if (curval->end_value > 0)
-				elog(DEBUG1, "used up old chunk");
+				elog(DEBUG1, "sequence %s.%s: used up old chunk",
+					 seqschema, seqname);
 
-			elog(DEBUG1, "need new batch %i", i);
+			elog(DEBUG1, "sequence %s.%s: needs new batch %i",
+				 seqschema, seqname, i);
 			if (bdr_sequencer_fill_chunk(seqoid, seqschema, seqname, curval))
 				acquired_new = true;
 			else
