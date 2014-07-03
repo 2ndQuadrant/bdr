@@ -432,7 +432,17 @@ process_remote_insert(StringInfo s)
 		IndexInfo  *ii = relinfo->ri_IndexRelationInfo[i];
 		bool found = false;
 
-		if (!ii->ii_Unique)
+		/*
+		 * Only unique indexes are of interest here, and we can't deal with
+		 * expression indexes so far. FIXME: predicates should be handled
+		 * better.
+		 *
+		 * NB: Needs to match expression in build_index_scan_key
+		 */
+		if (!ii->ii_Unique || ii->ii_Expressions != NIL)
+			continue;
+
+		if (index_keys[i] == NULL)
 			continue;
 
 		Assert(ii->ii_Expressions == NIL);
