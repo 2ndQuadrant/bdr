@@ -511,34 +511,26 @@ sub mkvcbuild
 	GenerateContribSqlFiles('pgcrypto', $mf);
 
 	# so is bdr
-	my $bdr_output = $solution->AddProject('bdr_output', 'dll', 'misc');
-	$bdr_output->AddFiles('contrib\bdr',
-			      'bdr_compat.c',
-			      'bdr_catalogs.c',
-			      'bdr_locks.c',
-			      'bdr_output.c');
-	$bdr_output->AddReference($postgres);
-	$bdr_output->AddLibrary('wsock32.lib');
-
-	my $bdr_apply = $solution->AddProject('bdr_apply', 'dll', 'misc');
-	$bdr_apply->AddFiles('contrib\bdr',
-			     'bdr.c',
-			     'bdr_apply.c',
-			     'bdr_catalogs.c',
-			     'bdr_commandfilter.c',
-			     'bdr_compat.c',
-			     'bdr_conflict_handlers.c',
-			     'bdr_conflict_logging.c',
-			     'bdr_count.c',
-			     'bdr_executor.c',
-			     'bdr_init_replica.c',
-			     'bdr_locks.c',
-			     'bdr_relcache.c',
-			     'bdr_seq.c');
-	$bdr_apply->AddReference($postgres);
-	$bdr_apply->AddLibrary('wsock32.lib');
-	$bdr_apply->AddIncludeDir('src\interfaces\libpq');
-	$bdr_apply->AddReference($libpq);
+	my $bdr = $solution->AddProject('bdr', 'dll', 'misc');
+	$bdr->AddFiles('contrib\bdr',
+		       'bdr.c',
+		       'bdr_apply.c',
+		       'bdr_catalogs.c',
+		       'bdr_conflict_handlers.c',
+		       'bdr_conflict_logging.c',
+		       'bdr_commandfilter.c',
+		       'bdr_compat.c',
+		       'bdr_count.c',
+		       'bdr_executor.c',
+		       'bdr_init_replica.c',
+		       'bdr_locks.c',
+		       'bdr_output.c',
+		       'bdr_relcache.c',
+		       'bdr_seq.c');
+	$bdr->AddReference($postgres);
+	$bdr->AddLibrary('wsock32.lib');
+	$bdr->AddIncludeDir('src\interfaces\libpq');
+	$bdr->AddReference($libpq);
 
 	my $D;
 	opendir($D, 'contrib') || croak "Could not opendir on contrib!\n";
