@@ -71,7 +71,6 @@ extern TimeLineID	origin_timeline;
 extern Oid			origin_dboid;
 /* end externs for bdr apply state */
 
-static int   n_configured_bdr_nodes = 0;
 ResourceOwner bdr_saved_resowner;
 static bool bdr_is_restart = false;
 Oid   BdrNodesRelid;
@@ -1078,22 +1077,6 @@ bdr_launch_apply_workers(char *dbname)
 }
 
 /*
- * Return the total number of BDR workers in the group.
- *
- * Sequence support relies on this.
- *
- * TODO: Use bdr.bdr_nodes to get this information. For now we assume that each
- * node has connections to all other nodes and that all configured connections
- * are correct and valid, so the number of nodes is equal to the number of
- * configured connections.
- */
-int
-bdr_node_count()
-{
-	return n_configured_bdr_nodes;
-}
-
-/*
  * Each database with BDR enabled on it has a static background worker,
  * registered at shared_preload_libraries time during postmaster start. This is
  * the entry point for these bgworkers.
@@ -1134,7 +1117,7 @@ bdr_perdb_worker_main(Datum main_arg)
 
 	/* need to be able to perform writes ourselves */
 	bdr_locks_always_allow_writes(true);
-	bdr_locks_startup();
+	bdr_locks_startup(bdr_perdb_worker->nnodes);
 
 	/*
 	 * Do we need to init the local DB from a remote node?
@@ -1164,7 +1147,7 @@ bdr_perdb_worker_main(Datum main_arg)
 		 NameStr(bdr_perdb_worker->dbname));
 
 	/* initialize sequencer */
-	bdr_sequencer_init(bdr_perdb_worker->seq_slot);
+	bdr_sequencer_init(bdr_perdb_worker->seq_slot, bdr_perdb_worker->nnodes);
 
 	while (!exit_worker)
 	{
@@ -1302,8 +1285,6 @@ bdr_worker_shmem_create_workers(void)
 {
 	uint32 off;
 
-	n_configured_bdr_nodes = 0;
-
 	/*
 	 * Create a BdrPerdbWorker for each distinct database found during
 	 * _PG_init. The bgworker for each has already been registered and assigned
@@ -1344,6 +1325,7 @@ bdr_worker_shmem_create_workers(void)
 		strncpy(NameStr(perdb->dbname), bdr_distinct_dbnames[off], NAMEDATALEN);
 		NameStr(perdb->dbname)[NAMEDATALEN-1] = '\0';
 
+		perdb->nnodes = 0;
 		perdb->seq_slot = off;
 
 		elog(DEBUG1, "Assigning shmem bdr database worker for db %s",
@@ -1368,6 +1350,8 @@ bdr_worker_shmem_create_workers(void)
 		BdrConnectionConfig *cfg = bdr_connection_configs[off];
 		BdrWorker	   *shmworker;
 		BdrApplyWorker *worker;
+		int				i;
+		bool			found_perdb = false;
 
 		if (cfg == NULL || !cfg->is_valid)
 			continue;
@@ -1378,12 +1362,42 @@ bdr_worker_shmem_create_workers(void)
 		worker->connection_config_idx = off;
 		worker->replay_stop_lsn = InvalidXLogRecPtr;
 		worker->forward_changesets = false;
+
+		/*
+		 * Now search for the perdb worker belonging to this slot.
+		 */
+		for (i = 0; i < bdr_max_workers; i++)
+		{
+			BdrPerdbWorker *perdb;
+			BdrWorker *entry = &BdrWorkerCtl->slots[i];
+
+			if (entry->worker_type != BDR_WORKER_PERDB)
+				continue;
+
+			perdb = &entry->worker_data.perdb_worker;
+
+			if (strcmp(NameStr(perdb->dbname), cfg->dbname) != 0)
+				continue;
+
+			/*
+			 * Remember how many connections there are for this node. This
+			 * will, e.g., be used to determine the quorum for ddl locks and
+			 * sequencer votes.
+			 */
+			perdb->nnodes++;
+			found_perdb = true;
+			worker->perdb_worker_off = i;
+			break;
+		}
+
+		if (!found_perdb)
+			elog(ERROR, "couldn't find perdb entry for apply worker");
+
 		/*
 		 * If this is a postmaster restart, don't register the worker a second
 		 * time when the per-db worker starts up.
 		 */
 		worker->bgw_is_registered = bdr_is_restart;
-		n_configured_bdr_nodes++;
 	}
 
 	/*

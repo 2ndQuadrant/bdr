@@ -43,14 +43,14 @@
 
 typedef struct BdrSequencerSlot
 {
-	Oid database_oid;
-	Latch *proclatch;
+	Oid			database_oid;
+	Size		nnodes;
+	Latch	   *proclatch;
 } BdrSequencerSlot;
 
 typedef struct BdrSequencerControl
 {
-	size_t nnodes;
-	size_t slot;
+	size_t		slot;
 	BdrSequencerSlot slots[FLEXIBLE_ARRAY_MEMBER];
 } BdrSequencerControl;
 
@@ -583,7 +583,7 @@ bdr_schedule_eoxact_sequencer_wakeup(void)
 }
 
 void
-bdr_sequencer_init(int new_seq_slot)
+bdr_sequencer_init(int new_seq_slot, Size nnodes)
 {
 	BdrSequencerSlot *slot;
 
@@ -593,6 +593,7 @@ bdr_sequencer_init(int new_seq_slot)
 	slot = &BdrSequencerCtl->slots[seq_slot];
 	slot->database_oid = MyDatabaseId;
 	slot->proclatch = &MyProc->procLatch;
+	slot->nnodes = nnodes;
 }
 
 static void
@@ -758,7 +759,7 @@ bdr_sequencer_tally(void)
 	nulls[3] = false;
 
 	argtypes[4] = INT4OID;
-	values[4] = Int32GetDatum(bdr_node_count());
+	values[4] = Int32GetDatum(BdrSequencerCtl->slots[seq_slot].nnodes);
 	nulls[4] = false;
 
 	SetCurrentStatementStartTimestamp();
