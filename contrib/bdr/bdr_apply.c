@@ -134,7 +134,7 @@ static void process_queued_ddl_command(HeapTuple cmdtup, bool tx_just_started);
 static bool bdr_performing_work(void);
 
 static void process_remote_begin(StringInfo s);
-static bool process_remote_commit(StringInfo s);
+static void process_remote_commit(StringInfo s);
 static void process_remote_insert(StringInfo s);
 static void process_remote_update(StringInfo s);
 static void process_remote_delete(StringInfo s);
@@ -271,7 +271,7 @@ process_remote_begin(StringInfo s)
  * Returns true if apply should continue with the next record, false if replay
  * should stop after this record.
  */
-static bool
+static void
 process_remote_commit(StringInfo s)
 {
 	XLogRecPtr		commit_lsn;
@@ -301,7 +301,19 @@ process_remote_commit(StringInfo s)
 
 	if (started_transaction)
 	{
+		BdrFlushPosition *flushpos;
+
 		CommitTransactionCommand();
+
+		/*
+		 * Associate the end of the remote commit lsn with the local end of
+		 * the commit record.
+		 */
+		flushpos = (BdrFlushPosition *) palloc(sizeof(BdrFlushPosition));
+		flushpos->local_end = XactLastCommitEnd;
+		flushpos->remote_end = end_lsn;
+
+		dlist_push_tail(&bdr_lsn_association, &flushpos->node);
 	}
 
 	pgstat_report_activity(STATE_IDLE, NULL);
@@ -358,10 +370,14 @@ process_remote_commit(StringInfo s)
 		 * workers.
 		 */
 		bdr_apply_worker->replay_stop_lsn = InvalidXLogRecPtr;
-		return false;
+
+		/* flush all writes so the latest position can be reported back to the sender */
+		XLogFlush(GetXLogWriteRecPtr());
+
+
+		/* Signal that we should stop */
+		exit_worker = true;
 	}
-	else
-		return true;
 }
 
 static void
@@ -1863,8 +1879,7 @@ bdr_process_remote_action(StringInfo s)
 			break;
 			/* COMMIT */
 		case 'C':
-			if (!process_remote_commit(s))
-				exit_worker = true;
+			process_remote_commit(s);
 			break;
 			/* INSERT */
 		case 'I':

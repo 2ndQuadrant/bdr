@@ -85,7 +85,7 @@ uint32 bdr_distinct_dbnames_count = 0;
 
 /* GUC storage */
 static char *connections = NULL;
-static char *bdr_synchronous_commit = NULL;
+static bool bdr_synchronous_commit;
 int bdr_default_apply_delay;
 int bdr_max_workers;
 static bool bdr_skip_ddl_replication;
@@ -104,6 +104,8 @@ static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
 
 /* shortcut for finding the the worker shmem block */
 BdrWorkerControl *BdrWorkerCtl = NULL;
+
+dlist_head bdr_lsn_association = DLIST_STATIC_INIT(bdr_lsn_association);
 
 PG_MODULE_MAGIC;
 
@@ -142,41 +144,68 @@ bdr_sendint64(int64 i, char *buf)
 
 /*
  * Send a Standby Status Update message to server.
+ *
+ * 'recvpos' is the latest LSN we've received data to, force is set if we need
+ * to send a response to avoid timeouts.
  */
 static bool
-bdr_send_feedback(PGconn *conn, XLogRecPtr blockpos, int64 now, bool replyRequested,
-			 bool force)
+bdr_send_feedback(PGconn *conn, XLogRecPtr recvpos, int64 now, bool force)
 {
 	char		replybuf[1 + 8 + 8 + 8 + 8 + 1];
 	int			len = 0;
-	static XLogRecPtr lastpos = InvalidXLogRecPtr;
 
-	Assert(blockpos != InvalidXLogRecPtr);
+	static XLogRecPtr last_recvpos = InvalidXLogRecPtr;
+	static XLogRecPtr last_writepos = InvalidXLogRecPtr;
+	static XLogRecPtr last_flushpos = InvalidXLogRecPtr;
 
-	if (!force && (blockpos <= lastpos))
+	XLogRecPtr writepos;
+	XLogRecPtr flushpos;
+
+	/* It's legal to not pass a recvpos */
+	if (recvpos < last_recvpos)
+		recvpos = last_recvpos;
+
+	if (bdr_get_flush_position(&writepos, &flushpos))
+	{
+		/*
+		 * No outstanding transactions to flush, we can report the latest
+		 * received position. This is important for synchronous replication.
+		 */
+		flushpos = writepos = recvpos;
+	}
+
+	if (writepos < last_writepos)
+		writepos = last_writepos;
+
+	if (flushpos < last_flushpos)
+		flushpos = last_flushpos;
+
+	/* if we've already reported everything we're good */
+	if (!force &&
+		writepos == last_writepos &&
+		flushpos == last_flushpos)
 		return true;
-
-	if (blockpos < lastpos)
-		blockpos = lastpos;
 
 	replybuf[len] = 'r';
 	len += 1;
-	bdr_sendint64(blockpos, &replybuf[len]);		/* write */
+	bdr_sendint64(recvpos, &replybuf[len]);			/* write */
 	len += 8;
-	bdr_sendint64(blockpos, &replybuf[len]);		/* flush */
+	bdr_sendint64(flushpos, &replybuf[len]);		/* flush */
 	len += 8;
-	bdr_sendint64(blockpos, &replybuf[len]);		/* apply */
+	bdr_sendint64(writepos, &replybuf[len]);		/* apply */
 	len += 8;
 	bdr_sendint64(now, &replybuf[len]);				/* sendTime */
 	len += 8;
-	replybuf[len] = replyRequested ? 1 : 0;		/* replyRequested */
+	replybuf[len] = false;							/* replyRequested */
 	len += 1;
 
-	elog(DEBUG2, "sending feedback (force %d, reply requested %d) to %X/%X",
-		 force, replyRequested,
-		 (uint32) (blockpos >> 32), (uint32) blockpos);
+	elog(DEBUG2, "sending feedback (force %d) to recv %X/%X, write %X/%X, flush %X/%X",
+		 force,
+		 (uint32) (recvpos >> 32), (uint32) recvpos,
+		 (uint32) (writepos >> 32), (uint32) writepos,
+		 (uint32) (flushpos >> 32), (uint32) flushpos
+		);
 
-	lastpos = blockpos;
 
 	if (PQputCopyData(conn, replybuf, len) <= 0 || PQflush(conn))
 	{
@@ -187,7 +216,66 @@ bdr_send_feedback(PGconn *conn, XLogRecPtr blockpos, int64 now, bool replyReques
 		return false;
 	}
 
+	if (recvpos > last_recvpos)
+		last_recvpos = recvpos;
+	if (writepos > last_writepos)
+		last_writepos = writepos;
+	if (flushpos > last_flushpos)
+		last_flushpos = flushpos;
+
 	return true;
+}
+
+/*
+ * Figure out which write/flush positions to report to the walsender process.
+ *
+ * We can't simply report back the last LSN the walsender sent us because the
+ * local transaction might not yet be flushed to disk locally. Instead we
+ * build a list that associates local with remote LSNs for every commit. When
+ * reporting back the flush position to the sender we iterate that list and
+ * check which entries on it are already locally flushed. Those we can report
+ * as having been flushed.
+ *
+ * Returns true if there's no outstanding transactions that need to be
+ * flushed.
+ */
+bool
+bdr_get_flush_position(XLogRecPtr *write, XLogRecPtr *flush)
+{
+	dlist_mutable_iter iter;
+	XLogRecPtr	local_flush = GetFlushRecPtr();
+
+	*write = InvalidXLogRecPtr;
+	*flush = InvalidXLogRecPtr;
+
+	dlist_foreach_modify(iter, &bdr_lsn_association)
+	{
+		BdrFlushPosition *pos =
+			dlist_container(BdrFlushPosition, node, iter.cur);
+
+		*write = pos->remote_end;
+
+		if (pos->local_end <= local_flush)
+		{
+			*flush = pos->remote_end;
+			dlist_delete(iter.cur);
+			pfree(pos);
+		}
+		else
+		{
+			/*
+			 * Don't want to uselessly iterate over the rest of the list which
+			 * could potentially be long. Instead get the last element and
+			 * grab the write position from there.
+			 */
+			pos = dlist_tail_element(BdrFlushPosition, node,
+									 &bdr_lsn_association);
+			*write = pos->remote_end;
+			return false;
+		}
+	}
+
+	return dlist_is_empty(&bdr_lsn_association);
 }
 
 static void
@@ -440,9 +528,9 @@ bdr_worker_init(char *dbname)
 					PGC_BACKEND, PGC_S_OVERRIDE);
 
 	/* setup synchronous commit according to the user's wishes */
-	if (bdr_synchronous_commit != NULL)
-		SetConfigOption("synchronous_commit", bdr_synchronous_commit,
-						PGC_BACKEND, PGC_S_OVERRIDE);	/* other context? */
+	SetConfigOption("synchronous_commit",
+					bdr_synchronous_commit ? "local" : "off",
+					PGC_BACKEND, PGC_S_OVERRIDE);	/* other context? */
 }
 
 /*
@@ -755,12 +843,16 @@ bdr_apply_main(Datum main_arg)
 				}
 				else if (c == 'k')
 				{
-					XLogRecPtr	temp;
+					XLogRecPtr endpos;
+					bool reply_requested;
 
-					temp = pq_getmsgint64(&s);
+					endpos = pq_getmsgint64(&s);
+					/* timestamp = */ pq_getmsgint64(&s);
+					reply_requested = pq_getmsgbyte(&s);
 
-					bdr_send_feedback(streamConn, temp,
-								 GetCurrentTimestamp(), false, true);
+					bdr_send_feedback(streamConn, endpos,
+									  GetCurrentTimestamp(),
+									  reply_requested);
 				}
 				/* other message types are purposefully ignored */
 			}
@@ -768,12 +860,8 @@ bdr_apply_main(Datum main_arg)
 		}
 
 		/* confirm all writes at once */
-		/*
-		 * FIXME: we should only do that after an xlog flush... Yuck.
-		 */
-		if (last_received != InvalidXLogRecPtr)
-			bdr_send_feedback(streamConn, last_received,
-						 GetCurrentTimestamp(), false, false);
+		bdr_send_feedback(streamConn, last_received,
+						  GetCurrentTimestamp(), false);
 
 		/*
 		 * If the user has paused replication with bdr_apply_pause(), we
@@ -1586,11 +1674,11 @@ _PG_init(void)
 							   NULL, NULL, NULL);
 
 	/* XXX: make it changeable at SIGHUP? */
-	DefineCustomStringVariable("bdr.synchronous_commit",
+	DefineCustomBoolVariable("bdr.synchronous_commit",
 							   "bdr specific synchronous commit value",
 							   NULL,
 							   &bdr_synchronous_commit,
-							   NULL, PGC_POSTMASTER,
+							   false, PGC_POSTMASTER,
 							   0,
 							   NULL, NULL, NULL);
 
