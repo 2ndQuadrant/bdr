@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # bdr_initial_load copies data from a running BDR instance's database to the empty
 # local database that's due to be joined into the BDR group.
