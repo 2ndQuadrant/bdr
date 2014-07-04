@@ -66,6 +66,8 @@ check: all | submake-regress submake-btree_gist regresscheck
 REGRESS_DDL_CHECKS=ddl/create ddl/alter_table
 
 regresscheck:
+	ln -fs $(top_srcdir)/contrib/bdr/pg_hba.conf .
+	mkdir -p results/ddl
 	$(pg_regress_check) \
 	    --temp-config $(top_srcdir)/contrib/bdr/bdr_ddlregress.conf \
 	    --temp-install=./tmp_check \
