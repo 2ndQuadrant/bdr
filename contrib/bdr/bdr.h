@@ -142,6 +142,8 @@ typedef struct BdrApplyWorker
 	 * BackgroundWorkerHandle, but it's an opaque struct.
 	 */
 	bool bgw_is_registered;
+
+	size_t perdb_worker_off;
 } BdrApplyWorker;
 
 /*
@@ -150,8 +152,11 @@ typedef struct BdrApplyWorker
  */
 typedef struct BdrPerdbWorker
 {
-	/* local & remote database name */
+	/* local database name */
 	NameData dbname;
+
+	/* number of outgoing connections from this database */
+	size_t nnodes;
 
 	size_t seq_slot;
 
@@ -276,12 +281,11 @@ extern void bdr_conflict_log(BdrConflictType conflict_type,
 
 /* sequence support */
 extern void bdr_sequencer_shmem_init(int nnodes, int sequencers);
-extern void bdr_sequencer_init(int seq_slot);
+extern void bdr_sequencer_init(int seq_slot, Size nnodes);
 extern void bdr_sequencer_vote(void);
 extern void bdr_sequencer_tally(void);
 extern void bdr_sequencer_start_elections(void);
 extern void bdr_sequencer_fill_sequences(void);
-extern int  bdr_node_count(void);
 
 extern void bdr_sequencer_wakeup(void);
 extern void bdr_schedule_eoxact_sequencer_wakeup(void);

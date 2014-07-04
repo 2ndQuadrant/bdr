@@ -95,6 +95,9 @@ typedef struct BdrLocksDBState {
 	/* db this slot is reserved for */
 	Oid			dboid;
 
+	/* number of nodes we're connected to */
+	Size		nnodes;
+
 	/* has startup progressed far enough to allow writes? */
 	bool		locked_and_loaded;
 
@@ -117,8 +120,8 @@ typedef struct BdrLocksCtl {
 	BdrLocksDBState dbstate[FLEXIBLE_ARRAY_MEMBER];
 } BdrLocksCtl;
 
-static BdrLocksDBState * bdr_locks_find_database(Oid dbid);
-static void bdr_locks_find_my_database(void);
+static BdrLocksDBState * bdr_locks_find_database(Oid dbid, bool create);
+static void bdr_locks_find_my_database(bool create);
 static void BdrExecutorStart(QueryDesc *queryDesc, int eflags);
 static void bdr_prepare_message(StringInfo s, BdrMessageType message_type);
 
@@ -190,7 +193,7 @@ bdr_locks_shmem_init(Size num_used_databases)
  * Find, and create if neccessary, the lock state entry for dboid.
  */
 static BdrLocksDBState*
-bdr_locks_find_database(Oid dboid)
+bdr_locks_find_database(Oid dboid, bool create)
 {
 	int off;
 	int free_off = -1;
@@ -209,6 +212,9 @@ bdr_locks_find_database(Oid dboid)
 			free_off = off;
 	}
 
+	if (!create)
+		elog(ERROR, "database %u is not configured for bdr", dboid);
+
 	if (free_off != -1)
 	{
 		BdrLocksDBState *db = &bdr_locks_ctl->dbstate[free_off];
@@ -220,7 +226,7 @@ bdr_locks_find_database(Oid dboid)
 }
 
 static void
-bdr_locks_find_my_database(void)
+bdr_locks_find_my_database(bool create)
 {
 	Assert(IsUnderPostmaster);
 	Assert(OidIsValid(MyDatabaseId));
@@ -228,7 +234,7 @@ bdr_locks_find_my_database(void)
 	if (bdr_my_locks_database != NULL)
 		return;
 
-	bdr_my_locks_database = bdr_locks_find_database(MyDatabaseId);
+	bdr_my_locks_database = bdr_locks_find_database(MyDatabaseId, create);
 	Assert(bdr_my_locks_database != NULL);
 }
 
@@ -236,7 +242,7 @@ bdr_locks_find_my_database(void)
  *
  */
 void
-bdr_locks_startup(void)
+bdr_locks_startup(Size nnodes)
 {
 	Relation		rel;
 	SysScanDesc		scan;
@@ -249,7 +255,7 @@ bdr_locks_startup(void)
 	Assert(IsUnderPostmaster);
 	Assert(!IsTransactionState());
 
-	bdr_locks_find_my_database();
+	bdr_locks_find_my_database(true);
 
 	/*
 	 * Don't initialize database level lock state twice. An crash requiring
@@ -257,6 +263,8 @@ bdr_locks_startup(void)
 	 */
 	if (bdr_my_locks_database->locked_and_loaded)
 		return;
+
+	bdr_my_locks_database->nnodes = nnodes;
 
 	initStringInfo(&s);
 
@@ -300,7 +308,8 @@ bdr_locks_startup(void)
 
 		if (strcmp(state, "acquired") == 0)
 		{
-			BdrLocksDBState *db = bdr_locks_find_database(DatumGetObjectId(values[7]));
+			BdrLocksDBState *db =
+				bdr_locks_find_database(DatumGetObjectId(values[7]), false);
 			db->lock_holder = node_id;
 			db->lockcount++;
 			elog(DEBUG1, "reacquiring DDL lock held before shutdown");
@@ -321,7 +330,7 @@ bdr_locks_startup(void)
 			XLogFlush(lsn);
 			resetStringInfo(&s);
 
-			db = bdr_locks_find_database(DatumGetObjectId(values[7]));
+			db = bdr_locks_find_database(DatumGetObjectId(values[7]), false);
 			db->lock_holder = node_id;
 			db->lockcount++;
 			db->replay_confirmed = 0;
@@ -340,7 +349,6 @@ bdr_locks_startup(void)
 	CommitTransactionCommand();
 
 	/* allow local DML */
-	bdr_locks_find_my_database();
 	bdr_my_locks_database->locked_and_loaded = true;
 }
 
@@ -451,7 +459,7 @@ bdr_acquire_ddl_lock(void)
 
 	initStringInfo(&s);
 
-	bdr_locks_find_my_database();
+	bdr_locks_find_my_database(false);
 
 	/* send message about ddl lock */
 	bdr_prepare_message(&s, BDR_MESSAGE_ACQUIRE_LOCK);
@@ -501,7 +509,7 @@ bdr_acquire_ddl_lock(void)
 		}
 
 		/* wait till all have given their consent */
-		if (bdr_my_locks_database->acquire_confirmed >= bdr_node_count())
+		if (bdr_my_locks_database->acquire_confirmed >= bdr_my_locks_database->nnodes)
 		{
 			LWLockRelease(bdr_locks_ctl->lock);
 			break;
@@ -576,7 +584,7 @@ bdr_process_acquire_ddl_lock(uint64 sysid, TimeLineID tli, Oid datid)
 	if (!check_is_my_origin_node(sysid, tli, datid))
 		return;
 
-	bdr_locks_find_my_database();
+	bdr_locks_find_my_database(false);
 
 	initStringInfo(&s);
 
@@ -752,7 +760,7 @@ bdr_process_release_ddl_lock(uint64 origin_sysid, TimeLineID origin_tli, Oid ori
 
 	/* FIXME: check db */
 
-	bdr_locks_find_my_database();
+	bdr_locks_find_my_database(false);
 
 	initStringInfo(&s);
 
@@ -816,14 +824,14 @@ bdr_process_confirm_ddl_lock(uint64 origin_sysid, TimeLineID origin_tli, Oid ori
 	if (!check_is_my_node(lock_sysid, lock_tli, lock_datid))
 		return;
 
-	bdr_locks_find_my_database();
+	bdr_locks_find_my_database(false);
 
 	LWLockAcquire(bdr_locks_ctl->lock, LW_EXCLUSIVE);
 	bdr_my_locks_database->acquire_confirmed++;
 	latch = bdr_my_locks_database->waiting_latch;
 
-	elog(DEBUG1, "received ddl lock confirmation number %d/%d",
-		 bdr_my_locks_database->acquire_confirmed, bdr_node_count());
+	elog(DEBUG1, "received ddl lock confirmation number %d/%zu",
+		 bdr_my_locks_database->acquire_confirmed, bdr_my_locks_database->nnodes);
 	LWLockRelease(bdr_locks_ctl->lock);
 
 	if(latch)
@@ -844,7 +852,7 @@ bdr_process_decline_ddl_lock(uint64 origin_sysid, TimeLineID origin_tli, Oid ori
 	if (!check_is_my_origin_node(origin_sysid, origin_tli, origin_datid))
 		return;
 
-	bdr_locks_find_my_database();
+	bdr_locks_find_my_database(false);
 
 	LWLockAcquire(bdr_locks_ctl->lock, LW_EXCLUSIVE);
 	bdr_my_locks_database->acquire_declined++;
@@ -864,7 +872,7 @@ bdr_process_request_replay_confirm(uint64 sysid, TimeLineID tli,
 	if (!check_is_my_origin_node(sysid, tli, datid))
 		return;
 
-	bdr_locks_find_my_database();
+	bdr_locks_find_my_database(false);
 
 	initStringInfo(&s);
 	bdr_prepare_message(&s, BDR_MESSAGE_REPLAY_CONFIRM);
@@ -882,7 +890,7 @@ bdr_process_replay_confirm(uint64 sysid, TimeLineID tli,
 	if (!check_is_my_origin_node(sysid, tli, datid))
 		return;
 
-	bdr_locks_find_my_database();
+	bdr_locks_find_my_database(false);
 
 	LWLockAcquire(bdr_locks_ctl->lock, LW_EXCLUSIVE);
 	elog(DEBUG1, "processing replay confirmation for request %X/%X at %X/%X",
@@ -896,11 +904,12 @@ bdr_process_replay_confirm(uint64 sysid, TimeLineID tli,
 	{
 		bdr_my_locks_database->replay_confirmed++;
 
-		elog(DEBUG1, "confirming replay %u/%u",
-			 bdr_my_locks_database->replay_confirmed, bdr_node_count());
+		elog(DEBUG1, "confirming replay %u/%zu",
+			 bdr_my_locks_database->replay_confirmed,
+			 bdr_my_locks_database->nnodes);
 
 		quorum_reached =
-			bdr_my_locks_database->replay_confirmed >= bdr_node_count();
+			bdr_my_locks_database->replay_confirmed >= bdr_my_locks_database->nnodes;
 	}
 	LWLockRelease(bdr_locks_ctl->lock);
 
@@ -1003,7 +1012,7 @@ bdr_locks_process_remote_startup(uint64 sysid, TimeLineID tli, Oid datid)
 	HeapTuple tuple;
 	StringInfoData s;
 
-	bdr_locks_find_my_database();
+	bdr_locks_find_my_database(false);
 
 	initStringInfo(&s);
 
@@ -1056,7 +1065,7 @@ BdrExecutorStart(QueryDesc *queryDesc, int eflags)
 	if (!performs_writes)
 		goto done;
 
-	bdr_locks_find_my_database();
+	bdr_locks_find_my_database(false);
 
 	/* is the database still starting up and hasn't loaded locks */
 	if (!bdr_my_locks_database->locked_and_loaded)
