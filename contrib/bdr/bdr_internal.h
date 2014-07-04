@@ -10,6 +10,8 @@
 #ifndef BDR_INTERNAL_H
 #define BDR_INTERNAL_H
 
+#include "lib/ilist.h"
+
 #define BDR_SLOT_NAME_FORMAT "bdr_%u_%s_%u_%u__%s"
 #define BDR_NODE_ID_FORMAT "bdr_"UINT64_FORMAT"_%u_%u_%u_%s"
 
@@ -30,4 +32,13 @@ typedef struct BdrConnectionConfig
 	bool is_valid;
 } BdrConnectionConfig;
 
+typedef struct BdrFlushPosition
+{
+	dlist_node node;
+	XLogRecPtr local_end;
+	XLogRecPtr remote_end;
+} BdrFlushPosition;
+
+extern dlist_head bdr_lsn_association;
+extern bool bdr_get_flush_position(XLogRecPtr *write, XLogRecPtr *flush);
 #endif   /* BDR_INTERNAL_H */
