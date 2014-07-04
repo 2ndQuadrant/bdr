@@ -78,7 +78,7 @@ static char *escapeConninfoValue(const char *val);
 
 static bool parse_bool(const char *value, bool *result);
 static bool parse_bool_with_len(const char *value, size_t len, bool *result);
-static char *trimwhitespace(char *str);
+static char *trimwhitespace(const char *str);
 static char	**split_list_guc(char *str, size_t *count);
 
 static bool is_pg_dir(char *path);
@@ -842,7 +842,7 @@ char *
 get_conninfo(char *dbname, char *dbhost, char *dbport, char *dbuser)
 {
 	char		*ret;
-	int			argcount = 4;	/* dbname, host, user, port, password */
+	int			argcount = 4;	/* dbname, host, user, port */
 	int			i;
 	const char **keywords;
 	const char **values;
@@ -886,11 +886,11 @@ get_conninfo(char *dbname, char *dbhost, char *dbport, char *dbuser)
 	{
 		keywords = pg_malloc0((argcount + 1) * sizeof(*keywords));
 		values = pg_malloc0((argcount + 1) * sizeof(*values));
-	}
 
-	keywords[i] = "dbname";
-	values[i] = dbname == NULL ? "postgres" : dbname;
-	i++;
+		keywords[i] = "dbname";
+		values[i] = dbname == NULL ? "postgres" : dbname;
+		i++;
+	}
 
 	if (dbhost)
 	{
@@ -1125,9 +1125,9 @@ parse_bool_with_len(const char *value, size_t len, bool *result)
  * does not change input
  */
 static char *
-trimwhitespace(char *str)
+trimwhitespace(const char *str)
 {
-	char *end;
+	const char *end;
 	char *res;
 	size_t len;
 
@@ -1146,7 +1146,7 @@ trimwhitespace(char *str)
 		return NULL;
 
 	len++;
-	res = pg_malloc(len);
+	res = pg_malloc(len+1);
 	memcpy(res, str, len);
 	res[len] = '\0';
 
