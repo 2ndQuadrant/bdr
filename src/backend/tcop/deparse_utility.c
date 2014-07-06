@@ -1780,7 +1780,7 @@ deparse_CreateTrigStmt(Oid objectId, Node *parsetree)
 	append_string_object(trigger, "for_each",
 						 node->row ? "ROW" : "STATEMENT");
 
-	tmp = new_objtree_VA("WHEN %{clause}s", 0);
+	tmp = new_objtree_VA("WHEN (%{clause}s)", 0);
 	if (node->whenClause)
 	{
 		Node	   *whenClause;
