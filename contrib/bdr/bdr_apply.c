@@ -1669,10 +1669,13 @@ read_tuple_parts(StringInfo s, BDRRelation *rel, BDRTupleData *tup)
 		{
 			case 'n': /* null */
 				/* already marked as null */
+				tup->values[i] = 0xdeadbeef;
 				break;
 			case 'u': /* unchanged column */
-				tup->isnull[i] = false;
+				tup->isnull[i] = true;
 				tup->changed[i] = false;
+				tup->values[i] = 0xdeadbeef; /* make bad usage more obvious */
+
 				break;
 
 			case 'b': /* binary format */
