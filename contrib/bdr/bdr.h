@@ -111,6 +111,13 @@ typedef struct BDRRelation
 	size_t		conflict_handlers_len;
 } BDRRelation;
 
+typedef struct BDRTupleData
+{
+	Datum		values[MaxTupleAttributeNumber];
+	bool		isnull[MaxTupleAttributeNumber];
+	bool		changed[MaxTupleAttributeNumber];
+} BDRTupleData;
+
 /*
  * BdrApplyWorker describes a BDR worker connection.
  *
@@ -258,10 +265,10 @@ extern void UserTableUpdateOpenIndexes(struct EState *estate,
 									   struct TupleTableSlot *slot);
 extern void build_index_scan_keys(struct EState *estate,
 								  struct ScanKeyData **scan_keys,
-								  struct TupleTableSlot *slot);
+								  BDRTupleData *tup);
 extern bool build_index_scan_key(struct ScanKeyData *skey, Relation rel,
 								 Relation idxrel,
-								 struct TupleTableSlot *slot);
+								 BDRTupleData *tup);
 extern bool find_pkey_tuple(struct ScanKeyData *skey, BDRRelation *rel,
 							Relation idxrel, struct TupleTableSlot *slot,
 							bool lock, enum LockTupleMode mode);
