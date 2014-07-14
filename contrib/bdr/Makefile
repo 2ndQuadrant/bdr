@@ -63,17 +63,18 @@ additional-clean:
 
 check: all | submake-regress submake-btree_gist regresscheck
 
-REGRESS_DDL_CHECKS=ddl/create ddl/alter_table
+REGRESSCHECKS=ddl/create ddl/alter_table dml/toasted
 
 regresscheck:
 	ln -fs $(top_srcdir)/contrib/bdr/pg_hba.conf .
 	mkdir -p results/ddl
+	mkdir -p results/dml
 	$(pg_regress_check) \
 	    --temp-config $(top_srcdir)/contrib/bdr/bdr_ddlregress.conf \
 	    --temp-install=./tmp_check \
 	    --extra-install=contrib/btree_gist \
 	    --extra-install=contrib/bdr \
-	    $(REGRESS_DDL_CHECKS)
+	    $(REGRESSCHECKS)
 
 PHONY: submake-regress
 
