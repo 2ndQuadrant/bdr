@@ -934,12 +934,21 @@ bdr_create_con_gucs(char  *name,
 
 	Assert(process_shared_preload_libraries_in_progress);
 
+	/* Ensure the connection name is legal */
+	if (strchr(name, '_') != NULL)
+	{
+		ereport(ERROR,
+				(errmsg("bdr.connections entry '%s' contains the '_' character, which is not permitted", name)));
+	}
+
+	/* allocate storage for connection parameters */
 	opts = palloc0(sizeof(BdrConnectionConfig));
 	opts->is_valid = false;
 	*out_config = opts;
 
 	opts->name = pstrdup(name);
 
+	/* Define GUCs for this connection */
 	sprintf(optname_dsn, "bdr.%s_dsn", name);
 	DefineCustomStringVariable(optname_dsn,
 							   optname_dsn,
