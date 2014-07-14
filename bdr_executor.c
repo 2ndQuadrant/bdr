@@ -111,7 +111,7 @@ UserTableUpdateOpenIndexes(EState *estate, TupleTableSlot *slot)
 }
 
 void
-build_index_scan_keys(EState *estate, ScanKey *scan_keys, TupleTableSlot *slot)
+build_index_scan_keys(EState *estate, ScanKey *scan_keys, BDRTupleData *tup)
 {
 	ResultRelInfo *relinfo;
 	int i;
@@ -142,7 +142,7 @@ build_index_scan_keys(EState *estate, ScanKey *scan_keys, TupleTableSlot *slot)
 		if (build_index_scan_key(scan_keys[i],
 								  relinfo->ri_RelationDesc,
 								  relinfo->ri_IndexRelationDescs[i],
-								  slot))
+								  tup))
 		{
 			pfree(scan_keys[i]);
 			scan_keys[i] = NULL;
@@ -158,7 +158,7 @@ build_index_scan_keys(EState *estate, ScanKey *scan_keys, TupleTableSlot *slot)
  * Returns whether any column contains NULLs.
  */
 bool
-build_index_scan_key(ScanKey skey, Relation rel, Relation idxrel, TupleTableSlot *slot)
+build_index_scan_key(ScanKey skey, Relation rel, Relation idxrel, BDRTupleData *tup)
 {
 	int			attoff;
 	Datum		indclassDatum;
@@ -166,7 +166,6 @@ build_index_scan_key(ScanKey skey, Relation rel, Relation idxrel, TupleTableSlot
 	bool		isnull;
 	oidvector  *opclass;
 	int2vector  *indkey;
-	HeapTuple	key = slot->tts_tuple;
 	bool		hasnulls = false;
 
 	indclassDatum = SysCacheGetAttr(INDEXRELID, idxrel->rd_indextuple,
@@ -208,9 +207,9 @@ build_index_scan_key(ScanKey skey, Relation rel, Relation idxrel, TupleTableSlot
 					pkattno,
 					BTEqualStrategyNumber,
 					regop,
-					fastgetattr(key, mainattno,
-								RelationGetDescr(rel), &isnull));
-		if (isnull)
+					tup->values[mainattno - 1]);
+
+		if (tup->isnull[mainattno])
 		{
 			hasnulls = true;
 			skey[attoff].sk_flags |= SK_ISNULL;
