@@ -17,6 +17,7 @@ use File::Basename;
 use Config;
 use VSObjectFactory;
 use List::Util qw(first);
+use POSIX qw/strftime/;
 
 use Exporter;
 our (@ISA, @EXPORT_OK);
@@ -531,6 +532,23 @@ sub mkvcbuild
 	$bdr->AddLibrary('wsock32.lib');
 	$bdr->AddIncludeDir('src\interfaces\libpq');
 	$bdr->AddReference($libpq);
+	if (Solution::IsNewer("contrib/bdr/bdr_version.h", "contrib/bdr/bdr_version.h.in"))
+	{
+		print "Building bdr_version.h from bdr_version.h.in (contrib/bdr)...\n";
+		my $date = strftime("%Y-%m-%d", localtime);
+		my $githash = `git rev-parse --short HEAD`;
+		chomp($githash);
+		my $cont = Project::read_file("contrib/bdr/bdr_version.h.in");
+		my $dn   = "bdr_version.h";
+		$cont =~ s/BDR_VERSION_DATE.*/BDR_VERSION_DATE "$date"/;
+		$cont =~ s/BDR_VERSION_GITHASH.*/BDR_VERSION_GITHASH "$githash"/;
+		my $o;
+		open($o, ">contrib/bdr/bdr_version.h")
+		  || croak "Could not write to contrib/bdr/bdr_version.h";
+		print $o $cont;
+		close($o);
+	}
+
 
 	my $D;
 	opendir($D, 'contrib') || croak "Could not opendir on contrib!\n";
