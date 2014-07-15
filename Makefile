@@ -66,7 +66,7 @@ check: all | submake-regress submake-btree_gist regresscheck
 REGRESSCHECKS=ddl/create ddl/alter_table dml/toasted
 
 regresscheck:
-	ln -fs $(top_srcdir)/contrib/bdr/pg_hba.conf .
+	[ -e pg_hba.conf ] || ln -s $(top_srcdir)/contrib/bdr/pg_hba.conf .
 	mkdir -p results/ddl
 	mkdir -p results/dml
 	$(pg_regress_check) \
