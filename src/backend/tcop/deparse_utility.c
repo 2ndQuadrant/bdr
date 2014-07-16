@@ -3225,7 +3225,7 @@ deparse_Seq_Cache(ObjTree *parent, Form_pg_sequence seqdata)
 	ObjTree	   *tmp;
 	char	   *tmpstr;
 
-	tmpstr = psprintf("%lu", seqdata->cache_value);
+	tmpstr = psprintf(INT64_FORMAT, seqdata->cache_value);
 	tmp = new_objtree_VA("CACHE %{value}s",
 						 2,
 						 "clause", ObjTypeString, "cache",
@@ -3252,7 +3252,7 @@ deparse_Seq_IncrementBy(ObjTree *parent, Form_pg_sequence seqdata)
 	ObjTree	   *tmp;
 	char	   *tmpstr;
 
-	tmpstr = psprintf("%lu", seqdata->increment_by);
+	tmpstr = psprintf(INT64_FORMAT, seqdata->increment_by);
 	tmp = new_objtree_VA("INCREMENT BY %{value}s",
 						 2,
 						 "clause", ObjTypeString, "increment_by",
@@ -3266,7 +3266,7 @@ deparse_Seq_Minvalue(ObjTree *parent, Form_pg_sequence seqdata)
 	ObjTree	   *tmp;
 	char	   *tmpstr;
 
-	tmpstr = psprintf("%lu", seqdata->min_value);
+	tmpstr = psprintf(INT64_FORMAT, seqdata->min_value);
 	tmp = new_objtree_VA("MINVALUE %{value}s",
 						 2,
 						 "clause", ObjTypeString, "minvalue",
@@ -3280,7 +3280,7 @@ deparse_Seq_Maxvalue(ObjTree *parent, Form_pg_sequence seqdata)
 	ObjTree	   *tmp;
 	char	   *tmpstr;
 
-	tmpstr = psprintf("%lu", seqdata->max_value);
+	tmpstr = psprintf(INT64_FORMAT, seqdata->max_value);
 	tmp = new_objtree_VA("MAXVALUE %{value}s",
 						 2,
 						 "clause", ObjTypeString, "maxvalue",
@@ -3294,7 +3294,7 @@ deparse_Seq_Startwith(ObjTree *parent, Form_pg_sequence seqdata)
 	ObjTree	   *tmp;
 	char	   *tmpstr;
 
-	tmpstr = psprintf("%lu", seqdata->start_value);
+	tmpstr = psprintf(INT64_FORMAT, seqdata->start_value);
 	tmp = new_objtree_VA("START WITH %{value}s",
 						 2,
 						 "clause", ObjTypeString, "start",
@@ -3308,7 +3308,7 @@ deparse_Seq_Restart(ObjTree *parent, Form_pg_sequence seqdata)
 	ObjTree	   *tmp;
 	char	   *tmpstr;
 
-	tmpstr = psprintf("%lu", seqdata->last_value);
+	tmpstr = psprintf(INT64_FORMAT, seqdata->last_value);
 	tmp = new_objtree_VA("RESTART %{value}s",
 						 2,
 						 "clause", ObjTypeString, "restart",
