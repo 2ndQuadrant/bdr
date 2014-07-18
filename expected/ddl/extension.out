@@ -1,0 +1,68 @@
+\c postgres
+-- create nonexistant extension
+CREATE EXTENSION pg_trgm;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\c regression
+\dx pg_trgm
+                                  List of installed extensions
+  Name   | Version | Schema |                            Description                            
+---------+---------+--------+-------------------------------------------------------------------
+ pg_trgm | 1.1     | public | text similarity measurement and index searching based on trigrams
+(1 row)
+
+-- drop and recreate using CINE
+DROP EXTENSION pg_trgm;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\c postgres
+\dx pg_trgm
+     List of installed extensions
+ Name | Version | Schema | Description 
+------+---------+--------+-------------
+(0 rows)
+
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\c regression
+\dx pg_trgm
+                                  List of installed extensions
+  Name   | Version | Schema |                            Description                            
+---------+---------+--------+-------------------------------------------------------------------
+ pg_trgm | 1.1     | public | text similarity measurement and index searching based on trigrams
+(1 row)
+
+-- CINE existing extension
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+NOTICE:  extension "pg_trgm" already exists, skipping
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\c postgres
+\dx pg_trgm
+                                  List of installed extensions
+  Name   | Version | Schema |                            Description                            
+---------+---------+--------+-------------------------------------------------------------------
+ pg_trgm | 1.1     | public | text similarity measurement and index searching based on trigrams
+(1 row)
+
