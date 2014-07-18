@@ -50,6 +50,9 @@ submake-regress:
 submake-btree_gist:
 	$(MAKE) -C $(top_builddir)/contrib/btree_gist
 
+submake-pg_trgm:
+	$(MAKE) -C $(top_builddir)/contrib/pg_trgm
+
 bdr_init_copy: bdr_init_copy.o | submake-libpq submake-libpgport
 	$(CC) $(CFLAGS) $^ $(LDFLAGS) $(LDFLAGS_EX) $(libpq_pgport) $(LIBS) -o $@$(X)
 
@@ -61,9 +64,9 @@ additional-clean:
 	rm -f bdr_init_copy$(X) bdr_init_copy.o
 	rm -f bdr_version.h
 
-check: all | submake-regress submake-btree_gist regresscheck
+check: all | submake-regress submake-btree_gist submake-pg_trgm regresscheck
 
-REGRESSCHECKS=ddl/create ddl/alter_table dml/toasted
+REGRESSCHECKS=ddl/create ddl/alter_table ddl/extension dml/toasted
 
 regresscheck:
 	[ -e pg_hba.conf ] || ln -s $(top_srcdir)/contrib/bdr/pg_hba.conf .
@@ -74,6 +77,7 @@ regresscheck:
 	    --temp-install=./tmp_check \
 	    --extra-install=contrib/btree_gist \
 	    --extra-install=contrib/bdr \
+	    --extra-install=contrib/pg_trgm \
 	    $(REGRESSCHECKS)
 
 PHONY: submake-regress
