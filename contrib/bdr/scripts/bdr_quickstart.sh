@@ -7,6 +7,8 @@ set -e -u
 
 GIT_REF="bdr-next"
 
+BDR_VERSION_SUFFIX="_bdr0601"
+
 # If you have an existing local PostgreSQL checkout you can put it here
 # to speed the clone or set it in the environment:
 #
@@ -99,15 +101,15 @@ fi
 # causing issues if we're on a detached head.
 git reset --hard "origin/$GIT_REF"
 
-./configure --prefix=$BASEDIR/bdr 2>&1 | tee -a "$LOGFILE"
+./configure --prefix=$BASEDIR/bdr --with-extra-version="$BDR_VERSION_SUFFIX" 2>&1 | tee -a "$LOGFILE"
 make install 2>&1 | tee -a "$LOGFILE"
 make -C contrib install 2>&1 | tee -a "$LOGFILE"
 
 # Did it install?
-if ! $BASEDIR/bdr/bin/psql --version | grep -i -q bdr; then
+if ! $BASEDIR/bdr/bin/psql --version | grep -i -q "$BDR_VERSION_SUFFIX"; then
     trap "" EXIT
     echo "Installation seemed to succeed, but the psql binary didn't report a "
-    echo "BDR version number or didn't run successfully:"
+    echo "version containing $BDR_VERSION_SUFFIX or didn't run successfully:"
     $BASEDIR/bdr/bin/psql --version
     echo "Check $BASEDIR/install.log for details."
     exit 1
