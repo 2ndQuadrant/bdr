@@ -325,7 +325,8 @@ process_remote_commit(StringInfo s)
 	 * If we're in catchup mode, see if the commit is relayed from elsewhere
 	 * and advance the appropriate slot.
 	 */
-	if (remote_origin_id != replication_origin_id)
+	if (remote_origin_id != InvalidRepNodeId &&
+		remote_origin_id != replication_origin_id)
 	{
 		/*
 		 * The row isn't from the immediate upstream; advance the slot of the
