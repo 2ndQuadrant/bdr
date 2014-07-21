@@ -1,5 +1,3 @@
-SELECT pg_sleep(5);
-
 CREATE TABLE test_tbl(pk int primary key, dropping_col1 text, dropping_col2 text);
 
 ALTER TABLE test_tbl ADD COLUMN col1 text;
