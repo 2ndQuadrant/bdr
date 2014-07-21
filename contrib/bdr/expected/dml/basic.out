@@ -1,0 +1,44 @@
+CREATE TABLE basic_dml (
+    id serial primary key,
+    other integer
+);
+-- check basic insert replication
+INSERT INTO basic_dml(other) VALUES (5), (4), (3), (2), (1);
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\c postgres
+SELECT id, other FROM basic_dml ORDER BY id;
+ id | other 
+----+-------
+  1 |     5
+  2 |     4
+  3 |     3
+  4 |     2
+  5 |     1
+(5 rows)
+
+-- delete one row
+DELETE FROM basic_dml WHERE id = 2;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\c regression
+SELECT id, other FROM basic_dml ORDER BY id;
+ id | other 
+----+-------
+  1 |     5
+  3 |     3
+  4 |     2
+  5 |     1
+(4 rows)
+
+DROP TABLE basic_dml;
