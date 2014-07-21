@@ -115,7 +115,7 @@ static void check_apply_update(RepNodeId local_node_id, TimestampTz local_ts,
 				   bool *perform_update, bool *log_update,
 				   BdrConflictResolution *resolution);
 static void do_log_update(RepNodeId local_node_id, bool apply_update,
-			  TimestampTz ts, Relation idxrel, BDRRelation *rel,
+			  TimestampTz ts, BDRRelation *rel,
 			  HeapTuple old_key, HeapTuple user_tuple);
 static void do_apply_update(BDRRelation *rel, EState *estate, TupleTableSlot *oldslot,
 				TupleTableSlot *newslot);
@@ -728,7 +728,7 @@ process_remote_update(StringInfo s)
 
 		if (log_update)
 			do_log_update(local_node_id, apply_update, local_ts,
-						  idxrel, rel, oldslot->tts_tuple, user_tuple);
+						  rel, oldslot->tts_tuple, user_tuple);
 
 		if (apply_update)
 		{
@@ -1198,7 +1198,7 @@ process_remote_message(StringInfo s)
 
 static void
 do_log_update(RepNodeId local_node_id, bool apply_update, TimestampTz ts,
-			  Relation idxrel, BDRRelation *rel, HeapTuple old_key,
+			  BDRRelation *rel, HeapTuple old_key,
 			  HeapTuple user_tuple)
 {
 	StringInfoData s_key,
@@ -1231,7 +1231,7 @@ do_log_update(RepNodeId local_node_id, bool apply_update, TimestampTz ts,
 		   MAXDATELEN);
 
 	initStringInfo(&s_key);
-	tuple_to_stringinfo(&s_key, RelationGetDescr(idxrel), old_key);
+	tuple_to_stringinfo(&s_key, RelationGetDescr(rel->rel), old_key);
 
 	if (user_tuple != NULL)
 	{
