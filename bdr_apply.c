@@ -705,9 +705,9 @@ process_remote_update(StringInfo s)
 
 #ifdef VERBOSE_UPDATE
 		initStringInfo(&o);
-		tuple_to_stringinfo(&o, RelationGetDescr(rel), oldslot->tts_tuple);
+		tuple_to_stringinfo(&o, RelationGetDescr(rel->rel), oldslot->tts_tuple);
 		appendStringInfo(&o, " to");
-		tuple_to_stringinfo(&o, RelationGetDescr(rel), remote_tuple);
+		tuple_to_stringinfo(&o, RelationGetDescr(rel->rel), remote_tuple);
 		elog(DEBUG1, "UPDATE:%s", o.data);
 		resetStringInfo(&o);
 #endif
@@ -737,7 +737,7 @@ process_remote_update(StringInfo s)
 			{
 #ifdef VERBOSE_UPDATE
 				initStringInfo(&o);
-				tuple_to_stringinfo(&o, RelationGetDescr(rel), user_tuple);
+				tuple_to_stringinfo(&o, RelationGetDescr(rel->rel), user_tuple);
 				elog(DEBUG1, "USER tuple:%s", o.data);
 				resetStringInfo(&o);
 #endif
