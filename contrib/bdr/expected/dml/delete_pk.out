@@ -1,0 +1,78 @@
+-- RT #37826 "issuing a DELETE broken replication"
+SELECT pg_sleep(10);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+CREATE TABLE test (
+    id TEXT,
+    ts TIMESTAMP DEFAULT ('now'::TEXT)::TIMESTAMP,
+    PRIMARY KEY (id)
+	);
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+-- INSERT data
+INSERT INTO test (id, ts) VALUES ('row', '1970-07-21 12:00:00');
+INSERT INTO test (id) VALUES ('broken');
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\c postgres
+SELECT id FROM test ORDER BY ts;
+   id   
+--------
+ row
+ broken
+(2 rows)
+
+-- DELETE one row by PK
+DELETE FROM test WHERE id = 'row';
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+SELECT id FROM test ORDER BY ts;
+   id   
+--------
+ broken
+(1 row)
+
+\c regression
+SELECT id FROM test ORDER BY ts;
+   id   
+--------
+ broken
+(1 row)
+
+DELETE FROM test WHERE id = 'broken';
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+SELECT id FROM test ORDER BY ts;
+ id 
+----
+(0 rows)
+
+\c postgres
+SELECT id FROM test ORDER BY ts;
+ id 
+----
+(0 rows)
+
