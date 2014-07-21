@@ -47,6 +47,12 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_
 \c regression
 \d+ test_tbl_serial
 
+CREATE TABLE test_tbl_serial(val SERIAL);
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+\d+ test_tbl_serial
+\c postgres
+\d+ test_tbl_serial
+
 CREATE TABLE test_tbl_serial_pk(val SERIAL PRIMARY KEY);
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
 \d+ test_tbl_serial_pk

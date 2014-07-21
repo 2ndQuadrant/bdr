@@ -322,6 +322,8 @@ bdr_queue_ddl_commands(PG_FUNCTION_ARGS)
 	int		res;
 	int		i;
 	MemoryContext	tupcxt;
+	uint32	nprocessed;
+	SPITupleTable *tuptable;
 
 	/*
 	 * If we're currently replaying something from a remote node, don't queue
@@ -376,7 +378,9 @@ bdr_queue_ddl_commands(PG_FUNCTION_ARGS)
 	 * it.
 	 */
 	MemoryContextSwitchTo(tupcxt);
-	for (i = 0; i < SPI_processed; i++)
+	nprocessed = SPI_processed;
+	tuptable = SPI_tuptable;
+	for (i = 0; i < nprocessed; i++)
 	{
 		HeapTuple	newtup = NULL;
 		Datum		cmdvalues[6];	/* # cols returned by above query */
@@ -387,12 +391,12 @@ bdr_queue_ddl_commands(PG_FUNCTION_ARGS)
 		MemoryContextReset(tupcxt);
 
 		/* this is the tuple reported by event triggers */
-		heap_deform_tuple(SPI_tuptable->vals[i], SPI_tuptable->tupdesc,
+		heap_deform_tuple(tuptable->vals[i], tuptable->tupdesc,
 						  cmdvalues, cmdnulls);
 
 		/* if a temp object, ignore it */
 		if (!cmdnulls[2] &&
-			(strcmp(TextDatumGetCString(cmdvalues[1]), "pg_temp") == 0))
+			(strcmp(TextDatumGetCString(cmdvalues[2]), "pg_temp") == 0))
 			continue;
 
 		/* if in_extension, ignore the command */

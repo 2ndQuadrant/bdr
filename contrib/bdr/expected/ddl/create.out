@@ -152,6 +152,31 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_
 \d+ test_tbl_serial
 \c regression
 \d+ test_tbl_serial
+CREATE TABLE test_tbl_serial(val SERIAL);
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\d+ test_tbl_serial
+                                             Table "public.test_tbl_serial"
+ Column |  Type   |                           Modifiers                           | Storage | Stats target | Description 
+--------+---------+---------------------------------------------------------------+---------+--------------+-------------
+ val    | integer | not null default nextval('test_tbl_serial_val_seq'::regclass) | plain   |              | 
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl_serial FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+\c postgres
+\d+ test_tbl_serial
+                                             Table "public.test_tbl_serial"
+ Column |  Type   |                           Modifiers                           | Storage | Stats target | Description 
+--------+---------+---------------------------------------------------------------+---------+--------------+-------------
+ val    | integer | not null default nextval('test_tbl_serial_val_seq'::regclass) | plain   |              | 
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl_serial FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
 CREATE TABLE test_tbl_serial_pk(val SERIAL PRIMARY KEY);
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
  pg_xlog_wait_remote_apply 
