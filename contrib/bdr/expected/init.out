@@ -1,0 +1,6 @@
+SELECT pg_sleep(5);
+ pg_sleep 
+----------
+ 
+(1 row)
+

@@ -1,5 +1,3 @@
-SELECT pg_sleep(10);
-
 CREATE TABLE test_tbl_simple_create(val int);
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
 \d+ test_tbl_simple_create
