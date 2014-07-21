@@ -209,7 +209,7 @@ build_index_scan_key(ScanKey skey, Relation rel, Relation idxrel, BDRTupleData *
 					regop,
 					tup->values[mainattno - 1]);
 
-		if (tup->isnull[mainattno])
+		if (tup->isnull[mainattno - 1])
 		{
 			hasnulls = true;
 			skey[attoff].sk_flags |= SK_ISNULL;
