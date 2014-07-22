@@ -1,10 +1,4 @@
 -- RT #37826 "issuing a DELETE broken replication"
-SELECT pg_sleep(10);
- pg_sleep 
-----------
- 
-(1 row)
-
 CREATE TABLE test (
     id TEXT,
     ts TIMESTAMP DEFAULT ('now'::TEXT)::TIMESTAMP,
