@@ -1,0 +1,101 @@
+-- ALTER TABLE DROP COLUMN (pk column)
+CREATE TABLE test (test_id SERIAL);
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\c postgres
+\d+ test
+                                                Table "public.test"
+ Column  |  Type   |                       Modifiers                        | Storage | Stats target | Description 
+---------+---------+--------------------------------------------------------+---------+--------------+-------------
+ test_id | integer | not null default nextval('test_test_id_seq'::regclass) | plain   |              | 
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+SELECT relname, relkind FROM pg_class WHERE relname = 'test_test_id_seq';
+     relname      | relkind 
+------------------+---------
+ test_test_id_seq | S
+(1 row)
+
+\d+ test_test_id_seq
+            Sequence "public.test_test_id_seq"
+    Column     |  Type   |        Value        | Storage  
+---------------+---------+---------------------+----------
+ sequence_name | name    | test_test_id_seq    | plain
+ last_value    | bigint  | 1                   | plain
+ start_value   | bigint  | 1                   | plain
+ increment_by  | bigint  | 1                   | plain
+ max_value     | bigint  | 9223372036854775807 | plain
+ min_value     | bigint  | 1                   | plain
+ cache_value   | bigint  | 1                   | plain
+ log_cnt       | bigint  | 0                   | plain
+ is_cycled     | boolean | f                   | plain
+ is_called     | boolean | f                   | plain
+ amdata        | bytea   |                     | extended
+Owned by: public.test.test_id
+
+ALTER TABLE test DROP COLUMN test_id;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\c regression
+\d+ test
+                       Table "public.test"
+ Column | Type | Modifiers | Storage | Stats target | Description 
+--------+------+-----------+---------+--------------+-------------
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+SELECT relname, relkind FROM pg_class WHERE relname = 'test_test_id_seq';
+ relname | relkind 
+---------+---------
+(0 rows)
+
+DROP TABLE test;
+-- ADD CONSTRAINT PRIMARY KEY
+CREATE TABLE test (test_id SERIAL NOT NULL);
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\c postgres
+\d+ test
+                                                Table "public.test"
+ Column  |  Type   |                       Modifiers                        | Storage | Stats target | Description 
+---------+---------+--------------------------------------------------------+---------+--------------+-------------
+ test_id | integer | not null default nextval('test_test_id_seq'::regclass) | plain   |              | 
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+ALTER TABLE test ADD CONSTRAINT test_pkey PRIMARY KEY (test_id);
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\c regression
+\d+ test
+                                                Table "public.test"
+ Column  |  Type   |                       Modifiers                        | Storage | Stats target | Description 
+---------+---------+--------------------------------------------------------+---------+--------------+-------------
+ test_id | integer | not null default nextval('test_test_id_seq'::regclass) | plain   |              | 
+Indexes:
+    "test_pkey" PRIMARY KEY, btree (test_id)
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+DROP TABLE test;

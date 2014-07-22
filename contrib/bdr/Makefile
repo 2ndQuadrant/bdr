@@ -67,7 +67,7 @@ additional-clean:
 check: all | submake-regress submake-btree_gist submake-pg_trgm regresscheck
 
 REGRESSCHECKS=init \
-	ddl/create ddl/alter_table ddl/extension \
+	ddl/create ddl/alter_table ddl/extension ddl/sequence \
 	dml/basic dml/delete_pk dml/toasted
 
 regresscheck:
