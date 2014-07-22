@@ -1116,7 +1116,7 @@ process_remote_message(StringInfo s)
 	if (origin_namelen != 0)
 		elog(ERROR, "no names expected yet");
 
-	elog(LOG, "message type %d from "UINT64_FORMAT":%u database %u at %X/%X",
+	elog(DEBUG1, "message type %d from "UINT64_FORMAT":%u database %u at %X/%X",
 		 type, origin_sysid, origin_tlid, origin_datid,
 		 (uint32) (lsn >> 32),
 		 (uint32) lsn);
