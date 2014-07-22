@@ -1671,6 +1671,14 @@ _PG_init(void)
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("bdr requires \"track_commit_timestamp\" to be enabled")));
 
+	/*
+	 * Force btree_gist to be loaded - its absolutely not required at this
+	 * point, but since it's required for BDR to be used it's much easier to
+	 * debug if we error out during start than failing during background
+	 * worker initialization.
+	 */
+	load_external_function("btree_gist", "gbtreekey_in", true, NULL);
+
 	/* guc's et al need to survive outside the lifetime of the library init */
 	old_context = MemoryContextSwitchTo(TopMemoryContext);
 
