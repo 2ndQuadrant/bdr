@@ -477,3 +477,4 @@ Indexes:
 Triggers:
     truncate_trigger AFTER TRUNCATE ON test_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
+DROP TABLE test_tbl;

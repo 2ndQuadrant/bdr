@@ -66,3 +66,4 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_
  pg_trgm | 1.1     | public | text similarity measurement and index searching based on trigrams
 (1 row)
 
+DROP EXTENSION pg_trgm;

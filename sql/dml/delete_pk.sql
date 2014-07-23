@@ -29,3 +29,5 @@ SELECT id FROM test ORDER BY ts;
 
 \c postgres
 SELECT id FROM test ORDER BY ts;
+
+DROP TABLE test;

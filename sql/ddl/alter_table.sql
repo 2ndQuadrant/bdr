@@ -117,3 +117,4 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_
 \c postgres
 \d+ test_tbl
 
+DROP TABLE test_tbl;
