@@ -153,4 +153,5 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_
 
 \dT+ test_t
 
-
+DROP TABLE test_tbl_serial;
+DROP TABLE test_tbl_serial_combined_pk;
