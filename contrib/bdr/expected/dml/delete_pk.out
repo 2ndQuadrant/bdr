@@ -70,3 +70,4 @@ SELECT id FROM test ORDER BY ts;
 ----
 (0 rows)
 
+DROP TABLE test;

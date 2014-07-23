@@ -532,3 +532,5 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_
 --------+------+---------------+------+----------+-------------------+-------------
 (0 rows)
 
+DROP TABLE test_tbl_serial;
+DROP TABLE test_tbl_serial_combined_pk;
