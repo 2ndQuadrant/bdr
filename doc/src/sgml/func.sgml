@@ -17543,7 +17543,7 @@ FOR EACH ROW EXECUTE PROCEDURE suppress_redundant_updates_trigger();
         <entry>Flag used to identify the root object of the deletion</entry>
        </row>
        <row>
-        <entry></literal>normal</literal></entry>
+        <entry><literal>normal</literal></entry>
         <entry><type>bool</type></entry>
         <entry>
          Flag indicating that there's a normal dependency relationship
@@ -17587,7 +17587,7 @@ FOR EACH ROW EXECUTE PROCEDURE suppress_redundant_updates_trigger();
          An array that, together with <literal>address_args</literal>,
          can be used by the C-language function getObjectAddress() to
          recreate the object address in a remote server containing a similar object.
-        <entry>
+        </entry>
        </row>
        <row>
         <entry><literal>address_args</literal></entry>
