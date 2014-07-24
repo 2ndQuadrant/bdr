@@ -7942,6 +7942,7 @@ CreateCheckPoint(int flags)
 	XLogCtlInsert *Insert = &XLogCtl->Insert;
 	XLogRecData rdata;
 	uint32		freespace;
+	XLogRecPtr	oldRedoPtr;
 	XLogSegNo	_logSegNo;
 	XLogRecPtr	curInsert;
 	VirtualTransactionId *vxids;
@@ -8250,10 +8251,10 @@ CreateCheckPoint(int flags)
 				(errmsg("concurrent transaction log activity while database system is shutting down")));
 
 	/*
-	 * Select point at which we can truncate the log, which we base on the
-	 * prior checkpoint's earliest info.
+	 * Select point at which we can truncate the log (and other resources
+	 * related to it), which we base on the prior checkpoint's earliest info.
 	 */
-	XLByteToSeg(ControlFile->checkPointCopy.redo, _logSegNo);
+	oldRedoPtr = ControlFile->checkPointCopy.redo;
 
 	/*
 	 * Update the control file.
@@ -8313,6 +8314,7 @@ CreateCheckPoint(int flags)
 	 * Delete old log files (those no longer needed even for previous
 	 * checkpoint or the standbys in XLOG streaming).
 	 */
+	XLByteToSeg(oldRedoPtr, _logSegNo);
 	if (_logSegNo)
 	{
 		KeepLogSeg(recptr, &_logSegNo);
@@ -8341,6 +8343,13 @@ CreateCheckPoint(int flags)
 	 * Truncate pg_multixact too.
 	 */
 	TruncateMultiXact();
+
+	/*
+	 * Remove old replication identifier checkpoints. We're using the previous
+	 * checkpoint's redo ptr as a cutoff - even if we were to use that
+	 * checkpoint to startup we're not going to need anything older.
+	 */
+	TruncateReplicationIdentifier(oldRedoPtr);
 
 	/* Real work is done, but log and update stats before releasing lock. */
 	LogCheckpointEnd(false);
@@ -8493,6 +8502,7 @@ CreateRestartPoint(int flags)
 {
 	XLogRecPtr	lastCheckPointRecPtr;
 	CheckPoint	lastCheckPoint;
+	XLogRecPtr	oldRedoPtr;
 	XLogSegNo	_logSegNo;
 	TimestampTz xtime;
 
@@ -8595,7 +8605,7 @@ CreateRestartPoint(int flags)
 	 * Select point at which we can truncate the xlog, which we base on the
 	 * prior checkpoint's earliest info.
 	 */
-	XLByteToSeg(ControlFile->checkPointCopy.redo, _logSegNo);
+	oldRedoPtr = ControlFile->checkPointCopy.redo;
 
 	/*
 	 * Update pg_control, using current time.  Check that it still shows
@@ -8622,6 +8632,7 @@ CreateRestartPoint(int flags)
 	 * checkpoint/restartpoint) to prevent the disk holding the xlog from
 	 * growing full.
 	 */
+	XLByteToSeg(oldRedoPtr, _logSegNo);
 	if (_logSegNo)
 	{
 		XLogRecPtr	receivePtr;
@@ -8689,6 +8700,12 @@ CreateRestartPoint(int flags)
 	 * It's probably worth improving this.
 	 */
 	TruncateMultiXact();
+
+	/*
+	 * Also truncate replication identifiers. c.f. CreateCheckPoint()'s
+	 * comment.
+	 */
+	TruncateReplicationIdentifier(oldRedoPtr);
 
 	/*
 	 * Truncate pg_subtrans if possible.  We can throw away all data before

@@ -627,6 +627,73 @@ CheckPointReplicationIdentifier(XLogRecPtr ckpt)
 }
 
 /*
+ * Remove old replication identifier checkpoints that cannot possibly be
+ * needed anymore for crash recovery.
+ */
+void
+TruncateReplicationIdentifier(XLogRecPtr cutoff)
+{
+	DIR		   *snap_dir;
+	struct dirent *snap_de;
+	char		path[MAXPGPATH];
+
+	snap_dir = AllocateDir("pg_logical/checkpoints");
+	while ((snap_de = ReadDir(snap_dir, "pg_logical/checkpoints")) != NULL)
+	{
+		uint32		hi;
+		uint32		lo;
+		XLogRecPtr	lsn;
+		struct stat statbuf;
+
+		if (strcmp(snap_de->d_name, ".") == 0 ||
+			strcmp(snap_de->d_name, "..") == 0)
+			continue;
+
+		snprintf(path, MAXPGPATH, "pg_logical/checkpoints/%s", snap_de->d_name);
+
+		if (lstat(path, &statbuf) == 0 && !S_ISREG(statbuf.st_mode))
+		{
+			elog(DEBUG1, "only regular files expected: %s", path);
+			continue;
+		}
+
+		if (sscanf(snap_de->d_name, "%X-%X.ckpt", &hi, &lo) != 2)
+		{
+			ereport(LOG,
+					(errmsg("could not parse filename \"%s\"", path)));
+			continue;
+		}
+
+		lsn = ((uint64) hi) << 32 | lo;
+
+		/* check whether we still need it */
+		if (lsn < cutoff)
+		{
+			elog(DEBUG2, "removing replication identifier checkpoint %s", path);
+
+			/*
+			 * It's not particularly harmful, though strange, if we can't
+			 * remove the file here. Don't prevent the checkpoint from
+			 * completing, that'd be cure worse than the disease.
+			 */
+			if (unlink(path) < 0)
+			{
+				ereport(LOG,
+						(errcode_for_file_access(),
+						 errmsg("could not unlink file \"%s\": %m",
+								path)));
+				continue;
+			}
+		}
+		else
+		{
+			elog(DEBUG2, "keeping replication identifier checkpoint %s", path);
+		}
+	}
+	FreeDir(snap_dir);
+}
+
+/*
  * Recover replication replay status from checkpoint data saved earlier by
  * CheckPointReplicationIdentifier.
  *

@@ -28,6 +28,7 @@ extern XLogRecPtr RemoteCommitFromCachedReplicationIdentifier(void);
 
 /* crash recovery support */
 extern void CheckPointReplicationIdentifier(XLogRecPtr ckpt);
+extern void TruncateReplicationIdentifier(XLogRecPtr cutoff);
 extern void StartupReplicationIdentifier(XLogRecPtr ckpt);
 
 /* internals */
