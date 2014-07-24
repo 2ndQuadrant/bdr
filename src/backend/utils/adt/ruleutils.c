@@ -55,6 +55,7 @@
 #include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
 #include "utils/rel.h"
+#include "utils/ruleutils.h"
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
 #include "utils/tqual.h"
@@ -268,9 +269,9 @@ typedef struct
  * ----------
  */
 static SPIPlanPtr plan_getrulebyoid = NULL;
-static const char *query_getrulebyoid = "SELECT * FROM pg_catalog.pg_rewrite WHERE oid = $1";
+static const char *query_getrulebyoid = "SELECT * FROM pg_catalog.pg_rewrite WHERE oid OPERATOR(pg_catalog.=) $1";
 static SPIPlanPtr plan_getviewrule = NULL;
-static const char *query_getviewrule = "SELECT * FROM pg_catalog.pg_rewrite WHERE ev_class = $1 AND rulename = $2";
+static const char *query_getviewrule = "SELECT * FROM pg_catalog.pg_rewrite WHERE ev_class OPERATOR(pg_catalog.=) $1 AND rulename OPERATOR(pg_catalog.=) $2";
 
 /* GUC parameters */
 bool		quote_all_identifiers = false;
@@ -447,6 +448,77 @@ pg_get_ruledef_ext(PG_FUNCTION_ARGS)
 	PG_RETURN_TEXT_P(string_to_text(pg_get_ruledef_worker(ruleoid, prettyFlags)));
 }
 
+/*
+ * Given a pair of Datum corresponding to a rule's pg_rewrite.ev_qual and
+ * ev_action columns, return their text representation; ev_qual as a single
+ * string in whereClause and ev_action as a List of strings (which might be
+ * NIL, signalling NOTHING) in actions.
+ */
+void
+pg_get_ruledef_details(Datum ev_qual, Datum ev_action,
+					   char **whereClause, List **actions)
+{
+	int prettyFlags = 0;
+	char *qualstr = TextDatumGetCString(ev_qual);
+	char *actionstr = TextDatumGetCString(ev_action);
+	List *actionNodeList = (List *) stringToNode(actionstr);
+	StringInfoData buf;
+
+	initStringInfo(&buf);
+	if (strlen(qualstr) > 0 && strcmp(qualstr, "<>") != 0)
+	{
+		Node	   *qual;
+		Query	   *query;
+		deparse_context context;
+		deparse_namespace dpns;
+
+		qual = stringToNode(qualstr);
+
+		query = (Query *) linitial(actionNodeList);
+		query = getInsertSelectQuery(query, NULL);
+
+		AcquireRewriteLocks(query, false, false);
+
+		context.buf = &buf;
+		context.namespaces = list_make1(&dpns);
+		context.windowClause = NIL;
+		context.windowTList = NIL;
+		context.varprefix = (list_length(query->rtable) != 1);
+		context.prettyFlags = prettyFlags;
+		context.wrapColumn = WRAP_COLUMN_DEFAULT;
+		context.indentLevel = PRETTYINDENT_STD;
+
+		set_deparse_for_query(&dpns, query, NIL);
+
+		get_rule_expr(qual, &context, false);
+
+		*whereClause = pstrdup(buf.data);
+	}
+	else
+		*whereClause = NULL;
+
+	if (list_length(actionNodeList) == 0)
+		*actions = NIL;
+	else
+	{
+		ListCell *cell;
+		List	*output = NIL;
+
+		foreach(cell, actionNodeList)
+		{
+			Query	*query = (Query *) lfirst(cell);
+
+			if (query->commandType == CMD_NOTHING)
+				continue;
+
+			resetStringInfo(&buf);
+			get_query_def(query, &buf, NIL, NULL,
+						  prettyFlags, WRAP_COLUMN_DEFAULT, 0);
+			output = lappend(output, pstrdup(buf.data));
+		}
+		*actions = output;
+	}
+}
 
 static char *
 pg_get_ruledef_worker(Oid ruleoid, int prettyFlags)
@@ -596,6 +668,13 @@ pg_get_viewdef_name_ext(PG_FUNCTION_ARGS)
 
 	PG_RETURN_TEXT_P(string_to_text(pg_get_viewdef_worker(viewoid, prettyFlags, WRAP_COLUMN_DEFAULT)));
 }
+
+char *
+pg_get_viewdef_internal(Oid viewoid)
+{
+	return pg_get_viewdef_worker(viewoid, 0, WRAP_COLUMN_DEFAULT);
+}
+
 
 /*
  * Common code for by-OID and by-name variants of pg_get_viewdef
@@ -820,59 +899,12 @@ pg_get_triggerdef_worker(Oid trigid, bool pretty)
 	if (!isnull)
 	{
 		Node	   *qual;
-		char		relkind;
-		deparse_context context;
-		deparse_namespace dpns;
-		RangeTblEntry *oldrte;
-		RangeTblEntry *newrte;
-
-		appendStringInfoString(&buf, "WHEN (");
+		char	   *qualstr;
 
 		qual = stringToNode(TextDatumGetCString(value));
+		qualstr = pg_get_trigger_whenclause(trigrec, qual, pretty);
 
-		relkind = get_rel_relkind(trigrec->tgrelid);
-
-		/* Build minimal OLD and NEW RTEs for the rel */
-		oldrte = makeNode(RangeTblEntry);
-		oldrte->rtekind = RTE_RELATION;
-		oldrte->relid = trigrec->tgrelid;
-		oldrte->relkind = relkind;
-		oldrte->alias = makeAlias("old", NIL);
-		oldrte->eref = oldrte->alias;
-		oldrte->lateral = false;
-		oldrte->inh = false;
-		oldrte->inFromCl = true;
-
-		newrte = makeNode(RangeTblEntry);
-		newrte->rtekind = RTE_RELATION;
-		newrte->relid = trigrec->tgrelid;
-		newrte->relkind = relkind;
-		newrte->alias = makeAlias("new", NIL);
-		newrte->eref = newrte->alias;
-		newrte->lateral = false;
-		newrte->inh = false;
-		newrte->inFromCl = true;
-
-		/* Build two-element rtable */
-		memset(&dpns, 0, sizeof(dpns));
-		dpns.rtable = list_make2(oldrte, newrte);
-		dpns.ctes = NIL;
-		set_rtable_names(&dpns, NIL, NULL);
-		set_simple_column_names(&dpns);
-
-		/* Set up context with one-deep namespace stack */
-		context.buf = &buf;
-		context.namespaces = list_make1(&dpns);
-		context.windowClause = NIL;
-		context.windowTList = NIL;
-		context.varprefix = true;
-		context.prettyFlags = pretty ? PRETTYFLAG_PAREN | PRETTYFLAG_INDENT : PRETTYFLAG_INDENT;
-		context.wrapColumn = WRAP_COLUMN_DEFAULT;
-		context.indentLevel = PRETTYINDENT_STD;
-
-		get_rule_expr(qual, &context, false);
-
-		appendStringInfoString(&buf, ") ");
+		appendStringInfo(&buf, "WHEN (%s) ", qualstr);
 	}
 
 	appendStringInfo(&buf, "EXECUTE PROCEDURE %s(",
@@ -909,6 +941,63 @@ pg_get_triggerdef_worker(Oid trigid, bool pretty)
 	systable_endscan(tgscan);
 
 	heap_close(tgrel, AccessShareLock);
+
+	return buf.data;
+}
+
+char *
+pg_get_trigger_whenclause(Form_pg_trigger trigrec, Node *whenClause, bool pretty)
+{
+	StringInfoData buf;
+	char		relkind;
+	deparse_context context;
+	deparse_namespace dpns;
+	RangeTblEntry *oldrte;
+	RangeTblEntry *newrte;
+
+	initStringInfo(&buf);
+
+	relkind = get_rel_relkind(trigrec->tgrelid);
+
+	/* Build minimal OLD and NEW RTEs for the rel */
+	oldrte = makeNode(RangeTblEntry);
+	oldrte->rtekind = RTE_RELATION;
+	oldrte->relid = trigrec->tgrelid;
+	oldrte->relkind = relkind;
+	oldrte->alias = makeAlias("old", NIL);
+	oldrte->eref = oldrte->alias;
+	oldrte->lateral = false;
+	oldrte->inh = false;
+	oldrte->inFromCl = true;
+
+	newrte = makeNode(RangeTblEntry);
+	newrte->rtekind = RTE_RELATION;
+	newrte->relid = trigrec->tgrelid;
+	newrte->relkind = relkind;
+	newrte->alias = makeAlias("new", NIL);
+	newrte->eref = newrte->alias;
+	newrte->lateral = false;
+	newrte->inh = false;
+	newrte->inFromCl = true;
+
+	/* Build two-element rtable */
+	memset(&dpns, 0, sizeof(dpns));
+	dpns.rtable = list_make2(oldrte, newrte);
+	dpns.ctes = NIL;
+	set_rtable_names(&dpns, NIL, NULL);
+	set_simple_column_names(&dpns);
+
+	/* Set up context with one-deep namespace stack */
+	context.buf = &buf;
+	context.namespaces = list_make1(&dpns);
+	context.windowClause = NIL;
+	context.windowTList = NIL;
+	context.varprefix = true;
+	context.prettyFlags = pretty ? PRETTYFLAG_PAREN | PRETTYFLAG_INDENT : PRETTYFLAG_INDENT;
+	context.wrapColumn = WRAP_COLUMN_DEFAULT;
+	context.indentLevel = PRETTYINDENT_STD;
+
+	get_rule_expr(whenClause, &context, false);
 
 	return buf.data;
 }
@@ -976,6 +1065,8 @@ pg_get_indexdef_columns(Oid indexrelid, bool pretty)
  *
  * This is now used for exclusion constraints as well: if excludeOps is not
  * NULL then it points to an array of exclusion operator OIDs.
+ *
+ * XXX if you change this function, see pg_get_indexdef_detailed too.
  */
 static char *
 pg_get_indexdef_worker(Oid indexrelid, int colno,
@@ -1255,6 +1346,245 @@ pg_get_indexdef_worker(Oid indexrelid, int colno,
 	return buf.data;
 }
 
+/*
+ * Return an index definition, split in several pieces.
+ *
+ * There is a huge lot of code that's a dupe of pg_get_indexdef_worker, but
+ * control flow is different enough that it doesn't seem worth keeping them
+ * together.
+ */
+void
+pg_get_indexdef_detailed(Oid indexrelid,
+						 char **index_am,
+						 char **definition,
+						 char **reloptions,
+						 char **tablespace,
+						 char **whereClause)
+{
+	HeapTuple	ht_idx;
+	HeapTuple	ht_idxrel;
+	HeapTuple	ht_am;
+	Form_pg_index idxrec;
+	Form_pg_class idxrelrec;
+	Form_pg_am	amrec;
+	List	   *indexprs;
+	ListCell   *indexpr_item;
+	List	   *context;
+	Oid			indrelid;
+	int			keyno;
+	Datum		indcollDatum;
+	Datum		indclassDatum;
+	Datum		indoptionDatum;
+	bool		isnull;
+	oidvector  *indcollation;
+	oidvector  *indclass;
+	int2vector *indoption;
+	StringInfoData definitionBuf;
+	char	   *sep;
+
+	/*
+	 * Fetch the pg_index tuple by the Oid of the index
+	 */
+	ht_idx = SearchSysCache1(INDEXRELID, ObjectIdGetDatum(indexrelid));
+	if (!HeapTupleIsValid(ht_idx))
+		elog(ERROR, "cache lookup failed for index %u", indexrelid);
+	idxrec = (Form_pg_index) GETSTRUCT(ht_idx);
+
+	indrelid = idxrec->indrelid;
+	Assert(indexrelid == idxrec->indexrelid);
+
+	/* Must get indcollation, indclass, and indoption the hard way */
+	indcollDatum = SysCacheGetAttr(INDEXRELID, ht_idx,
+								   Anum_pg_index_indcollation, &isnull);
+	Assert(!isnull);
+	indcollation = (oidvector *) DatumGetPointer(indcollDatum);
+
+	indclassDatum = SysCacheGetAttr(INDEXRELID, ht_idx,
+									Anum_pg_index_indclass, &isnull);
+	Assert(!isnull);
+	indclass = (oidvector *) DatumGetPointer(indclassDatum);
+
+	indoptionDatum = SysCacheGetAttr(INDEXRELID, ht_idx,
+									 Anum_pg_index_indoption, &isnull);
+	Assert(!isnull);
+	indoption = (int2vector *) DatumGetPointer(indoptionDatum);
+
+	/*
+	 * Fetch the pg_class tuple of the index relation
+	 */
+	ht_idxrel = SearchSysCache1(RELOID, ObjectIdGetDatum(indexrelid));
+	if (!HeapTupleIsValid(ht_idxrel))
+		elog(ERROR, "cache lookup failed for relation %u", indexrelid);
+	idxrelrec = (Form_pg_class) GETSTRUCT(ht_idxrel);
+
+	/*
+	 * Fetch the pg_am tuple of the index' access method
+	 */
+	ht_am = SearchSysCache1(AMOID, ObjectIdGetDatum(idxrelrec->relam));
+	if (!HeapTupleIsValid(ht_am))
+		elog(ERROR, "cache lookup failed for access method %u",
+			 idxrelrec->relam);
+	amrec = (Form_pg_am) GETSTRUCT(ht_am);
+
+	/*
+	 * Get the index expressions, if any.  (NOTE: we do not use the relcache
+	 * versions of the expressions and predicate, because we want to display
+	 * non-const-folded expressions.)
+	 */
+	if (!heap_attisnull(ht_idx, Anum_pg_index_indexprs))
+	{
+		Datum		exprsDatum;
+		bool		isnull;
+		char	   *exprsString;
+
+		exprsDatum = SysCacheGetAttr(INDEXRELID, ht_idx,
+									 Anum_pg_index_indexprs, &isnull);
+		Assert(!isnull);
+		exprsString = TextDatumGetCString(exprsDatum);
+		indexprs = (List *) stringToNode(exprsString);
+		pfree(exprsString);
+	}
+	else
+		indexprs = NIL;
+
+	indexpr_item = list_head(indexprs);
+
+	context = deparse_context_for(get_relation_name(indrelid), indrelid);
+
+	initStringInfo(&definitionBuf);
+
+	/* output index AM */
+	*index_am = pstrdup(quote_identifier(NameStr(amrec->amname)));
+
+	/*
+	 * Output index definition.  Note the outer parens must be supplied by
+	 * caller.
+	 */
+	sep = "";
+	for (keyno = 0; keyno < idxrec->indnatts; keyno++)
+	{
+		AttrNumber	attnum = idxrec->indkey.values[keyno];
+		int16		opt = indoption->values[keyno];
+		Oid			keycoltype;
+		Oid			keycolcollation;
+		Oid			indcoll;
+
+		appendStringInfoString(&definitionBuf, sep);
+		sep = ", ";
+
+		if (attnum != 0)
+		{
+			/* Simple index column */
+			char	   *attname;
+			int32		keycoltypmod;
+
+			attname = get_relid_attribute_name(indrelid, attnum);
+			appendStringInfoString(&definitionBuf, quote_identifier(attname));
+			get_atttypetypmodcoll(indrelid, attnum,
+								  &keycoltype, &keycoltypmod,
+								  &keycolcollation);
+		}
+		else
+		{
+			/* expressional index */
+			Node	   *indexkey;
+			char	   *str;
+
+			if (indexpr_item == NULL)
+				elog(ERROR, "too few entries in indexprs list");
+			indexkey = (Node *) lfirst(indexpr_item);
+			indexpr_item = lnext(indexpr_item);
+			/* Deparse */
+			str = deparse_expression_pretty(indexkey, context, false, false,
+											0, 0);
+
+			/* Need parens if it's not a bare function call */
+			if (indexkey && IsA(indexkey, FuncExpr) &&
+				((FuncExpr *) indexkey)->funcformat == COERCE_EXPLICIT_CALL)
+				appendStringInfoString(&definitionBuf, str);
+			else
+				appendStringInfo(&definitionBuf, "(%s)", str);
+
+			keycoltype = exprType(indexkey);
+			keycolcollation = exprCollation(indexkey);
+		}
+
+		/* Add collation, even if default */
+		indcoll = indcollation->values[keyno];
+		if (OidIsValid(indcoll))
+			appendStringInfo(&definitionBuf, " COLLATE %s",
+							 generate_collation_name((indcoll)));
+
+		/* Add the operator class name, even if default */
+		get_opclass_name(indclass->values[keyno], InvalidOid, &definitionBuf);
+
+		/* Add options if relevant */
+		if (amrec->amcanorder)
+		{
+			/* if it supports sort ordering, report DESC and NULLS opts */
+			if (opt & INDOPTION_DESC)
+			{
+				appendStringInfoString(&definitionBuf, " DESC");
+				/* NULLS FIRST is the default in this case */
+				if (!(opt & INDOPTION_NULLS_FIRST))
+					appendStringInfoString(&definitionBuf, " NULLS LAST");
+			}
+			else
+			{
+				if (opt & INDOPTION_NULLS_FIRST)
+					appendStringInfoString(&definitionBuf, " NULLS FIRST");
+			}
+		}
+
+		/* XXX excludeOps thingy was here; do we need anything? */
+	}
+	*definition = definitionBuf.data;
+
+	/* output reloptions */
+	*reloptions = flatten_reloptions(indexrelid);
+
+	/* output tablespace */
+	{
+		Oid			tblspc;
+
+		tblspc = get_rel_tablespace(indexrelid);
+		if (OidIsValid(tblspc))
+			*tablespace = pstrdup(quote_identifier(get_tablespace_name(tblspc)));
+		else
+			*tablespace = NULL;
+	}
+
+	/* report index predicate, if any */
+	if (!heap_attisnull(ht_idx, Anum_pg_index_indpred))
+	{
+		Node	   *node;
+		Datum		predDatum;
+		bool		isnull;
+		char	   *predString;
+
+		/* Convert text string to node tree */
+		predDatum = SysCacheGetAttr(INDEXRELID, ht_idx,
+									Anum_pg_index_indpred, &isnull);
+		Assert(!isnull);
+		predString = TextDatumGetCString(predDatum);
+		node = (Node *) stringToNode(predString);
+		pfree(predString);
+
+		/* Deparse */
+		*whereClause =
+			deparse_expression_pretty(node, context, false, false,
+									  0, 0);
+	}
+	else
+		*whereClause = NULL;
+
+	/* Clean up */
+	ReleaseSysCache(ht_idx);
+	ReleaseSysCache(ht_idxrel);
+	ReleaseSysCache(ht_am);
+
+	/* all done */
+}
 
 /*
  * pg_get_constraintdef
@@ -1289,9 +1619,9 @@ pg_get_constraintdef_ext(PG_FUNCTION_ARGS)
 
 /* Internal version that returns a palloc'd C string; no pretty-printing */
 char *
-pg_get_constraintdef_string(Oid constraintId)
+pg_get_constraintdef_string(Oid constraintId, bool fullCommand)
 {
-	return pg_get_constraintdef_worker(constraintId, true, 0);
+	return pg_get_constraintdef_worker(constraintId, fullCommand, 0);
 }
 
 /*
@@ -4231,6 +4561,20 @@ get_query_def(Query *query, StringInfo buf, List *parentnamespace,
 			break;
 	}
 }
+
+char *
+pg_get_viewstmt_definition(Query *viewParse)
+{
+	StringInfoData buf;
+
+	initStringInfo(&buf);
+
+	get_query_def(viewParse, &buf, NIL, NULL, 0,
+				  WRAP_COLUMN_DEFAULT, 1);
+
+	return buf.data;
+}
+
 
 /* ----------
  * get_values_def			- Parse back a VALUES list
@@ -9226,4 +9570,47 @@ flatten_reloptions(Oid relid)
 	ReleaseSysCache(tuple);
 
 	return result;
+}
+
+/*
+ * Obtain the deparsed default value for the given column of the given table.
+ *
+ * Caller must have set a correct deparse context.
+ */
+char *
+RelationGetColumnDefault(Relation rel, AttrNumber attno, List *dpcontext)
+{
+	Node *defval;
+	char *defstr;
+
+	defval = build_column_default(rel, attno);
+	defstr = deparse_expression_pretty(defval, dpcontext, false, false,
+									   0, 0);
+
+	return defstr;
+}
+
+/*
+ * Return the defaults values of arguments to a function, as a list of
+ * deparsed expressions.
+ */
+List *
+FunctionGetDefaults(text *proargdefaults)
+{
+	List   *nodedefs;
+	List   *strdefs = NIL;
+	ListCell *cell;
+
+	nodedefs = (List *) stringToNode(TextDatumGetCString(proargdefaults));
+	if (!IsA(nodedefs, List))
+		elog(ERROR, "proargdefaults is not a list");
+
+	foreach(cell, nodedefs)
+	{
+		Node   *onedef = lfirst(cell);
+
+		strdefs = lappend(strdefs, deparse_expression_pretty(onedef, NIL, false, false, 0, 0));
+	}
+
+	return strdefs;
 }

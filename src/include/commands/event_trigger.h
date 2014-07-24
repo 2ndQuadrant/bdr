@@ -17,6 +17,7 @@
 #include "catalog/objectaddress.h"
 #include "catalog/pg_event_trigger.h"
 #include "nodes/parsenodes.h"
+#include "utils/aclchk.h"
 
 typedef struct EventTriggerData
 {
@@ -50,6 +51,18 @@ extern void EventTriggerSQLDrop(Node *parsetree);
 extern bool EventTriggerBeginCompleteQuery(void);
 extern void EventTriggerEndCompleteQuery(void);
 extern bool trackDroppedObjectsNeeded(void);
-extern void EventTriggerSQLDropAddObject(ObjectAddress *object);
+extern void EventTriggerSQLDropAddObject(const ObjectAddress *object,
+							 bool original, bool normal);
+
+extern void EventTriggerStashExtensionStart(void);
+extern void EventTriggerStashExtensionStop(void);
+extern void EventTriggerStashCommand(Oid objectId, ObjectType objtype,
+						 Node *parsetree);
+extern void EventTriggerStashGrant(InternalGrant *istmt);
+extern void EventTriggerComplexCmdStart(Node *parsetree, ObjectType objtype);
+extern void EventTriggerComplexCmdSetOid(Oid objectId);
+extern void EventTriggerRecordSubcmd(Node *subcmd, Oid relid,
+						 AttrNumber attnum, Oid newoid);
+extern void EventTriggerComplexCmdEnd(void);
 
 #endif   /* EVENT_TRIGGER_H */
