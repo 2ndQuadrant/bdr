@@ -10,6 +10,8 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_
 \c regression
 \d+ test_tbl
 
+ALTER TABLE test_tbl ADD COLUMN col3_fail timestamptz NOT NULL DEFAULT now();
+
 ALTER TABLE test_tbl ADD COLUMN serial_col_node1 SERIAL;
 
 ALTER TABLE test_tbl DROP COLUMN dropping_col1;
