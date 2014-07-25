@@ -76,8 +76,16 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_
 \d+ test_seq
 \c regression
 \d+ test_seq
-
 DROP SEQUENCE test_seq;
+
+CREATE SEQUENCE test_seq;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+\d+ test_seq
+\c postgres
+\d+ test_seq
+DROP SEQUENCE test_seq;
+\c regression
+
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
 \d+ test_seq;
 \c postgres
@@ -106,7 +114,21 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_
 \d+ test_tbl_create_index
 
 DROP INDEX test1_idx;
-DROP INDEX test2_idx;
+DROP INDEX CONCURRENTLY test2_idx;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+\d+ test_tbl_create_index
+\c postgres
+\d+ test_tbl_create_index
+
+CREATE INDEX CONCURRENTLY test1_idx ON test_tbl_create_index(val, val2);
+CREATE UNIQUE INDEX CONCURRENTLY test2_idx ON test_tbl_create_index (lower(val2::text));
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+\d+ test_tbl_create_index
+\c regression
+\d+ test_tbl_create_index
+
+DROP INDEX CONCURRENTLY test1_idx;
+DROP INDEX CONCURRENTLY test2_idx;
 DROP TABLE test_tbl_create_index;
 
 CREATE TABLE test_simple_create_with_arrays_tbl(val int[], val1 text[]);

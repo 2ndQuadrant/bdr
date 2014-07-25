@@ -44,6 +44,8 @@ Indexes:
 Triggers:
     truncate_trigger AFTER TRUNCATE ON test_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
+ALTER TABLE test_tbl ADD COLUMN col3_fail timestamptz NOT NULL DEFAULT now();
+ERROR:  ALTER TABLE ... ADD COLUMN ... DEFAULT may only affect UNLOGGED or TEMPORARY tables when BDR is active; test_tbl is a regular table
 ALTER TABLE test_tbl ADD COLUMN serial_col_node1 SERIAL;
 ERROR:  ALTER TABLE ... ADD COLUMN ... DEFAULT may only affect UNLOGGED or TEMPORARY tables when BDR is active; test_tbl is a regular table
 ALTER TABLE test_tbl DROP COLUMN dropping_col1;
