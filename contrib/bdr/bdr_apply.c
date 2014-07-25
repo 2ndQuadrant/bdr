@@ -766,6 +766,7 @@ process_remote_update(StringInfo s)
 
 		ExecStoreTuple(remote_tuple, newslot, InvalidBuffer, true);
 
+		/* FIXME: only use the slot, not remote_tuple henceforth */
 		user_tuple = bdr_conflict_handlers_resolve(rel, NULL,
 												   remote_tuple, "UPDATE",
 												   BdrConflictType_UpdateDelete,
@@ -773,7 +774,7 @@ process_remote_update(StringInfo s)
 
 		initStringInfo(&o);
 		tuple_to_stringinfo(&o, RelationGetDescr(rel->rel),
-							oldslot->tts_tuple);
+							remote_tuple);
 		bdr_count_update_conflict();
 
 		if (user_tuple)
@@ -831,6 +832,7 @@ process_remote_delete(StringInfo s)
 	if (action == 'E')
 	{
 		elog(WARNING, "got delete without pkey");
+		bdr_heap_close(rel, NoLock);
 		return;
 	}
 
