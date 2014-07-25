@@ -832,6 +832,7 @@ process_remote_delete(StringInfo s)
 	if (action == 'E')
 	{
 		elog(WARNING, "got delete without pkey");
+		bdr_heap_close(rel, NoLock);
 		return;
 	}
 
