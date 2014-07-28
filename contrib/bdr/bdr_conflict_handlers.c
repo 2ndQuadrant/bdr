@@ -755,7 +755,7 @@ bdr_conflict_handlers_resolve(BDRRelation * rel, const HeapTuple local,
 		else
 			fcinfo.argnull[1] = true;
 
-		fcinfo.arg[2] = CStringGetDatum(command_tag);
+		fcinfo.arg[2] = CStringGetTextDatum(command_tag);
 		fcinfo.arg[3] = ObjectIdGetDatum(RelationGetRelid(rel->rel));
 		fcinfo.arg[4] = event_oid;
 
