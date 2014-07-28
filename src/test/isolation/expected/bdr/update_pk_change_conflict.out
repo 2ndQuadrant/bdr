@@ -1,6 +1,6 @@
 Parsed test spec with 3 sessions
 
-starting permutation: n1sync n1s1 n1sync n3read n2s1 n2sync n3read n1s2 n2s2 n1s3 n2s3 n1s4 n1sync n2s4 n2sync n1read n2read n3read
+starting permutation: n1sync n1s1 n1sync n3read n2s1 n2sync n3read n1s2 n2s2 n1s3 n2s3 n1s4 n2s4 n1sync n2sync n1read n2read n3read
 step n1sync: select pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
 pg_xlog_wait_remote_apply
 
@@ -31,12 +31,12 @@ step n2s2: BEGIN;
 step n1s3: UPDATE tst SET a = 4;
 step n2s3: UPDATE tst SET a = 5;
 step n1s4: COMMIT;
+step n2s4: COMMIT;
 step n1sync: select pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
 pg_xlog_wait_remote_apply
 
                
                
-step n2s4: COMMIT;
 step n2sync: select pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
 pg_xlog_wait_remote_apply
 

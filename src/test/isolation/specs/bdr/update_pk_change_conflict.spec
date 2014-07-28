@@ -37,4 +37,4 @@ connection "node3"
 step "n3read" { SELECT * FROM tst; }
 step "n3sync" { select pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication; }
 
-permutation "n1sync" "n1s1" "n1sync" "n3read" "n2s1" "n2sync" "n3read" "n1s2" "n2s2" "n1s3" "n2s3" "n1s4" "n1sync" "n2s4" "n2sync" "n1read" "n2read" "n3read"
+permutation "n1sync" "n1s1" "n1sync" "n3read" "n2s1" "n2sync" "n3read" "n1s2" "n2s2" "n1s3" "n2s3" "n1s4" "n2s4" "n1sync" "n2sync" "n1read" "n2read" "n3read"
