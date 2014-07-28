@@ -3474,7 +3474,7 @@ deparse_AlterSeqStmt(Oid objectId, Node *parsetree)
 			newelm = deparse_Seq_Cache(alterSeq, seqdata);
 		else if (strcmp(elem->defname, "cycle") == 0)
 			newelm = deparse_Seq_Cycle(alterSeq, seqdata);
-		else if (strcmp(elem->defname, "increment_by") == 0)
+		else if (strcmp(elem->defname, "increment") == 0)
 			newelm = deparse_Seq_IncrementBy(alterSeq, seqdata);
 		else if (strcmp(elem->defname, "minvalue") == 0)
 			newelm = deparse_Seq_Minvalue(alterSeq, seqdata);
