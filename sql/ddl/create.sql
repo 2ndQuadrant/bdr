@@ -87,15 +87,57 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_
 \d+ test_seq
 \c regression
 \d+ test_seq
-DROP SEQUENCE test_seq;
 
-CREATE SEQUENCE test_seq;
+ALTER SEQUENCE test_seq owned by test_tbl_serial_combined_pk.val;
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
 \d+ test_seq
 \c postgres
 \d+ test_seq
+
+-- these should fail
+ALTER SEQUENCE test_seq increment by 10;
+ALTER SEQUENCE test_seq minvalue 0;
+ALTER SEQUENCE test_seq maxvalue 1000000;
+ALTER SEQUENCE test_seq restart;
+ALTER SEQUENCE test_seq cache 10;
+ALTER SEQUENCE test_seq cycle;
+
 DROP SEQUENCE test_seq;
+
+CREATE SEQUENCE test_seq start 10000 owned by test_tbl_serial_combined_pk.val1 USING bdr;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+\d+ test_seq
 \c regression
+\d+ test_seq
+
+DROP SEQUENCE test_seq;
+
+-- these should fail
+CREATE SEQUENCE test_seq increment by 10 USING bdr;
+CREATE SEQUENCE test_seq minvalue 10 USING bdr;
+CREATE SEQUENCE test_seq maxvalue 10 USING bdr;
+CREATE SEQUENCE test_seq cache 10 USING bdr;
+CREATE SEQUENCE test_seq cycle USING bdr;
+
+-- non-bdr sequence
+CREATE SEQUENCE test_seq increment 10;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+\d+ test_seq
+\c postgres
+\d+ test_seq
+
+ALTER SEQUENCE test_seq increment by 10;
+ALTER SEQUENCE test_seq minvalue 0;
+ALTER SEQUENCE test_seq maxvalue 1000000;
+ALTER SEQUENCE test_seq restart;
+ALTER SEQUENCE test_seq cache 10;
+ALTER SEQUENCE test_seq cycle;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+\d+ test_seq
+\c regression
+\d+ test_seq
+
+DROP SEQUENCE test_seq;
 
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
 \d+ test_seq;
