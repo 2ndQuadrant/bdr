@@ -20,6 +20,7 @@
 #include "miscadmin.h"
 
 #include "access/heapam.h"
+#include "access/seqam.h"
 
 #include "catalog/namespace.h"
 
@@ -36,6 +37,7 @@
 
 #include "utils/guc.h"
 #include "utils/rel.h"
+#include "utils/syscache.h"
 
 static void error_unsupported_command(const char *cmdtag) __attribute__((noreturn));
 
@@ -264,6 +266,79 @@ filter_AlterTableStmt(Node *parsetree,
 }
 
 static void
+filter_CreateSeqStmt(Node *parsetree)
+{
+	ListCell	   *param;
+	CreateSeqStmt  *stmt;
+
+	stmt = (CreateSeqStmt *) parsetree;
+
+	if (stmt->accessMethod == NULL || strcmp(stmt->accessMethod, "bdr") != 0)
+		return;
+
+	foreach(param, stmt->options)
+	{
+		DefElem    *defel = (DefElem *) lfirst(param);
+		if (strcmp(defel->defname, "owned_by") != 0 &&
+			strcmp(defel->defname, "start") != 0)
+			ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 errmsg("CREATE SEQUENCE ... %s is not supported for bdr sequences",
+					defel->defname)));
+	}
+}
+
+static void
+filter_AlterSeqStmt(Node *parsetree)
+{
+	Oid				seqoid;
+	ListCell	   *param;
+	AlterSeqStmt   *stmt;
+	Oid				seqamid;
+	HeapTuple		ctup;
+	Form_pg_class	pgcform;
+
+	stmt = (AlterSeqStmt *) parsetree;
+
+	seqoid = RangeVarGetRelid(stmt->sequence, AccessShareLock, true);
+
+	if (seqoid == InvalidOid)
+		return;
+
+	seqamid = get_seqam_oid("bdr", true);
+
+	/* No bdr sequences? */
+	if (seqamid == InvalidOid)
+		return;
+
+	/* Fetch a tuple to check for relam */
+	ctup = SearchSysCache1(RELOID, ObjectIdGetDatum(seqoid));
+	if (!HeapTupleIsValid(ctup))
+		elog(ERROR, "pg_class entry for sequence %u unavailable",
+						seqoid);
+	pgcform = (Form_pg_class) GETSTRUCT(ctup);
+
+	/* Not bdr sequence */
+	if (pgcform->relam != seqamid)
+	{
+		ReleaseSysCache(ctup);
+		return;
+	}
+
+	ReleaseSysCache(ctup);
+
+	foreach(param, stmt->options)
+	{
+		DefElem    *defel = (DefElem *) lfirst(param);
+		if (strcmp(defel->defname, "owned_by") != 0)
+			ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 errmsg("ALTER SEQUENCE ... %s is not supported for bdr sequences",
+					defel->defname)));
+	}
+}
+
+static void
 bdr_commandfilter(Node *parsetree,
 				  const char *queryString,
 				  ProcessUtilityContext context,
@@ -454,8 +529,14 @@ bdr_commandfilter(Node *parsetree,
 		case T_CreateFunctionStmt:	/* CREATE FUNCTION */
 		case T_AlterFunctionStmt:	/* ALTER FUNCTION */
 		case T_RuleStmt:	/* CREATE RULE */
+			break;
+
 		case T_CreateSeqStmt:
+			filter_CreateSeqStmt(parsetree);
+			break;
+
 		case T_AlterSeqStmt:
+			filter_AlterSeqStmt(parsetree);
 			break;
 
 		case T_CreateTableAsStmt:
