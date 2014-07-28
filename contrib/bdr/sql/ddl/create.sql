@@ -10,6 +10,17 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_
 \c regression
 \d+ test_tbl_simple_create
 
+CREATE UNLOGGED TABLE test_tbl_unlogged_create(val int);
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+\d+ test_tbl_unlogged_create
+\c postgres
+\d+ test_tbl_unlogged_create
+
+DROP TABLE test_tbl_unlogged_create;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+\d+ test_tbl_unlogged_create
+\c regression
+\d+ test_tbl_unlogged_create
 
 CREATE TABLE test_tbl_simple_pk(val int PRIMARY KEY);
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
@@ -177,3 +188,21 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_
 
 DROP TABLE test_tbl_serial;
 DROP TABLE test_tbl_serial_combined_pk;
+
+
+CREATE FUNCTION test_trigger_fn() RETURNS trigger AS
+$$
+BEGIN
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TABLE test_trigger_table (f1 integer, f2 text);
+CREATE TRIGGER test_trigger_fn_trg1 BEFORE INSERT OR DELETE ON test_trigger_table FOR EACH STATEMENT WHEN (True) EXECUTE PROCEDURE test_trigger_fn();
+CREATE TRIGGER test_trigger_fn_trg2 AFTER UPDATE OF f1 ON test_trigger_table FOR EACH ROW EXECUTE PROCEDURE test_trigger_fn();
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+\d+ test_trigger_table
+\c regression
+\d+ test_trigger_table
+
+DROP TABLE test_trigger_table;
+DROP FUNCTION test_trigger_fn();

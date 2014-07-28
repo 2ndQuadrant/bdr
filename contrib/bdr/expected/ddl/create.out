@@ -34,6 +34,42 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_
 \d+ test_tbl_simple_create
 \c regression
 \d+ test_tbl_simple_create
+CREATE UNLOGGED TABLE test_tbl_unlogged_create(val int);
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\d+ test_tbl_unlogged_create
+          Unlogged table "public.test_tbl_unlogged_create"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ val    | integer |           | plain   |              | 
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl_unlogged_create FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+\c postgres
+\d+ test_tbl_unlogged_create
+          Unlogged table "public.test_tbl_unlogged_create"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ val    | integer |           | plain   |              | 
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl_unlogged_create FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+DROP TABLE test_tbl_unlogged_create;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\d+ test_tbl_unlogged_create
+\c regression
+\d+ test_tbl_unlogged_create
 CREATE TABLE test_tbl_simple_pk(val int PRIMARY KEY);
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
  pg_xlog_wait_remote_apply 
@@ -639,3 +675,43 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_
 
 DROP TABLE test_tbl_serial;
 DROP TABLE test_tbl_serial_combined_pk;
+CREATE FUNCTION test_trigger_fn() RETURNS trigger AS
+$$
+BEGIN
+END;
+$$ LANGUAGE plpgsql;
+CREATE TABLE test_trigger_table (f1 integer, f2 text);
+CREATE TRIGGER test_trigger_fn_trg1 BEFORE INSERT OR DELETE ON test_trigger_table FOR EACH STATEMENT WHEN (True) EXECUTE PROCEDURE test_trigger_fn();
+CREATE TRIGGER test_trigger_fn_trg2 AFTER UPDATE OF f1 ON test_trigger_table FOR EACH ROW EXECUTE PROCEDURE test_trigger_fn();
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\d+ test_trigger_table
+                  Table "public.test_trigger_table"
+ Column |  Type   | Modifiers | Storage  | Stats target | Description 
+--------+---------+-----------+----------+--------------+-------------
+ f1     | integer |           | plain    |              | 
+ f2     | text    |           | extended |              | 
+Triggers:
+    test_trigger_fn_trg1 BEFORE INSERT OR DELETE ON test_trigger_table FOR EACH STATEMENT WHEN (true) EXECUTE PROCEDURE test_trigger_fn()
+    test_trigger_fn_trg2 AFTER UPDATE OF f1 ON test_trigger_table FOR EACH ROW EXECUTE PROCEDURE test_trigger_fn()
+    truncate_trigger AFTER TRUNCATE ON test_trigger_table FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+\c regression
+\d+ test_trigger_table
+                  Table "public.test_trigger_table"
+ Column |  Type   | Modifiers | Storage  | Stats target | Description 
+--------+---------+-----------+----------+--------------+-------------
+ f1     | integer |           | plain    |              | 
+ f2     | text    |           | extended |              | 
+Triggers:
+    test_trigger_fn_trg1 BEFORE INSERT OR DELETE ON test_trigger_table FOR EACH STATEMENT WHEN (true) EXECUTE PROCEDURE test_trigger_fn()
+    test_trigger_fn_trg2 AFTER UPDATE OF f1 ON test_trigger_table FOR EACH ROW EXECUTE PROCEDURE test_trigger_fn()
+    truncate_trigger AFTER TRUNCATE ON test_trigger_table FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+DROP TABLE test_trigger_table;
+DROP FUNCTION test_trigger_fn();
