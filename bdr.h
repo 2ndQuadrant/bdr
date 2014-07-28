@@ -215,6 +215,7 @@ extern int	bdr_default_apply_delay;
 extern int bdr_max_workers;
 extern char *bdr_temp_dump_directory;
 extern bool bdr_init_from_basedump;
+extern bool bdr_log_applied_conflicts;
 
 /*
  * Header for the shared memory segment ref'd by the BdrWorkerCtl ptr,

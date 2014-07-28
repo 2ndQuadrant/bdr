@@ -1235,30 +1235,43 @@ do_log_update(RepNodeId local_node_id, bool apply_update, TimestampTz ts,
 	initStringInfo(&s_key);
 	tuple_to_stringinfo(&s_key, RelationGetDescr(rel->rel), old_key);
 
-	if (user_tuple != NULL)
+	/*
+	 * By default we only log conflicts where the remote tuple is discarded or
+	 * where a conflict handler emits a replacement tuple.
+	 *
+	 * Optionally the user may request that we log even conflicts where the
+	 * local tuple is replaced by a newer remote tuple. Most of the time these
+	 * are just noise, but there are times it's useful for debugging and tracing.
+	 */
+	if ( (!apply_update) || bdr_log_applied_conflicts ) 
 	{
-		initStringInfo(&s_user_tuple);
-		tuple_to_stringinfo(&s_user_tuple, RelationGetDescr(rel->rel),
-							user_tuple);
+		if (user_tuple != NULL)
+		{
+			/* Conflict handler returned new tuple, need to report it */
+			initStringInfo(&s_user_tuple);
+			tuple_to_stringinfo(&s_user_tuple, RelationGetDescr(rel->rel),
+								user_tuple);
 
-		ereport(LOG,
-				(errcode(ERRCODE_INTEGRITY_CONSTRAINT_VIOLATION),
-				 errmsg("CONFLICT: %s remote update originating at node " UINT64_FORMAT ":%u:%u at ts %s; row was previously updated at %s node " UINT64_FORMAT ":%u at ts %s. PKEY:%s, resolved by user tuple:%s",
-						apply_update ? "applying" : "skipping",
-						remote_origin_sysid, remote_tli, remote_origin_dboid, remote_ts,
-						local_node_id == InvalidRepNodeId ? "local" : "remote",
-						local_sysid, local_tli, local_ts, s_key.data,
-						s_user_tuple.data)));
-	}
-	else
-	{
-		ereport(LOG,
-				(errcode(ERRCODE_INTEGRITY_CONSTRAINT_VIOLATION),
-				 errmsg("CONFLICT: %s remote update originating at node " UINT64_FORMAT ":%u:%u at ts %s; row was previously updated at %s node " UINT64_FORMAT ":%u at ts %s. PKEY:%s",
-						apply_update ? "applying" : "skipping",
-						remote_origin_sysid, remote_tli, remote_origin_dboid, remote_ts,
-						local_node_id == InvalidRepNodeId ? "local" : "remote",
-						local_sysid, local_tli, local_ts, s_key.data)));
+			ereport(LOG,
+					(errcode(ERRCODE_INTEGRITY_CONSTRAINT_VIOLATION),
+					 errmsg("CONFLICT: %s remote update originating at node " UINT64_FORMAT ":%u:%u at ts %s; row was previously updated at %s node " UINT64_FORMAT ":%u at ts %s. PKEY:%s, resolved by user tuple:%s",
+							apply_update ? "applying" : "skipping",
+							remote_origin_sysid, remote_tli, remote_origin_dboid, remote_ts,
+							local_node_id == InvalidRepNodeId ? "local" : "remote",
+							local_sysid, local_tli, local_ts, s_key.data,
+							s_user_tuple.data)));
+		}
+		else
+		{
+			/* Handled by last update wins, or conflict handler w/o new tuple */
+			ereport(LOG,
+					(errcode(ERRCODE_INTEGRITY_CONSTRAINT_VIOLATION),
+					 errmsg("CONFLICT: %s remote update originating at node " UINT64_FORMAT ":%u:%u at ts %s; row was previously updated at %s node " UINT64_FORMAT ":%u at ts %s. PKEY:%s",
+							apply_update ? "applying" : "skipping",
+							remote_origin_sysid, remote_tli, remote_origin_dboid, remote_ts,
+							local_node_id == InvalidRepNodeId ? "local" : "remote",
+							local_sysid, local_tli, local_ts, s_key.data)));
+		}
 	}
 
 	resetStringInfo(&s_key);

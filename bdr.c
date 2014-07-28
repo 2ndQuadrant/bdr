@@ -88,6 +88,7 @@ static char *connections = NULL;
 static bool bdr_synchronous_commit;
 int bdr_default_apply_delay;
 int bdr_max_workers;
+bool bdr_log_applied_conflicts;
 static bool bdr_skip_ddl_replication;
 
 /*
@@ -1749,6 +1750,18 @@ _PG_init(void)
 							 &bdr_init_from_basedump,
 							 false,
 							 PGC_BACKEND,
+							 0,
+							 NULL, NULL, NULL);
+
+	DefineCustomBoolVariable("bdr.log_applied_conflicts",
+							 "BDR usually only logs conflicts resolved by user handlers or where "
+							 "the remote row is discarded. If enabled, log records will also be "
+							 "written for rows where the local row is overwritten by a newer remote "
+							 "row.",
+							 NULL,
+							 &bdr_log_applied_conflicts,
+							 false,
+							 PGC_SIGHUP,
 							 0,
 							 NULL, NULL, NULL);
 
