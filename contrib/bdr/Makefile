@@ -53,6 +53,12 @@ submake-btree_gist:
 submake-pg_trgm:
 	$(MAKE) -C $(top_builddir)/contrib/pg_trgm
 
+submake-cube:
+	$(MAKE) -C $(top_builddir)/contrib/cube
+
+submake-hstore:
+	$(MAKE) -C $(top_builddir)/contrib/hstore
+
 bdr_init_copy: bdr_init_copy.o | submake-libpq submake-libpgport
 	$(CC) $(CFLAGS) $^ $(LDFLAGS) $(LDFLAGS_EX) $(libpq_pgport) $(LIBS) -o $@$(X)
 
@@ -64,11 +70,11 @@ additional-clean:
 	rm -f bdr_init_copy$(X) bdr_init_copy.o
 	rm -f bdr_version.h
 
-check: all | submake-regress submake-btree_gist submake-pg_trgm regresscheck
+check: all | submake-regress submake-btree_gist submake-pg_trgm submake-cube submake-hstore regresscheck
 
 REGRESSCHECKS=init \
 	ddl/create ddl/alter_table ddl/extension ddl/sequence \
-	dml/basic dml/delete_pk dml/delete_extended dml/update_basic dml/toasted
+	dml/basic dml/contrib dml/delete_pk dml/extended dml/toasted
 
 regresscheck:
 	[ -e pg_hba.conf ] || ln -s $(top_srcdir)/contrib/bdr/pg_hba.conf .
@@ -80,6 +86,8 @@ regresscheck:
 	    --extra-install=contrib/btree_gist \
 	    --extra-install=contrib/bdr \
 	    --extra-install=contrib/pg_trgm \
+	    --extra-install=contrib/cube \
+	    --extra-install=contrib/hstore \
 	    $(REGRESSCHECKS)
 
 PHONY: submake-regress
