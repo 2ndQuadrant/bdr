@@ -3,3 +3,4 @@ bdr_version.h
 log/
 results/
 tmp_check/
+*~
