@@ -1839,7 +1839,7 @@ tuple_to_stringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple)
 		ReleaseSysCache(type_tuple);
 
 		/* get Datum from tuple */
-		origval = fastgetattr(tuple, natt + 1, tupdesc, &isnull);
+		origval = heap_getattr(tuple, natt + 1, tupdesc, &isnull);
 
 		if (isnull)
 			outputstr = "(null)";

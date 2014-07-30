@@ -74,7 +74,7 @@ check: all | submake-regress submake-btree_gist submake-pg_trgm submake-cube sub
 
 REGRESSCHECKS=init \
 	ddl/create ddl/alter_table ddl/extension ddl/sequence \
-	dml/basic dml/contrib dml/delete_pk dml/extended dml/toasted
+	dml/basic dml/contrib dml/delete_pk dml/extended dml/mixed dml/toasted
 
 regresscheck:
 	[ -e pg_hba.conf ] || ln -s $(top_srcdir)/contrib/bdr/pg_hba.conf .
