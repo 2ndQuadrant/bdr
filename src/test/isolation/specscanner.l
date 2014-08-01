@@ -14,6 +14,7 @@ static int	yyline = 1;			/* line number for error reporting */
 
 static char litbuf[1024];
 static int litbufpos = 0;
+static int bracelevel = 0;
 
 static void addlitchar(char c);
 
@@ -73,12 +74,18 @@ teardown		{ return(TEARDOWN); }
 					BEGIN(sql);
 				}
 <sql>{space}*"}" {
-					litbuf[litbufpos] = '\0';
-					yylval.str = strdup(litbuf);
-					BEGIN(INITIAL);
-					return(sqlblock);
+					if(bracelevel == 0) {
+						litbuf[litbufpos] = '\0';
+						yylval.str = strdup(litbuf);
+						BEGIN(INITIAL);
+						return(sqlblock);
+					} else {
+						bracelevel--;
+						addlitchar('}');
+					}
 				}
 <sql>.			{
+					if(yytext[0] == '{') bracelevel++;
 					addlitchar(yytext[0]);
 				}
 <sql>\n			{
