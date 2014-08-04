@@ -307,6 +307,7 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_
  is_cycled     | boolean | f                   | plain
  is_called     | boolean | f                   | plain
  amdata        | bytea   |                     | extended
+Access Method: bdr
 
 \c regression
 \d+ test_seq
@@ -324,6 +325,7 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_
  is_cycled     | boolean | f                   | plain
  is_called     | boolean | f                   | plain
  amdata        | bytea   |                     | extended
+Access Method: bdr
 
 ALTER SEQUENCE test_seq owned by test_tbl_serial_combined_pk.val;
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
@@ -348,6 +350,7 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_
  is_cycled     | boolean | f                   | plain
  is_called     | boolean | f                   | plain
  amdata        | bytea   |                     | extended
+Access Method: bdr
 Owned by: public.test_tbl_serial_combined_pk.val
 
 \c postgres
@@ -366,6 +369,7 @@ Owned by: public.test_tbl_serial_combined_pk.val
  is_cycled     | boolean | f                   | plain
  is_called     | boolean | f                   | plain
  amdata        | bytea   |                     | extended
+Access Method: bdr
 Owned by: public.test_tbl_serial_combined_pk.val
 
 -- these should fail
@@ -405,6 +409,7 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_
  is_cycled     | boolean | f                   | plain
  is_called     | boolean | f                   | plain
  amdata        | bytea   |                     | extended
+Access Method: bdr
 Owned by: public.test_tbl_serial_combined_pk.val1
 
 \c regression
@@ -423,6 +428,7 @@ Owned by: public.test_tbl_serial_combined_pk.val1
  is_cycled     | boolean | f                   | plain
  is_called     | boolean | f                   | plain
  amdata        | bytea   |                     | extended
+Access Method: bdr
 
 DROP SEQUENCE test_seq;
 -- these should fail
@@ -460,6 +466,7 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_
  is_cycled     | boolean | f                   | plain
  is_called     | boolean | f                   | plain
  amdata        | bytea   |                     | extended
+Access Method: local
 
 \c postgres
 \d+ test_seq
@@ -477,6 +484,7 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_
  is_cycled     | boolean | f                   | plain
  is_called     | boolean | f                   | plain
  amdata        | bytea   |                     | extended
+Access Method: local
 
 ALTER SEQUENCE test_seq increment by 10;
 ALTER SEQUENCE test_seq minvalue 0;
@@ -506,6 +514,7 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_
  is_cycled     | boolean | t        | plain
  is_called     | boolean | f        | plain
  amdata        | bytea   |          | extended
+Access Method: local
 
 \c regression
 \d+ test_seq
@@ -523,6 +532,7 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_
  is_cycled     | boolean | t        | plain
  is_called     | boolean | f        | plain
  amdata        | bytea   |          | extended
+Access Method: local
 
 DROP SEQUENCE test_seq;
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
