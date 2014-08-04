@@ -58,6 +58,15 @@ CREATE TABLE tst_comp_mix_array (
     a tst_comp_mix_t PRIMARY KEY,
     b tst_comp_mix_t[]
     );
+CREATE TABLE tst_range (
+    a INTEGER PRIMARY KEY,
+    b int4range
+);
+CREATE TABLE tst_range_array (
+    a INTEGER PRIMARY KEY,
+    b TSTZRANGE,
+    c int8range[]
+);
 
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
 
@@ -162,6 +171,22 @@ INSERT INTO tst_comp_mix_array (a, b) VALUES
         ]
     );
 
+-- test_tbl_range
+INSERT INTO tst_range (a, b) VALUES
+    (1, '[1, 10]'),
+    (2, '[2, 20]'),
+    (3, '[3, 30]'),
+    (4, '[4, 40]'),
+    (5, '[5, 50]');
+
+-- test_tbl_range_array
+INSERT INTO tst_range_array (a, b, c) VALUES
+    (1, tstzrange('Mon Aug 04 00:00:00 2014 CEST'::timestamptz, 'infinity'), '{"[1,2]", "[10,20]"}'),
+    (2, tstzrange('Mon Aug 04 00:00:00 2014 CEST'::timestamptz - interval '2 days', 'Mon Aug 04 00:00:00 2014 CEST'::timestamptz), '{"[2,3]", "[20,30]"}'),
+    (3, tstzrange('Mon Aug 04 00:00:00 2014 CEST'::timestamptz - interval '3 days', 'Mon Aug 04 00:00:00 2014 CEST'::timestamptz), '{"[3,4]"}'),
+    (4, tstzrange('Mon Aug 04 00:00:00 2014 CEST'::timestamptz - interval '4 days', 'Mon Aug 04 00:00:00 2014 CEST'::timestamptz), '{"[4,5]", NULL, "[40,50]"}'),
+    (5, NULL, NULL);
+
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
 \c postgres
 SELECT a, b FROM tst_one_array ORDER BY a;
@@ -175,6 +200,8 @@ SELECT a, b FROM tst_comp_enum_array ORDER BY a;
 SELECT a, b FROM tst_comp_one_enum_array ORDER BY a;
 SELECT a, b FROM tst_comp_enum_what ORDER BY a;
 SELECT a, b FROM tst_comp_mix_array ORDER BY a;
+SELECT a, b FROM tst_range ORDER BY a;
+SELECT a, b, c FROM tst_range_array ORDER BY a;
 
 -- test_tbl_one_array_col
 UPDATE tst_one_array SET b = '{4, 5, 6}' WHERE a = 1;
@@ -405,6 +432,52 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_
 \c regression
 SELECT a, b FROM tst_comp_mix_array ORDER BY a;
 
+-- test_tbl_range
+UPDATE tst_range SET b = '[100, 1000]' WHERE a = 1;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+\c postgres
+SELECT a, b FROM tst_range ORDER BY a;
+UPDATE tst_range SET b = '(1, 90)' WHERE a > 3;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+\c regression
+SELECT a, b FROM tst_range ORDER BY a;
+
+DELETE FROM tst_range WHERE a = 1;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+\c postgres
+SELECT a, b FROM tst_range ORDER BY a;
+DELETE FROM tst_range WHERE b = '[2, 20]';
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+\c regression
+SELECT a, b FROM tst_range ORDER BY a;
+DELETE FROM tst_range WHERE '[10,20]' && b;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+\c postgres
+SELECT a, b FROM tst_range ORDER BY a;
+
+-- test_tbl_range_array
+UPDATE tst_range_array SET c = '{"[100, 1000]"}' WHERE a = 1;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+\c regression
+SELECT a, b, c FROM tst_range_array ORDER BY a;
+UPDATE tst_range_array SET b = tstzrange('Mon Aug 04 00:00:00 2014 CEST'::timestamptz, 'infinity'), c = '{NULL, "[11,9999999]"}' WHERE a > 3;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+\c postgres
+SELECT a, b, c FROM tst_range_array ORDER BY a;
+
+DELETE FROM tst_range_array WHERE a = 1;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+\c regression
+SELECT a, b, c FROM tst_range_array ORDER BY a;
+DELETE FROM tst_range_array WHERE b = tstzrange('Mon Aug 04 00:00:00 2014 CEST'::timestamptz - interval '2 days', 'Mon Aug 04 00:00:00 2014 CEST'::timestamptz);
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+\c postgres
+SELECT a, b, c FROM tst_range_array ORDER BY a;
+DELETE FROM tst_range_array WHERE tstzrange('Mon Aug 04 00:00:00 2014 CEST'::timestamptz, 'Mon Aug 05 00:00:00 2014 CEST'::timestamptz) && b;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+\c regression
+SELECT a, b, c FROM tst_range_array ORDER BY a;
+
 DROP TABLE tst_one_array;
 DROP TABLE tst_arrays;
 DROP TABLE tst_one_enum;
@@ -416,6 +489,8 @@ DROP TABLE tst_comp_enum_array;
 DROP TABLE tst_comp_one_enum_array;
 DROP TABLE tst_comp_enum_what;
 DROP TABLE tst_comp_mix_array;
+DROP TABLE tst_range;
+DROP TABLE tst_range_array;
 
 DROP TYPE tst_comp_mix_t;
 DROP TYPE tst_comp_enum_array_t;
