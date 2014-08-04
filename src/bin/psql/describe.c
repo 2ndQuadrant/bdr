@@ -1702,6 +1702,29 @@ describeOneTableDetails(const char *schemaname,
 		/* Footer information about a sequence */
 		PGresult   *result = NULL;
 
+		/* Get the Access Method name for the sequence */
+		printfPQExpBuffer(&buf, "SELECT a.seqamname\n"
+								"FROM pg_catalog.pg_seqam a, pg_catalog.pg_class c\n"
+								"WHERE c.relam = a.oid AND c.oid = %s", oid);
+
+		result = PSQLexec(buf.data, false);
+
+		/*
+		 * If we get no rows back, don't show anything (obviously). We should
+		 * never get more than one row back, but if we do, just ignore it and
+		 * don't print anything.
+		 */
+		if (!result)
+			goto error_return;
+		else if (PQntuples(result) == 1)
+		{
+			printfPQExpBuffer(&buf, _("Access Method: %s"),
+							  PQgetvalue(result, 0, 0));
+			printTableAddFooter(&cont, buf.data);
+		}
+
+		PQclear(result);
+
 		/* Get the column that owns this sequence */
 		printfPQExpBuffer(&buf, "SELECT pg_catalog.quote_ident(nspname) || '.' ||"
 						  "\n   pg_catalog.quote_ident(relname) || '.' ||"
@@ -1719,6 +1742,8 @@ describeOneTableDetails(const char *schemaname,
 						  oid);
 
 		result = PSQLexec(buf.data, false);
+
+		/* Same logic as above, only print result when we get one row. */
 		if (!result)
 			goto error_return;
 		else if (PQntuples(result) == 1)
@@ -1728,11 +1753,6 @@ describeOneTableDetails(const char *schemaname,
 			printTableAddFooter(&cont, buf.data);
 		}
 
-		/*
-		 * If we get no rows back, don't show anything (obviously). We should
-		 * never get more than one row back, but if we do, just ignore it and
-		 * don't print anything.
-		 */
 		PQclear(result);
 	}
 	else if (tableinfo.relkind == 'r' || tableinfo.relkind == 'm' ||
