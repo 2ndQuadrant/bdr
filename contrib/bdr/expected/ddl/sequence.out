@@ -37,6 +37,7 @@ SELECT relname, relkind FROM pg_class WHERE relname = 'test_test_id_seq';
  is_cycled     | boolean | f                   | plain
  is_called     | boolean | f                   | plain
  amdata        | bytea   |                     | extended
+Access Method: local
 Owned by: public.test.test_id
 
 ALTER TABLE test DROP COLUMN test_id;
