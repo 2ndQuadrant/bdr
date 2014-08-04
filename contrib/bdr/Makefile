@@ -90,6 +90,20 @@ regresscheck:
 	    --extra-install=contrib/hstore \
 	    $(REGRESSCHECKS)
 
+
+bdr_pgbench_check: bdr_pgbench_check.sh
+	sed -e 's,@bindir@,$(bindir),g' \
+	    -e 's,@libdir@,$(libdir),g' \
+	    -e 's,@MAKE@,$(MAKE),g' \
+	    -e 's,@top_srcdir@,$(top_srcdir),g' \
+	  $< >$@
+	chmod a+x $@
+
+pgbenchcheck: bdr_pgbench_check
+	@RUNTIME=$(RUNTIME)
+	./bdr_pgbench_check
+
+
 PHONY: submake-regress
 
 
