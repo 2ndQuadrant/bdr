@@ -100,7 +100,6 @@ bdr_pgbench_check: bdr_pgbench_check.sh
 	chmod a+x $@
 
 pgbenchcheck: bdr_pgbench_check
-	@RUNTIME=$(RUNTIME)
 	./bdr_pgbench_check
 
 
