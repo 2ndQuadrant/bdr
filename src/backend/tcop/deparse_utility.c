@@ -3071,7 +3071,7 @@ deparse_RenameStmt(Oid objectId, Node *parsetree)
 				subthing = "ATTRIBUTE";
 
 			fmtstr = psprintf("ALTER %s %%{if_exists}s %%{identity}D RENAME %s %%{colname}I TO %%{newname}I",
-							  stringify_objtype(node->relationType),
+							  stringify_objtype(node->renameType),
 							  subthing);
 			renameStmt = new_objtree_VA(fmtstr, 0);
 			append_object_object(renameStmt, "identity",
@@ -3088,7 +3088,7 @@ deparse_RenameStmt(Oid objectId, Node *parsetree)
 		case OBJECT_LANGUAGE:
 		case OBJECT_FOREIGN_SERVER:
 			fmtstr = psprintf("ALTER %s %%{identity}I RENAME TO %%{newname}I",
-							  stringify_objtype(node->relationType));
+							  stringify_objtype(node->renameType));
 			renameStmt = new_objtree_VA(fmtstr, 0);
 			append_string_object(renameStmt, "identity",
 								 node->subname);
@@ -3144,7 +3144,7 @@ deparse_RenameStmt(Oid objectId, Node *parsetree)
 				conTup = SearchSysCache1(CONSTROID, objectId);
 				constrForm = (Form_pg_constraint) GETSTRUCT(conTup);
 				fmtstr = psprintf("ALTER %s %%{identity}D RENAME CONSTRAINT %%{conname}I TO %%{newname}I",
-								  stringify_objtype(node->relationType));
+								  stringify_objtype(node->renameType));
 				renameStmt = new_objtree_VA(fmtstr, 0);
 
 				if (node->relationType == OBJECT_DOMAIN)
