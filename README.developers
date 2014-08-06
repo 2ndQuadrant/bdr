@@ -18,8 +18,27 @@ Before tagging a release:
   can successfully replicate data to/from the prior version.
 
 * "git log -- bdr--[ver].sql" to see if there were any changes since it
-  was created. If there are, you MUST ensure that a bdr--[oldver]--[ver].sql
-  script exists and is listed in the Makefile's SCRIPTS section.
+  was created. If there are, you MUST bump the version in bdr.control to
+  the current release version. 
+
+* For non-point releases (e.g. 0.6 to 0.7), increase the version in
+  bdr.control even if nothing changed in the bdr extension script.
+
+  You should also bump the version in the control file if it's already a
+  point-release version like "0.7.1" because it's confusing (but legal) to have
+  extension version 0.7.1 with code version 0.7.2 .
+
+* If bdr.control's version was changed since the last release, as shown by
+  "git diff bdr/prevver bdr-next -- bdr.control" ensure that a 
+  "bdr--[oldver]--[ver].sql" script exists and is listed in the Makefile's
+  DATA section. Make sure it actually produces the expected results.
+
+  (If there were no changes between the previous and current version's
+  extension script, the upgrade script can be empty but must exist).
+
+  It's OK to have versions like "0.7" or versions like "0.7.1" in bdr.control.
+  Start with the x.y form, move to x.y.z if you have to change the extension
+  script in a patch release.
 
 * TEST that the prior release upgrades to the current release sucessfully.
   You should do this by doing a
@@ -41,6 +60,20 @@ repo)
 At a version bump a control file upgrade script must be created, e.g
 bdr--0.6--0.7.sql. This needs to be *tested* whenever the main control file is
 modified. It needs to be listed in bdr.control . 
+
+Patch releases vs major releases
+--------------------------------
+
+There is no firm policy for patch vs major releases.
+
+Anything that affects compatibility should generally get a major release, as
+should nontrivial changes to the extension setup script. Code bug fixes,
+performance work, etc should generally be minor releases.
+
+Bumping the protocl version
+---------------------------
+
+[pending]
 
 GIT INFO
 ========
@@ -85,6 +118,10 @@ back in to bdr-next. e.g.
     ... do your work ...
     git push origin bdr-magic-beans
 
-It's OK to --force push to this working branch, and you should consider doing
-a "git rebase --interactive bdr-next", cleaning it up, and then force-pushing
-the cleanup before requesting a merge.
+(If you don't have commit rights to the main 2ndQuadrant_bdr repo, you can push
+to a clone on github instead, then email us and ask to merge.)
+
+It's OK to --force push to this working branch, and you should consider doing a
+"git rebase --interactive bdr-next", cleaning it up, and then force-pushing the
+cleanup before requesting a merge. Don't force-push a branch once you've asked
+someone to review it or asked them to pull it.
