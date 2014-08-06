@@ -1,7 +1,7 @@
 # contrib/bdr/Makefile
-
-subdir = contrib/bdr
-top_builddir = ../..
+#
+# Please test changes here against USE_PGXS=1 as well
+#
 
 MODULE_big = bdr
 
@@ -29,8 +29,16 @@ OBJS = \
 	bdr_relcache.o \
 	bdr_seq.o
 
+ifndef USE_PGXS
+subdir = contrib/bdr
+top_builddir = ../..
 include $(top_builddir)/src/Makefile.global
 include $(top_srcdir)/contrib/contrib-global.mk
+else
+PG_CONFIG = pg_config
+PGXS := $(shell $(PG_CONFIG) --pgxs)
+include $(PGXS)
+endif
 
 DATE=$(shell date --iso-8601)
 GITHASH=$(shell git rev-parse --short HEAD)
@@ -40,10 +48,24 @@ bdr_version.h: bdr_version.h.in
 
 bdr.o: bdr_version.h
 
+bdr_init_copy: bdr_init_copy.o | submake-libpq submake-libpgport
+	$(CC) $(CFLAGS) $^ $(LDFLAGS) $(LDFLAGS_EX) $(libpq_pgport) $(LIBS) -o $@$(X)
+
+all: all-lib bdr_init_copy
+
+clean: additional-clean
+
+additional-clean:
+	rm -f bdr_init_copy$(X) bdr_init_copy.o
+	rm -f bdr_version.h
+
 # Disabled because these tests require "wal_level=logical", which
 # typical installcheck users do not have (e.g. buildfarm clients).
-installcheck:;
+installcheck: ;
 
+check: all | submake-regress submake-btree_gist submake-pg_trgm submake-cube submake-hstore regresscheck
+
+ifndef USE_PGXS
 submake-regress:
 	$(MAKE) -C $(top_builddir)/src/test/regress
 
@@ -58,19 +80,6 @@ submake-cube:
 
 submake-hstore:
 	$(MAKE) -C $(top_builddir)/contrib/hstore
-
-bdr_init_copy: bdr_init_copy.o | submake-libpq submake-libpgport
-	$(CC) $(CFLAGS) $^ $(LDFLAGS) $(LDFLAGS_EX) $(libpq_pgport) $(LIBS) -o $@$(X)
-
-all: bdr_init_copy
-
-clean: additional-clean
-
-additional-clean:
-	rm -f bdr_init_copy$(X) bdr_init_copy.o
-	rm -f bdr_version.h
-
-check: all | submake-regress submake-btree_gist submake-pg_trgm submake-cube submake-hstore regresscheck
 
 REGRESSCHECKS=init \
 	ddl/create ddl/alter_table ddl/extension ddl/sequence \
@@ -90,7 +99,6 @@ regresscheck:
 	    --extra-install=contrib/hstore \
 	    $(REGRESSCHECKS)
 
-
 bdr_pgbench_check: bdr_pgbench_check.sh
 	sed -e 's,@bindir@,$(bindir),g' \
 	    -e 's,@libdir@,$(libdir),g' \
@@ -102,10 +110,35 @@ bdr_pgbench_check: bdr_pgbench_check.sh
 pgbenchcheck: bdr_pgbench_check
 	./bdr_pgbench_check
 
+else #USE_PGXS
+
+error-pgxs:
+	@echo "Regression checks require an in-tree build in contrib/bdr"
+	@echo "You cannot run \"make check\" using pgxs"
+	exit 1
+
+submake-regress: ;
+
+submake-btree_gist: ;
+
+submake-pg_trgm: ;
+
+submake-cube: ;
+
+submake-hstore: ;
+
+bdr_pgbench_check: error-pgxs
+	;
+
+regresscheck: error-pgxs
+	;
+
+endif #USE_PGXS
+
+
 
 PHONY: submake-regress
 
-
 # phony target...
 
-.PHONY: all
+.PHONY: all check
