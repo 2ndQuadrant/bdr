@@ -118,6 +118,10 @@ back in to bdr-next. e.g.
     ... do your work ...
     git push origin bdr-magic-beans
 
-It's OK to --force push to this working branch, and you should consider doing
-a "git rebase --interactive bdr-next", cleaning it up, and then force-pushing
-the cleanup before requesting a merge.
+(If you don't have commit rights to the main 2ndQuadrant_bdr repo, you can push
+to a clone on github instead, then email us and ask to merge.)
+
+It's OK to --force push to this working branch, and you should consider doing a
+"git rebase --interactive bdr-next", cleaning it up, and then force-pushing the
+cleanup before requesting a merge. Don't force-push a branch once you've asked
+someone to review it or asked them to pull it.
