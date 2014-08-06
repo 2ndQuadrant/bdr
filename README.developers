@@ -1,0 +1,90 @@
+RELEASE PROCESS
+===============
+
+Before tagging the release
+--------------------------
+
+Releases should be tagged bdr/version, e.g bdr/0.6.1 .
+
+Before tagging a release:
+
+* run "make check"
+
+* Ensure that the version in bdr_version.h.in matches the intended tag
+
+* Ensure that bdr--[ver].sql matches the version in bdr_version.h.in
+
+* Test this version against the previous release to ensure that it
+  can successfully replicate data to/from the prior version.
+
+* "git log -- bdr--[ver].sql" to see if there were any changes since it
+  was created. If there are, you MUST ensure that a bdr--[oldver]--[ver].sql
+  script exists and is listed in the Makefile's SCRIPTS section.
+
+* TEST that the prior release upgrades to the current release sucessfully.
+  You should do this by doing a
+
+      PATH=/path/to/old/release/bin:$PATH make USE_PGXS=1 clean install
+
+  to upgrade the old release's 'bdr' extension to the latest, then restarting
+  the server and making sure it upgraded correctly. Check the logs and check
+  pg_catalog.pg_extensions for a DB with BDR enabled.
+
+After tagging the release
+-------------------------
+
+After tagging a release, immediately bump the version in bdr_version.h.in and
+rename bdr--[ver].sql to the new version. This ensures that we don't have a
+released 0.6 control file floating around that's different to what's in the
+repo)
+
+At a version bump a control file upgrade script must be created, e.g
+bdr--0.6--0.7.sql. This needs to be *tested* whenever the main control file is
+modified. It needs to be listed in bdr.control . 
+
+GIT INFO
+========
+
+The main branch is bdr-next and the official tree is 2ndquadrant_bdr.git at
+git.postgresql.org.
+
+This tree is subject to periodic rebasing (as 9.4 is updated) so care must
+be taken. Rebases are announced on chat first.
+
+COMMIT GUIDELINES
+=================
+
+Prefix the first line of commits against contrib/bdr with "bdr: ". This makes
+rebasing easier.
+
+If you're altering the deparse functoinality, apply your changes to the
+'deparse' and 'deparse_9_4' (if appropriate) branches, then "git merge" them
+into bdr-next. Do not make the changes directly in bdr-next. Prefix the first
+line of the commit message with "deparse: ".
+
+If you're patching core, where possible please apply the patch in a separate
+working branch then merge it into bdr-next. Prefix the first line of the commit
+message with "core: ".
+
+Minor fixes to recent commits should be commited as
+
+    fixup! bdr: original commit message
+
+followed by an explanation. These will get auto-squashed during the next rebase
+of bdr-next.
+
+Don't "git push --force" to a tree others might be using without asking. It can
+be appropriate to force-push a fix to a recent mistake, but always ask first,
+as you can silently clobber other people's changes.
+
+Perform non-trivial work in a working branch then request that it be merged
+back in to bdr-next. e.g.
+
+    git checkout bdr-next
+    git checkout -b bdr-magic-beans
+    ... do your work ...
+    git push origin bdr-magic-beans
+
+It's OK to --force push to this working branch, and you should consider doing
+a "git rebase --interactive bdr-next", cleaning it up, and then force-pushing
+the cleanup before requesting a merge.
