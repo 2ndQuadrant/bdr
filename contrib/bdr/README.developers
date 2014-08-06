@@ -31,7 +31,7 @@ Before tagging a release:
 * If bdr.control's version was changed since the last release, as shown by
   "git diff bdr/prevver bdr-next -- bdr.control" ensure that a 
   "bdr--[oldver]--[ver].sql" script exists and is listed in the Makefile's
-  SCRIPTS section. Make sure it actually produces the expected results.
+  DATA section. Make sure it actually produces the expected results.
 
   (If there were no changes between the previous and current version's
   extension script, the upgrade script can be empty but must exist).
