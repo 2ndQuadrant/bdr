@@ -3039,10 +3039,8 @@ wait_for_remote_lsn(int32 pid, XLogRecPtr ptr, bool wait_for_apply)
 Datum
 pg_xlog_wait_remote_apply(PG_FUNCTION_ARGS)
 {
-	text *pos = PG_GETARG_TEXT_P(0);
+	XLogRecPtr startpos = PG_GETARG_LSN(0);
 	int32 pid = PG_GETARG_INT32(1);
-
-	XLogRecPtr startpos = text_to_xlogrecptr(pos);
 
 	if (GetTopTransactionIdIfAny() != InvalidTransactionId)
 		elog(ERROR, "waiting in xact with dml");
@@ -3055,10 +3053,9 @@ pg_xlog_wait_remote_apply(PG_FUNCTION_ARGS)
 Datum
 pg_xlog_wait_remote_receive(PG_FUNCTION_ARGS)
 {
-	text *pos = PG_GETARG_TEXT_P(0);
+	XLogRecPtr *startpos = PG_GETARG_LSN(0);
 	int32 pid = PG_GETARG_INT32(1);
 
-	XLogRecPtr startpos = text_to_xlogrecptr(pos);
 	wait_for_remote_lsn(pid, startpos, false);
 
 	PG_RETURN_VOID();
