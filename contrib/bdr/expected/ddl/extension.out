@@ -1,7 +1,7 @@
 \c postgres
 -- create nonexistant extension
 CREATE EXTENSION pg_trgm;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
  pg_xlog_wait_remote_apply 
 ---------------------------
  
@@ -18,7 +18,7 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_
 
 -- drop and recreate using CINE
 DROP EXTENSION pg_trgm;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
  pg_xlog_wait_remote_apply 
 ---------------------------
  
@@ -33,7 +33,7 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_
 (0 rows)
 
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
  pg_xlog_wait_remote_apply 
 ---------------------------
  
@@ -51,7 +51,7 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_
 -- CINE existing extension
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 NOTICE:  extension "pg_trgm" already exists, skipping
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
  pg_xlog_wait_remote_apply 
 ---------------------------
  
