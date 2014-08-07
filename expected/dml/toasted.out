@@ -10,7 +10,7 @@ INSERT INTO toasted(other, data) VALUES('foo', repeat('1234567890', 300));
 UPDATE toasted SET other = 'foo2';
 -- check that changed toast values are replicated
 UPDATE toasted SET other = 'foo3', data = '-'||data;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
  pg_xlog_wait_remote_apply 
 ---------------------------
  
@@ -25,7 +25,7 @@ SELECT * FROM toasted ORDER BY id;
 (1 row)
 
 \copy toasted from stdin with csv
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
  pg_xlog_wait_remote_apply 
 ---------------------------
  
