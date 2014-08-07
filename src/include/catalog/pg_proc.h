@@ -4996,9 +4996,9 @@ DESCR("Local SequenceAM setval");
 DATA(insert OID = 6024 (  sequence_local_options	   PGNSP PGUID 12 1 0 0 0 f f f f t f s 2 0 2281 "2281 16" _null_ _null_ _null_ _null_ sequence_local_options _null_ _null_ _null_ ));
 DESCR("Local SequenceAM options");
 
-DATA(insert OID = 6040 (  pg_xlog_wait_remote_apply PGNSP PGUID 12 1 0 0 0 f f f f f f v 2 0 2278 "25 23" _null_ _null_ _null_ _null_ pg_xlog_wait_remote_apply _null_ _null_ _null_ ));
+DATA(insert OID = 6040 (  pg_xlog_wait_remote_apply PGNSP PGUID 12 1 0 0 0 f f f f f f v 2 0 2278 "3220 23" _null_ _null_ _null_ _null_ pg_xlog_wait_remote_apply _null_ _null_ _null_ ));
 DESCR("wait for an lsn to be applied by a remote node");
-DATA(insert OID = 6041 (  pg_xlog_wait_remote_receive PGNSP PGUID 12 1 0 0 0 f f f f f f v 2 0 2278 "25 23" _null_ _null_ _null_ _null_ pg_xlog_wait_remote_receive _null_ _null_ _null_ ));
+DATA(insert OID = 6041 (  pg_xlog_wait_remote_receive PGNSP PGUID 12 1 0 0 0 f f f f f f v 2 0 2278 "3220 23" _null_ _null_ _null_ _null_ pg_xlog_wait_remote_receive _null_ _null_ _null_ ));
 DESCR("wait for an lsn to be received by a remote node");
 
 /* event triggers */
