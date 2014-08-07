@@ -107,6 +107,20 @@ bdr_pgbench_check: bdr_pgbench_check.sh
 	  $< >$@
 	chmod a+x $@
 
+ISOLATIONCHECKS=\
+	isolation/waitforstart
+
+bdr_isolation_regress_check:
+	[ -e pg_hba.conf ] || ln -s $(top_srcdir)/contrib/bdr/pg_hba.conf .
+	mkdir -p results/isolation
+	$(pg_isolation_regress_check) \
+	    --dbname node1,node2,node3 \
+	    --temp-config $(top_srcdir)/contrib/bdr/bdr_isolationregress.conf \
+	    --temp-install=./tmp_check \
+	    --extra-install=contrib/btree_gist \
+	    --extra-install=contrib/bdr \
+	    $(ISOLATIONCHECKS)
+
 pgbenchcheck: bdr_pgbench_check
 	./bdr_pgbench_check
 
