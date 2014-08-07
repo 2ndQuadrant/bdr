@@ -16,7 +16,7 @@ teardown
 session "s1"
 connection "node1"
 step "n1read" { SELECT * FROM tst ORDER BY a; }
-step "n1sync" { SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication; }
+step "n1sync" { SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication; }
 step "n1s1" { INSERT INTO tst (a, b) VALUES (4, 'four'); }
 step "n1s2" { ALTER TABLE tst ADD COLUMN c TEXT; }
 step "n1s3" { INSERT INTO tst (a, b, c) VALUES (5, 'five', 'new'); }
@@ -31,7 +31,7 @@ step "n1s11" { COMMIT; }
 
 session "s2"
 connection "node2"
-step "n2sync" { SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication; }
+step "n2sync" { SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication; }
 step "n2read" { SELECT * FROM tst ORDER BY a; }
 step "n2s1" { UPDATE tst SET c = 'changed' WHERE a = 1; }
 step "n2s2" { UPDATE tst SET b = 'changed' WHERE a = 1; }
