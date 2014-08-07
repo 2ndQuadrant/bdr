@@ -881,6 +881,19 @@ process_remote_delete(StringInfo s)
 	}
 	else
 	{
+		/*
+		 * The tuple to be deleted could not be found. This could be a replay
+		 * order issue, where node A created a tuple then node B deleted it,
+		 * and we've received the changes from node B before the changes from
+		 * node A.
+		 *
+		 * Or it could be a conflict where two nodes deleted the same tuple.
+		 * We can't tell the difference. We also can't afford to ignore the
+		 * delete in case it is just an ordering issue.
+		 *
+		 * (This can also arise with an UPDATE that changes the PRIMARY KEY,
+		 * as that's effectively a DELETE + INSERT).
+		 */
 		StringInfoData s_key;
 		HeapTuple ttup;
 
@@ -894,7 +907,11 @@ process_remote_delete(StringInfo s)
 
 		ereport(ERROR,
 				(errcode(ERRCODE_INTEGRITY_CONSTRAINT_VIOLATION),
-				 errmsg("CONFLICT: DELETE could not find existing tuple for pkey %s", s_key.data)));
+				 errmsg("CONFLICT: DELETE could not find existing tuple for pkey %s in relation %s.%s",
+						 s_key.data,
+						 get_namespace_name(RelationGetNamespace(rel->rel)),
+						 RelationGetRelationName(rel->rel))
+				));
 		resetStringInfo(&s_key);
 	}
 
