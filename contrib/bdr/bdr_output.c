@@ -211,7 +211,7 @@ bdr_ensure_node_ready()
 	if (status != 'r')
 	{
 		const char * const base_msg =
-			"bdr.bdr_nodes entry for local node (sysid=" UINT64_FORMAT
+			"bdr output plugin: slot creation rejected, bdr.bdr_nodes entry for local node (sysid=" UINT64_FORMAT
 			", timelineid=%u, dboid=%u): %s";
 		switch (status)
 		{
@@ -230,7 +230,8 @@ bdr_ensure_node_ready()
 				ereport(ERROR,
 						(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 						 errmsg(base_msg, sysid, ThisTimeLineID, MyDatabaseId,
-								"row missing, bdr not active on this database or is initializing."),
+								"does not exist"),
+						 errdetail("BDR is not active on this database or is still initializing."),
 						 errhint("Add bdr to shared_preload_libraries and check logs for bdr startup errors.")));
 				break;
 			case 'c':
