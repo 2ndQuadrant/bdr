@@ -2950,6 +2950,113 @@ deparse_CreateFunction(Oid objectId, Node *parsetree)
 }
 
 /*
+ * deparse_AlterFunctionStmt
+ *		Deparse a AlterFunctionStmt (ALTER FUNCTION)
+ *
+ * Given a function OID and the parsetree that created it, return the JSON
+ * blob representing the alter command.
+ *
+ * XXX this is missing the per-function custom-GUC thing.
+ */
+static char *
+deparse_AlterFunction(Oid objectId, Node *parsetree)
+{
+	AlterFunctionStmt *node = (AlterFunctionStmt *) parsetree;
+	ObjTree	   *alterFunc;
+	ObjTree	   *sign;
+	ObjTree	   *tmp;
+	char	   *command;
+	HeapTuple	procTup;
+	Form_pg_proc procForm;
+	List	   *params;
+	List	   *elems = NIL;
+	ListCell   *cell;
+	int			i;
+
+	/* get the pg_proc tuple */
+	procTup = SearchSysCache1(PROCOID, objectId);
+	if (!HeapTupleIsValid(procTup))
+		elog(ERROR, "cache lookup failure for function with OID %u",
+			 objectId);
+	procForm = (Form_pg_proc) GETSTRUCT(procTup);
+
+	alterFunc = new_objtree_VA("ALTER FUNCTION %{signature}s %{definition: }s", 0);
+
+	sign = new_objtree_VA("%{identity}D(%{arguments:, }s)", 0);
+
+	params = NIL;
+	/*
+	 * ALTER FUNCTION does not change signature so we can use catalog
+	 * to get input type Oids.
+	 */
+	for (i = 0; i < procForm->pronargs; i++)
+	{
+		tmp = new_objtree_VA("%{type}T", 0);
+		append_object_object(tmp, "type",
+							 new_objtree_for_type(procForm->proargtypes.values[i], -1));
+		params = lappend(params,
+						 new_object_object(NULL, tmp));
+	}
+
+	append_array_object(sign, "arguments", params);
+	append_object_object(sign, "identity",
+						 new_objtree_for_qualname_id(ProcedureRelationId,
+													 objectId));
+	append_object_object(alterFunc, "signature", sign);
+
+	foreach(cell, node->actions)
+	{
+		DefElem	*defel = (DefElem *) lfirst(cell);
+
+		if (strcmp(defel->defname, "volatility") == 0)
+		{
+			tmp = new_objtree_VA(strVal(defel->arg), 0);
+		}
+		else if (strcmp(defel->defname, "strict") == 0)
+		{
+			tmp = new_objtree_VA(intVal(defel->arg) ?
+								 "RETURNS NULL ON NULL INPUT" :
+								 "CALLED ON NULL INPUT", 0);
+		}
+		else if (strcmp(defel->defname, "security") == 0)
+		{
+			tmp = new_objtree_VA(intVal(defel->arg) ?
+								 "SECURITY DEFINER" : "SECURITY INVOKER", 0);
+		}
+		else if (strcmp(defel->defname, "leakproof") == 0)
+		{
+			tmp = new_objtree_VA(intVal(defel->arg) ?
+								 "LEAKPROOF" : "", 0);
+		}
+		else if (strcmp(defel->defname, "cost") == 0)
+		{
+			tmp = new_objtree_VA("COST %{cost}s", 1,
+								 "cost", ObjTypeString,
+								 psprintf("%f", defGetNumeric(defel)));
+		}
+		else if (strcmp(defel->defname, "rows") == 0)
+		{
+		tmp = new_objtree_VA("ROWS %{rows}s", 0);
+			if (defGetNumeric(defel) == 0)
+				append_bool_object(tmp, "present", false);
+			else
+				append_string_object(tmp, "rows",
+									 psprintf("%f", defGetNumeric(defel)));
+		}
+
+		elems = lappend(elems, new_object_object(NULL, tmp));
+	}
+
+	append_array_object(alterFunc, "definition", elems);
+
+	ReleaseSysCache(procTup);
+	command = jsonize_objtree(alterFunc);
+	free_objtree(alterFunc);
+
+	return command;
+}
+
+/*
  * Return the given object type as a string.
  */
 static const char *
@@ -4561,6 +4668,10 @@ deparse_parsenode_cmd(StashedCommand *cmd)
 
 		case T_CreateFunctionStmt:
 			command = deparse_CreateFunction(objectId, parsetree);
+			break;
+
+		case T_AlterFunctionStmt:
+			command = deparse_AlterFunction(objectId, parsetree);
 			break;
 
 		case T_CreateTableAsStmt:

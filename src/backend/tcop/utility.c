@@ -1285,6 +1285,7 @@ ProcessUtilitySlow(Node *parsetree,
 
 			case T_AlterFunctionStmt:	/* ALTER FUNCTION */
 				objectId = AlterFunction((AlterFunctionStmt *) parsetree);
+				EventTriggerStashCommand(objectId, OBJECT_FUNCTION, parsetree);
 				break;
 
 			case T_RuleStmt:	/* CREATE RULE */
