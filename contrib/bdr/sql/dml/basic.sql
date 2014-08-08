@@ -13,19 +13,19 @@ VALUES (5, 'foo', '1 minute'::interval),
        (3, 'baz', '2 years 1 hour'::interval),
        (2, 'qux', '8 months 2 days'::interval),
        (1, NULL, NULL);
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 \c postgres
 SELECT id, other, data, something FROM basic_dml ORDER BY id;
 
 -- update one row
 UPDATE basic_dml SET other = '4', data = NULL, something = '3 days'::interval WHERE id = 4;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 \c regression
 SELECT id, other, data, something FROM basic_dml ORDER BY id;
 
 -- update multiple rows
 UPDATE basic_dml SET other = id, data = data || id::text;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 \c postgres
 SELECT id, other, data, something FROM basic_dml ORDER BY id;
 
@@ -33,28 +33,28 @@ SELECT id, other, data, something FROM basic_dml ORDER BY id;
 UPDATE basic_dml SET other = id, something = something - '10 seconds'::interval WHERE id < 3;
 \c regression
 UPDATE basic_dml SET other = id, something = something + '10 seconds'::interval WHERE id > 3;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 \c postgres
 SELECT id, other, data, something FROM basic_dml ORDER BY id;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 \c regression
 SELECT id, other, data, something FROM basic_dml ORDER BY id;
 
 -- delete one row
 DELETE FROM basic_dml WHERE id = 2;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 \c postgres
 SELECT id, other, data, something FROM basic_dml ORDER BY id;
 
 -- delete multiple rows
 DELETE FROM basic_dml WHERE id < 4;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 \c regression
 SELECT id, other, data, something FROM basic_dml ORDER BY id;
 
 -- truncate
 TRUNCATE basic_dml;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 \c postgres
 SELECT id, other, data, something FROM basic_dml ORDER BY id;
 
@@ -65,7 +65,7 @@ SELECT id, other, data, something FROM basic_dml ORDER BY id;
 9002,3,ccc,3 minutes
 9003,4,ddd,4 days
 \.
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 \c regression
 SELECT id, other, data, something FROM basic_dml ORDER BY id;
 

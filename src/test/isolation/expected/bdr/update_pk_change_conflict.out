@@ -1,13 +1,13 @@
 Parsed test spec with 3 sessions
 
 starting permutation: n1sync n1s1 n1sync n3read n2s1 n2sync n3read n1s2 n2s2 n1s3 n2s3 n1s4 n2s4 n1sync n2sync n1read n2read n3read
-step n1sync: select pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+step n1sync: select pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 pg_xlog_wait_remote_apply
 
                
                
 step n1s1: UPDATE tst SET a = 2;
-step n1sync: select pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+step n1sync: select pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 pg_xlog_wait_remote_apply
 
                
@@ -17,7 +17,7 @@ a              b
 
 2              one            
 step n2s1: UPDATE tst SET a = 3;
-step n2sync: select pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+step n2sync: select pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 pg_xlog_wait_remote_apply
 
                
@@ -32,12 +32,12 @@ step n1s3: UPDATE tst SET a = 4;
 step n2s3: UPDATE tst SET a = 5;
 step n1s4: COMMIT;
 step n2s4: COMMIT;
-step n1sync: select pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+step n1sync: select pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 pg_xlog_wait_remote_apply
 
                
                
-step n2sync: select pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+step n2sync: select pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 pg_xlog_wait_remote_apply
 
                

@@ -213,7 +213,10 @@ bdr_locks_find_database(Oid dboid, bool create)
 	}
 
 	if (!create)
-		elog(ERROR, "database %u is not configured for bdr", dboid);
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("database %s (oid=%u) is not configured for bdr",
+				 		get_database_name(dboid), dboid)));
 
 	if (free_off != -1)
 	{
@@ -222,7 +225,14 @@ bdr_locks_find_database(Oid dboid, bool create)
 		db->in_use = true;
 		return db;
 	}
-	elog(PANIC, "too many databases in use for bdr");
+	/*
+	 * Shouldn't happen with BDR statically configured, as the shmem segment
+	 * gets sized for the number of BDR-enabled databases. Later will be
+	 * affected by any bdr_max_databases setting or whatever we add.
+	 */
+	ereport(PANIC,
+			(errcode(ERRCODE_CONFIGURATION_LIMIT_EXCEEDED),
+			"Too many databases in use with BDR"));
 }
 
 static void
@@ -339,7 +349,7 @@ bdr_locks_startup(Size nnodes)
 			elog(DEBUG1, "restarting DDL lock replay catchup phase");
 		}
 		else
-			elog(PANIC, "unknown lockstate");
+			elog(PANIC, "BDR: unknown lockstate");
 	}
 
 	systable_endscan(scan);
@@ -396,7 +406,7 @@ bdr_lock_xact_callback(XactEvent event, void *arg)
 		if (bdr_my_locks_database->lockcount > 0)
 			bdr_my_locks_database->lockcount--;
 		else
-			elog(WARNING, "releasing unacquired DDL lock");
+			elog(WARNING, "BDR: releasing unacquired DDL lock");
 		LWLockRelease(bdr_locks_ctl->lock);
 		this_xact_acquired_lock = false;
 	}

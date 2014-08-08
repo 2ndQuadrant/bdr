@@ -18,7 +18,7 @@ teardown
 
 session "s1"
 connection "node1"
-step "n1sync" { SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication; }
+step "n1sync" { SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication; }
 step "n1reada" { SELECT a, b FROM tsta ORDER BY a; }
 step "n1readb" { SELECT a, b FROM tstb ORDER BY a; }
 step "n1readc" { SELECT a, b FROM tstc ORDER BY a; }
@@ -44,7 +44,7 @@ step "n1s2"
 
 session "s2"
 connection "node2"
-step "n2sync" { SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication; }
+step "n2sync" { SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication; }
 step "n2reada" { SELECT a, b FROM tsta ORDER BY a; }
 step "n2readb" { SELECT a, b FROM tstb ORDER BY a; }
 step "n2readc" { SELECT a, b FROM tstc ORDER BY a; }
@@ -58,7 +58,7 @@ step "n2s2" {
 
 session "s3"
 connection "node3"
-step "n3sync" { SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication; }
+step "n3sync" { SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication; }
 step "n3reada" { SELECT a, b FROM tsta ORDER BY a; }
 step "n3readb" { SELECT a, b FROM tstb ORDER BY a; }
 step "n3readc" { SELECT a, b FROM tstc ORDER BY a; }

@@ -244,7 +244,7 @@ TransactionIdGetCommitTsData(TransactionId xid, TimestampTz *ts,
 	if (!commit_ts_enabled)
 	{
 		if (ts)
-			*ts = InvalidTransactionId;
+			*ts = 0;
 		if (data)
 			*data = (CommitExtraData) 0;
 		return;
@@ -259,7 +259,7 @@ TransactionIdGetCommitTsData(TransactionId xid, TimestampTz *ts,
 		TransactionIdPrecedes(xid, oldestCommitTs))
 	{
 		if (ts)
-			*ts = InvalidTransactionId;
+			*ts = 0;
 		if (data)
 			*data = (CommitExtraData) 0;
 		return;

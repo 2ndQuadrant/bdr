@@ -15,7 +15,7 @@ step n1s1:
   (2, '{"t1": "aab", "t2": "bbb", "t3": "ccb"}'::jsonb),
   (3, '{"t1": "aac", "t2": "bbc", "t3": "ccc"}'::jsonb);
 
-step n1sync: SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+step n1sync: SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 pg_xlog_wait_remote_apply
 
                
@@ -41,7 +41,7 @@ a              b
 step n2s1: 
  UPDATE tsta SET b = b || ('dd' || (ARRAY['a', 'b', 'c']::text[])[a]);
 
-step n2sync: SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+step n2sync: SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 pg_xlog_wait_remote_apply
 
                
@@ -55,7 +55,7 @@ a              b
 step n3s1: 
  UPDATE tstb SET b = '[2525-01-01 23:55:00, 2525-01-02 00:05:00]' WHERE a = 3;
 
-step n3sync: SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+step n3sync: SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 pg_xlog_wait_remote_apply
 
                
@@ -69,7 +69,7 @@ a              b
 step n1s2: 
  UPDATE tstc set b = '{"t1": "aac", "t2": "bbc", "t3": "ccc"}'::jsonb;
 
-step n1sync: SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+step n1sync: SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 pg_xlog_wait_remote_apply
 
                
@@ -84,7 +84,7 @@ step n2s2:
  DELETE FROM tsta WHERE a = 3;
  DELETE FROM tstb WHERE b = '[2525-01-01 23:55:00, 2525-01-02 00:05:00]';
 
-step n2sync: SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+step n2sync: SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 pg_xlog_wait_remote_apply
 
                
@@ -103,7 +103,7 @@ step n3s2:
  INSERT INTO tstb (a, b) VALUES
   (3, '[2003-03-03 03:03:03, 2003-04-05 03:03:03]');
 
-step n3sync: SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication;
+step n3sync: SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 pg_xlog_wait_remote_apply
 
                

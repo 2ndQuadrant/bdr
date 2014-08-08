@@ -12,7 +12,7 @@ step "s1_update_to_pk2" { UPDATE t1 SET pk = 2 WHERE pk = 1; }
 step "s1_delete" { DELETE FROM t1 WHERE pk = 1; }
 
 step "s1_sleep7" { SELECT pg_sleep(7); }
-step "s1_wait_repl" { SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location()::text, pid) FROM pg_stat_replication; }
+step "s1_wait_repl" { SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication; }
 
 session "sess2"
 connection "conn2"
