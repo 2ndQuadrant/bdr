@@ -69,6 +69,9 @@ ifndef USE_PGXS
 submake-regress:
 	$(MAKE) -C $(top_builddir)/src/test/regress
 
+submake-isolation: | submake-regress
+	$(MAKE) -C $(top_builddir)/src/test/isolation
+
 submake-btree_gist:
 	$(MAKE) -C $(top_builddir)/contrib/btree_gist
 
@@ -110,7 +113,7 @@ bdr_pgbench_check: bdr_pgbench_check.sh
 ISOLATIONCHECKS=\
 	isolation/waitforstart
 
-bdr_isolation_regress_check:
+bdr_isolation_regress_check: all | submake-isolation submake-btree_gist
 	[ -e pg_hba.conf ] || ln -s $(top_srcdir)/contrib/bdr/pg_hba.conf .
 	mkdir -p results/isolation
 	$(pg_isolation_regress_check) \
