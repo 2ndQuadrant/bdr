@@ -284,267 +284,6 @@ Indexes:
 Triggers:
     truncate_trigger AFTER TRUNCATE ON test_tbl_serial_combined_pk FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
-CREATE SEQUENCE test_seq USING bdr;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
- pg_xlog_wait_remote_apply 
----------------------------
- 
- 
-(2 rows)
-
-\d+ test_seq
-                Sequence "public.test_seq"
-    Column     |  Type   |        Value        | Storage  
----------------+---------+---------------------+----------
- sequence_name | name    | test_seq            | plain
- last_value    | bigint  | 1                   | plain
- start_value   | bigint  | 1                   | plain
- increment_by  | bigint  | 1                   | plain
- max_value     | bigint  | 9223372036854775807 | plain
- min_value     | bigint  | 1                   | plain
- cache_value   | bigint  | 1                   | plain
- log_cnt       | bigint  | 0                   | plain
- is_cycled     | boolean | f                   | plain
- is_called     | boolean | f                   | plain
- amdata        | bytea   |                     | extended
-Access Method: bdr
-
-\c regression
-\d+ test_seq
-                Sequence "public.test_seq"
-    Column     |  Type   |        Value        | Storage  
----------------+---------+---------------------+----------
- sequence_name | name    | test_seq            | plain
- last_value    | bigint  | 1                   | plain
- start_value   | bigint  | 1                   | plain
- increment_by  | bigint  | 1                   | plain
- max_value     | bigint  | 9223372036854775807 | plain
- min_value     | bigint  | 1                   | plain
- cache_value   | bigint  | 1                   | plain
- log_cnt       | bigint  | 0                   | plain
- is_cycled     | boolean | f                   | plain
- is_called     | boolean | f                   | plain
- amdata        | bytea   |                     | extended
-Access Method: bdr
-
-ALTER SEQUENCE test_seq owned by test_tbl_serial_combined_pk.val;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
- pg_xlog_wait_remote_apply 
----------------------------
- 
- 
-(2 rows)
-
-\d+ test_seq
-                Sequence "public.test_seq"
-    Column     |  Type   |        Value        | Storage  
----------------+---------+---------------------+----------
- sequence_name | name    | test_seq            | plain
- last_value    | bigint  | 1                   | plain
- start_value   | bigint  | 1                   | plain
- increment_by  | bigint  | 1                   | plain
- max_value     | bigint  | 9223372036854775807 | plain
- min_value     | bigint  | 1                   | plain
- cache_value   | bigint  | 1                   | plain
- log_cnt       | bigint  | 0                   | plain
- is_cycled     | boolean | f                   | plain
- is_called     | boolean | f                   | plain
- amdata        | bytea   |                     | extended
-Access Method: bdr
-Owned by: public.test_tbl_serial_combined_pk.val
-
-\c postgres
-\d+ test_seq
-                Sequence "public.test_seq"
-    Column     |  Type   |        Value        | Storage  
----------------+---------+---------------------+----------
- sequence_name | name    | test_seq            | plain
- last_value    | bigint  | 1                   | plain
- start_value   | bigint  | 1                   | plain
- increment_by  | bigint  | 1                   | plain
- max_value     | bigint  | 9223372036854775807 | plain
- min_value     | bigint  | 1                   | plain
- cache_value   | bigint  | 1                   | plain
- log_cnt       | bigint  | 0                   | plain
- is_cycled     | boolean | f                   | plain
- is_called     | boolean | f                   | plain
- amdata        | bytea   |                     | extended
-Access Method: bdr
-Owned by: public.test_tbl_serial_combined_pk.val
-
--- these should fail
-ALTER SEQUENCE test_seq increment by 10;
-ERROR:  ALTER SEQUENCE ... increment is not supported for bdr sequences
-ALTER SEQUENCE test_seq minvalue 0;
-ERROR:  ALTER SEQUENCE ... minvalue is not supported for bdr sequences
-ALTER SEQUENCE test_seq maxvalue 1000000;
-ERROR:  ALTER SEQUENCE ... maxvalue is not supported for bdr sequences
-ALTER SEQUENCE test_seq restart;
-ERROR:  ALTER SEQUENCE ... restart is not supported for bdr sequences
-ALTER SEQUENCE test_seq cache 10;
-ERROR:  ALTER SEQUENCE ... cache is not supported for bdr sequences
-ALTER SEQUENCE test_seq cycle;
-ERROR:  ALTER SEQUENCE ... cycle is not supported for bdr sequences
-DROP SEQUENCE test_seq;
-CREATE SEQUENCE test_seq start 10000 owned by test_tbl_serial_combined_pk.val1 USING bdr;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
- pg_xlog_wait_remote_apply 
----------------------------
- 
- 
-(2 rows)
-
-\d+ test_seq
-                Sequence "public.test_seq"
-    Column     |  Type   |        Value        | Storage  
----------------+---------+---------------------+----------
- sequence_name | name    | test_seq            | plain
- last_value    | bigint  | 10000               | plain
- start_value   | bigint  | 10000               | plain
- increment_by  | bigint  | 1                   | plain
- max_value     | bigint  | 9223372036854775807 | plain
- min_value     | bigint  | 1                   | plain
- cache_value   | bigint  | 1                   | plain
- log_cnt       | bigint  | 0                   | plain
- is_cycled     | boolean | f                   | plain
- is_called     | boolean | f                   | plain
- amdata        | bytea   |                     | extended
-Access Method: bdr
-Owned by: public.test_tbl_serial_combined_pk.val1
-
-\c regression
-\d+ test_seq
-                Sequence "public.test_seq"
-    Column     |  Type   |        Value        | Storage  
----------------+---------+---------------------+----------
- sequence_name | name    | test_seq            | plain
- last_value    | bigint  | 10000               | plain
- start_value   | bigint  | 10000               | plain
- increment_by  | bigint  | 1                   | plain
- max_value     | bigint  | 9223372036854775807 | plain
- min_value     | bigint  | 1                   | plain
- cache_value   | bigint  | 1                   | plain
- log_cnt       | bigint  | 0                   | plain
- is_cycled     | boolean | f                   | plain
- is_called     | boolean | f                   | plain
- amdata        | bytea   |                     | extended
-Access Method: bdr
-
-DROP SEQUENCE test_seq;
--- these should fail
-CREATE SEQUENCE test_seq increment by 10 USING bdr;
-ERROR:  CREATE SEQUENCE ... increment is not supported for bdr sequences
-CREATE SEQUENCE test_seq minvalue 10 USING bdr;
-ERROR:  CREATE SEQUENCE ... minvalue is not supported for bdr sequences
-CREATE SEQUENCE test_seq maxvalue 10 USING bdr;
-ERROR:  CREATE SEQUENCE ... maxvalue is not supported for bdr sequences
-CREATE SEQUENCE test_seq cache 10 USING bdr;
-ERROR:  CREATE SEQUENCE ... cache is not supported for bdr sequences
-CREATE SEQUENCE test_seq cycle USING bdr;
-ERROR:  CREATE SEQUENCE ... cycle is not supported for bdr sequences
--- non-bdr sequence
-CREATE SEQUENCE test_seq increment 10;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
- pg_xlog_wait_remote_apply 
----------------------------
- 
- 
-(2 rows)
-
-\d+ test_seq
-                Sequence "public.test_seq"
-    Column     |  Type   |        Value        | Storage  
----------------+---------+---------------------+----------
- sequence_name | name    | test_seq            | plain
- last_value    | bigint  | 1                   | plain
- start_value   | bigint  | 1                   | plain
- increment_by  | bigint  | 10                  | plain
- max_value     | bigint  | 9223372036854775807 | plain
- min_value     | bigint  | 1                   | plain
- cache_value   | bigint  | 1                   | plain
- log_cnt       | bigint  | 0                   | plain
- is_cycled     | boolean | f                   | plain
- is_called     | boolean | f                   | plain
- amdata        | bytea   |                     | extended
-Access Method: local
-
-\c postgres
-\d+ test_seq
-                Sequence "public.test_seq"
-    Column     |  Type   |        Value        | Storage  
----------------+---------+---------------------+----------
- sequence_name | name    | test_seq            | plain
- last_value    | bigint  | 1                   | plain
- start_value   | bigint  | 1                   | plain
- increment_by  | bigint  | 10                  | plain
- max_value     | bigint  | 9223372036854775807 | plain
- min_value     | bigint  | 1                   | plain
- cache_value   | bigint  | 1                   | plain
- log_cnt       | bigint  | 0                   | plain
- is_cycled     | boolean | f                   | plain
- is_called     | boolean | f                   | plain
- amdata        | bytea   |                     | extended
-Access Method: local
-
-ALTER SEQUENCE test_seq increment by 10;
-ALTER SEQUENCE test_seq minvalue 0;
-ALTER SEQUENCE test_seq maxvalue 1000000;
-ALTER SEQUENCE test_seq restart;
-ALTER SEQUENCE test_seq cache 10;
-ALTER SEQUENCE test_seq cycle;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
- pg_xlog_wait_remote_apply 
----------------------------
- 
- 
-(2 rows)
-
-\d+ test_seq
-          Sequence "public.test_seq"
-    Column     |  Type   |  Value   | Storage  
----------------+---------+----------+----------
- sequence_name | name    | test_seq | plain
- last_value    | bigint  | 1        | plain
- start_value   | bigint  | 1        | plain
- increment_by  | bigint  | 10       | plain
- max_value     | bigint  | 1000000  | plain
- min_value     | bigint  | 0        | plain
- cache_value   | bigint  | 10       | plain
- log_cnt       | bigint  | 0        | plain
- is_cycled     | boolean | t        | plain
- is_called     | boolean | f        | plain
- amdata        | bytea   |          | extended
-Access Method: local
-
-\c regression
-\d+ test_seq
-          Sequence "public.test_seq"
-    Column     |  Type   |  Value   | Storage  
----------------+---------+----------+----------
- sequence_name | name    | test_seq | plain
- last_value    | bigint  | 1        | plain
- start_value   | bigint  | 1        | plain
- increment_by  | bigint  | 10       | plain
- max_value     | bigint  | 1000000  | plain
- min_value     | bigint  | 0        | plain
- cache_value   | bigint  | 10       | plain
- log_cnt       | bigint  | 0        | plain
- is_cycled     | boolean | t        | plain
- is_called     | boolean | f        | plain
- amdata        | bytea   |          | extended
-Access Method: local
-
-DROP SEQUENCE test_seq;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
- pg_xlog_wait_remote_apply 
----------------------------
- 
- 
-(2 rows)
-
-\d+ test_seq;
-\c postgres
-\d+ test_seq
 CREATE TABLE test_tbl_create_index (val int, val2 int);
 CREATE UNIQUE INDEX test1_idx ON test_tbl_create_index(val);
 CREATE INDEX test2_idx ON test_tbl_create_index (lower(val2::text));
@@ -841,14 +580,17 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
 
 DROP TABLE test_tbl_serial;
 DROP TABLE test_tbl_serial_combined_pk;
-CREATE FUNCTION test_trigger_fn() RETURNS trigger AS
-$$
-BEGIN
-END;
-$$ LANGUAGE plpgsql;
-CREATE TABLE test_trigger_table (f1 integer, f2 text);
-CREATE TRIGGER test_trigger_fn_trg1 BEFORE INSERT OR DELETE ON test_trigger_table FOR EACH STATEMENT WHEN (True) EXECUTE PROCEDURE test_trigger_fn();
-CREATE TRIGGER test_trigger_fn_trg2 AFTER UPDATE OF f1 ON test_trigger_table FOR EACH ROW EXECUTE PROCEDURE test_trigger_fn();
+CREATE TABLE test_tbl_inh_parent(f1 text, f2 date DEFAULT '2014-01-02');
+CREATE TABLE test_tbl_inh_chld1(f1 text, f2 date DEFAULT '2014-01-02') INHERITS (test_tbl_inh_parent);
+NOTICE:  merging column "f1" with inherited definition
+NOTICE:  merging column "f2" with inherited definition
+CREATE TABLE test_tbl_inh_chld2(f1 text, f2 date) INHERITS (test_tbl_inh_parent);
+NOTICE:  merging column "f1" with inherited definition
+NOTICE:  merging column "f2" with inherited definition
+CREATE TABLE test_tbl_inh_chld3(f1 text) INHERITS (test_tbl_inh_parent, test_tbl_inh_chld1);
+NOTICE:  merging multiple inherited definitions of column "f1"
+NOTICE:  merging multiple inherited definitions of column "f2"
+NOTICE:  merging column "f1" with inherited definition
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
  pg_xlog_wait_remote_apply 
 ---------------------------
@@ -856,28 +598,162 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
  
 (2 rows)
 
-\d+ test_trigger_table
-                  Table "public.test_trigger_table"
- Column |  Type   | Modifiers | Storage  | Stats target | Description 
---------+---------+-----------+----------+--------------+-------------
- f1     | integer |           | plain    |              | 
- f2     | text    |           | extended |              | 
+\d+ test_tbl_inh_*
+                         Table "public.test_tbl_inh_chld1"
+ Column | Type |         Modifiers          | Storage  | Stats target | Description 
+--------+------+----------------------------+----------+--------------+-------------
+ f1     | text |                            | extended |              | 
+ f2     | date | default '01-02-2014'::date | plain    |              | 
 Triggers:
-    test_trigger_fn_trg1 BEFORE INSERT OR DELETE ON test_trigger_table FOR EACH STATEMENT WHEN (true) EXECUTE PROCEDURE test_trigger_fn()
-    test_trigger_fn_trg2 AFTER UPDATE OF f1 ON test_trigger_table FOR EACH ROW EXECUTE PROCEDURE test_trigger_fn()
-    truncate_trigger AFTER TRUNCATE ON test_trigger_table FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+    truncate_trigger AFTER TRUNCATE ON test_tbl_inh_chld1 FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+Inherits: test_tbl_inh_parent
+Child tables: test_tbl_inh_chld3
+
+                         Table "public.test_tbl_inh_chld2"
+ Column | Type |         Modifiers          | Storage  | Stats target | Description 
+--------+------+----------------------------+----------+--------------+-------------
+ f1     | text |                            | extended |              | 
+ f2     | date | default '01-02-2014'::date | plain    |              | 
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl_inh_chld2 FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+Inherits: test_tbl_inh_parent
+
+                         Table "public.test_tbl_inh_chld3"
+ Column | Type |         Modifiers          | Storage  | Stats target | Description 
+--------+------+----------------------------+----------+--------------+-------------
+ f1     | text |                            | extended |              | 
+ f2     | date | default '01-02-2014'::date | plain    |              | 
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl_inh_chld3 FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+Inherits: test_tbl_inh_parent,
+          test_tbl_inh_chld1
+
+                         Table "public.test_tbl_inh_parent"
+ Column | Type |         Modifiers          | Storage  | Stats target | Description 
+--------+------+----------------------------+----------+--------------+-------------
+ f1     | text |                            | extended |              | 
+ f2     | date | default '01-02-2014'::date | plain    |              | 
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl_inh_parent FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+Child tables: test_tbl_inh_chld1,
+              test_tbl_inh_chld2,
+              test_tbl_inh_chld3
 
 \c regression
-\d+ test_trigger_table
-                  Table "public.test_trigger_table"
- Column |  Type   | Modifiers | Storage  | Stats target | Description 
---------+---------+-----------+----------+--------------+-------------
- f1     | integer |           | plain    |              | 
- f2     | text    |           | extended |              | 
+\d+ test_tbl_inh_*
+                         Table "public.test_tbl_inh_chld1"
+ Column | Type |         Modifiers          | Storage  | Stats target | Description 
+--------+------+----------------------------+----------+--------------+-------------
+ f1     | text |                            | extended |              | 
+ f2     | date | default '02-01-2014'::date | plain    |              | 
 Triggers:
-    test_trigger_fn_trg1 BEFORE INSERT OR DELETE ON test_trigger_table FOR EACH STATEMENT WHEN (true) EXECUTE PROCEDURE test_trigger_fn()
-    test_trigger_fn_trg2 AFTER UPDATE OF f1 ON test_trigger_table FOR EACH ROW EXECUTE PROCEDURE test_trigger_fn()
-    truncate_trigger AFTER TRUNCATE ON test_trigger_table FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+    truncate_trigger AFTER TRUNCATE ON test_tbl_inh_chld1 FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+Inherits: test_tbl_inh_parent
+Child tables: test_tbl_inh_chld3
 
-DROP TABLE test_trigger_table;
-DROP FUNCTION test_trigger_fn();
+                         Table "public.test_tbl_inh_chld2"
+ Column | Type |         Modifiers          | Storage  | Stats target | Description 
+--------+------+----------------------------+----------+--------------+-------------
+ f1     | text |                            | extended |              | 
+ f2     | date | default '02-01-2014'::date | plain    |              | 
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl_inh_chld2 FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+Inherits: test_tbl_inh_parent
+
+                         Table "public.test_tbl_inh_chld3"
+ Column | Type |         Modifiers          | Storage  | Stats target | Description 
+--------+------+----------------------------+----------+--------------+-------------
+ f1     | text |                            | extended |              | 
+ f2     | date | default '02-01-2014'::date | plain    |              | 
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl_inh_chld3 FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+Inherits: test_tbl_inh_parent,
+          test_tbl_inh_chld1
+
+                         Table "public.test_tbl_inh_parent"
+ Column | Type |         Modifiers          | Storage  | Stats target | Description 
+--------+------+----------------------------+----------+--------------+-------------
+ f1     | text |                            | extended |              | 
+ f2     | date | default '02-01-2014'::date | plain    |              | 
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl_inh_parent FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+Child tables: test_tbl_inh_chld1,
+              test_tbl_inh_chld2,
+              test_tbl_inh_chld3
+
+CREATE RULE test_tbl_inh_parent_rule_ins_1 AS ON INSERT TO test_tbl_inh_parent
+          WHERE (f1 LIKE '%1%') DO INSTEAD
+          INSERT INTO test_tbl_inh_chld1 VALUES (NEW.*);
+CREATE RULE test_tbl_inh_parent_rule_ins_2 AS ON INSERT TO test_tbl_inh_parent
+          WHERE (f1 LIKE '%2%') DO INSTEAD
+          INSERT INTO test_tbl_inh_chld2 VALUES (NEW.*);
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\d+ test_tbl_inh_parent
+                         Table "public.test_tbl_inh_parent"
+ Column | Type |         Modifiers          | Storage  | Stats target | Description 
+--------+------+----------------------------+----------+--------------+-------------
+ f1     | text |                            | extended |              | 
+ f2     | date | default '02-01-2014'::date | plain    |              | 
+Rules:
+    test_tbl_inh_parent_rule_ins_1 AS
+    ON INSERT TO test_tbl_inh_parent
+   WHERE new.f1 ~~ '%1%'::text DO INSTEAD  INSERT INTO test_tbl_inh_chld1 (f1, f2)
+  VALUES (new.f1, new.f2)
+    test_tbl_inh_parent_rule_ins_2 AS
+    ON INSERT TO test_tbl_inh_parent
+   WHERE new.f1 ~~ '%2%'::text DO INSTEAD  INSERT INTO test_tbl_inh_chld2 (f1, f2)
+  VALUES (new.f1, new.f2)
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl_inh_parent FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+Child tables: test_tbl_inh_chld1,
+              test_tbl_inh_chld2,
+              test_tbl_inh_chld3
+
+\c postgres
+\d+ test_tbl_inh_parent
+                         Table "public.test_tbl_inh_parent"
+ Column | Type |         Modifiers          | Storage  | Stats target | Description 
+--------+------+----------------------------+----------+--------------+-------------
+ f1     | text |                            | extended |              | 
+ f2     | date | default '01-02-2014'::date | plain    |              | 
+Rules:
+    test_tbl_inh_parent_rule_ins_1 AS
+    ON INSERT TO test_tbl_inh_parent
+   WHERE new.f1 ~~ '%1%'::text DO INSTEAD  INSERT INTO test_tbl_inh_chld1 (f1, f2)
+  VALUES (new.f1, new.f2)
+    test_tbl_inh_parent_rule_ins_2 AS
+    ON INSERT TO test_tbl_inh_parent
+   WHERE new.f1 ~~ '%2%'::text DO INSTEAD  INSERT INTO test_tbl_inh_chld2 (f1, f2)
+  VALUES (new.f1, new.f2)
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl_inh_parent FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+Child tables: test_tbl_inh_chld1,
+              test_tbl_inh_chld2,
+              test_tbl_inh_chld3
+
+DROP TABLE test_tbl_inh_chld1;
+ERROR:  cannot drop table test_tbl_inh_chld1 because other objects depend on it
+DETAIL:  rule test_tbl_inh_parent_rule_ins_1 on table test_tbl_inh_parent depends on table test_tbl_inh_chld1
+table test_tbl_inh_chld3 depends on table test_tbl_inh_chld1
+HINT:  Use DROP ... CASCADE to drop the dependent objects too.
+DROP TABLE test_tbl_inh_parent CASCADE;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to table test_tbl_inh_chld1
+drop cascades to table test_tbl_inh_chld2
+drop cascades to table test_tbl_inh_chld3
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\d+ test_tbl_inh_*
+\c regression
+\d+ test_tbl_inh_*
