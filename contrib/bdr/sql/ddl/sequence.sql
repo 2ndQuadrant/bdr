@@ -1,4 +1,3 @@
-
 -- ALTER TABLE DROP COLUMN (pk column)
 CREATE TABLE test (test_id SERIAL);
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
@@ -27,3 +26,70 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
 \d+ test
 
 DROP TABLE test;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+\c postgres
+
+CREATE SEQUENCE test_seq USING bdr;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+\d+ test_seq
+\c regression
+\d+ test_seq
+
+ALTER SEQUENCE test_seq owned by test_tbl_serial_combined_pk.val;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+\d+ test_seq
+\c postgres
+\d+ test_seq
+
+-- these should fail
+ALTER SEQUENCE test_seq increment by 10;
+ALTER SEQUENCE test_seq minvalue 0;
+ALTER SEQUENCE test_seq maxvalue 1000000;
+ALTER SEQUENCE test_seq restart;
+ALTER SEQUENCE test_seq cache 10;
+ALTER SEQUENCE test_seq cycle;
+
+DROP SEQUENCE test_seq;
+
+CREATE SEQUENCE test_seq start 10000 owned by test_tbl_serial_combined_pk.val1 USING bdr;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+\d+ test_seq
+\c regression
+\d+ test_seq
+
+DROP SEQUENCE test_seq;
+
+-- these should fail
+CREATE SEQUENCE test_seq increment by 10 USING bdr;
+CREATE SEQUENCE test_seq minvalue 10 USING bdr;
+CREATE SEQUENCE test_seq maxvalue 10 USING bdr;
+CREATE SEQUENCE test_seq cache 10 USING bdr;
+CREATE SEQUENCE test_seq cycle USING bdr;
+
+-- non-bdr sequence
+CREATE SEQUENCE test_seq increment 10;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+\d+ test_seq
+\c postgres
+\d+ test_seq
+
+ALTER SEQUENCE test_seq increment by 10;
+ALTER SEQUENCE test_seq minvalue 0;
+ALTER SEQUENCE test_seq maxvalue 1000000;
+ALTER SEQUENCE test_seq restart;
+ALTER SEQUENCE test_seq cache 10;
+ALTER SEQUENCE test_seq cycle;
+ALTER SEQUENCE test_seq RENAME TO renamed_test_seq;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+\d+ test_seq
+\d+ renamed_test_seq
+\c regression
+\d+ test_seq
+\d+ renamed_test_seq
+
+DROP SEQUENCE renamed_test_seq;
+
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+\d+ renamed_test_seq;
+\c postgres
+\d+ renamed_test_seq

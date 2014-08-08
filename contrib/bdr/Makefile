@@ -82,7 +82,7 @@ submake-hstore:
 	$(MAKE) -C $(top_builddir)/contrib/hstore
 
 REGRESSCHECKS=init \
-	ddl/create ddl/alter_table ddl/extension ddl/sequence \
+	ddl/create ddl/alter_table ddl/extension ddl/function ddl/namespace ddl/sequence ddl/view \
 	dml/basic dml/contrib dml/delete_pk dml/extended dml/mixed dml/toasted
 
 regresscheck:
