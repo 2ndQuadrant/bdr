@@ -82,68 +82,6 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
 \c postgres
 \d+ test_tbl_serial_combined_pk
 
-CREATE SEQUENCE test_seq USING bdr;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\d+ test_seq
-\c regression
-\d+ test_seq
-
-ALTER SEQUENCE test_seq owned by test_tbl_serial_combined_pk.val;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\d+ test_seq
-\c postgres
-\d+ test_seq
-
--- these should fail
-ALTER SEQUENCE test_seq increment by 10;
-ALTER SEQUENCE test_seq minvalue 0;
-ALTER SEQUENCE test_seq maxvalue 1000000;
-ALTER SEQUENCE test_seq restart;
-ALTER SEQUENCE test_seq cache 10;
-ALTER SEQUENCE test_seq cycle;
-
-DROP SEQUENCE test_seq;
-
-CREATE SEQUENCE test_seq start 10000 owned by test_tbl_serial_combined_pk.val1 USING bdr;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\d+ test_seq
-\c regression
-\d+ test_seq
-
-DROP SEQUENCE test_seq;
-
--- these should fail
-CREATE SEQUENCE test_seq increment by 10 USING bdr;
-CREATE SEQUENCE test_seq minvalue 10 USING bdr;
-CREATE SEQUENCE test_seq maxvalue 10 USING bdr;
-CREATE SEQUENCE test_seq cache 10 USING bdr;
-CREATE SEQUENCE test_seq cycle USING bdr;
-
--- non-bdr sequence
-CREATE SEQUENCE test_seq increment 10;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\d+ test_seq
-\c postgres
-\d+ test_seq
-
-ALTER SEQUENCE test_seq increment by 10;
-ALTER SEQUENCE test_seq minvalue 0;
-ALTER SEQUENCE test_seq maxvalue 1000000;
-ALTER SEQUENCE test_seq restart;
-ALTER SEQUENCE test_seq cache 10;
-ALTER SEQUENCE test_seq cycle;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\d+ test_seq
-\c regression
-\d+ test_seq
-
-DROP SEQUENCE test_seq;
-
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\d+ test_seq;
-\c postgres
-\d+ test_seq
-
 CREATE TABLE test_tbl_create_index (val int, val2 int);
 CREATE UNIQUE INDEX test1_idx ON test_tbl_create_index(val);
 CREATE INDEX test2_idx ON test_tbl_create_index (lower(val2::text));
@@ -231,20 +169,32 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
 DROP TABLE test_tbl_serial;
 DROP TABLE test_tbl_serial_combined_pk;
 
+CREATE TABLE test_tbl_inh_parent(f1 text, f2 date DEFAULT '2014-01-02');
+CREATE TABLE test_tbl_inh_chld1(f1 text, f2 date DEFAULT '2014-01-02') INHERITS (test_tbl_inh_parent);
+CREATE TABLE test_tbl_inh_chld2(f1 text, f2 date) INHERITS (test_tbl_inh_parent);
+CREATE TABLE test_tbl_inh_chld3(f1 text) INHERITS (test_tbl_inh_parent, test_tbl_inh_chld1);
 
-CREATE FUNCTION test_trigger_fn() RETURNS trigger AS
-$$
-BEGIN
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TABLE test_trigger_table (f1 integer, f2 text);
-CREATE TRIGGER test_trigger_fn_trg1 BEFORE INSERT OR DELETE ON test_trigger_table FOR EACH STATEMENT WHEN (True) EXECUTE PROCEDURE test_trigger_fn();
-CREATE TRIGGER test_trigger_fn_trg2 AFTER UPDATE OF f1 ON test_trigger_table FOR EACH ROW EXECUTE PROCEDURE test_trigger_fn();
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\d+ test_trigger_table
+\d+ test_tbl_inh_*
 \c regression
-\d+ test_trigger_table
+\d+ test_tbl_inh_*
 
-DROP TABLE test_trigger_table;
-DROP FUNCTION test_trigger_fn();
+CREATE RULE test_tbl_inh_parent_rule_ins_1 AS ON INSERT TO test_tbl_inh_parent
+          WHERE (f1 LIKE '%1%') DO INSTEAD
+          INSERT INTO test_tbl_inh_chld1 VALUES (NEW.*);
+CREATE RULE test_tbl_inh_parent_rule_ins_2 AS ON INSERT TO test_tbl_inh_parent
+          WHERE (f1 LIKE '%2%') DO INSTEAD
+          INSERT INTO test_tbl_inh_chld2 VALUES (NEW.*);
+
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+\d+ test_tbl_inh_parent
+\c postgres
+\d+ test_tbl_inh_parent
+
+DROP TABLE test_tbl_inh_chld1;
+DROP TABLE test_tbl_inh_parent CASCADE;
+
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+\d+ test_tbl_inh_*
+\c regression
+\d+ test_tbl_inh_*
