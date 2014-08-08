@@ -1,5 +1,6 @@
 bdr_init_copy
 bdr_version.h
+bdr_pgbench_check
 log/
 results/
 tmp_check/
