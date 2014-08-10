@@ -1,0 +1,15 @@
+Parsed test spec with 3 sessions
+
+starting permutation: s1sleep s2sleep s3sleep
+step s1sleep: SELECT pg_sleep(5);
+pg_sleep       
+
+               
+step s2sleep: SELECT pg_sleep(5);
+pg_sleep       
+
+               
+step s3sleep: SELECT pg_sleep(5);
+pg_sleep       
+
+               

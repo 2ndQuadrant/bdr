@@ -111,6 +111,7 @@ bdr_pgbench_check: bdr_pgbench_check.sh
 	chmod a+x $@
 
 ISOLATIONCHECKS=\
+	isolation/sleep5 \
 	isolation/waitforstart
 
 bdr_isolation_regress_check: all | submake-isolation submake-btree_gist
