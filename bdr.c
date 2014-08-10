@@ -1207,6 +1207,8 @@ bdr_perdb_worker_main(Datum main_arg)
 
 	bdr_worker_init(NameStr(bdr_perdb_worker->dbname));
 
+	elog(DEBUG1, "per-db worker for node " BDR_LOCALID_FORMAT " starting", BDR_LOCALID_FORMAT_ARGS);
+
 	appendStringInfo(&si, BDR_LOCALID_FORMAT": %s", BDR_LOCALID_FORMAT_ARGS, "perdb worker");
 	SetConfigOption("application_name", si.data, PGC_USERSET, PGC_S_SESSION);
 
