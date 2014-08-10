@@ -821,7 +821,10 @@ RegisterDynamicBackgroundWorker(BackgroundWorker *worker,
 	 * structure.
 	 */
 	if (!IsUnderPostmaster)
+	{
+		elog(DEBUG1, "Dynamic background workers may not be registered by the postmaster directly");
 		return false;
+	}
 
 	if (!SanityCheckBackgroundWorker(worker, ERROR))
 		return false;
@@ -860,6 +863,11 @@ RegisterDynamicBackgroundWorker(BackgroundWorker *worker,
 	/* If we found a slot, tell the postmaster to notice the change. */
 	if (success)
 		SendPostmasterSignal(PMSIGNAL_BACKGROUND_WORKER_CHANGE);
+	else
+		ereport(WARNING,
+				(errcode(ERRCODE_CONFIGURATION_LIMIT_EXCEEDED),
+				 errmsg("No free slots found for dynamic background worker allocation, %d slots used", max_worker_processes),
+				 errhint("Increase max_worker_processes in postgresql.conf")));
 
 	/*
 	 * If we found a slot and the user has provided a handle, initialize it.
