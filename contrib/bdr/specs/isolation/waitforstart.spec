@@ -4,8 +4,9 @@ conninfo "node3" "dbname=node3"
 
 setup
 {
-	SELECT pg_sleep(10);
-
+	-- This won't work until DDL rep has started properly so sleep5
+	-- must run first.
+	--
 	-- pg_xlog_wait_remote_apply isn't good enough alone
 	-- as it doesn't permit us to say how many nodes must be present.
 	-- It'll succeed if there are zero nodes. So we first have to wait
