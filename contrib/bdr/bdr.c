@@ -1805,6 +1805,20 @@ _PG_init(void)
 	}
 
 	/*
+	 * Sanity check max_worker_processes to make sure it's at least big enough
+	 * to hold all our BDR workers. There's no way to reserve them or guarantee
+	 * anyone else won't claim some, but this'll spot the most obvious
+	 * misconfiguration.
+	 */
+	if (max_worker_processes < bdr_max_workers)
+	{
+		ereport(WARNING,
+				(errcode(ERRCODE_CONFIGURATION_LIMIT_EXCEEDED),
+				 errmsg("bdr_max_workers is greater than max_worker_processes, may fail to start workers"),
+				 errhint("Set max_worker_processes to at least %d", bdr_max_workers)));
+	}
+
+	/*
 	 * Allocate a shared memory segment to store the bgworker connection
 	 * information we must pass to each worker we launch.
 	 *
