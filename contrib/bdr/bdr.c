@@ -103,6 +103,9 @@ extern BdrConnectionConfig *bdr_apply_config;
 /* shmem init hook to chain to on startup, if any */
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
 
+/* Store kind of BDR worker for the current proc, mainly for debugging */
+BdrWorkerType bdr_worker_type = BDR_WORKER_EMPTY_SLOT;
+
 /* shortcut for finding the the worker shmem block */
 BdrWorkerControl *BdrWorkerCtl = NULL;
 
@@ -639,6 +642,7 @@ bdr_apply_main(Datum main_arg)
 	bdr_worker_slot = &BdrWorkerCtl->slots[ DatumGetInt32(main_arg) ];
 	Assert(bdr_worker_slot->worker_type == BDR_WORKER_APPLY);
 	bdr_apply_worker = &bdr_worker_slot->worker_data.apply_worker;
+	bdr_worker_type = BDR_WORKER_APPLY;
 
 	bdr_apply_config = bdr_connection_configs[bdr_apply_worker->connection_config_idx];
 	Assert(bdr_apply_config != NULL);
@@ -1204,6 +1208,7 @@ bdr_perdb_worker_main(Datum main_arg)
 	bdr_worker_slot = &BdrWorkerCtl->slots[ DatumGetInt32(main_arg) ];
 	Assert(bdr_worker_slot->worker_type == BDR_WORKER_PERDB);
 	bdr_perdb_worker = &bdr_worker_slot->worker_data.perdb_worker;
+	bdr_worker_type = BDR_WORKER_PERDB;
 
 	bdr_worker_init(NameStr(bdr_perdb_worker->dbname));
 
