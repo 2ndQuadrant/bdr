@@ -16,6 +16,8 @@
 #include "utils/resowner.h"
 #include "storage/lock.h"
 
+#include "libpq-fe.h"
+
 #include "bdr_internal.h"
 
 #include "bdr_version.h"
@@ -342,6 +344,7 @@ extern void bdr_locks_always_allow_writes(bool always_allow);
 
 /* background workers */
 extern void bdr_apply_main(Datum main_arg);
+extern void bdr_apply_work(PGconn* streamConn);
 
 /* manipulation of bdr catalogs */
 extern char bdr_nodes_get_local_status(uint64 sysid, TimeLineID tli, Oid dboid);
