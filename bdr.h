@@ -339,8 +339,11 @@ extern bool bdr_is_bdr_activated_db(void);
 /* forbid commands we do not support currently (or never will) */
 extern void init_bdr_commandfilter(void);
 
+extern void bdr_executor_init(void);
+extern void bdr_executor_always_allow_writes(bool always_allow);
+
 extern void bdr_locks_shmem_init(Size num_used_databases);
-extern void bdr_locks_always_allow_writes(bool always_allow);
+extern void bdr_locks_check_query(void);
 
 /* background workers */
 extern void bdr_apply_main(Datum main_arg);

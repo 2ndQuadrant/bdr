@@ -51,6 +51,13 @@
 #include "utils/tqual.h"
 
 
+static void BdrExecutorStart(QueryDesc *queryDesc, int eflags);
+
+static ExecutorStart_hook_type PrevExecutorStart_hook = NULL;
+
+static bool bdr_allow_writes = false;
+
+
 PG_FUNCTION_INFO_V1(bdr_queue_ddl_commands);
 
 EState *
@@ -444,4 +451,97 @@ bdr_queue_ddl_commands(PG_FUNCTION_ARGS)
 	SPI_finish();
 
 	PG_RETURN_VOID();
+}
+
+void
+bdr_executor_always_allow_writes(bool always_allow)
+{
+	Assert(IsUnderPostmaster);
+	bdr_allow_writes = always_allow;
+}
+
+/*
+ * The BDR ExecutorStart_hook that does DDL lock checks and forbids
+ * writing into tables without replica identity index.
+ *
+ * Runs in all backends and workers.
+ */
+static void
+BdrExecutorStart(QueryDesc *queryDesc, int eflags)
+{
+	bool		performs_writes = false;
+	ListCell   *l;
+
+	if (bdr_allow_writes || !bdr_is_bdr_activated_db())
+		goto done;
+
+	/* identify whether this is a modifying statement */
+	if (queryDesc->plannedstmt != NULL &&
+		queryDesc->plannedstmt->hasModifyingCTE)
+		performs_writes = true;
+	else if (queryDesc->operation != CMD_SELECT)
+		performs_writes = true;
+
+	if (!performs_writes)
+		goto done;
+
+	bdr_locks_check_query();
+
+	/* INSERTs are always ok beyond this point */
+	if (queryDesc->operation == CMD_INSERT)
+		goto done;
+
+	/* Fail if query tries to UPDATE or DELETE any of tables without PK */
+	foreach(l, queryDesc->plannedstmt->rtable)
+	{
+		RangeTblEntry  *rte = (RangeTblEntry *) lfirst(l);
+		Relation		rel;
+
+		/* Executor should get views already expanded */
+		if (rte->rtekind != RTE_RELATION || rte->relkind != RELKIND_RELATION)
+			continue;
+
+		if ((rte->requiredPerms & (ACL_UPDATE | ACL_DELETE)) == 0)
+			continue;
+
+		rel = RelationIdGetRelation(rte->relid);
+
+		/* Skip UNLOGGED and TEMP tables */
+		if (!RelationNeedsWAL(rel))
+		{
+			RelationClose(rel);
+			continue;
+		}
+
+		if (rel->rd_indexvalid == 0)
+			RelationGetIndexList(rel);
+		if (OidIsValid(rel->rd_replidindex))
+		{
+			RelationClose(rel);
+			continue;
+		}
+
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("Cannot %s table %s because it does not have primary key.",
+						rte->requiredPerms & ACL_UPDATE ? "UPDATE" : "DELETE",
+						RelationGetRelationName(rel)),
+				 errhint("Add primary key to the table")));
+
+		RelationClose(rel);
+	}
+
+done:
+	if (PrevExecutorStart_hook)
+		(*PrevExecutorStart_hook) (queryDesc, eflags);
+	else
+		standard_ExecutorStart(queryDesc, eflags);
+}
+
+
+void
+bdr_executor_init(void)
+{
+	PrevExecutorStart_hook = ExecutorStart_hook;
+	ExecutorStart_hook = BdrExecutorStart;
 }
