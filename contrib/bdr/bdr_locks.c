@@ -191,6 +191,9 @@ bdr_locks_shmem_startup(void)
 void
 bdr_locks_shmem_init(Size num_used_databases)
 {
+	/* Must be called from postmaster its self */
+	Assert(IsPostmasterEnvironment && !IsUnderPostmaster);
+
 	PrevExecutorStart_hook = ExecutorStart_hook;
 	ExecutorStart_hook = BdrExecutorStart;
 
@@ -205,7 +208,7 @@ bdr_locks_shmem_init(Size num_used_databases)
 }
 
 /*
- * Find, and create if neccessary, the lock state entry for dboid.
+ * Find, and create if necessary, the lock state entry for dboid.
  */
 static BdrLocksDBState*
 bdr_locks_find_database(Oid dboid, bool create)
@@ -282,6 +285,7 @@ bdr_locks_startup(Size nnodes)
 
 	Assert(IsUnderPostmaster);
 	Assert(!IsTransactionState());
+	Assert(bdr_worker_type == BDR_WORKER_PERDB);
 
 	bdr_locks_find_my_database(true);
 
@@ -487,6 +491,8 @@ bdr_acquire_ddl_lock(void)
 	StringInfoData s;
 
 	Assert(IsTransactionState());
+	/* Not called from within a BDR worker */
+	Assert(bdr_worker_type == BDR_WORKER_EMPTY_SLOT);
 
 	if (this_xact_acquired_lock)
 		return;
@@ -622,6 +628,7 @@ bdr_process_acquire_ddl_lock(uint64 sysid, TimeLineID tli, Oid datid)
 	XLogRecPtr lsn;
 
 	Assert(!IsTransactionState());
+	Assert(bdr_worker_type == BDR_WORKER_APPLY);
 
 	/* Don't care about locks acquired locally. Already held. */
 	if (!check_is_my_origin_node(sysid, tli, datid))
@@ -817,6 +824,8 @@ bdr_process_release_ddl_lock(uint64 origin_sysid, TimeLineID origin_tli, Oid ori
 	Latch		   *latch;
 	StringInfoData	s;
 
+	Assert(bdr_worker_type == BDR_WORKER_APPLY);
+
 	if (!check_is_my_origin_node(origin_sysid, origin_tli, origin_datid))
 		return;
 
@@ -891,6 +900,8 @@ bdr_process_confirm_ddl_lock(uint64 origin_sysid, TimeLineID origin_tli, Oid ori
 {
 	Latch *latch;
 
+	Assert(bdr_worker_type == BDR_WORKER_APPLY);
+
 	if (!check_is_my_origin_node(origin_sysid, origin_tli, origin_datid))
 		return;
 
@@ -925,6 +936,8 @@ bdr_process_decline_ddl_lock(uint64 origin_sysid, TimeLineID origin_tli, Oid ori
 {
 	Latch *latch;
 
+	Assert(bdr_worker_type == BDR_WORKER_APPLY);
+
 	/* don't care if another database has been declined a lock */
 	if (!check_is_my_origin_node(origin_sysid, origin_tli, origin_datid))
 		return;
@@ -954,6 +967,8 @@ bdr_process_request_replay_confirm(uint64 sysid, TimeLineID tli,
 {
 	XLogRecPtr lsn;
 	StringInfoData s;
+
+	Assert(bdr_worker_type == BDR_WORKER_APPLY);
 
 	if (!check_is_my_origin_node(sysid, tli, datid))
 		return;
@@ -986,6 +1001,8 @@ bdr_process_replay_confirm(uint64 sysid, TimeLineID tli,
 						   Oid datid, XLogRecPtr request_lsn)
 {
 	bool quorum_reached = false;
+
+	Assert(bdr_worker_type == BDR_WORKER_APPLY);
 
 	if (!check_is_my_origin_node(sysid, tli, datid))
 		return;
@@ -1121,12 +1138,14 @@ bdr_locks_process_remote_startup(uint64 sysid, TimeLineID tli, Oid datid)
 	HeapTuple tuple;
 	StringInfoData s;
 
+	Assert(bdr_worker_type == BDR_WORKER_APPLY);
+
 	bdr_locks_find_my_database(false);
 
 	initStringInfo(&s);
 
 	elog(DEBUG2, "bdr: Got startup message from node ("BDR_LOCALID_FORMAT"), clearing any locks it held",
-		 sysid, tli, datid);
+		 sysid, tli, datid, "");
 
 	StartTransactionCommand();
 	snap = RegisterSnapshot(GetLatestSnapshot());
@@ -1163,7 +1182,7 @@ bdr_locks_process_remote_startup(uint64 sysid, TimeLineID tli, Oid datid)
  * The BDR ExecutorStart_hook that detects DDL and handles DDL lock acquision
  * requests.
  *
- * Runs in user backends.
+ * Runs in all backends and workers.
  */
 static void
 BdrExecutorStart(QueryDesc *queryDesc, int eflags)
