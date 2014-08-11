@@ -905,7 +905,7 @@ process_remote_delete(StringInfo s)
 
 		tuple_to_stringinfo(&s_key, RelationGetDescr(idxrel), ttup);
 
-		ereport(ERROR,
+		ereport(LOG,
 				(errcode(ERRCODE_INTEGRITY_CONSTRAINT_VIOLATION),
 				 errmsg("CONFLICT: DELETE could not find existing tuple for pkey %s in relation %s.%s",
 						 s_key.data,
