@@ -172,17 +172,21 @@ typedef struct BdrPerdbWorker
 /*
  * Type of BDR worker in a BdrWorker struct
  */
-typedef enum
-{
+typedef enum {
 	/*
-	 * This shm array slot is unused and may be allocated. Must be zero,
-	 * as it's set by memset(...) during shm segment init.
+	 * This shm array slot is unused and may be allocated. Must be zero, as
+	 * it's set by memset(...) during shm segment init.
 	 */
 	BDR_WORKER_EMPTY_SLOT = 0,
 	/* This shm array slot contains data for a */
 	BDR_WORKER_APPLY,
 	/* This is data for a per-database worker BdrPerdbWorker */
-	BDR_WORKER_PERDB
+	BDR_WORKER_PERDB,
+	/*
+	 * Data for a walsender output plugin. Never currently allocated but still
+	 * defined for use in the bdr_worker_type global.
+	 */
+	BDR_WORKER_WALSENDER
 } BdrWorkerType;
 
 /*
@@ -383,5 +387,11 @@ extern HeapTuple bdr_conflict_handlers_resolve(BDRRelation * rel,
 											   const char *command_tag,
 											   BdrConflictType event_type,
 											   uint64 timeframe, bool *skip);
+
+/*
+ * Global to identify the type of BDR worker the current process is. Primarily
+ * useful for assertions and debugging.
+ */
+extern BdrWorkerType bdr_worker_type;
 
 #endif   /* BDR_H */

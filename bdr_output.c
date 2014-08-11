@@ -283,6 +283,8 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 	Oid schema_oid;
 	bool tx_started = true;
 
+	bdr_worker_type = BDR_WORKER_WALSENDER;
+
 	data = palloc0(sizeof(BdrOutputData));
 	data->context = AllocSetContextCreate(TopMemoryContext,
 										  "bdr conversion context",
