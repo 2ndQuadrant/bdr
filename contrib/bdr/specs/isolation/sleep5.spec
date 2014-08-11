@@ -1,3 +1,7 @@
+#
+# This shouldn't really be required. It's needed because of bug #37904
+#
+
 conninfo "node1" "dbname=node1"
 conninfo "node2" "dbname=node2"
 conninfo "node3" "dbname=node3"
