@@ -55,7 +55,7 @@ static void BdrExecutorStart(QueryDesc *queryDesc, int eflags);
 
 static ExecutorStart_hook_type PrevExecutorStart_hook = NULL;
 
-static bool bdr_allow_writes = false;
+static bool bdr_always_allow_writes = false;
 
 
 PG_FUNCTION_INFO_V1(bdr_queue_ddl_commands);
@@ -457,7 +457,7 @@ void
 bdr_executor_always_allow_writes(bool always_allow)
 {
 	Assert(IsUnderPostmaster);
-	bdr_allow_writes = always_allow;
+	bdr_always_allow_writes = always_allow;
 }
 
 /*
@@ -472,7 +472,7 @@ BdrExecutorStart(QueryDesc *queryDesc, int eflags)
 	bool		performs_writes = false;
 	ListCell   *l;
 
-	if (bdr_allow_writes || !bdr_is_bdr_activated_db())
+	if (bdr_always_allow_writes || !bdr_is_bdr_activated_db())
 		goto done;
 
 	/* identify whether this is a modifying statement */
