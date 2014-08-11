@@ -86,7 +86,7 @@ submake-hstore:
 
 REGRESSCHECKS=init \
 	ddl/create ddl/alter_table ddl/extension ddl/function ddl/namespace ddl/sequence ddl/view \
-	dml/basic dml/contrib dml/delete_pk dml/extended dml/mixed dml/toasted
+	dml/basic dml/contrib dml/delete_pk dml/extended dml/missing_pk dml/mixed dml/toasted
 
 regresscheck:
 	[ -e pg_hba.conf ] || ln -s $(top_srcdir)/contrib/bdr/pg_hba.conf .
