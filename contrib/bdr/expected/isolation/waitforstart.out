@@ -1,1 +1,15 @@
-Expected results not yet known, so dummy file here
+Parsed test spec with 3 sessions
+
+starting permutation: s1waitlsn s2waitlsn s3waitlsn
+step s1waitlsn: SELECT wait_for_nodes(6);
+wait_for_nodes 
+
+               
+step s2waitlsn: SELECT wait_for_nodes(6);
+wait_for_nodes 
+
+               
+step s3waitlsn: SELECT wait_for_nodes(6);
+wait_for_nodes 
+
+               
