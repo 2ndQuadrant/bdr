@@ -2997,21 +2997,6 @@ GetOldestWALSendPointer(void)
 
 #endif
 
-static XLogRecPtr
-text_to_xlogrecptr(text *str)
-{
-	uint32 hi, lo;
-	char *pos = text_to_cstring(str);
-
-	if (sscanf(pos, "%X/%X", &hi, &lo) != 2)
-        ereport(ERROR,
-                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                 errmsg("could not parse transaction log location \"%s\"",
-                        pos)));
-
-	return ((uint64) hi) << 32 | lo;
-}
-
 static void
 wait_for_remote_lsn(int32 pid, XLogRecPtr ptr, bool wait_for_apply)
 {
@@ -3063,7 +3048,7 @@ pg_xlog_wait_remote_apply(PG_FUNCTION_ARGS)
 Datum
 pg_xlog_wait_remote_receive(PG_FUNCTION_ARGS)
 {
-	XLogRecPtr *startpos = PG_GETARG_LSN(0);
+	XLogRecPtr startpos = PG_GETARG_LSN(0);
 	int32 pid = PG_GETARG_INT32(1);
 
 	wait_for_remote_lsn(pid, startpos, false);
