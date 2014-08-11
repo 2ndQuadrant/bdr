@@ -137,22 +137,18 @@ typedef struct BdrLocksCtl {
 
 static BdrLocksDBState * bdr_locks_find_database(Oid dbid, bool create);
 static void bdr_locks_find_my_database(bool create);
-static void BdrExecutorStart(QueryDesc *queryDesc, int eflags);
 static void bdr_prepare_message(StringInfo s, BdrMessageType message_type);
 
 static BdrLocksCtl *bdr_locks_ctl;
 
 /* shmem init hook to chain to on startup, if any */
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
-static ExecutorStart_hook_type PrevExecutorStart_hook = NULL;
 
 /* number of per database slots */
 static int bdr_locks_num_databases;
 
 /* this database's state */
 static BdrLocksDBState *bdr_my_locks_database = NULL;
-
-static bool bdr_always_allow_writes = false;
 
 static bool this_xact_acquired_lock = false;
 
@@ -193,9 +189,6 @@ bdr_locks_shmem_init(Size num_used_databases)
 {
 	/* Must be called from postmaster its self */
 	Assert(IsPostmasterEnvironment && !IsUnderPostmaster);
-
-	PrevExecutorStart_hook = ExecutorStart_hook;
-	ExecutorStart_hook = BdrExecutorStart;
 
 	bdr_locks_ctl = NULL;
 	bdr_locks_num_databases = num_used_databases;
@@ -1116,13 +1109,6 @@ bdr_process_replay_confirm(uint64 sysid, TimeLineID tli,
 	}
 }
 
-void
-bdr_locks_always_allow_writes(bool always_allow)
-{
-	Assert(IsUnderPostmaster);
-	bdr_always_allow_writes = always_allow;
-}
-
 /*
  * A remote node has sent a startup message. Update any appropriate local state
  * like any locally held DDL locks for it.
@@ -1179,29 +1165,13 @@ bdr_locks_process_remote_startup(uint64 sysid, TimeLineID tli, Oid datid)
 }
 
 /*
- * The BDR ExecutorStart_hook that detects DDL and handles DDL lock acquision
- * requests.
+ * Function for checking if there is no conflicting BDR lock.
  *
- * Runs in all backends and workers.
+ * Should be caled from ExecutorStart_hook.
  */
-static void
-BdrExecutorStart(QueryDesc *queryDesc, int eflags)
+void
+bdr_locks_check_query(void)
 {
-	bool performs_writes = false;
-
-	if (bdr_always_allow_writes || !bdr_is_bdr_activated_db())
-		goto done;
-
-	/* identify whether this is a modifying statement */
-	if (queryDesc->plannedstmt != NULL &&
-		queryDesc->plannedstmt->hasModifyingCTE)
-		performs_writes = true;
-	else if (queryDesc->operation != CMD_SELECT)
-		performs_writes = true;
-
-	if (!performs_writes)
-		goto done;
-
 	bdr_locks_find_my_database(false);
 
 	/* is the database still starting up and hasn't loaded locks */
@@ -1223,10 +1193,4 @@ BdrExecutorStart(QueryDesc *queryDesc, int eflags)
 				(errcode(ERRCODE_LOCK_NOT_AVAILABLE),
 				 errmsg("bdr: database is locked against DDL operations"),
 				 errhint("Some node in the cluster is performing DDL")));
-
-done:
-	if (PrevExecutorStart_hook)
-		(*PrevExecutorStart_hook) (queryDesc, eflags);
-	else
-		standard_ExecutorStart(queryDesc, eflags);
 }

@@ -420,9 +420,9 @@ bdr_worker_init(char *dbname)
 	BackgroundWorkerInitializeConnection(dbname, NULL);
 
 	/* make sure BDR extension exists */
-	bdr_locks_always_allow_writes(true);
+	bdr_executor_always_allow_writes(true);
 	bdr_maintain_schema();
-	bdr_locks_always_allow_writes(false);
+	bdr_executor_always_allow_writes(false);
 
 	/* always work in our own schema */
 	SetConfigOption("search_path", "bdr, pg_catalog",
@@ -983,7 +983,7 @@ bdr_perdb_worker_main(Datum main_arg)
 	bdr_saved_resowner = CurrentResourceOwner;
 
 	/* need to be able to perform writes ourselves */
-	bdr_locks_always_allow_writes(true);
+	bdr_executor_always_allow_writes(true);
 	bdr_locks_startup(bdr_perdb_worker->nnodes);
 
 	/*
@@ -1694,6 +1694,7 @@ out:
 	/* register a slot for every remote node */
 	bdr_count_shmem_init(bdr_max_workers);
 	bdr_sequencer_shmem_init(bdr_max_workers, bdr_distinct_dbnames_count);
+	bdr_executor_init();
 	bdr_locks_shmem_init(bdr_distinct_dbnames_count);
 	/* Set up a ProcessUtility_hook to stop unsupported commands being run */
 	init_bdr_commandfilter();
