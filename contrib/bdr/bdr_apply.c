@@ -39,8 +39,10 @@
 #include "replication/logical.h"
 #include "replication/replication_identifier.h"
 
+#include "storage/ipc.h"
 #include "storage/lmgr.h"
 #include "storage/lwlock.h"
+#include "storage/proc.h"
 
 #include "tcop/pquery.h"
 #include "tcop/tcopprot.h"
@@ -1919,5 +1921,264 @@ bdr_process_remote_action(StringInfo s)
 			break;
 		default:
 			elog(ERROR, "unknown action of type %c", action);
+	}
+}
+
+
+/*
+ * Converts an int64 to network byte order.
+ */
+static void
+bdr_sendint64(int64 i, char *buf)
+{
+	uint32		n32;
+
+	/* High order half first, since we're doing MSB-first */
+	n32 = (uint32) (i >> 32);
+	n32 = htonl(n32);
+	memcpy(&buf[0], &n32, 4);
+
+	/* Now the low order half */
+	n32 = (uint32) i;
+	n32 = htonl(n32);
+	memcpy(&buf[4], &n32, 4);
+}
+
+/*
+ * Send a Standby Status Update message to server.
+ *
+ * 'recvpos' is the latest LSN we've received data to, force is set if we need
+ * to send a response to avoid timeouts.
+ */
+static bool
+bdr_send_feedback(PGconn *conn, XLogRecPtr recvpos, int64 now, bool force)
+{
+	char		replybuf[1 + 8 + 8 + 8 + 8 + 1];
+	int			len = 0;
+
+	static XLogRecPtr last_recvpos = InvalidXLogRecPtr;
+	static XLogRecPtr last_writepos = InvalidXLogRecPtr;
+	static XLogRecPtr last_flushpos = InvalidXLogRecPtr;
+
+	XLogRecPtr writepos;
+	XLogRecPtr flushpos;
+
+	/* It's legal to not pass a recvpos */
+	if (recvpos < last_recvpos)
+		recvpos = last_recvpos;
+
+	if (bdr_get_flush_position(&writepos, &flushpos))
+	{
+		/*
+		 * No outstanding transactions to flush, we can report the latest
+		 * received position. This is important for synchronous replication.
+		 */
+		flushpos = writepos = recvpos;
+	}
+
+	if (writepos < last_writepos)
+		writepos = last_writepos;
+
+	if (flushpos < last_flushpos)
+		flushpos = last_flushpos;
+
+	/* if we've already reported everything we're good */
+	if (!force &&
+		writepos == last_writepos &&
+		flushpos == last_flushpos)
+		return true;
+
+	replybuf[len] = 'r';
+	len += 1;
+	bdr_sendint64(recvpos, &replybuf[len]);			/* write */
+	len += 8;
+	bdr_sendint64(flushpos, &replybuf[len]);		/* flush */
+	len += 8;
+	bdr_sendint64(writepos, &replybuf[len]);		/* apply */
+	len += 8;
+	bdr_sendint64(now, &replybuf[len]);				/* sendTime */
+	len += 8;
+	replybuf[len] = false;							/* replyRequested */
+	len += 1;
+
+	elog(DEBUG2, "sending feedback (force %d) to recv %X/%X, write %X/%X, flush %X/%X",
+		 force,
+		 (uint32) (recvpos >> 32), (uint32) recvpos,
+		 (uint32) (writepos >> 32), (uint32) writepos,
+		 (uint32) (flushpos >> 32), (uint32) flushpos
+		);
+
+
+	if (PQputCopyData(conn, replybuf, len) <= 0 || PQflush(conn))
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_CONNECTION_FAILURE),
+				 errmsg("could not send feedback packet: %s",
+						PQerrorMessage(conn))));
+		return false;
+	}
+
+	if (recvpos > last_recvpos)
+		last_recvpos = recvpos;
+	if (writepos > last_writepos)
+		last_writepos = writepos;
+	if (flushpos > last_flushpos)
+		last_flushpos = flushpos;
+
+	return true;
+}
+
+/*
+ * The actual main loop of a BDR apply worker.
+ */
+void
+bdr_apply_work(PGconn* streamConn)
+{
+	int			fd;
+	char	   *copybuf = NULL;
+	XLogRecPtr	last_received = InvalidXLogRecPtr;
+
+	fd = PQsocket(streamConn);
+
+	MessageContext = AllocSetContextCreate(TopMemoryContext,
+										   "MessageContext",
+										   ALLOCSET_DEFAULT_MINSIZE,
+										   ALLOCSET_DEFAULT_INITSIZE,
+										   ALLOCSET_DEFAULT_MAXSIZE);
+
+	while (!exit_worker)
+	{
+		/* int		 ret; */
+		int			rc;
+		int			r;
+
+		/*
+		 * Background workers mustn't call usleep() or any direct equivalent:
+		 * instead, they may wait on their process latch, which sleeps as
+		 * necessary, but is awakened if postmaster dies.  That way the
+		 * background process goes away immediately in an emergency.
+		 */
+		rc = WaitLatchOrSocket(&MyProc->procLatch,
+							   WL_SOCKET_READABLE | WL_LATCH_SET |
+							   WL_TIMEOUT | WL_POSTMASTER_DEATH,
+							   fd, 1000L);
+
+		ResetLatch(&MyProc->procLatch);
+
+		MemoryContextSwitchTo(MessageContext);
+
+		/* emergency bailout if postmaster has died */
+		if (rc & WL_POSTMASTER_DEATH)
+			proc_exit(1);
+
+		if (PQstatus(streamConn) == CONNECTION_BAD)
+		{
+			bdr_count_disconnect();
+			elog(ERROR, "connection to other side has died");
+		}
+
+		if (rc & WL_SOCKET_READABLE)
+			PQconsumeInput(streamConn);
+
+		for (;;)
+		{
+			if (exit_worker)
+				break;
+
+			if (copybuf != NULL)
+			{
+				PQfreemem(copybuf);
+				copybuf = NULL;
+			}
+
+			r = PQgetCopyData(streamConn, &copybuf, 1);
+
+			if (r == -1)
+			{
+				elog(ERROR, "data stream ended");
+			}
+			else if (r == -2)
+			{
+				elog(ERROR, "could not read COPY data: %s",
+					 PQerrorMessage(streamConn));
+			}
+			else if (r < 0)
+				elog(ERROR, "invalid COPY status %d", r);
+			else if (r == 0)
+			{
+				/* need to wait for new data */
+				break;
+			}
+			else
+			{
+				int c;
+				StringInfoData s;
+
+				MemoryContextSwitchTo(MessageContext);
+
+				initStringInfo(&s);
+				s.data = copybuf;
+				s.len = r;
+				s.maxlen = -1;
+
+				c = pq_getmsgbyte(&s);
+
+				if (c == 'w')
+				{
+					XLogRecPtr	start_lsn;
+					XLogRecPtr	end_lsn;
+
+					start_lsn = pq_getmsgint64(&s);
+					end_lsn = pq_getmsgint64(&s);
+					pq_getmsgint64(&s); /* sendTime */
+
+					if (last_received < start_lsn)
+						last_received = start_lsn;
+
+					if (last_received < end_lsn)
+						last_received = end_lsn;
+
+					bdr_process_remote_action(&s);
+				}
+				else if (c == 'k')
+				{
+					XLogRecPtr endpos;
+					bool reply_requested;
+
+					endpos = pq_getmsgint64(&s);
+					/* timestamp = */ pq_getmsgint64(&s);
+					reply_requested = pq_getmsgbyte(&s);
+
+					bdr_send_feedback(streamConn, endpos,
+									  GetCurrentTimestamp(),
+									  reply_requested);
+				}
+				/* other message types are purposefully ignored */
+			}
+
+		}
+
+		/* confirm all writes at once */
+		bdr_send_feedback(streamConn, last_received,
+						  GetCurrentTimestamp(), false);
+
+		/*
+		 * If the user has paused replication with bdr_apply_pause(), we
+		 * wait on our procLatch until pg_bdr_apply_resume() unsets the
+		 * flag in shmem. We don't pause until the end of the current
+		 * transaction, to avoid sleeping with locks held.
+		 *
+		 * XXX With the 1s timeout below, we don't risk delaying the
+		 * resumption too much. But it would be better to use a global
+		 * latch that can be set by pg_bdr_apply_resume(), and not have
+		 * to wake up so often.
+		 */
+
+		while (BdrWorkerCtl->pause_apply && !IsTransactionState())
+		{
+			ResetLatch(&MyProc->procLatch);
+			rc = WaitLatch(&MyProc->procLatch, WL_TIMEOUT, 1000L);
+		}
+		MemoryContextResetAndDeleteChildren(MessageContext);
 	}
 }
