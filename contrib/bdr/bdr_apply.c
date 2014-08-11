@@ -529,10 +529,14 @@ process_remote_insert(StringInfo s)
 							   newslot->tts_tuple);
 			/* races will be resolved by abort/retry */
 			UserTableUpdateOpenIndexes(estate, newslot);
+
+			bdr_count_insert();
 		}
 
 		if (log_update)
 		{
+			bdr_count_insert_conflict();
+
 			bdr_conflict_log(BdrConflictType_InsertInsert, resolution,
 							 replication_origin_xid, rel, oldslot,
 							 local_node_id, newslot, NULL /*no error*/);
@@ -543,6 +547,8 @@ process_remote_insert(StringInfo s)
 		simple_heap_insert(rel->rel, newslot->tts_tuple);
 		/* races will be resolved by abort/retry */
 		UserTableUpdateOpenIndexes(estate, newslot);
+
+		bdr_count_insert();
 	}
 
 	ExecCloseIndices(estate->es_result_relation_info);
@@ -747,7 +753,8 @@ process_remote_update(StringInfo s)
 
 			do_apply_update(rel, estate, oldslot, newslot);
 		}
-		else
+
+		if (log_update)
 			bdr_count_update_conflict();
 	}
 	else
