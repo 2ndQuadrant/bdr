@@ -912,6 +912,7 @@ help(const char *progname)
 	printf(_("  --inserts                    dump data as INSERT commands, rather than COPY\n"));
 	printf(_("  --no-security-labels         do not dump security label assignments\n"));
 	printf(_("  --no-synchronized-snapshots  do not use synchronized snapshots in parallel jobs\n"));
+	printf(_("  --snapshot=NAME              attach to externally exported snapshot\n"));
 	printf(_("  --no-tablespaces             do not dump tablespace assignments\n"));
 	printf(_("  --no-unlogged-table-data     do not dump unlogged table data\n"));
 	printf(_("  --quote-all-identifiers      quote all identifiers, even if not key words\n"));
@@ -1047,11 +1048,6 @@ setup_connection(Archive *AH, const char *dumpencoding,
 
 	if (dumpsnapshot)
 		AH->sync_snapshot_id = strdup(dumpsnapshot);
-	else if (AH->numWorkers > 1 && AH->remoteVersion >= 90200 && !no_synchronized_snapshots)
-	{
-		if (AH->sync_snapshot_id == NULL)
-			AH->sync_snapshot_id = get_synchronized_snapshot(AH);
-	}
 
 	if (AH->sync_snapshot_id)
 	{
@@ -1061,6 +1057,11 @@ setup_connection(Archive *AH, const char *dumpencoding,
 		appendStringLiteralConn(query, AH->sync_snapshot_id, conn);
 		ExecuteSqlStatement(AH, query->data);
 		destroyPQExpBuffer(query);
+	}
+	else if (AH->numWorkers > 1 && AH->remoteVersion >= 90200 && !no_synchronized_snapshots)
+	{
+		if (AH->sync_snapshot_id == NULL)
+			AH->sync_snapshot_id = get_synchronized_snapshot(AH);
 	}
 }
 
