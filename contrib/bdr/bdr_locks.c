@@ -300,7 +300,7 @@ bdr_locks_startup(Size nnodes)
 	 */
 	bdr_prepare_message(&s, BDR_MESSAGE_START);
 
-	elog(DEBUG1, "bdr: sending DDL lock startup message");
+	elog(DEBUG1, "Sending DDL lock startup message");
 	lsn = LogStandbyMessage(s.data, s.len, false);
 	resetStringInfo(&s);
 	XLogFlush(lsn);
@@ -338,7 +338,7 @@ bdr_locks_startup(Size nnodes)
 			db->lock_holder = node_id;
 			db->lockcount++;
 			/* A remote node might have held the local DDL lock before restart */
-			elog(DEBUG1, "bdr: reacquiring local DDL lock held before shutdown");
+			elog(DEBUG1, "Reacquiring local DDL lock held before shutdown");
 		}
 		else if (strcmp(state, "catchup") == 0)
 		{
@@ -362,10 +362,10 @@ bdr_locks_startup(Size nnodes)
 			db->replay_confirmed = 0;
 			db->replay_confirmed_lsn = wait_for_lsn;
 
-			elog(DEBUG1, "bdr: restarting DDL lock replay catchup phase");
+			elog(DEBUG1, "Restarting DDL lock replay catchup phase");
 		}
 		else
-			elog(PANIC, "bdr: unknown lockstate");
+			elog(PANIC, "Unknown lockstate '%s'", state);
 	}
 
 	systable_endscan(scan);
@@ -374,7 +374,7 @@ bdr_locks_startup(Size nnodes)
 
 	CommitTransactionCommand();
 
-	elog(DEBUG2, "bdr: ddl locking startup completed, local DML enabled");
+	elog(DEBUG2, "DDL locking startup completed, local DML enabled");
 
 	/* allow local DML */
 	bdr_my_locks_database->locked_and_loaded = true;
@@ -424,7 +424,7 @@ bdr_lock_xact_callback(XactEvent event, void *arg)
 		if (bdr_my_locks_database->lockcount > 0)
 			bdr_my_locks_database->lockcount--;
 		else
-			elog(WARNING, "bdr: releasing unacquired DDL lock");
+			elog(WARNING, "Releasing unacquired DDL lock");
 		LWLockRelease(bdr_locks_ctl->lock);
 		this_xact_acquired_lock = false;
 	}
@@ -494,7 +494,7 @@ bdr_acquire_ddl_lock(void)
 
 	bdr_locks_find_my_database(false);
 
-	elog(DEBUG2, "bdr: attempting to acquire global DDL lock for (" BDR_LOCALID_FORMAT ")", BDR_LOCALID_FORMAT_ARGS);
+	elog(DEBUG2, "Attempting to acquire global DDL lock for (" BDR_LOCALID_FORMAT ")", BDR_LOCALID_FORMAT_ARGS);
 
 	/* send message about ddl lock */
 	bdr_prepare_message(&s, BDR_MESSAGE_ACQUIRE_LOCK);
@@ -524,7 +524,7 @@ bdr_acquire_ddl_lock(void)
 	bdr_my_locks_database->waiting_latch = &MyProc->procLatch;
 	LWLockRelease(bdr_locks_ctl->lock);
 
-	elog(DEBUG2, "bdr: sent DDL lock request, waiting for confirmation");
+	elog(DEBUG2, "Sent DDL lock request, waiting for confirmation");
 
 	while (true)
 	{
@@ -572,7 +572,7 @@ bdr_acquire_ddl_lock(void)
 	bdr_my_locks_database->lockcount++;
 	this_xact_acquired_lock = true;
 
-	elog(DEBUG1, "bdr: global DDL lock acquired successfully by (" BDR_LOCALID_FORMAT ")", BDR_LOCALID_FORMAT_ARGS);
+	elog(DEBUG1, "Global DDL lock acquired successfully by (" BDR_LOCALID_FORMAT ")", BDR_LOCALID_FORMAT_ARGS);
 
 	LWLockRelease(bdr_locks_ctl->lock);
 
@@ -629,7 +629,7 @@ bdr_process_acquire_ddl_lock(uint64 sysid, TimeLineID tli, Oid datid)
 
 	bdr_locks_find_my_database(false);
 
-	elog(DEBUG2, "bdr: node (" BDR_LOCALID_FORMAT ") requested the global DDL lock", sysid, tli, datid, "");
+	elog(DEBUG2, "Global DDL lock requested by node (" BDR_LOCALID_FORMAT ")", sysid, tli, datid, "");
 
 	initStringInfo(&s);
 
@@ -648,7 +648,7 @@ bdr_process_acquire_ddl_lock(uint64 sysid, TimeLineID tli, Oid datid)
 		 * No previous DDL lock found. Start acquiring it.
 		 */
 
-		elog(DEBUG2, "bdr: no prior DDL lock found, acquiring local DDL lock");
+		elog(DEBUG2, "No prior DDL lock found, acquiring local DDL lock");
 
 		/* Add a row to bdr_locks */
 		StartTransactionCommand();
@@ -685,13 +685,13 @@ bdr_process_acquire_ddl_lock(uint64 sysid, TimeLineID tli, Oid datid)
 			ForceSyncCommit(); /* async commit would be too complicated */
 			heap_close(rel, NoLock);
 			CommitTransactionCommand();
-			elog(DEBUG3, "bdr: no conflicting global DDL lock found");
+			elog(DEBUG3, "No conflicting global DDL lock found");
 		}
 		PG_CATCH();
 		{
 			if (geterrcode() == ERRCODE_UNIQUE_VIOLATION)
 			{
-				elog(DEBUG1, "bdr: declining DDL lock because a conflicting DDL lock exists in bdr_global_locks");
+				elog(DEBUG1, "Declining DDL lock because a conflicting DDL lock exists in bdr_global_locks");
 				AbortOutOfAnyTransaction();
 				goto decline;
 			}
@@ -716,7 +716,7 @@ bdr_process_acquire_ddl_lock(uint64 sysid, TimeLineID tli, Oid datid)
 		 * held conflicting locks, but that's not easiliy possible at the
 		 * moment.
 		 */
-		elog(DEBUG3, "bdr: terminating any local processes that conflict with the DDL lock");
+		elog(DEBUG3, "Terminating any local processes that conflict with the DDL lock");
 		conflicts = GetConflictingVirtualXIDs(InvalidTransactionId, MyDatabaseId);
 		while (conflicts->backendId != InvalidBackendId)
 		{
@@ -741,7 +741,7 @@ bdr_process_acquire_ddl_lock(uint64 sysid, TimeLineID tli, Oid datid)
 			else
 				pg_usleep(5000);
 
-			elog(DEBUG3, "bdr: signaled %d to terminate, conflicts with ddl lock requested by another node", p);
+			elog(DEBUG3, "Signaled pid %d to terminate because it conflicts with a DDL lock requested by another node", p);
 		}
 
 		/*
@@ -755,7 +755,7 @@ bdr_process_acquire_ddl_lock(uint64 sysid, TimeLineID tli, Oid datid)
 		 * change that caused those local changes not to apply on remote
 		 * nodes might occur, causing a divergent conflict.
 		 */
-		elog(DEBUG2, "bdr: ddl locking requesting replay confirmation from all other nodes before confirming lock granted");
+		elog(DEBUG2, "Requesting replay confirmation from all other nodes before confirming global DDL lock granted");
 
 		wait_for_lsn = GetXLogInsertRecPtr();
 		bdr_prepare_message(&s, BDR_MESSAGE_REQUEST_REPLAY_CONFIRM);
@@ -769,7 +769,7 @@ bdr_process_acquire_ddl_lock(uint64 sysid, TimeLineID tli, Oid datid)
 		bdr_my_locks_database->replay_confirmed_lsn = wait_for_lsn;
 		LWLockRelease(bdr_locks_ctl->lock);
 
-		elog(DEBUG1, "bdr: ddl lock granted to remote node");
+		elog(DEBUG1, "DDL lock granted to remote node");
 	}
 	else
 	{
@@ -779,7 +779,7 @@ bdr_process_acquire_ddl_lock(uint64 sysid, TimeLineID tli, Oid datid)
 		LWLockRelease(bdr_locks_ctl->lock);
 decline:
 		ereport(LOG,
-				(errmsg("bdr: declining remote DDL lock request, already locked")));
+				(errmsg("Declining remote DDL lock request, this node is already locked")));
 		bdr_prepare_message(&s, BDR_MESSAGE_DECLINE_LOCK);
 
 		Assert(!IsTransactionState());
@@ -828,7 +828,7 @@ bdr_process_release_ddl_lock(uint64 origin_sysid, TimeLineID origin_tli, Oid ori
 
 	initStringInfo(&s);
 
-	elog(DEBUG2, "bdr: node (" BDR_LOCALID_FORMAT ") released DDL lock", lock_sysid, lock_tli, lock_datid, "");
+	elog(DEBUG2, "DDL lock released by (" BDR_LOCALID_FORMAT ")", lock_sysid, lock_tli, lock_datid, "");
 
 	/*
 	 * Remove row from bdr_locks *before* releasing the in memory lock. If we
@@ -842,7 +842,7 @@ bdr_process_release_ddl_lock(uint64 origin_sysid, TimeLineID origin_tli, Oid ori
 
 	while ((tuple = systable_getnext(scan)) != NULL)
 	{
-		elog(DEBUG3, "bdr: found DDL lock entry to delete in response to DDL lock release message");
+		elog(DEBUG3, "Found DDL lock entry to delete in response to DDL lock release message");
 		simple_heap_delete(rel, &tuple->t_self);
 		ForceSyncCommit(); /* async commit would be too complicated */
 		found = true;
@@ -856,7 +856,7 @@ bdr_process_release_ddl_lock(uint64 origin_sysid, TimeLineID origin_tli, Oid ori
 	if (!found)
 		ereport(WARNING,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("bdr: Did not find local DDL lock entry for a remotely released global DDL lock"),
+				 errmsg("Did not find local DDL lock entry for a remotely released global DDL lock"),
 				 errdetail("node ("BDR_LOCALID_FORMAT") sent a release message but the lock isn't held locally",
 				 		   lock_sysid, lock_tli, lock_datid, "")));
 
@@ -868,12 +868,12 @@ bdr_process_release_ddl_lock(uint64 origin_sysid, TimeLineID origin_tli, Oid ori
 	}
 	else
 		/* This shouldn't happen; probable bug if reached */
-		elog(WARNING, "bdr: releasing DDL lock without corresponding in-memory state");
+		elog(WARNING, "Releasing DDL lock without corresponding in-memory state");
 
 	latch = bdr_my_locks_database->waiting_latch;
 	LWLockRelease(bdr_locks_ctl->lock);
 
-	elog(DEBUG1, "bdr: local DDL lock released");
+	elog(DEBUG1, "Local DDL lock released");
 
 	/* notify an eventual waiter */
 	if(latch)
@@ -908,7 +908,7 @@ bdr_process_confirm_ddl_lock(uint64 origin_sysid, TimeLineID origin_tli, Oid ori
 	bdr_my_locks_database->acquire_confirmed++;
 	latch = bdr_my_locks_database->waiting_latch;
 
-	elog(DEBUG2, "bdr: received DDL lock confirmation number %d/%zu from ("BDR_LOCALID_FORMAT")",
+	elog(DEBUG2, "Received DDL lock confirmation number %d/%zu from ("BDR_LOCALID_FORMAT")",
 		 bdr_my_locks_database->acquire_confirmed, bdr_my_locks_database->nnodes,
 		 origin_sysid, origin_tli, origin_datid, "");
 	LWLockRelease(bdr_locks_ctl->lock);
@@ -944,7 +944,7 @@ bdr_process_decline_ddl_lock(uint64 origin_sysid, TimeLineID origin_tli, Oid ori
 	if(latch)
 		SetLatch(latch);
 
-	elog(DEBUG2, "bdr: node ("BDR_LOCALID_FORMAT") declined our DDL global lock request",
+	elog(DEBUG2, "Global lock request declined by node ("BDR_LOCALID_FORMAT")",
 		 origin_sysid, origin_tli, origin_datid, "");
 }
 
@@ -968,7 +968,7 @@ bdr_process_request_replay_confirm(uint64 sysid, TimeLineID tli,
 
 	bdr_locks_find_my_database(false);
 
-	elog(DEBUG2, "bdr: node ("BDR_LOCALID_FORMAT") requested replay confirmation; sending",
+	elog(DEBUG2, "Replay confirmation requested by node ("BDR_LOCALID_FORMAT"); sending",
 		 sysid, tli, datid, "");
 
 	initStringInfo(&s);
@@ -1003,7 +1003,7 @@ bdr_process_replay_confirm(uint64 sysid, TimeLineID tli,
 	bdr_locks_find_my_database(false);
 
 	LWLockAcquire(bdr_locks_ctl->lock, LW_EXCLUSIVE);
-	elog(DEBUG2, "bdr: processing replay confirmation from node ("BDR_LOCALID_FORMAT") for request %X/%X at %X/%X",
+	elog(DEBUG2, "Processing replay confirmation from node ("BDR_LOCALID_FORMAT") for request %X/%X at %X/%X",
 		 sysid, tli, datid, "",
 		 (uint32)(bdr_my_locks_database->replay_confirmed_lsn >> 32),
 		 (uint32)bdr_my_locks_database->replay_confirmed_lsn,
@@ -1015,7 +1015,7 @@ bdr_process_replay_confirm(uint64 sysid, TimeLineID tli,
 	{
 		bdr_my_locks_database->replay_confirmed++;
 
-		elog(DEBUG2, "bdr: confirming replay %u/%zu",
+		elog(DEBUG2, "Confirming replay %u/%zu",
 			 bdr_my_locks_database->replay_confirmed,
 			 bdr_my_locks_database->nnodes);
 
@@ -1039,7 +1039,7 @@ bdr_process_replay_confirm(uint64 sysid, TimeLineID tli,
 
 		initStringInfo(&s);
 
-		elog(DEBUG2, "bdr: DDL lock quorum reached, logging confirmation of this node's acquisition of global DDL lock");
+		elog(DEBUG2, "DDL lock quorum reached, logging confirmation of this node's acquisition of global DDL lock");
 
 		/* clear out information about requested confirmations */
 		LWLockAcquire(bdr_locks_ctl->lock, LW_EXCLUSIVE);
@@ -1080,9 +1080,9 @@ bdr_process_replay_confirm(uint64 sysid, TimeLineID tli,
 			bool		isnull[10];
 
 			if (found)
-				elog(PANIC, "bdr: duplicate lock?");
+				elog(PANIC, "Duplicate lock?");
 
-			elog(DEBUG1, "bdr: updating DDL lock state from 'catchup' to 'acquired'");
+			elog(DEBUG1, "Updating DDL lock state from 'catchup' to 'acquired'");
 
 			heap_deform_tuple(tuple, RelationGetDescr(rel),
 							  values, isnull);
@@ -1097,7 +1097,7 @@ bdr_process_replay_confirm(uint64 sysid, TimeLineID tli,
 		}
 
 		if (!found)
-			elog(PANIC, "bdr: got confirmation for unknown lock");
+			elog(PANIC, "Got confirmation for unknown lock");
 
 		systable_endscan(scan);
 		UnregisterSnapshot(snap);
@@ -1105,7 +1105,7 @@ bdr_process_replay_confirm(uint64 sysid, TimeLineID tli,
 
 		CommitTransactionCommand();
 
-		elog(DEBUG2, "bdr: sent confirmation of successful DDL lock acquisition");
+		elog(DEBUG2, "Sent confirmation of successful DDL lock acquisition");
 	}
 }
 
@@ -1130,7 +1130,7 @@ bdr_locks_process_remote_startup(uint64 sysid, TimeLineID tli, Oid datid)
 
 	initStringInfo(&s);
 
-	elog(DEBUG2, "bdr: Got startup message from node ("BDR_LOCALID_FORMAT"), clearing any locks it held",
+	elog(DEBUG2, "Got startup message from node ("BDR_LOCALID_FORMAT"), clearing any locks it held",
 		 sysid, tli, datid, "");
 
 	StartTransactionCommand();
@@ -1141,13 +1141,13 @@ bdr_locks_process_remote_startup(uint64 sysid, TimeLineID tli, Oid datid)
 
 	while ((tuple = systable_getnext(scan)) != NULL)
 	{
-		elog(DEBUG2, "bdr: found remote lock to delete (after remote restart)");
+		elog(DEBUG2, "Found remote lock to delete (after remote restart)");
 
 		simple_heap_delete(rel, &tuple->t_self);
 		/* FIXME: locks */
 		LWLockAcquire(bdr_locks_ctl->lock, LW_EXCLUSIVE);
 		if (bdr_my_locks_database->lockcount == 0)
-			elog(WARNING, "bdr: bdr_global_locks row exists without corresponding in memory state");
+			elog(WARNING, "bdr_global_locks row exists without corresponding in memory state");
 		else
 		{
 			bdr_my_locks_database->lockcount--;
@@ -1182,7 +1182,7 @@ bdr_locks_check_query(void)
 		 */
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("bdr: database is not yet ready for DDL operations"),
+				 errmsg("Database is not yet ready for DDL operations"),
 				 errdetail("BDR DDL locking is still starting up"),
 				 errhint("Wait for a short time and retry.")));
 
@@ -1191,6 +1191,6 @@ bdr_locks_check_query(void)
 	if (bdr_my_locks_database->lockcount > 0 && !this_xact_acquired_lock)
 		ereport(ERROR,
 				(errcode(ERRCODE_LOCK_NOT_AVAILABLE),
-				 errmsg("bdr: database is locked against DDL operations"),
-				 errhint("Some node in the cluster is performing DDL")));
+				 errmsg("Database is locked against DDL operations"),
+				 errhint("Some node in the cluster is already performing DDL")));
 }
