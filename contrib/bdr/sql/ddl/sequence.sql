@@ -87,9 +87,15 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
 \d+ test_seq
 \d+ renamed_test_seq
 
+ALTER SEQUENCE renamed_test_seq USING bdr;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+\d+ renamed_test_seq;
+\c postgres
+\d+ renamed_test_seq
+
 DROP SEQUENCE renamed_test_seq;
 
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 \d+ renamed_test_seq;
-\c postgres
+\c regression
 \d+ renamed_test_seq
