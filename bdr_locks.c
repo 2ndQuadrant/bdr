@@ -224,10 +224,14 @@ bdr_locks_find_database(Oid dboid, bool create)
 	}
 
 	if (!create)
+		/*
+		 * We can't call get_databse_name here as the catalogs may not be
+		 * accessible, so we can only report the oid of the database.
+		 */
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("database %s (oid=%u) is not configured for bdr or bdr is still starting up",
-				 		get_database_name(dboid), dboid)));
+				 errmsg("database with oid=%u is not configured for bdr or bdr is still starting up",
+						dboid)));
 
 	if (free_off != -1)
 	{
