@@ -786,14 +786,6 @@ CreateReplicationSlot(CreateReplicationSlotCmd *cmd)
 
 	Assert(!MyReplicationSlot);
 
-	if (tmpbuf.data == NULL)
-		/*
-		 * If not already inited, we need a temporary working buffer.  It's
-		 * shared across lots of the walsender code and palloc'd only once to
-		 * reduce overhead.
-		 */
-		initStringInfo(&tmpbuf);
-
 	/* setup state for XLogReadPage */
 	sendTimeLineIsHistoric = false;
 	sendTimeLine = ThisTimeLineID;
@@ -1805,9 +1797,7 @@ WalSndLoop(WalSndSendDataCallback send_data)
 	 */
 	initStringInfo(&output_message);
 	initStringInfo(&reply_message);
-	if (tmpbuf.data == NULL)
-		/* tmpbuf might've already been inited by slot creation code */
-		initStringInfo(&tmpbuf);
+	initStringInfo(&tmpbuf);
 
 	/*
 	 * Initialize the last reply timestamp. That enables timeout processing
