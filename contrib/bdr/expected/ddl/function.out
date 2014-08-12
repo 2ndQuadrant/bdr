@@ -5,43 +5,47 @@ $$
 BEGIN
 END;
 $$ LANGUAGE plpgsql IMMUTABLE  STRICT;
-SELECT * FROM pg_proc WHERE proname = 'test_fn';
- proname | pronamespace | proowner | prolang | procost | prorows | provariadic | protransform | proisagg | proiswindow | prosecdef | proleakproof | proisstrict | proretset | provolatile | pronargs | pronargdefaults | prorettype | proargtypes | proallargtypes | proargmodes |     proargnames     | proargdefaults | prosrc | probin | proconfig | proacl 
----------+--------------+----------+---------+---------+---------+-------------+--------------+----------+-------------+-----------+--------------+-------------+-----------+-------------+----------+-----------------+------------+-------------+----------------+-------------+---------------------+----------------+--------+--------+-----------+--------
- test_fn |         2200 |    17047 |   12785 |     100 |    1000 |           0 | -            | f        | f           | f         | f            | t           | t         | i           |        2 |               0 |       2249 | 1043 23     | {1043,23,1184} | {i,b,o}     | {inpar,inoutpar,""} |                |       +|        |           | 
-         |              |          |         |         |         |             |              |          |             |           |              |             |           |             |          |                 |            |             |                |             |                     |                | BEGIN +|        |           | 
-         |              |          |         |         |         |             |              |          |             |           |              |             |           |             |          |                 |            |             |                |             |                     |                | END;  +|        |           | 
-         |              |          |         |         |         |             |              |          |             |           |              |             |           |             |          |                 |            |             |                |             |                     |                |        |        |           | 
+\df+ test_fn
+                                                                                          List of functions
+ Schema |  Name   | Result data type |                              Argument data types                              |  Type  | Security | Volatility | Owner | Language | Source code | Description 
+--------+---------+------------------+-------------------------------------------------------------------------------+--------+----------+------------+-------+----------+-------------+-------------
+ public | test_fn | SETOF record     | inpar character varying, INOUT inoutpar integer, OUT timestamp with time zone | normal | invoker  | immutable  | super | plpgsql  |            +| 
+        |         |                  |                                                                               |        |          |            |       |          | BEGIN      +| 
+        |         |                  |                                                                               |        |          |            |       |          | END;       +| 
+        |         |                  |                                                                               |        |          |            |       |          |             | 
 (1 row)
 
 \c regression
-SELECT * FROM pg_proc WHERE proname = 'test_fn';
- proname | pronamespace | proowner | prolang | procost | prorows | provariadic | protransform | proisagg | proiswindow | prosecdef | proleakproof | proisstrict | proretset | provolatile | pronargs | pronargdefaults | prorettype | proargtypes | proallargtypes | proargmodes |     proargnames     | proargdefaults | prosrc | probin | proconfig | proacl 
----------+--------------+----------+---------+---------+---------+-------------+--------------+----------+-------------+-----------+--------------+-------------+-----------+-------------+----------+-----------------+------------+-------------+----------------+-------------+---------------------+----------------+--------+--------+-----------+--------
- test_fn |         2200 |    17047 |   12785 |     100 |    1000 |           0 | -            | f        | f           | f         | f            | t           | t         | i           |        2 |               0 |       2249 | 1043 23     | {1043,23,1184} | {i,b,o}     | {inpar,inoutpar,""} |                |       +|        |           | 
-         |              |          |         |         |         |             |              |          |             |           |              |             |           |             |          |                 |            |             |                |             |                     |                | BEGIN +|        |           | 
-         |              |          |         |         |         |             |              |          |             |           |              |             |           |             |          |                 |            |             |                |             |                     |                | END;  +|        |           | 
-         |              |          |         |         |         |             |              |          |             |           |              |             |           |             |          |                 |            |             |                |             |                     |                |        |        |           | 
+\df+ test_fn
+                                                                                          List of functions
+ Schema |  Name   | Result data type |                              Argument data types                              |  Type  | Security | Volatility | Owner | Language | Source code | Description 
+--------+---------+------------------+-------------------------------------------------------------------------------+--------+----------+------------+-------+----------+-------------+-------------
+ public | test_fn | SETOF record     | inpar character varying, INOUT inoutpar integer, OUT timestamp with time zone | normal | invoker  | immutable  | super | plpgsql  |            +| 
+        |         |                  |                                                                               |        |          |            |       |          | BEGIN      +| 
+        |         |                  |                                                                               |        |          |            |       |          | END;       +| 
+        |         |                  |                                                                               |        |          |            |       |          |             | 
 (1 row)
 
 ALTER FUNCTION test_fn(varchar, integer) SECURITY DEFINER CALLED ON NULL INPUT VOLATILE ROWS 1 COST 1;
-SELECT * FROM pg_proc WHERE proname = 'test_fn';
- proname | pronamespace | proowner | prolang | procost | prorows | provariadic | protransform | proisagg | proiswindow | prosecdef | proleakproof | proisstrict | proretset | provolatile | pronargs | pronargdefaults | prorettype | proargtypes | proallargtypes | proargmodes |     proargnames     | proargdefaults | prosrc | probin | proconfig | proacl 
----------+--------------+----------+---------+---------+---------+-------------+--------------+----------+-------------+-----------+--------------+-------------+-----------+-------------+----------+-----------------+------------+-------------+----------------+-------------+---------------------+----------------+--------+--------+-----------+--------
- test_fn |         2200 |    17047 |   12785 |       1 |       1 |           0 | -            | f        | f           | t         | f            | f           | t         | v           |        2 |               0 |       2249 | 1043 23     | {1043,23,1184} | {i,b,o}     | {inpar,inoutpar,""} |                |       +|        |           | 
-         |              |          |         |         |         |             |              |          |             |           |              |             |           |             |          |                 |            |             |                |             |                     |                | BEGIN +|        |           | 
-         |              |          |         |         |         |             |              |          |             |           |              |             |           |             |          |                 |            |             |                |             |                     |                | END;  +|        |           | 
-         |              |          |         |         |         |             |              |          |             |           |              |             |           |             |          |                 |            |             |                |             |                     |                |        |        |           | 
+\df+ test_fn
+                                                                                          List of functions
+ Schema |  Name   | Result data type |                              Argument data types                              |  Type  | Security | Volatility | Owner | Language | Source code | Description 
+--------+---------+------------------+-------------------------------------------------------------------------------+--------+----------+------------+-------+----------+-------------+-------------
+ public | test_fn | SETOF record     | inpar character varying, INOUT inoutpar integer, OUT timestamp with time zone | normal | definer  | volatile   | super | plpgsql  |            +| 
+        |         |                  |                                                                               |        |          |            |       |          | BEGIN      +| 
+        |         |                  |                                                                               |        |          |            |       |          | END;       +| 
+        |         |                  |                                                                               |        |          |            |       |          |             | 
 (1 row)
 
 \c postgres
-SELECT * FROM pg_proc WHERE proname = 'test_fn';
- proname | pronamespace | proowner | prolang | procost | prorows | provariadic | protransform | proisagg | proiswindow | prosecdef | proleakproof | proisstrict | proretset | provolatile | pronargs | pronargdefaults | prorettype | proargtypes | proallargtypes | proargmodes |     proargnames     | proargdefaults | prosrc | probin | proconfig | proacl 
----------+--------------+----------+---------+---------+---------+-------------+--------------+----------+-------------+-----------+--------------+-------------+-----------+-------------+----------+-----------------+------------+-------------+----------------+-------------+---------------------+----------------+--------+--------+-----------+--------
- test_fn |         2200 |    17047 |   12785 |       1 |       1 |           0 | -            | f        | f           | t         | f            | f           | t         | v           |        2 |               0 |       2249 | 1043 23     | {1043,23,1184} | {i,b,o}     | {inpar,inoutpar,""} |                |       +|        |           | 
-         |              |          |         |         |         |             |              |          |             |           |              |             |           |             |          |                 |            |             |                |             |                     |                | BEGIN +|        |           | 
-         |              |          |         |         |         |             |              |          |             |           |              |             |           |             |          |                 |            |             |                |             |                     |                | END;  +|        |           | 
-         |              |          |         |         |         |             |              |          |             |           |              |             |           |             |          |                 |            |             |                |             |                     |                |        |        |           | 
+\df+ test_fn
+                                                                                          List of functions
+ Schema |  Name   | Result data type |                              Argument data types                              |  Type  | Security | Volatility | Owner | Language | Source code | Description 
+--------+---------+------------------+-------------------------------------------------------------------------------+--------+----------+------------+-------+----------+-------------+-------------
+ public | test_fn | SETOF record     | inpar character varying, INOUT inoutpar integer, OUT timestamp with time zone | normal | definer  | volatile   | super | plpgsql  |            +| 
+        |         |                  |                                                                               |        |          |            |       |          | BEGIN      +| 
+        |         |                  |                                                                               |        |          |            |       |          | END;       +| 
+        |         |                  |                                                                               |        |          |            |       |          |             | 
 (1 row)
 
 CREATE OR REPLACE FUNCTION test_fn(IN inpar varchar, INOUT inoutpar integer, OUT timestamp with time zone) RETURNS SETOF record AS
@@ -49,23 +53,25 @@ $$
 BEGIN
 END;
 $$ LANGUAGE plpgsql STABLE;
-SELECT * FROM pg_proc WHERE proname = 'test_fn';
- proname | pronamespace | proowner | prolang | procost | prorows | provariadic | protransform | proisagg | proiswindow | prosecdef | proleakproof | proisstrict | proretset | provolatile | pronargs | pronargdefaults | prorettype | proargtypes | proallargtypes | proargmodes |     proargnames     | proargdefaults | prosrc | probin | proconfig | proacl 
----------+--------------+----------+---------+---------+---------+-------------+--------------+----------+-------------+-----------+--------------+-------------+-----------+-------------+----------+-----------------+------------+-------------+----------------+-------------+---------------------+----------------+--------+--------+-----------+--------
- test_fn |         2200 |    17047 |   12785 |     100 |    1000 |           0 | -            | f        | f           | f         | f            | f           | t         | s           |        2 |               0 |       2249 | 1043 23     | {1043,23,1184} | {i,b,o}     | {inpar,inoutpar,""} |                |       +|        |           | 
-         |              |          |         |         |         |             |              |          |             |           |              |             |           |             |          |                 |            |             |                |             |                     |                | BEGIN +|        |           | 
-         |              |          |         |         |         |             |              |          |             |           |              |             |           |             |          |                 |            |             |                |             |                     |                | END;  +|        |           | 
-         |              |          |         |         |         |             |              |          |             |           |              |             |           |             |          |                 |            |             |                |             |                     |                |        |        |           | 
+\df+ test_fn
+                                                                                          List of functions
+ Schema |  Name   | Result data type |                              Argument data types                              |  Type  | Security | Volatility | Owner | Language | Source code | Description 
+--------+---------+------------------+-------------------------------------------------------------------------------+--------+----------+------------+-------+----------+-------------+-------------
+ public | test_fn | SETOF record     | inpar character varying, INOUT inoutpar integer, OUT timestamp with time zone | normal | invoker  | stable     | super | plpgsql  |            +| 
+        |         |                  |                                                                               |        |          |            |       |          | BEGIN      +| 
+        |         |                  |                                                                               |        |          |            |       |          | END;       +| 
+        |         |                  |                                                                               |        |          |            |       |          |             | 
 (1 row)
 
 \c regression
-SELECT * FROM pg_proc WHERE proname = 'test_fn';
- proname | pronamespace | proowner | prolang | procost | prorows | provariadic | protransform | proisagg | proiswindow | prosecdef | proleakproof | proisstrict | proretset | provolatile | pronargs | pronargdefaults | prorettype | proargtypes | proallargtypes | proargmodes |     proargnames     | proargdefaults | prosrc | probin | proconfig | proacl 
----------+--------------+----------+---------+---------+---------+-------------+--------------+----------+-------------+-----------+--------------+-------------+-----------+-------------+----------+-----------------+------------+-------------+----------------+-------------+---------------------+----------------+--------+--------+-----------+--------
- test_fn |         2200 |    17047 |   12785 |     100 |    1000 |           0 | -            | f        | f           | f         | f            | f           | t         | s           |        2 |               0 |       2249 | 1043 23     | {1043,23,1184} | {i,b,o}     | {inpar,inoutpar,""} |                |       +|        |           | 
-         |              |          |         |         |         |             |              |          |             |           |              |             |           |             |          |                 |            |             |                |             |                     |                | BEGIN +|        |           | 
-         |              |          |         |         |         |             |              |          |             |           |              |             |           |             |          |                 |            |             |                |             |                     |                | END;  +|        |           | 
-         |              |          |         |         |         |             |              |          |             |           |              |             |           |             |          |                 |            |             |                |             |                     |                |        |        |           | 
+\df+ test_fn
+                                                                                          List of functions
+ Schema |  Name   | Result data type |                              Argument data types                              |  Type  | Security | Volatility | Owner | Language | Source code | Description 
+--------+---------+------------------+-------------------------------------------------------------------------------+--------+----------+------------+-------+----------+-------------+-------------
+ public | test_fn | SETOF record     | inpar character varying, INOUT inoutpar integer, OUT timestamp with time zone | normal | invoker  | stable     | super | plpgsql  |            +| 
+        |         |                  |                                                                               |        |          |            |       |          | BEGIN      +| 
+        |         |                  |                                                                               |        |          |            |       |          | END;       +| 
+        |         |                  |                                                                               |        |          |            |       |          |             | 
 (1 row)
 
 DROP FUNCTION test_fn(varchar, integer);

@@ -5,23 +5,23 @@ $$
 BEGIN
 END;
 $$ LANGUAGE plpgsql IMMUTABLE  STRICT;
-SELECT * FROM pg_proc WHERE proname = 'test_fn';
+\df+ test_fn
 \c regression
-SELECT * FROM pg_proc WHERE proname = 'test_fn';
+\df+ test_fn
 
 ALTER FUNCTION test_fn(varchar, integer) SECURITY DEFINER CALLED ON NULL INPUT VOLATILE ROWS 1 COST 1;
-SELECT * FROM pg_proc WHERE proname = 'test_fn';
+\df+ test_fn
 \c postgres
-SELECT * FROM pg_proc WHERE proname = 'test_fn';
+\df+ test_fn
 
 CREATE OR REPLACE FUNCTION test_fn(IN inpar varchar, INOUT inoutpar integer, OUT timestamp with time zone) RETURNS SETOF record AS
 $$
 BEGIN
 END;
 $$ LANGUAGE plpgsql STABLE;
-SELECT * FROM pg_proc WHERE proname = 'test_fn';
+\df+ test_fn
 \c regression
-SELECT * FROM pg_proc WHERE proname = 'test_fn';
+\df+ test_fn
 
 DROP FUNCTION test_fn(varchar, integer);
 \df test_fn
