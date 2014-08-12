@@ -1,5 +1,5 @@
 -- tests for functions and triggers
-\c postgres
+\c postgres super
 CREATE FUNCTION test_fn(IN inpar character varying (20), INOUT inoutpar integer, OUT timestamp with time zone) RETURNS SETOF record AS
 $$
 BEGIN
