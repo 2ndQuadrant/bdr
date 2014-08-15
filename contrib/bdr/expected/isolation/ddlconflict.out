@@ -1,0 +1,33 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s1b s1ct s2b s2ct s1c s2c s2dt s1wait s2wait s2ct2
+step s1b: BEGIN;
+step s1ct: CREATE TABLE bdr_ddl_conflict_a(f1 int);
+step s2b: BEGIN;
+step s2ct: CREATE TABLE bdr_ddl_conflict_b(f1 int);
+ERROR:  database is locked against ddl by another node
+step s1c: COMMIT;
+step s2c: COMMIT;
+step s2dt: DROP TABLE bdr_ddl_conflict_a;
+step s1wait: SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+pg_xlog_wait_remote_apply
+
+               
+               
+               
+               
+               
+               
+step s2wait: SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication; select * from pg_sleep(1);
+pg_xlog_wait_remote_apply
+
+               
+               
+               
+               
+               
+               
+pg_sleep       
+
+               
+step s2ct2: CREATE TABLE bdr_ddl_conflict_c(f1 int);
