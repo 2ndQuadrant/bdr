@@ -1070,7 +1070,14 @@ bdr_sequence_alloc(PG_FUNCTION_ARGS)
 
 	values = fastgetattr(seqtuple, 11, RelationGetDescr(seqrel), &isnull);
 	if (isnull)
-		elog(ERROR, "uninitialized sequence");
+		ereport(ERROR,
+				(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+				 errmsg("global sequence %s.%s is not initialized yet",
+				 		get_namespace_name(RelationGetNamespace(seqrel)),
+						RelationGetRelationName(seqrel)),
+				 errhint("All nodes must agree before the sequence is usable. "
+				 		 "Try again soon. Check all nodes are up if the condition "
+						 "persists.")));
 
 	curval = (BdrSequenceValues *) VARDATA_ANY(DatumGetByteaP(values));
 
@@ -1139,7 +1146,11 @@ bdr_sequence_alloc(PG_FUNCTION_ARGS)
 		bdr_sequencer_wakeup();
 		ereport(ERROR,
 				(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
-				 errmsg("could not find free sequence value")));
+				 errmsg("could not find free sequence value for global sequence %s.%s",
+				 		get_namespace_name(RelationGetNamespace(seqrel)),
+						RelationGetRelationName(seqrel)),
+				 errhint("The sequence is refilling from remote nodes. Try again soon. "
+				 		 "Check that all nodes are up if the condition persists.")));
 	}
 
 	if (wakeup)
