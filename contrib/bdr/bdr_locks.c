@@ -429,8 +429,13 @@ bdr_lock_xact_callback(XactEvent event, void *arg)
 			bdr_my_locks_database->lockcount--;
 		else
 			elog(WARNING, "Releasing unacquired DDL lock");
-		LWLockRelease(bdr_locks_ctl->lock);
+
 		this_xact_acquired_lock = false;
+		bdr_my_locks_database->replay_confirmed = 0;
+		bdr_my_locks_database->replay_confirmed_lsn = InvalidXLogRecPtr;
+		bdr_my_locks_database->waiting_latch = NULL;
+
+		LWLockRelease(bdr_locks_ctl->lock);
 	}
 }
 
@@ -506,16 +511,9 @@ bdr_acquire_ddl_lock(void)
 	/* register an XactCallback to release the lock */
 	register_xact_callback();
 
-	/* send message about ddl lock */
-	lsn = LogStandbyMessage(s.data, s.len, false);
-	XLogFlush(lsn);
-
-	/* ---
-	 * Now wait for standbys to ack ddl lock
-	 * ---
-	 */
-
 	LWLockAcquire(bdr_locks_ctl->lock, LW_EXCLUSIVE);
+
+	/* first check whether the lock can't actually be acquired */
 	if (bdr_my_locks_database->lockcount > 0)
 	{
 		uint64		holder_sysid;
@@ -533,12 +531,32 @@ bdr_acquire_ddl_lock(void)
 						 holder_sysid, holder_tli, holder_datid)));
 	}
 
+	START_CRIT_SECTION();
 
+	/*
+	 * NB: We need to setup the state as if we'd have already acquired the
+	 * lock - otherwise concurrent transactions could acquire the lock; and we
+	 * wouldn't send a release message when we fail to fully acquire the lock.
+	 */
+	bdr_my_locks_database->lockcount++;
+	this_xact_acquired_lock = true;
 	bdr_my_locks_database->acquire_confirmed = 0;
 	bdr_my_locks_database->acquire_declined = 0;
 	bdr_my_locks_database->waiting_latch = &MyProc->procLatch;
+
+	/* lock looks to be free, try to acquire it */
+
+	lsn = LogStandbyMessage(s.data, s.len, false);
+	XLogFlush(lsn);
+
+	END_CRIT_SECTION();
+
 	LWLockRelease(bdr_locks_ctl->lock);
 
+	/* ---
+	 * Now wait for standbys to ack ddl lock
+	 * ---
+	 */
 	elog(DEBUG2, "sent DDL lock request, waiting for confirmation");
 
 	while (true)
@@ -552,7 +570,6 @@ bdr_acquire_ddl_lock(void)
 		/* check for confirmations in shared memory */
 		if (bdr_my_locks_database->acquire_declined > 0)
 		{
-			LWLockRelease(bdr_locks_ctl->lock);
 			ereport(ERROR,
 					(errcode(ERRCODE_LOCK_NOT_AVAILABLE),
 					 errmsg("could not acquire DDL lock - another node has declined our lock request"),
@@ -584,8 +601,6 @@ bdr_acquire_ddl_lock(void)
 	bdr_my_locks_database->acquire_confirmed = 0;
 	bdr_my_locks_database->acquire_declined = 0;
 	bdr_my_locks_database->waiting_latch = NULL;
-	bdr_my_locks_database->lockcount++;
-	this_xact_acquired_lock = true;
 
 	elog(DEBUG1, "global DDL lock acquired successfully by (" BDR_LOCALID_FORMAT ")", BDR_LOCALID_FORMAT_ARGS);
 
@@ -662,7 +677,6 @@ bdr_process_acquire_ddl_lock(uint64 sysid, TimeLineID tli, Oid datid)
 		/*
 		 * No previous DDL lock found. Start acquiring it.
 		 */
-
 		elog(DEBUG1, "no prior DDL lock found, acquiring local DDL lock");
 
 		/* Add a row to bdr_locks */
@@ -869,6 +883,12 @@ bdr_process_release_ddl_lock(uint64 origin_sysid, TimeLineID origin_tli, Oid ori
 	heap_close(rel, NoLock);
 	CommitTransactionCommand();
 
+	/*
+	 * Note that it's not unexpected to receive release requests for locks
+	 * this node hasn't acquired. It e.g. happens if lock acquisition failed
+	 * halfway through.
+	 */
+
 	if (!found)
 		ereport(WARNING,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
@@ -881,12 +901,15 @@ bdr_process_release_ddl_lock(uint64 origin_sysid, TimeLineID origin_tli, Oid ori
 	{
 		bdr_my_locks_database->lockcount--;
 		bdr_my_locks_database->lock_holder = InvalidRepNodeId;
+		/* XXX: recheck owner of lock */
 	}
-	else
-		/* This shouldn't happen; probable bug if reached */
-		elog(WARNING, "Releasing DDL lock without corresponding in-memory state");
 
 	latch = bdr_my_locks_database->waiting_latch;
+
+	bdr_my_locks_database->replay_confirmed = 0;
+	bdr_my_locks_database->replay_confirmed_lsn = InvalidXLogRecPtr;
+	bdr_my_locks_database->waiting_latch = NULL;
+
 	LWLockRelease(bdr_locks_ctl->lock);
 
 	elog(DEBUG1, "local DDL lock released");
@@ -1038,7 +1061,6 @@ bdr_process_replay_confirm(uint64 sysid, TimeLineID tli,
 		quorum_reached =
 			bdr_my_locks_database->replay_confirmed >= bdr_my_locks_database->nnodes;
 	}
-	LWLockRelease(bdr_locks_ctl->lock);
 
 	if (quorum_reached)
 	{
@@ -1057,12 +1079,9 @@ bdr_process_replay_confirm(uint64 sysid, TimeLineID tli,
 
 		elog(DEBUG2, "DDL lock quorum reached, logging confirmation of this node's acquisition of global DDL lock");
 
-		/* clear out information about requested confirmations */
-		LWLockAcquire(bdr_locks_ctl->lock, LW_EXCLUSIVE);
 		bdr_my_locks_database->replay_confirmed = 0;
 		bdr_my_locks_database->replay_confirmed_lsn = InvalidXLogRecPtr;
 		bdr_my_locks_database->waiting_latch = NULL;
-		LWLockRelease(bdr_locks_ctl->lock);
 
 		bdr_prepare_message(&s, BDR_MESSAGE_CONFIRM_LOCK);
 
@@ -1123,6 +1142,8 @@ bdr_process_replay_confirm(uint64 sysid, TimeLineID tli,
 
 		elog(DEBUG2, "sent confirmation of successful DDL lock acquisition");
 	}
+
+	LWLockRelease(bdr_locks_ctl->lock);
 }
 
 /*
