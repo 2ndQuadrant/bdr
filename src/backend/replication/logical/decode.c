@@ -357,6 +357,7 @@ DecodeStandbyOp(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 					!SnapBuildProcessChange(builder, r->xl_xid, buf->origptr))
 					break;
 				else if(!message->transactional &&
+						SnapBuildCurrentState(ctx->snapshot_builder) == SNAPBUILD_CONSISTENT &&
 						SnapBuildXactNeedsSkip(builder, buf->origptr))
 					break;
 
