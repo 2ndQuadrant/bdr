@@ -125,3 +125,18 @@ It's OK to --force push to this working branch, and you should consider doing a
 "git rebase --interactive bdr-next", cleaning it up, and then force-pushing the
 cleanup before requesting a merge. Don't force-push a branch once you've asked
 someone to review it or asked them to pull it.
+
+Read the error message style guide:
+http://www.postgresql.org/docs/current/static/error-style-guide.html
+and the NLS/translator message guide:
+http://www.postgresql.org/docs/current/static/nls-programmer.html#NLS-GUIDELINES
+Key points:
+
+* Don't prefix errors with 'bdr: ' or similar. That's what log_error_verbosity is for.
+* Primary error messages: Do not capitalize the first letter. Do not end a message with a period.
+* Detail and hint messages: Use complete sentences, and end each with a period. Capitalize the first word of sentences.
+* Avoid passive voice
+* Pay attention to tense
+* Avoid contractions and abbreviations
+* Avoid "unable", "unknown" (see docs)
+* Don't construct messages from chunks of text at runtime
