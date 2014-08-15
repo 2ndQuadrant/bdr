@@ -40,7 +40,7 @@ PGXS := $(shell $(PG_CONFIG) --pgxs)
 include $(PGXS)
 endif
 
-DATE=$(shell date --iso-8601)
+DATE=$(shell date "+%Y-%m-%d")
 GITHASH=$(shell git rev-parse --short HEAD)
 
 bdr_version.h: bdr_version.h.in
