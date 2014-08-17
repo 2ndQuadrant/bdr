@@ -73,6 +73,7 @@ typedef enum BdrConflictType
 	BdrConflictType_InsertUpdate,
 	BdrConflictType_UpdateUpdate,
 	BdrConflictType_UpdateDelete,
+	BdrConflictType_DeleteDelete,
 	BdrConflictType_UnhandledTxAbort
 } BdrConflictType;
 
