@@ -73,7 +73,8 @@ performance work, etc should generally be minor releases.
 Bumping the protocl version
 ---------------------------
 
-[pending]
+If new release is not protocol compatible with some of the older releases,
+BDR_MIN_REMOTE_VERSION_NUM should be bumped accordingly.
 
 GIT INFO
 ========

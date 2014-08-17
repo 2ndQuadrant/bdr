@@ -62,6 +62,7 @@ typedef struct
 	uint32 client_pg_version;
 	uint32 client_pg_catversion;
 	uint32 client_bdr_version;
+	uint32 client_min_bdr_version;
 	size_t client_sizeof_int;
 	size_t client_sizeof_long;
 	size_t client_sizeof_datum;
@@ -313,6 +314,8 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 			bdr_parse_uint32(elem, &data->client_pg_catversion);
 		else if (strcmp(elem->defname, "bdr_version") == 0)
 			bdr_parse_uint32(elem, &data->client_bdr_version);
+		else if (strcmp(elem->defname, "min_bdr_version") == 0)
+			bdr_parse_uint32(elem, &data->client_min_bdr_version);
 		else if (strcmp(elem->defname, "sizeof_int") == 0)
 			bdr_parse_size_t(elem, &data->client_sizeof_int);
 		else if (strcmp(elem->defname, "sizeof_long") == 0)
@@ -352,6 +355,8 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 			bdr_req_param("pg_catversion");
 		if (data->client_bdr_version == 0)
 			bdr_req_param("bdr_version");
+		if (data->client_min_bdr_version == 0)
+			bdr_req_param("min_bdr_version");
 		if (data->client_sizeof_int == 0)
 			bdr_req_param("sizeof_int");
 		if (data->client_sizeof_long == 0)
@@ -368,8 +373,10 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 		if (strcmp(data->client_db_encoding, GetDatabaseEncodingName()) != 0)
 			elog(ERROR, "mismatching encodings are not yet supported");
 
-		if (data->client_bdr_version != BDR_VERSION_NUM)
-			elog(ERROR, "bdr versions currently have to match on both sides");
+		if (data->client_min_bdr_version > BDR_VERSION_NUM)
+			elog(ERROR, "incompatible bdr client and server versions, server too old");
+		if (data->client_bdr_version < BDR_MIN_REMOTE_VERSION_NUM)
+			elog(ERROR, "incompatible bdr client and server versions, client too old");
 
 		data->allow_binary_protocol = true;
 		data->allow_sendrecv_protocol = true;
