@@ -1,15 +1,28 @@
-Parsed test spec with 3 sessions
+Parsed test spec with 1 sessions
 
-starting permutation: s1waitlsn s2waitlsn s3waitlsn
-step s1waitlsn: SELECT wait_for_nodes(6);
-wait_for_nodes 
+starting permutation: wait
+step wait: 
+	-- pg_xlog_wait_remote_apply isn't good enough alone
+	-- as it doesn't permit us to say how many nodes must be present.
+	-- It'll succeed if there are zero nodes. So we first have to wait
+	-- for enough replication connections.
+	DO $$
+	DECLARE
+		nodecount integer := 0;
+		target_lsn pg_lsn;
+	BEGIN
+		WHILE nodecount <> 6
+		LOOP
+			PERFORM pg_sleep(1);
+			nodecount := (SELECT count(*)
+						  FROM pg_catalog.pg_stat_replication);
+			RAISE NOTICE 'Found % nodes',nodecount;
+		END LOOP;
+		-- OK, all nodes seen, now we wait for catchup on them all.
+		target_lsn := pg_current_xlog_location();
+		RAISE NOTICE 'Found expected % nodes, waiting for xlog catchup to %', 6, target_lsn;
+		PERFORM pg_xlog_wait_remote_apply( target_lsn, 0 );
+		RAISE NOTICE 'Catchup to LSN completed';
+	END;
+	$$;
 
-               
-step s2waitlsn: SELECT wait_for_nodes(6);
-wait_for_nodes 
-
-               
-step s3waitlsn: SELECT wait_for_nodes(6);
-wait_for_nodes 
-
-               

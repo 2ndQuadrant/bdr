@@ -1,0 +1,68 @@
+Parsed test spec with 3 sessions
+
+starting permutation: s1i s2i s3i s1w s2w s3w s1s s2s s3s s1h s2h s3h
+pg_xlog_wait_remote_apply
+
+               
+               
+               
+               
+               
+               
+step s1i: UPDATE test_dmlconflict SET a = 'x', b = '1', c = 'foo';
+step s2i: UPDATE test_dmlconflict SET a = 'y', b = '1', c = 'bar';
+step s3i: UPDATE test_dmlconflict SET a = 'y', b = '1', c = 'baz';
+step s1w: SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+pg_xlog_wait_remote_apply
+
+               
+               
+               
+               
+               
+               
+step s2w: SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+pg_xlog_wait_remote_apply
+
+               
+               
+               
+               
+               
+               
+step s3w: SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+pg_xlog_wait_remote_apply
+
+               
+               
+               
+               
+               
+               
+step s1s: SELECT * FROM test_dmlconflict;
+a              b              c              
+
+y              1              baz            
+step s2s: SELECT * FROM test_dmlconflict;
+a              b              c              
+
+y              1              baz            
+step s3s: SELECT * FROM test_dmlconflict;
+a              b              c              
+
+y              1              baz            
+step s1h: SELECT object_schema, object_name, conflict_type, conflict_resolution, local_tuple, remote_tuple, error_sqlstate FROM bdr.bdr_conflict_history ORDER BY conflict_id;
+object_schema  object_name    conflict_type  conflict_resolutionlocal_tuple    remote_tuple   error_sqlstate 
+
+public         test_dmlconflictupdate_update  last_update_wins_keep_remote{"a":"x","b":1,"c":"foo"}{"a":"y","b":1,"c":"bar"}               
+public         test_dmlconflictupdate_update  last_update_wins_keep_remote{"a":"y","b":1,"c":"bar"}{"a":"y","b":1,"c":"baz"}               
+step s2h: SELECT object_schema, object_name, conflict_type, conflict_resolution, local_tuple, remote_tuple, error_sqlstate FROM bdr.bdr_conflict_history ORDER BY conflict_id;
+object_schema  object_name    conflict_type  conflict_resolutionlocal_tuple    remote_tuple   error_sqlstate 
+
+public         test_dmlconflictupdate_update  last_update_wins_keep_local{"a":"y","b":1,"c":"bar"}{"a":"x","b":1,"c":"foo"}               
+public         test_dmlconflictupdate_update  last_update_wins_keep_remote{"a":"y","b":1,"c":"bar"}{"a":"y","b":1,"c":"baz"}               
+step s3h: SELECT object_schema, object_name, conflict_type, conflict_resolution, local_tuple, remote_tuple, error_sqlstate FROM bdr.bdr_conflict_history ORDER BY conflict_id;
+object_schema  object_name    conflict_type  conflict_resolutionlocal_tuple    remote_tuple   error_sqlstate 
+
+public         test_dmlconflictupdate_update  last_update_wins_keep_local{"a":"y","b":1,"c":"baz"}{"a":"x","b":1,"c":"foo"}               
+public         test_dmlconflictupdate_update  last_update_wins_keep_local{"a":"y","b":1,"c":"baz"}{"a":"y","b":1,"c":"bar"}               
