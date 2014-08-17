@@ -6,7 +6,7 @@
 MODULE_big = bdr
 
 EXTENSION = bdr
-DATA = bdr--0.6.sql
+DATA = bdr--0.7.sql
 DOCS = bdr.conf.sample README.bdr
 SCRIPTS = scripts/bdr_initial_load bdr_init_copy
 

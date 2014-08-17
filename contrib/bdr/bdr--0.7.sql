@@ -158,6 +158,7 @@ CREATE TYPE bdr_conflict_type AS ENUM
     'insert_update',
     'update_update',
     'update_delete',
+    'delete_delete',
     'unhandled_tx_abort'
 );
 
