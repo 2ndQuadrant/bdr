@@ -107,7 +107,6 @@ BdrConnectionConfig *bdr_apply_config = NULL;
 
 static BDRRelation *read_rel(StringInfo s, LOCKMODE mode);
 extern void read_tuple_parts(StringInfo s, BDRRelation *rel, BDRTupleData *tup);
-static void tuple_to_stringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple);
 
 static void tuple_to_stringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple);
 
@@ -116,9 +115,14 @@ static void check_apply_update(RepNodeId local_node_id, TimestampTz local_ts,
 				   HeapTuple remote_tuple, HeapTuple *new_tuple,
 				   bool *perform_update, bool *log_update,
 				   BdrConflictResolution *resolution);
-static void do_log_update(RepNodeId local_node_id, bool apply_update,
-			  TimestampTz ts, BDRRelation *rel,
-			  HeapTuple old_key, HeapTuple user_tuple);
+static void do_log_conflict(BdrConflictType conflict_type,
+				BdrConflictResolution resolution,
+				BDRRelation *conflict_relation,
+				RepNodeId local_node_id,
+				bool apply_remote,
+				TimestampTz local_timestamp,
+				HeapTuple old_key,
+				HeapTuple user_tuple);
 static void do_apply_update(BDRRelation *rel, EState *estate, TupleTableSlot *oldslot,
 				TupleTableSlot *newslot);
 
@@ -520,9 +524,14 @@ process_remote_insert(StringInfo s)
 						   &resolution);
 
 		if (log_update)
-			/* TODO: Roll into conflict logging code */
-			elog(DEBUG2, "bdr: insert vs insert conflict: %s",
-				 apply_update ? "update" : "ignore");
+		{
+			do_log_conflict(BdrConflictType_InsertInsert, resolution,
+							rel, local_node_id, apply_update,
+							local_ts,
+							oldslot->tts_tuple, NULL /*no user tuple*/);
+
+			bdr_count_insert_conflict();
+		}
 
 		if (apply_update)
 		{
@@ -536,13 +545,9 @@ process_remote_insert(StringInfo s)
 		}
 
 		if (log_update)
-		{
-			bdr_count_insert_conflict();
-
 			bdr_conflict_log(BdrConflictType_InsertInsert, resolution,
 							 replication_origin_xid, rel, oldslot,
 							 local_node_id, newslot, NULL /*no error*/);
-		}
 	}
 	else
 	{
@@ -623,7 +628,9 @@ process_remote_update(StringInfo s)
 	Oid			idxoid;
 	BDRRelation	*rel;
 	Relation	idxrel;
+#ifdef VERBOSE_UPDATE
 	StringInfoData o;
+#endif
 	ScanKeyData skey[INDEX_MAX_KEYS];
 	HeapTuple	user_tuple = NULL,
 				remote_tuple = NULL;
@@ -735,8 +742,14 @@ process_remote_update(StringInfo s)
 						   &log_update, &resolution);
 
 		if (log_update)
-			do_log_update(local_node_id, apply_update, local_ts,
-						  rel, oldslot->tts_tuple, user_tuple);
+		{
+			do_log_conflict(BdrConflictType_UpdateUpdate, resolution,
+							rel, local_node_id, apply_update,
+							local_ts,
+							oldslot->tts_tuple, user_tuple);
+
+			bdr_count_update_conflict();
+		}
 
 		if (apply_update)
 		{
@@ -757,7 +770,10 @@ process_remote_update(StringInfo s)
 		}
 
 		if (log_update)
-			bdr_count_update_conflict();
+			bdr_conflict_log(BdrConflictType_UpdateUpdate, resolution,
+							 replication_origin_xid, rel, oldslot,
+							 local_node_id, newslot, NULL /*no error*/);
+
 	}
 	else
 	{
@@ -768,6 +784,7 @@ process_remote_update(StringInfo s)
 		 */
 
 		bool skip = false;
+		BdrConflictResolution resolution;
 
 		remote_tuple = heap_form_tuple(RelationGetDescr(rel->rel),
 									   new_tuple.values,
@@ -781,20 +798,25 @@ process_remote_update(StringInfo s)
 												   BdrConflictType_UpdateDelete,
 												   0, &skip);
 
-		initStringInfo(&o);
-		tuple_to_stringinfo(&o, RelationGetDescr(rel->rel),
-							remote_tuple);
 		bdr_count_update_conflict();
 
+		/* XXX: handle user_tuple */
 		if (user_tuple)
 			ereport(ERROR,
 					(errmsg("UPDATE vs DELETE handler returned a row which"
 							" isn't allowed for now")));
 
-		ereport(LOG,
-				(errcode(ERRCODE_INTEGRITY_CONSTRAINT_VIOLATION),
-				 errmsg("CONFLICT: could not find existing tuple for pkey %s",
-						o.data)));
+		resolution = user_tuple ? BdrConflictResolution_ConflictTriggerReturnedTuple :
+								  BdrConflictResolution_ConflictTriggerSkipChange;
+
+		do_log_conflict(BdrConflictType_UpdateDelete, resolution,
+						rel, InvalidRepNodeId, false, 0,
+						remote_tuple, user_tuple);
+
+		bdr_conflict_log(BdrConflictType_UpdateDelete, resolution,
+						 replication_origin_xid, rel, NULL,
+						 InvalidRepNodeId, newslot, NULL /*no error*/);
+
 	}
 
 	PopActiveSnapshot();
@@ -870,8 +892,14 @@ process_remote_delete(StringInfo s)
 			 rel->rel->rd_rel->relkind, RelationGetRelationName(rel->rel));
 
 #ifdef VERBOSE_DELETE
+	{
+		HeapTuple tup;
+		tup = heap_form_tuple(RelationGetDescr(rel->rel),
+							  oldtup.values, oldtup.isnull);
+		ExecStoreTuple(tup, oldslot, InvalidBuffer, true);
+	}
 	initStringInfo(&o);
-	tuple_to_stringinfo(&o, RelationGetDescr(idxrel), slot->tts_tuple);
+	tuple_to_stringinfo(&o, RelationGetDescr(idxrel), oldslot->tts_tuple);
 	elog(DEBUG1, "DELETE old-key:%s", o.data);
 	resetStringInfo(&o);
 #endif
@@ -903,25 +931,24 @@ process_remote_delete(StringInfo s)
 		 * (This can also arise with an UPDATE that changes the PRIMARY KEY,
 		 * as that's effectively a DELETE + INSERT).
 		 */
-		StringInfoData s_key;
-		HeapTuple ttup;
-
 		bdr_count_delete_conflict();
 
-		initStringInfo(&s_key);
-		ttup = heap_form_tuple(RelationGetDescr(rel->rel),
-							   oldtup.values, oldtup.isnull);
+		/* Since the local tuple is missing, fill slot from the received data. */
+		{
+			HeapTuple tup;
+			tup = heap_form_tuple(RelationGetDescr(rel->rel),
+								  oldtup.values, oldtup.isnull);
+			ExecStoreTuple(tup, oldslot, InvalidBuffer, true);
+		}
 
-		tuple_to_stringinfo(&s_key, RelationGetDescr(idxrel), ttup);
+		do_log_conflict(BdrConflictType_DeleteDelete, BdrConflictResolution_ConflictTriggerSkipChange,
+						rel, InvalidRepNodeId, false, 0,
+						oldslot->tts_tuple, NULL);
 
-		ereport(LOG,
-				(errcode(ERRCODE_INTEGRITY_CONSTRAINT_VIOLATION),
-				 errmsg("CONFLICT: DELETE could not find existing tuple for pkey %s in relation %s.%s",
-						 s_key.data,
-						 get_namespace_name(RelationGetNamespace(rel->rel)),
-						 RelationGetRelationName(rel->rel))
-				));
-		resetStringInfo(&s_key);
+		bdr_conflict_log(BdrConflictType_DeleteDelete, BdrConflictResolution_ConflictTriggerSkipChange,
+						 replication_origin_xid, rel, NULL,
+						 InvalidRepNodeId, oldslot, NULL /*no error*/);
+
 	}
 
 	PopActiveSnapshot();
@@ -1224,15 +1251,23 @@ process_remote_message(StringInfo s)
 		AdvanceCachedReplicationIdentifier(lsn, InvalidXLogRecPtr);
 }
 
+
 static void
-do_log_update(RepNodeId local_node_id, bool apply_update, TimestampTz ts,
-			  BDRRelation *rel, HeapTuple old_key,
-			  HeapTuple user_tuple)
+do_log_conflict(BdrConflictType conflict_type,
+				BdrConflictResolution resolution,
+				BDRRelation *conflict_relation,
+				RepNodeId local_node_id,
+				bool apply_remote,
+				TimestampTz local_timestamp,
+				HeapTuple primary_key,
+				HeapTuple user_tuple)
 {
 	StringInfoData s_key,
 				s_user_tuple;
 	char		remote_ts[MAXDATELEN + 1];
 	char		local_ts[MAXDATELEN + 1];
+	const char *object_namespace;
+	const char *object_name;
 
 	uint64		local_sysid,
 				remote_origin_sysid;
@@ -1240,6 +1275,19 @@ do_log_update(RepNodeId local_node_id, bool apply_update, TimestampTz ts,
 				remote_tli;
 	Oid			local_dboid,
 				remote_origin_dboid;
+
+#define CONFLICT_MSG_PREFIX "CONFLICT: %s remote %s on relation %s.%s originating at node " UINT64_FORMAT ":%u:%u at ts %s;"
+
+	/*
+	 * By default we only log conflicts where the remote change is discarded or
+	 * where a conflict handler emits a replacement tuple.
+	 *
+	 * Optionally the user may request that we log even conflicts where the
+	 * local tuple is replaced by a newer remote tuple. Most of the time these
+	 * are just noise, but there are times it's useful for debugging and tracing.
+	 */
+	if (apply_remote && !bdr_log_applied_conflicts)
+		return;
 
 
 	bdr_fetch_sysid_via_node_id(local_node_id,
@@ -1255,49 +1303,78 @@ do_log_update(RepNodeId local_node_id, bool apply_update, TimestampTz ts,
 
 	memcpy(remote_ts, timestamptz_to_str(replication_origin_timestamp),
 		   MAXDATELEN);
-	memcpy(local_ts, timestamptz_to_str(ts),
+	memcpy(local_ts, timestamptz_to_str(local_timestamp),
 		   MAXDATELEN);
 
 	initStringInfo(&s_key);
-	tuple_to_stringinfo(&s_key, RelationGetDescr(rel->rel), old_key);
+	tuple_to_stringinfo(&s_key, RelationGetDescr(conflict_relation->rel), primary_key);
 
-	/*
-	 * By default we only log conflicts where the remote tuple is discarded or
-	 * where a conflict handler emits a replacement tuple.
-	 *
-	 * Optionally the user may request that we log even conflicts where the
-	 * local tuple is replaced by a newer remote tuple. Most of the time these
-	 * are just noise, but there are times it's useful for debugging and tracing.
-	 */
-	if ( (!apply_update) || bdr_log_applied_conflicts ) 
+	object_namespace = get_namespace_name(RelationGetNamespace(conflict_relation->rel));
+	object_name = RelationGetRelationName(conflict_relation->rel);
+
+	switch(conflict_type)
 	{
-		if (user_tuple != NULL)
-		{
-			/* Conflict handler returned new tuple, need to report it */
-			initStringInfo(&s_user_tuple);
-			tuple_to_stringinfo(&s_user_tuple, RelationGetDescr(rel->rel),
-								user_tuple);
+		case BdrConflictType_InsertInsert:
+				ereport(LOG,
+						(errcode(ERRCODE_INTEGRITY_CONSTRAINT_VIOLATION),
+						 errmsg(CONFLICT_MSG_PREFIX " row was previously updated at %s node " UINT64_FORMAT ":%u at ts %s. PKEY:%s",
+								apply_remote ? "applying" : "skipping",
+								apply_remote ? "INSERT as UPDATE" : "INSERT",
+								object_namespace, object_name,
+								remote_origin_sysid, remote_tli, remote_origin_dboid, remote_ts,
+								local_node_id == InvalidRepNodeId ? "local" : "remote",
+								local_sysid, local_tli, local_ts, s_key.data)));
+			break;
+		case BdrConflictType_InsertUpdate:
+			/* XXX? */
+			break;
+		case BdrConflictType_UpdateUpdate:
+			{
+				if (user_tuple != NULL)
+				{
+					/* Conflict handler returned new tuple, need to report it */
+					initStringInfo(&s_user_tuple);
+					tuple_to_stringinfo(&s_user_tuple, RelationGetDescr(conflict_relation->rel),
+										user_tuple);
 
+					ereport(LOG,
+							(errcode(ERRCODE_INTEGRITY_CONSTRAINT_VIOLATION),
+							 errmsg(CONFLICT_MSG_PREFIX " row was previously updated at %s node " UINT64_FORMAT ":%u at ts %s. PKEY:%s, resolved by user tuple:%s",
+									apply_remote ? "applying" : "skipping", "UPDATE",
+									object_namespace, object_name,
+									remote_origin_sysid, remote_tli, remote_origin_dboid, remote_ts,
+									local_node_id == InvalidRepNodeId ? "local" : "remote",
+									local_sysid, local_tli, local_ts, s_key.data,
+									s_user_tuple.data)));
+				}
+				else
+				{
+					/* Handled by last update wins, or conflict handler w/o new tuple */
+					ereport(LOG,
+							(errcode(ERRCODE_INTEGRITY_CONSTRAINT_VIOLATION),
+							 errmsg(CONFLICT_MSG_PREFIX " row was previously updated at %s node " UINT64_FORMAT ":%u at ts %s. PKEY:%s",
+									apply_remote ? "applying" : "skipping", "UPDATE",
+									object_namespace, object_name,
+									remote_origin_sysid, remote_tli, remote_origin_dboid, remote_ts,
+									local_node_id == InvalidRepNodeId ? "local" : "remote",
+									local_sysid, local_tli, local_ts, s_key.data)));
+				}
+			}
+			break;
+		case BdrConflictType_UpdateDelete:
+		case BdrConflictType_DeleteDelete:
 			ereport(LOG,
 					(errcode(ERRCODE_INTEGRITY_CONSTRAINT_VIOLATION),
-					 errmsg("CONFLICT: %s remote update originating at node " UINT64_FORMAT ":%u:%u at ts %s; row was previously updated at %s node " UINT64_FORMAT ":%u at ts %s. PKEY:%s, resolved by user tuple:%s",
-							apply_update ? "applying" : "skipping",
+					 errmsg(CONFLICT_MSG_PREFIX " could not find existing tuple. PKEY:%s",
+							"skipping", BdrConflictType_UpdateDelete ? "UPDATE" : "DELETE",
+							object_namespace, object_name,
 							remote_origin_sysid, remote_tli, remote_origin_dboid, remote_ts,
-							local_node_id == InvalidRepNodeId ? "local" : "remote",
-							local_sysid, local_tli, local_ts, s_key.data,
-							s_user_tuple.data)));
-		}
-		else
-		{
-			/* Handled by last update wins, or conflict handler w/o new tuple */
-			ereport(LOG,
-					(errcode(ERRCODE_INTEGRITY_CONSTRAINT_VIOLATION),
-					 errmsg("CONFLICT: %s remote update originating at node " UINT64_FORMAT ":%u:%u at ts %s; row was previously updated at %s node " UINT64_FORMAT ":%u at ts %s. PKEY:%s",
-							apply_update ? "applying" : "skipping",
-							remote_origin_sysid, remote_tli, remote_origin_dboid, remote_ts,
-							local_node_id == InvalidRepNodeId ? "local" : "remote",
-							local_sysid, local_tli, local_ts, s_key.data)));
-		}
+							s_key.data)));
+
+			break;
+		case BdrConflictType_UnhandledTxAbort:
+			/* XXX? */
+			break;
 	}
 
 	resetStringInfo(&s_key);
