@@ -607,6 +607,7 @@ bdr_apply_main(Datum main_arg)
 	appendStringInfo(&query, "pg_version '%u'", PG_VERSION_NUM);
 	appendStringInfo(&query, ", pg_catversion '%u'", CATALOG_VERSION_NO);
 	appendStringInfo(&query, ", bdr_version '%u'", BDR_VERSION_NUM);
+	appendStringInfo(&query, ", min_bdr_version '%u'", BDR_MIN_REMOTE_VERSION_NUM);
 	appendStringInfo(&query, ", sizeof_int '%zu'", sizeof(int));
 	appendStringInfo(&query, ", sizeof_long '%zu'", sizeof(long));
 	appendStringInfo(&query, ", sizeof_datum '%zu'", sizeof(Datum));
