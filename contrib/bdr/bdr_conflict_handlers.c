@@ -621,6 +621,8 @@ bdr_get_conflict_handlers(BDRRelation * rel)
 				rel->conflict_handlers[i].handler_type = BdrConflictType_UpdateUpdate;
 			else if (strcmp(htype, "update_delete") == 0)
 				rel->conflict_handlers[i].handler_type = BdrConflictType_UpdateDelete;
+			else if (strcmp(htype, "delete_delete") == 0)
+				rel->conflict_handlers[i].handler_type = BdrConflictType_DeleteDelete;
 			else if (strcmp(htype, "insert_insert") == 0)
 				rel->conflict_handlers[i].handler_type = BdrConflictType_InsertInsert;
 			else if (strcmp(htype, "insert_update") == 0)
@@ -662,6 +664,8 @@ bdr_conflict_handlers_event_type_name(BdrConflictType event_type)
 			return "update_update";
 		case BdrConflictType_UpdateDelete:
 			return "update_delete";
+		case BdrConflictType_DeleteDelete:
+			return "delete_delete";
 		case BdrConflictType_UnhandledTxAbort:
 			return "unhandled_tx_abort";
 

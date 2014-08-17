@@ -144,6 +144,9 @@ bdr_conflict_type_get_datum(BdrConflictType conflict_type)
 		case BdrConflictType_UpdateDelete:
 			enumname = "update_delete";
 			break;
+		case BdrConflictType_DeleteDelete:
+			enumname = "delete_delete";
+			break;
 		case BdrConflictType_UnhandledTxAbort:
 			enumname = "unhandled_tx_abort";
 			break;
