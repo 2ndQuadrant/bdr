@@ -111,9 +111,12 @@ bdr_pgbench_check: bdr_pgbench_check.sh
 	chmod a+x $@
 
 ISOLATIONCHECKS=\
-	isolation/sleep5 \
 	isolation/waitforstart \
-	isolation/ddlconflict
+	isolation/ddlconflict \
+	isolation/dmlconflict_ii \
+	isolation/dmlconflict_uu \
+	isolation/dmlconflict_ud \
+	isolation/dmlconflict_dd
 
 bdr_isolation_regress_check: all | submake-isolation submake-btree_gist
 	[ -e pg_hba.conf ] || ln -s $(top_srcdir)/contrib/bdr/pg_hba.conf .
