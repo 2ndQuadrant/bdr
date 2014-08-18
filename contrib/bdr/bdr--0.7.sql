@@ -105,7 +105,7 @@ CREATE TABLE bdr_votes
 
     voter_sysid text NOT NULL,
     voter_tlid oid NOT NULL,
-    voter_dboid bigint NOT NULL,
+    voter_dboid oid NOT NULL,
     voter_riname text NOT NULL,
 
     vote bool NOT NULL,
