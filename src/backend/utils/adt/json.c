@@ -354,8 +354,9 @@ static void
 parse_object_field(JsonLexContext *lex, JsonSemAction *sem)
 {
 	/*
-	 * an object field is "fieldname" : value where value can be a scalar,
-	 * object or array
+	 * An object field is "fieldname" : value where value can be a scalar,
+	 * object or array.  Note: in user-facing docs and error messages, we
+	 * generally call a field name a "key".
 	 */
 
 	char	   *fname = NULL;	/* keep compiler quiet */
@@ -1868,10 +1869,10 @@ json_object_agg_transfn(PG_FUNCTION_ARGS)
 	if (PG_ARGISNULL(0))
 	{
 		/*
-		 * Make this StringInfo in a context where it will persist for the
-		 * duration off the aggregate call. It's only needed for this initial
-		 * piece, as the StringInfo routines make sure they use the right
-		 * context to enlarge the object if necessary.
+		 * Make the StringInfo in a context where it will persist for the
+		 * duration of the aggregate call. Switching context is only needed
+		 * for this initial step, as the StringInfo routines make sure they
+		 * use the right context to enlarge the object if necessary.
 		 */
 		oldcontext = MemoryContextSwitchTo(aggcontext);
 		state = makeStringInfo();
@@ -1885,56 +1886,42 @@ json_object_agg_transfn(PG_FUNCTION_ARGS)
 		appendStringInfoString(state, ", ");
 	}
 
+	/*
+	 * Note: since json_object_agg() is declared as taking type "any", the
+	 * parser will not do any type conversion on unknown-type literals (that
+	 * is, undecorated strings or NULLs).  Such values will arrive here as
+	 * type UNKNOWN, which fortunately does not matter to us, since
+	 * unknownout() works fine.
+	 */
+	val_type = get_fn_expr_argtype(fcinfo->flinfo, 1);
+
+	if (val_type == InvalidOid)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("could not determine data type for argument %d", 1)));
+
 	if (PG_ARGISNULL(1))
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 				 errmsg("field name must not be null")));
 
-
-	val_type = get_fn_expr_argtype(fcinfo->flinfo, 1);
-
-	/*
-	 * turn a constant (more or less literal) value that's of unknown type
-	 * into text. Unknowns come in as a cstring pointer.
-	 */
-	if (val_type == UNKNOWNOID && get_fn_expr_arg_stable(fcinfo->flinfo, 1))
-	{
-		val_type = TEXTOID;
-		arg = CStringGetTextDatum(PG_GETARG_POINTER(1));
-	}
-	else
-	{
-		arg = PG_GETARG_DATUM(1);
-	}
-
-	if (val_type == InvalidOid || val_type == UNKNOWNOID)
-		ereport(ERROR,
-				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-				 errmsg("arg 1: could not determine data type")));
+	arg = PG_GETARG_DATUM(1);
 
 	add_json(arg, false, state, val_type, true);
 
 	appendStringInfoString(state, " : ");
 
 	val_type = get_fn_expr_argtype(fcinfo->flinfo, 2);
-	/* see comments above */
-	if (val_type == UNKNOWNOID && get_fn_expr_arg_stable(fcinfo->flinfo, 2))
-	{
-		val_type = TEXTOID;
-		if (PG_ARGISNULL(2))
-			arg = (Datum) 0;
-		else
-			arg = CStringGetTextDatum(PG_GETARG_POINTER(2));
-	}
-	else
-	{
-		arg = PG_GETARG_DATUM(2);
-	}
 
-	if (val_type == InvalidOid || val_type == UNKNOWNOID)
+	if (val_type == InvalidOid)
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-				 errmsg("arg 2: could not determine data type")));
+				 errmsg("could not determine data type for argument %d", 2)));
+
+	if (PG_ARGISNULL(2))
+		arg = (Datum) 0;
+	else
+		arg = PG_GETARG_DATUM(2);
 
 	add_json(arg, PG_ARGISNULL(2), state, val_type, false);
 
@@ -1972,15 +1959,15 @@ json_build_object(PG_FUNCTION_ARGS)
 	int			nargs = PG_NARGS();
 	int			i;
 	Datum		arg;
-	char	   *sep = "";
+	const char *sep = "";
 	StringInfo	result;
 	Oid			val_type;
-
 
 	if (nargs % 2 != 0)
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-				 errmsg("invalid number or arguments: object must be matched key value pairs")));
+				 errmsg("argument list must have even number of elements"),
+				 errhint("The arguments of json_build_object() must consist of alternating keys and values.")));
 
 	result = makeStringInfo();
 
@@ -1988,68 +1975,57 @@ json_build_object(PG_FUNCTION_ARGS)
 
 	for (i = 0; i < nargs; i += 2)
 	{
+		/*
+		 * Note: since json_build_object() is declared as taking type "any",
+		 * the parser will not do any type conversion on unknown-type literals
+		 * (that is, undecorated strings or NULLs).  Such values will arrive
+		 * here as type UNKNOWN, which fortunately does not matter to us,
+		 * since unknownout() works fine.
+		 */
+		appendStringInfoString(result, sep);
+		sep = ", ";
 
 		/* process key */
+		val_type = get_fn_expr_argtype(fcinfo->flinfo, i);
+
+		if (val_type == InvalidOid)
+			ereport(ERROR,
+					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+					 errmsg("could not determine data type for argument %d",
+							i + 1)));
 
 		if (PG_ARGISNULL(i))
 			ereport(ERROR,
 					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-					 errmsg("arg %d: key cannot be null", i + 1)));
-		val_type = get_fn_expr_argtype(fcinfo->flinfo, i);
+					 errmsg("argument %d cannot be null", i + 1),
+					 errhint("Object keys should be text.")));
 
-		/*
-		 * turn a constant (more or less literal) value that's of unknown type
-		 * into text. Unknowns come in as a cstring pointer.
-		 */
-		if (val_type == UNKNOWNOID && get_fn_expr_arg_stable(fcinfo->flinfo, i))
-		{
-			val_type = TEXTOID;
-			if (PG_ARGISNULL(i))
-				arg = (Datum) 0;
-			else
-				arg = CStringGetTextDatum(PG_GETARG_POINTER(i));
-		}
-		else
-		{
-			arg = PG_GETARG_DATUM(i);
-		}
-		if (val_type == InvalidOid || val_type == UNKNOWNOID)
-			ereport(ERROR,
-					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-					 errmsg("arg %d: could not determine data type", i + 1)));
-		appendStringInfoString(result, sep);
-		sep = ", ";
+		arg = PG_GETARG_DATUM(i);
+
 		add_json(arg, false, result, val_type, true);
 
 		appendStringInfoString(result, " : ");
 
 		/* process value */
-
 		val_type = get_fn_expr_argtype(fcinfo->flinfo, i + 1);
-		/* see comments above */
-		if (val_type == UNKNOWNOID && get_fn_expr_arg_stable(fcinfo->flinfo, i + 1))
-		{
-			val_type = TEXTOID;
-			if (PG_ARGISNULL(i + 1))
-				arg = (Datum) 0;
-			else
-				arg = CStringGetTextDatum(PG_GETARG_POINTER(i + 1));
-		}
-		else
-		{
-			arg = PG_GETARG_DATUM(i + 1);
-		}
-		if (val_type == InvalidOid || val_type == UNKNOWNOID)
+
+		if (val_type == InvalidOid)
 			ereport(ERROR,
 					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-					 errmsg("arg %d: could not determine data type", i + 2)));
-		add_json(arg, PG_ARGISNULL(i + 1), result, val_type, false);
+					 errmsg("could not determine data type for argument %d",
+							i + 2)));
 
+		if (PG_ARGISNULL(i + 1))
+			arg = (Datum) 0;
+		else
+			arg = PG_GETARG_DATUM(i + 1);
+
+		add_json(arg, PG_ARGISNULL(i + 1), result, val_type, false);
 	}
+
 	appendStringInfoChar(result, '}');
 
 	PG_RETURN_TEXT_P(cstring_to_text_with_len(result->data, result->len));
-
 }
 
 /*
@@ -2070,10 +2046,9 @@ json_build_array(PG_FUNCTION_ARGS)
 	int			nargs = PG_NARGS();
 	int			i;
 	Datum		arg;
-	char	   *sep = "";
+	const char *sep = "";
 	StringInfo	result;
 	Oid			val_type;
-
 
 	result = makeStringInfo();
 
@@ -2081,33 +2056,35 @@ json_build_array(PG_FUNCTION_ARGS)
 
 	for (i = 0; i < nargs; i++)
 	{
-		val_type = get_fn_expr_argtype(fcinfo->flinfo, i);
-		arg = PG_GETARG_DATUM(i + 1);
-		/* see comments in json_build_object above */
-		if (val_type == UNKNOWNOID && get_fn_expr_arg_stable(fcinfo->flinfo, i))
-		{
-			val_type = TEXTOID;
-			if (PG_ARGISNULL(i))
-				arg = (Datum) 0;
-			else
-				arg = CStringGetTextDatum(PG_GETARG_POINTER(i));
-		}
-		else
-		{
-			arg = PG_GETARG_DATUM(i);
-		}
-		if (val_type == InvalidOid || val_type == UNKNOWNOID)
-			ereport(ERROR,
-					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-					 errmsg("arg %d: could not determine data type", i + 1)));
+		/*
+		 * Note: since json_build_array() is declared as taking type "any",
+		 * the parser will not do any type conversion on unknown-type literals
+		 * (that is, undecorated strings or NULLs).  Such values will arrive
+		 * here as type UNKNOWN, which fortunately does not matter to us,
+		 * since unknownout() works fine.
+		 */
 		appendStringInfoString(result, sep);
 		sep = ", ";
+
+		val_type = get_fn_expr_argtype(fcinfo->flinfo, i);
+
+		if (val_type == InvalidOid)
+			ereport(ERROR,
+					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+					 errmsg("could not determine data type for argument %d",
+							i + 1)));
+
+		if (PG_ARGISNULL(i))
+			arg = (Datum) 0;
+		else
+			arg = PG_GETARG_DATUM(i);
+
 		add_json(arg, PG_ARGISNULL(i), result, val_type, false);
 	}
+
 	appendStringInfoChar(result, ']');
 
 	PG_RETURN_TEXT_P(cstring_to_text_with_len(result->data, result->len));
-
 }
 
 /*
@@ -2122,9 +2099,8 @@ json_build_array_noargs(PG_FUNCTION_ARGS)
 /*
  * SQL function json_object(text[])
  *
- * take a one or two dimensional array of text as name vale pairs
+ * take a one or two dimensional array of text as key/value pairs
  * for a json object.
- *
  */
 Datum
 json_object(PG_FUNCTION_ARGS)
@@ -2214,7 +2190,7 @@ json_object(PG_FUNCTION_ARGS)
 /*
  * SQL function json_object(text[], text[])
  *
- * take separate name and value arrays of text to construct a json object
+ * take separate key and value arrays of text to construct a json object
  * pairwise.
  */
 Datum
@@ -2294,7 +2270,6 @@ json_object_two_arg(PG_FUNCTION_ARGS)
 	pfree(result.data);
 
 	PG_RETURN_TEXT_P(rval);
-
 }
 
 
