@@ -372,7 +372,7 @@ const char *tally_elections_sql =
 "    UPDATE bdr_sequence_elections\n"
 "    SET\n"
 "        open = false,\n"
-"        success = (nays = 0)\n"
+"        success = (nays = 0 OR yays >= ceil($5/ 2.0))\n"
 "    FROM tallied_votes\n"
 "    WHERE\n"
 "       bdr_sequence_elections.owning_sysid = tallied_votes.owning_sysid\n"
