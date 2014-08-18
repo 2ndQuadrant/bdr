@@ -353,12 +353,13 @@ DecodeStandbyOp(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 		case XLOG_STANDBY_MESSAGE:
 			{
 				xl_standby_message *message = (xl_standby_message *) buf->record_data;
+
 				if (message->transactional &&
 					!SnapBuildProcessChange(builder, r->xl_xid, buf->origptr))
 					break;
 				else if(!message->transactional &&
-						SnapBuildCurrentState(ctx->snapshot_builder) == SNAPBUILD_CONSISTENT &&
-						SnapBuildXactNeedsSkip(builder, buf->origptr))
+						(SnapBuildCurrentState(ctx->snapshot_builder) != SNAPBUILD_CONSISTENT ||
+						 SnapBuildXactNeedsSkip(builder, buf->origptr)))
 					break;
 
 				ReorderBufferQueueMessage(ctx->reorder, r->xl_xid, buf->endptr,
