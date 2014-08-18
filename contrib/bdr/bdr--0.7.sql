@@ -95,6 +95,11 @@ CREATE TABLE bdr_sequence_elections
 REVOKE ALL ON TABLE bdr_sequence_values FROM PUBLIC;
 SELECT pg_catalog.pg_extension_config_dump('bdr_sequence_elections', '');
 
+CREATE INDEX bdr_sequence_elections__open_by_sequence ON bdr.bdr_sequence_elections USING gist(seqschema, seqname, seqrange) WHERE open;
+CREATE INDEX bdr_sequence_elections__by_sequence ON bdr.bdr_sequence_elections USING gist(seqschema, seqname, seqrange);
+CREATE INDEX bdr_sequence_elections__owning_election_id ON bdr.bdr_sequence_elections (owning_election_id);
+CREATE INDEX bdr_sequence_elections__owner_range ON bdr.bdr_sequence_elections USING gist(owning_election_id, seqrange);
+
 CREATE TABLE bdr_votes
 (
     vote_sysid text NOT NULL,
@@ -114,6 +119,8 @@ CREATE TABLE bdr_votes
 );
 REVOKE ALL ON TABLE bdr_votes FROM PUBLIC;
 SELECT pg_catalog.pg_extension_config_dump('bdr_votes', '');
+
+CREATE INDEX bdr_votes__by_voter ON bdr.bdr_votes(voter_sysid, voter_tlid, voter_dboid, voter_riname);
 
 CREATE OR REPLACE FUNCTION bdr_sequence_alloc(INTERNAL)
 RETURNS INTERNAL
