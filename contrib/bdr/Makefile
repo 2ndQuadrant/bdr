@@ -63,7 +63,7 @@ additional-clean:
 # typical installcheck users do not have (e.g. buildfarm clients).
 installcheck: ;
 
-check: all | submake-regress submake-btree_gist submake-pg_trgm submake-cube submake-hstore regresscheck
+check: all | submake-regress submake-btree_gist submake-pg_trgm submake-cube submake-hstore regresscheck isolationcheck
 
 ifndef USE_PGXS
 submake-regress:
@@ -102,14 +102,6 @@ regresscheck:
 	    --extra-install=contrib/hstore \
 	    $(REGRESSCHECKS)
 
-bdr_pgbench_check: bdr_pgbench_check.sh
-	sed -e 's,@bindir@,$(bindir),g' \
-	    -e 's,@libdir@,$(libdir),g' \
-	    -e 's,@MAKE@,$(MAKE),g' \
-	    -e 's,@top_srcdir@,$(top_srcdir),g' \
-	  $< >$@
-	chmod a+x $@
-
 ISOLATIONCHECKS=\
 	isolation/waitforstart \
 	isolation/ddlconflict \
@@ -118,7 +110,7 @@ ISOLATIONCHECKS=\
 	isolation/dmlconflict_ud \
 	isolation/dmlconflict_dd
 
-bdr_isolation_regress_check: all | submake-isolation submake-btree_gist
+isolationcheck: all | submake-isolation submake-btree_gist
 	[ -e pg_hba.conf ] || ln -s $(top_srcdir)/contrib/bdr/pg_hba.conf .
 	mkdir -p results/isolation
 	$(pg_isolation_regress_check) \
@@ -128,6 +120,15 @@ bdr_isolation_regress_check: all | submake-isolation submake-btree_gist
 	    --extra-install=contrib/btree_gist \
 	    --extra-install=contrib/bdr \
 	    $(ISOLATIONCHECKS)
+
+
+bdr_pgbench_check: bdr_pgbench_check.sh
+	sed -e 's,@bindir@,$(bindir),g' \
+	    -e 's,@libdir@,$(libdir),g' \
+	    -e 's,@MAKE@,$(MAKE),g' \
+	    -e 's,@top_srcdir@,$(top_srcdir),g' \
+	  $< >$@
+	chmod a+x $@
 
 pgbenchcheck: bdr_pgbench_check
 	./bdr_pgbench_check
