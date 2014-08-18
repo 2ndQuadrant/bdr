@@ -1391,6 +1391,12 @@ do_apply_update(BDRRelation *rel, EState *estate, TupleTableSlot *oldslot,
 
 
 static void
+queued_command_error_callback(void *arg)
+{
+	errcontext("during DDL replay of ddl statement: %s", (char *) arg);
+}
+
+static void
 process_queued_ddl_command(HeapTuple cmdtup, bool tx_just_started)
 {
 	Relation	cmdsrel;
@@ -1403,6 +1409,7 @@ process_queued_ddl_command(HeapTuple cmdtup, bool tx_just_started)
 	ListCell   *command_i;
 	bool		isTopLevel;
 	MemoryContext oldcontext;
+	ErrorContextCallback errcallback;
 
 	/* ----
 	 * We can't use spi here, because it implicitly assumes a transaction
@@ -1445,6 +1452,11 @@ process_queued_ddl_command(HeapTuple cmdtup, bool tx_just_started)
 
 	/* close relation, command execution might end/start xact */
 	heap_close(cmdsrel, NoLock);
+
+	errcallback.callback = queued_command_error_callback;
+	errcallback.arg = cmdstr;
+	errcallback.previous = error_context_stack;
+	error_context_stack = &errcallback;
 
 	commands = pg_parse_query(cmdstr);
 
@@ -1508,6 +1520,42 @@ process_queued_ddl_command(HeapTuple cmdtup, bool tx_just_started)
 
 		MemoryContextSwitchTo(oldcontext);
 	}
+
+	/* protect against stack resets during CONCURRENTLY processing */
+	if (error_context_stack == &errcallback)
+		error_context_stack = errcallback.previous;
+}
+
+
+/*
+ * ugly hack: Copied struct from dependency.c - there doesn't seem to be a
+ * supported way of iterating ObjectAddresses otherwise.
+ */
+struct ObjectAddresses
+{
+	ObjectAddress *refs;		/* => palloc'd array */
+	void	   *extras;			/* => palloc'd array, or NULL if not used */
+	int			numrefs;		/* current number of references */
+	int			maxrefs;		/* current size of palloc'd array(s) */
+};
+
+static void
+queued_drop_error_callback(void *arg)
+{
+	ObjectAddresses *addrs = (ObjectAddresses *) arg;
+	StringInfo s;
+	int i;
+
+	s = makeStringInfo();
+
+	for (i = addrs->numrefs - 1; i >= 0; i--)
+	{
+		ObjectAddress *obj = addrs->refs + i;
+
+		appendStringInfo(s, "\n  * %s", getObjectDescription(obj));
+	}
+	errcontext("during DDL replay object drop:%s", s->data);
+	resetStringInfo(s);
 }
 
 static HeapTuple
@@ -1529,6 +1577,7 @@ process_queued_drop(HeapTuple cmdtup)
 	int			nelems;
 	int			i;
 	ObjectAddresses *addresses;
+	ErrorContextCallback errcallback;
 
 	cmdsrel = heap_open(QueuedDropsRelid, AccessShareLock);
 	arrayDatum = heap_getattr(cmdtup, 3,
@@ -1714,7 +1763,16 @@ process_queued_drop(HeapTuple cmdtup)
 		add_exact_object_address(&addr, addresses);
 	}
 
+	errcallback.callback = queued_drop_error_callback;
+	errcallback.arg = addresses;
+	errcallback.previous = error_context_stack;
+	error_context_stack = &errcallback;
+
 	performMultipleDeletions(addresses, DROP_RESTRICT, 0);
+
+	/* protect against stack resets during CONCURRENTLY processing */
+	if (error_context_stack == &errcallback)
+		error_context_stack = errcallback.previous;
 
 	newtup = cmdtup;
 
