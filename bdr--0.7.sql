@@ -427,6 +427,11 @@ BEGIN
        RETURN;
     END IF;
 
+    -- don't replicate if disabled
+    IF  current_setting('bdr.skip_ddl_replication')::bool THEN
+       RETURN;
+    END IF;
+
     FOR r IN SELECT * FROM pg_event_trigger_dropped_objects()
     LOOP
         IF r.original OR r.normal THEN
