@@ -899,7 +899,7 @@ bdr_sequencer_fill_chunk(Oid seqoid, char *seqschema, char *seqname,
 
 	if (SPI_processed != 1)
 	{
-		elog(NOTICE, "no free chunks for sequence %s.%s",
+		elog(DEBUG2, "no free chunks for sequence %s.%s",
 			 seqschema, seqname);
 		success = false;
 	}
@@ -913,7 +913,7 @@ bdr_sequencer_fill_chunk(Oid seqoid, char *seqschema, char *seqname,
 		upper = DatumGetInt64(SPI_getbinval(tup, SPI_tuptable->tupdesc, 2, &isnull));
 		Assert(!isnull);
 
-		elog(NOTICE, "got chunk [%zu, %zu) for sequence %s.%s",
+		elog(DEBUG2, "got chunk [%zu, %zu) for sequence %s.%s",
 			 lower, upper, seqschema, seqname);
 		curval->start_value = lower;
 		curval->next_value = lower;
@@ -974,7 +974,7 @@ bdr_sequencer_fill_sequence(Oid seqoid, char *seqschema, char *seqname)
 				elog(DEBUG1, "sequence %s.%s: used up old chunk",
 					 seqschema, seqname);
 
-			elog(DEBUG1, "sequence %s.%s: needs new batch %i",
+			elog(DEBUG2, "sequence %s.%s: needs new batch %i",
 				 seqschema, seqname, i);
 			if (bdr_sequencer_fill_chunk(seqoid, seqschema, seqname, curval))
 				acquired_new = true;
