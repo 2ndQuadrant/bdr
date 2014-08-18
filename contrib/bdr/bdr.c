@@ -963,6 +963,7 @@ bdr_perdb_worker_main(Datum main_arg)
 	BdrPerdbWorker   *bdr_perdb_worker;
 	BdrWorker		 *bdr_worker_slot;
 	StringInfoData	  si;
+	bool			  wait;
 
 	initStringInfo(&si);
 
@@ -1017,6 +1018,7 @@ bdr_perdb_worker_main(Datum main_arg)
 	/* initialize sequencer */
 	bdr_sequencer_init(bdr_perdb_worker->seq_slot, bdr_perdb_worker->nnodes);
 
+	wait = true;
 	while (!exit_worker)
 	{
 		/*
@@ -1029,18 +1031,24 @@ bdr_perdb_worker_main(Datum main_arg)
 		 * passed without events. That's a stopgap for the case a backend
 		 * committed sequencer changes but died before setting the latch.
 		 */
-		rc = WaitLatch(&MyProc->procLatch,
-					   WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
-					   180000L);
+		if (wait)
+		{
+			rc = WaitLatch(&MyProc->procLatch,
+						   WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
+						   180000L);
 
-		ResetLatch(&MyProc->procLatch);
+			ResetLatch(&MyProc->procLatch);
+		}
 
 		/* emergency bailout if postmaster has died */
 		if (rc & WL_POSTMASTER_DEATH)
 			proc_exit(1);
 
 		/* check whether we need to vote */
-		bdr_sequencer_vote();
+		if (bdr_sequencer_vote())
+			wait = false;
+		else
+			wait = true;
 
 		/* check whether any of our elections needs to be tallied */
 		bdr_sequencer_tally();
