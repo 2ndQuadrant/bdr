@@ -651,7 +651,7 @@ bdr_sequencer_lock(void)
 	bdr_sequencer_lock_rel("bdr_votes", BdrVotesRelid);
 }
 
-void
+bool
 bdr_sequencer_vote(void)
 {
 	Oid			argtypes[4];
@@ -659,7 +659,8 @@ bdr_sequencer_vote(void)
 	char		nulls[4];
 	char		local_sysid[32];
 	int			ret;
-	int			my_processed;
+	int			loops = 0;
+	int			total_processed = 0;
 
 	snprintf(local_sysid, sizeof(local_sysid), UINT64_FORMAT,
 			 GetSystemIdentifier());
@@ -694,16 +695,26 @@ again:
 
 	if (ret != SPI_OK_INSERT)
 		elog(ERROR, "expected SPI state %u, got %u", SPI_OK_INSERT, ret);
-	my_processed = SPI_processed;
-	elog(DEBUG1, "started %d votes", my_processed);
 
-	if (my_processed > 0)
+	total_processed += SPI_processed;
+
+	/*
+	 * The voting query currently only works one vote at a time. To avoid
+	 * having to be called too often, which would delay voting in comparison
+	 * to starting new elections, processes several votes in one go. But don't
+	 * do too much in one xact, that'd make this function run too long in one
+	 * xact.
+	 */
+	if (SPI_processed > 0 && loops++ < 5)
 		goto again;
 
 	PopActiveSnapshot();
 	SPI_finish();
 	CommitTransactionCommand();
 
+	elog(DEBUG1, "started %d votes", total_processed);
+
+	return loops == 5;
 }
 
 /*
