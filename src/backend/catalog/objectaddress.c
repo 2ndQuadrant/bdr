@@ -518,6 +518,9 @@ static ObjectAddress get_object_address_relobject(ObjectType objtype,
 static ObjectAddress get_object_address_attribute(ObjectType objtype,
 							 List *objname, Relation *relp,
 							 LOCKMODE lockmode, bool missing_ok);
+static ObjectAddress get_object_address_attrdef(ObjectType objtype,
+						   List *objname, Relation *relp, LOCKMODE lockmode,
+						   bool missing_ok);
 static ObjectAddress get_object_address_type(ObjectType objtype,
 						List *objname, bool missing_ok);
 static ObjectAddress get_object_address_opcf(ObjectType objtype, List *objname,
@@ -605,6 +608,12 @@ get_object_address(ObjectType objtype, List *objname, List *objargs,
 					get_object_address_attribute(objtype, objname,
 												 &relation, lockmode,
 												 missing_ok);
+				break;
+			case OBJECT_DEFAULT:
+				address =
+					get_object_address_attrdef(objtype, objname,
+											   &relation, lockmode,
+											   missing_ok);
 				break;
 			case OBJECT_RULE:
 			case OBJECT_TRIGGER:
@@ -1261,6 +1270,88 @@ get_object_address_attribute(ObjectType objtype, List *objname,
 	address.classId = RelationRelationId;
 	address.objectId = reloid;
 	address.objectSubId = attnum;
+
+	*relp = relation;
+	return address;
+}
+
+/*
+ * Find the ObjectAddress for an attribute's default value.
+ */
+static ObjectAddress
+get_object_address_attrdef(ObjectType objtype, List *objname,
+						   Relation *relp, LOCKMODE lockmode,
+						   bool missing_ok)
+{
+	ObjectAddress address;
+	List	   *relname;
+	Oid			reloid;
+	Relation	relation;
+	const char *attname;
+	AttrNumber	attnum;
+	TupleDesc	tupdesc;
+	Oid			defoid;
+
+	/* Extract relation name and open relation. */
+	if (list_length(objname) < 2)
+		ereport(ERROR,
+				(errcode(ERRCODE_SYNTAX_ERROR),
+				 errmsg("column name must be qualified")));
+	attname = strVal(lfirst(list_tail(objname)));
+	relname = list_truncate(list_copy(objname), list_length(objname) - 1);
+	/* XXX no missing_ok support here */
+	relation = relation_openrv(makeRangeVarFromNameList(relname), lockmode);
+	reloid = RelationGetRelid(relation);
+
+	tupdesc = RelationGetDescr(relation);
+
+	/* Look up attribute number and scan pg_attrdef to find its tuple */
+	attnum = get_attnum(reloid, attname);
+	defoid = InvalidOid;
+	if (attnum != InvalidAttrNumber && tupdesc->constr != NULL)
+	{
+		Relation	attrdef;
+		ScanKeyData	keys[2];
+		SysScanDesc	scan;
+		HeapTuple	tup;
+
+		attrdef = relation_open(AttrDefaultRelationId, AccessShareLock);
+		ScanKeyInit(&keys[0],
+					Anum_pg_attrdef_adrelid,
+					BTEqualStrategyNumber,
+					F_OIDEQ,
+					ObjectIdGetDatum(reloid));
+		ScanKeyInit(&keys[1],
+					Anum_pg_attrdef_adnum,
+					BTEqualStrategyNumber,
+					F_INT2EQ,
+					Int16GetDatum(attnum));
+		scan = systable_beginscan(attrdef, AttrDefaultIndexId, true,
+								  NULL, 2, keys);
+		if (HeapTupleIsValid(tup = systable_getnext(scan)))
+			defoid = HeapTupleGetOid(tup);
+
+		systable_endscan(scan);
+		relation_close(attrdef, AccessShareLock);
+	}
+	if (!OidIsValid(defoid))
+	{
+		if (!missing_ok)
+			ereport(ERROR,
+					(errcode(ERRCODE_UNDEFINED_COLUMN),
+					 errmsg("default value for column \"%s\" of relation \"%s\" does not exist",
+							attname, NameListToString(relname))));
+
+		address.classId = AttrDefaultRelationId;
+		address.objectId = InvalidOid;
+		address.objectSubId = InvalidAttrNumber;
+		relation_close(relation, lockmode);
+		return address;
+	}
+
+	address.classId = AttrDefaultRelationId;
+	address.objectId = defoid;
+	address.objectSubId = 0;
 
 	*relp = relation;
 	return address;
@@ -3138,9 +3229,8 @@ getObjectIdentityParts(const ObjectAddress *object,
 				colobject.objectSubId = attrdef->adnum;
 
 				appendStringInfo(&buffer, "for %s",
-								 getObjectIdentity(&colobject));
-
-				/* XXX no objname/objargs here */
+								 getObjectIdentityParts(&colobject,
+														objname, objargs));
 
 				systable_endscan(adscan);
 				heap_close(attrdefDesc, AccessShareLock);
