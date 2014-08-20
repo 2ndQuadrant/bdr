@@ -99,3 +99,19 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
 \d+ renamed_test_seq;
 \c regression
 \d+ renamed_test_seq
+
+CREATE SEQUENCE test_seq;
+CREATE TABLE test_tbl (a int DEFAULT nextval('test_seq'));
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+\d+ test_tbl
+\c postgres
+\d+ test_tbl
+
+DROP SEQUENCE test_seq CASCADE;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+\d+ test_tbl
+\c regression
+\d+ test_tbl
+
+DROP TABLE test_tbl;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;

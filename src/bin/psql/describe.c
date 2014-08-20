@@ -1317,30 +1317,6 @@ describeOneTableDetails(const char *schemaname,
 	res = NULL;
 
 	/*
-	 * If it's a sequence, fetch its values and store into an array that will
-	 * be used later.
-	 */
-	if (tableinfo.relkind == 'S')
-	{
-		printfPQExpBuffer(&buf, "SELECT * FROM %s", fmtId(schemaname));
-		/* must be separate because fmtId isn't reentrant */
-		appendPQExpBuffer(&buf, ".%s;", fmtId(relationname));
-
-		res = PSQLexec(buf.data, false);
-		if (!res)
-			goto error_return;
-
-		seq_values = pg_malloc((PQnfields(res) + 1) * sizeof(*seq_values));
-
-		for (i = 0; i < PQnfields(res); i++)
-			seq_values[i] = pg_strdup(PQgetvalue(res, 0, i));
-		seq_values[i] = NULL;
-
-		PQclear(res);
-		res = NULL;
-	}
-
-	/*
 	 * Get column info
 	 *
 	 * You need to modify value of "firstvcol" which will be defined below if
@@ -1384,12 +1360,47 @@ describeOneTableDetails(const char *schemaname,
 
 	appendPQExpBufferStr(&buf, "\nFROM pg_catalog.pg_attribute a");
 	appendPQExpBuffer(&buf, "\nWHERE a.attrelid = '%s' AND a.attnum > 0 AND NOT a.attisdropped", oid);
+	if (tableinfo.relkind == 'S')
+		appendPQExpBufferStr(&buf, " AND attname <> 'amdata'");
 	appendPQExpBufferStr(&buf, "\nORDER BY a.attnum;");
 
 	res = PSQLexec(buf.data, false);
 	if (!res)
 		goto error_return;
 	numrows = PQntuples(res);
+
+	/*
+	 * If it's a sequence, fetch its values and store into an array that will
+	 * be used later.
+	 */
+	if (tableinfo.relkind == 'S')
+	{
+		PGresult   *result;
+
+		/*
+		 * Use column names from the column info query, to automatically skip
+		 * unwanted columns.
+		 */
+		printfPQExpBuffer(&buf, "SELECT ");
+		for (i = 0; i < numrows; i++)
+			appendPQExpBuffer(&buf, i > 0 ? ", %s" : "%s", fmtId(PQgetvalue(res, i, 0)));
+		appendPQExpBuffer(&buf, " FROM %s",
+						  fmtId(schemaname));
+		/* must be separate because fmtId isn't reentrant */
+		appendPQExpBuffer(&buf, ".%s;", fmtId(relationname));
+
+		result = PSQLexec(buf.data, false);
+		if (!result)
+			goto error_return;
+
+		seq_values = pg_malloc((PQnfields(result) + 1) * sizeof(*seq_values));
+
+		for (i = 0; i < PQnfields(result); i++)
+			seq_values[i] = pg_strdup(PQgetvalue(result, 0, i));
+		seq_values[i] = NULL;
+
+		PQclear(result);
+	}
 
 	/* Make title */
 	switch (tableinfo.relkind)
