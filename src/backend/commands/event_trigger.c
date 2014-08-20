@@ -1842,26 +1842,36 @@ dequote_jsonval(char *jsonval)
 	/* skip the start and end quotes right away */
 	for (i = 1; i < inputlen - 1; i++)
 	{
-		/*
-		 * XXX this skips the \ in a \" sequence but leaves other escaped
-		 * sequences in place.	Are there other cases we need to handle
-		 * specially?
-		 */
 		if (jsonval[i] == '\\')
 		{
-			if (jsonval[i + 1] == 'n')
-			{
-				result[j++] = '\n';
-				i++;
-				continue;
-			}
-			else if (jsonval[i + 1] == 't')
-			{
-				result[j++] = '\t';
-				i++;
-				continue;
-			}
 			i++;
+
+			/* This uses same logic as json.c */
+			switch (jsonval[i])
+			{
+				case 'b':
+					result[j++] = '\b';
+					continue;
+				case 'f':
+					result[j++] = '\f';
+					continue;
+				case 'n':
+					result[j++] = '\n';
+					continue;
+				case 'r':
+					result[j++] = '\r';
+					continue;
+				case 't':
+					result[j++] = '\t';
+					continue;
+				case '"':
+				case '\\':
+				case '/':
+					break;
+				default:
+					/* XXX: ERROR? */
+					break;
+			}
 		}
 
 		result[j++] = jsonval[i];
