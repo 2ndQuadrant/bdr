@@ -408,6 +408,7 @@ bdr_conflict_log_table(BdrApplyConflict *conflict)
 	UserTableUpdateIndexes(log_estate, log_slot);
 	/* and finish up */
 	heap_close(log_rel, RowExclusiveLock);
+	ExecResetTupleTable(log_estate->es_tupleTable, true);
 	FreeExecutorState(log_estate);
 }
 
