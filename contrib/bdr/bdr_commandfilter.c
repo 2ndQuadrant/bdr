@@ -251,6 +251,16 @@ filter_AlterTableStmt(Node *parsetree,
 				case AT_ValidateConstraint: /* VALIDATE CONSTRAINT */
 					break;
 
+				case AT_EnableTrig:
+				case AT_EnableAlwaysTrig:
+				case AT_EnableReplicaTrig:
+				case AT_DisableTrig:
+				case AT_EnableTrigAll:
+				case AT_DisableTrigAll:
+				case AT_EnableTrigUser:
+				case AT_DisableTrigUser:
+					break;
+
 				default:
 					hasInvalid = true;
 					break;
