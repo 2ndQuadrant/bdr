@@ -432,6 +432,16 @@ bdr_worker_init(char *dbname)
 	SetConfigOption("synchronous_commit",
 					bdr_synchronous_commit ? "local" : "off",
 					PGC_BACKEND, PGC_S_OVERRIDE);	/* other context? */
+
+	/*
+	 * Disable function body checks during replay. That's necessary because a)
+	 * the creator of the function might have had it disabled b) the function
+	 * might be search_path dependant and we don't fix the contents of
+	 * functions.
+	 */
+	SetConfigOption("check_function_bodies", "off",
+					PGC_INTERNAL, PGC_S_OVERRIDE);
+
 }
 
 /*
