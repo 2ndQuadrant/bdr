@@ -3,49 +3,59 @@
 CREATE FUNCTION test_fn(IN inpar character varying (20), INOUT inoutpar integer, OUT timestamp with time zone) RETURNS SETOF record AS
 $$
 BEGIN
+	PERFORM E'\t\r\n\b\f';
+	
 END;
 $$ LANGUAGE plpgsql IMMUTABLE  STRICT;
 \df+ test_fn
-                                                                                          List of functions
- Schema |  Name   | Result data type |                              Argument data types                              |  Type  | Security | Volatility | Owner | Language | Source code | Description 
---------+---------+------------------+-------------------------------------------------------------------------------+--------+----------+------------+-------+----------+-------------+-------------
- public | test_fn | SETOF record     | inpar character varying, INOUT inoutpar integer, OUT timestamp with time zone | normal | invoker  | immutable  | super | plpgsql  |            +| 
-        |         |                  |                                                                               |        |          |            |       |          | BEGIN      +| 
-        |         |                  |                                                                               |        |          |            |       |          | END;       +| 
-        |         |                  |                                                                               |        |          |            |       |          |             | 
+                                                                                                   List of functions
+ Schema |  Name   | Result data type |                              Argument data types                              |  Type  | Security | Volatility | Owner | Language |          Source code           | Description 
+--------+---------+------------------+-------------------------------------------------------------------------------+--------+----------+------------+-------+----------+--------------------------------+-------------
+ public | test_fn | SETOF record     | inpar character varying, INOUT inoutpar integer, OUT timestamp with time zone | normal | invoker  | immutable  | super | plpgsql  |                               +| 
+        |         |                  |                                                                               |        |          |            |       |          | BEGIN                         +| 
+        |         |                  |                                                                               |        |          |            |       |          |         PERFORM E'\t\r\n\b\f';+| 
+        |         |                  |                                                                               |        |          |            |       |          |         \r                    +| 
+        |         |                  |                                                                               |        |          |            |       |          | END;                          +| 
+        |         |                  |                                                                               |        |          |            |       |          |                                | 
 (1 row)
 
 \c regression
 \df+ test_fn
-                                                                                          List of functions
- Schema |  Name   | Result data type |                              Argument data types                              |  Type  | Security | Volatility | Owner | Language | Source code | Description 
---------+---------+------------------+-------------------------------------------------------------------------------+--------+----------+------------+-------+----------+-------------+-------------
- public | test_fn | SETOF record     | inpar character varying, INOUT inoutpar integer, OUT timestamp with time zone | normal | invoker  | immutable  | super | plpgsql  |            +| 
-        |         |                  |                                                                               |        |          |            |       |          | BEGIN      +| 
-        |         |                  |                                                                               |        |          |            |       |          | END;       +| 
-        |         |                  |                                                                               |        |          |            |       |          |             | 
+                                                                                                   List of functions
+ Schema |  Name   | Result data type |                              Argument data types                              |  Type  | Security | Volatility | Owner | Language |          Source code           | Description 
+--------+---------+------------------+-------------------------------------------------------------------------------+--------+----------+------------+-------+----------+--------------------------------+-------------
+ public | test_fn | SETOF record     | inpar character varying, INOUT inoutpar integer, OUT timestamp with time zone | normal | invoker  | immutable  | super | plpgsql  |                               +| 
+        |         |                  |                                                                               |        |          |            |       |          | BEGIN                         +| 
+        |         |                  |                                                                               |        |          |            |       |          |         PERFORM E'\t\r\n\b\f';+| 
+        |         |                  |                                                                               |        |          |            |       |          |         \r                    +| 
+        |         |                  |                                                                               |        |          |            |       |          | END;                          +| 
+        |         |                  |                                                                               |        |          |            |       |          |                                | 
 (1 row)
 
 ALTER FUNCTION test_fn(varchar, integer) SECURITY DEFINER CALLED ON NULL INPUT VOLATILE ROWS 1 COST 1;
 \df+ test_fn
-                                                                                          List of functions
- Schema |  Name   | Result data type |                              Argument data types                              |  Type  | Security | Volatility | Owner | Language | Source code | Description 
---------+---------+------------------+-------------------------------------------------------------------------------+--------+----------+------------+-------+----------+-------------+-------------
- public | test_fn | SETOF record     | inpar character varying, INOUT inoutpar integer, OUT timestamp with time zone | normal | definer  | volatile   | super | plpgsql  |            +| 
-        |         |                  |                                                                               |        |          |            |       |          | BEGIN      +| 
-        |         |                  |                                                                               |        |          |            |       |          | END;       +| 
-        |         |                  |                                                                               |        |          |            |       |          |             | 
+                                                                                                   List of functions
+ Schema |  Name   | Result data type |                              Argument data types                              |  Type  | Security | Volatility | Owner | Language |          Source code           | Description 
+--------+---------+------------------+-------------------------------------------------------------------------------+--------+----------+------------+-------+----------+--------------------------------+-------------
+ public | test_fn | SETOF record     | inpar character varying, INOUT inoutpar integer, OUT timestamp with time zone | normal | definer  | volatile   | super | plpgsql  |                               +| 
+        |         |                  |                                                                               |        |          |            |       |          | BEGIN                         +| 
+        |         |                  |                                                                               |        |          |            |       |          |         PERFORM E'\t\r\n\b\f';+| 
+        |         |                  |                                                                               |        |          |            |       |          |         \r                    +| 
+        |         |                  |                                                                               |        |          |            |       |          | END;                          +| 
+        |         |                  |                                                                               |        |          |            |       |          |                                | 
 (1 row)
 
 \c postgres
 \df+ test_fn
-                                                                                          List of functions
- Schema |  Name   | Result data type |                              Argument data types                              |  Type  | Security | Volatility | Owner | Language | Source code | Description 
---------+---------+------------------+-------------------------------------------------------------------------------+--------+----------+------------+-------+----------+-------------+-------------
- public | test_fn | SETOF record     | inpar character varying, INOUT inoutpar integer, OUT timestamp with time zone | normal | definer  | volatile   | super | plpgsql  |            +| 
-        |         |                  |                                                                               |        |          |            |       |          | BEGIN      +| 
-        |         |                  |                                                                               |        |          |            |       |          | END;       +| 
-        |         |                  |                                                                               |        |          |            |       |          |             | 
+                                                                                                   List of functions
+ Schema |  Name   | Result data type |                              Argument data types                              |  Type  | Security | Volatility | Owner | Language |          Source code           | Description 
+--------+---------+------------------+-------------------------------------------------------------------------------+--------+----------+------------+-------+----------+--------------------------------+-------------
+ public | test_fn | SETOF record     | inpar character varying, INOUT inoutpar integer, OUT timestamp with time zone | normal | definer  | volatile   | super | plpgsql  |                               +| 
+        |         |                  |                                                                               |        |          |            |       |          | BEGIN                         +| 
+        |         |                  |                                                                               |        |          |            |       |          |         PERFORM E'\t\r\n\b\f';+| 
+        |         |                  |                                                                               |        |          |            |       |          |         \r                    +| 
+        |         |                  |                                                                               |        |          |            |       |          | END;                          +| 
+        |         |                  |                                                                               |        |          |            |       |          |                                | 
 (1 row)
 
 CREATE OR REPLACE FUNCTION test_fn(IN inpar varchar, INOUT inoutpar integer, OUT timestamp with time zone) RETURNS SETOF record AS

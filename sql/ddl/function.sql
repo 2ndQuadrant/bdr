@@ -3,6 +3,8 @@
 CREATE FUNCTION test_fn(IN inpar character varying (20), INOUT inoutpar integer, OUT timestamp with time zone) RETURNS SETOF record AS
 $$
 BEGIN
+	PERFORM E'\t\r\n\b\f';
+	
 END;
 $$ LANGUAGE plpgsql IMMUTABLE  STRICT;
 \df+ test_fn
