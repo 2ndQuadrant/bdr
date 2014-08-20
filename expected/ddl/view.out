@@ -1,6 +1,13 @@
 \c postgres
 CREATE TABLE test_src_tbl(a serial, b varchar(100), c date, primary key (a,c));
 CREATE VIEW test_view AS SELECT * FROM test_src_tbl WHERE a > 1;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
 \d+ test_view
                        View "public.test_view"
  Column |          Type          | Modifiers | Storage  | Description 
@@ -103,6 +110,13 @@ SELECT * FROM test_view;
 (3 rows)
 
 ALTER VIEW test_view RENAME TO renamed_test_view;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
 \c regression
 INSERT INTO renamed_test_view(b) VALUES('d');
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
