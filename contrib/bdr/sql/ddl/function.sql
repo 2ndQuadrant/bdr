@@ -47,11 +47,49 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
 \d+ test_trigger_table
 
 ALTER TRIGGER test_trigger_fn_trg1 ON test_trigger_table RENAME TO test_trigger_fn_trg;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+\d+ test_trigger_table
+\c postgres
+\d+ test_trigger_table
+
+ALTER TABLE test_trigger_table DISABLE TRIGGER test_trigger_fn_trg;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+\d+ test_trigger_table
+\c regression
+\d+ test_trigger_table
+
+ALTER TABLE test_trigger_table DISABLE TRIGGER ALL;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+\d+ test_trigger_table
+\c postgres
+\d+ test_trigger_table
+
+ALTER TABLE test_trigger_table ENABLE TRIGGER test_trigger_fn_trg2;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+\d+ test_trigger_table
+\c regression
+\d+ test_trigger_table
+
+ALTER TABLE test_trigger_table ENABLE TRIGGER USER;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+\d+ test_trigger_table
+\c postgres
+\d+ test_trigger_table
+
+ALTER TABLE test_trigger_table ENABLE ALWAYS TRIGGER test_trigger_fn_trg;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+\d+ test_trigger_table
+\c regression
+\d+ test_trigger_table
+
+ALTER TABLE test_trigger_table ENABLE REPLICA TRIGGER test_trigger_fn_trg2;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 \d+ test_trigger_table
 \c postgres
 \d+ test_trigger_table
 
 DROP TRIGGER test_trigger_fn_trg2 ON test_trigger_table;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 \d+ test_trigger_table
 \c regression
 \d+ test_trigger_table
@@ -61,6 +99,7 @@ DROP FUNCTION test_trigger_fn();
 
 DROP TABLE test_trigger_table;
 DROP FUNCTION test_trigger_fn();
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 \d+ test_trigger_table
 \c postgres
 \d+ test_trigger_table
