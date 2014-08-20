@@ -825,10 +825,8 @@ get_objtype_catalog_oid(ObjectType objtype)
 		case OBJECT_VIEW:
 		case OBJECT_MATVIEW:
 		case OBJECT_FOREIGN_TABLE:
-			catalog_id = RelationRelationId;
-			break;
 		case OBJECT_COLUMN:
-			catalog_id = AttributeRelationId;
+			catalog_id = RelationRelationId;
 			break;
 		case OBJECT_RULE:
 			catalog_id = RewriteRelationId;

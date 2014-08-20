@@ -54,6 +54,7 @@ typedef struct StashedCommand
 		struct BasicCommand
 		{
 			Oid			objectId;
+			uint32		objectSubId;
 			ObjectType	objtype;
 		} basic;
 
