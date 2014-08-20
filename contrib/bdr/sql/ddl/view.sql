@@ -2,6 +2,7 @@
 
 CREATE TABLE test_src_tbl(a serial, b varchar(100), c date, primary key (a,c));
 CREATE VIEW test_view AS SELECT * FROM test_src_tbl WHERE a > 1;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 \d+ test_view
 \c regression
 \d+ test_view
@@ -26,7 +27,7 @@ SELECT * FROM test_src_tbl;
 SELECT * FROM test_view;
 
 ALTER VIEW test_view RENAME TO renamed_test_view;
-
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 \c regression
 INSERT INTO renamed_test_view(b) VALUES('d');
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
