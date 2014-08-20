@@ -2964,7 +2964,6 @@ deparse_AlterFunction(Oid objectId, Node *parsetree)
 	AlterFunctionStmt *node = (AlterFunctionStmt *) parsetree;
 	ObjTree	   *alterFunc;
 	ObjTree	   *sign;
-	ObjTree	   *tmp;
 	char	   *command;
 	HeapTuple	procTup;
 	Form_pg_proc procForm;
@@ -2985,13 +2984,15 @@ deparse_AlterFunction(Oid objectId, Node *parsetree)
 	sign = new_objtree_VA("%{identity}D(%{arguments:, }s)", 0);
 
 	params = NIL;
+
 	/*
 	 * ALTER FUNCTION does not change signature so we can use catalog
 	 * to get input type Oids.
 	 */
 	for (i = 0; i < procForm->pronargs; i++)
 	{
-		tmp = new_objtree_VA("%{type}T", 0);
+		ObjTree	   *tmp = new_objtree_VA("%{type}T", 0);
+
 		append_object_object(tmp, "type",
 							 new_objtree_for_type(procForm->proargtypes.values[i], -1));
 		params = lappend(params,
@@ -3007,6 +3008,7 @@ deparse_AlterFunction(Oid objectId, Node *parsetree)
 	foreach(cell, node->actions)
 	{
 		DefElem	*defel = (DefElem *) lfirst(cell);
+		ObjTree	   *tmp = NULL;
 
 		if (strcmp(defel->defname, "volatility") == 0)
 		{
@@ -3036,7 +3038,7 @@ deparse_AlterFunction(Oid objectId, Node *parsetree)
 		}
 		else if (strcmp(defel->defname, "rows") == 0)
 		{
-		tmp = new_objtree_VA("ROWS %{rows}s", 0);
+			tmp = new_objtree_VA("ROWS %{rows}s", 0);
 			if (defGetNumeric(defel) == 0)
 				append_bool_object(tmp, "present", false);
 			else
@@ -3044,7 +3046,8 @@ deparse_AlterFunction(Oid objectId, Node *parsetree)
 									 psprintf("%f", defGetNumeric(defel)));
 		}
 
-		elems = lappend(elems, new_object_object(NULL, tmp));
+		if (tmp)
+			elems = lappend(elems, new_object_object(NULL, tmp));
 	}
 
 	append_array_object(alterFunc, "definition", elems);
@@ -3066,12 +3069,16 @@ stringify_objtype(ObjectType objtype)
 	{
 		case OBJECT_AGGREGATE:
 			return "AGGREGATE";
+		case OBJECT_COLUMN:
+			return "COLUMN";
 		case OBJECT_DOMAIN:
 			return "DOMAIN";
 		case OBJECT_COLLATION:
 			return "COLLATION";
 		case OBJECT_CONVERSION:
 			return "CONVERSION";
+		case OBJECT_EXTENSION:
+			return "EXTENSION";
 		case OBJECT_FDW:
 			return "FOREIGN DATA WRAPPER";
 		case OBJECT_FOREIGN_SERVER:
@@ -3094,6 +3101,10 @@ stringify_objtype(ObjectType objtype)
 			return "OPERATOR CLASS";
 		case OBJECT_OPFAMILY:
 			return "OPERATOR FAMILY";
+		case OBJECT_SCHEMA:
+			return "SCHEMA";
+		case OBJECT_SEQUENCE:
+			return "SEQUENCE";
 		case OBJECT_TABLE:
 			return "TABLE";
 		case OBJECT_TSCONFIGURATION:
@@ -3106,10 +3117,6 @@ stringify_objtype(ObjectType objtype)
 			return "TEXT SEARCH TEMPLATE";
 		case OBJECT_TYPE:
 			return "TYPE";
-		case OBJECT_SCHEMA:
-			return "SCHEMA";
-		case OBJECT_SEQUENCE:
-			return "SEQUENCE";
 		case OBJECT_VIEW:
 			return "VIEW";
 
@@ -3891,6 +3898,33 @@ deparse_AlterOwnerStmt(Oid objectId, Node *parsetree)
 }
 
 static char *
+deparse_CommentStmt(Oid objectId, Oid objectSubId, Node *parsetree)
+{
+	CommentStmt *node = (CommentStmt *) parsetree;
+	ObjTree	   *comment;
+	ObjectAddress addr;
+	char	   *fmt;
+	char	   *command;
+
+	fmt = psprintf("COMMENT ON %s %%{identity}s IS %%{comment}L",
+				   stringify_objtype(node->objtype));
+	comment = new_objtree_VA(fmt, 0);
+	append_string_object(comment, "comment", node->comment);
+
+	addr.classId = get_objtype_catalog_oid(node->objtype);
+	addr.objectId = objectId;
+	addr.objectSubId = objectSubId;
+
+	append_string_object(comment, "identity",
+						 getObjectIdentity(&addr));
+
+	command = jsonize_objtree(comment);
+	free_objtree(comment);
+
+	return command;
+}
+
+static char *
 deparse_CreateConversion(Oid objectId, Node *parsetree)
 {
 	HeapTuple   conTup;
@@ -4572,6 +4606,7 @@ static char *
 deparse_parsenode_cmd(StashedCommand *cmd)
 {
 	Oid			objectId;
+	uint32		objectSubId = 0;
 	Node	   *parsetree;
 	char	   *command;
 
@@ -4581,15 +4616,18 @@ deparse_parsenode_cmd(StashedCommand *cmd)
 	{
 		case SCT_Basic:
 			objectId = cmd->d.basic.objectId;
+			objectSubId = cmd->d.basic.objectSubId;
 			break;
 		case SCT_AlterTable:
 			/* XXX needed? */
 			objectId = cmd->d.alterTable.objectId;
+			objectSubId = 0;
 			break;
 		default:
 			elog(ERROR, "unexpected deparse node type %d", cmd->type);
 	}
 
+	/* This switch needs to handle everything that ProcessUtility does */
 	switch (nodeTag(parsetree))
 	{
 		case T_CreateSchemaStmt:
@@ -4704,6 +4742,10 @@ deparse_parsenode_cmd(StashedCommand *cmd)
 
 		case T_AlterOwnerStmt:
 			command = deparse_AlterOwnerStmt(objectId, parsetree);
+			break;
+
+		case T_CommentStmt:
+			command = deparse_CommentStmt(objectId, objectSubId, parsetree);
 			break;
 
 		case T_GrantStmt:

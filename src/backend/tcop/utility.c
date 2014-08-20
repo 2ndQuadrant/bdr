@@ -514,10 +514,6 @@ standard_ProcessUtility(Node *parsetree,
 			ExecuteTruncate((TruncateStmt *) parsetree);
 			break;
 
-		case T_CommentStmt:
-			CommentObject((CommentStmt *) parsetree);
-			break;
-
 		case T_SecLabelStmt:
 			ExecSecLabelStmt((SecLabelStmt *) parsetree);
 			break;
@@ -830,6 +826,19 @@ standard_ProcessUtility(Node *parsetree,
 			}
 			break;
 
+		case T_CommentStmt:
+			{
+				CommentStmt *stmt = (CommentStmt *) parsetree;
+
+				if (EventTriggerSupportsObjectType(stmt->objtype))
+					ProcessUtilitySlow(parsetree, queryString,
+									   context, params,
+									   dest, completionTag);
+				else
+					CommentObject((CommentStmt *) parsetree, NULL);
+				break;
+			}
+
 		default:
 			/* All other statement types have event trigger support */
 			ProcessUtilitySlow(parsetree, queryString,
@@ -904,7 +913,7 @@ ProcessUtilitySlow(Node *parsetree,
 							objectId = DefineRelation((CreateStmt *) stmt,
 													  RELKIND_RELATION,
 													  InvalidOid);
-							EventTriggerStashCommand(objectId, OBJECT_TABLE,
+							EventTriggerStashCommand(objectId, 0, OBJECT_TABLE,
 													 stmt);
 
 							/*
@@ -937,7 +946,7 @@ ProcessUtilitySlow(Node *parsetree,
 													  InvalidOid);
 							CreateForeignTable((CreateForeignTableStmt *) stmt,
 											   objectId);
-							EventTriggerStashCommand(objectId,
+							EventTriggerStashCommand(objectId, 0,
 													 OBJECT_FOREIGN_TABLE,
 													 stmt);
 						}
@@ -1142,7 +1151,7 @@ ProcessUtilitySlow(Node *parsetree,
 							break;
 					}
 
-					EventTriggerStashCommand(objectId, stmt->kind, parsetree);
+					EventTriggerStashCommand(objectId, 0, stmt->kind, parsetree);
 				}
 				break;
 
@@ -1186,7 +1195,7 @@ ProcessUtilitySlow(Node *parsetree,
 									true,	/* check_rights */
 									false,	/* skip_build */
 									false); /* quiet */
-					EventTriggerStashCommand(objectId, OBJECT_INDEX,
+					EventTriggerStashCommand(objectId, 0, OBJECT_INDEX,
 											 parsetree);
 					EventTriggerComplexCmdEnd();
 				}
@@ -1196,14 +1205,14 @@ ProcessUtilitySlow(Node *parsetree,
 				EventTriggerStashExtensionStart();
 				objectId = CreateExtension((CreateExtensionStmt *) parsetree);
 				EventTriggerStashExtensionStop();
-				EventTriggerStashCommand(objectId, OBJECT_EXTENSION, parsetree);
+				EventTriggerStashCommand(objectId, 0, OBJECT_EXTENSION, parsetree);
 				break;
 
 			case T_AlterExtensionStmt:
 				EventTriggerStashExtensionStart();
 				objectId = ExecAlterExtensionStmt((AlterExtensionStmt *) parsetree);
 				EventTriggerStashExtensionStop();
-				EventTriggerStashCommand(objectId, OBJECT_EXTENSION, parsetree);
+				EventTriggerStashCommand(objectId, 0, OBJECT_EXTENSION, parsetree);
 				break;
 
 			case T_AlterExtensionContentsStmt:
@@ -1214,7 +1223,7 @@ ProcessUtilitySlow(Node *parsetree,
 
 			case T_CreateFdwStmt:
 				objectId = CreateForeignDataWrapper((CreateFdwStmt *) parsetree);
-				EventTriggerStashCommand(objectId, OBJECT_FDW, parsetree);
+				EventTriggerStashCommand(objectId, 0, OBJECT_FDW, parsetree);
 				break;
 
 			case T_AlterFdwStmt:
@@ -1223,7 +1232,7 @@ ProcessUtilitySlow(Node *parsetree,
 
 			case T_CreateForeignServerStmt:
 				objectId = CreateForeignServer((CreateForeignServerStmt *) parsetree);
-				EventTriggerStashCommand(objectId, OBJECT_FOREIGN_SERVER,
+				EventTriggerStashCommand(objectId, 0, OBJECT_FOREIGN_SERVER,
 										 parsetree);
 				break;
 
@@ -1233,7 +1242,7 @@ ProcessUtilitySlow(Node *parsetree,
 
 			case T_CreateUserMappingStmt:
 				objectId = CreateUserMapping((CreateUserMappingStmt *) parsetree);
-				EventTriggerStashCommand(objectId, OBJECT_USER_MAPPING,
+				EventTriggerStashCommand(objectId, 0, OBJECT_USER_MAPPING,
 										 parsetree);
 				break;
 
@@ -1251,105 +1260,105 @@ ProcessUtilitySlow(Node *parsetree,
 
 					objectId = DefineCompositeType(stmt->typevar,
 												   stmt->coldeflist);
-					EventTriggerStashCommand(objectId, OBJECT_COMPOSITE,
+					EventTriggerStashCommand(objectId, 0, OBJECT_COMPOSITE,
 											 parsetree);
 				}
 				break;
 
 			case T_CreateEnumStmt:		/* CREATE TYPE AS ENUM */
 				objectId = DefineEnum((CreateEnumStmt *) parsetree);
-				EventTriggerStashCommand(objectId, OBJECT_TYPE, parsetree);
+				EventTriggerStashCommand(objectId, 0, OBJECT_TYPE, parsetree);
 				break;
 
 			case T_CreateRangeStmt:		/* CREATE TYPE AS RANGE */
 				objectId = DefineRange((CreateRangeStmt *) parsetree);
-				EventTriggerStashCommand(objectId, OBJECT_TYPE, parsetree);
+				EventTriggerStashCommand(objectId, 0, OBJECT_TYPE, parsetree);
 				break;
 
 			case T_AlterEnumStmt:		/* ALTER TYPE (enum) */
 				objectId = AlterEnum((AlterEnumStmt *) parsetree, isTopLevel);
-				EventTriggerStashCommand(objectId, OBJECT_TYPE, parsetree);
+				EventTriggerStashCommand(objectId, 0, OBJECT_TYPE, parsetree);
 				break;
 
 			case T_ViewStmt:	/* CREATE VIEW */
 				EventTriggerComplexCmdStart(parsetree, OBJECT_VIEW);	/* XXX relkind? */
 				objectId = DefineView((ViewStmt *) parsetree, queryString);
-				EventTriggerStashCommand(objectId, OBJECT_VIEW, parsetree);
+				EventTriggerStashCommand(objectId, 0, OBJECT_VIEW, parsetree);
 				EventTriggerComplexCmdEnd();
 				break;
 
 			case T_CreateFunctionStmt:	/* CREATE FUNCTION */
 				objectId = CreateFunction((CreateFunctionStmt *) parsetree, queryString);
-				EventTriggerStashCommand(objectId, OBJECT_FUNCTION, parsetree);
+				EventTriggerStashCommand(objectId, 0, OBJECT_FUNCTION, parsetree);
 				break;
 
 			case T_AlterFunctionStmt:	/* ALTER FUNCTION */
 				objectId = AlterFunction((AlterFunctionStmt *) parsetree);
-				EventTriggerStashCommand(objectId, OBJECT_FUNCTION, parsetree);
+				EventTriggerStashCommand(objectId, 0, OBJECT_FUNCTION, parsetree);
 				break;
 
 			case T_RuleStmt:	/* CREATE RULE */
 				objectId = DefineRule((RuleStmt *) parsetree, queryString);
-				EventTriggerStashCommand(objectId, OBJECT_RULE, parsetree);
+				EventTriggerStashCommand(objectId, 0, OBJECT_RULE, parsetree);
 				break;
 
 			case T_CreateSeqStmt:
 				objectId = DefineSequence((CreateSeqStmt *) parsetree);
-				EventTriggerStashCommand(objectId, OBJECT_SEQUENCE, parsetree);
+				EventTriggerStashCommand(objectId, 0, OBJECT_SEQUENCE, parsetree);
 				break;
 
 			case T_AlterSeqStmt:
 				objectId = AlterSequence((AlterSeqStmt *) parsetree);
-				EventTriggerStashCommand(objectId, OBJECT_SEQUENCE, parsetree);
+				EventTriggerStashCommand(objectId, 0, OBJECT_SEQUENCE, parsetree);
 				break;
 
 			case T_CreateTableAsStmt:
 				objectId = ExecCreateTableAs((CreateTableAsStmt *) parsetree,
 								  queryString, params, completionTag);
-				EventTriggerStashCommand(objectId, OBJECT_TABLE, parsetree);
+				EventTriggerStashCommand(objectId, 0, OBJECT_TABLE, parsetree);
 				break;
 
 			case T_RefreshMatViewStmt:
 				objectId = ExecRefreshMatView((RefreshMatViewStmt *) parsetree,
 								   queryString, params, completionTag);
-				EventTriggerStashCommand(objectId, OBJECT_MATVIEW, parsetree);
+				EventTriggerStashCommand(objectId, 0, OBJECT_MATVIEW, parsetree);
 				break;
 
 			case T_CreateTrigStmt:
 				objectId = CreateTrigger((CreateTrigStmt *) parsetree,
 										 queryString, InvalidOid, InvalidOid,
 										 InvalidOid, InvalidOid, false);
-				EventTriggerStashCommand(objectId, OBJECT_TRIGGER, parsetree);
+				EventTriggerStashCommand(objectId, 0, OBJECT_TRIGGER, parsetree);
 				break;
 
 			case T_CreatePLangStmt:
 				objectId = CreateProceduralLanguage((CreatePLangStmt *) parsetree);
-				EventTriggerStashCommand(objectId, OBJECT_LANGUAGE, parsetree);
+				EventTriggerStashCommand(objectId, 0, OBJECT_LANGUAGE, parsetree);
 				break;
 
 			case T_CreateDomainStmt:
 				objectId = DefineDomain((CreateDomainStmt *) parsetree);
-				EventTriggerStashCommand(objectId, OBJECT_DOMAIN, parsetree);
+				EventTriggerStashCommand(objectId, 0, OBJECT_DOMAIN, parsetree);
 				break;
 
 			case T_CreateConversionStmt:
 				objectId = CreateConversionCommand((CreateConversionStmt *) parsetree);
-				EventTriggerStashCommand(objectId, OBJECT_CONVERSION, parsetree);
+				EventTriggerStashCommand(objectId, 0, OBJECT_CONVERSION, parsetree);
 				break;
 
 			case T_CreateCastStmt:
 				objectId = CreateCast((CreateCastStmt *) parsetree);
-				EventTriggerStashCommand(objectId, OBJECT_CAST, parsetree);
+				EventTriggerStashCommand(objectId, 0, OBJECT_CAST, parsetree);
 				break;
 
 			case T_CreateOpClassStmt:
 				objectId = DefineOpClass((CreateOpClassStmt *) parsetree);
-				EventTriggerStashCommand(objectId, OBJECT_OPCLASS, parsetree);
+				EventTriggerStashCommand(objectId, 0, OBJECT_OPCLASS, parsetree);
 				break;
 
 			case T_CreateOpFamilyStmt:
 				objectId = DefineOpFamily((CreateOpFamilyStmt *) parsetree);
-				EventTriggerStashCommand(objectId, OBJECT_OPFAMILY, parsetree);
+				EventTriggerStashCommand(objectId, 0, OBJECT_OPFAMILY, parsetree);
 				break;
 
 			case T_AlterOpFamilyStmt:
@@ -1390,11 +1399,12 @@ ProcessUtilitySlow(Node *parsetree,
 					 * number for the column or attribute here.  Maybe have
 					 * ExecRenameStmt pass it back?
 					 */
+					/* FIXME --- we can fix this now */
 					objtype = ((RenameStmt *) parsetree)->renameType;
 					if (objtype == OBJECT_COLUMN ||
 						objtype == OBJECT_ATTRIBUTE)
 						objtype = ((RenameStmt *) parsetree)->relationType;
-					EventTriggerStashCommand(objectId, objtype, parsetree);
+					EventTriggerStashCommand(objectId, 0, objtype, parsetree);
 				}
 				break;
 
@@ -1404,10 +1414,21 @@ ProcessUtilitySlow(Node *parsetree,
 
 			case T_AlterOwnerStmt:
 				objectId = ExecAlterOwnerStmt((AlterOwnerStmt *) parsetree);
-				EventTriggerStashCommand(objectId,
+				EventTriggerStashCommand(objectId, 0,
 										 ((AlterOwnerStmt *) parsetree)->objectType,
 										 parsetree);
 				break;
+
+			case T_CommentStmt:
+				{
+					uint32	objectSubId;
+
+					objectId = CommentObject((CommentStmt *) parsetree, &objectSubId);
+					EventTriggerStashCommand(objectId, objectSubId,
+											 ((CommentStmt *) parsetree)->objtype,
+											 parsetree);
+					break;
+				}
 
 			case T_GrantStmt:
 				/* command is stashed in ExecuteGrantStmt_oids */

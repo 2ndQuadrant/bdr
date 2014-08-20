@@ -256,6 +256,7 @@ check_ddl_tag(const char *tag)
 		pg_strcasecmp(tag, "REFRESH MATERIALIZED VIEW") == 0 ||
 		pg_strcasecmp(tag, "ALTER DEFAULT PRIVILEGES") == 0 ||
 		pg_strcasecmp(tag, "ALTER LARGE OBJECT") == 0 ||
+		pg_strcasecmp(tag, "COMMENT") == 0 ||
 		pg_strcasecmp(tag, "GRANT") == 0 ||
 		pg_strcasecmp(tag, "REVOKE") == 0 ||
 		pg_strcasecmp(tag, "DROP OWNED") == 0)
@@ -1306,7 +1307,8 @@ pg_event_trigger_dropped_objects(PG_FUNCTION_ARGS)
  * 		Save data about a simple DDL command that was just executed
  */
 void
-EventTriggerStashCommand(Oid objectId, ObjectType objtype, Node *parsetree)
+EventTriggerStashCommand(Oid objectId, uint32 objectSubId, ObjectType objtype,
+						 Node *parsetree)
 {
 	MemoryContext oldcxt;
 	StashedCommand *stashed;
@@ -1320,6 +1322,7 @@ EventTriggerStashCommand(Oid objectId, ObjectType objtype, Node *parsetree)
 
 	stashed->d.basic.objectId = objectId;
 	stashed->d.basic.objtype = objtype;
+	stashed->d.basic.objectSubId = objectSubId;
 	stashed->parsetree = copyObject(parsetree);
 
 	currentEventTriggerState->stash = lappend(currentEventTriggerState->stash,
@@ -1573,6 +1576,7 @@ pg_event_trigger_get_creation_commands(PG_FUNCTION_ARGS)
 			{
 				Oid			classId;
 				Oid			objId;
+				uint32		objSubId;
 				const char *tag;
 				char	   *identity;
 				char	   *type;
@@ -1582,17 +1586,19 @@ pg_event_trigger_get_creation_commands(PG_FUNCTION_ARGS)
 				{
 					classId = get_objtype_catalog_oid(cmd->d.basic.objtype);
 					objId = cmd->d.basic.objectId;
+					objSubId = cmd->d.basic.objectSubId;
 				}
 				else if (cmd->type == SCT_AlterTable)
 				{
 					classId = get_objtype_catalog_oid(cmd->d.alterTable.objtype);
 					objId = cmd->d.alterTable.objectId;
+					objSubId = 0;
 				}
 
 				tag = CreateCommandTag(cmd->parsetree);
 				addr.classId = classId;
 				addr.objectId = objId;
-				addr.objectSubId = 0;
+				addr.objectSubId = objSubId;
 
 				type = getObjectTypeDescription(&addr);
 				identity = getObjectIdentity(&addr);
