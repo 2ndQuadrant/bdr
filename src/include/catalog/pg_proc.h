@@ -5088,6 +5088,9 @@ DESCR("is a replication identifier setup");
 DATA(insert OID = 6010 (  pg_replication_identifier_advance PGNSP PGUID 12 1 0 0 0 f f f f t f v 3 0 2278 "25 25 25" _null_ _null_ _null_ _null_ pg_replication_identifier_advance _null_ _null_ _null_ ));
 DESCR("advance replication itentifier to specific location");
 
+DATA(insert OID = 6011 (  pg_replication_identifier_drop PGNSP PGUID 12 1 0 0 0 f f f f t f v 1 0 2278 "25" _null_ _null_ _null_ _null_ pg_replication_identifier_drop _null_ _null_ _null_ ));
+DESCR("drop existing replication identifier");
+
 
 /*
  * Symbolic values for provolatile column: these indicate whether the result

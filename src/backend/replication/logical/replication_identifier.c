@@ -212,6 +212,62 @@ CreateReplicationIdentifier(char *riname)
 
 
 /*
+ * Create a persistent replication identifier.
+ *
+ * Needs to be called in a transaction.
+ */
+void
+DropReplicationIdentifier(RepNodeId riident)
+{
+	HeapTuple tuple = NULL;
+	Relation rel;
+	SnapshotData SnapshotDirty;
+	SysScanDesc scan;
+	ScanKeyData key;
+	int			i;
+
+	Assert(IsTransactionState());
+
+	InitDirtySnapshot(SnapshotDirty);
+
+	rel = heap_open(ReplicationIdentifierRelationId, ExclusiveLock);
+
+	/* cleanup the slot state info */
+	for (i = 0; i < max_replication_slots; i++)
+	{
+		/* found our slot */
+		if (ReplicationStates[i].local_identifier == riident)
+		{
+			memset(&ReplicationStates[i], 0, sizeof(ReplicationState));
+			break;
+		}
+	}
+
+	ScanKeyInit(&key,
+				Anum_pg_replication_riident,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(riident));
+
+	scan = systable_beginscan(rel, ReplicationLocalIdentIndex,
+							  true /* indexOK */,
+							  &SnapshotDirty,
+							  1, &key);
+
+	tuple = systable_getnext(scan);
+
+	if (HeapTupleIsValid(tuple))
+		simple_heap_delete(rel, &tuple->t_self);
+
+	systable_endscan(scan);
+
+	CommandCounterIncrement();
+
+	/* now release lock again,  */
+	heap_close(rel, ExclusiveLock);
+}
+
+
+/*
  * Lookup pg_replication_identifier tuple via its riident.
  *
  * The result needs to be ReleaseSysCache'ed and is an invalid HeapTuple if
@@ -493,6 +549,25 @@ pg_replication_identifier_advance(PG_FUNCTION_ARGS)
 
 	pfree(remote_lsn_str);
 	pfree(local_lsn_str);
+
+	PG_RETURN_VOID();
+}
+
+Datum
+pg_replication_identifier_drop(PG_FUNCTION_ARGS)
+{
+	char *name;
+	RepNodeId riident;
+
+	CheckReplicationIdentifierPrerequisites(false);
+
+	name = text_to_cstring((text *) DatumGetPointer(PG_GETARG_DATUM(0)));
+
+	riident = GetReplicationIdentifier(name, false);
+	if (OidIsValid(riident))
+		DropReplicationIdentifier(riident);
+
+	pfree(name);
 
 	PG_RETURN_VOID();
 }

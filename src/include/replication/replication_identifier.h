@@ -16,6 +16,7 @@
 extern RepNodeId GetReplicationIdentifier(char *name, bool missing_ok);
 extern RepNodeId CreateReplicationIdentifier(char *name);
 extern HeapTuple GetReplicationInfoByIdentifier(RepNodeId riident, bool missing_ok);
+extern void DropReplicationIdentifier(RepNodeId riident);
 
 extern void AdvanceReplicationIdentifier(RepNodeId node,
 										 XLogRecPtr remote_commit,
