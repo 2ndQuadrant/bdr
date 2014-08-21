@@ -696,8 +696,8 @@ initialize_replication_identifiers(char *remote_lsn)
 	PGresult		*res;
 
 	/* Remove replication identifiers */
-	res = PQexec(local_conn, "DELETE FROM pg_catalog.pg_replication_identifier;");
-	if (PQresultStatus(res) != PGRES_COMMAND_OK)
+	res = PQexec(local_conn, "SELECT pg_catalog.pg_replication_identifier_drop(riname) FROM pg_catalog.pg_replication_identifier;");
+	if (PQresultStatus(res) != PGRES_TUPLES_OK)
 	{
 		PQclear(res);
 		die(_("Could not remove replication identifier: %s"), PQerrorMessage(local_conn));
@@ -736,7 +736,7 @@ initialize_replication_identifiers(char *remote_lsn)
 				ri->sysid, ri->tlid, ri->dboid, dboid,
 				"");
 
-		create_replication_identifier(local_conn, remote_ident, 
+		create_replication_identifier(local_conn, remote_ident,
 									  cfg->init_replica ? remote_lsn : NULL);
 	}
 }
