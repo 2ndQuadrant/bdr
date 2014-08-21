@@ -39,6 +39,7 @@ extern void ReplicationIdentifierShmemInit(void);
 /* SQL callable functions */
 extern Datum pg_replication_identifier_get(PG_FUNCTION_ARGS);
 extern Datum pg_replication_identifier_create(PG_FUNCTION_ARGS);
+extern Datum pg_replication_identifier_drop(PG_FUNCTION_ARGS);
 extern Datum pg_replication_identifier_setup_replaying_from(PG_FUNCTION_ARGS);
 extern Datum pg_replication_identifier_reset_replaying_from(PG_FUNCTION_ARGS);
 extern Datum pg_replication_identifier_is_replaying(PG_FUNCTION_ARGS);
