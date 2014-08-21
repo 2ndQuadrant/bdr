@@ -369,7 +369,7 @@ format_type_detailed(Oid type_oid, int32 typemod,
 		*typname = pstrdup("INTERVAL");
 		*nspid = InvalidOid;
 
-		if (typemod > 0)
+		if (typemod >= 0)
 			*typemodstr = printTypmod(NULL, typemod, typeform->typmodout);
 		else
 			*typemodstr = pstrdup("");	/* XXX ?? */
@@ -405,7 +405,7 @@ format_type_detailed(Oid type_oid, int32 typemod,
 	*nspid = typeform->typnamespace;
 	*typname = pstrdup(NameStr(typeform->typname));
 
-	if (typemod > 0)
+	if (typemod >= 0)
 		*typemodstr = printTypmod(NULL, typemod, typeform->typmodout);
 	else
 		*typemodstr = pstrdup("");	/* XXX ?? */
