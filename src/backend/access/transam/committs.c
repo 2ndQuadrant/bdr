@@ -128,6 +128,8 @@ TransactionTreeSetCommitTimestamp(TransactionId xid, int nsubxids,
 	int			i;
 	TransactionId headxid;
 
+	Assert(xid != InvalidTransactionId);
+
 	if (!commit_ts_enabled)
 		return;
 
@@ -681,8 +683,14 @@ TruncateCommitTs(TransactionId oldestXact)
 void
 SetCommitTsLimit(TransactionId oldestXact)
 {
+	/*
+	 * Be careful not to overwrite values that are either further into the
+	 * "future" or signal a disabled committs.
+	 */
 	LWLockAcquire(CommitTsControlLock, LW_EXCLUSIVE);
-	ShmemVariableCache->oldestCommitTs = oldestXact;
+	if (ShmemVariableCache->oldestCommitTs != InvalidTransactionId &&
+		TransactionIdPrecedes(ShmemVariableCache->oldestCommitTs, oldestXact))
+		ShmemVariableCache->oldestCommitTs = oldestXact;
 	LWLockRelease(CommitTsControlLock);
 }
 
