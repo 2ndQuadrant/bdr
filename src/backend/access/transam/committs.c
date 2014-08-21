@@ -128,6 +128,8 @@ TransactionTreeSetCommitTimestamp(TransactionId xid, int nsubxids,
 	int			i;
 	TransactionId headxid;
 
+	Assert(xid != InvalidTransactionId);
+
 	if (!commit_ts_enabled)
 		return;
 
