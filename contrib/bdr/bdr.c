@@ -567,8 +567,8 @@ bdr_apply_main(Datum main_arg)
 
 	if (bdr_apply_worker->replay_stop_lsn != InvalidXLogRecPtr)
 		appendStringInfo(&query, " up to %X/%X",
-						 (uint32)(bdr_apply_worker->replay_stop_lsn),
-						 (uint32)(bdr_apply_worker->replay_stop_lsn>>32));
+						 (uint32)(bdr_apply_worker->replay_stop_lsn >> 32),
+						 (uint32)bdr_apply_worker->replay_stop_lsn);
 
 	SetConfigOption("application_name", query.data, PGC_USERSET, PGC_S_SESSION);
 
@@ -581,8 +581,8 @@ bdr_apply_main(Datum main_arg)
 
 	if (bdr_apply_worker->replay_stop_lsn != InvalidXLogRecPtr)
 		appendStringInfo(&query, " up to %X/%X",
-						 (uint32)(bdr_apply_worker->replay_stop_lsn),
-						 (uint32)(bdr_apply_worker->replay_stop_lsn>>32));
+						 (uint32)(bdr_apply_worker->replay_stop_lsn >> 32),
+						 (uint32)bdr_apply_worker->replay_stop_lsn);
 
 	/* Make the replication connection to the remote end */
 	streamConn = bdr_establish_connection_and_slot(bdr_apply_config,
