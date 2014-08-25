@@ -64,8 +64,9 @@
 
 #define MAXCONNINFO		1024
 
-/* TODO: move to bdr_apply.c when bdr_apply_main is moved */
-extern bool			exit_worker;
+volatile sig_atomic_t got_SIGTERM = false;
+volatile sig_atomic_t got_SIGHUP = false;
+
 extern uint64		origin_sysid;
 extern TimeLineID	origin_timeline;
 extern Oid			origin_dboid;
@@ -184,7 +185,8 @@ bdr_sigterm(SIGNAL_ARGS)
 {
 	int			save_errno = errno;
 
-	exit_worker = true;
+	got_SIGTERM = true;
+
 	/*
 	 * For now allow to interrupt all queries. It'd be better if we were more
 	 * granular, only allowing to interrupt some things, but that's a bit
@@ -203,6 +205,8 @@ static void
 bdr_sighup(SIGNAL_ARGS)
 {
 	int			save_errno = errno;
+
+	got_SIGHUP = true;
 
 	if (MyProc)
 		SetLatch(&MyProc->procLatch);
@@ -1029,7 +1033,7 @@ bdr_perdb_worker_main(Datum main_arg)
 	bdr_sequencer_init(bdr_perdb_worker->seq_slot, bdr_perdb_worker->nnodes);
 
 	wait = true;
-	while (!exit_worker)
+	while (!got_SIGTERM)
 	{
 		/*
 		 * Background workers mustn't call usleep() or any direct equivalent:
@@ -1053,6 +1057,12 @@ bdr_perdb_worker_main(Datum main_arg)
 		/* emergency bailout if postmaster has died */
 		if (rc & WL_POSTMASTER_DEATH)
 			proc_exit(1);
+
+		if (got_SIGHUP)
+		{
+			got_SIGHUP = false;
+			ProcessConfigFile(PGC_SIGHUP);
+		}
 
 		/* check whether we need to vote */
 		if (bdr_sequencer_vote())
