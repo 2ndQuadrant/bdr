@@ -620,9 +620,10 @@ bdr_exec_init_replica(BdrConnectionConfig *cfg, char *snapshot)
 		}
 		envp[0] = path.data;
 
-		elog(DEBUG1, "Creating replica with: %s --snapshot %s --source \"%s\" --target \"%s\" --tmp-directory \"%s\"",
-			 bdr_init_replica_script_path, snapshot, cfg->dsn,
-			 cfg->replica_local_dsn, tmpdir);
+		ereport(LOG,
+				(errmsg("Creating replica with: %s --snapshot %s --source \"%s\" --target \"%s\" --tmp-directory \"%s\"",
+						bdr_init_replica_script_path, snapshot, cfg->dsn,
+						cfg->replica_local_dsn, tmpdir)));
 
 		n = execve(bdr_init_replica_script_path, argv, envp);
 		if (n < 0)
@@ -794,7 +795,7 @@ bdr_init_replica(Name dbname)
 
 	init_replica_config = bdr_connection_configs
 		[init_replica_worker->worker_data.apply_worker.connection_config_idx];
-	elog(DEBUG2, "bdr %s: bdr_init_replica init from connection %s",
+	elog(LOG, "bdr %s: bdr_init_replica init from connection %s",
 		 NameStr(*dbname), init_replica_config->name);
 
 	resetStringInfo(&dsn);
@@ -818,8 +819,6 @@ bdr_init_replica(Name dbname)
 	}
 
 	bdr_ensure_ext_installed(nonrepl_init_conn, dbname);
-	elog(DEBUG2, "bdr %s: bdr extension is installed in remote",
-		 NameStr(*dbname));
 
 	/* Get the bdr.bdr_nodes status field for our node id from the remote */
 	status = bdr_get_remote_status(nonrepl_init_conn);
@@ -958,8 +957,9 @@ bdr_init_replica(Name dbname)
 			cfg = bdr_connection_configs
 				[w->worker_data.apply_worker.connection_config_idx];
 
-			elog(DEBUG1, "bdr %s: checking/creating slot for %s",
-				 NameStr(*dbname), cfg->name);
+			ereport(LOG,
+					(errmsg("bdr %s: checking/creating slot for %s at %s",
+							NameStr(*dbname), cfg->name, cfg->dsn)));
 			/*
 			 * Create the slot on the remote. The returned remote sysid and
 			 * timeline, the slot name, and the local replication identifier
