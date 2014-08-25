@@ -9,6 +9,11 @@
 # interrupted.
 #
 
+errlog()
+{
+    echo "$@" 1>&2
+}
+
 JOBS=1
 
 i=0
@@ -31,12 +36,12 @@ while (($i < ${#argv[*]})); do
             ((i++)); JOBS="${argv[$i]}"
         ;;
         --help)
-            echo "Usage: bdr_replica --source <dsn> --target <dsn> [--snapshot <name>] --dir /path/to/dir [--jobs N]"
-            echo "<dsn> is a libpq conninfo string, e.g. \"host=/tmp post=5433 dbnae=xxx\""
+            errlog "Usage: bdr_replica --source <dsn> --target <dsn> [--snapshot <name>] --dir /path/to/dir [--jobs N]"
+            errlog "<dsn> is a libpq conninfo string, e.g. \"host=/tmp post=5433 dbname=xxx\""
             exit 0
         ;;
         *)
-            echo Unknown command-line option: ${argv[$i]}
+            errlog Unknown command-line option: ${argv[$i]}
             exit 1
         ;;
     esac
@@ -45,28 +50,28 @@ while (($i < ${#argv[*]})); do
 done
 
 if [ -z "$SOURCE" ]; then
-    echo Please specify a source DSN with '--source "port=nnn dbname=xxx"'; exit 1
+    errlog Please specify a source DSN with '--source "port=nnn dbname=xxx"'; exit 1
 fi
 
 if [ -z "$TARGET" ]; then
-    echo Please specify a target DSN with '--target "port=nnn dbname=xxx"'; exit 1
+    errlog Please specify a target DSN with '--target "port=nnn dbname=xxx"'; exit 1
 fi
 
 if [ -z "$TMPDIR" ]; then
-    echo Please specify a directory with '--temp-directory /path/to/dir'; exit 1
+    errlog Please specify a directory with '--temp-directory /path/to/dir'; exit 1
 fi
 
 SNAP=${SNAPSHOT:+"--snapshot $SNAPSHOT"}
 
-echo "Dumping remote database \"$SOURCE\" with $JOBS concurrent workers to \"$TMPDIR\""
+errlog "Dumping remote database \"$SOURCE\" with $JOBS concurrent workers to \"$TMPDIR\""
 if ! pg_dump -j $JOBS $SNAP -F d -f $TMPDIR "$SOURCE"; then
-    echo "pg_dump of "$SOURCE" failed, aborting"
+    errlog "pg_dump of "$SOURCE" failed, aborting"
     exit 1
 fi
 
-echo "Restoring dump to local DB \"$TARGET\" with $JOBS concurrent workers from \"$TMPDIR\""
+errlog "Restoring dump to local DB \"$TARGET\" with $JOBS concurrent workers from \"$TMPDIR\""
 if ! PGOPTIONS="-c bdr.permit_unsafe_ddl_commands=true -c bdr.skip_ddl_replication=true" pg_restore --exit-on-error --single-transaction -j $JOBS -F d -d "$TARGET" $TMPDIR; then
-    echo "pg_restore to "$TARGET" failed, aborting"
+    errlog "pg_restore to "$TARGET" failed, aborting"
     exit 2
 fi
 
