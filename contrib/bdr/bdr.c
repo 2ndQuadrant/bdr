@@ -1498,6 +1498,25 @@ _PG_init(void)
 							   0,
 							   NULL, NULL, NULL);
 
+
+	DefineCustomBoolVariable("bdr.log_conflicts_to_table",
+							 "Log BDR conflicts to bdr.conflict_history table",
+							 NULL,
+							 &bdr_log_conflicts_to_table,
+							 false,
+							 PGC_SIGHUP,
+							 0,
+							 NULL, NULL, NULL);
+
+	DefineCustomBoolVariable("bdr.conflict_logging_include_tuples",
+							 "Log whole tuples when logging BDR conflicts",
+							 NULL,
+							 &bdr_conflict_logging_include_tuples,
+							 true,
+							 PGC_SIGHUP,
+							 0,
+							 NULL, NULL, NULL);
+
 	/*
 	 * Limit on worker count - number of slots to allocate in fixed shared
 	 * memory array.
@@ -1510,6 +1529,25 @@ _PG_init(void)
 							PGC_POSTMASTER,
 							0,
 							NULL, NULL, NULL);
+
+
+	DefineCustomBoolVariable("bdr.permit_unsafe_ddl_commands",
+							 "Allow commands that might cause data or " \
+							 "replication problems under BDR to run",
+							 NULL,
+							 &bdr_permit_unsafe_commands,
+							 false, PGC_SUSET,
+							 0,
+							 NULL, NULL, NULL);
+
+	DefineCustomBoolVariable("bdr.skip_ddl_replication",
+							 "Internal. Set during local restore during init_replica only",
+							 NULL,
+							 &bdr_skip_ddl_replication,
+							 false,
+							 PGC_SUSET,
+							 0,
+							 NULL, NULL, NULL);
 
 	DefineCustomIntVariable("bdr.default_apply_delay",
 							"default replication apply delay, can be overwritten per connection",
@@ -1533,15 +1571,6 @@ _PG_init(void)
 							   0,
 							   NULL, NULL, NULL);
 
-	DefineCustomBoolVariable("bdr.skip_ddl_replication",
-							 "Internal. Set during local restore during init_replica only",
-							 NULL,
-							 &bdr_skip_ddl_replication,
-							 false,
-							 PGC_SUSET,
-							 0,
-							 NULL, NULL, NULL);
-
 	DefineCustomBoolVariable("bdr.init_from_basedump",
 							 "Internal. Set during local initialization from basebackup only",
 							 NULL,
@@ -1562,8 +1591,6 @@ _PG_init(void)
 							 PGC_SIGHUP,
 							 0,
 							 NULL, NULL, NULL);
-
-	bdr_conflict_logging_create_gucs();
 
 	/* if nothing is configured, we're done */
 	if (connections == NULL)
