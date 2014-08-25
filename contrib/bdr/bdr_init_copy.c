@@ -219,7 +219,7 @@ main(int argc, char **argv)
 	wait_postmaster_connection(&local_connstr);
 
 	if (local_connstr == NULL)
-		die(_("Failed to detect local connection info."));
+		die(_("Failed to detect local connection info.\n"));
 
 	/*
 	 * Postgres should have reached restore point and is accepting connections,
@@ -399,7 +399,7 @@ read_bdr_config(void)
 
 	connections = get_postgres_guc_value("bdr.connections", NULL);
 	if (!connections)
-		die(_("bdr.connections is empty"));
+		die(_("bdr.connections is empty\n"));
 
 	connames = split_list_guc(connections, &connection_count);
 	pg_free(connections);
@@ -441,7 +441,7 @@ read_bdr_config(void)
 			char *str = pg_strdup(errormsg);
 
 			PQfreemem(errormsg);
-			die(_("bdr %s: error in dsn: %s"), name, str);
+			die(_("bdr %s: error in dsn: %s\n"), name, str);
 		}
 
 		if (opts->dbname == NULL)
@@ -452,7 +452,7 @@ read_bdr_config(void)
 				if (strcmp(cur_option->keyword, "dbname") == 0)
 				{
 					if (cur_option->val == NULL)
-						die(_("bdr %s: no dbname set"), name);
+						die(_("bdr %s: no dbname set\n"), name);
 
 					opts->dbname = pg_strdup(cur_option->val);
 				}
@@ -555,7 +555,7 @@ initialize_replication_slots(bool init_replica)
 
 		if (PQstatus(remote_conn) != CONNECTION_OK)
 		{
-			die(_("Could not connect to the remote server: %s"),
+			die(_("Could not connect to the remote server: %s\n"),
 						PQerrorMessage(remote_conn));
 		}
 
@@ -598,7 +598,7 @@ get_remote_info(PGconn *conn)
 	if (PQresultStatus(res) != PGRES_TUPLES_OK)
 	{
 		PQclear(res);
-		die(_("Could not send replication command \"%s\": %s"),
+		die(_("Could not send replication command \"%s\": %s\n"),
 			 "IDENTIFY_SYSTEM", PQerrorMessage(conn));
 	}
 
@@ -617,11 +617,11 @@ get_remote_info(PGconn *conn)
 
 	remote_tlid = PQgetvalue(res, 0, 1);
 	if (sscanf(remote_tlid, "%u", &ri->tlid) != 1)
-		die(_("Could not parse remote tlid %s"), remote_tlid);
+		die(_("Could not parse remote tlid %s\n"), remote_tlid);
 
 	remote_dboid = PQgetvalue(res, 0, 4);
 	if (sscanf(remote_dboid, "%u", &ri->dboid) != 1)
-		die(_("Could not parse remote database OID %s"), remote_dboid);
+		die(_("Could not parse remote database OID %s\n"), remote_dboid);
 
 	PQclear(res);
 
@@ -646,13 +646,13 @@ get_dboid_from_dbname(PGconn *conn, const char* dbname)
 	if (PQresultStatus(res) != PGRES_TUPLES_OK || PQntuples(res) != 1)
 	{
 		PQclear(res);
-		die(_("Could not get database id for \"%s\": %s"),
+		die(_("Could not get database id for \"%s\": %s\n"),
 			 dbname, PQerrorMessage(conn));
 	}
 
 	dboid_str = PQgetvalue(res, 0, 0);
 	if (sscanf(dboid_str, "%u", &dboid) != 1)
-		die(_("Could not parse database OID %s"), dboid_str);
+		die(_("Could not parse database OID %s\n"), dboid_str);
 
 	PQclear(res);
 	destroyPQExpBuffer(query);
@@ -700,7 +700,7 @@ initialize_replication_identifiers(char *remote_lsn)
 	if (PQresultStatus(res) != PGRES_TUPLES_OK)
 	{
 		PQclear(res);
-		die(_("Could not remove replication identifier: %s"), PQerrorMessage(local_conn));
+		die(_("Could not remove replication identifier: %s\n"), PQerrorMessage(local_conn));
 	}
 
 	/* Initialize new replication identifiers */
@@ -721,7 +721,7 @@ initialize_replication_identifiers(char *remote_lsn)
 
 		if (PQstatus(remote_conn) != CONNECTION_OK)
 		{
-			die(_("Could not connect to the remote server: %s"),
+			die(_("Could not connect to the remote server: %s\n"),
 						PQerrorMessage(remote_conn));
 		}
 
@@ -797,7 +797,7 @@ create_restore_point(char *remote_connstr)
 	remote_conn = PQconnectdb(remote_connstr);
 	if (PQstatus(remote_conn) != CONNECTION_OK)
 	{
-		die(_("Could not connect to the remote server: %s"),
+		die(_("Could not connect to the remote server: %s\n"),
 					PQerrorMessage(remote_conn));
 	}
 
@@ -860,7 +860,7 @@ get_conninfo(char *dbname, char *dbhost, char *dbport, char *dbuser)
 		conn_opts = PQconninfoParse(dbname, &err_msg);
 		if (conn_opts == NULL)
 		{
-			die(_("Invalid connection string: %s"), err_msg);
+			die(_("Invalid connection string: %s\n"), err_msg);
 		}
 
 		for (conn_opt = conn_opts; conn_opt->keyword != NULL; conn_opt++)
@@ -1169,11 +1169,11 @@ split_list_guc(char *str, size_t *count)
 		ret = realloc(ret, sizeof(char*)* ++i);
 
 		if (ret == NULL)
-			die(_("Out of memory"));
+			die(_("Out of memory\n"));
 
 		t = trimwhitespace(t);
 		if (!t)
-			die(_("Bad input for list: %s"), str);
+			die(_("Bad input for list: %s\n"), str);
 
 		ret[i-1] = t;
 
