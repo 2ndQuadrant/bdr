@@ -1762,7 +1762,9 @@ bdr_maintain_schema(void)
 	StartTransactionCommand();
 	PushActiveSnapshot(GetTransactionSnapshot());
 
-	set_config_option("bdr.skip_ddl_replication", "true", PGC_SUSET, PGC_S_OVERRIDE, GUC_ACTION_LOCAL, true, 0);
+	set_config_option("bdr.skip_ddl_replication", "true",
+					  PGC_SUSET, PGC_S_OVERRIDE, GUC_ACTION_LOCAL,
+					  true, 0);
 
 	/* make sure we're operating without other bdr workers interfering */
 	extrel = heap_open(ExtensionRelationId, ShareUpdateExclusiveLock);
@@ -1813,33 +1815,24 @@ bdr_maintain_schema(void)
 
 	/* setup initial queued_cmds OID */
 	schema_oid = get_namespace_oid("bdr", false);
-	Assert(schema_oid != InvalidOid);
-
 	QueuedDDLCommandsRelid =
 		bdr_lookup_relid("bdr_queued_commands", schema_oid);
-
 	BdrSequenceValuesRelid =
 		bdr_lookup_relid("bdr_sequence_values", schema_oid);
-
 	BdrSequenceElectionsRelid =
 		bdr_lookup_relid("bdr_sequence_elections", schema_oid);
-
-	BdrVotesRelid = bdr_lookup_relid("bdr_votes", schema_oid);
-
-	BdrNodesRelid = bdr_lookup_relid("bdr_nodes", schema_oid);
-
+	BdrVotesRelid =
+		bdr_lookup_relid("bdr_votes", schema_oid);
+	BdrNodesRelid =
+		bdr_lookup_relid("bdr_nodes", schema_oid);
 	BdrConflictHistoryRelId =
 		bdr_lookup_relid("bdr_conflict_history", schema_oid);
-
-	QueuedDropsRelid = bdr_lookup_relid("bdr_queued_drops", schema_oid);
-
-	BdrLocksRelid = bdr_lookup_relid("bdr_global_locks", schema_oid);
-	BdrLocksByOwnerRelid = bdr_lookup_relid("bdr_global_locks_byowner", schema_oid);
-
-	elog(DEBUG1, "bdr.bdr_queued_commands OID set to %u",
-		 QueuedDDLCommandsRelid);
-	elog(DEBUG1, "bdr.bdr_queued_drops OID set to %u",
-		 QueuedDropsRelid);
+	QueuedDropsRelid =
+		bdr_lookup_relid("bdr_queued_drops", schema_oid);
+	BdrLocksRelid =
+		bdr_lookup_relid("bdr_global_locks", schema_oid);
+	BdrLocksByOwnerRelid =
+		bdr_lookup_relid("bdr_global_locks_byowner", schema_oid);
 
 	bdr_conflict_handlers_init();
 
