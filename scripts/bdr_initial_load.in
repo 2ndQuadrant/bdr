@@ -20,6 +20,10 @@ i=0
 argv=("$@")
 while (($i < ${#argv[*]})); do
     case "${argv[$i]}" in
+	-V)
+	    echo "bdr_initial_load (PostgreSQL) VERSION"
+	    exit
+	;;
         --snapshot)
             ((i++)); SNAPSHOT="${argv[$i]}"
         ;;
