@@ -86,12 +86,6 @@ static XLogRecPtr		remote_origin_lsn = InvalidXLogRecPtr;
 static RepNodeId		remote_origin_id = InvalidRepNodeId;
 
 /*
- * this should really be a static in bdr_apply.c, but bdr.c needs it for
- * bdr_apply_main currently.
- */
-bool		exit_worker = false;
-
-/*
  * This code only runs within an apply bgworker, so we can stash a pointer to our
  * state in shm in a global for convenient access.
  *
@@ -375,7 +369,7 @@ process_remote_commit(StringInfo s)
 
 
 		/* Signal that we should stop */
-		exit_worker = true;
+		got_SIGTERM = true;
 	}
 }
 
@@ -2023,7 +2017,7 @@ tuple_to_stringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple)
 /*
  * Read a remote action type and process the action record.
  *
- * May set exit_worker to stop processing before next record.
+ * May set got_SIGTERM to stop processing before next record.
  */
 void
 bdr_process_remote_action(StringInfo s)
@@ -2181,7 +2175,7 @@ bdr_apply_work(PGconn* streamConn)
 										   ALLOCSET_DEFAULT_INITSIZE,
 										   ALLOCSET_DEFAULT_MAXSIZE);
 
-	while (!exit_worker)
+	while (!got_SIGTERM)
 	{
 		/* int		 ret; */
 		int			rc;
@@ -2212,12 +2206,18 @@ bdr_apply_work(PGconn* streamConn)
 			elog(ERROR, "connection to other side has died");
 		}
 
+		if (got_SIGHUP)
+		{
+			got_SIGHUP = false;
+			ProcessConfigFile(PGC_SIGHUP);
+		}
+
 		if (rc & WL_SOCKET_READABLE)
 			PQconsumeInput(streamConn);
 
 		for (;;)
 		{
-			if (exit_worker)
+			if (got_SIGTERM)
 				break;
 
 			if (copybuf != NULL)

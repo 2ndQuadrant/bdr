@@ -10,6 +10,8 @@
 #ifndef BDR_INTERNAL_H
 #define BDR_INTERNAL_H
 
+#include <signal.h>
+
 #include "lib/ilist.h"
 
 #define BDR_SLOT_NAME_FORMAT "bdr_%u_%s_%u_%u__%s"
@@ -41,4 +43,8 @@ typedef struct BdrFlushPosition
 
 extern dlist_head bdr_lsn_association;
 extern bool bdr_get_flush_position(XLogRecPtr *write, XLogRecPtr *flush);
+
+extern volatile sig_atomic_t got_SIGTERM;
+extern volatile sig_atomic_t got_SIGHUP;
+
 #endif   /* BDR_INTERNAL_H */
