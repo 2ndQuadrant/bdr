@@ -223,6 +223,9 @@ extern int bdr_max_workers;
 extern char *bdr_temp_dump_directory;
 extern bool bdr_init_from_basedump;
 extern bool bdr_log_applied_conflicts;
+extern bool bdr_log_conflicts_to_table;
+extern bool bdr_conflict_logging_include_tuples;
+extern bool bdr_permit_unsafe_commands;
 
 /*
  * Header for the shared memory segment ref'd by the BdrWorkerCtl ptr,
@@ -283,7 +286,6 @@ extern bool find_pkey_tuple(struct ScanKeyData *skey, BDRRelation *rel,
 
 /* conflict logging (usable in apply only) */
 extern void bdr_conflict_logging_startup(void);
-extern void bdr_conflict_logging_create_gucs(void);
 
 extern void bdr_conflict_log(BdrConflictType conflict_type,
 							 BdrConflictResolution resolution,
