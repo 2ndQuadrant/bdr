@@ -1180,7 +1180,7 @@ UpdateLogicalCheckpoints(void)
 
 	while ((len = read(sourcefd, buffer, sizeof(buffer))) > 0)
 	{
-		errno == 0;
+		errno = 0;
 		if (write(targetfd, buffer, len) != len)
 		{
 			/* if write didn't set errno, assume problem is no disk space */
