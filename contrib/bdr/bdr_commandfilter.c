@@ -48,7 +48,8 @@ static void error_unsupported_command(const char *cmdtag) __attribute__((noretur
 
 static ProcessUtility_hook_type next_ProcessUtility_hook = NULL;
 
-static bool bdr_permit_unsafe_commands;
+/* GUCs */
+bool bdr_permit_unsafe_commands = false;
 
 /*
 * Check the passed rangevar, locking it and looking it up in the cache
@@ -654,13 +655,4 @@ init_bdr_commandfilter(void)
 {
 	next_ProcessUtility_hook = ProcessUtility_hook;
 	ProcessUtility_hook = bdr_commandfilter;
-
-	DefineCustomBoolVariable("bdr.permit_unsafe_ddl_commands",
-							 "Allow commands that might cause data or " \
-							 "replication problems under BDR to run",
-							 NULL,
-							 &bdr_permit_unsafe_commands,
-							 false, PGC_SUSET,
-							 0,
-							 NULL, NULL, NULL);
 }

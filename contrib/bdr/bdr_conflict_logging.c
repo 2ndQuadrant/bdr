@@ -25,12 +25,13 @@
 #include "utils/pg_lsn.h"
 #include "utils/syscache.h"
 
+/* GUCs */
+bool bdr_log_conflicts_to_table = false;
+bool bdr_conflict_logging_include_tuples = false;
+
 static Oid BdrConflictTypeOid = InvalidOid;
 static Oid BdrConflictResolutionOid = InvalidOid;
 static Oid BdrConflictHistorySeqId = InvalidOid;
-
-static bool bdr_log_conflicts_to_table = false;
-static bool bdr_conflict_logging_include_tuples = false;
 
 /*
  * All this code runs only in the context of an apply worker, so
@@ -99,28 +100,6 @@ bdr_conflict_logging_startup()
 		ObjectIdGetDatum(schema_oid));
 
 	CommitTransactionCommand();
-}
-
-void
-bdr_conflict_logging_create_gucs()
-{
-	DefineCustomBoolVariable("bdr.log_conflicts_to_table",
-							 "Log BDR conflicts to bdr.conflict_history table",
-							 NULL,
-							 &bdr_log_conflicts_to_table,
-							 false,
-							 PGC_SIGHUP,
-							 0,
-							 NULL, NULL, NULL);
-
-	DefineCustomBoolVariable("bdr.conflict_logging_include_tuples",
-							 "Log whole tuples when logging BDR conflicts",
-							 NULL,
-							 &bdr_conflict_logging_include_tuples,
-							 true,
-							 PGC_SIGHUP,
-							 0,
-							 NULL, NULL, NULL);
 }
 
 /* Get the enum oid for a given BdrConflictType */
