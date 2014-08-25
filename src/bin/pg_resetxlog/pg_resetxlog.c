@@ -63,6 +63,7 @@ static bool guessed = false;	/* T if we had to guess at any values */
 static const char *progname;
 static uint32 set_xid_epoch = (uint32) -1;
 static TransactionId set_xid = 0;
+static TransactionId set_committs = 0;
 static Oid	set_oid = 0;
 static MultiXactId set_mxid = 0;
 static MultiXactOffset set_mxoff = (MultiXactOffset) -1;
@@ -115,7 +116,7 @@ main(int argc, char *argv[])
 	}
 
 
-	while ((c = getopt(argc, argv, "fl:m:no:O:x:e:s::")) != -1)
+	while ((c = getopt(argc, argv, "fl:m:no:O:x:e:c:s::")) != -1)
 	{
 		switch (c)
 		{
@@ -153,6 +154,21 @@ main(int argc, char *argv[])
 				if (set_xid == 0)
 				{
 					fprintf(stderr, _("%s: transaction ID (-x) must not be 0\n"), progname);
+					exit(1);
+				}
+				break;
+
+			case 'c':
+				set_committs = strtoul(optarg, &endptr, 0);
+				if (endptr == optarg || *endptr != '\0')
+				{
+					fprintf(stderr, _("%s: invalid argument for option -c\n"), progname);
+					fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
+					exit(1);
+				}
+				if (set_committs == 0)
+				{
+					fprintf(stderr, _("%s: transaction ID (-c) must not be 0\n"), progname);
 					exit(1);
 				}
 				break;
@@ -348,6 +364,9 @@ main(int argc, char *argv[])
 			ControlFile.checkPointCopy.oldestXid += FirstNormalTransactionId;
 		ControlFile.checkPointCopy.oldestXidDB = InvalidOid;
 	}
+
+	if (set_committs != 0)
+		ControlFile.checkPointCopy.oldestCommitTs = set_committs;
 
 	if (set_oid != 0)
 		ControlFile.checkPointCopy.nextOid = set_oid;
@@ -648,6 +667,8 @@ PrintControlValues(bool guessed)
 		   ControlFile.checkPointCopy.oldestMulti);
 	printf(_("Latest checkpoint's oldestMulti's DB: %u\n"),
 		   ControlFile.checkPointCopy.oldestMultiDB);
+	printf(_("Latest checkpoint's oldestCommitTs:   %u\n"),
+		   ControlFile.checkPointCopy.oldestCommitTs);
 	printf(_("Maximum data alignment:               %u\n"),
 		   ControlFile.maxAlign);
 	/* we don't print floatFormat since can't say much useful about it */
@@ -728,6 +749,12 @@ PrintNewControlValues()
 	{
 		printf(_("NextXID epoch:                        %u\n"),
 			   ControlFile.checkPointCopy.nextXidEpoch);
+	}
+
+	if (set_committs != 0)
+	{
+		printf(_("oldestCommitTs:                       %u\n"),
+			   ControlFile.checkPointCopy.oldestCommitTs);
 	}
 }
 
@@ -1191,6 +1218,7 @@ usage(void)
 	printf(_("  -V, --version    output version information, then exit\n"));
 	printf(_("  -s [SYSID]       set system identifier (or generate one)\n"));
 	printf(_("  -x XID           set next transaction ID\n"));
+	printf(_("  -c XID           set the oldest retrievable commit timestamp\n"));
 	printf(_("  -?, --help       show this help, then exit\n"));
 	printf(_("\nReport bugs to <pgsql-bugs@postgresql.org>.\n"));
 }
