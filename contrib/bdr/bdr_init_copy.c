@@ -179,6 +179,8 @@ main(int argc, char **argv)
 	 * Initialization
 	 */
 	system_identifier = GenerateSystemIdentifier();
+	print_msg(_("Assigning new system identifier: "UINT64_FORMAT"...\n"), system_identifier);
+
 	read_bdr_config();
 
 	if (!remote_connstr && !dbhost && !dbport && !dbuser)
