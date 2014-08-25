@@ -51,6 +51,9 @@ bdr.o: bdr_version.h
 bdr_init_copy: bdr_init_copy.o | submake-libpq submake-libpgport
 	$(CC) $(CFLAGS) $^ $(LDFLAGS) $(LDFLAGS_EX) $(libpq_pgport) $(LIBS) -o $@$(X)
 
+scripts/bdr_initial_load: scripts/bdr_initial_load.in
+	sed -e "s/VERSION/$(VERSION)/" $< > $@
+
 all: all-lib bdr_init_copy
 
 clean: additional-clean
