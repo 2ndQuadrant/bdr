@@ -33,6 +33,7 @@ static const char	*progname;
 static uint64		 system_identifier;
 static NameData		 restore_point_name;
 static char			*data_dir = NULL;
+static char			*config_options = "";
 static char			 pid_file[MAXPGPATH];
 static time_t		 start_time;
 
@@ -50,7 +51,7 @@ __attribute__((format(PG_PRINTF_ATTRIBUTE, 1, 2)));
 static void print_msg(const char *fmt,...)
 __attribute__((format(PG_PRINTF_ATTRIBUTE, 1, 2)));
 
-static int run_pg_ctl(const char *arg);
+static int run_pg_ctl(const char *arg, const char *opts);
 static char *get_postgres_guc_value(char *guc, char *defval);
 static void wait_postmaster_connection(char **out_connstr);
 static void wait_postgres_shutdown(void);
@@ -131,12 +132,15 @@ main(int argc, char **argv)
 	}
 
 	/* Option parsing and validation */
-	while ((c = getopt(argc, argv, "D:d:h:p:U:")) != -1)
+	while ((c = getopt(argc, argv, "D:d:h:o:p:U:")) != -1)
 	{
 		switch (c)
 		{
 			case 'D':
 				data_dir = pg_strdup(optarg);
+				break;
+			case 'o':
+				config_options = pg_strdup(optarg);
 				break;
 			case 'd':
 				remote_connstr = pg_strdup(optarg);
@@ -215,7 +219,7 @@ main(int argc, char **argv)
 	appendPQExpBuffer(recoveryconfcontents, "primary_conninfo = '%s'\n", remote_connstr);
 	WriteRecoveryConf(recoveryconfcontents);
 
-	run_pg_ctl("start -w -l \"bdr_init_copy_postgres.log\" -o \"-c shared_preload_libraries=''\"");
+	run_pg_ctl("start -w -l \"bdr_init_copy_postgres.log\"", "-c shared_preload_libraries=''");
 	wait_postmaster_connection(&local_connstr);
 
 	if (local_connstr == NULL)
@@ -240,13 +244,13 @@ main(int argc, char **argv)
 	/*
 	 * Make this node functional as individual bdr node and start it.
 	 */
-	run_pg_ctl("stop");
+	run_pg_ctl("stop", "");
 	wait_postgres_shutdown();
 
 	set_sysid();
 
 	print_msg(_("Starting the cluster...\n"));
-	run_pg_ctl("start -w -o \"-c bdr.init_from_basedump=true\"");
+	run_pg_ctl("start -w", "-c bdr.init_from_basedump=true");
 
 	return 0;
 }
@@ -265,6 +269,7 @@ usage(void)
 	printf(_("  %s [OPTION]...\n"), progname);
 	printf(_("\nGeneral options:\n"));
 	printf(_("  -D, --pgdata=DIRECTORY base backup directory\n"));
+	printf(_("  -o                     configuration options passed to pg_ctl's -o\n"));
 	printf(_("\nConnection options:\n"));
 	printf(_("  -d, --dbname=CONNSTR   connection string\n"));
 	printf(_("  -h, --host=HOSTNAME    database server host or socket directory\n"));
@@ -287,7 +292,7 @@ die(const char *fmt,...)
 	PQfinish(remote_conn);
 
 	if (get_pgpid())
-		run_pg_ctl("stop -s");
+		run_pg_ctl("stop -s", "");
 
 	exit(1);
 }
@@ -310,13 +315,14 @@ print_msg(const char *fmt,...)
  * Start pg_ctl with given argument(s) - used to start/stop postgres
  */
 static int
-run_pg_ctl(const char *arg)
+run_pg_ctl(const char *arg, const char *opts)
 {
 	int			 ret;
 	PQExpBuffer  cmd = createPQExpBuffer();
 	char		*exec_path = find_other_exec_or_die(argv0, "pg_ctl", "pg_ctl (PostgreSQL) " PG_VERSION "\n");
 
-	appendPQExpBuffer(cmd, "%s %s -D \"%s\"", exec_path, arg, data_dir);
+	appendPQExpBuffer(cmd, "%s %s -D \"%s\" -o \"%s %s\"", exec_path, arg, data_dir,
+					  opts, config_options);
 
 	ret = system(cmd->data);
 
@@ -340,7 +346,8 @@ get_postgres_guc_value(char *guc, char *defval)
 	char		 buf[8192];
 	char		*ret;
 
-	printfPQExpBuffer(cmd, "%s -D \"%s\" -C \"%s\" 2>\"%s\"", exec_path, data_dir, guc, DEVNULL);
+	printfPQExpBuffer(cmd, "%s -D \"%s\" %s -C \"%s\" 2>\"%s\"",
+					  exec_path, data_dir, config_options, guc, DEVNULL);
 
 	fp = popen(cmd->data, "r");
 	while (fgets(buf, sizeof(buf), fp) != NULL)
