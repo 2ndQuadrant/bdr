@@ -388,46 +388,6 @@ bdr_ensure_ext_installed(PGconn *pgconn, Name bdr_conn_name)
 	}
 }
 
-/*
- * Delete a replication identifier.
- *
- * This should really be in the replication identifier support code in
- * changeset extraction, as DeleteReplicationIdentifier or
- * DropReplicationIdentifier.
- *
- * If no matching identifier is found, takes no action.
- */
-static void
-bdr_delete_replication_identifier(RepNodeId repid)
-{
-	HeapTuple		tuple = NULL;
-	Relation		rel;
-	ItemPointerData	tid;
-
-	/*
-	 * Exclusively lock pg_replication_identifier
-	 */
-	rel = heap_open(ReplicationIdentifierRelationId, RowExclusiveLock);
-
-	/*
-	 * Look it up from the syscache and get a copy we can safely
-	 * modify.
-	 */
-	tuple = GetReplicationInfoByIdentifier(repid, true);
-	if (HeapTupleIsValid(tuple))
-	{
-		tid = tuple->t_self;
-		ReleaseSysCache(tuple);
-		simple_heap_delete(rel, &tid);
-	}
-	heap_close(rel, RowExclusiveLock);
-
-	/*
-	 * We should CHECKPOINT after this to make sure replication
-	 * identifier state gets flushed.
-	 */
-	RequestCheckpoint(CHECKPOINT_IMMEDIATE|CHECKPOINT_FORCE);
-}
 
 static void
 bdr_drop_slot_and_replication_identifier(BdrConnectionConfig *cfg)
@@ -468,7 +428,12 @@ bdr_drop_slot_and_replication_identifier(BdrConnectionConfig *cfg)
 		/* Local replication identifier exists and must be dropped. */
 		elog(DEBUG2, "bdr %s: Deleting local replication identifier %hu",
 			 cfg->dbname, replication_identifier);
-		bdr_delete_replication_identifier(replication_identifier);
+		DropReplicationIdentifier(replication_identifier);
+		/*
+		 * We should CHECKPOINT after this to make sure replication
+		 * identifier state gets flushed.
+		 */
+		RequestCheckpoint(CHECKPOINT_IMMEDIATE|CHECKPOINT_FORCE);
 	}
 	else
 	{
