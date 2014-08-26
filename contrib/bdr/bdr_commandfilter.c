@@ -252,6 +252,42 @@ filter_AlterTableStmt(Node *parsetree,
 				case AT_ValidateConstraint: /* VALIDATE CONSTRAINT */
 					break;
 
+				case AT_AlterConstraint:
+					error_on_persistent_rv(astmt->relation,
+										   "ALTER TABLE ... ALTER CONSTRAINT",
+										   AlterTableGetLockLevel(astmt->cmds),
+										   astmt->missing_ok);
+					break;
+
+				case AT_AddIndexConstraint:
+					error_on_persistent_rv(astmt->relation,
+										   "ALTER TABLE ... ADD CONSTRAINT USING INDEX",
+										   AlterTableGetLockLevel(astmt->cmds),
+										   astmt->missing_ok);
+					break;
+
+				case AT_AlterColumnType:
+					error_on_persistent_rv(astmt->relation,
+										   "ALTER TABLE ... ALTER COLUMN TYPE",
+										   AlterTableGetLockLevel(astmt->cmds),
+										   astmt->missing_ok);
+					break;
+
+				case AT_AlterColumnGenericOptions:
+					error_on_persistent_rv(astmt->relation,
+										   "ALTER TABLE ... ALTER COLUMN OPTIONS",
+										   AlterTableGetLockLevel(astmt->cmds),
+										   astmt->missing_ok);
+					break;
+
+				case AT_AddOids:
+				case AT_DropOids:
+					error_on_persistent_rv(astmt->relation,
+										   "ALTER TABLE ... SET WITH[OUT] OIDS",
+										   AlterTableGetLockLevel(astmt->cmds),
+										   astmt->missing_ok);
+					break;
+
 				case AT_EnableTrig:
 				case AT_EnableAlwaysTrig:
 				case AT_EnableReplicaTrig:
@@ -260,6 +296,48 @@ filter_AlterTableStmt(Node *parsetree,
 				case AT_DisableTrigAll:
 				case AT_EnableTrigUser:
 				case AT_DisableTrigUser:
+					break;
+
+				case AT_EnableRule:
+				case AT_EnableAlwaysRule:
+				case AT_EnableReplicaRule:
+				case AT_DisableRule:
+					error_on_persistent_rv(astmt->relation,
+										   "ALTER TABLE ... ENABLE|DISABLE [ALWAYS|REPLICA] RULE",
+										   AlterTableGetLockLevel(astmt->cmds),
+										   astmt->missing_ok);
+					break;
+
+				case AT_AddInherit:
+				case AT_DropInherit:
+					error_on_persistent_rv(astmt->relation,
+										   "ALTER TABLE ... ADD|DROP INHERIT",
+										   AlterTableGetLockLevel(astmt->cmds),
+										   astmt->missing_ok);
+					break;
+
+				case AT_AddOf:
+				case AT_DropOf:
+					error_on_persistent_rv(astmt->relation,
+										   "ALTER TABLE ... [NOT] OF",
+										   AlterTableGetLockLevel(astmt->cmds),
+										   astmt->missing_ok);
+					break;
+
+				case AT_SetStatistics:
+				case AT_SetOptions:
+				case AT_ResetOptions:
+					error_on_persistent_rv(astmt->relation,
+										   "ALTER TABLE ... ALTER COLUMN SET STATISTICS|(...)",
+										   AlterTableGetLockLevel(astmt->cmds),
+										   astmt->missing_ok);
+					break;
+
+				case AT_GenericOptions:
+					error_on_persistent_rv(astmt->relation,
+										   "ALTER TABLE ... SET (...)",
+										   AlterTableGetLockLevel(astmt->cmds),
+										   astmt->missing_ok);
 					break;
 
 				default:
@@ -271,7 +349,7 @@ filter_AlterTableStmt(Node *parsetree,
 
 	if (hasInvalid)
 		error_on_persistent_rv(astmt->relation,
-							   "ALTER TABLE",
+							   "This variant of ALTER TABLE",
 							   AlterTableGetLockLevel(astmt->cmds),
 							   astmt->missing_ok);
 }
