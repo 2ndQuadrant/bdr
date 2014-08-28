@@ -244,7 +244,7 @@ COMMENT ON TYPE bdr_conflict_resolution IS 'Resolution of a bdr conflict - if a 
 -- This must remain in sync with bdr_log_handled_conflict(...) and
 -- struct BdrApplyConflict
 --
-CREATE SEQUENCE bdr_conflict_history_id_seq;
+CREATE SEQUENCE bdr_conflict_history_id_seq USING local;
 
 CREATE TABLE bdr_conflict_history (
     conflict_id         bigint not null default nextval('bdr_conflict_history_id_seq'),
