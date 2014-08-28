@@ -988,6 +988,8 @@ check_apply_update(RepNodeId local_node_id, TimestampTz local_ts,
 	if (new_tuple)
 		*new_tuple = NULL;
 
+	*log_update = false;
+
 	if (local_node_id == replication_origin_id)
 	{
 		/*
@@ -997,7 +999,6 @@ check_apply_update(RepNodeId local_node_id, TimestampTz local_ts,
 		 * locking guarantees are met.
 		 */
 		*perform_update = true;
-		*log_update = false;
 		return;
 	}
 	else
@@ -1009,7 +1010,6 @@ check_apply_update(RepNodeId local_node_id, TimestampTz local_ts,
 		 * If the caller doesn't provide storage for the conflict handler to
 		 * store a new tuple in, don't fire any conflict triggers.
 		 */
-		*log_update = true;
 
 		if (new_tuple)
 		{
@@ -1021,6 +1021,7 @@ check_apply_update(RepNodeId local_node_id, TimestampTz local_ts,
 			 * - Take no action and fall through to the next handling option
 			 * --------------
 			 */
+
 			TimestampDifference(replication_origin_timestamp, local_ts,
 								&secs, &microsecs);
 
@@ -1032,12 +1033,15 @@ check_apply_update(RepNodeId local_node_id, TimestampTz local_ts,
 
 			if (skip)
 			{
+				*log_update = true;
 				*perform_update = false;
 				*resolution = BdrConflictResolution_ConflictTriggerSkipChange;
 				return;
 			}
 			else if (*new_tuple)
 			{
+				/* Custom conflict handler returned tuple, log it. */
+				*log_update = true;
 				*perform_update = true;
 				*resolution = BdrConflictResolution_ConflictTriggerReturnedTuple;
 				return;
@@ -1061,6 +1065,7 @@ check_apply_update(RepNodeId local_node_id, TimestampTz local_ts,
 		else if (cmp < 0)
 		{
 			/* The most recent update is the local one; retain it */
+			*log_update = true;
 			*perform_update = false;
 			*resolution = BdrConflictResolution_LastUpdateWins_KeepLocal;
 			return;
@@ -1114,9 +1119,14 @@ check_apply_update(RepNodeId local_node_id, TimestampTz local_ts,
 			 * later.
 			 */
 			if (*perform_update)
+			{
 				*resolution = BdrConflictResolution_LastUpdateWins_KeepRemote;
+			}
 			else
+			{
 				*resolution = BdrConflictResolution_LastUpdateWins_KeepLocal;
+				*log_update = true;
+			}
 
 			return;
 		}
@@ -1280,9 +1290,6 @@ do_log_conflict(BdrConflictType conflict_type,
 	 * local tuple is replaced by a newer remote tuple. Most of the time these
 	 * are just noise, but there are times it's useful for debugging and tracing.
 	 */
-	if (apply_remote && !bdr_log_applied_conflicts)
-		return;
-
 
 	bdr_fetch_sysid_via_node_id(local_node_id,
 								&local_sysid, &local_tli,
