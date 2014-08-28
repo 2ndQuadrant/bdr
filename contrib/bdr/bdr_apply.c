@@ -1780,14 +1780,14 @@ bdr_performing_work(void)
 {
 	if (started_transaction)
 	{
-		if (CurrentMemoryContext != TopTransactionContext)
-			MemoryContextSwitchTo(TopTransactionContext);
+		if (CurrentMemoryContext != MessageContext)
+			MemoryContextSwitchTo(MessageContext);
 		return false;
 	}
 
 	started_transaction = true;
 	StartTransactionCommand();
-
+	MemoryContextSwitchTo(MessageContext);
 	return true;
 }
 
