@@ -54,13 +54,10 @@ z              1              baz
 step s1h: SELECT object_schema, object_name, conflict_type, conflict_resolution, local_tuple, remote_tuple, error_sqlstate FROM bdr.bdr_conflict_history ORDER BY conflict_id;
 object_schema  object_name    conflict_type  conflict_resolutionlocal_tuple    remote_tuple   error_sqlstate 
 
-public         test_dmlconflictinsert_insert  last_update_wins_keep_remote{"a":"x","b":1,"c":"foo"}{"a":"y","b":1,"c":"bar"}               
-public         test_dmlconflictinsert_insert  last_update_wins_keep_remote{"a":"y","b":1,"c":"bar"}{"a":"z","b":1,"c":"baz"}               
 step s2h: SELECT object_schema, object_name, conflict_type, conflict_resolution, local_tuple, remote_tuple, error_sqlstate FROM bdr.bdr_conflict_history ORDER BY conflict_id;
 object_schema  object_name    conflict_type  conflict_resolutionlocal_tuple    remote_tuple   error_sqlstate 
 
 public         test_dmlconflictinsert_insert  last_update_wins_keep_local{"a":"y","b":1,"c":"bar"}{"a":"x","b":1,"c":"foo"}               
-public         test_dmlconflictinsert_insert  last_update_wins_keep_remote{"a":"y","b":1,"c":"bar"}{"a":"z","b":1,"c":"baz"}               
 step s3h: SELECT object_schema, object_name, conflict_type, conflict_resolution, local_tuple, remote_tuple, error_sqlstate FROM bdr.bdr_conflict_history ORDER BY conflict_id;
 object_schema  object_name    conflict_type  conflict_resolutionlocal_tuple    remote_tuple   error_sqlstate 
 
