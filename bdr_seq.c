@@ -1263,6 +1263,15 @@ bdr_sequence_setval(PG_FUNCTION_ARGS)
 	Page		page = BufferGetPage(buf);
 	Form_pg_sequence seq = (Form_pg_sequence) GETSTRUCT(seqtuple);
 
+	if (seq->last_value != next ||
+		seq->is_called != iscalled)
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("cannot call setval() on global sequence %s.%s ",
+						get_namespace_name(RelationGetNamespace(seqrel)),
+						RelationGetRelationName(seqrel))));
+
+
 	/* ready to change the on-disk (or really, in-buffer) tuple */
 	START_CRIT_SECTION();
 
