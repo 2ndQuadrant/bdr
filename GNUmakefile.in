@@ -76,7 +76,7 @@ GNUmakefile: GNUmakefile.in $(top_builddir)/config.status
 
 ##########################################################################
 
-distdir	= postgresql-bdr-$(VERSION)
+distdir	?= postgresql-bdr-$(VERSION)
 dummy	= =install=
 garbage = =*  "#"*  ."#"*  *~*  *.orig  *.rej  core  postgresql-*
 
