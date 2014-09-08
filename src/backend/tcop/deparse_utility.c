@@ -4737,6 +4737,7 @@ deparse_parsenode_cmd(StashedCommand *cmd)
 			break;
 
 		case T_AlterTableStmt:
+		case T_AlterTableMoveAllStmt:
 			command = deparse_AlterTableStmt(cmd);
 			break;
 

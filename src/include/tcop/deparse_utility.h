@@ -46,7 +46,6 @@ typedef struct StashedCommand
 {
 	StashedCommandType type;
 	bool		in_extension;
-	List	   *subcmds;	/* list of StashedATSubcmd */
 	Node	   *parsetree;
 
 	union

@@ -506,10 +506,6 @@ standard_ProcessUtility(Node *parsetree,
 			AlterTableSpaceOptions((AlterTableSpaceOptionsStmt *) parsetree);
 			break;
 
-		case T_AlterTableMoveAllStmt:
-			AlterTableMoveAll((AlterTableMoveAllStmt *) parsetree);
-			break;
-
 		case T_TruncateStmt:
 			ExecuteTruncate((TruncateStmt *) parsetree);
 			break;
@@ -1417,6 +1413,10 @@ ProcessUtilitySlow(Node *parsetree,
 				EventTriggerStashCommand(objectId, 0,
 										 ((AlterOwnerStmt *) parsetree)->objectType,
 										 parsetree);
+				break;
+
+			case T_AlterTableMoveAllStmt:
+				AlterTableMoveAll((AlterTableMoveAllStmt *) parsetree);
 				break;
 
 			case T_CommentStmt:
