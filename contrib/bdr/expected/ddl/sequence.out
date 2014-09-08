@@ -23,9 +23,9 @@ SELECT relname, relkind FROM pg_class WHERE relname = 'test_test_id_seq';
 (1 row)
 
 \d+ test_test_id_seq
-            Sequence "public.test_test_id_seq"
-    Column     |  Type   |        Value        | Storage  
----------------+---------+---------------------+----------
+           Sequence "public.test_test_id_seq"
+    Column     |  Type   |        Value        | Storage 
+---------------+---------+---------------------+---------
  sequence_name | name    | test_test_id_seq    | plain
  last_value    | bigint  | 1                   | plain
  start_value   | bigint  | 1                   | plain
@@ -36,7 +36,6 @@ SELECT relname, relkind FROM pg_class WHERE relname = 'test_test_id_seq';
  log_cnt       | bigint  | 0                   | plain
  is_cycled     | boolean | f                   | plain
  is_called     | boolean | f                   | plain
- amdata        | bytea   |                     | extended
 Access Method: local
 Owned by: public.test.test_id
 
@@ -117,9 +116,9 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
 (2 rows)
 
 \d+ test_seq
-                Sequence "public.test_seq"
-    Column     |  Type   |        Value        | Storage  
----------------+---------+---------------------+----------
+               Sequence "public.test_seq"
+    Column     |  Type   |        Value        | Storage 
+---------------+---------+---------------------+---------
  sequence_name | name    | test_seq            | plain
  last_value    | bigint  | 1                   | plain
  start_value   | bigint  | 1                   | plain
@@ -130,14 +129,13 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
  log_cnt       | bigint  | 0                   | plain
  is_cycled     | boolean | f                   | plain
  is_called     | boolean | f                   | plain
- amdata        | bytea   |                     | extended
 Access Method: bdr
 
 \c regression
 \d+ test_seq
-                Sequence "public.test_seq"
-    Column     |  Type   |        Value        | Storage  
----------------+---------+---------------------+----------
+               Sequence "public.test_seq"
+    Column     |  Type   |        Value        | Storage 
+---------------+---------+---------------------+---------
  sequence_name | name    | test_seq            | plain
  last_value    | bigint  | 1                   | plain
  start_value   | bigint  | 1                   | plain
@@ -148,7 +146,6 @@ Access Method: bdr
  log_cnt       | bigint  | 0                   | plain
  is_cycled     | boolean | f                   | plain
  is_called     | boolean | f                   | plain
- amdata        | bytea   |                     | extended
 Access Method: bdr
 
 ALTER SEQUENCE test_seq owned by test_tbl_serial_combined_pk.val;
@@ -161,9 +158,9 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
 (2 rows)
 
 \d+ test_seq
-                Sequence "public.test_seq"
-    Column     |  Type   |        Value        | Storage  
----------------+---------+---------------------+----------
+               Sequence "public.test_seq"
+    Column     |  Type   |        Value        | Storage 
+---------------+---------+---------------------+---------
  sequence_name | name    | test_seq            | plain
  last_value    | bigint  | 1                   | plain
  start_value   | bigint  | 1                   | plain
@@ -174,14 +171,13 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
  log_cnt       | bigint  | 0                   | plain
  is_cycled     | boolean | f                   | plain
  is_called     | boolean | f                   | plain
- amdata        | bytea   |                     | extended
 Access Method: bdr
 
 \c postgres
 \d+ test_seq
-                Sequence "public.test_seq"
-    Column     |  Type   |        Value        | Storage  
----------------+---------+---------------------+----------
+               Sequence "public.test_seq"
+    Column     |  Type   |        Value        | Storage 
+---------------+---------+---------------------+---------
  sequence_name | name    | test_seq            | plain
  last_value    | bigint  | 1                   | plain
  start_value   | bigint  | 1                   | plain
@@ -192,7 +188,6 @@ Access Method: bdr
  log_cnt       | bigint  | 0                   | plain
  is_cycled     | boolean | f                   | plain
  is_called     | boolean | f                   | plain
- amdata        | bytea   |                     | extended
 Access Method: bdr
 
 -- these should fail
@@ -244,9 +239,9 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
 (2 rows)
 
 \d+ test_seq
-                Sequence "public.test_seq"
-    Column     |  Type   |        Value        | Storage  
----------------+---------+---------------------+----------
+               Sequence "public.test_seq"
+    Column     |  Type   |        Value        | Storage 
+---------------+---------+---------------------+---------
  sequence_name | name    | test_seq            | plain
  last_value    | bigint  | 1                   | plain
  start_value   | bigint  | 1                   | plain
@@ -257,14 +252,13 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
  log_cnt       | bigint  | 0                   | plain
  is_cycled     | boolean | f                   | plain
  is_called     | boolean | f                   | plain
- amdata        | bytea   |                     | extended
 Access Method: local
 
 \c postgres
 \d+ test_seq
-                Sequence "public.test_seq"
-    Column     |  Type   |        Value        | Storage  
----------------+---------+---------------------+----------
+               Sequence "public.test_seq"
+    Column     |  Type   |        Value        | Storage 
+---------------+---------+---------------------+---------
  sequence_name | name    | test_seq            | plain
  last_value    | bigint  | 1                   | plain
  start_value   | bigint  | 1                   | plain
@@ -275,7 +269,6 @@ Access Method: local
  log_cnt       | bigint  | 0                   | plain
  is_cycled     | boolean | f                   | plain
  is_called     | boolean | f                   | plain
- amdata        | bytea   |                     | extended
 Access Method: local
 
 ALTER SEQUENCE test_seq increment by 10;
@@ -295,8 +288,8 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
 \d+ test_seq
 \d+ renamed_test_seq
       Sequence "public.renamed_test_seq"
-    Column     |  Type   |  Value   | Storage  
----------------+---------+----------+----------
+    Column     |  Type   |  Value   | Storage 
+---------------+---------+----------+---------
  sequence_name | name    | test_seq | plain
  last_value    | bigint  | 1        | plain
  start_value   | bigint  | 1        | plain
@@ -307,15 +300,14 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
  log_cnt       | bigint  | 0        | plain
  is_cycled     | boolean | t        | plain
  is_called     | boolean | f        | plain
- amdata        | bytea   |          | extended
 Access Method: local
 
 \c regression
 \d+ test_seq
 \d+ renamed_test_seq
       Sequence "public.renamed_test_seq"
-    Column     |  Type   |  Value   | Storage  
----------------+---------+----------+----------
+    Column     |  Type   |  Value   | Storage 
+---------------+---------+----------+---------
  sequence_name | name    | test_seq | plain
  last_value    | bigint  | 1        | plain
  start_value   | bigint  | 1        | plain
@@ -326,7 +318,6 @@ Access Method: local
  log_cnt       | bigint  | 0        | plain
  is_cycled     | boolean | t        | plain
  is_called     | boolean | f        | plain
- amdata        | bytea   |          | extended
 Access Method: local
 
 ALTER SEQUENCE renamed_test_seq USING bdr;
@@ -339,8 +330,8 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
 
 \d+ renamed_test_seq;
       Sequence "public.renamed_test_seq"
-    Column     |  Type   |  Value   | Storage  
----------------+---------+----------+----------
+    Column     |  Type   |  Value   | Storage 
+---------------+---------+----------+---------
  sequence_name | name    | test_seq | plain
  last_value    | bigint  | 1        | plain
  start_value   | bigint  | 1        | plain
@@ -351,14 +342,13 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
  log_cnt       | bigint  | 0        | plain
  is_cycled     | boolean | t        | plain
  is_called     | boolean | f        | plain
- amdata        | bytea   |          | extended
 Access Method: bdr
 
 \c postgres
 \d+ renamed_test_seq
       Sequence "public.renamed_test_seq"
-    Column     |  Type   |  Value   | Storage  
----------------+---------+----------+----------
+    Column     |  Type   |  Value   | Storage 
+---------------+---------+----------+---------
  sequence_name | name    | test_seq | plain
  last_value    | bigint  | 1        | plain
  start_value   | bigint  | 1        | plain
@@ -369,7 +359,6 @@ Access Method: bdr
  log_cnt       | bigint  | 0        | plain
  is_cycled     | boolean | t        | plain
  is_called     | boolean | f        | plain
- amdata        | bytea   |          | extended
 Access Method: bdr
 
 DROP SEQUENCE renamed_test_seq;
@@ -383,3 +372,63 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
 \d+ renamed_test_seq;
 \c regression
 \d+ renamed_test_seq
+CREATE SEQUENCE test_seq;
+CREATE TABLE test_tbl (a int DEFAULT nextval('test_seq'));
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\d+ test_tbl
+                                     Table "public.test_tbl"
+ Column |  Type   |               Modifiers               | Storage | Stats target | Description 
+--------+---------+---------------------------------------+---------+--------------+-------------
+ a      | integer | default nextval('test_seq'::regclass) | plain   |              | 
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+\c postgres
+\d+ test_tbl
+                                     Table "public.test_tbl"
+ Column |  Type   |               Modifiers               | Storage | Stats target | Description 
+--------+---------+---------------------------------------+---------+--------------+-------------
+ a      | integer | default nextval('test_seq'::regclass) | plain   |              | 
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+DROP SEQUENCE test_seq CASCADE;
+NOTICE:  drop cascades to default for table test_tbl column a
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\d+ test_tbl
+                       Table "public.test_tbl"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+\c regression
+\d+ test_tbl
+                       Table "public.test_tbl"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+
+DROP TABLE test_tbl;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
