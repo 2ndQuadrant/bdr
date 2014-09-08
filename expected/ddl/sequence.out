@@ -329,6 +329,49 @@ Access Method: local
  amdata        | bytea   |          | extended
 Access Method: local
 
+ALTER SEQUENCE renamed_test_seq USING bdr;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\d+ renamed_test_seq;
+      Sequence "public.renamed_test_seq"
+    Column     |  Type   |  Value   | Storage  
+---------------+---------+----------+----------
+ sequence_name | name    | test_seq | plain
+ last_value    | bigint  | 1        | plain
+ start_value   | bigint  | 1        | plain
+ increment_by  | bigint  | 10       | plain
+ max_value     | bigint  | 1000000  | plain
+ min_value     | bigint  | 0        | plain
+ cache_value   | bigint  | 10       | plain
+ log_cnt       | bigint  | 0        | plain
+ is_cycled     | boolean | t        | plain
+ is_called     | boolean | f        | plain
+ amdata        | bytea   |          | extended
+Access Method: bdr
+
+\c postgres
+\d+ renamed_test_seq
+      Sequence "public.renamed_test_seq"
+    Column     |  Type   |  Value   | Storage  
+---------------+---------+----------+----------
+ sequence_name | name    | test_seq | plain
+ last_value    | bigint  | 1        | plain
+ start_value   | bigint  | 1        | plain
+ increment_by  | bigint  | 10       | plain
+ max_value     | bigint  | 1000000  | plain
+ min_value     | bigint  | 0        | plain
+ cache_value   | bigint  | 10       | plain
+ log_cnt       | bigint  | 0        | plain
+ is_cycled     | boolean | t        | plain
+ is_called     | boolean | f        | plain
+ amdata        | bytea   |          | extended
+Access Method: bdr
+
 DROP SEQUENCE renamed_test_seq;
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
  pg_xlog_wait_remote_apply 
@@ -338,5 +381,5 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
 (2 rows)
 
 \d+ renamed_test_seq;
-\c postgres
+\c regression
 \d+ renamed_test_seq
