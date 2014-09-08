@@ -20,6 +20,10 @@ pg_xlog_wait_remote_apply
 
                
                
+               
+               
+               
+               
 step n2reada: SELECT a, b FROM tsta ORDER BY a;
 a              b              
 
@@ -46,6 +50,10 @@ pg_xlog_wait_remote_apply
 
                
                
+               
+               
+               
+               
 step n3reada: SELECT a, b FROM tsta ORDER BY a;
 a              b              
 
@@ -58,6 +66,10 @@ step n3s1:
 step n3sync: SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 pg_xlog_wait_remote_apply
 
+               
+               
+               
+               
                
                
 step n1readb: SELECT a, b FROM tstb ORDER BY a;
@@ -74,6 +86,10 @@ pg_xlog_wait_remote_apply
 
                
                
+               
+               
+               
+               
 step n2readc: SELECT a, b FROM tstc ORDER BY a;
 a              b              
 
@@ -87,6 +103,10 @@ step n2s2:
 step n2sync: SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 pg_xlog_wait_remote_apply
 
+               
+               
+               
+               
                
                
 step n3reada: SELECT a, b FROM tsta ORDER BY a;
@@ -106,6 +126,10 @@ step n3s2:
 step n3sync: SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 pg_xlog_wait_remote_apply
 
+               
+               
+               
+               
                
                
 step n1readb: SELECT a, b FROM tstb ORDER BY a;

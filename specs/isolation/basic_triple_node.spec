@@ -1,6 +1,6 @@
-conninfo "node1" "port=15432 dbname=test_db"
-conninfo "node2" "port=15433 dbname=test_db"
-conninfo "node3" "port=15434 dbname=test_db"
+conninfo "node1" "dbname=node1"
+conninfo "node2" "dbname=node2"
+conninfo "node3" "dbname=node3"
 
 setup
 {

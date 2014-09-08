@@ -7,6 +7,10 @@ pg_xlog_wait_remote_apply
 
                
                
+               
+               
+               
+               
 step n2read: SELECT * FROM tst ORDER BY a;
 a              b              
 
@@ -18,6 +22,10 @@ step n1s2: ALTER TABLE tst ADD COLUMN c TEXT;
 step n1sync: SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 pg_xlog_wait_remote_apply
 
+               
+               
+               
+               
                
                
 step n2read: SELECT * FROM tst ORDER BY a;
@@ -32,6 +40,10 @@ step n1s4: UPDATE tst set c = 'updated' WHERE c IS NULL;
 step n1sync: SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 pg_xlog_wait_remote_apply
 
+               
+               
+               
+               
                
                
 step n2read: SELECT * FROM tst ORDER BY a;
@@ -49,6 +61,10 @@ pg_xlog_wait_remote_apply
 
                
                
+               
+               
+               
+               
 step n2read: SELECT * FROM tst ORDER BY a;
 a              b              c              
 
@@ -64,6 +80,10 @@ pg_xlog_wait_remote_apply
 
                
                
+               
+               
+               
+               
 step n2read: SELECT * FROM tst ORDER BY a;
 a              b              c              
 
@@ -77,10 +97,14 @@ ERROR:  ALTER TABLE ... ADD COLUMN ... DEFAULT may only affect UNLOGGED or TEMPO
 step n1s9: BEGIN;
 step n1s10: ALTER TABLE tst DROP COLUMN c;
 step n2s1: UPDATE tst SET c = 'changed' WHERE a = 1;
-ERROR:  database is locked against writes
+ERROR:  Database is locked against DDL operations
 step n2sync: SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 pg_xlog_wait_remote_apply
 
+               
+               
+               
+               
                
                
 step n1s11: COMMIT;
@@ -89,9 +113,17 @@ pg_xlog_wait_remote_apply
 
                
                
+               
+               
+               
+               
 step n2sync: SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 pg_xlog_wait_remote_apply
 
+               
+               
+               
+               
                
                
 step n2read: SELECT * FROM tst ORDER BY a;
@@ -114,6 +146,10 @@ step n2s2: UPDATE tst SET b = 'changed' WHERE a = 1;
 step n2sync: SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 pg_xlog_wait_remote_apply
 
+               
+               
+               
+               
                
                
 step n1read: SELECT * FROM tst ORDER BY a;
