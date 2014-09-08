@@ -690,10 +690,6 @@ bdr_commandfilter(Node *parsetree,
 			error_unsupported_command(CreateCommandTag(parsetree));
 			break;
 
-		case T_AlterTableSpaceMoveStmt:
-			error_unsupported_command("ALTER TABLESPACE ... MOVE");
-			break;
-
 		case T_AlterOwnerStmt:
 			/* local only for now*/
 			break;
