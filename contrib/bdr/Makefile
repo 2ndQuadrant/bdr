@@ -111,7 +111,10 @@ ISOLATIONCHECKS=\
 	isolation/dmlconflict_ii \
 	isolation/dmlconflict_uu \
 	isolation/dmlconflict_ud \
-	isolation/dmlconflict_dd
+	isolation/dmlconflict_dd \
+	isolation/alter_table \
+	isolation/basic_triple_node \
+	isolation/update_pk_change_conflict
 
 isolationcheck: all | submake-isolation submake-btree_gist
 	[ -e pg_hba.conf ] || ln -s $(top_srcdir)/contrib/bdr/pg_hba.conf .
