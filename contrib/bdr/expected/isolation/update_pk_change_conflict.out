@@ -6,10 +6,18 @@ pg_xlog_wait_remote_apply
 
                
                
+               
+               
+               
+               
 step n1s1: UPDATE tst SET a = 2;
 step n1sync: select pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 pg_xlog_wait_remote_apply
 
+               
+               
+               
+               
                
                
 step n3read: SELECT * FROM tst;
@@ -20,6 +28,10 @@ step n2s1: UPDATE tst SET a = 3;
 step n2sync: select pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 pg_xlog_wait_remote_apply
 
+               
+               
+               
+               
                
                
 step n3read: SELECT * FROM tst;
@@ -37,9 +49,17 @@ pg_xlog_wait_remote_apply
 
                
                
+               
+               
+               
+               
 step n2sync: select pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 pg_xlog_wait_remote_apply
 
+               
+               
+               
+               
                
                
 step n1read: SELECT * FROM tst;
