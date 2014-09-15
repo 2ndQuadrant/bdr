@@ -295,7 +295,6 @@ tuple_to_stringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple)
 	}
 }
 
-
 static void
 row_to_stringinfo(StringInfo s, Datum composite)
 {
@@ -316,6 +315,7 @@ row_to_stringinfo(StringInfo s, Datum composite)
 	/* Build a temporary HeapTuple control structure */
 	tmptup.t_len = HeapTupleHeaderGetDatumLength(td);
 	tmptup.t_data = td;
+
 	tuple = &tmptup;
 
 	/* Print the tuple to stringinfo */

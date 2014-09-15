@@ -123,6 +123,12 @@ SELECT pg_catalog.pg_extension_config_dump('bdr_votes', '');
 
 CREATE INDEX bdr_votes__by_voter ON bdr.bdr_votes(voter_sysid, voter_tlid, voter_dboid, voter_riname);
 
+-- register bdr am if seqam is supported
+DO $DO$BEGIN
+IF right(bdr_version(), 4) = '-udr' THEN
+    RETURN;
+END IF;
+
 CREATE OR REPLACE FUNCTION bdr_sequence_alloc(INTERNAL)
 RETURNS INTERNAL
 LANGUAGE C
@@ -159,6 +165,8 @@ VALUES (
     'bdr_sequence_setval',
     'bdr_sequence_options'
 );
+END;$DO$;
+
 
 CREATE TYPE bdr_conflict_type AS ENUM
 (
@@ -221,6 +229,7 @@ STRICT
 AS 'MODULE_PATHNAME'
 ;
 
+
 CREATE VIEW bdr_list_conflict_handlers(ch_name, ch_type, ch_reloid, ch_fun) AS
     SELECT ch_name, ch_type, ch_reloid, ch_fun, ch_timeframe
     FROM bdr.bdr_conflict_handlers
@@ -245,7 +254,15 @@ COMMENT ON TYPE bdr_conflict_resolution IS 'Resolution of a bdr conflict - if a 
 -- This must remain in sync with bdr_log_handled_conflict(...) and
 -- struct BdrApplyConflict
 --
-CREATE SEQUENCE bdr_conflict_history_id_seq USING local;
+
+-- when seqam is present, make sure the sequence is using local AM
+DO $DO$BEGIN
+IF right(bdr_version(), 4) = '-udr' THEN
+    CREATE SEQUENCE bdr_conflict_history_id_seq;
+ELSE
+    EXECUTE 'CREATE SEQUENCE bdr_conflict_history_id_seq USING local';
+END IF;
+END;$DO$;
 
 CREATE TABLE bdr_conflict_history (
     conflict_id         bigint not null default nextval('bdr_conflict_history_id_seq'),
@@ -393,11 +410,18 @@ BEGIN
 END;
 $function$;
 
+DO $DO$BEGIN
+IF right(bdr_version(), 4) = '-udr' THEN
+    RETURN;
+END IF;
+
 CREATE OR REPLACE FUNCTION bdr.bdr_queue_ddl_commands()
 RETURNS event_trigger
 LANGUAGE C
 AS 'MODULE_PATHNAME'
 ;
+
+END;$DO$;
 
 -- This type is tailored to use as input to get_object_address
 CREATE TYPE bdr.dropped_object AS (
@@ -472,6 +496,22 @@ LANGUAGE C
 AS 'MODULE_PATHNAME'
 ;
 
+DO $DO$BEGIN
+IF right(bdr_version(), 4) = '-udr' THEN
+
+CREATE TABLE bdr_replication_identifier (
+    riident oid NOT NULL,
+    riname text,
+    riremote_lsn pg_lsn,
+    rilocal_lsn pg_lsn
+);
+
+CREATE UNIQUE INDEX bdr_replication_identifier_riiident_index ON bdr_replication_identifier(riident);
+CREATE UNIQUE INDEX pg_replication_identifier_riname_index ON bdr_replication_identifier(riname varchar_pattern_ops);
+
+END IF;
+END;$DO$;
+
 ---
 --- Funtions for manipulating/displaying replications sets
 ---
@@ -531,9 +571,21 @@ BEGIN
 END;
 $$;
 
+
+---
+--- this should always be last to avoid replicating our internal schema
+---
+
+DO $DO$BEGIN
+IF right(bdr_version(), 4) = '-udr' THEN
+    RETURN;
+END IF;
+
 CREATE EVENT TRIGGER bdr_queue_ddl_commands
 ON ddl_command_end
 EXECUTE PROCEDURE bdr.bdr_queue_ddl_commands();
+
+END;$DO$;
 
 RESET bdr.permit_unsafe_ddl_commands;
 RESET bdr.skip_ddl_replication;

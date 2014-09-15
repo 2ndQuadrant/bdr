@@ -27,7 +27,7 @@
 
 #include "executor/spi.h"
 
-#include "replication/replication_identifier.h"
+#include "bdr_replication_identifier.h"
 
 #include "utils/builtins.h"
 #include "utils/guc.h"

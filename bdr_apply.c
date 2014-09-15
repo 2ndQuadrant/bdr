@@ -22,7 +22,9 @@
 #include "miscadmin.h"
 #include "pgstat.h"
 
+#ifdef BDR_MULTIMASTER
 #include "access/committs.h"
+#endif
 #include "access/htup_details.h"
 #include "access/relscan.h"
 #include "access/xact.h"
@@ -37,7 +39,7 @@
 #include "parser/parse_type.h"
 
 #include "replication/logical.h"
-#include "replication/replication_identifier.h"
+#include "bdr_replication_identifier.h"
 
 #include "storage/ipc.h"
 #include "storage/lmgr.h"
@@ -61,6 +63,10 @@
 #define VERBOSE_DELETE
 #define VERBOSE_UPDATE
 */
+
+#ifndef BDR_MULTIMASTER
+bool bdr_conflict_default_apply = false;
+#endif
 
 /* Relation oid cache; initialized then left unchanged */
 Oid			QueuedDDLCommandsRelid = InvalidOid;
@@ -110,11 +116,14 @@ static void check_apply_update(BdrConflictType conflict_type,
 							   HeapTuple remote_tuple, HeapTuple *new_tuple,
 							   bool *perform_update, bool *log_update,
 							   BdrConflictResolution *resolution);
+
 static void do_apply_update(BDRRelation *rel, EState *estate, TupleTableSlot *oldslot,
 				TupleTableSlot *newslot);
 
 static void check_sequencer_wakeup(BDRRelation *rel);
+#ifdef BDR_MULTIMASTER
 static HeapTuple process_queued_drop(HeapTuple cmdtup);
+#endif
 static void process_queued_ddl_command(HeapTuple cmdtup, bool tx_just_started);
 static bool bdr_performing_work(void);
 
@@ -123,7 +132,9 @@ static void process_remote_commit(StringInfo s);
 static void process_remote_insert(StringInfo s);
 static void process_remote_update(StringInfo s);
 static void process_remote_delete(StringInfo s);
+#ifdef BDR_MULTIMASTER
 static void process_remote_message(StringInfo s);
+#endif
 
 static void get_local_tuple_origin(HeapTuple tuple,
 								   TimestampTz *commit_ts,
@@ -270,6 +281,9 @@ process_remote_commit(StringInfo s)
 	TimestampTz		committime;
 	TimestampTz		end_lsn;
 	int				flags;
+#ifndef BDR_MULTIMASTER
+	XLogRecPtr XactLastCommitEnd;
+#endif
 
 	Assert(bdr_apply_worker != NULL);
 
@@ -290,6 +304,10 @@ process_remote_commit(StringInfo s)
 
 	Assert(commit_lsn == replication_origin_lsn);
 	Assert(committime == replication_origin_timestamp);
+
+#ifndef BDR_MULTIMASTER
+	XactLastCommitEnd = GetXLogInsertRecPtr();
+#endif
 
 	if (started_transaction)
 	{
@@ -321,6 +339,7 @@ process_remote_commit(StringInfo s)
 	 */
 	AdvanceCachedReplicationIdentifier(end_lsn, XactLastCommitEnd);
 
+#ifdef BDR_MULTIMASTER
 	/*
 	 * If we're in catchup mode, see if the commit is relayed from elsewhere
 	 * and advance the appropriate slot.
@@ -336,6 +355,7 @@ process_remote_commit(StringInfo s)
 		AdvanceReplicationIdentifier(remote_origin_id, remote_origin_lsn,
 									 XactLastCommitEnd);
 	}
+#endif
 
 	CurrentResourceOwner = bdr_saved_resowner;
 
@@ -431,6 +451,7 @@ process_remote_insert(StringInfo s)
 	elog(DEBUG1, "INSERT:%s", o.data);
 	resetStringInfo(&o);
 #endif
+
 
 	/*
 	 * Search for conflicting tuples.
@@ -552,9 +573,7 @@ process_remote_insert(StringInfo s)
 	else
 	{
 		simple_heap_insert(rel->rel, newslot->tts_tuple);
-		/* races will be resolved by abort/retry */
 		UserTableUpdateOpenIndexes(estate, newslot);
-
 		bdr_count_insert();
 	}
 
@@ -590,7 +609,13 @@ process_remote_insert(StringInfo s)
 		if (relid == QueuedDDLCommandsRelid)
 			process_queued_ddl_command(ht, started_tx);
 		if (relid == QueuedDropsRelid)
+#ifdef BDR_MULTIMASTER
 			process_queued_drop(ht);
+#else
+			ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 errmsg("drop queue is not supported by this build")));
+#endif
 
 		qrel = heap_open(QueuedDDLCommandsRelid, RowExclusiveLock);
 
@@ -979,6 +1004,7 @@ process_remote_delete(StringInfo s)
 static void
 get_local_tuple_origin(HeapTuple tuple, TimestampTz *commit_ts, RepNodeId *node_id)
 {
+#ifdef BDR_MULTIMASTER
 	TransactionId	xmin;
 	CommitExtraData	node_id_raw;
 
@@ -987,8 +1013,13 @@ get_local_tuple_origin(HeapTuple tuple, TimestampTz *commit_ts, RepNodeId *node_
 
 	TransactionIdGetCommitTsData(xmin, commit_ts, &node_id_raw);
 	*node_id = node_id_raw;
+#else
+	TIMESTAMP_NOBEGIN(*commit_ts);
+	*node_id = InvalidRepNodeId;
+#endif
 }
 
+#ifdef BDR_MULTIMASTER
 /*
  * Last update wins conflict handling.
  */
@@ -1077,6 +1108,21 @@ bdr_conflict_last_update_wins(RepNodeId local_node_id,
 		}
 	}
 }
+
+#else
+
+static void
+bdr_conflict_default_apply_resolve(bool *perform_update, bool *log_update,
+						   BdrConflictResolution *resolution)
+{
+	*perform_update = bdr_conflict_default_apply;
+	/* For UDR conflicts are never expected so they should always be logged. */
+	*log_update = true;
+	*resolution = bdr_conflict_default_apply ?
+						BdrConflictResolution_DefaultApplyChange :
+						BdrConflictResolution_DefaultSkipChange;
+}
+#endif //BDR_MULTIMASTER
 
 /*
  * Check whether a remote insert or update conflicts with the local row
@@ -1175,6 +1221,7 @@ check_apply_update(BdrConflictType conflict_type,
 		 */
 	}
 
+#ifdef BDR_MULTIMASTER
 	/* Use last update wins conflict handling. */
 	bdr_conflict_last_update_wins(local_node_id,
 								  replication_origin_id,
@@ -1182,8 +1229,13 @@ check_apply_update(BdrConflictType conflict_type,
 								  replication_origin_timestamp,
 								  perform_update, log_update,
 								  resolution);
+#else
+	bdr_conflict_default_apply_resolve(perform_update, log_update,
+									   resolution);
+#endif
 }
 
+#ifdef BDR_MULTIMASTER
 static void
 process_remote_message(StringInfo s)
 {
@@ -1303,7 +1355,7 @@ process_remote_message(StringInfo s)
 	if (!transactional)
 		AdvanceCachedReplicationIdentifier(lsn, InvalidXLogRecPtr);
 }
-
+#endif // BDR_MULTIMASTER
 
 static void
 do_apply_update(BDRRelation *rel, EState *estate, TupleTableSlot *oldslot,
@@ -1313,7 +1365,6 @@ do_apply_update(BDRRelation *rel, EState *estate, TupleTableSlot *oldslot,
 	UserTableUpdateIndexes(estate, newslot);
 	bdr_count_update();
 }
-
 
 static void
 queued_command_error_callback(void *arg)
@@ -1452,6 +1503,7 @@ process_queued_ddl_command(HeapTuple cmdtup, bool tx_just_started)
 }
 
 
+#ifdef BDR_MULTIMASTER
 /*
  * ugly hack: Copied struct from dependency.c - there doesn't seem to be a
  * supported way of iterating ObjectAddresses otherwise.
@@ -1705,6 +1757,7 @@ process_queued_drop(HeapTuple cmdtup)
 
 	return newtup;
 }
+#endif // BDR_MULTIMASTER
 
 static bool
 bdr_performing_work(void)
@@ -1725,12 +1778,14 @@ bdr_performing_work(void)
 static void
 check_sequencer_wakeup(BDRRelation *rel)
 {
+#ifdef BDR_MULTIMASTER
 	Oid			reloid = RelationGetRelid(rel->rel);
 
 	if (reloid == BdrSequenceValuesRelid ||
 		reloid == BdrSequenceElectionsRelid ||
 		reloid == BdrVotesRelid)
 		bdr_schedule_eoxact_sequencer_wakeup();
+#endif //BDR_MULTIMASTER
 }
 
 void
@@ -1890,9 +1945,11 @@ bdr_process_remote_action(StringInfo s)
 		case 'D':
 			process_remote_delete(s);
 			break;
+#ifdef BDR_MULTIMASTER
 		case 'M':
 			process_remote_message(s);
 			break;
+#endif
 		default:
 			elog(ERROR, "unknown action of type %c", action);
 	}

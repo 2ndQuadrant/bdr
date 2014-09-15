@@ -20,6 +20,8 @@
 
 #include "bdr_internal.h"
 
+#include "bdr_replication_identifier.h"
+
 #include "bdr_version.h"
 
 /* Right now replication_name isn't used; make it easily found for later */
@@ -238,7 +240,11 @@ extern char *bdr_temp_dump_directory;
 extern bool bdr_init_from_basedump;
 extern bool bdr_log_conflicts_to_table;
 extern bool bdr_conflict_logging_include_tuples;
+#ifdef BDR_MULTIMASTER
 extern bool bdr_permit_unsafe_commands;
+#else
+extern bool bdr_conflict_default_apply;
+#endif
 
 /*
  * Header for the shared memory segment ref'd by the BdrWorkerCtl ptr,
@@ -275,6 +281,8 @@ extern Oid	BdrLocksRelid;
 extern Oid	BdrLocksByOwnerRelid;
 
 extern Oid  BdrReplicationSetConfigRelid;
+
+extern Oid bdr_lookup_relid(const char *relname, Oid schema_oid);
 
 /* apply support */
 extern void bdr_process_remote_action(StringInfo s);
@@ -350,6 +358,7 @@ extern void bdr_conflict_log_table(BdrApplyConflict *conflict);
 extern void tuple_to_stringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple);
 
 /* sequence support */
+#ifdef BDR_MULTIMASTER
 extern void bdr_sequencer_shmem_init(int nnodes, int sequencers);
 extern void bdr_sequencer_init(int seq_slot, Size nnodes);
 extern bool bdr_sequencer_vote(void);
@@ -363,6 +372,7 @@ extern void bdr_schedule_eoxact_sequencer_wakeup(void);
 extern Datum bdr_sequence_alloc(PG_FUNCTION_ARGS);
 extern Datum bdr_sequence_setval(PG_FUNCTION_ARGS);
 extern Datum bdr_sequence_options(PG_FUNCTION_ARGS);
+#endif
 
 /* statistic functions */
 extern void bdr_count_shmem_init(size_t nnodes);
@@ -420,6 +430,7 @@ extern Oid GetSysCacheOidError(int cacheId, Datum key1, Datum key2, Datum key3,
 
 /* helpers shared by multiple worker types */
 extern struct pg_conn* bdr_connect(char *conninfo_repl,
+								   char *conninfo_db,
 								   char* remote_ident,
 								   size_t remote_ident_length,
 								   NameData* slot_name,

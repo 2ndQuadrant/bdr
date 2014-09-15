@@ -310,7 +310,7 @@ retry:
 	return found;
 }
 
-
+#ifdef BDR_MULTIMASTER
 /*
  * bdr_queue_ddl_commands
  * 		ddl_command_end event triggger handler for BDR
@@ -452,6 +452,7 @@ bdr_queue_ddl_commands(PG_FUNCTION_ARGS)
 
 	PG_RETURN_VOID();
 }
+#endif //BDR_MULTIMASTER
 
 void
 bdr_executor_always_allow_writes(bool always_allow)
@@ -485,7 +486,9 @@ BdrExecutorStart(QueryDesc *queryDesc, int eflags)
 	if (!performs_writes)
 		goto done;
 
+#ifdef BDR_MULTIMASTER
 	bdr_locks_check_query();
+#endif
 
 	/* INSERTs are always ok beyond this point */
 	if (queryDesc->operation == CMD_INSERT)

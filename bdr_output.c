@@ -90,10 +90,12 @@ static void pg_decode_commit_txn(LogicalDecodingContext *ctx,
 static void pg_decode_change(LogicalDecodingContext *ctx,
 				 ReorderBufferTXN *txn, Relation rel,
 				 ReorderBufferChange *change);
+#ifdef BDR_MULTIMASTER
 static void pg_decode_message(LogicalDecodingContext *ctx,
 							  ReorderBufferTXN *txn, XLogRecPtr message_lsn,
 							  bool transactional, Size sz,
 							  const char *message);
+#endif
 
 /* private prototypes */
 static void write_rel(StringInfo out, Relation rel);
@@ -110,7 +112,9 @@ _PG_output_plugin_init(OutputPluginCallbacks *cb)
 	cb->begin_cb = pg_decode_begin_txn;
 	cb->change_cb = pg_decode_change;
 	cb->commit_cb = pg_decode_commit_txn;
+#ifdef BDR_MULTIMASTER
 	cb->message_cb = pg_decode_message;
+#endif
 	cb->shutdown_cb = NULL;
 }
 
@@ -210,6 +214,7 @@ bdr_req_param(const char *param)
 static void
 bdr_ensure_node_ready()
 {
+#ifdef BDR_MULTIMASTER
 	int spi_ret;
 	const uint64 sysid = GetSystemIdentifier();
 	char status;
@@ -303,6 +308,7 @@ bdr_ensure_node_ready()
 				break;
 		}
 	}
+#endif
 }
 
 
@@ -331,7 +337,6 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 	data->bdr_conflict_handlers_reloid = InvalidOid;
 	data->bdr_locks_reloid = InvalidOid;
 	data->bdr_schema_oid = InvalidOid;
-
 	data->num_replication_sets = -1;
 
 	/* parse options passed in by the client */
@@ -534,7 +539,11 @@ static inline bool
 should_forward_changeset(LogicalDecodingContext *ctx, BdrOutputData *data,
 						 ReorderBufferTXN *txn)
 {
+#ifdef BDR_MULTIMASTER
 	return txn->origin_id == InvalidRepNodeId || data->forward_changesets;
+#else
+	return true;
+#endif
 }
 
 static inline bool
@@ -585,7 +594,9 @@ should_forward_change(LogicalDecodingContext *ctx, BdrOutputData *data,
 void
 pg_decode_begin_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *txn)
 {
+#ifdef BDR_MULTIMASTER
 	BdrOutputData *data = ctx->output_plugin_private;
+#endif
 	int flags = 0;
 
 	AssertVariableIsOfType(&pg_decode_begin_txn, LogicalDecodeBeginCB);
@@ -596,12 +607,14 @@ pg_decode_begin_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *txn)
 	OutputPluginPrepareWrite(ctx, true);
 	pq_sendbyte(ctx->out, 'B');		/* BEGIN */
 
+#ifdef BDR_MULTIMASTER
 	/*
 	 * Are we forwarding changesets from other nodes? If so, we must include
 	 * the origin node ID and LSN in BEGIN records.
 	 */
 	if (data->forward_changesets)
 		flags |= BDR_OUTPUT_TRANSACTION_HAS_ORIGIN;
+#endif
 
 	/* send the flags field its self */
 	pq_sendint(ctx->out, flags, 4);
@@ -611,6 +624,7 @@ pg_decode_begin_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *txn)
 	pq_sendint64(ctx->out, txn->commit_time);
 	pq_sendint(ctx->out, txn->xid, 4);
 
+#ifdef BDR_MULTIMASTER
 	/* and optional data selected above */
 	if (flags & BDR_OUTPUT_TRANSACTION_HAS_ORIGIN)
 	{
@@ -632,6 +646,7 @@ pg_decode_begin_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *txn)
 		pq_sendint(ctx->out, origin_dboid, 4);
 		pq_sendint64(ctx->out, txn->origin_lsn);
 	}
+#endif
 
 	OutputPluginWrite(ctx, true);
 	return;
@@ -947,6 +962,7 @@ write_tuple(BdrOutputData *data, StringInfo out, Relation rel,
 	}
 }
 
+#ifdef BDR_MULTIMASTER
 static void
 pg_decode_message(LogicalDecodingContext *ctx,
 				  ReorderBufferTXN *txn, XLogRecPtr lsn,
@@ -964,3 +980,4 @@ pg_decode_message(LogicalDecodingContext *ctx,
 	pq_sendbytes(ctx->out, message, sz);
 	OutputPluginWrite(ctx, true);
 }
+#endif

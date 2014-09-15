@@ -24,7 +24,9 @@
 #include "pgstat.h"
 #include "port.h"
 
+#ifdef BDR_MULTIMASTER
 #include "access/committs.h"
+#endif
 #include "access/heapam.h"
 #include "access/xact.h"
 
@@ -45,8 +47,6 @@
 #include "nodes/execnodes.h"
 
 #include "postmaster/bgworker.h"
-
-#include "replication/replication_identifier.h"
 
 #include "storage/ipc.h"
 #include "storage/latch.h"
@@ -177,6 +177,7 @@ bdr_sighup(SIGNAL_ARGS)
  */
 PGconn*
 bdr_connect(char *conninfo_repl,
+			char *conninfo_db,
 			char* remote_ident, size_t remote_ident_length,
 			NameData* slot_name,
 			uint64* remote_sysid_i, TimeLineID *remote_tlid_i,
@@ -213,25 +214,63 @@ bdr_connect(char *conninfo_repl,
 		elog(FATAL, "could not send replication command \"%s\": %s",
 			 "IDENTIFY_SYSTEM", PQerrorMessage(streamConn));
 	}
-	if (PQntuples(res) != 1 || PQnfields(res) != 5)
+	if (PQntuples(res) != 1 || PQnfields(res) < 4 || PQnfields(res) > 5)
 	{
-		elog(FATAL, "could not identify system: got %d rows and %d fields, expected %d rows and %d fields\n",
-			 PQntuples(res), PQnfields(res), 1, 5);
+		elog(FATAL, "could not identify system: got %d rows and %d fields, expected %d rows and %d or %d fields\n",
+			 PQntuples(res), PQnfields(res), 1, 4, 5);
 	}
 
 	remote_sysid = PQgetvalue(res, 0, 0);
 	remote_tlid = PQgetvalue(res, 0, 1);
 	remote_dbname = PQgetvalue(res, 0, 3);
-	remote_dboid = PQgetvalue(res, 0, 4);
+	if (PQnfields(res) == 5)
+	{
+		remote_dboid = PQgetvalue(res, 0, 4);
+		if (sscanf(remote_dboid, "%u", remote_dboid_i) != 1)
+			elog(ERROR, "could not parse remote database OID %s", remote_dboid);
+	}
+	else
+	{
+		PGconn	   *dbConn;
+		PGresult   *res2;
+
+		elog(DEBUG3, "Fetching database oid via standard connection");
+
+		dbConn = PQconnectdb(conninfo_db);
+		if (PQstatus(dbConn) != CONNECTION_OK)
+		{
+			ereport(FATAL,
+					(errcode(ERRCODE_CONNECTION_FAILURE),
+					 errmsg("could not connect to the primary server: %s",
+							PQerrorMessage(dbConn)),
+					 errdetail("Connection string is '%s'", conninfo_db)));
+		}
+
+		res2 = PQexec(dbConn, "SELECT oid FROM pg_database WHERE datname = current_database()");
+		if (PQresultStatus(res2) != PGRES_TUPLES_OK)
+		{
+			elog(FATAL, "could fetch database oid: %s",
+				 PQerrorMessage(dbConn));
+		}
+		if (PQntuples(res2) != 1 || PQnfields(res2) != 1)
+		{
+			elog(FATAL, "could not identify system: got %d rows and %d fields, expected %d rows and %d fields\n",
+				 PQntuples(res2), PQnfields(res2), 1, 1);
+		}
+
+		remote_dboid = PQgetvalue(res2, 0, 0);
+		if (sscanf(remote_dboid, "%u", remote_dboid_i) != 1)
+			elog(ERROR, "could not parse remote database OID %s", remote_dboid);
+
+		PQclear(res2);
+		PQfinish(dbConn);
+	}
 
 	if (sscanf(remote_sysid, UINT64_FORMAT, remote_sysid_i) != 1)
 		elog(ERROR, "could not parse remote sysid %s", remote_sysid);
 
 	if (sscanf(remote_tlid, "%u", remote_tlid_i) != 1)
 		elog(ERROR, "could not parse remote tlid %s", remote_tlid);
-
-	if (sscanf(remote_dboid, "%u", remote_dboid_i) != 1)
-		elog(ERROR, "could not parse remote database OID %s", remote_dboid);
 
 	snprintf(local_sysid, sizeof(local_sysid), UINT64_FORMAT,
 			 GetSystemIdentifier());
@@ -434,6 +473,7 @@ bdr_establish_connection_and_slot(BdrConnectionConfig *cfg,
 	/* Establish BDR conn and IDENTIFY_SYSTEM */
 	streamConn = bdr_connect(
 		conninfo_repl.data,
+		cfg->dsn,
 		remote_ident, sizeof(remote_ident),
 		out_slot_name, out_sysid, out_timeline, out_dboid
 		);
@@ -960,8 +1000,10 @@ bdr_perdb_worker_main(Datum main_arg)
 	bdr_saved_resowner = CurrentResourceOwner;
 
 	/* need to be able to perform writes ourselves */
+#ifdef BDR_MULTIMASTER
 	bdr_executor_always_allow_writes(true);
 	bdr_locks_startup(bdr_perdb_worker->nnodes);
+#endif
 
 	/*
 	 * Do we need to init the local DB from a remote node?
@@ -987,11 +1029,13 @@ bdr_perdb_worker_main(Datum main_arg)
 		pfree(h);
 	}
 
+#ifdef BDR_MULTIMASTER
 	elog(DEBUG1, "BDR starting sequencer on db \"%s\"",
 		 NameStr(bdr_perdb_worker->dbname));
 
 	/* initialize sequencer */
 	bdr_sequencer_init(bdr_perdb_worker->seq_slot, bdr_perdb_worker->nnodes);
+#endif
 
 	wait = true;
 	while (!got_SIGTERM)
@@ -1025,6 +1069,7 @@ bdr_perdb_worker_main(Datum main_arg)
 			ProcessConfigFile(PGC_SIGHUP);
 		}
 
+#ifdef BDR_MULTIMASTER
 		/* check whether we need to vote */
 		if (bdr_sequencer_vote())
 			wait = false;
@@ -1039,6 +1084,8 @@ bdr_perdb_worker_main(Datum main_arg)
 
 		/* check whether we need to start new elections */
 		bdr_sequencer_start_elections();
+#endif
+
 		pgstat_report_activity(STATE_IDLE, NULL);
 	}
 
@@ -1426,10 +1473,12 @@ _PG_init(void)
 				(errcode(ERRCODE_CONFIG_FILE_ERROR),
 				 errmsg("bdr can only be loaded via shared_preload_libraries")));
 
+#ifdef BDR_MULTIMASTER
 	if (!commit_ts_enabled)
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("bdr requires \"track_commit_timestamp\" to be enabled")));
+#endif
 
 	/*
 	 * Force btree_gist to be loaded - its absolutely not required at this
@@ -1459,7 +1508,6 @@ _PG_init(void)
 							   0,
 							   NULL, NULL, NULL);
 
-
 	DefineCustomBoolVariable("bdr.log_conflicts_to_table",
 							 "Log BDR conflicts to bdr.conflict_history table",
 							 NULL,
@@ -1478,6 +1526,17 @@ _PG_init(void)
 							 0,
 							 NULL, NULL, NULL);
 
+#ifndef BDR_MULTIMASTER
+	DefineCustomBoolVariable("bdr.conflict_default_apply",
+							 "Apply conflicting changes by default",
+							 NULL,
+							 &bdr_conflict_default_apply,
+							 true,
+							 PGC_SIGHUP,
+							 0,
+							 NULL, NULL, NULL);
+#endif
+
 	/*
 	 * Limit on worker count - number of slots to allocate in fixed shared
 	 * memory array.
@@ -1492,6 +1551,7 @@ _PG_init(void)
 							NULL, NULL, NULL);
 
 
+#ifdef BDR_MULTIMASTER
 	DefineCustomBoolVariable("bdr.permit_unsafe_ddl_commands",
 							 "Allow commands that might cause data or " \
 							 "replication problems under BDR to run",
@@ -1500,6 +1560,7 @@ _PG_init(void)
 							 false, PGC_SUSET,
 							 0,
 							 NULL, NULL, NULL);
+#endif
 
 	DefineCustomBoolVariable("bdr.skip_ddl_replication",
 							 "Internal. Set during local restore during init_replica only",
@@ -1699,16 +1760,18 @@ out:
 
 	/* register a slot for every remote node */
 	bdr_count_shmem_init(bdr_max_workers);
-	bdr_sequencer_shmem_init(bdr_max_workers, bdr_distinct_dbnames_count);
 	bdr_executor_init();
+#ifdef BDR_MULTIMASTER
+	bdr_sequencer_shmem_init(bdr_max_workers, bdr_distinct_dbnames_count);
 	bdr_locks_shmem_init(bdr_distinct_dbnames_count);
 	/* Set up a ProcessUtility_hook to stop unsupported commands being run */
 	init_bdr_commandfilter();
+#endif
 
 	MemoryContextSwitchTo(old_context);
 }
 
-static Oid
+Oid
 bdr_lookup_relid(const char *relname, Oid schema_oid)
 {
 	Oid			relid;
@@ -1784,7 +1847,7 @@ bdr_maintain_schema(void)
 		create_stmt.extname = (char *)"bdr";
 		CreateExtension(&create_stmt);
 	}
-	else
+
 	{
 		AlterExtensionStmt alter_stmt;
 
@@ -1800,6 +1863,10 @@ bdr_maintain_schema(void)
 	schema_oid = get_namespace_oid("bdr", false);
 	QueuedDDLCommandsRelid =
 		bdr_lookup_relid("bdr_queued_commands", schema_oid);
+	BdrConflictHistoryRelId =
+		bdr_lookup_relid("bdr_conflict_history", schema_oid);
+
+#ifdef BDR_MULTIMASTER
 	BdrSequenceValuesRelid =
 		bdr_lookup_relid("bdr_sequence_values", schema_oid);
 	BdrSequenceElectionsRelid =
@@ -1808,8 +1875,6 @@ bdr_maintain_schema(void)
 		bdr_lookup_relid("bdr_votes", schema_oid);
 	BdrNodesRelid =
 		bdr_lookup_relid("bdr_nodes", schema_oid);
-	BdrConflictHistoryRelId =
-		bdr_lookup_relid("bdr_conflict_history", schema_oid);
 	QueuedDropsRelid =
 		bdr_lookup_relid("bdr_queued_drops", schema_oid);
 	BdrLocksRelid =
@@ -1818,6 +1883,12 @@ bdr_maintain_schema(void)
 		bdr_lookup_relid("bdr_global_locks_byowner", schema_oid);
 	BdrReplicationSetConfigRelid  =
 		bdr_lookup_relid("bdr_replication_set_config", schema_oid);
+#else
+	ReplicationIdentifierRelationId =
+		bdr_lookup_relid("bdr_replication_identifier", schema_oid);
+	ReplicationLocalIdentIndex =
+		bdr_lookup_relid("bdr_replication_identifier_riiident_index", schema_oid);
+#endif
 
 	bdr_conflict_handlers_init();
 

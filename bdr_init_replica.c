@@ -37,7 +37,7 @@
 
 #include "executor/spi.h"
 
-#include "replication/replication_identifier.h"
+#include "bdr_replication_identifier.h"
 #include "replication/walreceiver.h"
 
 #include "postmaster/bgworker.h"
@@ -416,6 +416,7 @@ bdr_drop_slot_and_replication_identifier(BdrConnectionConfig *cfg)
 	/* Establish BDR conn and IDENTIFY_SYSTEM */
 	streamConn = bdr_connect(
 		query.data,
+		cfg->dsn,
 		remote_ident, sizeof(remote_ident),
 		&slot_name, &sysid, &timeline, &dboid
 		);

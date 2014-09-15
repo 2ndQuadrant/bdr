@@ -23,8 +23,6 @@
 
 #include "nodes/execnodes.h"
 
-#include "replication/replication_identifier.h"
-
 #include "storage/fd.h"
 #include "storage/ipc.h"
 #include "storage/lwlock.h"
