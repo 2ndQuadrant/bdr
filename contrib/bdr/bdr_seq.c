@@ -1204,6 +1204,8 @@ bdr_sequence_alloc(PG_FUNCTION_ARGS)
 	if (wakeup)
 		bdr_sequencer_wakeup();
 
+	next = result + log - 1;
+
 	elm->last = result;
 	elm->cached = result;
 	elm->last_valid = true;
@@ -1239,7 +1241,7 @@ bdr_sequence_alloc(PG_FUNCTION_ARGS)
 	/* Now update sequence tuple to the intended final state */
 	seq->last_value = elm->last; /* last fetched number */
 	seq->is_called = true;
-	seq->log_cnt = log; /* how much is logged */
+	seq->log_cnt = log-1; /* how much is logged */
 
 	result = elm->last;
 
