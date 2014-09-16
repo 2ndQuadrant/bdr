@@ -1553,14 +1553,18 @@ deparse_AlterExtensionStmt(Oid objectId, Node *parsetree)
 static ObjTree *
 deparse_ViewStmt(Oid objectId, Node *parsetree)
 {
+	ViewStmt   *node = (ViewStmt *) parsetree;
 	ObjTree    *viewStmt;
 	ObjTree    *tmp;
 	Relation	relation;
 
 	relation = relation_open(objectId, AccessShareLock);
 
-	viewStmt = new_objtree_VA("CREATE %{persistence}s VIEW %{identity}D AS %{query}s",
-							  1, "persistence", ObjTypeString,
+	viewStmt = new_objtree_VA("CREATE %{or_replace}s %{persistence}s VIEW %{identity}D AS %{query}s",
+							  2,
+							  "or_replace", ObjTypeString,
+							  node->replace ? "OR REPLACE" : "",
+							  "persistence", ObjTypeString,
 					  get_persistence_str(relation->rd_rel->relpersistence));
 
 	tmp = new_objtree_for_qualname(relation->rd_rel->relnamespace,
