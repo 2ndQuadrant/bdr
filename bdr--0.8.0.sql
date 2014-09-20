@@ -438,6 +438,11 @@ CREATE TABLE bdr.bdr_queued_drops (
 REVOKE ALL ON TABLE bdr_queued_drops FROM PUBLIC;
 SELECT pg_catalog.pg_extension_config_dump('bdr_queued_drops', '');
 
+DO $DO$BEGIN
+IF right(bdr_version(), 4) = '-udr' THEN
+    RETURN;
+END IF;
+
 CREATE OR REPLACE FUNCTION bdr.queue_dropped_objects()
 RETURNS event_trigger
 LANGUAGE plpgsql
@@ -483,6 +488,8 @@ $function$;
 CREATE EVENT TRIGGER queue_drops
 ON sql_drop
 EXECUTE PROCEDURE bdr.queue_dropped_objects();
+
+END;$DO$;
 
 CREATE OR REPLACE FUNCTION bdr_apply_pause()
 RETURNS VOID
