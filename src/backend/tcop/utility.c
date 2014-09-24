@@ -875,6 +875,8 @@ standard_ProcessUtility(Node *parsetree,
  * The "Slow" variant of ProcessUtility should only receive statements
  * supported by the event triggers facility.  Therefore, we always
  * perform the trigger support calls if the context allows it.
+ *
+ * See deparse_utility_command, which must be kept in sync with this.
  */
 static void
 ProcessUtilitySlow(Node *parsetree,

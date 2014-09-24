@@ -1079,6 +1079,9 @@ extern char *format_type_be_qualified(Oid type_oid);
 extern char *format_type_with_typemod(Oid type_oid, int32 typemod);
 extern Datum oidvectortypes(PG_FUNCTION_ARGS);
 extern int32 type_maximum_size(Oid type_oid, int32 typemod);
+extern void format_type_detailed(Oid type_oid, int32 typemod,
+					 Oid *nspid, char **typname,
+					 char **typemodstr, bool *is_array);
 
 /* quote.c */
 extern Datum quote_ident(PG_FUNCTION_ARGS);
@@ -1210,6 +1213,10 @@ extern Datum unique_key_recheck(PG_FUNCTION_ARGS);
 extern Datum pg_event_trigger_dropped_objects(PG_FUNCTION_ARGS);
 extern Datum pg_event_trigger_table_rewrite_oid(PG_FUNCTION_ARGS);
 extern Datum pg_event_trigger_table_rewrite_reason(PG_FUNCTION_ARGS);
+extern Datum pg_event_trigger_get_creation_commands(PG_FUNCTION_ARGS);
+
+/* utils/adt/ddl_json.c */
+extern Datum pg_event_trigger_expand_command(PG_FUNCTION_ARGS);
 
 /* commands/extension.c */
 extern Datum pg_available_extensions(PG_FUNCTION_ARGS);
