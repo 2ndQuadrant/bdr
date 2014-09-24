@@ -849,6 +849,122 @@ get_object_address(ObjectType objtype, List *objname, List *objargs,
 }
 
 /*
+ * Return the OID of the catalog corresponding to the given object type
+ */
+Oid
+get_objtype_catalog_oid(ObjectType objtype)
+{
+	Oid		catalog_id;
+
+	switch (objtype)
+	{
+		case OBJECT_INDEX:
+		case OBJECT_COMPOSITE:
+		case OBJECT_SEQUENCE:
+		case OBJECT_TABLE:
+		case OBJECT_VIEW:
+		case OBJECT_MATVIEW:
+		case OBJECT_FOREIGN_TABLE:
+		case OBJECT_COLUMN:
+			catalog_id = RelationRelationId;
+			break;
+		case OBJECT_RULE:
+			catalog_id = RewriteRelationId;
+			break;
+		case OBJECT_TRIGGER:
+			catalog_id = TriggerRelationId;
+			break;
+		case OBJECT_DOMCONSTRAINT:
+		case OBJECT_TABCONSTRAINT:
+			catalog_id = ConstraintRelationId;
+			break;
+		case OBJECT_DATABASE:
+			catalog_id = DatabaseRelationId;
+			break;
+		case OBJECT_EXTENSION:
+			catalog_id = ExtensionRelationId;
+			break;
+		case OBJECT_TABLESPACE:
+			catalog_id = TableSpaceRelationId;
+			break;
+		case OBJECT_ROLE:
+			catalog_id = AuthIdRelationId;
+			break;
+		case OBJECT_SCHEMA:
+			catalog_id = NamespaceRelationId;
+			break;
+		case OBJECT_LANGUAGE:
+			catalog_id = LanguageRelationId;
+			break;
+		case OBJECT_FDW:
+			catalog_id = ForeignDataWrapperRelationId;
+			break;
+		case OBJECT_FOREIGN_SERVER:
+			catalog_id = ForeignServerRelationId;
+			break;
+		case OBJECT_USER_MAPPING:
+			catalog_id = UserMappingRelationId;
+			break;
+		case OBJECT_EVENT_TRIGGER:
+			catalog_id = EventTriggerRelationId;
+			break;
+		case OBJECT_TYPE:
+		case OBJECT_DOMAIN:
+			catalog_id = TypeRelationId;
+			break;
+		case OBJECT_ATTRIBUTE:
+			catalog_id = TypeRelationId;	/* XXX? */
+			break;
+		case OBJECT_AGGREGATE:
+			catalog_id = ProcedureRelationId;
+			break;
+		case OBJECT_FUNCTION:
+			catalog_id = ProcedureRelationId;
+			break;
+		case OBJECT_OPERATOR:
+			catalog_id = OperatorRelationId;
+			break;
+		case OBJECT_COLLATION:
+			catalog_id = CollationRelationId;
+			break;
+		case OBJECT_CONVERSION:
+			catalog_id = ConversionRelationId;
+			break;
+		case OBJECT_OPCLASS:
+			catalog_id = OperatorClassRelationId;
+			break;
+		case OBJECT_OPFAMILY:
+			catalog_id = OperatorFamilyRelationId;
+			break;
+		case OBJECT_LARGEOBJECT:
+			catalog_id = LargeObjectRelationId;
+			break;
+		case OBJECT_CAST:
+			catalog_id = CastRelationId;
+			break;
+		case OBJECT_TSPARSER:
+			catalog_id = TSParserRelationId;
+			break;
+		case OBJECT_TSDICTIONARY:
+			catalog_id = TSDictionaryRelationId;
+			break;
+		case OBJECT_TSTEMPLATE:
+			catalog_id = TSTemplateRelationId;
+			break;
+		case OBJECT_TSCONFIGURATION:
+			catalog_id = TSConfigRelationId;
+			break;
+		default:
+				elog(ERROR, "unrecognized objtype: %d", (int) objtype);
+				/* placate compiler, in case it thinks elog might return */
+				catalog_id = InvalidOid;
+	}
+
+	/* Return the object address and the relation. */
+	return catalog_id;
+}
+
+/*
  * Find an ObjectAddress for a type of object that is identified by an
  * unqualified name.
  */

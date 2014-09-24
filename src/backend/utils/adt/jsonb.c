@@ -416,7 +416,7 @@ JsonbToCString(StringInfo out, JsonbContainer *in, int estimated_len)
 {
 	bool		first = true;
 	JsonbIterator *it;
-	int			type = 0;
+	JsonbIteratorToken type = WJB_DONE;
 	JsonbValue	v;
 	int			level = 0;
 	bool		redo_switch = false;
@@ -498,7 +498,7 @@ JsonbToCString(StringInfo out, JsonbContainer *in, int estimated_len)
 				first = false;
 				break;
 			default:
-				elog(ERROR, "unknown flag of jsonb iterator");
+				elog(ERROR, "unknown jsonb iterator token type");
 		}
 	}
 

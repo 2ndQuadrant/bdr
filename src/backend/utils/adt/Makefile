@@ -18,7 +18,7 @@ endif
 # keep this list arranged alphabetically or it gets to be a mess
 OBJS = acl.o arrayfuncs.o array_selfuncs.o array_typanalyze.o \
 	array_userfuncs.o arrayutils.o ascii.o bool.o \
-	cash.o char.o date.o datetime.o datum.o dbsize.o domains.o \
+	cash.o char.o date.o datetime.o datum.o dbsize.o ddl_json.o domains.o \
 	encode.o enum.o float.o format_type.o formatting.o genfile.o \
 	geo_ops.o geo_selfuncs.o inet_cidr_ntop.o inet_net_pton.o int.o \
 	int8.o json.o jsonb.o jsonb_gin.o jsonb_op.o jsonb_util.o \

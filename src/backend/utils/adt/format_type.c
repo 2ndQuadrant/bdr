@@ -96,6 +96,9 @@ format_type_be(Oid type_oid)
 	return format_type_internal(type_oid, -1, false, false, false);
 }
 
+/*
+ * This version returns a name which is always qualified.
+ */
 char *
 format_type_be_qualified(Oid type_oid)
 {
@@ -323,6 +326,106 @@ format_type_internal(Oid type_oid, int32 typemod,
 	return buf;
 }
 
+/*
+ * Similar to format_type_internal, except we return each bit of information
+ * separately:
+ *
+ * - nspid is the schema OID.  For certain SQL-standard types which have weird
+ *   typmod rules, we return InvalidOid; caller is expected to not schema-
+ *   qualify the name nor add quotes to the type name.
+ *
+ * - typename is set to the type name, without quotes
+ *
+ * - typmod is set to the typemod, if any, as a string with parens
+ *
+ * - is_array indicates whether []s must be added
+ *
+ * Also, we don't try to decode type names to their standard-mandated names,
+ * except in the cases of unusual typmod rules, as specified above.
+ *
+ * XXX there is a lot of code duplication between this routine and
+ * format_type_internal.  (One thing that doesn't quite match is the whole
+ * allow_invalid business.)
+ */
+void
+format_type_detailed(Oid type_oid, int32 typemod,
+					 Oid *nspid, char **typname, char **typemodstr,
+					 bool *is_array)
+{
+	HeapTuple	tuple;
+	Form_pg_type typeform;
+	Oid			array_base_type;
+
+	tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(type_oid));
+	if (!HeapTupleIsValid(tuple))
+		elog(ERROR, "cache lookup failed for type %u", type_oid);
+
+	typeform = (Form_pg_type) GETSTRUCT(tuple);
+
+	/*
+	 * Special-case crock for types with strange typmod rules.
+	 */
+	if (type_oid == INTERVALOID ||
+		type_oid == TIMESTAMPOID ||
+		type_oid == TIMESTAMPTZOID)
+	{
+		switch (type_oid)
+		{
+			case INTERVALOID:
+				*typname = pstrdup("INTERVAL");
+				break;
+			case TIMESTAMPOID:
+			case TIMESTAMPTZOID:
+				/* the TZ part is added by typmod */
+				*typname = pstrdup("TIMESTAMP");
+				break;
+		}
+		*nspid = InvalidOid;
+
+		if (typemod >= 0)
+			*typemodstr = printTypmod(NULL, typemod, typeform->typmodout);
+		else
+			*typemodstr = pstrdup("");
+
+		*is_array = false;
+
+		ReleaseSysCache(tuple);
+		return;
+	}
+
+	/*
+	 * Check if it's a regular (variable length) array type.  As above,
+	 * fixed-length array types such as "name" shouldn't get deconstructed.
+	 */
+	array_base_type = typeform->typelem;
+
+	if (array_base_type != InvalidOid &&
+		typeform->typstorage != 'p')
+	{
+		/* Switch our attention to the array element type */
+		ReleaseSysCache(tuple);
+		tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(array_base_type));
+		if (!HeapTupleIsValid(tuple))
+			elog(ERROR, "cache lookup failed for type %u", type_oid);
+
+		typeform = (Form_pg_type) GETSTRUCT(tuple);
+		type_oid = array_base_type;
+		*is_array = true;
+	}
+	else
+		*is_array = false;
+
+	*nspid = typeform->typnamespace;
+	*typname = pstrdup(NameStr(typeform->typname));
+
+	if (typemod >= 0)
+		*typemodstr = printTypmod(NULL, typemod, typeform->typmodout);
+	else
+		*typemodstr = pstrdup("");
+
+	ReleaseSysCache(tuple);
+}
+
 
 /*
  * Add typmod decoration to the basic type name
@@ -338,7 +441,10 @@ printTypmod(const char *typname, int32 typmod, Oid typmodout)
 	if (typmodout == InvalidOid)
 	{
 		/* Default behavior: just print the integer typmod with parens */
-		res = psprintf("%s(%d)", typname, (int) typmod);
+		if (typname == NULL)
+			res = psprintf("(%d)", (int) typmod);
+		else
+			res = psprintf("%s(%d)", typname, (int) typmod);
 	}
 	else
 	{
@@ -347,7 +453,10 @@ printTypmod(const char *typname, int32 typmod, Oid typmodout)
 
 		tmstr = DatumGetCString(OidFunctionCall1(typmodout,
 												 Int32GetDatum(typmod)));
-		res = psprintf("%s%s", typname, tmstr);
+		if (typname == NULL)
+			res = psprintf("%s", tmstr);
+		else
+			res = psprintf("%s%s", typname, tmstr);
 	}
 
 	return res;
