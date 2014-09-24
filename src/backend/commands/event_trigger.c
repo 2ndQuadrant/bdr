@@ -25,16 +25,20 @@
 #include "catalog/pg_type.h"
 #include "commands/dbcommands.h"
 #include "commands/event_trigger.h"
+#include "commands/extension.h"
 #include "commands/trigger.h"
 #include "funcapi.h"
 #include "parser/parse_func.h"
 #include "pgstat.h"
 #include "lib/ilist.h"
 #include "miscadmin.h"
+#include "tcop/deparse_utility.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
 #include "utils/evtcache.h"
 #include "utils/fmgroids.h"
+#include "utils/json.h"
+#include "utils/jsonb.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
@@ -52,7 +56,9 @@ typedef struct EventTriggerQueryState
 	Oid			table_rewrite_oid;	/* InvalidOid, or set for table_rewrite event */
 	int			table_rewrite_reason;	/* AT_REWRITE reason */
 
+	bool		commandCollectionInhibited;
 	MemoryContext cxt;
+	List	   *stash;		/* list of StashedCommand; see deparse_utility.h */
 	struct EventTriggerQueryState *previous;
 } EventTriggerQueryState;
 
@@ -71,6 +77,7 @@ typedef enum
 	EVENT_TRIGGER_COMMAND_TAG_NOT_RECOGNIZED
 } event_trigger_command_tag_check_result;
 
+/* XXX merge this with ObjectTypeMap? */
 static event_trigger_support_data event_trigger_support[] = {
 	{"AGGREGATE", true},
 	{"CAST", true},
@@ -1064,6 +1071,7 @@ EventTriggerSupportsObjectType(ObjectType obtype)
 		case OBJECT_CAST:
 		case OBJECT_COLUMN:
 		case OBJECT_COLLATION:
+		case OBJECT_COMPOSITE:
 		case OBJECT_CONVERSION:
 		case OBJECT_DEFAULT:
 		case OBJECT_DOMAIN:
@@ -1092,6 +1100,7 @@ EventTriggerSupportsObjectType(ObjectType obtype)
 		case OBJECT_TSPARSER:
 		case OBJECT_TSTEMPLATE:
 		case OBJECT_TYPE:
+		case OBJECT_USER_MAPPING:
 		case OBJECT_VIEW:
 			return true;
 	}
@@ -1197,14 +1206,6 @@ EventTriggerBeginCompleteQuery(void)
 	EventTriggerQueryState *state;
 	MemoryContext cxt;
 
-	/*
-	 * Currently, sql_drop and table_rewrite events are the only reason to
-	 * have event trigger state at all; so if there are none, don't install
-	 * one.
-	 */
-	if (!trackDroppedObjectsNeeded())
-		return false;
-
 	cxt = AllocSetContextCreate(TopMemoryContext,
 								"event trigger state",
 								ALLOCSET_DEFAULT_MINSIZE,
@@ -1215,7 +1216,9 @@ EventTriggerBeginCompleteQuery(void)
 	slist_init(&(state->SQLDropList));
 	state->in_sql_drop = false;
 	state->table_rewrite_oid = InvalidOid;
-
+	state->commandCollectionInhibited = currentEventTriggerState ?
+		currentEventTriggerState->commandCollectionInhibited : false;
+	state->stash = NIL;
 	state->previous = currentEventTriggerState;
 	currentEventTriggerState = state;
 
@@ -1539,4 +1542,222 @@ pg_event_trigger_table_rewrite_reason(PG_FUNCTION_ARGS)
 				"pg_event_trigger_table_rewrite_reason()")));
 
 	PG_RETURN_INT32(currentEventTriggerState->table_rewrite_reason);
+}
+
+/*
+ * EventTriggerStashCommand
+ * 		Save data about a simple DDL command that was just executed
+ *
+ * address identifies the object being operated on.  secondaryObject is an
+ * object address that was related in some way to the executed command; its
+ * meaning is command-specific.
+ *
+ * For instance, for an ALTER obj SET SCHEMA command, objtype is the type of
+ * object being moved, objectId is its OID, and secondaryOid is the OID of the
+ * old schema.  (The destination schema OID can be obtained by catalog lookup
+ * of the object.)
+ */
+void
+EventTriggerStashCommand(ObjectAddress address, ObjectAddress *secondaryObject,
+						 Node *parsetree)
+{
+	MemoryContext oldcxt;
+	StashedCommand *stashed;
+
+	if (currentEventTriggerState->commandCollectionInhibited)
+		return;
+
+	oldcxt = MemoryContextSwitchTo(currentEventTriggerState->cxt);
+
+	stashed = palloc(sizeof(StashedCommand));
+
+	stashed->type = SCT_Simple;
+	stashed->in_extension = creating_extension;
+
+	stashed->d.simple.address = address;
+	stashed->d.simple.secondaryObject =
+		secondaryObject ? *secondaryObject : InvalidObjectAddress;
+	stashed->parsetree = copyObject(parsetree);
+
+	currentEventTriggerState->stash = lappend(currentEventTriggerState->stash,
+											  stashed);
+
+	MemoryContextSwitchTo(oldcxt);
+}
+
+void
+EventTriggerInhibitCommandCollection(void)
+{
+	currentEventTriggerState->commandCollectionInhibited = true;
+}
+
+void
+EventTriggerUndoInhibitCommandCollection(void)
+{
+	currentEventTriggerState->commandCollectionInhibited = false;
+}
+
+Datum
+pg_event_trigger_get_creation_commands(PG_FUNCTION_ARGS)
+{
+	ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+	TupleDesc	tupdesc;
+	Tuplestorestate *tupstore;
+	MemoryContext per_query_ctx;
+	MemoryContext oldcontext;
+	ListCell   *lc;
+
+	/*
+	 * Protect this function from being called out of context
+	 */
+	if (!currentEventTriggerState)
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("%s can only be called in an event trigger function",
+						"pg_event_trigger_get_creation_commands()")));
+
+	/* check to see if caller supports us returning a tuplestore */
+	if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo))
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("set-valued function called in context that cannot accept a set")));
+	if (!(rsinfo->allowedModes & SFRM_Materialize))
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("materialize mode required, but it is not allowed in this context")));
+
+	/* Build a tuple descriptor for our result type */
+	if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
+		elog(ERROR, "return type must be a row type");
+
+	/* Build tuplestore to hold the result rows */
+	per_query_ctx = rsinfo->econtext->ecxt_per_query_memory;
+	oldcontext = MemoryContextSwitchTo(per_query_ctx);
+
+	tupstore = tuplestore_begin_heap(true, false, work_mem);
+	rsinfo->returnMode = SFRM_Materialize;
+	rsinfo->setResult = tupstore;
+	rsinfo->setDesc = tupdesc;
+
+	MemoryContextSwitchTo(oldcontext);
+
+	foreach(lc, currentEventTriggerState->stash)
+	{
+		StashedCommand *cmd = lfirst(lc);
+		char	   *command;
+
+		/*
+		 * For IF NOT EXISTS commands that attempt to create an existing
+		 * object, the returned OID is Invalid; in those cases, return an empty
+		 * command instead of trying to soldier on.
+		 *
+		 * One might think that a viable alternative would be to look up the
+		 * Oid of the existing object and run the deparse with that.  But since
+		 * the parse tree might be different from the one that created the
+		 * object in the first place, we might not end up in a consistent state
+		 * anyway.
+		 */
+		if (cmd->type == SCT_Simple &&
+			!OidIsValid(cmd->d.simple.address.objectId))
+			continue;
+
+		command = deparse_utility_command(cmd);
+
+		/*
+		 * Some parse trees return NULL when deparse is attempted; we don't
+		 * emit anything for them.
+		 */
+		if (command != NULL)
+		{
+			Datum		values[9];
+			bool		nulls[9];
+			ObjectAddress addr;
+			int			i = 0;
+
+			MemSet(nulls, 0, sizeof(nulls));
+
+			if (cmd->type == SCT_Simple)
+			{
+				const char *tag;
+				char	   *identity;
+				char	   *type;
+				char	   *schema = NULL;
+
+				if (cmd->type == SCT_Simple)
+					addr = cmd->d.simple.address;
+
+				tag = CreateCommandTag(cmd->parsetree);
+
+				type = getObjectTypeDescription(&addr);
+				identity = getObjectIdentity(&addr);
+
+				/*
+				 * Obtain schema name, if any ("pg_temp" if a temp object).  If
+				 * the object class is not in the supported list here, we
+				 * assume it's a schema-less object type, and thus "schema"
+				 * remains set to NULL.
+				 */
+				if (is_objectclass_supported(addr.classId))
+				{
+					AttrNumber	nspAttnum;
+
+					nspAttnum = get_object_attnum_namespace(addr.classId);
+					if (nspAttnum != InvalidAttrNumber)
+					{
+						Relation	catalog;
+						HeapTuple	objtup;
+						Oid			schema_oid;
+						bool		isnull;
+
+						catalog = heap_open(addr.classId, AccessShareLock);
+						objtup = get_catalog_object_by_oid(catalog,
+														   addr.objectId);
+						if (!HeapTupleIsValid(objtup))
+							elog(ERROR, "cache lookup failed for object %u/%u",
+								 addr.classId, addr.objectId);
+						schema_oid = heap_getattr(objtup, nspAttnum,
+												  RelationGetDescr(catalog), &isnull);
+						if (isnull)
+							elog(ERROR, "invalid null namespace in object %u/%u/%d",
+								 addr.classId, addr.objectId, addr.objectSubId);
+						if (isAnyTempNamespace(schema_oid))
+							schema = pstrdup("pg_temp");
+						else
+							schema = get_namespace_name(schema_oid);
+
+						heap_close(catalog, AccessShareLock);
+					}
+				}
+
+				/* classid */
+				values[i++] = ObjectIdGetDatum(addr.classId);
+				/* objid */
+				values[i++] = ObjectIdGetDatum(addr.objectId);
+				/* objsubid */
+				values[i++] = Int32GetDatum(addr.objectSubId);
+				/* command tag */
+				values[i++] = CStringGetTextDatum(tag);
+				/* object_type */
+				values[i++] = CStringGetTextDatum(type);
+				/* schema */
+				if (schema == NULL)
+					nulls[i++] = true;
+				else
+					values[i++] = CStringGetTextDatum(schema);
+				/* identity */
+				values[i++] = CStringGetTextDatum(identity);
+				/* in_extension */
+				values[i++] = BoolGetDatum(cmd->in_extension);
+				/* command */
+				values[i++] = CStringGetTextDatum(command);
+			}
+
+			tuplestore_putvalues(tupstore, tupdesc, values, nulls);
+		}
+	}
+
+	/* clean up and return the tuplestore */
+	tuplestore_donestoring(tupstore);
+
+	PG_RETURN_VOID();
 }

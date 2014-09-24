@@ -96,6 +96,9 @@ format_type_be(Oid type_oid)
 	return format_type_internal(type_oid, -1, false, false, false);
 }
 
+/*
+ * This version returns a name which is always qualified.
+ */
 char *
 format_type_be_qualified(Oid type_oid)
 {
@@ -323,6 +326,132 @@ format_type_internal(Oid type_oid, int32 typemod,
 	return buf;
 }
 
+/*
+ * Similar to format_type_internal, except we return each bit of information
+ * separately:
+ *
+ * - nspid is the schema OID.  For certain SQL-standard types which have weird
+ *   typmod rules, we return InvalidOid; caller is expected to not schema-
+ *   qualify the name nor add quotes to the type name in this case.
+ *
+ * - typename is set to the type name, without quotes
+ *
+ * - typmod is set to the typemod, if any, as a string with parens
+ *
+ * - typarray indicates whether []s must be added
+ *
+ * We don't try to decode type names to their standard-mandated names, except
+ * in the cases of types with unusual typmod rules.
+ */
+void
+format_type_detailed(Oid type_oid, int32 typemod,
+					 Oid *nspid, char **typname, char **typemodstr,
+					 bool *typarray)
+{
+	HeapTuple	tuple;
+	Form_pg_type typeform;
+	Oid			array_base_type;
+
+	tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(type_oid));
+	if (!HeapTupleIsValid(tuple))
+		elog(ERROR, "cache lookup failed for type %u", type_oid);
+
+	typeform = (Form_pg_type) GETSTRUCT(tuple);
+
+	/*
+	 * Special-case crock for types with strange typmod rules.
+	 */
+	if (type_oid == INTERVALOID ||
+		type_oid == TIMESTAMPOID ||
+		type_oid == TIMESTAMPTZOID ||
+		type_oid == TIMEOID ||
+		type_oid == TIMETZOID)
+	{
+		*typarray = false;
+
+peculiar_typmod:
+		switch (type_oid)
+		{
+			case INTERVALOID:
+				*typname = pstrdup("INTERVAL");
+				break;
+			case TIMESTAMPTZOID:
+				if (typemod < 0)
+				{
+					*typname = pstrdup("TIMESTAMP WITH TIME ZONE");
+					break;
+				}
+				/* otherwise, WITH TZ is added by typmod, so fall through */
+			case TIMESTAMPOID:
+				*typname = pstrdup("TIMESTAMP");
+				break;
+			case TIMETZOID:
+				if (typemod < 0)
+				{
+					*typname = pstrdup("TIME WITH TIME ZONE");
+					break;
+				}
+				/* otherwise, WITH TZ is added by typmode, so fall through */
+			case TIMEOID:
+				*typname = pstrdup("TIME");
+				break;
+		}
+		*nspid = InvalidOid;
+
+		if (typemod >= 0)
+			*typemodstr = printTypmod(NULL, typemod, typeform->typmodout);
+		else
+			*typemodstr = pstrdup("");
+
+		ReleaseSysCache(tuple);
+		return;
+	}
+
+	/*
+	 * Check if it's a regular (variable length) array type.  As above,
+	 * fixed-length array types such as "name" shouldn't get deconstructed.
+	 */
+	array_base_type = typeform->typelem;
+
+	if (array_base_type != InvalidOid &&
+		typeform->typstorage != 'p')
+	{
+		/* Switch our attention to the array element type */
+		ReleaseSysCache(tuple);
+		tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(array_base_type));
+		if (!HeapTupleIsValid(tuple))
+			elog(ERROR, "cache lookup failed for type %u", type_oid);
+
+		typeform = (Form_pg_type) GETSTRUCT(tuple);
+		type_oid = array_base_type;
+		*typarray = true;
+
+		/*
+		 * If it's an array of one of the types with special typmod rules,
+		 * have the element type be processed as above, but now with typarray
+		 * set to true.
+		 */
+		if (type_oid == INTERVALOID ||
+			type_oid == TIMESTAMPTZOID ||
+			type_oid == TIMESTAMPOID ||
+			type_oid == TIMETZOID ||
+			type_oid == TIMEOID)
+			goto peculiar_typmod;
+	}
+	else
+		*typarray = false;
+
+	*nspid = typeform->typnamespace;
+	*typname = pstrdup(NameStr(typeform->typname));
+
+	if (typemod >= 0)
+		*typemodstr = printTypmod(NULL, typemod, typeform->typmodout);
+	else
+		*typemodstr = pstrdup("");
+
+	ReleaseSysCache(tuple);
+}
+
 
 /*
  * Add typmod decoration to the basic type name
@@ -338,7 +467,10 @@ printTypmod(const char *typname, int32 typmod, Oid typmodout)
 	if (typmodout == InvalidOid)
 	{
 		/* Default behavior: just print the integer typmod with parens */
-		res = psprintf("%s(%d)", typname, (int) typmod);
+		if (typname == NULL)
+			res = psprintf("(%d)", (int) typmod);
+		else
+			res = psprintf("%s(%d)", typname, (int) typmod);
 	}
 	else
 	{
@@ -347,7 +479,10 @@ printTypmod(const char *typname, int32 typmod, Oid typmodout)
 
 		tmstr = DatumGetCString(OidFunctionCall1(typmodout,
 												 Int32GetDatum(typmod)));
-		res = psprintf("%s%s", typname, tmstr);
+		if (typname == NULL)
+			res = psprintf("%s", tmstr);
+		else
+			res = psprintf("%s%s", typname, tmstr);
 	}
 
 	return res;
