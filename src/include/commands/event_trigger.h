@@ -60,4 +60,10 @@ extern bool trackDroppedObjectsNeeded(void);
 extern void EventTriggerSQLDropAddObject(const ObjectAddress *object,
 							 bool original, bool normal);
 
+extern void EventTriggerInhibitCommandCollection(void);
+extern void EventTriggerUndoInhibitCommandCollection(void);
+
+extern void EventTriggerStashCommand(ObjectAddress address,
+						 ObjectAddress secondaryObject, Node *parsetree);
+
 #endif   /* EVENT_TRIGGER_H */

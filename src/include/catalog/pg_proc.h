@@ -5126,6 +5126,10 @@ DATA(insert OID = 4566 (  pg_event_trigger_table_rewrite_oid	PGNSP PGUID 12 1 0 
 DESCR("return Oid of the table getting rewritten");
 DATA(insert OID = 4567 (  pg_event_trigger_table_rewrite_reason PGNSP PGUID 12 1 0 0 0 f f f f t f s 0 0 23 "" _null_ _null_ _null_ _null_ pg_event_trigger_table_rewrite_reason _null_ _null_ _null_ ));
 DESCR("return reason code for table getting rewritten");
+DATA(insert OID = 3590 (  pg_event_trigger_get_creation_commands PGNSP PGUID 12 10 100 0 0 f f f f t t s 0 0 2249 "" "{26,26,23,25,25,25,25,16,114}" "{o,o,o,o,o,o,o,o,o}" "{classid,objid,objsubid,command_tag,object_type,schema,identity,in_extension,command}" _null_ pg_event_trigger_get_creation_commands _null_ _null_ _null_ ));
+DESCR("list JSON-formatted commands executed by the current command");
+DATA(insert OID = 3591 (  pg_event_trigger_expand_command PGNSP PGUID 12 10 0 0 0 f f f f t f s 1 0 25 "114" _null_ _null_ _null_ _null_ pg_event_trigger_expand_command _null_ _null_ _null_ ));
+DESCR("format JSON command");
 
 /* generic transition functions for ordered-set aggregates */
 DATA(insert OID = 3970 ( ordered_set_transition			PGNSP PGUID 12 1 0 0 0 f f f f f f i 2 0 2281 "2281 2276" _null_ _null_ _null_ _null_ ordered_set_transition _null_ _null_ _null_ ));
