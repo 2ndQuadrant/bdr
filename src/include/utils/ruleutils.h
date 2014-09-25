@@ -13,6 +13,7 @@
 #ifndef RULEUTILS_H
 #define RULEUTILS_H
 
+#include "catalog/pg_trigger.h"
 #include "nodes/nodes.h"
 #include "nodes/parsenodes.h"
 #include "nodes/pg_list.h"
@@ -20,8 +21,16 @@
 
 extern char *pg_get_indexdef_string(Oid indexrelid);
 extern char *pg_get_indexdef_columns(Oid indexrelid, bool pretty);
+extern void pg_get_indexdef_detailed(Oid indexrelid,
+						 char **index_am,
+						 char **definition,
+						 char **reloptions,
+						 char **tablespace,
+						 char **whereClause);
+extern char *pg_get_trigger_whenclause(Form_pg_trigger trigrec,
+						  Node *whenClause, bool pretty);
+extern char *pg_get_constraintdef_string(Oid constraintId, bool fullCommand);
 
-extern char *pg_get_constraintdef_string(Oid constraintId);
 extern char *deparse_expression(Node *expr, List *dpcontext,
 				   bool forceprefix, bool showimplicit);
 extern List *deparse_context_for(const char *aliasname, Oid relid);
@@ -31,5 +40,8 @@ extern List *set_deparse_context_planstate(List *dpcontext,
 extern List *select_rtable_names_for_explain(List *rtable,
 								Bitmapset *rels_used);
 extern char *generate_collation_name(Oid collid);
+
+extern char *RelationGetColumnDefault(Relation rel, AttrNumber attno,
+						 List *dpcontext);
 
 #endif	/* RULEUTILS_H */
