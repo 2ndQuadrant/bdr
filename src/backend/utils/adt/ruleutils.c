@@ -9352,3 +9352,21 @@ flatten_reloptions(Oid relid)
 
 	return result;
 }
+
+/*
+ * Obtain the deparsed default value for the given column of the given table.
+ *
+ * Caller must have set a correct deparse context.
+ */
+char *
+RelationGetColumnDefault(Relation rel, AttrNumber attno, List *dpcontext)
+{
+	Node *defval;
+	char *defstr;
+
+	defval = build_column_default(rel, attno);
+	defstr = deparse_expression_pretty(defval, dpcontext, false, false,
+									   0, 0);
+
+	return defstr;
+}
