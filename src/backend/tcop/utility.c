@@ -888,7 +888,11 @@ ProcessUtilitySlow(Node *parsetree,
 	bool		isTopLevel = (context == PROCESS_UTILITY_TOPLEVEL);
 	bool		isCompleteQuery = (context <= PROCESS_UTILITY_QUERY);
 	bool		needCleanup;
+	bool		commandStashed = false;
+	ObjectType	objectType;
+	Oid			objectId = InvalidOid;
 	ObjectAddress address;
+	Oid			secondaryOid = InvalidOid;
 
 	/* All event trigger calls are done only when isCompleteQuery is true */
 	needCleanup = isCompleteQuery && EventTriggerBeginCompleteQuery();
@@ -907,6 +911,12 @@ ProcessUtilitySlow(Node *parsetree,
 			case T_CreateSchemaStmt:
 				CreateSchemaCommand((CreateSchemaStmt *) parsetree,
 									queryString);
+				/*
+				 * CreateSchemaCommand calls EventTriggerStashCommand
+				 * internally, for reasons explained there, so turn off
+				 * command collection below.
+				 */
+				commandStashed = true;
 				break;
 
 			case T_CreateStmt:
@@ -931,8 +941,10 @@ ProcessUtilitySlow(Node *parsetree,
 
 							/* Create the table itself */
 							address = DefineRelation((CreateStmt *) stmt,
-													 RELKIND_RELATION,
-													 InvalidOid);
+													  RELKIND_RELATION,
+													  InvalidOid);
+							EventTriggerStashCommand(address, InvalidOid,
+													 stmt);
 
 							/*
 							 * Let NewRelationCreateToastTable decide if this
@@ -965,10 +977,15 @@ ProcessUtilitySlow(Node *parsetree,
 													 InvalidOid);
 							CreateForeignTable((CreateForeignTableStmt *) stmt,
 											   address.objectId);
+							EventTriggerStashCommand(address, InvalidOid, stmt);
 						}
 						else
 						{
-							/* Recurse for anything else */
+							/*
+							 * Recurse for anything else.  Note the recursive
+							 * call will stash the objects so created into our
+							 * event trigger context.
+							 */
 							ProcessUtility(stmt,
 										   queryString,
 										   PROCESS_UTILITY_SUBCOMMAND,
@@ -976,6 +993,12 @@ ProcessUtilitySlow(Node *parsetree,
 										   None_Receiver,
 										   NULL);
 						}
+
+						/*
+						 * The multiple commands generated here are stashed
+						 * individually, so disable collection below.
+						 */
+						commandStashed = true;
 
 						/* Need CCI between commands */
 						if (lnext(l) != NULL)
@@ -1039,6 +1062,9 @@ ProcessUtilitySlow(Node *parsetree,
 						  (errmsg("relation \"%s\" does not exist, skipping",
 								  atstmt->relation->relname)));
 				}
+
+				/* ALTER TABLE stashes commands internally */
+				commandStashed = true;
 				break;
 
 			case T_AlterDomainStmt:
@@ -1057,30 +1083,36 @@ ProcessUtilitySlow(Node *parsetree,
 							 * Recursively alter column default for table and,
 							 * if requested, for descendants
 							 */
-							AlterDomainDefault(stmt->typeName,
-											   stmt->def);
+							address =
+								AlterDomainDefault(stmt->typeName,
+												   stmt->def);
 							break;
 						case 'N':		/* ALTER DOMAIN DROP NOT NULL */
-							AlterDomainNotNull(stmt->typeName,
-											   false);
+							address =
+								AlterDomainNotNull(stmt->typeName,
+												   false);
 							break;
 						case 'O':		/* ALTER DOMAIN SET NOT NULL */
-							AlterDomainNotNull(stmt->typeName,
-											   true);
+							address =
+								AlterDomainNotNull(stmt->typeName,
+												   true);
 							break;
 						case 'C':		/* ADD CONSTRAINT */
-							AlterDomainAddConstraint(stmt->typeName,
-													 stmt->def);
+							address =
+								AlterDomainAddConstraint(stmt->typeName,
+														 stmt->def);
 							break;
 						case 'X':		/* DROP CONSTRAINT */
-							AlterDomainDropConstraint(stmt->typeName,
-													  stmt->name,
-													  stmt->behavior,
-													  stmt->missing_ok);
+							address =
+								AlterDomainDropConstraint(stmt->typeName,
+														  stmt->name,
+														  stmt->behavior,
+														  stmt->missing_ok);
 							break;
 						case 'V':		/* VALIDATE CONSTRAINT */
-							AlterDomainValidateConstraint(stmt->typeName,
-														  stmt->name);
+							address =
+								AlterDomainValidateConstraint(stmt->typeName,
+															  stmt->name);
 							break;
 						default:		/* oops */
 							elog(ERROR, "unrecognized alter domain type: %d",
@@ -1097,43 +1129,49 @@ ProcessUtilitySlow(Node *parsetree,
 				{
 					DefineStmt *stmt = (DefineStmt *) parsetree;
 
+					objectType = stmt->kind;
 					switch (stmt->kind)
 					{
 						case OBJECT_AGGREGATE:
-							DefineAggregate(stmt->defnames, stmt->args,
-											stmt->oldstyle, stmt->definition,
-											queryString);
+							objectId =
+								DefineAggregate(stmt->defnames, stmt->args,
+												stmt->oldstyle,
+												stmt->definition, queryString);
 							break;
 						case OBJECT_OPERATOR:
 							Assert(stmt->args == NIL);
-							DefineOperator(stmt->defnames, stmt->definition);
+							objectId = DefineOperator(stmt->defnames,
+													  stmt->definition);
 							break;
 						case OBJECT_TYPE:
 							Assert(stmt->args == NIL);
-							DefineType(stmt->defnames, stmt->definition);
+							objectId = DefineType(stmt->defnames,
+												  stmt->definition);
 							break;
 						case OBJECT_TSPARSER:
 							Assert(stmt->args == NIL);
-							DefineTSParser(stmt->defnames, stmt->definition);
+							objectId = DefineTSParser(stmt->defnames,
+													  stmt->definition);
 							break;
 						case OBJECT_TSDICTIONARY:
 							Assert(stmt->args == NIL);
-							DefineTSDictionary(stmt->defnames,
-											   stmt->definition);
+							objectId = DefineTSDictionary(stmt->defnames,
+														  stmt->definition);
 							break;
 						case OBJECT_TSTEMPLATE:
 							Assert(stmt->args == NIL);
-							DefineTSTemplate(stmt->defnames,
-											 stmt->definition);
+							objectId = DefineTSTemplate(stmt->defnames,
+														stmt->definition);
 							break;
 						case OBJECT_TSCONFIGURATION:
 							Assert(stmt->args == NIL);
-							DefineTSConfiguration(stmt->defnames,
-												  stmt->definition);
+							objectId = DefineTSConfiguration(stmt->defnames,
+															 stmt->definition);
 							break;
 						case OBJECT_COLLATION:
 							Assert(stmt->args == NIL);
-							DefineCollation(stmt->defnames, stmt->definition);
+							objectId = DefineCollation(stmt->defnames,
+													   stmt->definition);
 							break;
 						default:
 							elog(ERROR, "unrecognized define stmt type: %d",
@@ -1174,209 +1212,285 @@ ProcessUtilitySlow(Node *parsetree,
 					stmt = transformIndexStmt(relid, stmt, queryString);
 
 					/* ... and do it */
-					DefineIndex(relid,	/* OID of heap relation */
-								stmt,
-								InvalidOid,		/* no predefined OID */
-								false,	/* is_alter_table */
-								true,	/* check_rights */
-								false,	/* skip_build */
-								false); /* quiet */
+					address =
+						DefineIndex(relid,	/* OID of heap relation */
+									stmt,
+									InvalidOid,		/* no predefined OID */
+									false,	/* is_alter_table */
+									true,	/* check_rights */
+									false,	/* skip_build */
+									false); /* quiet */
+					/*
+					 * Add the CREATE INDEX node itself to stash right away; if
+					 * there were any commands stashed in the ALTER TABLE code,
+					 * we need them to appear after this one.
+					 */
+					EventTriggerStashCommand(address,
+											 InvalidOid, parsetree);
+					commandStashed = true;
 				}
 				break;
 
 			case T_CreateExtensionStmt:
-				CreateExtension((CreateExtensionStmt *) parsetree);
+				objectId = CreateExtension((CreateExtensionStmt *) parsetree);
+				objectType = OBJECT_EXTENSION;
 				break;
 
 			case T_AlterExtensionStmt:
-				ExecAlterExtensionStmt((AlterExtensionStmt *) parsetree);
+				objectId = ExecAlterExtensionStmt((AlterExtensionStmt *) parsetree);
+				objectType = OBJECT_EXTENSION;
 				break;
 
 			case T_AlterExtensionContentsStmt:
-				ExecAlterExtensionContentsStmt((AlterExtensionContentsStmt *) parsetree,
-											   NULL);
+				objectId = ExecAlterExtensionContentsStmt((AlterExtensionContentsStmt *) parsetree,
+														  &secondaryOid);
+				objectType = OBJECT_EXTENSION;
 				break;
 
 			case T_CreateFdwStmt:
-				CreateForeignDataWrapper((CreateFdwStmt *) parsetree);
+				objectId = CreateForeignDataWrapper((CreateFdwStmt *) parsetree);
+				objectType = OBJECT_FDW;
 				break;
 
 			case T_AlterFdwStmt:
-				AlterForeignDataWrapper((AlterFdwStmt *) parsetree);
+				objectId = AlterForeignDataWrapper((AlterFdwStmt *) parsetree);
+				objectType = OBJECT_FDW;
 				break;
 
 			case T_CreateForeignServerStmt:
-				CreateForeignServer((CreateForeignServerStmt *) parsetree);
+				objectId = CreateForeignServer((CreateForeignServerStmt *) parsetree);
+				objectType = OBJECT_FOREIGN_SERVER;
 				break;
 
 			case T_AlterForeignServerStmt:
-				AlterForeignServer((AlterForeignServerStmt *) parsetree);
+				objectId = AlterForeignServer((AlterForeignServerStmt *) parsetree);
+				objectType = OBJECT_FOREIGN_SERVER;
 				break;
 
 			case T_CreateUserMappingStmt:
-				CreateUserMapping((CreateUserMappingStmt *) parsetree);
+				objectId = CreateUserMapping((CreateUserMappingStmt *) parsetree);
+				objectType = OBJECT_USER_MAPPING;
 				break;
 
 			case T_AlterUserMappingStmt:
-				AlterUserMapping((AlterUserMappingStmt *) parsetree);
+				objectId = AlterUserMapping((AlterUserMappingStmt *) parsetree);
+				objectType = OBJECT_USER_MAPPING;
 				break;
 
 			case T_DropUserMappingStmt:
 				RemoveUserMapping((DropUserMappingStmt *) parsetree);
+				/* no commands stashed for DROP */
+				commandStashed = true;
 				break;
 
 			case T_ImportForeignSchemaStmt:
 				ImportForeignSchema((ImportForeignSchemaStmt *) parsetree);
+				/* commands are stashed inside ImportForeignSchema */
+				commandStashed = true;
 				break;
 
 			case T_CompositeTypeStmt:	/* CREATE TYPE (composite) */
 				{
 					CompositeTypeStmt *stmt = (CompositeTypeStmt *) parsetree;
 
-					DefineCompositeType(stmt->typevar, stmt->coldeflist);
+					objectId = DefineCompositeType(stmt->typevar,
+												   stmt->coldeflist);
+					objectType = OBJECT_COMPOSITE;
 				}
 				break;
 
 			case T_CreateEnumStmt:		/* CREATE TYPE AS ENUM */
-				DefineEnum((CreateEnumStmt *) parsetree);
+				objectId = DefineEnum((CreateEnumStmt *) parsetree);
+				objectType = OBJECT_TYPE;
 				break;
 
 			case T_CreateRangeStmt:		/* CREATE TYPE AS RANGE */
-				DefineRange((CreateRangeStmt *) parsetree);
+				objectId = DefineRange((CreateRangeStmt *) parsetree);
+				objectType = OBJECT_TYPE;
 				break;
 
 			case T_AlterEnumStmt:		/* ALTER TYPE (enum) */
-				AlterEnum((AlterEnumStmt *) parsetree, isTopLevel);
+				objectId = AlterEnum((AlterEnumStmt *) parsetree, isTopLevel);
+				objectType = OBJECT_TYPE;
 				break;
 
 			case T_ViewStmt:	/* CREATE VIEW */
-				DefineView((ViewStmt *) parsetree, queryString);
+				address = DefineView((ViewStmt *) parsetree, queryString);
+				EventTriggerStashCommand(address, InvalidOid, parsetree);
+				/* stashed internally */
+				commandStashed = true;
 				break;
 
 			case T_CreateFunctionStmt:	/* CREATE FUNCTION */
-				CreateFunction((CreateFunctionStmt *) parsetree, queryString);
+				objectId = CreateFunction((CreateFunctionStmt *) parsetree, queryString);
+				objectType = OBJECT_FUNCTION;
 				break;
 
 			case T_AlterFunctionStmt:	/* ALTER FUNCTION */
-				AlterFunction((AlterFunctionStmt *) parsetree);
+				objectId = AlterFunction((AlterFunctionStmt *) parsetree);
+				objectType = OBJECT_FUNCTION;
 				break;
 
 			case T_RuleStmt:	/* CREATE RULE */
-				DefineRule((RuleStmt *) parsetree, queryString);
+				objectId = DefineRule((RuleStmt *) parsetree, queryString);
+				objectType = OBJECT_RULE;
 				break;
 
 			case T_CreateSeqStmt:
-				DefineSequence((CreateSeqStmt *) parsetree);
+				address = DefineSequence((CreateSeqStmt *) parsetree);
 				break;
 
 			case T_AlterSeqStmt:
-				AlterSequence((AlterSeqStmt *) parsetree);
+				objectId = AlterSequence((AlterSeqStmt *) parsetree);
+				objectType = OBJECT_SEQUENCE;
 				break;
 
 			case T_CreateTableAsStmt:
-				ExecCreateTableAs((CreateTableAsStmt *) parsetree,
+				objectId = ExecCreateTableAs((CreateTableAsStmt *) parsetree,
 								  queryString, params, completionTag);
+				objectType = OBJECT_TABLE;
 				break;
 
 			case T_RefreshMatViewStmt:
-				ExecRefreshMatView((RefreshMatViewStmt *) parsetree,
+				objectId = ExecRefreshMatView((RefreshMatViewStmt *) parsetree,
 								   queryString, params, completionTag);
+				objectType = OBJECT_MATVIEW;
 				break;
 
 			case T_CreateTrigStmt:
-				(void) CreateTrigger((CreateTrigStmt *) parsetree, queryString,
-									 InvalidOid, InvalidOid, InvalidOid,
-									 InvalidOid, false);
+				objectId = CreateTrigger((CreateTrigStmt *) parsetree,
+										 queryString, InvalidOid, InvalidOid,
+										 InvalidOid, InvalidOid, false);
+				objectType = OBJECT_TRIGGER;
 				break;
 
 			case T_CreatePLangStmt:
-				CreateProceduralLanguage((CreatePLangStmt *) parsetree);
+				objectId = CreateProceduralLanguage((CreatePLangStmt *) parsetree);
+				objectType = OBJECT_LANGUAGE;
 				break;
 
 			case T_CreateDomainStmt:
-				DefineDomain((CreateDomainStmt *) parsetree);
+				objectId = DefineDomain((CreateDomainStmt *) parsetree);
+				objectType = OBJECT_DOMAIN;
 				break;
 
 			case T_CreateConversionStmt:
-				CreateConversionCommand((CreateConversionStmt *) parsetree);
+				objectId = CreateConversionCommand((CreateConversionStmt *) parsetree);
+				objectType = OBJECT_CONVERSION;
 				break;
 
 			case T_CreateCastStmt:
-				CreateCast((CreateCastStmt *) parsetree);
+				objectId = CreateCast((CreateCastStmt *) parsetree);
+				objectType = OBJECT_CAST;
 				break;
 
 			case T_CreateOpClassStmt:
-				DefineOpClass((CreateOpClassStmt *) parsetree);
+				objectId = DefineOpClass((CreateOpClassStmt *) parsetree);
+				objectType = OBJECT_OPCLASS;
 				break;
 
 			case T_CreateOpFamilyStmt:
-				DefineOpFamily((CreateOpFamilyStmt *) parsetree);
+				objectId = DefineOpFamily((CreateOpFamilyStmt *) parsetree);
+				objectType = OBJECT_OPFAMILY;
 				break;
 
 			case T_AlterOpFamilyStmt:
-				AlterOpFamily((AlterOpFamilyStmt *) parsetree);
+				objectId = AlterOpFamily((AlterOpFamilyStmt *) parsetree);
+				objectType = OBJECT_OPFAMILY;
 				break;
 
 			case T_AlterTSDictionaryStmt:
-				AlterTSDictionary((AlterTSDictionaryStmt *) parsetree);
+				objectId = AlterTSDictionary((AlterTSDictionaryStmt *) parsetree);
+				objectType = OBJECT_TSDICTIONARY;
 				break;
 
 			case T_AlterTSConfigurationStmt:
-				AlterTSConfiguration((AlterTSConfigurationStmt *) parsetree);
+				objectId = AlterTSConfiguration((AlterTSConfigurationStmt *) parsetree);
+				objectType = OBJECT_TSCONFIGURATION;
 				break;
 
 			case T_AlterTableMoveAllStmt:
 				AlterTableMoveAll((AlterTableMoveAllStmt *) parsetree);
+				/* commands are stashed in AlterTableMoveAll */
+				commandStashed = true;
 				break;
 
 			case T_DropStmt:
 				ExecDropStmt((DropStmt *) parsetree, isTopLevel);
+				/* no commands stashed for DROP */
+				commandStashed = true;
 				break;
 
 			case T_RenameStmt:
-				ExecRenameStmt((RenameStmt *) parsetree);
+				address = ExecRenameStmt((RenameStmt *) parsetree);
 				break;
 
 			case T_AlterObjectSchemaStmt:
-				ExecAlterObjectSchemaStmt((AlterObjectSchemaStmt *) parsetree);
+				objectId = ExecAlterObjectSchemaStmt((AlterObjectSchemaStmt *) parsetree);
+				objectType = ((AlterObjectSchemaStmt *) parsetree)->objectType;
 				break;
 
 			case T_AlterOwnerStmt:
-				ExecAlterOwnerStmt((AlterOwnerStmt *) parsetree);
+				objectId = ExecAlterOwnerStmt((AlterOwnerStmt *) parsetree);
+				objectType = ((AlterOwnerStmt *) parsetree)->objectType;
 				break;
 
 			case T_CommentStmt:
-				CommentObject((CommentStmt *) parsetree);
+				address = CommentObject((CommentStmt *) parsetree);
 				break;
 
 			case T_GrantStmt:
 				ExecuteGrantStmt((GrantStmt *) parsetree);
+				/* commands are stashed in ExecGrantStmt_oids */
+				commandStashed = true;
 				break;
 
 			case T_DropOwnedStmt:
 				DropOwnedObjects((DropOwnedStmt *) parsetree);
+				/* no commands stashed for DROP */
+				commandStashed = true;
 				break;
 
 			case T_AlterDefaultPrivilegesStmt:
 				ExecAlterDefaultPrivilegesStmt((AlterDefaultPrivilegesStmt *) parsetree);
+				/* XXX FIXME WTF? */
 				break;
 
 			case T_CreatePolicyStmt:	/* CREATE POLICY */
-				CreatePolicy((CreatePolicyStmt *) parsetree);
+				objectId = CreatePolicy((CreatePolicyStmt *) parsetree);
+				objectType = OBJECT_POLICY;
 				break;
 
 			case T_AlterPolicyStmt:		/* ALTER POLICY */
-				AlterPolicy((AlterPolicyStmt *) parsetree);
+				objectId = AlterPolicy((AlterPolicyStmt *) parsetree);
+				objectType = OBJECT_POLICY;
 				break;
 
 			case T_SecLabelStmt:
-				ExecSecLabelStmt((SecLabelStmt *) parsetree);
+				objectId = ExecSecLabelStmt((SecLabelStmt *) parsetree);
+				objectType = ((SecLabelStmt *) parsetree)->objtype;
 				break;
 
 			default:
 				elog(ERROR, "unrecognized node type: %d",
 					 (int) nodeTag(parsetree));
 				break;
+		}
+
+		/*
+		 * Remember the object so that ddl_command_end event triggers have
+		 * access to it.
+		 */
+		if (!commandStashed)
+		{
+			if (objectId != InvalidOid)
+			{
+				address.classId = get_objtype_catalog_oid(objectType);
+				address.objectId = objectId;
+				address.objectSubId = 0;
+			}
+
+			EventTriggerStashCommand(address, secondaryOid, parsetree);
 		}
 
 		if (isCompleteQuery)
