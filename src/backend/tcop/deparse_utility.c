@@ -3535,6 +3535,41 @@ deparse_AlterEnumStmt(Oid objectId, Node *parsetree)
 }
 
 static ObjTree *
+deparse_CreateOpFamily(Oid objectId, Node *parsetree)
+{
+	HeapTuple   opfTup;
+	HeapTuple   amTup;
+	Form_pg_opfamily opfForm;
+	Form_pg_am  amForm;
+	ObjTree	   *copfStmt;
+	ObjTree	   *tmp;
+
+	opfTup = SearchSysCache1(OPFAMILYOID, ObjectIdGetDatum(objectId));
+	if (!HeapTupleIsValid(opfTup))
+		elog(ERROR, "cache lookup failed for operator family with OID %u", objectId);
+	opfForm = (Form_pg_opfamily) GETSTRUCT(opfTup);
+
+	amTup = SearchSysCache1(AMOID, ObjectIdGetDatum(opfForm->opfmethod));
+	if (!HeapTupleIsValid(amTup))
+		elog(ERROR, "cache lookup failed for access method %u",
+			 opfForm->opfmethod);
+	amForm = (Form_pg_am) GETSTRUCT(amTup);
+
+	copfStmt = new_objtree_VA("CREATE OPERATOR FAMILY %{identity}D USING %{amname}I",
+							  0);
+
+	tmp = new_objtree_for_qualname(opfForm->opfnamespace,
+								   NameStr(opfForm->opfname));
+	append_object_object(copfStmt, "identity", tmp);
+	append_string_object(copfStmt, "amname", NameStr(amForm->amname));
+
+	ReleaseSysCache(amTup);
+	ReleaseSysCache(opfTup);
+
+	return copfStmt;
+}
+
+static ObjTree *
 deparse_AlterTableStmt(StashedCommand *cmd)
 {
 	ObjTree	   *alterTableStmt;
@@ -4269,7 +4304,7 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_CreateOpFamilyStmt:
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			command = deparse_CreateOpFamily(objectId, parsetree);
 			break;
 
 		case T_AlterOpFamilyStmt:
