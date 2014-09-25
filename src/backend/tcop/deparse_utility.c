@@ -624,6 +624,223 @@ new_objtree_for_qualname_id(Oid classId, Oid objectId)
 }
 
 /*
+ * Return the string representation of the given RELPERSISTENCE value
+ */
+static char *
+get_persistence_str(char persistence)
+{
+	switch (persistence)
+	{
+		case RELPERSISTENCE_TEMP:
+			return "TEMPORARY";
+		case RELPERSISTENCE_UNLOGGED:
+			return "UNLOGGED";
+		case RELPERSISTENCE_PERMANENT:
+			return "";
+		default:
+			return "???";
+	}
+}
+
+/*
+ * deparse_CreateTrigStmt
+ *		Deparse a CreateTrigStmt (CREATE TRIGGER)
+ *
+ * Given a trigger OID and the parsetree that created it, return an ObjTree
+ * representing the creation command.
+ */
+static ObjTree *
+deparse_CreateTrigStmt(Oid objectId, Node *parsetree)
+{
+	CreateTrigStmt *node = (CreateTrigStmt *) parsetree;
+	Relation	pg_trigger;
+	HeapTuple	trigTup;
+	Form_pg_trigger trigForm;
+	ObjTree	   *trigger;
+	ObjTree	   *tmp;
+	int			tgnargs;
+	List	   *list;
+	List	   *events;
+
+	pg_trigger = heap_open(TriggerRelationId, AccessShareLock);
+
+	trigTup = get_catalog_object_by_oid(pg_trigger, objectId);
+	trigForm = (Form_pg_trigger) GETSTRUCT(trigTup);
+
+	/*
+	 * Some of the elements only make sense for CONSTRAINT TRIGGERs, but it
+	 * seems simpler to use a single fmt string for both kinds of triggers.
+	 */
+	trigger =
+		new_objtree_VA("CREATE %{constraint}s TRIGGER %{name}I %{time}s %{events: OR }s "
+					   "ON %{relation}D %{from_table}s %{constraint_attrs: }s "
+					   "FOR EACH %{for_each}s %{when}s EXECUTE PROCEDURE %{function}s",
+					   2,
+					   "name", ObjTypeString, node->trigname,
+					   "constraint", ObjTypeString,
+					   node->isconstraint ? "CONSTRAINT" : "");
+
+	if (node->timing == TRIGGER_TYPE_BEFORE)
+		append_string_object(trigger, "time", "BEFORE");
+	else if (node->timing == TRIGGER_TYPE_AFTER)
+		append_string_object(trigger, "time", "AFTER");
+	else if (node->timing == TRIGGER_TYPE_INSTEAD)
+		append_string_object(trigger, "time", "INSTEAD OF");
+	else
+		elog(ERROR, "unrecognized trigger timing value %d", node->timing);
+
+	/*
+	 * Decode the events that the trigger fires for.  The output is a list;
+	 * in most cases it will just be a string with the even name, but when
+	 * there's an UPDATE with a list of columns, we return a JSON object.
+	 */
+	events = NIL;
+	if (node->events & TRIGGER_TYPE_INSERT)
+		events = lappend(events, new_string_object("INSERT"));
+	if (node->events & TRIGGER_TYPE_DELETE)
+		events = lappend(events, new_string_object("DELETE"));
+	if (node->events & TRIGGER_TYPE_TRUNCATE)
+		events = lappend(events, new_string_object("TRUNCATE"));
+	if (node->events & TRIGGER_TYPE_UPDATE)
+	{
+		if (node->columns == NIL)
+		{
+			events = lappend(events, new_string_object("UPDATE"));
+		}
+		else
+		{
+			ObjTree	   *update;
+			ListCell   *cell;
+			List	   *cols = NIL;
+
+			/*
+			 * Currently only UPDATE OF can be objects in the output JSON, but
+			 * we add a "kind" element so that user code can distinguish
+			 * possible future new event types.
+			 */
+			update = new_objtree_VA("UPDATE OF %{columns:, }I",
+									1, "kind", ObjTypeString, "update_of");
+
+			foreach(cell, node->columns)
+			{
+				char   *colname = strVal(lfirst(cell));
+
+				cols = lappend(cols,
+							   new_string_object(colname));
+			}
+
+			append_array_object(update, "columns", cols);
+
+			events = lappend(events,
+							 new_object_object(update));
+		}
+	}
+	append_array_object(trigger, "events", events);
+
+	tmp = new_objtree_for_qualname_id(RelationRelationId,
+									  trigForm->tgrelid);
+	append_object_object(trigger, "relation", tmp);
+
+	tmp = new_objtree_VA("FROM %{relation}D", 0);
+	if (trigForm->tgconstrrelid)
+	{
+		ObjTree	   *rel;
+
+		rel = new_objtree_for_qualname_id(RelationRelationId,
+										  trigForm->tgconstrrelid);
+		append_object_object(tmp, "relation", rel);
+	}
+	else
+		append_bool_object(tmp, "present", false);
+	append_object_object(trigger, "from_table", tmp);
+
+	list = NIL;
+	if (node->deferrable)
+		list = lappend(list,
+					   new_string_object("DEFERRABLE"));
+	if (node->initdeferred)
+		list = lappend(list,
+					   new_string_object("INITIALLY DEFERRED"));
+	append_array_object(trigger, "constraint_attrs", list);
+
+	append_string_object(trigger, "for_each",
+						 node->row ? "ROW" : "STATEMENT");
+
+	tmp = new_objtree_VA("WHEN (%{clause}s)", 0);
+	if (node->whenClause)
+	{
+		Node	   *whenClause;
+		Datum		value;
+		bool		isnull;
+
+		value = fastgetattr(trigTup, Anum_pg_trigger_tgqual,
+							RelationGetDescr(pg_trigger), &isnull);
+		if (isnull)
+			elog(ERROR, "bogus NULL tgqual");
+
+		whenClause = stringToNode(TextDatumGetCString(value));
+		append_string_object(tmp, "clause",
+							 pg_get_trigger_whenclause(trigForm,
+													   whenClause,
+													   false));
+	}
+	else
+		append_bool_object(tmp, "present", false);
+	append_object_object(trigger, "when", tmp);
+
+	tmp = new_objtree_VA("%{funcname}D(%{args:, }L)",
+						 1, "funcname", ObjTypeObject,
+						 new_objtree_for_qualname_id(ProcedureRelationId,
+													 trigForm->tgfoid));
+	list = NIL;
+	tgnargs = trigForm->tgnargs;
+	if (tgnargs > 0)
+	{
+		bytea  *tgargs;
+		char   *argstr;
+		bool	isnull;
+		int		findx;
+		int		lentgargs;
+		char   *p;
+
+		tgargs = DatumGetByteaP(fastgetattr(trigTup,
+											Anum_pg_trigger_tgargs,
+											RelationGetDescr(pg_trigger),
+											&isnull));
+		if (isnull)
+			elog(ERROR, "invalid NULL tgargs");
+		argstr = (char *) VARDATA(tgargs);
+		lentgargs = VARSIZE_ANY_EXHDR(tgargs);
+
+		p = argstr;
+		for (findx = 0; findx < tgnargs; findx++)
+		{
+			size_t	tlen;
+
+			/* verify that the argument encoding is correct */
+			tlen = strlen(p);
+			if (p + tlen >= argstr + lentgargs)
+				ereport(ERROR,
+						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						 errmsg("invalid argument string (%s) for trigger \"%s\"",
+								argstr, NameStr(trigForm->tgname))));
+
+			list = lappend(list, new_string_object(p));
+
+			p += tlen + 1;
+		}
+	}
+
+	append_array_object(tmp, "args", list);		/* might be NIL */
+
+	append_object_object(trigger, "function", tmp);
+
+	heap_close(pg_trigger, AccessShareLock);
+
+	return trigger;
+}
+
+/*
  * deparse_ColumnDef
  *		Subroutine for CREATE TABLE deparsing
  *
@@ -850,6 +1067,334 @@ deparseTableElements(Relation relation, List *tableElements, List *dpcontext,
 }
 
 /*
+ * obtainConstraints
+ *		Subroutine for CREATE TABLE/CREATE DOMAIN deparsing
+ *
+ * Given a table OID or domain OID, obtain its constraints and append them to
+ * the given elements list.  The updated list is returned.
+ *
+ * This works for typed tables, regular tables, and domains.
+ *
+ * Note that CONSTRAINT_FOREIGN constraints are always ignored.
+ */
+static List *
+obtainConstraints(List *elements, Oid relationId, Oid domainId)
+{
+	Relation	conRel;
+	ScanKeyData key;
+	SysScanDesc scan;
+	HeapTuple	tuple;
+	ObjTree    *tmp;
+
+	/* only one may be valid */
+	Assert(OidIsValid(relationId) ^ OidIsValid(domainId));
+
+	/*
+	 * scan pg_constraint to fetch all constraints linked to the given
+	 * relation.
+	 */
+	conRel = heap_open(ConstraintRelationId, AccessShareLock);
+	if (OidIsValid(relationId))
+	{
+		ScanKeyInit(&key,
+					Anum_pg_constraint_conrelid,
+					BTEqualStrategyNumber, F_OIDEQ,
+					ObjectIdGetDatum(relationId));
+		scan = systable_beginscan(conRel, ConstraintRelidIndexId,
+								  true, NULL, 1, &key);
+	}
+	else
+	{
+		Assert(OidIsValid(domainId));
+		ScanKeyInit(&key,
+					Anum_pg_constraint_contypid,
+					BTEqualStrategyNumber, F_OIDEQ,
+					ObjectIdGetDatum(domainId));
+		scan = systable_beginscan(conRel, ConstraintTypidIndexId,
+								  true, NULL, 1, &key);
+	}
+
+	/*
+	 * For each constraint, add a node to the list of table elements.  In
+	 * these nodes we include not only the printable information ("fmt"), but
+	 * also separate attributes to indicate the type of constraint, for
+	 * automatic processing.
+	 */
+	while (HeapTupleIsValid(tuple = systable_getnext(scan)))
+	{
+		Form_pg_constraint constrForm;
+		char	   *contype;
+
+		constrForm = (Form_pg_constraint) GETSTRUCT(tuple);
+
+		switch (constrForm->contype)
+		{
+			case CONSTRAINT_CHECK:
+				contype = "check";
+				break;
+			case CONSTRAINT_FOREIGN:
+				continue;	/* not here */
+			case CONSTRAINT_PRIMARY:
+				contype = "primary key";
+				break;
+			case CONSTRAINT_UNIQUE:
+				contype = "unique";
+				break;
+			case CONSTRAINT_TRIGGER:
+				contype = "trigger";
+				break;
+			case CONSTRAINT_EXCLUSION:
+				contype = "exclusion";
+				break;
+			default:
+				elog(ERROR, "unrecognized constraint type");
+		}
+
+		/*
+		 * "type" and "contype" are not part of the printable output, but are
+		 * useful to programmatically distinguish these from columns and among
+		 * different constraint types.
+		 *
+		 * XXX it might be useful to also list the column names in a PK, etc.
+		 */
+		tmp = new_objtree_VA("CONSTRAINT %{name}I %{definition}s",
+							 4,
+							 "type", ObjTypeString, "constraint",
+							 "contype", ObjTypeString, contype,
+						 "name", ObjTypeString, NameStr(constrForm->conname),
+							 "definition", ObjTypeString,
+						  pg_get_constraintdef_string(HeapTupleGetOid(tuple),
+													  false));
+		elements = lappend(elements, new_object_object(tmp));
+	}
+
+	systable_endscan(scan);
+	heap_close(conRel, AccessShareLock);
+
+	return elements;
+}
+
+/*
+ * deparse_CreateStmt
+ *		Deparse a CreateStmt (CREATE TABLE)
+ *
+ * Given a table OID and the parsetree that created it, return an ObjTree
+ * representing the creation command.
+ */
+static ObjTree *
+deparse_CreateStmt(Oid objectId, Node *parsetree)
+{
+	CreateStmt *node = (CreateStmt *) parsetree;
+	Relation	relation = relation_open(objectId, AccessShareLock);
+	List	   *dpcontext;
+	ObjTree    *createStmt;
+	ObjTree    *tmp;
+	List	   *list;
+	ListCell   *cell;
+	char	   *fmtstr;
+
+	/*
+	 * Typed tables use a slightly different format string: we must not put
+	 * table_elements with parents directly in the fmt string, because if
+	 * there are no options the parens must not be emitted; and also, typed
+	 * tables do not allow for inheritance.
+	 */
+	if (node->ofTypename)
+		fmtstr = "CREATE %{persistence}s TABLE %{if_not_exists}s %{identity}D "
+			"OF %{of_type}T %{table_elements}s "
+			"WITH (%{with:, }s) %{on_commit}s %{tablespace}s";
+	else
+		fmtstr = "CREATE %{persistence}s TABLE %{if_not_exists}s %{identity}D "
+			"(%{table_elements:, }s) %{inherits}s "
+			"WITH (%{with:, }s) %{on_commit}s %{tablespace}s";
+
+	createStmt =
+		new_objtree_VA(fmtstr, 1,
+					   "persistence", ObjTypeString,
+					   get_persistence_str(relation->rd_rel->relpersistence));
+
+	tmp = new_objtree_for_qualname(relation->rd_rel->relnamespace,
+								   RelationGetRelationName(relation));
+	append_object_object(createStmt, "identity", tmp);
+
+	append_string_object(createStmt, "if_not_exists",
+						 node->if_not_exists ? "IF NOT EXISTS" : "");
+
+	dpcontext = deparse_context_for(RelationGetRelationName(relation),
+									objectId);
+
+	if (node->ofTypename)
+	{
+		List	   *tableelts = NIL;
+
+		/*
+		 * We can't put table elements directly in the fmt string as an array
+		 * surrounded by parens here, because an empty clause would cause a
+		 * syntax error.  Therefore, we use an indirection element and set
+		 * present=false when there are no elements.
+		 */
+		append_string_object(createStmt, "table_kind", "typed");
+
+		tmp = new_objtree_for_type(relation->rd_rel->reloftype, -1);
+		append_object_object(createStmt, "of_type", tmp);
+
+		tableelts = deparseTableElements(relation, node->tableElts, dpcontext,
+										 true,		/* typed table */
+										 false);	/* not composite */
+		tableelts = obtainConstraints(tableelts, objectId, InvalidOid);
+		if (tableelts == NIL)
+			tmp = new_objtree_VA("", 1,
+								 "present", ObjTypeBool, false);
+		else
+			tmp = new_objtree_VA("(%{elements:, }s)", 1,
+								 "elements", ObjTypeArray, tableelts);
+		append_object_object(createStmt, "table_elements", tmp);
+	}
+	else
+	{
+		List	   *tableelts = NIL;
+
+		/*
+		 * There is no need to process LIKE clauses separately; they have
+		 * already been transformed into columns and constraints.
+		 */
+		append_string_object(createStmt, "table_kind", "plain");
+
+		/*
+		 * Process table elements: column definitions and constraints.	Only
+		 * the column definitions are obtained from the parse node itself.	To
+		 * get constraints we rely on pg_constraint, because the parse node
+		 * might be missing some things such as the name of the constraints.
+		 */
+		tableelts = deparseTableElements(relation, node->tableElts, dpcontext,
+										 false,		/* not typed table */
+										 false);	/* not composite */
+		tableelts = obtainConstraints(tableelts, objectId, InvalidOid);
+
+		append_array_object(createStmt, "table_elements", tableelts);
+
+		/*
+		 * Add inheritance specification.  We cannot simply scan the list of
+		 * parents from the parser node, because that may lack the actual
+		 * qualified names of the parent relations.  Rather than trying to
+		 * re-resolve them from the information in the parse node, it seems
+		 * more accurate and convenient to grab it from pg_inherits.
+		 */
+		tmp = new_objtree_VA("INHERITS (%{parents:, }D)", 0);
+		if (list_length(node->inhRelations) > 0)
+		{
+			List	   *parents = NIL;
+			Relation	inhRel;
+			SysScanDesc scan;
+			ScanKeyData key;
+			HeapTuple	tuple;
+
+			inhRel = heap_open(InheritsRelationId, RowExclusiveLock);
+
+			ScanKeyInit(&key,
+						Anum_pg_inherits_inhrelid,
+						BTEqualStrategyNumber, F_OIDEQ,
+						ObjectIdGetDatum(objectId));
+
+			scan = systable_beginscan(inhRel, InheritsRelidSeqnoIndexId,
+									  true, NULL, 1, &key);
+
+			while (HeapTupleIsValid(tuple = systable_getnext(scan)))
+			{
+				ObjTree    *parent;
+				Form_pg_inherits formInh = (Form_pg_inherits) GETSTRUCT(tuple);
+
+				parent = new_objtree_for_qualname_id(RelationRelationId,
+													 formInh->inhparent);
+				parents = lappend(parents, new_object_object(parent));
+			}
+
+			systable_endscan(scan);
+			heap_close(inhRel, RowExclusiveLock);
+
+			append_array_object(tmp, "parents", parents);
+		}
+		else
+		{
+			append_null_object(tmp, "parents");
+			append_bool_object(tmp, "present", false);
+		}
+		append_object_object(createStmt, "inherits", tmp);
+	}
+
+	tmp = new_objtree_VA("TABLESPACE %{tablespace}I", 0);
+	if (node->tablespacename)
+		append_string_object(tmp, "tablespace", node->tablespacename);
+	else
+	{
+		append_null_object(tmp, "tablespace");
+		append_bool_object(tmp, "present", false);
+	}
+	append_object_object(createStmt, "tablespace", tmp);
+
+	tmp = new_objtree_VA("ON COMMIT %{on_commit_value}s", 0);
+	switch (node->oncommit)
+	{
+		case ONCOMMIT_DROP:
+			append_string_object(tmp, "on_commit_value", "DROP");
+			break;
+
+		case ONCOMMIT_DELETE_ROWS:
+			append_string_object(tmp, "on_commit_value", "DELETE ROWS");
+			break;
+
+		case ONCOMMIT_PRESERVE_ROWS:
+			append_string_object(tmp, "on_commit_value", "PRESERVE ROWS");
+			break;
+
+		case ONCOMMIT_NOOP:
+			append_null_object(tmp, "on_commit_value");
+			append_bool_object(tmp, "present", false);
+			break;
+	}
+	append_object_object(createStmt, "on_commit", tmp);
+
+	/*
+	 * WITH clause.  We always emit one, containing at least the OIDS option.
+	 * That way we don't depend on the default value for default_with_oids.
+	 * We can skip emitting other options if there don't appear in the parse
+	 * node.
+	 */
+	tmp = new_objtree_VA("oids=%{value}s", 2,
+						 "option", ObjTypeString, "oids",
+						 "value", ObjTypeString,
+						 relation->rd_rel->relhasoids ? "ON" : "OFF");
+	list = list_make1(new_object_object(tmp));
+	foreach(cell, node->options)
+	{
+		DefElem	*opt = (DefElem *) lfirst(cell);
+		char   *defname;
+		char   *value;
+
+		/* already handled above */
+		if (strcmp(opt->defname, "oids") == 0)
+			continue;
+
+		if (opt->defnamespace)
+			defname = psprintf("%s.%s", opt->defnamespace, opt->defname);
+		else
+			defname = opt->defname;
+
+		value = opt->arg ? defGetString(opt) :
+			defGetBoolean(opt) ? "TRUE" : "FALSE";
+		tmp = new_objtree_VA("%{option}s=%{value}s", 2,
+							 "option", ObjTypeString, defname,
+							 "value", ObjTypeString, value);
+		list = lappend(list, new_object_object(tmp));
+	}
+	append_array_object(createStmt, "with", list);
+
+	relation_close(relation, AccessShareLock);
+
+	return createStmt;
+}
+
+/*
  * deparse_CompositeTypeStmt
  *		Deparse a CompositeTypeStmt (CREATE TYPE AS)
  *
@@ -917,6 +1462,405 @@ deparse_CreateEnumStmt(Oid objectId, Node *parsetree)
 	return enumtype;
 }
 
+static inline ObjElem *
+deparse_Seq_Cache(ObjTree *parent, Form_pg_sequence seqdata)
+{
+	ObjTree	   *tmp;
+	char	   *tmpstr;
+
+	tmpstr = psprintf(INT64_FORMAT, seqdata->cache_value);
+	tmp = new_objtree_VA("CACHE %{value}s",
+						 2,
+						 "clause", ObjTypeString, "cache",
+						 "value", ObjTypeString, tmpstr);
+	return new_object_object(tmp);
+}
+
+static inline ObjElem *
+deparse_Seq_Cycle(ObjTree *parent, Form_pg_sequence seqdata)
+{
+	ObjTree	   *tmp;
+
+	tmp = new_objtree_VA("%{no}s CYCLE",
+						 2,
+						 "clause", ObjTypeString, "cycle",
+						 "no", ObjTypeString,
+						 seqdata->is_cycled ? "" : "NO");
+	return new_object_object(tmp);
+}
+
+static inline ObjElem *
+deparse_Seq_IncrementBy(ObjTree *parent, Form_pg_sequence seqdata)
+{
+	ObjTree	   *tmp;
+	char	   *tmpstr;
+
+	tmpstr = psprintf(INT64_FORMAT, seqdata->increment_by);
+	tmp = new_objtree_VA("INCREMENT BY %{value}s",
+						 2,
+						 "clause", ObjTypeString, "increment_by",
+						 "value", ObjTypeString, tmpstr);
+	return new_object_object(tmp);
+}
+
+static inline ObjElem *
+deparse_Seq_Minvalue(ObjTree *parent, Form_pg_sequence seqdata)
+{
+	ObjTree	   *tmp;
+	char	   *tmpstr;
+
+	tmpstr = psprintf(INT64_FORMAT, seqdata->min_value);
+	tmp = new_objtree_VA("MINVALUE %{value}s",
+						 2,
+						 "clause", ObjTypeString, "minvalue",
+						 "value", ObjTypeString, tmpstr);
+	return new_object_object(tmp);
+}
+
+static inline ObjElem *
+deparse_Seq_Maxvalue(ObjTree *parent, Form_pg_sequence seqdata)
+{
+	ObjTree	   *tmp;
+	char	   *tmpstr;
+
+	tmpstr = psprintf(INT64_FORMAT, seqdata->max_value);
+	tmp = new_objtree_VA("MAXVALUE %{value}s",
+						 2,
+						 "clause", ObjTypeString, "maxvalue",
+						 "value", ObjTypeString, tmpstr);
+	return new_object_object(tmp);
+}
+
+static inline ObjElem *
+deparse_Seq_Startwith(ObjTree *parent, Form_pg_sequence seqdata)
+{
+	ObjTree	   *tmp;
+	char	   *tmpstr;
+
+	tmpstr = psprintf(INT64_FORMAT, seqdata->start_value);
+	tmp = new_objtree_VA("START WITH %{value}s",
+						 2,
+						 "clause", ObjTypeString, "start",
+						 "value", ObjTypeString, tmpstr);
+	return new_object_object(tmp);
+}
+
+static inline ObjElem *
+deparse_Seq_Restart(ObjTree *parent, Form_pg_sequence seqdata)
+{
+	ObjTree	   *tmp;
+	char	   *tmpstr;
+
+	tmpstr = psprintf(INT64_FORMAT, seqdata->last_value);
+	tmp = new_objtree_VA("RESTART %{value}s",
+						 2,
+						 "clause", ObjTypeString, "restart",
+						 "value", ObjTypeString, tmpstr);
+	return new_object_object(tmp);
+}
+
+static ObjElem *
+deparse_Seq_OwnedBy(ObjTree *parent, Oid sequenceId)
+{
+	ObjTree    *ownedby = NULL;
+	Relation	depRel;
+	SysScanDesc scan;
+	ScanKeyData keys[3];
+	HeapTuple	tuple;
+
+	depRel = heap_open(DependRelationId, AccessShareLock);
+	ScanKeyInit(&keys[0],
+				Anum_pg_depend_classid,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(RelationRelationId));
+	ScanKeyInit(&keys[1],
+				Anum_pg_depend_objid,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(sequenceId));
+	ScanKeyInit(&keys[2],
+				Anum_pg_depend_objsubid,
+				BTEqualStrategyNumber, F_INT4EQ,
+				Int32GetDatum(0));
+
+	scan = systable_beginscan(depRel, DependDependerIndexId, true,
+							  NULL, 3, keys);
+	while (HeapTupleIsValid(tuple = systable_getnext(scan)))
+	{
+		Oid			ownerId;
+		Form_pg_depend depform;
+		ObjTree    *tmp;
+		char	   *colname;
+
+		depform = (Form_pg_depend) GETSTRUCT(tuple);
+
+		/* only consider AUTO dependencies on pg_class */
+		if (depform->deptype != DEPENDENCY_AUTO)
+			continue;
+		if (depform->refclassid != RelationRelationId)
+			continue;
+		if (depform->refobjsubid <= 0)
+			continue;
+
+		ownerId = depform->refobjid;
+		colname = get_attname(ownerId, depform->refobjsubid);
+		if (colname == NULL)
+			continue;
+
+		tmp = new_objtree_for_qualname_id(RelationRelationId, ownerId);
+		append_string_object(tmp, "attrname", colname);
+		ownedby = new_objtree_VA("OWNED BY %{owner}D",
+								 2,
+								 "clause", ObjTypeString, "owned",
+								 "owner", ObjTypeObject, tmp);
+	}
+
+	systable_endscan(scan);
+	relation_close(depRel, AccessShareLock);
+
+	/*
+	 * If there's no owner column, emit an empty OWNED BY element, set up so
+	 * that it won't print anything.
+	 */
+	if (!ownedby)
+		/* XXX this shouldn't happen ... */
+		ownedby = new_objtree_VA("OWNED BY %{owner}D",
+								 3,
+								 "clause", ObjTypeString, "owned",
+								 "owner", ObjTypeNull,
+								 "present", ObjTypeBool, false);
+	return new_object_object(ownedby);
+}
+
+/*
+ * deparse_CreateSeqStmt
+ *		deparse a CreateSeqStmt
+ *
+ * Given a sequence OID and the parsetree that created it, return an ObjTree
+ * representing the creation command.
+ */
+static ObjTree *
+deparse_CreateSeqStmt(Oid objectId, Node *parsetree)
+{
+	ObjTree    *createSeq;
+	ObjTree    *tmp;
+	Relation	relation = relation_open(objectId, AccessShareLock);
+	Form_pg_sequence seqdata;
+	List	   *elems = NIL;
+
+	seqdata = get_sequence_values(objectId);
+
+	createSeq =
+		new_objtree_VA("CREATE %{persistence}s SEQUENCE %{identity}D "
+					   "%{definition: }s",
+					   1,
+					   "persistence", ObjTypeString,
+					   get_persistence_str(relation->rd_rel->relpersistence));
+
+	tmp = new_objtree_for_qualname(relation->rd_rel->relnamespace,
+								   RelationGetRelationName(relation));
+	append_object_object(createSeq, "identity", tmp);
+
+	/* definition elements */
+	elems = lappend(elems, deparse_Seq_Cache(createSeq, seqdata));
+	elems = lappend(elems, deparse_Seq_Cycle(createSeq, seqdata));
+	elems = lappend(elems, deparse_Seq_IncrementBy(createSeq, seqdata));
+	elems = lappend(elems, deparse_Seq_Minvalue(createSeq, seqdata));
+	elems = lappend(elems, deparse_Seq_Maxvalue(createSeq, seqdata));
+	elems = lappend(elems, deparse_Seq_Startwith(createSeq, seqdata));
+	elems = lappend(elems, deparse_Seq_Restart(createSeq, seqdata));
+	/* we purposefully do not emit OWNED BY here */
+
+	append_array_object(createSeq, "definition", elems);
+
+	relation_close(relation, AccessShareLock);
+
+	return createSeq;
+}
+
+/*
+ * deparse_AlterSeqStmt
+ *		deparse an AlterSeqStmt
+ *
+ * Given a sequence OID and a parsetree that modified it, return an ObjTree
+ * representing the alter command.
+ */
+static ObjTree *
+deparse_AlterSeqStmt(Oid objectId, Node *parsetree)
+{
+	ObjTree	   *alterSeq;
+	ObjTree	   *tmp;
+	Relation	relation = relation_open(objectId, AccessShareLock);
+	Form_pg_sequence seqdata;
+	List	   *elems = NIL;
+	ListCell   *cell;
+
+	seqdata = get_sequence_values(objectId);
+
+	alterSeq =
+		new_objtree_VA("ALTER SEQUENCE %{identity}D %{definition: }s", 0);
+	tmp = new_objtree_for_qualname(relation->rd_rel->relnamespace,
+								   RelationGetRelationName(relation));
+	append_object_object(alterSeq, "identity", tmp);
+
+	foreach(cell, ((AlterSeqStmt *) parsetree)->options)
+	{
+		DefElem *elem = (DefElem *) lfirst(cell);
+		ObjElem *newelm;
+
+		if (strcmp(elem->defname, "cache") == 0)
+			newelm = deparse_Seq_Cache(alterSeq, seqdata);
+		else if (strcmp(elem->defname, "cycle") == 0)
+			newelm = deparse_Seq_Cycle(alterSeq, seqdata);
+		else if (strcmp(elem->defname, "increment") == 0)
+			newelm = deparse_Seq_IncrementBy(alterSeq, seqdata);
+		else if (strcmp(elem->defname, "minvalue") == 0)
+			newelm = deparse_Seq_Minvalue(alterSeq, seqdata);
+		else if (strcmp(elem->defname, "maxvalue") == 0)
+			newelm = deparse_Seq_Maxvalue(alterSeq, seqdata);
+		else if (strcmp(elem->defname, "start") == 0)
+			newelm = deparse_Seq_Startwith(alterSeq, seqdata);
+		else if (strcmp(elem->defname, "restart") == 0)
+			newelm = deparse_Seq_Restart(alterSeq, seqdata);
+		else if (strcmp(elem->defname, "owned_by") == 0)
+			newelm = deparse_Seq_OwnedBy(alterSeq, objectId);
+		else
+			elog(ERROR, "invalid sequence option %s", elem->defname);
+
+		elems = lappend(elems, newelm);
+	}
+
+	append_array_object(alterSeq, "definition", elems);
+
+	relation_close(relation, AccessShareLock);
+
+	return alterSeq;
+}
+
+/*
+ * deparse_IndexStmt
+ *		deparse an IndexStmt
+ *
+ * Given an index OID and the parsetree that created it, return an ObjTree
+ * representing the creation command.
+ *
+ * If the index corresponds to a constraint, NULL is returned.
+ */
+static ObjTree *
+deparse_IndexStmt(Oid objectId, Node *parsetree)
+{
+	IndexStmt  *node = (IndexStmt *) parsetree;
+	ObjTree    *indexStmt;
+	ObjTree    *tmp;
+	Relation	idxrel;
+	Relation	heaprel;
+	char	   *index_am;
+	char	   *definition;
+	char	   *reloptions;
+	char	   *tablespace;
+	char	   *whereClause;
+
+	if (node->primary || node->isconstraint)
+	{
+		/*
+		 * indexes for PRIMARY KEY and other constraints are output
+		 * separately; return empty here.
+		 */
+		return NULL;
+	}
+
+	idxrel = relation_open(objectId, AccessShareLock);
+	heaprel = relation_open(idxrel->rd_index->indrelid, AccessShareLock);
+
+	pg_get_indexdef_detailed(objectId,
+							 &index_am, &definition, &reloptions,
+							 &tablespace, &whereClause);
+
+	indexStmt =
+		new_objtree_VA("CREATE %{unique}s INDEX %{concurrently}s %{if_not_exists}s %{name}I "
+					   "ON %{table}D USING %{index_am}s (%{definition}s) "
+					   "%{with}s %{tablespace}s %{where_clause}s",
+					   6,
+					   "unique", ObjTypeString, node->unique ? "UNIQUE" : "",
+					   "concurrently", ObjTypeString,
+					   node->concurrent ? "CONCURRENTLY" : "",
+					   "if_not_exists", ObjTypeString, node->if_not_exists ? "IF NOT EXISTS" : "",
+					   "name", ObjTypeString, RelationGetRelationName(idxrel),
+					   "definition", ObjTypeString, definition,
+					   "index_am", ObjTypeString, index_am);
+
+	tmp = new_objtree_for_qualname(heaprel->rd_rel->relnamespace,
+								   RelationGetRelationName(heaprel));
+	append_object_object(indexStmt, "table", tmp);
+
+	/* reloptions */
+	tmp = new_objtree_VA("WITH (%{opts}s)", 0);
+	if (reloptions)
+		append_string_object(tmp, "opts", reloptions);
+	else
+		append_bool_object(tmp, "present", false);
+	append_object_object(indexStmt, "with", tmp);
+
+	/* tablespace */
+	tmp = new_objtree_VA("TABLESPACE %{tablespace}s", 0);
+	if (tablespace)
+		append_string_object(tmp, "tablespace", tablespace);
+	else
+		append_bool_object(tmp, "present", false);
+	append_object_object(indexStmt, "tablespace", tmp);
+
+	/* WHERE clause */
+	tmp = new_objtree_VA("WHERE %{where}s", 0);
+	if (whereClause)
+		append_string_object(tmp, "where", whereClause);
+	else
+		append_bool_object(tmp, "present", false);
+	append_object_object(indexStmt, "where_clause", tmp);
+
+	heap_close(idxrel, AccessShareLock);
+	heap_close(heaprel, AccessShareLock);
+
+	return indexStmt;
+}
+
+/*
+ * deparse_CreateSchemaStmt
+ *		deparse a CreateSchemaStmt
+ *
+ * Given a schema OID and the parsetree that created it, return an ObjTree
+ * representing the creation command.
+ *
+ * Note we don't output the schema elements given in the creation command.
+ * They must be output separately.	 (In the current implementation,
+ * CreateSchemaCommand passes them back to ProcessUtility, which will lead to
+ * this file if appropriate.)
+ */
+static ObjTree *
+deparse_CreateSchemaStmt(Oid objectId, Node *parsetree)
+{
+	CreateSchemaStmt *node = (CreateSchemaStmt *) parsetree;
+	ObjTree    *createSchema;
+	ObjTree    *auth;
+
+	createSchema =
+		new_objtree_VA("CREATE SCHEMA %{if_not_exists}s %{name}I %{authorization}s",
+					   2,
+					   "name", ObjTypeString, node->schemaname,
+					   "if_not_exists", ObjTypeString,
+					   node->if_not_exists ? "IF NOT EXISTS" : "");
+
+	auth = new_objtree_VA("AUTHORIZATION %{authorization_role}I", 0);
+	if (node->authid)
+		append_string_object(auth, "authorization_role", node->authid);
+	else
+	{
+		append_null_object(auth, "authorization_role");
+		append_bool_object(auth, "present", false);
+	}
+	append_object_object(createSchema, "authorization", auth);
+
+	return createSchema;
+}
+
 /*
  * Handle deparsing of simple commands.
  *
@@ -939,11 +1883,11 @@ deparse_simple_command(StashedCommand *cmd)
 	switch (nodeTag(parsetree))
 	{
 		case T_CreateSchemaStmt:
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			command = deparse_CreateSchemaStmt(objectId, parsetree);
 			break;
 
 		case T_CreateStmt:
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			command = deparse_CreateStmt(objectId, parsetree);
 			break;
 
 		case T_CreateForeignTableStmt:
@@ -966,7 +1910,7 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_IndexStmt:
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			command = deparse_IndexStmt(objectId, parsetree);
 			break;
 
 		case T_CreateExtensionStmt:
@@ -1048,11 +1992,11 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_CreateSeqStmt:
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			command = deparse_CreateSeqStmt(objectId, parsetree);
 			break;
 
 		case T_AlterSeqStmt:
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			command = deparse_AlterSeqStmt(objectId, parsetree);
 			break;
 
 		case T_CreateTableAsStmt:
@@ -1065,7 +2009,7 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_CreateTrigStmt:
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			command = deparse_CreateTrigStmt(objectId, parsetree);
 			break;
 
 		case T_CreatePLangStmt:
