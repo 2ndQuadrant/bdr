@@ -4052,6 +4052,94 @@ deparse_AlterOwnerStmt(Oid objectId, Node *parsetree)
 	return ownerStmt;
 }
 
+/*
+ * Deparse a CommentStmt when it pertains to a constraint.
+ */
+static ObjTree *
+deparse_CommentOnConstraintSmt(Oid objectId, Node *parsetree)
+{
+	CommentStmt *node = (CommentStmt *) parsetree;
+	ObjTree	   *comment;
+	HeapTuple	constrTup;
+	Form_pg_constraint constrForm;
+	char	   *fmt;
+	ObjectAddress addr;
+
+	Assert(node->objtype == OBJECT_TABCONSTRAINT || node->objtype == OBJECT_DOMCONSTRAINT);
+
+	if (node->comment)
+		fmt = psprintf("COMMENT ON CONSTRAINT %%{identity}s ON %s%%{parentobj}s IS %%{comment}L",
+					   node->objtype == OBJECT_TABCONSTRAINT ? "" : "DOMAIN ");
+	else
+		fmt = psprintf("COMMENT ON CONSTRAINT %%{identity}s ON %s%%{parentobj}s IS NULL",
+					   node->objtype == OBJECT_TABCONSTRAINT ? "" : "DOMAIN ");
+	comment = new_objtree_VA(fmt, 0);
+	if (node->comment)
+		append_string_object(comment, "comment", node->comment);
+
+	constrTup = SearchSysCache1(CONSTROID, objectId);
+	if (!HeapTupleIsValid(constrTup))
+		elog(ERROR, "cache lookup failed for constraint %u", objectId);
+	constrForm = (Form_pg_constraint) GETSTRUCT(constrTup);
+
+	append_string_object(comment, "identity", pstrdup(NameStr(constrForm->conname)));
+
+	if (OidIsValid(constrForm->conrelid))
+	{
+		addr.classId = RelationRelationId;
+		addr.objectId = constrForm->conrelid;
+		addr.objectSubId = 0;
+	}
+	else
+	{
+		addr.classId = TypeRelationId;
+		addr.objectId = constrForm->contypid;
+		addr.objectSubId = 0;
+	}
+
+	append_string_object(comment, "parentobj",
+						 getObjectIdentity(&addr));
+
+	ReleaseSysCache(constrTup);
+
+	return comment;
+}
+
+static ObjTree *
+deparse_CommentStmt(ObjectAddress address, Node *parsetree)
+{
+	CommentStmt *node = (CommentStmt *) parsetree;
+	ObjTree	   *comment;
+	char	   *fmt;
+
+	/*
+	 * Constraints are sufficiently different that it is easier to handle them
+	 * separately.
+	 */
+	if (node->objtype == OBJECT_DOMCONSTRAINT ||
+		node->objtype == OBJECT_TABCONSTRAINT)
+	{
+		Assert(address.classId == ConstraintRelationId);
+		return deparse_CommentOnConstraintSmt(address.objectId, parsetree);
+	}
+
+	if (node->comment)
+		fmt = psprintf("COMMENT ON %s %%{identity}s IS %%{comment}L",
+					   stringify_objtype(node->objtype));
+	else
+		fmt = psprintf("COMMENT ON %s %%{identity}s IS NULL",
+					   stringify_objtype(node->objtype));
+
+	comment = new_objtree_VA(fmt, 0);
+	if (node->comment)
+		append_string_object(comment, "comment", node->comment);
+
+	append_string_object(comment, "identity",
+						 getObjectIdentity(&address));
+
+	return comment;
+}
+
 static ObjTree *
 deparse_CreateConversion(Oid objectId, Node *parsetree)
 {
@@ -5022,7 +5110,7 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_CommentStmt:
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			command = deparse_CommentStmt(cmd->d.simple.address, parsetree);
 			break;
 
 		case T_GrantStmt:
