@@ -896,6 +896,38 @@ deparse_CompositeTypeStmt(Oid objectId, Node *parsetree)
 }
 
 /*
+ * deparse_CreateEnumStmt
+ *		Deparse a CreateEnumStmt (CREATE TYPE AS ENUM)
+ *
+ * Given a type OID and the parsetree that created it, return an ObjTree
+ * representing the creation command.
+ */
+static ObjTree *
+deparse_CreateEnumStmt(Oid objectId, Node *parsetree)
+{
+	CreateEnumStmt *node = (CreateEnumStmt *) parsetree;
+	ObjTree	   *enumtype;
+	List	   *values;
+	ListCell   *cell;
+
+	enumtype = new_objtree_VA("CREATE TYPE %{identity}D AS ENUM (%{values:, }L)",
+							  0);
+	append_object_object(enumtype, "identity",
+						 new_objtree_for_qualname_id(TypeRelationId,
+													 objectId));
+	values = NIL;
+	foreach(cell, node->vals)
+	{
+		Value   *val = (Value *) lfirst(cell);
+
+		values = lappend(values, new_string_object(strVal(val)));
+	}
+	append_array_object(enumtype, "values", values);
+
+	return enumtype;
+}
+
+/*
  * Handle deparsing of simple commands.
  *
  * This function contains a large switch that mirrors that in
@@ -998,7 +1030,7 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_CreateEnumStmt:	/* CREATE TYPE AS ENUM */
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			command = deparse_CreateEnumStmt(objectId, parsetree);
 			break;
 
 		case T_CreateRangeStmt:	/* CREATE TYPE AS RANGE */
