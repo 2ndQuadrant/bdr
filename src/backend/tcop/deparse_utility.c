@@ -917,6 +917,42 @@ deparse_AlterDomainStmt(Oid objectId, Node *parsetree,
 }
 
 /*
+ * deparse_ViewStmt
+ *		deparse a ViewStmt
+ *
+ * Given a view OID and the parsetree that created it, return an ObjTree
+ * representing the creation command.
+ */
+static ObjTree *
+deparse_ViewStmt(Oid objectId, Node *parsetree)
+{
+	ViewStmt   *node = (ViewStmt *) parsetree;
+	ObjTree    *viewStmt;
+	ObjTree    *tmp;
+	Relation	relation;
+
+	relation = relation_open(objectId, AccessShareLock);
+
+	viewStmt = new_objtree_VA("CREATE %{or_replace}s %{persistence}s VIEW %{identity}D AS %{query}s",
+							  2,
+							  "or_replace", ObjTypeString,
+							  node->replace ? "OR REPLACE" : "",
+							  "persistence", ObjTypeString,
+					  get_persistence_str(relation->rd_rel->relpersistence));
+
+	tmp = new_objtree_for_qualname(relation->rd_rel->relnamespace,
+								   RelationGetRelationName(relation));
+	append_object_object(viewStmt, "identity", tmp);
+
+	append_string_object(viewStmt, "query",
+						 pg_get_viewdef_internal(objectId));
+
+	relation_close(relation, AccessShareLock);
+
+	return viewStmt;
+}
+
+/*
  * deparse_CreateTrigStmt
  *		Deparse a CreateTrigStmt (CREATE TRIGGER)
  *
@@ -4116,7 +4152,7 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_ViewStmt:		/* CREATE VIEW */
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			command = deparse_ViewStmt(objectId, parsetree);
 			break;
 
 		case T_CreateFunctionStmt:
