@@ -8123,7 +8123,8 @@ ATExecAlterColumnType(AlteredTableInfo *tab, Relation rel,
 				if (!list_member_oid(tab->changedConstraintOids,
 									 foundObject.objectId))
 				{
-					char	   *defstring = pg_get_constraintdef_string(foundObject.objectId);
+					char	   *defstring = pg_get_constraintdef_string(foundObject.objectId,
+																		true);
 
 					/*
 					 * Put NORMAL dependencies at the front of the list and
