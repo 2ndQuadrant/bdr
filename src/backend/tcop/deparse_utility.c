@@ -624,6 +624,278 @@ new_objtree_for_qualname_id(Oid classId, Oid objectId)
 }
 
 /*
+ * deparse_ColumnDef
+ *		Subroutine for CREATE TABLE deparsing
+ *
+ * Deparse a ColumnDef node within a regular (non typed) table creation.
+ *
+ * NOT NULL constraints in the column definition are emitted directly in the
+ * column definition by this routine; other constraints must be emitted
+ * elsewhere (the info in the parse node is incomplete anyway.)
+ */
+static ObjTree *
+deparse_ColumnDef(Relation relation, List *dpcontext, bool composite,
+				  ColumnDef *coldef)
+{
+	ObjTree    *column;
+	ObjTree    *tmp;
+	Oid			relid = RelationGetRelid(relation);
+	HeapTuple	attrTup;
+	Form_pg_attribute attrForm;
+	Oid			typid;
+	int32		typmod;
+	Oid			typcollation;
+	bool		saw_notnull;
+	ListCell   *cell;
+
+	/*
+	 * Inherited columns without local definitions must not be emitted. XXX --
+	 * maybe it is useful to have them with "present = false" or some such?
+	 */
+	if (!coldef->is_local)
+		return NULL;
+
+	attrTup = SearchSysCacheAttName(relid, coldef->colname);
+	if (!HeapTupleIsValid(attrTup))
+		elog(ERROR, "could not find cache entry for column \"%s\" of relation %u",
+			 coldef->colname, relid);
+	attrForm = (Form_pg_attribute) GETSTRUCT(attrTup);
+
+	get_atttypetypmodcoll(relid, attrForm->attnum,
+						  &typid, &typmod, &typcollation);
+
+	/* Composite types use a slightly simpler format string */
+	if (composite)
+		column = new_objtree_VA("%{name}I %{coltype}T %{collation}s",
+								3,
+								"type", ObjTypeString, "column",
+								"name", ObjTypeString, coldef->colname,
+								"coltype", ObjTypeObject,
+								new_objtree_for_type(typid, typmod));
+	else
+		column = new_objtree_VA("%{name}I %{coltype}T %{default}s %{not_null}s %{collation}s",
+								3,
+								"type", ObjTypeString, "column",
+								"name", ObjTypeString, coldef->colname,
+								"coltype", ObjTypeObject,
+								new_objtree_for_type(typid, typmod));
+
+	tmp = new_objtree_VA("COLLATE %{name}D", 0);
+	if (OidIsValid(typcollation))
+	{
+		ObjTree *collname;
+
+		collname = new_objtree_for_qualname_id(CollationRelationId,
+											   typcollation);
+		append_object_object(tmp, "name", collname);
+	}
+	else
+		append_bool_object(tmp, "present", false);
+	append_object_object(column, "collation", tmp);
+
+	if (!composite)
+	{
+		/*
+		 * Emit a NOT NULL declaration if necessary.  Note that we cannot trust
+		 * pg_attribute.attnotnull here, because that bit is also set when
+		 * primary keys are specified; and we must not emit a NOT NULL
+		 * constraint in that case, unless explicitely specified.  Therefore,
+		 * we scan the list of constraints attached to this column to determine
+		 * whether we need to emit anything.
+		 * (Fortunately, NOT NULL constraints cannot be table constraints.)
+		 */
+		saw_notnull = false;
+		foreach(cell, coldef->constraints)
+		{
+			Constraint *constr = (Constraint *) lfirst(cell);
+
+			if (constr->contype == CONSTR_NOTNULL)
+				saw_notnull = true;
+		}
+
+		if (saw_notnull)
+			append_string_object(column, "not_null", "NOT NULL");
+		else
+			append_string_object(column, "not_null", "");
+
+		tmp = new_objtree_VA("DEFAULT %{default}s", 0);
+		if (attrForm->atthasdef)
+		{
+			char *defstr;
+
+			defstr = RelationGetColumnDefault(relation, attrForm->attnum,
+											  dpcontext);
+
+			append_string_object(tmp, "default", defstr);
+		}
+		else
+			append_bool_object(tmp, "present", false);
+		append_object_object(column, "default", tmp);
+	}
+
+	ReleaseSysCache(attrTup);
+
+	return column;
+}
+
+/*
+ * deparse_ColumnDef_Typed
+ *		Subroutine for CREATE TABLE OF deparsing
+ *
+ * Deparse a ColumnDef node within a typed table creation.	This is simpler
+ * than the regular case, because we don't have to emit the type declaration,
+ * collation, or default.  Here we only return something if the column is being
+ * declared NOT NULL.
+ *
+ * As in deparse_ColumnDef, any other constraint is processed elsewhere.
+ *
+ * FIXME --- actually, what about default values?
+ */
+static ObjTree *
+deparse_ColumnDef_typed(Relation relation, List *dpcontext, ColumnDef *coldef)
+{
+	ObjTree    *column = NULL;
+	Oid			relid = RelationGetRelid(relation);
+	HeapTuple	attrTup;
+	Form_pg_attribute attrForm;
+	Oid			typid;
+	int32		typmod;
+	Oid			typcollation;
+	bool		saw_notnull;
+	ListCell   *cell;
+
+	attrTup = SearchSysCacheAttName(relid, coldef->colname);
+	if (!HeapTupleIsValid(attrTup))
+		elog(ERROR, "could not find cache entry for column \"%s\" of relation %u",
+			 coldef->colname, relid);
+	attrForm = (Form_pg_attribute) GETSTRUCT(attrTup);
+
+	get_atttypetypmodcoll(relid, attrForm->attnum,
+						  &typid, &typmod, &typcollation);
+
+	/*
+	 * Search for a NOT NULL declaration.  As in deparse_ColumnDef, we rely on
+	 * finding a constraint on the column rather than coldef->is_not_null.
+	 */
+	saw_notnull = false;
+	foreach(cell, coldef->constraints)
+	{
+		Constraint *constr = (Constraint *) lfirst(cell);
+
+		if (constr->contype == CONSTR_NOTNULL)
+		{
+			saw_notnull = true;
+			break;
+		}
+	}
+
+	if (saw_notnull)
+		column = new_objtree_VA("%{name}I WITH OPTIONS NOT NULL", 2,
+								"type", ObjTypeString, "column_notnull",
+								"name", ObjTypeString, coldef->colname);
+
+	ReleaseSysCache(attrTup);
+
+	return column;
+}
+
+/*
+ * deparseTableElements
+ *		Subroutine for CREATE TABLE deparsing
+ *
+ * Deal with all the table elements (columns and constraints).
+ *
+ * Note we ignore constraints in the parse node here; they are extracted from
+ * system catalogs instead.
+ */
+static List *
+deparseTableElements(Relation relation, List *tableElements, List *dpcontext,
+					 bool typed, bool composite)
+{
+	List	   *elements = NIL;
+	ListCell   *lc;
+
+	foreach(lc, tableElements)
+	{
+		Node	   *elt = (Node *) lfirst(lc);
+
+		switch (nodeTag(elt))
+		{
+			case T_ColumnDef:
+				{
+					ObjTree	   *tree;
+
+					tree = typed ?
+						deparse_ColumnDef_typed(relation, dpcontext,
+												(ColumnDef *) elt) :
+						deparse_ColumnDef(relation, dpcontext,
+										  composite, (ColumnDef *) elt);
+					if (tree != NULL)
+					{
+						ObjElem    *column;
+
+						column = new_object_object(tree);
+						elements = lappend(elements, column);
+					}
+				}
+				break;
+			case T_Constraint:
+				break;
+			default:
+				elog(ERROR, "invalid node type %d", nodeTag(elt));
+		}
+	}
+
+	return elements;
+}
+
+/*
+ * deparse_CompositeTypeStmt
+ *		Deparse a CompositeTypeStmt (CREATE TYPE AS)
+ *
+ * Given a type OID and the parsetree that created it, return an ObjTree
+ * representing the creation command.
+ */
+static ObjTree *
+deparse_CompositeTypeStmt(Oid objectId, Node *parsetree)
+{
+	CompositeTypeStmt *node = (CompositeTypeStmt *) parsetree;
+	ObjTree	   *composite;
+	HeapTuple	typtup;
+	Form_pg_type typform;
+	Relation	typerel;
+	List	   *dpcontext;
+	List	   *tableelts = NIL;
+
+	/* Find the pg_type entry and open the corresponding relation */
+	typtup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(objectId));
+	if (!HeapTupleIsValid(typtup))
+		elog(ERROR, "cache lookup failed for type %u", objectId);
+	typform = (Form_pg_type) GETSTRUCT(typtup);
+	typerel = relation_open(typform->typrelid, AccessShareLock);
+
+	dpcontext = deparse_context_for(RelationGetRelationName(typerel),
+									RelationGetRelid(typerel));
+
+	composite = new_objtree_VA("CREATE TYPE %{identity}D AS (%{columns:, }s)",
+							   0);
+	append_object_object(composite, "identity",
+						 new_objtree_for_qualname_id(TypeRelationId,
+													 objectId));
+
+	tableelts = deparseTableElements(typerel, node->coldeflist, dpcontext,
+									 false,		/* not typed */
+									 true);		/* composite type */
+
+	append_array_object(composite, "columns", tableelts);
+
+	heap_close(typerel, AccessShareLock);
+	ReleaseSysCache(typtup);
+
+	return composite;
+}
+
+/*
  * Handle deparsing of simple commands.
  *
  * This function contains a large switch that mirrors that in
@@ -722,7 +994,7 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_CompositeTypeStmt:		/* CREATE TYPE (composite) */
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			command = deparse_CompositeTypeStmt(objectId, parsetree);
 			break;
 
 		case T_CreateEnumStmt:	/* CREATE TYPE AS ENUM */
