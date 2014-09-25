@@ -3781,6 +3781,38 @@ deparse_AlterOwnerStmt(Oid objectId, Node *parsetree)
 }
 
 static ObjTree *
+deparse_CommentStmt(Oid objectId, Oid objectSubId, Node *parsetree)
+{
+	CommentStmt *node = (CommentStmt *) parsetree;
+	ObjTree	   *comment;
+	ObjectAddress addr;
+	char	   *fmt;
+
+	if (node->comment)
+	{
+		fmt = psprintf("COMMENT ON %s %%{identity}s IS %%{comment}L",
+					   stringify_objtype(node->objtype));
+		comment = new_objtree_VA(fmt, 0);
+		append_string_object(comment, "comment", node->comment);
+	}
+	else
+	{
+		fmt = psprintf("COMMENT ON %s %%{identity}s IS NULL",
+					   stringify_objtype(node->objtype));
+		comment = new_objtree_VA(fmt, 0);
+	}
+
+	addr.classId = get_objtype_catalog_oid(node->objtype);
+	addr.objectId = objectId;
+	addr.objectSubId = objectSubId;
+
+	append_string_object(comment, "identity",
+						 getObjectIdentity(&addr));
+
+	return comment;
+}
+
+static ObjTree *
 deparse_CreateConversion(Oid objectId, Node *parsetree)
 {
 	HeapTuple   conTup;
@@ -4641,7 +4673,8 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_CommentStmt:
-			command = NULL;
+			command = deparse_CommentStmt(objectId, cmd->d.simple.objectSubId,
+										  parsetree);
 			break;
 
 		case T_GrantStmt:
