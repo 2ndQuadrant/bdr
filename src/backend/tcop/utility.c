@@ -513,10 +513,6 @@ standard_ProcessUtility(Node *parsetree,
 			ExecuteTruncate((TruncateStmt *) parsetree);
 			break;
 
-		case T_CommentStmt:
-			CommentObject((CommentStmt *) parsetree);
-			break;
-
 		case T_SecLabelStmt:
 			ExecSecLabelStmt((SecLabelStmt *) parsetree);
 			break;
@@ -841,6 +837,19 @@ standard_ProcessUtility(Node *parsetree,
 					ExecAlterOwnerStmt(stmt);
 			}
 			break;
+
+		case T_CommentStmt:
+			{
+				CommentStmt *stmt = (CommentStmt *) parsetree;
+
+				if (EventTriggerSupportsObjectType(stmt->objtype))
+					ProcessUtilitySlow(parsetree, queryString,
+									   context, params,
+									   dest, completionTag);
+				else
+					CommentObject((CommentStmt *) parsetree, NULL);
+				break;
+			}
 
 		default:
 			/* All other statement types have event trigger support */
@@ -1320,6 +1329,10 @@ ProcessUtilitySlow(Node *parsetree,
 
 			case T_AlterOwnerStmt:
 				ExecAlterOwnerStmt((AlterOwnerStmt *) parsetree);
+				break;
+
+			case T_CommentStmt:
+				CommentObject((CommentStmt *) parsetree, NULL);
 				break;
 
 			case T_GrantStmt:

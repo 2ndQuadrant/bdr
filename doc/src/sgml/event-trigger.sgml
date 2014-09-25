@@ -37,7 +37,7 @@
    <para>
      The <literal>ddl_command_start</> event occurs just before the
      execution of a <literal>CREATE</>, <literal>ALTER</>, <literal>DROP</>,
-     <literal>GRANT</> or <literal>REVOKE</>
+     <literal>COMMENT</>, <literal>GRANT</> or <literal>REVOKE</>
      command.  No check whether the affected object exists or doesn't exist is
      performed before the event trigger fires.
      As an exception, however, this event does not occur for
@@ -312,6 +312,13 @@
        </row>
        <row>
         <entry align="left"><literal>CREATE AGGREGATE</literal></entry>
+        <entry align="center"><literal>X</literal></entry>
+        <entry align="center"><literal>X</literal></entry>
+        <entry align="center"><literal>-</literal></entry>
+        <entry align="center"><literal>-</literal></entry>
+       </row>
+       <row>
+        <entry align="left"><literal>COMMENT</literal></entry>
         <entry align="center"><literal>X</literal></entry>
         <entry align="center"><literal>X</literal></entry>
         <entry align="center"><literal>-</literal></entry>

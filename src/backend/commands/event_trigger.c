@@ -267,6 +267,7 @@ check_ddl_tag(const char *tag)
 		pg_strcasecmp(tag, "REFRESH MATERIALIZED VIEW") == 0 ||
 		pg_strcasecmp(tag, "ALTER DEFAULT PRIVILEGES") == 0 ||
 		pg_strcasecmp(tag, "ALTER LARGE OBJECT") == 0 ||
+		pg_strcasecmp(tag, "COMMENT") == 0 ||
 		pg_strcasecmp(tag, "GRANT") == 0 ||
 		pg_strcasecmp(tag, "REVOKE") == 0 ||
 		pg_strcasecmp(tag, "DROP OWNED") == 0 ||
