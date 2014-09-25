@@ -2215,8 +2215,9 @@ free_object_addresses(ObjectAddresses *addrs)
 ObjectClass
 getObjectClass(const ObjectAddress *object)
 {
-	/* only pg_class entries can have nonzero objectSubId */
-	if (object->classId != RelationRelationId &&
+	/* only pg_class and pg_type entries can have nonzero objectSubId */
+	if ((object->classId != RelationRelationId &&
+		 object->classId != TypeRelationId) &&
 		object->objectSubId != 0)
 		elog(ERROR, "invalid non-zero objectSubId for object class %u",
 			 object->classId);
@@ -2231,6 +2232,7 @@ getObjectClass(const ObjectAddress *object)
 			return OCLASS_PROC;
 
 		case TypeRelationId:
+			/* caller must check objectSubId */
 			return OCLASS_TYPE;
 
 		case CastRelationId:

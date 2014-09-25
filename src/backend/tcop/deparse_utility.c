@@ -3138,7 +3138,6 @@ deparse_RenameStmt(Oid objectId, Node *parsetree)
 	char	   *fmtstr;
 	Relation	relation;
 	Oid			schemaId;
-	const char *subthing;
 
 	/*
 	 * FIXME --- this code is missing support for inheritance behavioral flags,
@@ -3179,18 +3178,11 @@ deparse_RenameStmt(Oid objectId, Node *parsetree)
 			break;
 
 		case OBJECT_COLUMN:
-		case OBJECT_ATTRIBUTE:
 			relation = relation_open(objectId, AccessShareLock);
 			schemaId = RelationGetNamespace(relation);
 
-			if (node->renameType == OBJECT_COLUMN)
-				subthing = "COLUMN";
-			else
-				subthing = "ATTRIBUTE";
-
-			fmtstr = psprintf("ALTER %s %%{if_exists}s %%{identity}D RENAME %s %%{colname}I TO %%{newname}I",
-							  stringify_objtype(node->relationType),
-							  subthing);
+			fmtstr = psprintf("ALTER %s %%{if_exists}s %%{identity}D RENAME COLUMN %%{colname}I TO %%{newname}I",
+							  stringify_objtype(node->relationType));
 			renameStmt = new_objtree_VA(fmtstr, 0);
 			append_object_object(renameStmt, "identity",
 								 new_objtree_for_qualname(schemaId,
@@ -3199,6 +3191,30 @@ deparse_RenameStmt(Oid objectId, Node *parsetree)
 			append_string_object(renameStmt, "if_exists",
 								 node->missing_ok ? "IF EXISTS" : "");
 			relation_close(relation, AccessShareLock);
+			break;
+
+		case OBJECT_ATTRIBUTE:
+			{
+				HeapTuple	typeTup;
+				Oid			schemaId;
+				char	   *typname;
+
+				typeTup = SearchSysCache1(TYPEOID, objectId);
+				if (!HeapTupleIsValid(typeTup))
+					elog(ERROR, "cache lookup failed for type %u", objectId);
+
+				schemaId = ((Form_pg_type) GETSTRUCT(typeTup))->typnamespace;
+				typname = NameStr(((Form_pg_type) GETSTRUCT(typeTup))->typname);
+
+				renameStmt =
+					new_objtree_VA("ALTER TYPE %{identity}D RENAME ATTRIBUTE %{attname}I TO %{newname}I",
+								   0);
+				append_object_object(renameStmt, "identity",
+									 new_objtree_for_qualname(schemaId,
+															  typname));
+				append_string_object(renameStmt, "attname", node->subname);
+				ReleaseSysCache(typeTup);
+			}
 			break;
 
 		case OBJECT_SCHEMA:
