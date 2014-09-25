@@ -37,7 +37,7 @@
  * pg_description for the object specified by the given SQL command.
  */
 Oid
-CommentObject(CommentStmt *stmt)
+CommentObject(CommentStmt *stmt, uint32 *objectSubId)
 {
 	ObjectAddress address;
 	Relation	relation;
@@ -125,6 +125,9 @@ CommentObject(CommentStmt *stmt)
 	 */
 	if (relation != NULL)
 		relation_close(relation, NoLock);
+
+	if (objectSubId)
+		*objectSubId = address.objectSubId;
 
 	return address.objectId;
 }

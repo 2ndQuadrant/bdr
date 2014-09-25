@@ -29,7 +29,7 @@
  *------------------------------------------------------------------
  */
 
-extern Oid	CommentObject(CommentStmt *stmt);
+extern Oid	CommentObject(CommentStmt *stmt, uint32 *objectSubId);
 
 extern void DeleteComments(Oid oid, Oid classoid, int32 subid);
 
