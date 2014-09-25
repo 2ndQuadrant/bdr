@@ -299,9 +299,12 @@ AlterObjectRename_internal(Relation rel, Oid objectId, const char *new_name)
 /*
  * Executes an ALTER OBJECT / RENAME TO statement.  Based on the object
  * type, the function appropriate to that type is executed.
+ *
+ * Return value is the OID of the renamed object.  The objectSubId, if any,
+ * is returned in objsubid.
  */
 Oid
-ExecRenameStmt(RenameStmt *stmt)
+ExecRenameStmt(RenameStmt *stmt, int *objsubid)
 {
 	switch (stmt->renameType)
 	{
@@ -331,7 +334,7 @@ ExecRenameStmt(RenameStmt *stmt)
 
 		case OBJECT_COLUMN:
 		case OBJECT_ATTRIBUTE:
-			return renameatt(stmt);
+			return renameatt(stmt, objsubid);
 
 		case OBJECT_RULE:
 			return RenameRewriteRule(stmt->relation, stmt->subname,

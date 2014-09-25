@@ -53,7 +53,7 @@ extern void ExecuteTruncate(TruncateStmt *stmt);
 
 extern void SetRelationHasSubclass(Oid relationId, bool relhassubclass);
 
-extern Oid	renameatt(RenameStmt *stmt);
+extern Oid	renameatt(RenameStmt *stmt, int *attnum);
 
 extern Oid	RenameConstraint(RenameStmt *stmt);
 
