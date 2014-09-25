@@ -4364,6 +4364,157 @@ deparse_AlterEnumStmt(Oid objectId, Node *parsetree)
 	return alterEnum;
 }
 
+/*
+ * Append a NULL-or-quoted-literal clause.  Useful for COMMENT and SECURITY
+ * LABEL.
+ */
+static void
+append_literal_or_null(ObjTree *mainobj, char *elemname, char *value)
+{
+	ObjTree	*top;
+	ObjTree *part;
+
+	top = new_objtree_VA("%{null}s%{literal}s", 0);
+	part = new_objtree_VA("NULL", 1,
+						  "present", ObjTypeBool,
+						  !value);
+	append_object_object(top, "null", part);
+	part = new_objtree_VA("%{value}L", 1,
+						  "present", ObjTypeBool,
+						  !!value);
+	if (value)
+		append_string_object(part, "value", value);
+	append_object_object(top, "literal", part);
+
+	append_object_object(mainobj, elemname, top);
+}
+
+/*
+ * Deparse a CommentStmt when it pertains to a constraint.
+ */
+static ObjTree *
+deparse_CommentOnConstraintSmt(Oid objectId, Node *parsetree)
+{
+	CommentStmt *node = (CommentStmt *) parsetree;
+	ObjTree	   *comment;
+	HeapTuple	constrTup;
+	Form_pg_constraint constrForm;
+	char	   *fmt;
+	ObjectAddress addr;
+
+	Assert(node->objtype == OBJECT_TABCONSTRAINT || node->objtype == OBJECT_DOMCONSTRAINT);
+
+	constrTup = SearchSysCache1(CONSTROID, objectId);
+	if (!HeapTupleIsValid(constrTup))
+		elog(ERROR, "cache lookup failed for constraint %u", objectId);
+	constrForm = (Form_pg_constraint) GETSTRUCT(constrTup);
+
+	if (OidIsValid(constrForm->conrelid))
+		ObjectAddressSet(addr, RelationRelationId, constrForm->conrelid);
+	else
+		ObjectAddressSet(addr, TypeRelationId, constrForm->contypid);
+
+	fmt = psprintf("COMMENT ON CONSTRAINT %%{identity}s ON %s%%{parentobj}s IS %%{comment}s",
+				   node->objtype == OBJECT_TABCONSTRAINT ? "" : "DOMAIN ");
+	comment = new_objtree_VA(fmt, 0);
+
+	/* Add the comment clause */
+	append_literal_or_null(comment, "comment", node->comment);
+
+	append_string_object(comment, "identity", pstrdup(NameStr(constrForm->conname)));
+
+	append_string_object(comment, "parentobj",
+						 getObjectIdentity(&addr));
+
+	ReleaseSysCache(constrTup);
+
+	return comment;
+}
+
+static ObjTree *
+deparse_CommentStmt(ObjectAddress address, Node *parsetree)
+{
+	CommentStmt *node = (CommentStmt *) parsetree;
+	ObjTree	   *comment;
+	char	   *fmt;
+	char	   *identity;
+
+	/*
+	 * Constraints are sufficiently different that it is easier to handle them
+	 * separately.
+	 */
+	if (node->objtype == OBJECT_DOMCONSTRAINT ||
+		node->objtype == OBJECT_TABCONSTRAINT)
+	{
+		Assert(address.classId == ConstraintRelationId);
+		return deparse_CommentOnConstraintSmt(address.objectId, parsetree);
+	}
+
+	fmt = psprintf("COMMENT ON %s %%{identity}s IS %%{comment}s",
+				   stringify_objtype(node->objtype));
+	comment = new_objtree_VA(fmt, 0);
+
+	/* Add the comment clause; can be either NULL or a quoted literal.  */
+	append_literal_or_null(comment, "comment", node->comment);
+
+	/*
+	 * Add the object identity clause.  For zero argument aggregates we need to
+	 * add the (*) bit; in all other cases we can just use getObjectIdentity.
+	 *
+	 * XXX shouldn't we instead fix the object identities for zero-argument
+	 * aggregates?
+	 */
+	if (node->objtype == OBJECT_AGGREGATE)
+	{
+		HeapTuple		procTup;
+		Form_pg_proc	procForm;
+
+		procTup = SearchSysCache1(PROCOID, ObjectIdGetDatum(address.objectId));
+		if (!HeapTupleIsValid(procTup))
+			elog(ERROR, "cache lookup failed for procedure %u", address.objectId);
+		procForm = (Form_pg_proc) GETSTRUCT(procTup);
+		if (procForm->pronargs == 0)
+			identity = psprintf("%s(*)",
+								quote_qualified_identifier(get_namespace_name(procForm->pronamespace),
+														   NameStr(procForm->proname)));
+		else
+			identity = getObjectIdentity(&address);
+		ReleaseSysCache(procTup);
+	}
+	else
+		identity = getObjectIdentity(&address);
+
+	append_string_object(comment, "identity", identity);
+
+	return comment;
+}
+
+static ObjTree *
+deparse_SecLabelStmt(ObjectAddress address, Node *parsetree)
+{
+	SecLabelStmt *node = (SecLabelStmt *) parsetree;
+	ObjTree	   *label;
+	char	   *fmt;
+
+	Assert(node->provider);
+
+	fmt = psprintf("SECURITY LABEL FOR %%{provider}s ON %s %%{identity}s IS %%{label}s",
+				   stringify_objtype(node->objtype));
+	label = new_objtree_VA(fmt, 0);
+
+	/* Add the label clause; can be either NULL or a quoted literal. */
+	append_literal_or_null(label, "label", node->label);
+
+	/* Add the security provider clause */
+	append_string_object(label, "provider", node->provider);
+
+	/* Add the object identity clause */
+	append_string_object(label, "identity",
+						 getObjectIdentity(&address));
+
+	return label;
+}
+
 static ObjTree *
 deparse_CreateConversion(Oid objectId, Node *parsetree)
 {
@@ -5452,7 +5603,7 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_CommentStmt:
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			command = deparse_CommentStmt(cmd->d.simple.address, parsetree);
 			break;
 
 		case T_GrantStmt:
@@ -5478,7 +5629,7 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_SecLabelStmt:
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			command = deparse_SecLabelStmt(cmd->d.simple.address, parsetree);
 			break;
 
 		default:
