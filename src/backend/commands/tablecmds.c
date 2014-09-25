@@ -2155,8 +2155,10 @@ renameatt_check(Oid myrelid, Form_pg_class classform, bool recursing)
 
 /*
  *		renameatt_internal		- workhorse for renameatt
+ *
+ * Return value is the column number of the attribute in the 'myrelid' relation.
  */
-static void
+static int
 renameatt_internal(Oid myrelid,
 				   const char *oldattname,
 				   const char *newattname,
@@ -2297,6 +2299,8 @@ renameatt_internal(Oid myrelid,
 	heap_close(attrelation, RowExclusiveLock);
 
 	relation_close(targetrelation, NoLock);		/* close rel but keep lock */
+
+	return attnum;
 }
 
 /*
@@ -2321,9 +2325,10 @@ RangeVarCallbackForRenameAttribute(const RangeVar *rv, Oid relid, Oid oldrelid,
  *		renameatt		- changes the name of a attribute in a relation
  */
 Oid
-renameatt(RenameStmt *stmt)
+renameatt(RenameStmt *stmt, int *objsubid)
 {
 	Oid			relid;
+	int			attnum;
 
 	/* lock level taken here should match renameatt_internal */
 	relid = RangeVarGetRelidExtended(stmt->relation, AccessExclusiveLock,
@@ -2339,13 +2344,16 @@ renameatt(RenameStmt *stmt)
 		return InvalidOid;
 	}
 
-	renameatt_internal(relid,
-					   stmt->subname,	/* old att name */
-					   stmt->newname,	/* new att name */
-					   interpretInhOption(stmt->relation->inhOpt),		/* recursive? */
-					   false,	/* recursing? */
-					   0,		/* expected inhcount */
-					   stmt->behavior);
+	attnum =
+		renameatt_internal(relid,
+						   stmt->subname,	/* old att name */
+						   stmt->newname,	/* new att name */
+						   interpretInhOption(stmt->relation->inhOpt), /* recursive? */
+						   false,	/* recursing? */
+						   0,		/* expected inhcount */
+						   stmt->behavior);
+	if (objsubid)
+		*objsubid = attnum;
 
 	/* This is an ALTER TABLE command so it's about the relid */
 	return relid;

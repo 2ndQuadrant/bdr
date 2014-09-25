@@ -18,7 +18,7 @@
 #include "nodes/parsenodes.h"
 #include "utils/relcache.h"
 
-extern Oid	ExecRenameStmt(RenameStmt *stmt);
+extern Oid	ExecRenameStmt(RenameStmt *stmt, int *objsubid);
 
 extern Oid	ExecAlterObjectSchemaStmt(AlterObjectSchemaStmt *stmt);
 extern Oid AlterObjectNamespace_oid(Oid classId, Oid objid, Oid nspOid,

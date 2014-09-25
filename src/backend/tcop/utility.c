@@ -803,7 +803,7 @@ standard_ProcessUtility(Node *parsetree,
 									   context, params,
 									   dest, completionTag);
 				else
-					ExecRenameStmt(stmt);
+					ExecRenameStmt(stmt, NULL);
 			}
 			break;
 
@@ -1302,7 +1302,7 @@ ProcessUtilitySlow(Node *parsetree,
 				break;
 
 			case T_RenameStmt:
-				ExecRenameStmt((RenameStmt *) parsetree);
+				ExecRenameStmt((RenameStmt *) parsetree, NULL);
 				break;
 
 			case T_AlterObjectSchemaStmt:
