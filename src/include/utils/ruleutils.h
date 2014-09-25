@@ -32,6 +32,7 @@ extern char *pg_get_trigger_whenclause(Form_pg_trigger trigrec,
 extern char *pg_get_constraintdef_string(Oid constraintId, bool fullCommand);
 extern void pg_get_ruledef_details(Datum ev_qual, Datum ev_action,
 					   char **whereClause, List **actions);
+extern char *pg_get_viewdef_internal(Oid viewoid);
 
 extern char *deparse_expression(Node *expr, List *dpcontext,
 				   bool forceprefix, bool showimplicit);

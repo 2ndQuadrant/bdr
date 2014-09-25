@@ -669,6 +669,13 @@ pg_get_viewdef_name_ext(PG_FUNCTION_ARGS)
 	PG_RETURN_TEXT_P(string_to_text(pg_get_viewdef_worker(viewoid, prettyFlags, WRAP_COLUMN_DEFAULT)));
 }
 
+char *
+pg_get_viewdef_internal(Oid viewoid)
+{
+	return pg_get_viewdef_worker(viewoid, 0, WRAP_COLUMN_DEFAULT);
+}
+
+
 /*
  * Common code for by-OID and by-name variants of pg_get_viewdef
  */
