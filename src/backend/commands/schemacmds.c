@@ -24,6 +24,7 @@
 #include "catalog/objectaccess.h"
 #include "catalog/pg_namespace.h"
 #include "commands/dbcommands.h"
+#include "commands/event_trigger.h"
 #include "commands/schemacmds.h"
 #include "miscadmin.h"
 #include "parser/parse_utilcmd.h"
@@ -128,6 +129,14 @@ CreateSchemaCommand(CreateSchemaStmt *stmt, const char *queryString)
 	overridePath->schemas = lcons_oid(namespaceId, overridePath->schemas);
 	/* XXX should we clear overridePath->useTemp? */
 	PushOverrideSearchPath(overridePath);
+
+	/*
+	 * Report the new schema to possibly interested event triggers.  Note we
+	 * must do this here and not in ProcessUtilitySlow because otherwise the
+	 * objects created below are reported before the schema, which would be
+	 * wrong.
+	 */
+	EventTriggerStashCommand(namespaceId, 0, OBJECT_SCHEMA, InvalidOid, (Node *) stmt);
 
 	/*
 	 * Examine the list of commands embedded in the CREATE SCHEMA command, and
