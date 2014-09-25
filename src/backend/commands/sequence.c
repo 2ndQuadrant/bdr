@@ -1475,6 +1475,40 @@ process_owned_by(Relation seqrel, List *owned_by)
 		relation_close(tablerel, NoLock);
 }
 
+/*
+ * Return sequence parameters, detailed
+ */
+Form_pg_sequence
+get_sequence_values(Oid sequenceId)
+{
+	Buffer		buf;
+	SeqTable	elm;
+	Relation	seqrel;
+	HeapTupleData seqtuple;
+	Form_pg_sequence seq;
+	Form_pg_sequence retSeq;
+
+	retSeq = palloc(sizeof(FormData_pg_sequence));
+
+	/* open and AccessShareLock sequence */
+	init_sequence(sequenceId, &elm, &seqrel);
+
+	if (pg_class_aclcheck(sequenceId, GetUserId(),
+						  ACL_SELECT | ACL_UPDATE | ACL_USAGE) != ACLCHECK_OK)
+		ereport(ERROR,
+				(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+				 errmsg("permission denied for sequence %s",
+						RelationGetRelationName(seqrel))));
+
+	seq = read_seq_tuple(elm, seqrel, &buf, &seqtuple);
+
+	memcpy(retSeq, seq, sizeof(FormData_pg_sequence));
+
+	UnlockReleaseBuffer(buf);
+	relation_close(seqrel, NoLock);
+
+	return retSeq;
+}
 
 /*
  * Return sequence parameters, for use by information schema

@@ -71,6 +71,7 @@ extern Datum setval3_oid(PG_FUNCTION_ARGS);
 extern Datum lastval(PG_FUNCTION_ARGS);
 
 extern Datum pg_sequence_parameters(PG_FUNCTION_ARGS);
+extern Form_pg_sequence get_sequence_values(Oid sequenceId);
 
 extern Oid	DefineSequence(CreateSeqStmt *stmt);
 extern Oid	AlterSequence(AlterSeqStmt *stmt);
