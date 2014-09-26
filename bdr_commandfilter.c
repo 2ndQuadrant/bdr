@@ -594,6 +594,7 @@ bdr_commandfilter(Node *parsetree,
 					error_on_persistent_rv(stmt->relation,
 										   "CREATE UNIQUE INDEX ... WHERE",
 										   AccessExclusiveLock, false);
+				break;
 			}
 		case T_CreateExtensionStmt:
 			break;
