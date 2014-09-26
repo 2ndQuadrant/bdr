@@ -41,6 +41,13 @@ specparse.h: specparse.c ;
 # specscanner is compiled as part of specparse
 specparse.o: specscanner.c
 
+install: all installdirs
+	$(INSTALL_PROGRAM) pg_isolation_regress$(X) '$(DESTDIR)$(pgxsdir)/$(subdir)/pg_isolation_regress$(X)'
+	$(INSTALL_PROGRAM) isolationtester$(X) '$(DESTDIR)$(pgxsdir)/$(subdir)/isolationtester$(X)'
+
+installdirs:
+	$(MKDIR_P) '$(DESTDIR)$(pgxsdir)/$(subdir)'
+
 # specparse.c and specscanner.c are in the distribution tarball,
 # so do not clean them here
 clean distclean:
