@@ -428,6 +428,16 @@ filter_AlterSeqStmt(Node *parsetree)
 }
 
 static void
+filter_CreateTableAs(Node *parsetree)
+{
+	CreateTableAsStmt *stmt;
+	stmt = (CreateTableAsStmt *) parsetree;
+
+	if (stmt->into->rel->relpersistence != RELPERSISTENCE_TEMP)
+		error_unsupported_command(CreateCommandTag(parsetree));
+}
+
+static void
 bdr_commandfilter(Node *parsetree,
 				  const char *queryString,
 				  ProcessUtilityContext context,
@@ -629,7 +639,7 @@ bdr_commandfilter(Node *parsetree,
 			break;
 
 		case T_CreateTableAsStmt:
-			error_unsupported_command(CreateCommandTag(parsetree));
+			filter_CreateTableAs(parsetree);
 			break;
 
 		case T_RefreshMatViewStmt:
