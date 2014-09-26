@@ -61,6 +61,17 @@ At a version bump a control file upgrade script must be created, e.g
 bdr--0.6--0.7.sql. This needs to be *tested* whenever the main control file is
 modified. It needs to be listed in bdr.control . 
 
+Dist tarballs
+-------------
+
+To prepare a release dist tarball for a tagged release:
+
+    PATH=/usr/pgsql-9.4/bin:$PATH make USE_PGXS=1 git-dist
+
+If you're preparing a dist tarball for a snapshot, not a tagged release, please add the git rev to the filename, e.g.:
+
+    PATH=/usr/pgsql-9.4/bin:$PATH make USE_PGXS=1 git-dist distdir='bdr-$(BDR_VERSION)-git'$(git rev-parse --short HEAD)
+
 Patch releases vs major releases
 --------------------------------
 

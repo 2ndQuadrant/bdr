@@ -21,7 +21,7 @@ argv=("$@")
 while (($i < ${#argv[*]})); do
     case "${argv[$i]}" in
 	-V)
-	    echo "bdr_initial_load (PostgreSQL) VERSION"
+	    echo "bdr_initial_load (PostgreSQL PG_VERSION, BDR BDR_VERSION)"
 	    exit
 	;;
         --snapshot)

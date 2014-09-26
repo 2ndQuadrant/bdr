@@ -5,3 +5,6 @@ log/
 results/
 tmp_check/
 *~
+bdr-*.tar.bz2
+.distgitrev
+.distgittag

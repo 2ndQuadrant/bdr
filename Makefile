@@ -41,7 +41,8 @@ include $(PGXS)
 endif
 
 DATE=$(shell date "+%Y-%m-%d")
-GITHASH=$(shell git rev-parse --short HEAD)
+GITHASH=$(shell if [ -e .distgitrev ]; then cat .distgitrev; else git rev-parse --short HEAD; fi)
+BDR_VERSION=$(shell awk '/^\#define BDR_VERSION / { print $3; }' bdr_version.h.in | cut -d '"' -f 2)
 
 bdr_version.h: bdr_version.h.in
 	sed '0,/BDR_VERSION_DATE/s,\(BDR_VERSION_DATE\).*,\1 "$(DATE)",;0,/BDR_VERSION_GITHASH/s,\(BDR_VERSION_GITHASH\).*,\1 "$(GITHASH)",' $< >$@
@@ -52,7 +53,7 @@ bdr_init_copy: bdr_init_copy.o | submake-libpq submake-libpgport
 	$(CC) $(CFLAGS) $^ $(LDFLAGS) $(LDFLAGS_EX) $(libpq_pgport) $(LIBS) -o $@$(X)
 
 scripts/bdr_initial_load: scripts/bdr_initial_load.in
-	sed -e "s/VERSION/$(VERSION)/" $< > $@
+	sed -e "s/BDR_VERSION/$(BDR_VERSION)/" -e "s/PG_VERSION/$(VERSION)/" $< > $@
 
 all: all-lib bdr_init_copy
 
@@ -61,6 +62,7 @@ clean: additional-clean
 additional-clean:
 	rm -f bdr_init_copy$(X) bdr_init_copy.o
 	rm -f bdr_version.h
+	rm -f .distgitrev
 
 # Disabled because these tests require "wal_level=logical", which
 # typical installcheck users do not have (e.g. buildfarm clients).
@@ -165,7 +167,19 @@ regresscheck: error-pgxs
 
 endif #USE_PGXS
 
+distdir = bdr-$(BDR_VERSION)
 
+git-dist: clean
+	rm -f .distgitrev .distgittag
+	if ! git diff-index --quiet HEAD; then echo >&2 "WARNING: git working tree has uncommitted changes to tracked files which were INCLUDED"; fi
+	if [ -n "`git ls-files --exclude-standard --others`" ]; then echo >&2 "WARNING: git working tree has unstaged files which were IGNORED!"; fi
+	echo $(GITHASH) > .distgitrev
+	git name-rev --tags --name-only `cat .distgitrev` > .distgittag
+	git ls-tree -r -t --full-tree HEAD --name-only |\
+	  tar cjf "${distdir}.tar.bz2" --transform="s|^|${distdir}/|" -T - \
+	    .distgitrev .distgittag 
+	echo >&2 "Prepared ${distdir}.tar.bz2 for rev=`cat .distgitrev`, tag=`cat .distgittag`"
+	rm -f .distgitrev .distgittag
 
 PHONY: submake-regress
 
