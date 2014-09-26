@@ -585,7 +585,8 @@ ExecGrantStmt_oids(InternalGrant *istmt)
 	 * the functions a chance to adjust the istmt with privileges actually
 	 * granted.
 	 */
-	EventTriggerStashGrant(istmt);
+	if (EventTriggerSupportsGrantObjectType(istmt->objtype))
+		EventTriggerStashGrant(istmt);
 }
 
 /*

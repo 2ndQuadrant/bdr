@@ -1021,6 +1021,34 @@ EventTriggerSupportsObjectClass(ObjectClass objclass)
 	return true;
 }
 
+bool
+EventTriggerSupportsGrantObjectType(GrantObjectType objtype)
+{
+	switch (objtype)
+	{
+		case ACL_OBJECT_DATABASE:
+		case ACL_OBJECT_TABLESPACE:
+			/* no support for global objects */
+			return false;
+
+		case ACL_OBJECT_COLUMN:
+		case ACL_OBJECT_RELATION:
+		case ACL_OBJECT_SEQUENCE:
+		case ACL_OBJECT_DOMAIN:
+		case ACL_OBJECT_FDW:
+		case ACL_OBJECT_FOREIGN_SERVER:
+		case ACL_OBJECT_FUNCTION:
+		case ACL_OBJECT_LANGUAGE:
+		case ACL_OBJECT_LARGEOBJECT:
+		case ACL_OBJECT_NAMESPACE:
+		case ACL_OBJECT_TYPE:
+			return true;
+		default:
+			Assert(false);
+			return true;
+	}
+}
+
 /*
  * Prepare event trigger state for a new complete query to run, if necessary;
  * returns whether this was done.  If it was, EventTriggerEndCompleteQuery must
