@@ -12,7 +12,7 @@ SCRIPTS = scripts/bdr_initial_load bdr_init_copy
 
 PG_CPPFLAGS = -I$(libpq_srcdir)
 SHLIB_LINK = $(libpq)
-SHLIB_PREREQS = submake-libpq
+
 OBJS = \
 	bdr.o \
 	bdr_apply.o \
@@ -29,16 +29,12 @@ OBJS = \
 	bdr_relcache.o \
 	bdr_seq.o
 
-ifndef USE_PGXS
-subdir = contrib/bdr
-top_builddir = ../..
-include $(top_builddir)/src/Makefile.global
-include $(top_srcdir)/contrib/contrib-global.mk
-else
+# Can only be built using pgxs
+USE_PGXS=1
+
 PG_CONFIG = pg_config
 PGXS := $(shell $(PG_CONFIG) --pgxs)
 include $(PGXS)
-endif
 
 DATE=$(shell date "+%Y-%m-%d")
 GITHASH=$(shell if [ -e .distgitrev ]; then cat .distgitrev; else git rev-parse --short HEAD; fi)
@@ -49,7 +45,7 @@ bdr_version.h: bdr_version.h.in
 
 bdr.o: bdr_version.h
 
-bdr_init_copy: bdr_init_copy.o | submake-libpq submake-libpgport
+bdr_init_copy: bdr_init_copy.o
 	$(CC) $(CFLAGS) $^ $(LDFLAGS) $(LDFLAGS_EX) $(libpq_pgport) $(LIBS) -o $@$(X)
 
 scripts/bdr_initial_load: scripts/bdr_initial_load.in
@@ -68,44 +64,12 @@ additional-clean:
 # typical installcheck users do not have (e.g. buildfarm clients).
 installcheck: ;
 
-check: all | submake-regress submake-btree_gist submake-pg_trgm submake-cube submake-hstore regresscheck isolationcheck
-
-ifndef USE_PGXS
-submake-regress:
-	$(MAKE) -C $(top_builddir)/src/test/regress
-
-submake-isolation: | submake-regress
-	$(MAKE) -C $(top_builddir)/src/test/isolation
-
-submake-btree_gist:
-	$(MAKE) -C $(top_builddir)/contrib/btree_gist
-
-submake-pg_trgm:
-	$(MAKE) -C $(top_builddir)/contrib/pg_trgm
-
-submake-cube:
-	$(MAKE) -C $(top_builddir)/contrib/cube
-
-submake-hstore:
-	$(MAKE) -C $(top_builddir)/contrib/hstore
+check: regresscheck isolationcheck
 
 REGRESSCHECKS=init \
 	ddl/create ddl/alter_table ddl/extension ddl/function ddl/grant ddl/namespace ddl/sequence ddl/view \
 	dml/basic dml/contrib dml/delete_pk dml/extended dml/missing_pk dml/mixed dml/toasted
 
-regresscheck:
-	[ -e pg_hba.conf ] || ln -s $(top_srcdir)/contrib/bdr/pg_hba.conf .
-	mkdir -p results/ddl
-	mkdir -p results/dml
-	$(pg_regress_check) \
-	    --temp-config $(top_srcdir)/contrib/bdr/bdr_ddlregress.conf \
-	    --temp-install=./tmp_check \
-	    --extra-install=contrib/btree_gist \
-	    --extra-install=contrib/bdr \
-	    --extra-install=contrib/pg_trgm \
-	    --extra-install=contrib/cube \
-	    --extra-install=contrib/hstore \
-	    $(REGRESSCHECKS)
 
 ISOLATIONCHECKS=\
 	isolation/waitforstart \
@@ -119,17 +83,27 @@ ISOLATIONCHECKS=\
 #	this test demonstrates a divergent conflict, so deactivate for now
 #	isolation/update_pk_change_conflict
 
-isolationcheck: all | submake-isolation submake-btree_gist
-	[ -e pg_hba.conf ] || ln -s $(top_srcdir)/contrib/bdr/pg_hba.conf .
-	mkdir -p results/isolation
-	$(pg_isolation_regress_check) \
-	    --dbname node1,node2,node3 \
-	    --temp-config $(top_srcdir)/contrib/bdr/bdr_isolationregress.conf \
-	    --temp-install=./tmp_check \
-	    --extra-install=contrib/btree_gist \
-	    --extra-install=contrib/bdr \
-	    $(ISOLATIONCHECKS)
+# XXX: Add a check that these are installed
+REQUIRED_EXTENSIONS="btree_gist"
+REQUIRED_TEST_EXTENSIONS="pg_trgm cube hstore"
 
+regresscheck: all install
+	[ -e pg_hba.conf ] || ln -s $(top_srcdir)/contrib/bdr/pg_hba.conf .
+
+	mkdir -p results/ddl
+	mkdir -p results/dml
+
+	./run_tests --config bdr_regress.conf \
+		--testbinary src/test/regress/pg_regress \
+		$(REGRESSCHECKS)
+
+isolationcheck: all install
+	mkdir -p results/isolation
+
+	./run_tests --config bdr_isolationregress.conf \
+		--testbinary src/test/isolation/pg_isolation_regress \
+		--dbname node1,node2,node3 \
+		$(ISOLATIONCHECKS)
 
 bdr_pgbench_check: bdr_pgbench_check.sh
 	sed -e 's,@bindir@,$(bindir),g' \
@@ -141,31 +115,6 @@ bdr_pgbench_check: bdr_pgbench_check.sh
 
 pgbenchcheck: bdr_pgbench_check
 	./bdr_pgbench_check
-
-else #USE_PGXS
-
-error-pgxs:
-	@echo "Regression checks require an in-tree build in contrib/bdr"
-	@echo "You cannot run \"make check\" using pgxs"
-	exit 1
-
-submake-regress: ;
-
-submake-btree_gist: ;
-
-submake-pg_trgm: ;
-
-submake-cube: ;
-
-submake-hstore: ;
-
-bdr_pgbench_check: error-pgxs
-	;
-
-regresscheck: error-pgxs
-	;
-
-endif #USE_PGXS
 
 distdir = bdr-$(BDR_VERSION)
 
@@ -185,4 +134,4 @@ PHONY: submake-regress
 
 # phony target...
 
-.PHONY: all check
+.PHONY: all check regresscheck isolationcheck

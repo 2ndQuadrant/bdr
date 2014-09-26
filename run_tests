@@ -1,0 +1,65 @@
+#!/bin/bash
+
+set -e
+#set -x
+
+BINDIR=$(pg_config --bindir)
+REGRESS_BASE=$(pg_config --libdir)/pgxs/
+DBNAME=regression
+
+mkdir -p tmp_check
+rm -rf tmp_check/data
+rm -rf tmp_check/postmaster.log
+rm -rf tmp_check/initdb.log
+mkdir tmp_check/data
+
+PARSEOPTS=$(getopt \
+    --longoptions testbinary: \
+    --longoptions dbname: \
+    --longoptions config: \
+    -o 'h' -- "$@")
+
+eval set -- "$PARSEOPTS"
+
+
+usage() {
+    echo "run_tests -h --testbinary binary LIST OF TESTS"
+    exit 1
+}
+
+while true ; do
+    case "$1" in
+	-h) usage; shift;;
+	--testbinary) TESTBINARY="$2"; shift;shift;;
+	--dbname) DBNAME="$2"; shift;shift;;
+	--config) CONFIGFILE="$2"; shift;shift;;
+	--) shift ; break ;;
+	*) echo "unknown option $1"; exit 1;;
+    esac
+done
+
+SOCKET=$(pwd)/tmp_check
+PORT=5440
+OPTIONS="-c config_file=${CONFIGFILE}"
+OPTIONS="$OPTIONS -c unix_socket_directories=$SOCKET"
+OPTIONS="$OPTIONS -c listen_addresses=''"
+
+PGHOST=$SOCKET
+PGPORT=$PORT
+
+# create new data directory
+$BINDIR/initdb --nosync tmp_check/data > tmp_check/initdb.log 2>&1
+
+# install trap to shutdown server at failure/exit
+trap "$BINDIR/pg_ctl stop -w -D tmp_check/data" INT QUIT TERM EXIT
+
+#start server
+$BINDIR/pg_ctl start -w -D tmp_check/data -o "$OPTIONS" -l tmp_check/postmaster.log
+
+$REGRESS_BASE/$TESTBINARY \
+    --host $SOCKET \
+    --port $PORT \
+    --dbname $DBNAME \
+    "$@"
+
+exit 0
