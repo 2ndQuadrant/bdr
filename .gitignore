@@ -38,5 +38,12 @@ lib*.pc
 /bdr-*.tar.bz2
 /.distgitrev
 /.distgittag
-
->>>>>>> 364ba09... bdr: Adapt gitignore to the new out-of-tree situation
+# autoconf output
+/autom4te.cache/
+/bdr_config.h.in
+# configure output
+/Makefile
+/configure
+/run_tests
+/config.log
+/config.status

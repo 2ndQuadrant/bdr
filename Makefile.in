@@ -1,7 +1,6 @@
-# contrib/bdr/Makefile
-#
-# Please test changes here against USE_PGXS=1 as well
-#
+# -*-makefile-*-
+# Makefile.in
+# @configure_input@
 
 MODULE_big = bdr
 
@@ -32,15 +31,27 @@ OBJS = \
 # Can only be built using pgxs
 USE_PGXS=1
 
-PG_CONFIG = pg_config
+bdr_abs_srcdir := @srcdir@
+PG_CONFIG :=@PG_CONFIG@
 PGXS := $(shell $(PG_CONFIG) --pgxs)
+
+USE_VPATH=$(bdr_abs_srcdir)
+GIT_WORK_TREE=$(USE_VPATH)
+GIT_DIR=$(USE_VPATH)/.git
+export GIT_DIR
+export GIT_WORK_TREE
+
 include $(PGXS)
 
+#top_srcdir := $(bdr_abs_srcdir)
+#srcdir := $(top_srcdir)
+#top_builddir=/tmp/frak
+
 DATE=$(shell date "+%Y-%m-%d")
-GITHASH=$(shell if [ -e .distgitrev ]; then cat .distgitrev; else git rev-parse --short HEAD; fi)
+GITHASH=$(shell if [ -e .distgitrev ]; then cat .distgitrev; else GIT_DIR=$(USE_VPATH)/.git git rev-parse --short HEAD; fi)
 BDR_VERSION=$(shell awk '/^\#define BDR_VERSION / { print $3; }' bdr_version.h.in | cut -d '"' -f 2)
 
-bdr_version.h: bdr_version.h.in
+bdr_version.h: ${bdr_abs_srcdir}/bdr_version.h.in
 	sed '0,/BDR_VERSION_DATE/s,\(BDR_VERSION_DATE\).*,\1 "$(DATE)",;0,/BDR_VERSION_GITHASH/s,\(BDR_VERSION_GITHASH\).*,\1 "$(GITHASH)",' $< >$@
 
 bdr.o: bdr_version.h
@@ -59,6 +70,7 @@ additional-clean:
 	rm -f bdr_init_copy$(X) bdr_init_copy.o
 	rm -f bdr_version.h
 	rm -f .distgitrev
+	rm -rf tmp_check
 
 # Disabled because these tests require "wal_level=logical", which
 # typical installcheck users do not have (e.g. buildfarm clients).
@@ -88,19 +100,19 @@ REQUIRED_EXTENSIONS="btree_gist"
 REQUIRED_TEST_EXTENSIONS="pg_trgm cube hstore"
 
 regresscheck: all install
-	[ -e pg_hba.conf ] || ln -s $(top_srcdir)/contrib/bdr/pg_hba.conf .
+	[ -e pg_hba.conf ] || ln -s $(bdr_abs_srcdir)/pg_hba.conf .
 
 	mkdir -p results/ddl
 	mkdir -p results/dml
 
-	./run_tests --config bdr_regress.conf \
+	./run_tests --config $(bdr_abs_srcdir)/bdr_regress.conf \
 		--testbinary src/test/regress/pg_regress \
 		$(REGRESSCHECKS)
 
 isolationcheck: all install
 	mkdir -p results/isolation
 
-	./run_tests --config bdr_isolationregress.conf \
+	./run_tests --config $(bdr_abs_srcdir)/bdr_isolationregress.conf \
 		--testbinary src/test/isolation/pg_isolation_regress \
 		--dbname node1,node2,node3 \
 		$(ISOLATIONCHECKS)

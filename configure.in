@@ -1,0 +1,50 @@
+AC_INIT([BDR], [bdr-next], [pgsql-bugs@postgresql.org], [bdr], [http://2ndquadrant.com/en/resources/bdr/])
+AC_COPYRIGHT([Copyright (c) 1996-2014, PostgreSQL Global Development Group])
+
+AC_SUBST(configure_args, [$ac_configure_args])
+
+AC_PROG_SED
+
+if test -z "$PG_CONFIG"; then
+  AC_PATH_PROG(PG_CONFIG, pg_config)
+fi
+
+if test -z "$PG_CONFIG"; then
+   AC_MSG_ERROR([could not find pg_config])
+fi
+
+pgac_pg_config_version=$($PG_CONFIG --version 2>/dev/null)
+version_num=$(echo "$pgac_pg_config_version"|
+              $SED -e 's/^PostgreSQL \([[0-9]]\+\)\.\([[0-9]]\+\)\([[a-zA-Z0-9]]\+\)$/\1.\2/')
+version_add=$(echo "$pgac_pg_config_version"|
+              $SED -e 's/^PostgreSQL \([[0-9]]\+\)\.\([[0-9]]\+\)\([[a-zA-Z0-9]]\+\)$/\3/')
+
+if test "$version_num" != '9.4'; then
+   AC_MSG_ERROR([bdr is not compatible with postgres $version_num])
+else
+   AC_MSG_NOTICE([building against PostgreSQL $version_num])
+fi;
+
+# add includedir to prerequisites, so tests for headers can succeed
+CPPFLAGS="-I$($PG_CONFIG --includedir-server) $CFLAGS"
+
+# now that we found pg_config, check whether we're building against
+# a stock postgres or not.
+AC_CHECK_HEADERS([replication/replication_identifier.h], [], [],
+[#include "postgres.h"
+])
+
+if test "$ac_cv_header_replication_replication_identifier_h" != 'yes'; then
+   AC_MSG_ERROR([bdr can only be compiled against postgres-bdr])
+   AC_ARG_VAR([BUILDING_UDR], 1)
+   AC_DEFINE([BUILDING_UDR], 1, ['Building UDR'])
+else
+   AC_MSG_NOTICE([building against appropriately patched PostgreSQL])
+   AC_ARG_VAR([BUILDING_BDR], 1)
+   AC_DEFINE([BUILDING_BDR], 1, ['Building BDR'])
+fi;
+
+AC_CONFIG_FILES([Makefile])
+AC_CONFIG_FILES([run_tests], [chmod +x run_tests])
+AC_CONFIG_HEADERS([bdr_config.h])
+AC_OUTPUT

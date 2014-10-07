@@ -3,8 +3,8 @@
 set -e
 #set -x
 
-BINDIR=$(pg_config --bindir)
-REGRESS_BASE=$(pg_config --libdir)/pgxs/
+BINDIR=$(@PG_CONFIG@ --bindir)
+REGRESS_BASE=$(@PG_CONFIG@ --libdir)/pgxs/
 DBNAME=regression
 
 mkdir -p tmp_check
@@ -43,9 +43,10 @@ PORT=5440
 OPTIONS="-c config_file=${CONFIGFILE}"
 OPTIONS="$OPTIONS -c unix_socket_directories=$SOCKET"
 OPTIONS="$OPTIONS -c listen_addresses=''"
+OPTIONS="$OPTIONS -c port=${PORT}"
 
-PGHOST=$SOCKET
-PGPORT=$PORT
+export PGHOST=$SOCKET
+export PGPORT=$PORT
 
 # create new data directory
 $BINDIR/initdb --nosync tmp_check/data > tmp_check/initdb.log 2>&1
@@ -54,12 +55,13 @@ $BINDIR/initdb --nosync tmp_check/data > tmp_check/initdb.log 2>&1
 trap "$BINDIR/pg_ctl stop -w -D tmp_check/data" INT QUIT TERM EXIT
 
 #start server
-$BINDIR/pg_ctl start -w -D tmp_check/data -o "$OPTIONS" -l tmp_check/postmaster.log
+$BINDIR/pg_ctl start -w -D tmp_check/data -o "$OPTIONS" -c -l tmp_check/postmaster.log
 
 $REGRESS_BASE/$TESTBINARY \
     --host $SOCKET \
     --port $PORT \
     --dbname $DBNAME \
+    --inputdir=@srcdir@ \
     "$@"
 
 exit 0
