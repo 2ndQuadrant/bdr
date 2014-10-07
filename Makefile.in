@@ -66,11 +66,20 @@ all: all-lib bdr_init_copy
 
 clean: additional-clean
 
+maintainer-clean: additional-maintainer-clean
+
 additional-clean:
 	rm -f bdr_init_copy$(X) bdr_init_copy.o
 	rm -f bdr_version.h
 	rm -f .distgitrev
 	rm -rf tmp_check
+
+additional-maintainer-clean:
+	rm -f configure
+	rm -f config.status config.log
+	rm -f bdr_config.h.in Makefile
+	rm -f run_tests
+	@rm -rf autom4te.cache/
 
 # Disabled because these tests require "wal_level=logical", which
 # typical installcheck users do not have (e.g. buildfarm clients).

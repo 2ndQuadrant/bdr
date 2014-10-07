@@ -41,6 +41,7 @@ lib*.pc
 # autoconf output
 /autom4te.cache/
 /bdr_config.h.in
+/bdr_config.h
 # configure output
 /Makefile
 /configure
