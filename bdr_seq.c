@@ -1161,6 +1161,7 @@ bdr_sequence_alloc(PG_FUNCTION_ARGS)
 		if (curval->next_value >= curval->end_value)
 		{
 			curval++;
+			wakeup = true;
 			continue;
 		}
 
@@ -1192,6 +1193,8 @@ bdr_sequence_alloc(PG_FUNCTION_ARGS)
 	if (result == 0)
 	{
 		bdr_sequencer_wakeup();
+		bdr_schedule_eoxact_sequencer_wakeup();
+
 		ereport(ERROR,
 				(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
 				 errmsg("could not find free sequence value for global sequence %s.%s",
@@ -1202,7 +1205,10 @@ bdr_sequence_alloc(PG_FUNCTION_ARGS)
 	}
 
 	if (wakeup)
+	{
 		bdr_sequencer_wakeup();
+		bdr_schedule_eoxact_sequencer_wakeup();
+	}
 
 	next = result + log - 1;
 
@@ -1247,7 +1253,7 @@ bdr_sequence_alloc(PG_FUNCTION_ARGS)
 
 	END_CRIT_SECTION();
 
-	/* schedule wakeup as soon as other xacts can see the seuqence */
+	/* schedule wakeup as soon as other xacts can see the sequence */
 	bdr_schedule_eoxact_sequencer_wakeup();
 
 	PG_RETURN_VOID();
