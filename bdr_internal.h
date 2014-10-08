@@ -41,9 +41,6 @@ typedef struct BdrFlushPosition
 	XLogRecPtr remote_end;
 } BdrFlushPosition;
 
-extern dlist_head bdr_lsn_association;
-extern bool bdr_get_flush_position(XLogRecPtr *write, XLogRecPtr *flush);
-
 extern volatile sig_atomic_t got_SIGTERM;
 extern volatile sig_atomic_t got_SIGHUP;
 

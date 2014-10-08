@@ -99,6 +99,8 @@ BdrApplyWorker *bdr_apply_worker = NULL;
  */
 BdrConnectionConfig *bdr_apply_config = NULL;
 
+dlist_head bdr_lsn_association = DLIST_STATIC_INIT(bdr_lsn_association);
+
 static BDRRelation *read_rel(StringInfo s, LOCKMODE mode);
 extern void read_tuple_parts(StringInfo s, BDRRelation *rel, BDRTupleData *tup);
 
@@ -2078,6 +2080,58 @@ bdr_sendint64(int64 i, char *buf)
 	n32 = (uint32) i;
 	n32 = htonl(n32);
 	memcpy(&buf[4], &n32, 4);
+}
+
+/*
+ * Figure out which write/flush positions to report to the walsender process.
+ *
+ * We can't simply report back the last LSN the walsender sent us because the
+ * local transaction might not yet be flushed to disk locally. Instead we
+ * build a list that associates local with remote LSNs for every commit. When
+ * reporting back the flush position to the sender we iterate that list and
+ * check which entries on it are already locally flushed. Those we can report
+ * as having been flushed.
+ *
+ * Returns true if there's no outstanding transactions that need to be
+ * flushed.
+ */
+static bool
+bdr_get_flush_position(XLogRecPtr *write, XLogRecPtr *flush)
+{
+	dlist_mutable_iter iter;
+	XLogRecPtr	local_flush = GetFlushRecPtr();
+
+	*write = InvalidXLogRecPtr;
+	*flush = InvalidXLogRecPtr;
+
+	dlist_foreach_modify(iter, &bdr_lsn_association)
+	{
+		BdrFlushPosition *pos =
+			dlist_container(BdrFlushPosition, node, iter.cur);
+
+		*write = pos->remote_end;
+
+		if (pos->local_end <= local_flush)
+		{
+			*flush = pos->remote_end;
+			dlist_delete(iter.cur);
+			pfree(pos);
+		}
+		else
+		{
+			/*
+			 * Don't want to uselessly iterate over the rest of the list which
+			 * could potentially be long. Instead get the last element and
+			 * grab the write position from there.
+			 */
+			pos = dlist_tail_element(BdrFlushPosition, node,
+									 &bdr_lsn_association);
+			*write = pos->remote_end;
+			return false;
+		}
+	}
+
+	return dlist_is_empty(&bdr_lsn_association);
 }
 
 /*
