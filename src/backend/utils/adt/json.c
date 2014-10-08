@@ -1341,6 +1341,9 @@ datum_to_json(Datum val, bool is_null, StringInfo result,
 	bool		numeric_error;
 	JsonLexContext dummy_lex;
 
+	/* callers are expected to ensure that null keys are not passed in */
+	Assert( ! (key_scalar && is_null));
+
 	if (is_null)
 	{
 		appendStringInfoString(result, "null");
@@ -1486,10 +1489,6 @@ datum_to_json(Datum val, bool is_null, StringInfo result,
 			break;
 		default:
 			outputstr = OidOutputFunctionCall(outfuncoid, val);
-			if (key_scalar && *outputstr == '\0')
-				ereport(ERROR,
-						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-						 errmsg("key value must not be empty")));
 			escape_json(result, outputstr);
 			pfree(outputstr);
 			break;
@@ -1973,7 +1972,7 @@ json_object_agg_finalfn(PG_FUNCTION_ARGS)
 	state = PG_ARGISNULL(0) ? NULL : (StringInfo) PG_GETARG_POINTER(0);
 
 	if (state == NULL)
-		PG_RETURN_TEXT_P(cstring_to_text("{}"));
+		PG_RETURN_NULL();
 
 	appendStringInfoString(state, " }");
 
