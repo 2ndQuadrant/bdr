@@ -49,7 +49,7 @@ include $(PGXS)
 
 DATE=$(shell date "+%Y-%m-%d")
 GITHASH=$(shell if [ -e .distgitrev ]; then cat .distgitrev; else GIT_DIR=$(USE_VPATH)/.git git rev-parse --short HEAD; fi)
-BDR_VERSION=$(shell awk '/^\#define BDR_VERSION / { print $3; }' bdr_version.h.in | cut -d '"' -f 2)
+BDR_VERSION=$(shell awk '/^\#define BDR_VERSION / { print $3; }' ${bdr_abs_srcdir}/bdr_version.h.in | cut -d '"' -f 2)
 
 bdr_version.h: ${bdr_abs_srcdir}/bdr_version.h.in
 	sed '0,/BDR_VERSION_DATE/s,\(BDR_VERSION_DATE\).*,\1 "$(DATE)",;0,/BDR_VERSION_GITHASH/s,\(BDR_VERSION_GITHASH\).*,\1 "$(GITHASH)",' $< >$@
@@ -60,6 +60,7 @@ bdr_init_copy: bdr_init_copy.o
 	$(CC) $(CFLAGS) $^ $(LDFLAGS) $(LDFLAGS_EX) $(libpq_pgport) $(LIBS) -o $@$(X)
 
 scripts/bdr_initial_load: scripts/bdr_initial_load.in
+	mkdir -p scripts
 	sed -e "s/BDR_VERSION/$(BDR_VERSION)/" -e "s/PG_VERSION/$(VERSION)/" $< > $@
 
 all: all-lib bdr_init_copy
@@ -73,8 +74,9 @@ additional-clean:
 	rm -f bdr_version.h
 	rm -f .distgitrev
 	rm -rf tmp_check
+	rm -rf scripts/bdr_initial_load
 
-additional-maintainer-clean:
+additional-maintainer-clean: clean
 	rm -f configure
 	rm -f config.status config.log
 	rm -f bdr_config.h.in Makefile

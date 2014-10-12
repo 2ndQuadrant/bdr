@@ -513,8 +513,8 @@ bdr_exec_init_replica(BdrConnectionConfig *cfg, char *snapshot)
 	get_parent_directory(bindir);
 
 	if (find_other_exec(my_exec_path, BDR_INIT_REPLICA_CMD,
-						 BDR_INIT_REPLICA_CMD " (PostgreSQL) " PG_VERSION "\n",
-						&bdr_init_replica_script_path[0]) < 0)
+	                    BDR_INIT_REPLICA_CMD " (PostgreSQL " PG_VERSION ", BDR " BDR_VERSION ")\n",
+	                    &bdr_init_replica_script_path[0]) < 0)
 	{
 		elog(ERROR, "bdr: failed to find " BDR_INIT_REPLICA_CMD
 			 " in Pg bin dir or wrong version (expected %s)",
