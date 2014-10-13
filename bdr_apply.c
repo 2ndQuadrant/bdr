@@ -22,7 +22,7 @@
 #include "miscadmin.h"
 #include "pgstat.h"
 
-#ifdef BDR_MULTIMASTER
+#ifdef BUILDING_BDR
 #include "access/committs.h"
 #endif
 #include "access/htup_details.h"
@@ -64,7 +64,7 @@
 #define VERBOSE_UPDATE
 */
 
-#ifndef BDR_MULTIMASTER
+#ifdef BUILDING_UDR
 bool bdr_conflict_default_apply = false;
 #endif
 
@@ -121,7 +121,7 @@ static void do_apply_update(BDRRelation *rel, EState *estate, TupleTableSlot *ol
 				TupleTableSlot *newslot);
 
 static void check_sequencer_wakeup(BDRRelation *rel);
-#ifdef BDR_MULTIMASTER
+#ifdef BUILDING_BDR
 static HeapTuple process_queued_drop(HeapTuple cmdtup);
 #endif
 static void process_queued_ddl_command(HeapTuple cmdtup, bool tx_just_started);
@@ -132,7 +132,7 @@ static void process_remote_commit(StringInfo s);
 static void process_remote_insert(StringInfo s);
 static void process_remote_update(StringInfo s);
 static void process_remote_delete(StringInfo s);
-#ifdef BDR_MULTIMASTER
+#ifdef BUILDING_BDR
 static void process_remote_message(StringInfo s);
 #endif
 
@@ -281,7 +281,7 @@ process_remote_commit(StringInfo s)
 	TimestampTz		committime;
 	TimestampTz		end_lsn;
 	int				flags;
-#ifndef BDR_MULTIMASTER
+#ifdef BUILDING_UDR
 	XLogRecPtr XactLastCommitEnd;
 #endif
 
@@ -305,7 +305,7 @@ process_remote_commit(StringInfo s)
 	Assert(commit_lsn == replication_origin_lsn);
 	Assert(committime == replication_origin_timestamp);
 
-#ifndef BDR_MULTIMASTER
+#ifdef BUILDING_UDR
 	XactLastCommitEnd = GetXLogInsertRecPtr();
 #endif
 
@@ -339,7 +339,7 @@ process_remote_commit(StringInfo s)
 	 */
 	AdvanceCachedReplicationIdentifier(end_lsn, XactLastCommitEnd);
 
-#ifdef BDR_MULTIMASTER
+#ifdef BUILDING_BDR
 	/*
 	 * If we're in catchup mode, see if the commit is relayed from elsewhere
 	 * and advance the appropriate slot.
@@ -609,7 +609,7 @@ process_remote_insert(StringInfo s)
 		if (relid == QueuedDDLCommandsRelid)
 			process_queued_ddl_command(ht, started_tx);
 		if (relid == QueuedDropsRelid)
-#ifdef BDR_MULTIMASTER
+#ifdef BUILDING_BDR
 			process_queued_drop(ht);
 #else
 			ereport(ERROR,
@@ -1004,7 +1004,7 @@ process_remote_delete(StringInfo s)
 static void
 get_local_tuple_origin(HeapTuple tuple, TimestampTz *commit_ts, RepNodeId *node_id)
 {
-#ifdef BDR_MULTIMASTER
+#ifdef BUILDING_BDR
 	TransactionId	xmin;
 	CommitExtraData	node_id_raw;
 
@@ -1019,7 +1019,7 @@ get_local_tuple_origin(HeapTuple tuple, TimestampTz *commit_ts, RepNodeId *node_
 #endif
 }
 
-#ifdef BDR_MULTIMASTER
+#ifdef BUILDING_BDR
 /*
  * Last update wins conflict handling.
  */
@@ -1122,7 +1122,7 @@ bdr_conflict_default_apply_resolve(bool *perform_update, bool *log_update,
 						BdrConflictResolution_DefaultApplyChange :
 						BdrConflictResolution_DefaultSkipChange;
 }
-#endif //BDR_MULTIMASTER
+#endif /*BUILDING_BDR*/
 
 /*
  * Check whether a remote insert or update conflicts with the local row
@@ -1221,7 +1221,7 @@ check_apply_update(BdrConflictType conflict_type,
 		 */
 	}
 
-#ifdef BDR_MULTIMASTER
+#ifdef BUILDING_BDR
 	/* Use last update wins conflict handling. */
 	bdr_conflict_last_update_wins(local_node_id,
 								  replication_origin_id,
@@ -1235,7 +1235,7 @@ check_apply_update(BdrConflictType conflict_type,
 #endif
 }
 
-#ifdef BDR_MULTIMASTER
+#ifdef BUILDING_BDR
 static void
 process_remote_message(StringInfo s)
 {
@@ -1355,7 +1355,7 @@ process_remote_message(StringInfo s)
 	if (!transactional)
 		AdvanceCachedReplicationIdentifier(lsn, InvalidXLogRecPtr);
 }
-#endif // BDR_MULTIMASTER
+#endif /* BUILDING_BDR */
 
 static void
 do_apply_update(BDRRelation *rel, EState *estate, TupleTableSlot *oldslot,
@@ -1503,7 +1503,7 @@ process_queued_ddl_command(HeapTuple cmdtup, bool tx_just_started)
 }
 
 
-#ifdef BDR_MULTIMASTER
+#ifdef BUILDING_BDR
 /*
  * ugly hack: Copied struct from dependency.c - there doesn't seem to be a
  * supported way of iterating ObjectAddresses otherwise.
@@ -1757,7 +1757,7 @@ process_queued_drop(HeapTuple cmdtup)
 
 	return newtup;
 }
-#endif // BDR_MULTIMASTER
+#endif /* BUILDING_BDR */
 
 static bool
 bdr_performing_work(void)
@@ -1778,14 +1778,14 @@ bdr_performing_work(void)
 static void
 check_sequencer_wakeup(BDRRelation *rel)
 {
-#ifdef BDR_MULTIMASTER
+#ifdef BUILDING_BDR
 	Oid			reloid = RelationGetRelid(rel->rel);
 
 	if (reloid == BdrSequenceValuesRelid ||
 		reloid == BdrSequenceElectionsRelid ||
 		reloid == BdrVotesRelid)
 		bdr_schedule_eoxact_sequencer_wakeup();
-#endif //BDR_MULTIMASTER
+#endif
 }
 
 void
@@ -1945,7 +1945,7 @@ bdr_process_remote_action(StringInfo s)
 		case 'D':
 			process_remote_delete(s);
 			break;
-#ifdef BDR_MULTIMASTER
+#ifdef BUILDING_BDR
 		case 'M':
 			process_remote_message(s);
 			break;

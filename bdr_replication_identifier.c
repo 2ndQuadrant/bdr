@@ -23,6 +23,7 @@
 #include "access/xlogdefs.h"
 
 #include "catalog/indexing.h"
+#include "catalog/namespace.h"
 
 #include "miscadmin.h"
 
@@ -34,6 +35,8 @@
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
 #include "utils/tqual.h"
+
+#include "bdr.h"
 
 RepNodeId	replication_origin_id = InvalidRepNodeId; /* assumed identity */
 XLogRecPtr	replication_origin_lsn;

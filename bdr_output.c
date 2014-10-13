@@ -90,7 +90,7 @@ static void pg_decode_commit_txn(LogicalDecodingContext *ctx,
 static void pg_decode_change(LogicalDecodingContext *ctx,
 				 ReorderBufferTXN *txn, Relation rel,
 				 ReorderBufferChange *change);
-#ifdef BDR_MULTIMASTER
+#ifdef BUILDING_BDR
 static void pg_decode_message(LogicalDecodingContext *ctx,
 							  ReorderBufferTXN *txn, XLogRecPtr message_lsn,
 							  bool transactional, Size sz,
@@ -112,7 +112,7 @@ _PG_output_plugin_init(OutputPluginCallbacks *cb)
 	cb->begin_cb = pg_decode_begin_txn;
 	cb->change_cb = pg_decode_change;
 	cb->commit_cb = pg_decode_commit_txn;
-#ifdef BDR_MULTIMASTER
+#ifdef BUILDING_BDR
 	cb->message_cb = pg_decode_message;
 #endif
 	cb->shutdown_cb = NULL;
@@ -214,7 +214,7 @@ bdr_req_param(const char *param)
 static void
 bdr_ensure_node_ready()
 {
-#ifdef BDR_MULTIMASTER
+#ifdef BUILDING_BDR
 	int spi_ret;
 	const uint64 sysid = GetSystemIdentifier();
 	char status;
@@ -594,7 +594,7 @@ should_forward_change(LogicalDecodingContext *ctx, BdrOutputData *data,
 void
 pg_decode_begin_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *txn)
 {
-#ifdef BDR_MULTIMASTER
+#ifdef BUILDING_BDR
 	BdrOutputData *data = ctx->output_plugin_private;
 #endif
 	int flags = 0;
@@ -607,7 +607,7 @@ pg_decode_begin_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *txn)
 	OutputPluginPrepareWrite(ctx, true);
 	pq_sendbyte(ctx->out, 'B');		/* BEGIN */
 
-#ifdef BDR_MULTIMASTER
+#ifdef BUILDING_BDR
 	/*
 	 * Are we forwarding changesets from other nodes? If so, we must include
 	 * the origin node ID and LSN in BEGIN records.
@@ -624,7 +624,7 @@ pg_decode_begin_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *txn)
 	pq_sendint64(ctx->out, txn->commit_time);
 	pq_sendint(ctx->out, txn->xid, 4);
 
-#ifdef BDR_MULTIMASTER
+#ifdef BUILDING_BDR
 	/* and optional data selected above */
 	if (flags & BDR_OUTPUT_TRANSACTION_HAS_ORIGIN)
 	{
@@ -962,7 +962,7 @@ write_tuple(BdrOutputData *data, StringInfo out, Relation rel,
 	}
 }
 
-#ifdef BDR_MULTIMASTER
+#ifdef BUILDING_BDR
 static void
 pg_decode_message(LogicalDecodingContext *ctx,
 				  ReorderBufferTXN *txn, XLogRecPtr lsn,

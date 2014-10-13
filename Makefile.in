@@ -24,15 +24,22 @@ OBJS = \
 	bdr_conflict_handlers.o \
 	bdr_conflict_logging.o \
 	bdr_compat.o \
-	bdr_commandfilter.o \
 	bdr_count.o \
 	bdr_executor.o \
 	bdr_init_replica.o \
 	bdr_label.o \
-	bdr_locks.o \
 	bdr_output.o \
-	bdr_relcache.o \
+	bdr_relcache.o
+
+ifeq "@BUILDING_BDR@" "1"
+OBJS += \
+	bdr_commandfilter.o \
+	bdr_locks.o \
 	bdr_seq.o
+else
+OBJS += \
+	bdr_replication_identifier.o
+endif
 
 DUMPOBJS = pg_dump/pg_dump.o pg_dump/common.o pg_dump/pg_dump_sort.o \
 	pg_dump/pg_backup_archiver.o pg_dump/pg_backup_db.o \

@@ -1,1 +1,1 @@
-autoreconf
+autoreconf -f

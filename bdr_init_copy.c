@@ -22,7 +22,7 @@
 
 #define LLOGCDIR "pg_logical/checkpoints"
 
-#ifdef BDR_MULTIMASTER
+#ifdef BUILDING_BDR
 #define RIINTERFACE_PREFIX "pg_catalog.pg_"
 #else
 #define RIINTERFACE_PREFIX "bdr.bdr_"
@@ -382,7 +382,7 @@ get_postgres_guc_value(char *guc, char *defval)
 static int
 set_sysid(void)
 {
-#ifdef BDR_MULTIMASTER
+#ifdef BUILDING_BDR
 	int			 ret;
 	PQExpBuffer  cmd = createPQExpBuffer();
 	char		*exec_path = find_other_exec_or_die(argv0, "bdr_resetxlog", "bdr_resetxlog (PostgreSQL) " PG_VERSION "\n");
@@ -492,7 +492,7 @@ read_bdr_config(void)
 static void
 remove_unwanted_state(void)
 {
-#ifdef BDR_MULTIMASTER
+#ifdef BUILDING_BDR
 	DIR				*lldir;
 	struct dirent	*llde;
 	PQExpBuffer		 llpath = createPQExpBuffer();

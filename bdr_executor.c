@@ -59,7 +59,7 @@ static ExecutorStart_hook_type PrevExecutorStart_hook = NULL;
 
 static bool bdr_always_allow_writes = false;
 
-#ifdef BDR_MULTIMASTER
+#ifdef BUILDING_BDR
 PG_FUNCTION_INFO_V1(bdr_queue_ddl_commands);
 #else
 PG_FUNCTION_INFO_V1(bdr_replicate_ddl_command);
@@ -421,7 +421,7 @@ bdr_add_truncate_trigger(PG_FUNCTION_ARGS)
 	PG_RETURN_VOID();
 }
 
-#ifdef BDR_MULTIMASTER
+#ifdef BUILDING_BDR
 /*
  * bdr_queue_ddl_commands
  * 		ddl_command_end event triggger handler for BDR
@@ -539,7 +539,7 @@ bdr_replicate_ddl_command(PG_FUNCTION_ARGS)
 
 	PG_RETURN_VOID();
 }
-#endif //BDR_MULTIMASTER
+#endif //BUILDING_BDR
 
 void
 bdr_executor_always_allow_writes(bool always_allow)
@@ -573,7 +573,7 @@ BdrExecutorStart(QueryDesc *queryDesc, int eflags)
 	if (!performs_writes)
 		goto done;
 
-#ifdef BDR_MULTIMASTER
+#ifdef BUILDING_BDR
 	bdr_locks_check_query();
 #endif
 

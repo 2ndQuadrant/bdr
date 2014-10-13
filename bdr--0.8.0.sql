@@ -17,6 +17,12 @@ LANGUAGE C
 AS 'MODULE_PATHNAME'
 ;
 
+CREATE OR REPLACE FUNCTION bdr_variant()
+RETURNS TEXT
+LANGUAGE C
+AS 'MODULE_PATHNAME'
+;
+
 CREATE FUNCTION pg_stat_get_bdr(
     OUT rep_node_id oid,
     OUT rilocalid oid,
@@ -413,15 +419,12 @@ END;
 $function$;
 
 DO $DO$BEGIN
-IF right(bdr_version(), 4) = '-udr' THEN
-    RETURN;
-END IF;
+IF bdr.bdr_variant() = 'BDR' THEN
 
-CREATE OR REPLACE FUNCTION bdr.bdr_queue_ddl_commands()
-RETURNS event_trigger
-LANGUAGE C
-AS 'MODULE_PATHNAME'
-;
+	CREATE OR REPLACE FUNCTION bdr.bdr_queue_ddl_commands()
+	RETURNS event_trigger
+	LANGUAGE C
+	AS 'MODULE_PATHNAME';
 
 END;$DO$;
 
@@ -441,55 +444,53 @@ REVOKE ALL ON TABLE bdr_queued_drops FROM PUBLIC;
 SELECT pg_catalog.pg_extension_config_dump('bdr_queued_drops', '');
 
 DO $DO$BEGIN
-IF right(bdr_version(), 4) = '-udr' THEN
-    RETURN;
-END IF;
+IF bdr.c() = 'BDR' THEN
 
-CREATE OR REPLACE FUNCTION bdr.queue_dropped_objects()
-RETURNS event_trigger
-LANGUAGE plpgsql
-AS $function$
-DECLARE
-    r RECORD;
-    dropped bdr.dropped_object;
-    otherobjs bdr.dropped_object[] = '{}';
-BEGIN
-    -- don't recursively log drop commands
-    IF pg_replication_identifier_is_replaying() THEN
-       RETURN;
-    END IF;
+	CREATE OR REPLACE FUNCTION bdr.queue_dropped_objects()
+	RETURNS event_trigger
+	LANGUAGE plpgsql
+	AS $function$
+	DECLARE
+		r RECORD;
+		dropped bdr.dropped_object;
+		otherobjs bdr.dropped_object[] = '{}';
+	BEGIN
+		-- don't recursively log drop commands
+		IF pg_replication_identifier_is_replaying() THEN
+		   RETURN;
+		END IF;
 
-    -- don't replicate if disabled
-    IF  current_setting('bdr.skip_ddl_replication')::bool THEN
-       RETURN;
-    END IF;
+		-- don't replicate if disabled
+		IF  current_setting('bdr.skip_ddl_replication')::bool THEN
+		   RETURN;
+		END IF;
 
-    FOR r IN SELECT * FROM pg_event_trigger_dropped_objects()
-    LOOP
-        IF r.original OR r.normal THEN
-            dropped.objtype = r.object_type;
-            dropped.objnames = r.address_names;
-            dropped.objargs = r.address_args;
-            otherobjs := otherobjs || dropped;
-            RAISE LOG 'object is: %', dropped;
-        END IF;
-    END LOOP;
+		FOR r IN SELECT * FROM pg_event_trigger_dropped_objects()
+		LOOP
+			IF r.original OR r.normal THEN
+				dropped.objtype = r.object_type;
+				dropped.objnames = r.address_names;
+				dropped.objargs = r.address_args;
+				otherobjs := otherobjs || dropped;
+				RAISE LOG 'object is: %', dropped;
+			END IF;
+		END LOOP;
 
-    IF otherobjs <> '{}' THEN
-        INSERT INTO bdr.bdr_queued_drops (
-            lsn, queued_at, dropped_objects
-        )
-        VALUES (pg_current_xlog_location(),
-            NOW(),
-            otherobjs
-        );
-    END IF;
-END;
-$function$;
+		IF otherobjs <> '{}' THEN
+			INSERT INTO bdr.bdr_queued_drops (
+				lsn, queued_at, dropped_objects
+			)
+			VALUES (pg_current_xlog_location(),
+				NOW(),
+				otherobjs
+			);
+		END IF;
+	END;
+	$function$;
 
-CREATE EVENT TRIGGER queue_drops
-ON sql_drop
-EXECUTE PROCEDURE bdr.queue_dropped_objects();
+	CREATE EVENT TRIGGER queue_drops
+	ON sql_drop
+	EXECUTE PROCEDURE bdr.queue_dropped_objects();
 
 END;$DO$;
 
@@ -506,49 +507,49 @@ AS 'MODULE_PATHNAME'
 ;
 
 DO $DO$BEGIN
-IF right(bdr_version(), 4) = '-udr' THEN
+IF bdr.bdr_variant() = 'BDR' THEN
 
-CREATE TABLE bdr_replication_identifier (
-    riident oid NOT NULL,
-    riname text,
-    riremote_lsn pg_lsn,
-    rilocal_lsn pg_lsn
-);
+	CREATE TABLE bdr_replication_identifier (
+		riident oid NOT NULL,
+		riname text,
+		riremote_lsn pg_lsn,
+		rilocal_lsn pg_lsn
+	);
 
-CREATE UNIQUE INDEX bdr_replication_identifier_riiident_index ON bdr_replication_identifier(riident);
-CREATE UNIQUE INDEX bdr_replication_identifier_riname_index ON bdr_replication_identifier(riname varchar_pattern_ops);
+	CREATE UNIQUE INDEX bdr_replication_identifier_riiident_index ON bdr_replication_identifier(riident);
+	CREATE UNIQUE INDEX bdr_replication_identifier_riname_index ON bdr_replication_identifier(riname varchar_pattern_ops);
 
-CREATE OR REPLACE FUNCTION bdr_replication_identifier_create(i_riname text) RETURNS Oid
-AS $func$
-DECLARE
-	i smallint := 1;
-BEGIN
-	LOCK TABLE bdr.bdr_replication_identifier;
-	WHILE (SELECT 1 FROM bdr.bdr_replication_identifier WHERE riident = i) LOOP
-		i := i += 1;
-	END LOOP;
-	INSERT INTO bdr.bdr_replication_identifier(riident, riname) VALUES(i, i_riname);
+	CREATE OR REPLACE FUNCTION bdr_replication_identifier_create(i_riname text) RETURNS Oid
+	AS $func$
+	DECLARE
+		i smallint := 1;
+	BEGIN
+		LOCK TABLE bdr.bdr_replication_identifier;
+		WHILE (SELECT 1 FROM bdr.bdr_replication_identifier WHERE riident = i) LOOP
+			i := i += 1;
+		END LOOP;
+		INSERT INTO bdr.bdr_replication_identifier(riident, riname) VALUES(i, i_riname);
 
-	RETURN i;
-END;
-$func$ STRICT LANGUAGE plpgsql;
+		RETURN i;
+	END;
+	$func$ STRICT LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION bdr_replication_identifier_advance(i_riname text, i_remote_lsn pg_lsn, i_local_lsn pg_lsn) RETURNS void
-AS $func$
-BEGIN
-	UPDATE bdr.bdr_replication_identifier SET riremote_lsn = i_remote_lsn, rilocal_lsn = i_local_lsn WHERE riname = i_riname;
-END;
-$func$ STRICT LANGUAGE plpgsql;
+	CREATE OR REPLACE FUNCTION bdr_replication_identifier_advance(i_riname text, i_remote_lsn pg_lsn, i_local_lsn pg_lsn) RETURNS void
+	AS $func$
+	BEGIN
+		UPDATE bdr.bdr_replication_identifier SET riremote_lsn = i_remote_lsn, rilocal_lsn = i_local_lsn WHERE riname = i_riname;
+	END;
+	$func$ STRICT LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION bdr_replication_identifier_drop(i_riname text) RETURNS void
-AS $func$
-BEGIN
-	DELETE FROM bdr.bdr_replication_identifier WHERE riname = i_riname;
-END;
-$func$ STRICT LANGUAGE plpgsql;
+	CREATE OR REPLACE FUNCTION bdr_replication_identifier_drop(i_riname text) RETURNS void
+	AS $func$
+	BEGIN
+		DELETE FROM bdr.bdr_replication_identifier WHERE riname = i_riname;
+	END;
+	$func$ STRICT LANGUAGE plpgsql;
 
 
-END IF;
+	END IF;
 END;$DO$;
 
 ---
@@ -616,14 +617,13 @@ $$;
 ---
 
 DO $DO$BEGIN
-IF right(bdr_version(), 4) = '-udr' THEN
-    RETURN;
+IF bdr.bdr_variant() = 'BDR' THEN
+
+	CREATE EVENT TRIGGER bdr_queue_ddl_commands
+	ON ddl_command_end
+	EXECUTE PROCEDURE bdr.bdr_queue_ddl_commands();
+
 END IF;
-
-CREATE EVENT TRIGGER bdr_queue_ddl_commands
-ON ddl_command_end
-EXECUTE PROCEDURE bdr.bdr_queue_ddl_commands();
-
 END;$DO$;
 
 RESET bdr.permit_unsafe_ddl_commands;

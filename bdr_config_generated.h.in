@@ -1,4 +1,6 @@
-/* bdr_config.h.in.  Generated from configure.in by autoheader.  */
+/* bdr_config_generated.h.in.  Generated from configure.in by autoheader.  */
+
+/* Do not include directly, use bdr_config.h instead. */
 
 /* 'Building BDR' */
 #undef BUILDING_BDR

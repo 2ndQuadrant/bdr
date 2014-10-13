@@ -33,16 +33,19 @@ AC_CHECK_HEADERS([replication/replication_identifier.h], [], [],
 ])
 
 if test "$ac_cv_header_replication_replication_identifier_h" != 'yes'; then
-   AC_MSG_ERROR([bdr can only be compiled against postgres-bdr])
+   AC_MSG_NOTICE([postgres-bdr patches missing, forcing UDR build])
    AC_ARG_VAR([BUILDING_UDR], 1)
+   AC_SUBST([BUILDING_UDR], 1)
    AC_DEFINE([BUILDING_UDR], 1, ['Building UDR'])
 else
    AC_MSG_NOTICE([building against appropriately patched PostgreSQL])
    AC_ARG_VAR([BUILDING_BDR], 1)
+   AC_SUBST([BUILDING_BDR], 1)
    AC_DEFINE([BUILDING_BDR], 1, ['Building BDR'])
 fi;
 
 AC_CONFIG_FILES([Makefile])
 AC_CONFIG_FILES([run_tests], [chmod +x run_tests])
-AC_CONFIG_HEADERS([bdr_config.h])
+AC_CONFIG_HEADERS([bdr_config_generated.h])
+AH_TOP([/* Do not include directly, use bdr_config.h instead. */])
 AC_OUTPUT

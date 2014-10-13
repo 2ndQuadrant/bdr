@@ -10,7 +10,7 @@
 #ifndef BDR_REPLICATION_IDENTIFIER_H
 #define BDR_REPLICATION_IDENTIFIER_H
 
-#ifdef BDR_MULTIMASTER
+#ifdef BUILDING_BDR
 
 #include "replication/replication_identifier.h"
 

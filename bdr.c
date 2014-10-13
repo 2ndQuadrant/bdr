@@ -24,7 +24,7 @@
 #include "pgstat.h"
 #include "port.h"
 
-#ifdef BDR_MULTIMASTER
+#ifdef BUILDING_BDR
 #include "access/committs.h"
 #endif
 #include "access/heapam.h"
@@ -120,10 +120,12 @@ static void bdr_worker_shmem_create_workers(void);
 Datum bdr_apply_pause(PG_FUNCTION_ARGS);
 Datum bdr_apply_resume(PG_FUNCTION_ARGS);
 Datum bdr_version(PG_FUNCTION_ARGS);
+Datum bdr_variant(PG_FUNCTION_ARGS);
 
 PG_FUNCTION_INFO_V1(bdr_apply_pause);
 PG_FUNCTION_INFO_V1(bdr_apply_resume);
 PG_FUNCTION_INFO_V1(bdr_version);
+PG_FUNCTION_INFO_V1(bdr_variant);
 
 static void
 bdr_sigterm(SIGNAL_ARGS)
@@ -606,6 +608,7 @@ bdr_apply_main(Datum main_arg)
 	appendStringInfo(&query, "pg_version '%u'", PG_VERSION_NUM);
 	appendStringInfo(&query, ", pg_catversion '%u'", CATALOG_VERSION_NO);
 	appendStringInfo(&query, ", bdr_version '%u'", BDR_VERSION_NUM);
+	appendStringInfo(&query, ", bdr_variant '%s'", BDR_VARIANT);
 	appendStringInfo(&query, ", min_bdr_version '%u'", BDR_MIN_REMOTE_VERSION_NUM);
 	appendStringInfo(&query, ", sizeof_int '%zu'", sizeof(int));
 	appendStringInfo(&query, ", sizeof_long '%zu'", sizeof(long));
@@ -1000,7 +1003,7 @@ bdr_perdb_worker_main(Datum main_arg)
 	bdr_saved_resowner = CurrentResourceOwner;
 
 	/* need to be able to perform writes ourselves */
-#ifdef BDR_MULTIMASTER
+#ifdef BUILDING_BDR
 	bdr_executor_always_allow_writes(true);
 	bdr_locks_startup(bdr_perdb_worker->nnodes);
 #endif
@@ -1029,7 +1032,7 @@ bdr_perdb_worker_main(Datum main_arg)
 		pfree(h);
 	}
 
-#ifdef BDR_MULTIMASTER
+#ifdef BUILDING_BDR
 	elog(DEBUG1, "BDR starting sequencer on db \"%s\"",
 		 NameStr(bdr_perdb_worker->dbname));
 
@@ -1069,7 +1072,7 @@ bdr_perdb_worker_main(Datum main_arg)
 			ProcessConfigFile(PGC_SIGHUP);
 		}
 
-#ifdef BDR_MULTIMASTER
+#ifdef BUILDING_BDR
 		/* check whether we need to vote */
 		if (bdr_sequencer_vote())
 			wait = false;
@@ -1473,7 +1476,7 @@ _PG_init(void)
 				(errcode(ERRCODE_CONFIG_FILE_ERROR),
 				 errmsg("bdr can only be loaded via shared_preload_libraries")));
 
-#ifdef BDR_MULTIMASTER
+#ifdef BUILDING_BDR
 	if (!commit_ts_enabled)
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
@@ -1526,7 +1529,7 @@ _PG_init(void)
 							 0,
 							 NULL, NULL, NULL);
 
-#ifndef BDR_MULTIMASTER
+#ifdef BUILDING_UDR
 	DefineCustomBoolVariable("bdr.conflict_default_apply",
 							 "Apply conflicting changes by default",
 							 NULL,
@@ -1551,7 +1554,7 @@ _PG_init(void)
 							NULL, NULL, NULL);
 
 
-#ifdef BDR_MULTIMASTER
+#ifdef BUILDING_BDR
 	DefineCustomBoolVariable("bdr.permit_unsafe_ddl_commands",
 							 "Allow commands that might cause data or " \
 							 "replication problems under BDR to run",
@@ -1761,7 +1764,7 @@ out:
 	/* register a slot for every remote node */
 	bdr_count_shmem_init(bdr_max_workers);
 	bdr_executor_init();
-#ifdef BDR_MULTIMASTER
+#ifdef BUILDING_BDR
 	bdr_sequencer_shmem_init(bdr_max_workers, bdr_distinct_dbnames_count);
 	bdr_locks_shmem_init(bdr_distinct_dbnames_count);
 	/* Set up a ProcessUtility_hook to stop unsupported commands being run */
@@ -1866,7 +1869,7 @@ bdr_maintain_schema(void)
 	BdrConflictHistoryRelId =
 		bdr_lookup_relid("bdr_conflict_history", schema_oid);
 
-#ifdef BDR_MULTIMASTER
+#ifdef BUILDING_BDR
 	BdrSequenceValuesRelid =
 		bdr_lookup_relid("bdr_sequence_values", schema_oid);
 	BdrSequenceElectionsRelid =
@@ -1915,4 +1918,10 @@ Datum
 bdr_version(PG_FUNCTION_ARGS)
 {
 	PG_RETURN_TEXT_P(cstring_to_text(BDR_VERSION_STR));
+}
+
+Datum
+bdr_variant(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_TEXT_P(cstring_to_text(BDR_VARIANT));
 }

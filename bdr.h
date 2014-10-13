@@ -18,6 +18,8 @@
 
 #include "libpq-fe.h"
 
+#include "bdr_config.h"
+
 #include "bdr_internal.h"
 
 #include "bdr_replication_identifier.h"
@@ -240,7 +242,7 @@ extern char *bdr_temp_dump_directory;
 extern bool bdr_init_from_basedump;
 extern bool bdr_log_conflicts_to_table;
 extern bool bdr_conflict_logging_include_tuples;
-#ifdef BDR_MULTIMASTER
+#ifdef BUILDING_BDR
 extern bool bdr_permit_unsafe_commands;
 #else
 extern bool bdr_conflict_default_apply;
@@ -357,8 +359,8 @@ extern void bdr_conflict_log_table(BdrApplyConflict *conflict);
 
 extern void tuple_to_stringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple);
 
+#ifdef BUILDING_BDR
 /* sequence support */
-#ifdef BDR_MULTIMASTER
 extern void bdr_sequencer_shmem_init(int nnodes, int sequencers);
 extern void bdr_sequencer_init(int seq_slot, Size nnodes);
 extern bool bdr_sequencer_vote(void);
