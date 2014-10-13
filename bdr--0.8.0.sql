@@ -125,7 +125,8 @@ CREATE INDEX bdr_votes__by_voter ON bdr.bdr_votes(voter_sysid, voter_tlid, voter
 
 -- register bdr am if seqam is supported
 DO $DO$BEGIN
-IF right(bdr_version(), 4) = '-udr' THEN
+PERFORM 1 FROM pg_catalog.pg_class WHERE relname = 'pg_seqam' AND relnamespace = 11;
+IF NOT FOUND THEN
     RETURN;
 END IF;
 
@@ -257,10 +258,11 @@ COMMENT ON TYPE bdr_conflict_resolution IS 'Resolution of a bdr conflict - if a 
 
 -- when seqam is present, make sure the sequence is using local AM
 DO $DO$BEGIN
-IF right(bdr_version(), 4) = '-udr' THEN
-    CREATE SEQUENCE bdr_conflict_history_id_seq;
-ELSE
+PERFORM 1 FROM pg_catalog.pg_class WHERE relname = 'pg_seqam' AND relnamespace = 11;
+IF FOUND THEN
     EXECUTE 'CREATE SEQUENCE bdr_conflict_history_id_seq USING local';
+ELSE
+    CREATE SEQUENCE bdr_conflict_history_id_seq;
 END IF;
 END;$DO$;
 
@@ -514,7 +516,37 @@ CREATE TABLE bdr_replication_identifier (
 );
 
 CREATE UNIQUE INDEX bdr_replication_identifier_riiident_index ON bdr_replication_identifier(riident);
-CREATE UNIQUE INDEX pg_replication_identifier_riname_index ON bdr_replication_identifier(riname varchar_pattern_ops);
+CREATE UNIQUE INDEX bdr_replication_identifier_riname_index ON bdr_replication_identifier(riname varchar_pattern_ops);
+
+CREATE OR REPLACE FUNCTION bdr_replication_identifier_create(i_riname text) RETURNS Oid
+AS $func$
+DECLARE
+	i smallint := 1;
+BEGIN
+	LOCK TABLE bdr.bdr_replication_identifier;
+	WHILE (SELECT 1 FROM bdr.bdr_replication_identifier WHERE riident = i) LOOP
+		i := i += 1;
+	END LOOP;
+	INSERT INTO bdr.bdr_replication_identifier(riident, riname) VALUES(i, i_riname);
+
+	RETURN i;
+END;
+$func$ STRICT LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION bdr_replication_identifier_advance(i_riname text, i_remote_lsn pg_lsn, i_local_lsn pg_lsn) RETURNS void
+AS $func$
+BEGIN
+	UPDATE bdr.bdr_replication_identifier SET riremote_lsn = i_remote_lsn, rilocal_lsn = i_local_lsn WHERE riname = i_riname;
+END;
+$func$ STRICT LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION bdr_replication_identifier_drop(i_riname text) RETURNS void
+AS $func$
+BEGIN
+	DELETE FROM bdr.bdr_replication_identifier WHERE riname = i_riname;
+END;
+$func$ STRICT LANGUAGE plpgsql;
+
 
 END IF;
 END;$DO$;
