@@ -1,0 +1,30 @@
+# == get source ==
+# go to directory where you want to place postgres' and bdr's source code
+$ cd ~/src/
+# checkout the sourcecode of postgres 9.4 with bdr patches added
+$ git clone -b bdr-pg/REL9_4_STABLE ssh://git@git.postgresql.org/2ndquadrant_bdr.git postgresql-bdr
+# checkout the sourcecode of the bdr plugin
+$ git clone -b bdr-plugin/next ssh://git@git.postgresql.org/2ndquadrant_bdr.git bdr-plugin
+
+# ==  build postgres ==
+$ cd postgresql-bdr
+$ ./configure --enable-depend --enable-debug --enable-cassert --prefix ~/bin/
+$ make -j8 -s install-world
+
+# == build bdr plugin ==
+$ cd ../bdr-plugin
+$ export PATH=~/bin/bin:$PATH
+$ ./autogen.sh
+$ ./configure
+$ make -j8 -s install
+
+
+# == update checkout ==
+$ cd ../postgresql-bdr
+$ git pull
+$ make -j8 -s install-world
+
+$ cd ../bdr-plugin
+$ ./autogen.sh
+$ ./configure
+$ make -s install-world
