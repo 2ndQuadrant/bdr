@@ -4,7 +4,7 @@ set -e
 #set -x
 
 BINDIR=$(@PG_CONFIG@ --bindir)
-REGRESS_BASE=$(@PG_CONFIG@ --libdir)/pgxs/
+REGRESS_BASE=$(@PG_CONFIG@ --pkglibdir)/pgxs/
 DBNAME=regression
 
 mkdir -p tmp_check
