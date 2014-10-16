@@ -25,6 +25,7 @@ $ git pull
 $ make -j8 -s install-world
 
 $ cd ../bdr-plugin
+$ git pull
 $ ./autogen.sh
 $ ./configure
-$ make -s install-world
+$ make -s install
