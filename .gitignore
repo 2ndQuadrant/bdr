@@ -40,11 +40,9 @@ lib*.pc
 /.distgittag
 # autoconf output
 /autom4te.cache/
-/bdr_config.h.in
 /bdr_config.h
 # configure output
 /Makefile
-/configure
 /run_tests
 /config.log
 /config.status
