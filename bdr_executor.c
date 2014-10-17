@@ -366,11 +366,11 @@ bdr_queue_ddl_command(char *command_tag, char *command)
 Datum
 bdr_add_truncate_trigger(PG_FUNCTION_ARGS)
 {
-    EventTriggerData   *trigdata;
+	EventTriggerData   *trigdata;
 	char			   *skip_ddl;
 
-    if (!CALLED_AS_EVENT_TRIGGER(fcinfo))  /* internal error */
-        elog(ERROR, "not fired by event trigger manager");
+	if (!CALLED_AS_EVENT_TRIGGER(fcinfo))  /* internal error */
+		elog(ERROR, "not fired by event trigger manager");
 
 	/*
 	 * If we're currently replaying something from a remote node, don't queue
@@ -388,7 +388,7 @@ bdr_add_truncate_trigger(PG_FUNCTION_ARGS)
 	if (strcmp(skip_ddl, "on") == 0)
 		PG_RETURN_VOID();
 
-    trigdata = (EventTriggerData *) fcinfo->context;
+	trigdata = (EventTriggerData *) fcinfo->context;
 
 	if (strcmp(trigdata->tag, "CREATE TABLE") == 0 &&
 		IsA(trigdata->parsetree, CreateStmt))
@@ -544,8 +544,10 @@ bdr_replicate_ddl_command(PG_FUNCTION_ARGS)
 void
 bdr_executor_always_allow_writes(bool always_allow)
 {
+#ifdef BUILDING_BDR
 	Assert(IsUnderPostmaster);
 	bdr_always_allow_writes = always_allow;
+#endif
 }
 
 /*

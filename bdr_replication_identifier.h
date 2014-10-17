@@ -16,6 +16,7 @@
 
 #else
 
+#include "fmgr.h"
 #include "access/htup.h"
 #include "access/xlogdefs.h"
 #include "datatype/timestamp.h"
@@ -39,19 +40,21 @@ extern void AdvanceCachedReplicationIdentifier(XLogRecPtr remote_commit,
 
 extern XLogRecPtr RemoteCommitFromCachedReplicationIdentifier(void);
 
-extern HeapTuple GetReplicationInfoByIdentifier(RepNodeId riident, bool missing_ok);
+extern void GetReplicationInfoByIdentifier(RepNodeId riident, bool missing_ok, char **riname);
+
+extern Datum bdr_replication_identifier_is_replaying(PG_FUNCTION_ARGS);
 
 /*
- * XXX: ugly
  * bdr_replication_identifier struct
+ *
+ * Used by GetReplicationInfoByIdentifier()
  */
 typedef struct {
-	Oid		riident;
-	text	riname;
-	XLogRecPtr  riremote_lsn;
-	XLogRecPtr  rilocal_lsn;
+        Oid		riident;
+        text	riname;
 } FormData_pg_replication_identifier;
 typedef FormData_pg_replication_identifier *Form_pg_replication_identifier;
+
 
 #endif
 

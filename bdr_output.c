@@ -76,6 +76,10 @@ typedef struct
 	Oid bdr_schema_oid;
 	Oid bdr_conflict_handlers_reloid;
 	Oid bdr_locks_reloid;
+#ifdef BUILDING_UDR
+	Oid bdr_replication_identifier_reloid;
+	Oid bdr_replication_identifier_pos_reloid;
+#endif
 
 	int num_replication_sets;
 	char **replication_sets;
@@ -362,6 +366,10 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 
 	data->bdr_conflict_handlers_reloid = InvalidOid;
 	data->bdr_locks_reloid = InvalidOid;
+#ifdef BUILDING_UDR
+	data->bdr_replication_identifier_reloid = InvalidOid;
+	data->bdr_replication_identifier_pos_reloid = InvalidOid;
+#endif
 	data->bdr_schema_oid = InvalidOid;
 	data->num_replication_sets = -1;
 
@@ -544,6 +552,12 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 				get_relname_relid("bdr_global_locks", schema_oid);
 			Assert(data->bdr_locks_reloid != InvalidOid); /* FIXME */
 
+#ifdef BUILDING_UDR
+			data->bdr_replication_identifier_reloid =
+				get_relname_relid("bdr_replication_identifier", schema_oid);
+			data->bdr_replication_identifier_pos_reloid =
+				get_relname_relid("bdr_replication_identifier_pos", schema_oid);
+#endif
 		}
 		else
 			elog(WARNING, "cache lookup for schema bdr failed");
@@ -567,7 +581,7 @@ static inline bool
 should_forward_changeset(LogicalDecodingContext *ctx, BdrOutputData *data,
 						 ReorderBufferTXN *txn)
 {
-#ifdef BDR_MULTIMASTER
+#ifdef BUILDING_BDR
 	return txn->origin_id == InvalidRepNodeId || data->forward_changesets;
 #else
 	return true;
@@ -579,9 +593,14 @@ should_forward_change(LogicalDecodingContext *ctx, BdrOutputData *data,
 					  BDRRelation *r, enum ReorderBufferChangeType change)
 {
 	/* internal bdr relations that may not be replicated */
-	if(RelationGetRelid(r->rel) == data->bdr_conflict_handlers_reloid ||
-	   RelationGetRelid(r->rel) == data->bdr_locks_reloid)
+	if (RelationGetRelid(r->rel) == data->bdr_conflict_handlers_reloid ||
+		RelationGetRelid(r->rel) == data->bdr_locks_reloid)
 		return false;
+#ifdef BUILDING_UDR
+	if (RelationGetRelid(r->rel) == data->bdr_replication_identifier_reloid ||
+		RelationGetRelid(r->rel) == data->bdr_replication_identifier_pos_reloid)
+		return false;
+#endif
 
 	/*
 	 * Quite ugly, but there's no neat way right now: Flush replication set

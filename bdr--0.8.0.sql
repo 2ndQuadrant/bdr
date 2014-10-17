@@ -398,7 +398,7 @@ DECLARE
     ident TEXT;
 BEGIN
     -- don't recursively log truncation commands
-    IF pg_replication_identifier_is_replaying() THEN
+    IF bdr.bdr_replication_identifier_is_replaying() THEN
        RETURN NULL;
     END IF;
 
@@ -444,7 +444,7 @@ REVOKE ALL ON TABLE bdr_queued_drops FROM PUBLIC;
 SELECT pg_catalog.pg_extension_config_dump('bdr_queued_drops', '');
 
 DO $DO$BEGIN
-IF bdr.c() = 'BDR' THEN
+IF bdr.bdr_variant() = 'BDR' THEN
 
 	CREATE OR REPLACE FUNCTION bdr.queue_dropped_objects()
 	RETURNS event_trigger
@@ -456,7 +456,7 @@ IF bdr.c() = 'BDR' THEN
 		otherobjs bdr.dropped_object[] = '{}';
 	BEGIN
 		-- don't recursively log drop commands
-		IF pg_replication_identifier_is_replaying() THEN
+		IF bdr.bdr_replication_identifier_is_replaying() THEN
 		   RETURN;
 		END IF;
 
@@ -507,7 +507,7 @@ AS 'MODULE_PATHNAME'
 ;
 
 DO $DO$BEGIN
-IF bdr.bdr_variant() = 'BDR' THEN
+IF bdr.bdr_variant() = 'UDR' THEN
 
 	CREATE TABLE bdr_replication_identifier (
 		riident oid NOT NULL,
@@ -519,6 +519,14 @@ IF bdr.bdr_variant() = 'BDR' THEN
 	CREATE UNIQUE INDEX bdr_replication_identifier_riiident_index ON bdr_replication_identifier(riident);
 	CREATE UNIQUE INDEX bdr_replication_identifier_riname_index ON bdr_replication_identifier(riname varchar_pattern_ops);
 
+	CREATE TABLE bdr_replication_identifier_pos (
+		riident oid NOT NULL,
+		riremote_lsn pg_lsn,
+		rilocal_lsn pg_lsn
+	);
+
+	CREATE UNIQUE INDEX bdr_replication_identifier_pos_riiident_index ON bdr_replication_identifier_pos(riident);
+
 	CREATE OR REPLACE FUNCTION bdr_replication_identifier_create(i_riname text) RETURNS Oid
 	AS $func$
 	DECLARE
@@ -529,6 +537,7 @@ IF bdr.bdr_variant() = 'BDR' THEN
 			i := i += 1;
 		END LOOP;
 		INSERT INTO bdr.bdr_replication_identifier(riident, riname) VALUES(i, i_riname);
+		INSERT INTO bdr.bdr_replication_identifier_pos(riident) VALUES(i);
 
 		RETURN i;
 	END;
@@ -543,13 +552,29 @@ IF bdr.bdr_variant() = 'BDR' THEN
 
 	CREATE OR REPLACE FUNCTION bdr_replication_identifier_drop(i_riname text) RETURNS void
 	AS $func$
+	DECLARE
+		v_riident int;
 	BEGIN
-		DELETE FROM bdr.bdr_replication_identifier WHERE riname = i_riname;
+		DELETE FROM bdr.bdr_replication_identifier WHERE riname = i_riname RETURNING riident INTO v_riident;
+		IF FOUND THEN
+			DELETE FROM bdr.bdr_replication_identifier_pos WHERE riident = v_riident;
+		END IF;
 	END;
 	$func$ STRICT LANGUAGE plpgsql;
 
+	CREATE OR REPLACE FUNCTION bdr.bdr_replication_identifier_is_replaying()
+	RETURNS boolean
+	LANGUAGE C
+	AS 'MODULE_PATHNAME';
 
-	END IF;
+ELSE
+
+	CREATE OR REPLACE FUNCTION bdr.bdr_replication_identifier_is_replaying()
+	RETURNS boolean
+	LANGUAGE SQL
+	AS 'SELECT pg_replication_identifier_is_replaying()';
+
+END IF;
 END;$DO$;
 
 ---
