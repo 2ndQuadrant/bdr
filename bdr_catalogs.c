@@ -183,9 +183,7 @@ bdr_fetch_sysid_via_node_id(RepNodeId node_id, uint64 *sysid, TimeLineID *tli,
 	}
 	else
 	{
-		HeapTuple	node;
-		Form_pg_replication_identifier node_class;
-		char *ident;
+		char *riname;
 
 		uint64 remote_sysid;
 		Oid remote_dboid;
@@ -193,18 +191,13 @@ bdr_fetch_sysid_via_node_id(RepNodeId node_id, uint64 *sysid, TimeLineID *tli,
 		Oid local_dboid;
 		NameData replication_name;
 
-		node = GetReplicationInfoByIdentifier(node_id, false);
+		GetReplicationInfoByIdentifier(node_id, false, &riname);
 
-		node_class = (Form_pg_replication_identifier) GETSTRUCT(node);
-
-		ident = text_to_cstring(&node_class->riname);
-
-		if (sscanf(ident, BDR_NODE_ID_FORMAT,
+		if (sscanf(riname, BDR_NODE_ID_FORMAT,
 				   &remote_sysid, &remote_tli, &remote_dboid, &local_dboid,
 				   NameStr(replication_name)) != 4)
-			elog(ERROR, "could not parse sysid: %s", ident);
-		ReleaseSysCache(node);
-		pfree(ident);
+			elog(ERROR, "could not parse sysid: %s", riname);
+		pfree(riname);
 
 		*sysid = remote_sysid;
 		*tli = remote_tli;

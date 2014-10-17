@@ -334,9 +334,8 @@ pg_stat_get_bdr(PG_FUNCTION_ARGS)
 	for (current_offset = 0; current_offset < bdr_count_nnodes;
 		 current_offset++)
 	{
-		HeapTuple	repTup;
-		Form_pg_replication_identifier repClass;
 		BdrCountSlot *slot;
+		char	   *riname;
 		Datum		values[BDR_COUNT_STAT_COLS];
 		bool		nulls[BDR_COUNT_STAT_COLS];
 
@@ -349,13 +348,11 @@ pg_stat_get_bdr(PG_FUNCTION_ARGS)
 		memset(values, 0, sizeof(values));
 		memset(nulls, 0, sizeof(nulls));
 
-		repTup = GetReplicationInfoByIdentifier(slot->node_id, false);
-
-		repClass = (Form_pg_replication_identifier) GETSTRUCT(repTup);
+		GetReplicationInfoByIdentifier(slot->node_id, false, &riname);
 
 		values[ 0] = ObjectIdGetDatum(slot->node_id);
-		values[ 1] = ObjectIdGetDatum(repClass->riident);
-		values[ 2] = PointerGetDatum(&repClass->riname);
+		values[ 1] = ObjectIdGetDatum(slot->node_id);
+		values[ 2] = CStringGetTextDatum(riname);
 		values[ 3] = Int64GetDatumFast(slot->nr_commit);
 		values[ 4] = Int64GetDatumFast(slot->nr_rollback);
 		values[ 5] = Int64GetDatumFast(slot->nr_insert);
@@ -367,7 +364,6 @@ pg_stat_get_bdr(PG_FUNCTION_ARGS)
 		values[11] = Int64GetDatumFast(slot->nr_disconnect);
 
 		tuplestore_putvalues(tupstore, tupdesc, values, nulls);
-		ReleaseSysCache(repTup);
 	}
 	LWLockRelease(BdrCountCtl->lock);
 
