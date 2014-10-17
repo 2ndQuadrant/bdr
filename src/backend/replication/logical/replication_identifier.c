@@ -273,21 +273,28 @@ DropReplicationIdentifier(RepNodeId riident)
  * The result needs to be ReleaseSysCache'ed and is an invalid HeapTuple if
  * the lookup failed.
  */
-HeapTuple
-GetReplicationInfoByIdentifier(RepNodeId riident, bool missing_ok)
+void
+GetReplicationInfoByIdentifier(RepNodeId riident, bool missing_ok, char **riname)
 {
 	HeapTuple tuple;
+	Form_pg_replication_identifier ric;
 
 	Assert(OidIsValid((Oid) riident));
 	Assert(riident < UINT16_MAX);
 	tuple = SearchSysCache1(REPLIDIDENT,
 							ObjectIdGetDatum((Oid) riident));
 
+	if (HeapTupleIsValid(tuple))
+	{
+		ric = (Form_pg_replication_identifier) GETSTRUCT(tuple);
+		*riname = pstrdup(text_to_cstring(&ric->riname));
+	}
+
 	if (!HeapTupleIsValid(tuple) && !missing_ok)
 		elog(ERROR, "cache lookup failed for replication identifier id: %u",
 			 riident);
 
-	return tuple;
+	ReleaseSysCache(tuple);
 }
 
 static void
@@ -459,8 +466,7 @@ pg_get_replication_identifier_progress(PG_FUNCTION_ARGS)
 		Datum		values[REPLICATION_IDENTIFIER_PROGRESS_COLS];
 		bool		nulls[REPLICATION_IDENTIFIER_PROGRESS_COLS];
 		char		location[MAXFNAMELEN];
-		HeapTuple	ri;
-		Form_pg_replication_identifier ric;
+		char		*riname;
 
 		state = &ReplicationStates[i];
 
@@ -473,17 +479,16 @@ pg_get_replication_identifier_progress(PG_FUNCTION_ARGS)
 
 		values[ 0] = ObjectIdGetDatum(state->local_identifier);
 
-		ri = GetReplicationInfoByIdentifier(state->local_identifier, true);
+		GetReplicationInfoByIdentifier(state->local_identifier, true, &riname);
 
 		/*
 		 * We're not preventing the identifier to be dropped concurrently, so
 		 * silently accept that it might be gone.
 		 */
-		if (!OidIsValid(ri))
+		if (!riname)
 			continue;
 
-		ric = (Form_pg_replication_identifier) GETSTRUCT(ri);
-		values[ 1] = PointerGetDatum(&ric->riname);
+		values[ 1] = CStringGetTextDatum(riname);
 
 		snprintf(location, sizeof(location), "%X/%X",
 				 (uint32) (state->remote_lsn >> 32), (uint32) state->remote_lsn);
@@ -497,7 +502,6 @@ pg_get_replication_identifier_progress(PG_FUNCTION_ARGS)
 		/* free the strings we just allocated */
 		pfree(DatumGetPointer(values[ 2]));
 		pfree(DatumGetPointer(values[ 3]));
-		ReleaseSysCache(ri);
 	}
 
 	tuplestore_donestoring(tupstore);
