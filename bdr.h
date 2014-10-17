@@ -242,9 +242,8 @@ extern char *bdr_temp_dump_directory;
 extern bool bdr_init_from_basedump;
 extern bool bdr_log_conflicts_to_table;
 extern bool bdr_conflict_logging_include_tuples;
-#ifdef BUILDING_BDR
 extern bool bdr_permit_unsafe_commands;
-#else
+#ifdef BUILDING_UDR
 extern bool bdr_conflict_default_apply;
 #endif
 
@@ -265,6 +264,9 @@ typedef struct BdrWorkerControl
 extern BdrWorkerControl *BdrWorkerCtl;
 
 extern ResourceOwner bdr_saved_resowner;
+
+/* DDL executor/filtering support */
+extern bool in_bdr_replicate_ddl_command;
 
 /* bdr_nodes table oid */
 extern Oid	BdrNodesRelid;
@@ -407,10 +409,12 @@ extern bool bdr_is_bdr_activated_db(void);
 
 /* forbid commands we do not support currently (or never will) */
 extern void init_bdr_commandfilter(void);
+extern void bdr_commandfilter_always_allow_ddl(bool always_allow);
 
 extern void bdr_executor_init(void);
 extern void bdr_executor_always_allow_writes(bool always_allow);
 extern void bdr_queue_ddl_command(char *command_tag, char *command);
+extern void bdr_execute_ddl_command(char *cmdstr, char *perpetrator, bool tx_just_started);
 
 extern void bdr_locks_shmem_init(Size num_used_databases);
 extern void bdr_locks_check_query(void);

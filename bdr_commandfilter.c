@@ -20,7 +20,9 @@
 #include "miscadmin.h"
 
 #include "access/heapam.h"
+#ifdef BUILDING_BDR
 #include "access/seqam.h"
+#endif
 
 #include "catalog/namespace.h"
 
@@ -39,8 +41,6 @@
 #include "utils/rel.h"
 #include "utils/syscache.h"
 
-static void error_unsupported_command(const char *cmdtag) __attribute__((noreturn));
-
 /*
 * bdr_commandfilter.c: a ProcessUtility_hook to prevent a cluster from running
 * commands that BDR does not yet support.
@@ -50,6 +50,10 @@ static ProcessUtility_hook_type next_ProcessUtility_hook = NULL;
 
 /* GUCs */
 bool bdr_permit_unsafe_commands = false;
+
+bool bdr_always_allow_ddl = false;
+
+static void error_unsupported_command(const char *cmdtag) __attribute__((noreturn));
 
 /*
 * Check the passed rangevar, locking it and looking it up in the cache
@@ -357,6 +361,7 @@ filter_AlterTableStmt(Node *parsetree,
 static void
 filter_CreateSeqStmt(Node *parsetree)
 {
+#ifdef BUILDING_BDR
 	ListCell	   *param;
 	CreateSeqStmt  *stmt;
 
@@ -375,11 +380,13 @@ filter_CreateSeqStmt(Node *parsetree)
 					 errmsg("CREATE SEQUENCE ... %s is not supported for bdr sequences",
 					defel->defname)));
 	}
+#endif
 }
 
 static void
 filter_AlterSeqStmt(Node *parsetree)
 {
+#ifdef BUILDING_BDR
 	Oid				seqoid;
 	ListCell	   *param;
 	AlterSeqStmt   *stmt;
@@ -425,6 +432,7 @@ filter_AlterSeqStmt(Node *parsetree)
 					 errmsg("ALTER SEQUENCE ... %s is not supported for bdr sequences",
 					defel->defname)));
 	}
+#endif
 }
 
 static void
@@ -450,7 +458,7 @@ bdr_commandfilter(Node *parsetree,
 		goto done;
 
 	/* don't filter if explicitly told so */
-	if (bdr_permit_unsafe_commands)
+	if (bdr_always_allow_ddl || bdr_permit_unsafe_commands)
 		goto done;
 
 	/* extension contents aren't individually replicated */
@@ -461,7 +469,7 @@ bdr_commandfilter(Node *parsetree,
 	if (replication_origin_id != InvalidRepNodeId)
 		goto done;
 
-	/* statements handled directly in standard_ProcessUtility */
+	/* commands we skip (for now) */
 	switch (nodeTag(parsetree))
 	{
 		case T_TransactionStmt:
@@ -508,6 +516,20 @@ bdr_commandfilter(Node *parsetree,
 		case T_ReindexStmt:
 			goto done;
 
+		default:
+			break;
+	}
+
+#ifdef BUILDING_UDR
+	if (!in_bdr_replicate_ddl_command && bdr_is_bdr_activated_db())
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("DDL commands are not allowed when UDR is active unless bdr.permit_unsafe_ddl_commands is true")));
+#endif /*BUILDING_UDR*/
+
+	/* statements handled directly in standard_ProcessUtility */
+	switch (nodeTag(parsetree))
+	{
 		case T_DropStmt:
 			{
 				DropStmt   *stmt = (DropStmt *) parsetree;
@@ -544,6 +566,7 @@ bdr_commandfilter(Node *parsetree,
 				else
 					goto done;
 			}
+
 		default:
 			break;
 	}
@@ -739,6 +762,13 @@ done:
 	else
 		standard_ProcessUtility(parsetree, queryString, context, params,
 								dest, completionTag);
+}
+
+void
+bdr_commandfilter_always_allow_ddl(bool always_allow)
+{
+	Assert(IsUnderPostmaster);
+	bdr_always_allow_ddl = always_allow;
 }
 
 /* Module load */

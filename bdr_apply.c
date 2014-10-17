@@ -1385,62 +1385,16 @@ queued_command_error_callback(void *arg)
 	errcontext("during DDL replay of ddl statement: %s", (char *) arg);
 }
 
-static void
-process_queued_ddl_command(HeapTuple cmdtup, bool tx_just_started)
+void
+bdr_execute_ddl_command(char *cmdstr, char *perpetrator, bool tx_just_started)
 {
-	Relation	cmdsrel;
-	Datum		datum;
-	char	   *command_tag;
-	char	   *cmdstr;
-	bool		isnull;
-	char       *perpetrator;
 	List	   *commands;
 	ListCell   *command_i;
 	bool		isTopLevel;
 	MemoryContext oldcontext;
 	ErrorContextCallback errcallback;
 
-	/* ----
-	 * We can't use spi here, because it implicitly assumes a transaction
-	 * context. As we want to be able to replicate CONCURRENTLY commands,
-	 * that's not going to work...
-	 * So instead do all the work manually, being careful about managing the
-	 * lifecycle of objects.
-	 * ----
-	 */
 	oldcontext = MemoryContextSwitchTo(MessageContext);
-
-	cmdsrel = heap_open(QueuedDDLCommandsRelid, NoLock);
-
-	/* fetch the perpetrator user identifier */
-	datum = heap_getattr(cmdtup, 3,
-						 RelationGetDescr(cmdsrel),
-						 &isnull);
-	if (isnull)
-		elog(ERROR, "null command perpetrator in command tuple in \"%s\"",
-			 RelationGetRelationName(cmdsrel));
-	perpetrator = TextDatumGetCString(datum);
-
-	/* fetch the command tag */
-	datum = heap_getattr(cmdtup, 4,
-						 RelationGetDescr(cmdsrel),
-						 &isnull);
-	if (isnull)
-		elog(ERROR, "null command tag in command tuple in \"%s\"",
-			 RelationGetRelationName(cmdsrel));
-	command_tag = TextDatumGetCString(datum);
-
-	/* finally fetch and execute the command */
-	datum = heap_getattr(cmdtup, 5,
-						 RelationGetDescr(cmdsrel),
-						 &isnull);
-	if (isnull)
-		elog(ERROR, "null command for \"%s\" command tuple", command_tag);
-
-	cmdstr = TextDatumGetCString(datum);
-
-	/* close relation, command execution might end/start xact */
-	heap_close(cmdsrel, NoLock);
 
 	errcallback.callback = queued_command_error_callback;
 	errcallback.arg = cmdstr;
@@ -1489,7 +1443,7 @@ process_queued_ddl_command(HeapTuple cmdtup, bool tx_just_started)
 
 		PopActiveSnapshot();
 
-		portal = CreatePortal("", true, true);
+		portal = CreatePortal("bdr", true, true);
 		PortalDefineQuery(portal, NULL,
 						  cmdstr, commandTag,
 						  plantree_list, NULL);
@@ -1513,6 +1467,65 @@ process_queued_ddl_command(HeapTuple cmdtup, bool tx_just_started)
 	/* protect against stack resets during CONCURRENTLY processing */
 	if (error_context_stack == &errcallback)
 		error_context_stack = errcallback.previous;
+}
+
+
+static void
+process_queued_ddl_command(HeapTuple cmdtup, bool tx_just_started)
+{
+	Relation	cmdsrel;
+	Datum		datum;
+	char	   *command_tag;
+	char	   *cmdstr;
+	bool		isnull;
+	char       *perpetrator;
+	MemoryContext oldcontext;
+
+	/* ----
+	 * We can't use spi here, because it implicitly assumes a transaction
+	 * context. As we want to be able to replicate CONCURRENTLY commands,
+	 * that's not going to work...
+	 * So instead do all the work manually, being careful about managing the
+	 * lifecycle of objects.
+	 * ----
+	 */
+	oldcontext = MemoryContextSwitchTo(MessageContext);
+
+	cmdsrel = heap_open(QueuedDDLCommandsRelid, NoLock);
+
+	/* fetch the perpetrator user identifier */
+	datum = heap_getattr(cmdtup, 3,
+						 RelationGetDescr(cmdsrel),
+						 &isnull);
+	if (isnull)
+		elog(ERROR, "null command perpetrator in command tuple in \"%s\"",
+			 RelationGetRelationName(cmdsrel));
+	perpetrator = TextDatumGetCString(datum);
+
+	/* fetch the command tag */
+	datum = heap_getattr(cmdtup, 4,
+						 RelationGetDescr(cmdsrel),
+						 &isnull);
+	if (isnull)
+		elog(ERROR, "null command tag in command tuple in \"%s\"",
+			 RelationGetRelationName(cmdsrel));
+	command_tag = TextDatumGetCString(datum);
+
+	/* finally fetch and execute the command */
+	datum = heap_getattr(cmdtup, 5,
+						 RelationGetDescr(cmdsrel),
+						 &isnull);
+	if (isnull)
+		elog(ERROR, "null command for \"%s\" command tuple", command_tag);
+
+	cmdstr = TextDatumGetCString(datum);
+
+	/* close relation, command execution might end/start xact */
+	heap_close(cmdsrel, NoLock);
+
+	MemoryContextSwitchTo(oldcontext);
+
+	bdr_execute_ddl_command(cmdstr, perpetrator, tx_just_started);
 }
 
 

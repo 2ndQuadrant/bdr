@@ -249,6 +249,8 @@ CREATE TYPE bdr_conflict_resolution AS ENUM
     'conflict_trigger_returned_tuple',
     'last_update_wins_keep_local',
     'last_update_wins_keep_remote',
+	'apply_change',
+	'skip_change',
     'unhandled_tx_abort'
 );
 
@@ -418,6 +420,12 @@ BEGIN
 END;
 $function$;
 
+CREATE OR REPLACE FUNCTION bdr.bdr_replicate_ddl_command(cmd TEXT)
+RETURNS VOID
+LANGUAGE C
+AS 'MODULE_PATHNAME'
+;
+
 DO $DO$BEGIN
 IF bdr.bdr_variant() = 'BDR' THEN
 
@@ -426,7 +434,14 @@ IF bdr.bdr_variant() = 'BDR' THEN
 	LANGUAGE C
 	AS 'MODULE_PATHNAME';
 
+END IF;
 END;$DO$;
+
+CREATE OR REPLACE FUNCTION bdr.bdr_truncate_trigger_add()
+RETURNS event_trigger
+LANGUAGE C
+AS 'MODULE_PATHNAME'
+;
 
 -- This type is tailored to use as input to get_object_address
 CREATE TYPE bdr.dropped_object AS (
@@ -448,50 +463,14 @@ IF bdr.bdr_variant() = 'BDR' THEN
 
 	CREATE OR REPLACE FUNCTION bdr.queue_dropped_objects()
 	RETURNS event_trigger
-	LANGUAGE plpgsql
-	AS $function$
-	DECLARE
-		r RECORD;
-		dropped bdr.dropped_object;
-		otherobjs bdr.dropped_object[] = '{}';
-	BEGIN
-		-- don't recursively log drop commands
-		IF bdr.bdr_replication_identifier_is_replaying() THEN
-		   RETURN;
-		END IF;
-
-		-- don't replicate if disabled
-		IF  current_setting('bdr.skip_ddl_replication')::bool THEN
-		   RETURN;
-		END IF;
-
-		FOR r IN SELECT * FROM pg_event_trigger_dropped_objects()
-		LOOP
-			IF r.original OR r.normal THEN
-				dropped.objtype = r.object_type;
-				dropped.objnames = r.address_names;
-				dropped.objargs = r.address_args;
-				otherobjs := otherobjs || dropped;
-				RAISE LOG 'object is: %', dropped;
-			END IF;
-		END LOOP;
-
-		IF otherobjs <> '{}' THEN
-			INSERT INTO bdr.bdr_queued_drops (
-				lsn, queued_at, dropped_objects
-			)
-			VALUES (pg_current_xlog_location(),
-				NOW(),
-				otherobjs
-			);
-		END IF;
-	END;
-	$function$;
+	LANGUAGE C
+	AS 'MODULE_PATHNAME', 'bdr_queue_dropped_objects';
 
 	CREATE EVENT TRIGGER queue_drops
 	ON sql_drop
 	EXECUTE PROCEDURE bdr.queue_dropped_objects();
 
+END IF;
 END;$DO$;
 
 CREATE OR REPLACE FUNCTION bdr_apply_pause()
@@ -506,6 +485,9 @@ LANGUAGE C
 AS 'MODULE_PATHNAME'
 ;
 
+---
+--- Replication identifier emulation
+---
 DO $DO$BEGIN
 IF bdr.bdr_variant() = 'UDR' THEN
 
@@ -516,6 +498,8 @@ IF bdr.bdr_variant() = 'UDR' THEN
 		rilocal_lsn pg_lsn
 	);
 
+	PERFORM pg_catalog.pg_extension_config_dump('bdr_replication_identifier', '');
+
 	CREATE UNIQUE INDEX bdr_replication_identifier_riiident_index ON bdr_replication_identifier(riident);
 	CREATE UNIQUE INDEX bdr_replication_identifier_riname_index ON bdr_replication_identifier(riname varchar_pattern_ops);
 
@@ -524,6 +508,8 @@ IF bdr.bdr_variant() = 'UDR' THEN
 		riremote_lsn pg_lsn,
 		rilocal_lsn pg_lsn
 	);
+
+	PERFORM pg_catalog.pg_extension_config_dump('bdr_replication_identifier_pos', '');
 
 	CREATE UNIQUE INDEX bdr_replication_identifier_pos_riiident_index ON bdr_replication_identifier_pos(riident);
 
@@ -650,6 +636,10 @@ IF bdr.bdr_variant() = 'BDR' THEN
 
 END IF;
 END;$DO$;
+
+CREATE EVENT TRIGGER bdr_truncate_trigger_add
+ON ddl_command_end
+EXECUTE PROCEDURE bdr.bdr_truncate_trigger_add();
 
 RESET bdr.permit_unsafe_ddl_commands;
 RESET bdr.skip_ddl_replication;

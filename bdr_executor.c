@@ -33,6 +33,7 @@
 #include "executor/spi.h"
 #include "executor/tuptable.h"
 
+#include "funcapi.h"
 #include "miscadmin.h"
 
 #include "nodes/execnodes.h"
@@ -58,13 +59,14 @@ static void BdrExecutorStart(QueryDesc *queryDesc, int eflags);
 static ExecutorStart_hook_type PrevExecutorStart_hook = NULL;
 
 static bool bdr_always_allow_writes = false;
+bool in_bdr_replicate_ddl_command = false;
 
 #ifdef BUILDING_BDR
 PG_FUNCTION_INFO_V1(bdr_queue_ddl_commands);
-#else
-PG_FUNCTION_INFO_V1(bdr_replicate_ddl_command);
+PG_FUNCTION_INFO_V1(bdr_queue_dropped_objects);
 #endif
-PG_FUNCTION_INFO_V1(bdr_add_truncate_trigger);
+PG_FUNCTION_INFO_V1(bdr_replicate_ddl_command);
+PG_FUNCTION_INFO_V1(bdr_truncate_trigger_add);
 
 EState *
 bdr_create_rel_estate(Relation rel)
@@ -359,12 +361,15 @@ bdr_queue_ddl_command(char *command_tag, char *command)
 
 
 /*
- * bdr_add_truncate_trigger
+ * bdr_truncate_trigger_add
  *
  * This function adds TRUNCATE trigger to newly created tables.
+ *
+ * Note: it's important that this function be named so that it comes
+ * after bdr_queue_ddl_commands when triggers are alphabetically sorted.
  */
 Datum
-bdr_add_truncate_trigger(PG_FUNCTION_ARGS)
+bdr_truncate_trigger_add(PG_FUNCTION_ARGS)
 {
 	EventTriggerData   *trigdata;
 	char			   *skip_ddl;
@@ -415,6 +420,16 @@ bdr_add_truncate_trigger(PG_FUNCTION_ARGS)
 		if (res != SPI_OK_UTILITY)
 			elog(ERROR, "SPI failure: %d", res);
 
+		/*
+		 * If this is inside manually replicated DDL, the
+		 * bdr_queue_ddl_commands will skip queueing the CREATE TRIGGER
+		 * command, so we have to do it ourselves.
+		 *
+		 * XXX: The whole in_bdr_replicate_ddl_command concept is not very nice
+		 */
+		if (in_bdr_replicate_ddl_command)
+			bdr_queue_ddl_command("CREATE TRIGGER", query);
+
 		SPI_finish();
 	}
 
@@ -438,6 +453,13 @@ bdr_queue_ddl_commands(PG_FUNCTION_ARGS)
 	MemoryContext	tupcxt;
 	uint32	nprocessed;
 	SPITupleTable *tuptable;
+
+	/*
+	 * If the trigger comes from DDL executed by bdr_replicate_ddl_command,
+	 * don't queue it as it would insert duplicate commands into the queue.
+	 */
+	if (in_bdr_replicate_ddl_command)
+		PG_RETURN_VOID();	/* XXX return type? */
 
 	/*
 	 * If we're currently replaying something from a remote node, don't queue
@@ -489,11 +511,8 @@ bdr_queue_ddl_commands(PG_FUNCTION_ARGS)
 	tuptable = SPI_tuptable;
 	for (i = 0; i < nprocessed; i++)
 	{
-		HeapTuple	newtup = NULL;
 		Datum		cmdvalues[6];	/* # cols returned by above query */
 		bool		cmdnulls[6];
-		Datum		values[5];		/* # cols in bdr_queued_commands */
-		bool		nulls[5];
 
 		MemoryContextReset(tupcxt);
 
@@ -518,36 +537,217 @@ bdr_queue_ddl_commands(PG_FUNCTION_ARGS)
 
 	PG_RETURN_VOID();
 }
-#else
+
+/*
+ * bdr_queue_dropped_objects
+ * 		sql_drop event triggger handler for BDR
+ *
+ * This function queues DROPs for replay by other BDR nodes.
+ */
+Datum
+bdr_queue_dropped_objects(PG_FUNCTION_ARGS)
+{
+	char	   *skip_ddl;
+	int			res;
+	int			i;
+	Oid			schema_oid;
+	Oid			elmtype;
+	int16		elmlen;
+	bool		elmbyval;
+	char		elmalign;
+	int			droppedcnt = 0;
+	Datum	   *droppedobjs;
+	ArrayType  *droppedarr;
+	TupleDesc	tupdesc;
+	uint32		nprocessed;
+	SPITupleTable *tuptable;
+
+	if (!CALLED_AS_EVENT_TRIGGER(fcinfo))  /* internal error */
+		elog(ERROR, "%s: not fired by event trigger manager",
+			 "bdr_queue_dropped_objects");
+
+	/*
+	 * If the trigger comes from DDL executed by bdr_replicate_ddl_command,
+	 * don't queue it as it would insert duplicate commands into the queue.
+	 */
+	if (in_bdr_replicate_ddl_command)
+		PG_RETURN_VOID();	/* XXX return type? */
+
+	/*
+	 * If we're currently replaying something from a remote node, don't queue
+	 * the commands; that would cause recursion.
+	 */
+	if (replication_origin_id != InvalidRepNodeId)
+		PG_RETURN_VOID();	/* XXX return type? */
+
+	/*
+	 * Similarly, if configured to skip queueing DDL, don't queue.  This is
+	 * mostly used when pg_restore brings a remote node state, so all objects
+	 * will be copied over in the dump anyway.
+	 */
+	skip_ddl = GetConfigOptionByName("bdr.skip_ddl_replication", NULL);
+	if (strcmp(skip_ddl, "on") == 0)
+		PG_RETURN_VOID();
+
+	/*
+	 * Connect to SPI early, so that all memory allocated in this routine is
+	 * released when we disconnect.
+	 */
+	SPI_connect();
+
+	res = SPI_execute("SELECT "
+					  "   original, normal, object_type, "
+					  "   address_names, address_args "
+					  "FROM pg_event_trigger_dropped_objects()",
+					  false, 0);
+	if (res != SPI_OK_SELECT)
+		elog(ERROR, "SPI query failed: %d", res);
+
+	/*
+	 * Build array of dropped objects based on the results of the query.
+	 */
+	nprocessed = SPI_processed;
+	tuptable = SPI_tuptable;
+
+	droppedobjs = (Datum *) palloc(sizeof(Datum) * nprocessed);
+
+	schema_oid = get_namespace_oid("bdr", false);
+	elmtype = bdr_lookup_relid("dropped_object", schema_oid);
+	elmtype = get_rel_type_id(elmtype);
+
+	get_typlenbyvalalign(elmtype, &elmlen, &elmbyval, &elmalign);
+	tupdesc = TypeGetTupleDesc(elmtype, NIL);
+
+	for (i = 0; i < nprocessed; i++)
+	{
+		Datum		cmdvalues[5];	/* # cols returned by above query */
+		bool		cmdnulls[5];
+		Datum		values[3];
+		bool		nulls[3];
+		HeapTuple	tuple;
+
+		/* this is the tuple reported by event triggers */
+		heap_deform_tuple(tuptable->vals[i], tuptable->tupdesc,
+						  cmdvalues, cmdnulls);
+
+		/* if not original or normal skip */
+		if ((cmdnulls[0] || !DatumGetBool(cmdvalues[0])) &&
+			(cmdnulls[1] || !DatumGetBool(cmdvalues[1])))
+			continue;
+
+		nulls[0] = cmdnulls[2];
+		nulls[1] = cmdnulls[3];
+		nulls[2] = cmdnulls[4];
+		values[0] = cmdvalues[2];
+		values[1] = cmdvalues[3];
+		values[2] = cmdvalues[4];
+
+		tuple = heap_form_tuple(tupdesc, values, nulls);
+		droppedobjs[droppedcnt] = HeapTupleGetDatum(tuple);
+		droppedcnt++;
+	}
+
+	SPI_finish();
+
+	/* No objects dropped? */
+	if (droppedcnt == 0)
+		PG_RETURN_VOID();
+
+	droppedarr = construct_array(droppedobjs, droppedcnt,
+								 elmtype, elmlen, elmbyval, elmalign);
+
+	/*
+	 * Insert the dropped object(s) info into the bdr_queued_drops table
+	 */
+	{
+		EState		   *estate;
+		TupleTableSlot *slot;
+		RangeVar	   *rv;
+		Relation		queuedcmds;
+		HeapTuple		newtup = NULL;
+		Datum			values[5];
+		bool			nulls[5];
+
+		/*
+		 * Prepare bdr.bdr_queued_drops for insert.
+		 * Can't use preloaded table oid since this method is executed under
+		 * normal backends and not inside BDR worker.
+		 * The tuple slot here is only needed for updating indexes.
+		 */
+		rv = makeRangeVar("bdr", "bdr_queued_drops", -1);
+		queuedcmds = heap_openrv(rv, RowExclusiveLock);
+		slot = MakeSingleTupleTableSlot(RelationGetDescr(queuedcmds));
+		estate = bdr_create_rel_estate(queuedcmds);
+		ExecOpenIndices(estate->es_result_relation_info);
+
+		/* lsn, queued_at, dropped_objects */
+		values[0] = pg_current_xlog_location(NULL);
+		values[1] = now(NULL);
+		values[2] = PointerGetDatum(droppedarr);
+		MemSet(nulls, 0, sizeof(nulls));
+
+		newtup = heap_form_tuple(RelationGetDescr(queuedcmds), values, nulls);
+		simple_heap_insert(queuedcmds, newtup);
+		ExecStoreTuple(newtup, slot, InvalidBuffer, false);
+		UserTableUpdateOpenIndexes(estate, slot);
+
+		ExecCloseIndices(estate->es_result_relation_info);
+		ExecDropSingleTupleTableSlot(slot);
+		heap_close(queuedcmds, RowExclusiveLock);
+	}
+
+	PG_RETURN_VOID();
+}
+#endif /*BUILDING_BDR*/
+
 /*
  * bdr_replicate_ddl_command
  *
  * Queues the input SQL for replication.
+ *
+ * Note that we don't allow CONCURRENTLY commands here, this is mainly because
+ * we queue command before we actually execute it, which we currently need
+ * to make the bdr_truncate_trigger_add work correctly. As written there
+ * the in_bdr_replicate_ddl_command concept is ugly.
  */
 Datum
 bdr_replicate_ddl_command(PG_FUNCTION_ARGS)
 {
 	text	*command = PG_GETARG_TEXT_PP(0);
-	char	*query;
+	char	*query = text_to_cstring(command);
 
-	/* XXX: handle more nicely */
-	query = psprintf("SET LOCAL search_path TO %s;\n %s",
-					 GetConfigOptionByName("search_path", NULL),
-					 TextDatumGetCString(command));
+	/* Force everything in the query to be fully qualified. */
+	(void) set_config_option("search_path", "",
+							 PGC_USERSET, PGC_S_SESSION,
+							 GUC_ACTION_SAVE, true, 0);
 
-	bdr_queue_ddl_command("SQL", query);
+	/* Execute the query locally. */
+	bdr_commandfilter_always_allow_ddl(true);
+	in_bdr_replicate_ddl_command = true;
+
+	PG_TRY();
+		/* Queue the query for replication. */
+		bdr_queue_ddl_command("SQL", query);
+
+		/* Execute the query locally. */
+		bdr_execute_ddl_command(query, GetUserNameFromId(GetUserId()), false);
+	PG_CATCH();
+		in_bdr_replicate_ddl_command = false;
+		bdr_commandfilter_always_allow_ddl(false);
+		PG_RE_THROW();
+	PG_END_TRY();
+
+	in_bdr_replicate_ddl_command = false;
+	bdr_commandfilter_always_allow_ddl(false);
 
 	PG_RETURN_VOID();
 }
-#endif //BUILDING_BDR
 
 void
 bdr_executor_always_allow_writes(bool always_allow)
 {
-#ifdef BUILDING_BDR
 	Assert(IsUnderPostmaster);
 	bdr_always_allow_writes = always_allow;
-#endif
 }
 
 /*

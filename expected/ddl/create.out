@@ -47,8 +47,6 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
  Column |  Type   | Modifiers | Storage | Stats target | Description 
 --------+---------+-----------+---------+--------------+-------------
  val    | integer |           | plain   |              | 
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_tbl_unlogged_create FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
 \c postgres
 \d+ test_tbl_unlogged_create
@@ -56,8 +54,6 @@ Triggers:
  Column |  Type   | Modifiers | Storage | Stats target | Description 
 --------+---------+-----------+---------+--------------+-------------
  val    | integer |           | plain   |              | 
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_tbl_unlogged_create FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
 DROP TABLE test_tbl_unlogged_create;
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;

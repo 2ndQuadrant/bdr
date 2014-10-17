@@ -988,7 +988,7 @@ bdr_launch_apply_workers(char *dbname)
 static void
 bdr_perdb_worker_main(Datum main_arg)
 {
-	int				  rc;
+	int				  rc = 0;
 	List			 *apply_workers;
 	ListCell		 *c;
 	BdrPerdbWorker   *bdr_perdb_worker;
@@ -1016,10 +1016,8 @@ bdr_perdb_worker_main(Datum main_arg)
 	bdr_saved_resowner = CurrentResourceOwner;
 
 	/* need to be able to perform writes ourselves */
-#ifdef BUILDING_BDR
 	bdr_executor_always_allow_writes(true);
 	bdr_locks_startup(bdr_perdb_worker->nnodes);
-#endif
 
 	/*
 	 * Do we need to init the local DB from a remote node?
@@ -1437,7 +1435,7 @@ bdr_is_bdr_activated_db(void)
 	else
 		mydb = get_database_name(MyDatabaseId);
 
-	/* look for the perdb worker's entries, they have the database name */
+	/* Look for the perdb worker's entries, they have the database name */
 	for (i = 0; i < bdr_max_workers; i++)
 	{
 		BdrWorker *worker;
@@ -1456,6 +1454,48 @@ bdr_is_bdr_activated_db(void)
 			return true;
 		}
 	}
+
+	/*
+	 * Make sure nobody changes the replication slot list concurrently
+	 */
+	LWLockAcquire(ReplicationSlotControlLock, LW_EXCLUSIVE);
+
+	/* If no worker was found, try searching for slot with bdr output plugin */
+	for (i = 0; i < max_replication_slots; i++)
+	{
+		ReplicationSlot *slot = &ReplicationSlotCtl->replication_slots[i];
+
+		Oid			database;
+		NameData	plugin;
+
+		/* XXX: is the spinlock necessary? */
+		SpinLockAcquire(&slot->mutex);
+		if (!slot->in_use)
+		{
+			SpinLockRelease(&slot->mutex);
+			continue;
+		}
+		else
+		{
+			database = slot->data.database;
+			namecpy(&plugin, &slot->data.plugin);
+		}
+		SpinLockRelease(&slot->mutex);
+
+		if (database == MyDatabaseId && strcmp(NameStr(plugin), "bdr") == 0)
+		{
+			LWLockRelease(ReplicationSlotControlLock);
+
+			/*
+			 * XXX: we might not wan't to set is_bdr_db here because slot can
+			 * be dropped without restart.
+			 */
+			is_bdr_db = true;
+			return true;
+		}
+	}
+
+	LWLockRelease(ReplicationSlotControlLock);
 
 	is_bdr_db = false;
 	return false;
@@ -1567,7 +1607,6 @@ _PG_init(void)
 							NULL, NULL, NULL);
 
 
-#ifdef BUILDING_BDR
 	DefineCustomBoolVariable("bdr.permit_unsafe_ddl_commands",
 							 "Allow commands that might cause data or " \
 							 "replication problems under BDR to run",
@@ -1576,7 +1615,6 @@ _PG_init(void)
 							 false, PGC_SUSET,
 							 0,
 							 NULL, NULL, NULL);
-#endif
 
 	DefineCustomBoolVariable("bdr.skip_ddl_replication",
 							 "Internal. Set during local restore during init_replica only",
@@ -1779,10 +1817,10 @@ out:
 	bdr_executor_init();
 #ifdef BUILDING_BDR
 	bdr_sequencer_shmem_init(bdr_max_workers, bdr_distinct_dbnames_count);
+#endif
 	bdr_locks_shmem_init(bdr_distinct_dbnames_count);
 	/* Set up a ProcessUtility_hook to stop unsupported commands being run */
 	init_bdr_commandfilter();
-#endif
 
 	MemoryContextSwitchTo(old_context);
 }
@@ -1863,7 +1901,7 @@ bdr_maintain_schema(void)
 		create_stmt.extname = (char *)"bdr";
 		CreateExtension(&create_stmt);
 	}
-
+	else
 	{
 		AlterExtensionStmt alter_stmt;
 

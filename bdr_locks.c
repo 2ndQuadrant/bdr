@@ -75,7 +75,10 @@
 #include "postgres.h"
 
 #include "bdr.h"
+
 #include "bdr_locks.h"
+
+#ifdef BUILDING_BDR
 
 #include "miscadmin.h"
 
@@ -1243,3 +1246,22 @@ bdr_locks_check_query(void)
 
 	}
 }
+
+#else
+
+/* bdr_locks are not used by UDR at the moment */
+void
+bdr_locks_startup(Size nnodes)
+{
+}
+
+void
+bdr_locks_shmem_init(Size num_used_databases)
+{
+}
+
+void
+bdr_acquire_ddl_lock(void)
+{
+}
+#endif
