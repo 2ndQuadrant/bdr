@@ -339,6 +339,10 @@ process_remote_commit(StringInfo s)
 	 */
 	AdvanceCachedReplicationIdentifier(end_lsn, XactLastCommitEnd);
 
+	/*
+	 * Catchup mode is not supported in UDR, because we can't sent origin_id
+	 * in 9.4.
+	 */
 #ifdef BUILDING_BDR
 	/*
 	 * If we're in catchup mode, see if the commit is relayed from elsewhere

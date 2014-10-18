@@ -641,9 +641,7 @@ should_forward_change(LogicalDecodingContext *ctx, BdrOutputData *data,
 void
 pg_decode_begin_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *txn)
 {
-#ifdef BUILDING_BDR
 	BdrOutputData *data = ctx->output_plugin_private;
-#endif
 	int flags = 0;
 
 	AssertVariableIsOfType(&pg_decode_begin_txn, LogicalDecodeBeginCB);
@@ -654,10 +652,18 @@ pg_decode_begin_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *txn)
 	OutputPluginPrepareWrite(ctx, true);
 	pq_sendbyte(ctx->out, 'B');		/* BEGIN */
 
+	/*
+	 * Vanialla Postgres does not provide origin id so UDR
+	 * can't set transaction origin (same applies to the other
+	 * ifdef in this function).
+	 */
 #ifdef BUILDING_BDR
 	/*
 	 * Are we forwarding changesets from other nodes? If so, we must include
 	 * the origin node ID and LSN in BEGIN records.
+	 *
+	 * Note: the 9.4 does not provide origin_id so we don't support
+	 * forwarded changesets in UDR yet.
 	 */
 	if (data->forward_changesets)
 		flags |= BDR_OUTPUT_TRANSACTION_HAS_ORIGIN;
