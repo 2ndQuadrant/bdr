@@ -9461,13 +9461,17 @@ AlterTableMoveAll(AlterTableMoveAllStmt *stmt)
 	{
 		List	   *cmds = NIL;
 		AlterTableCmd *cmd = makeNode(AlterTableCmd);
+		Oid			relid = lfirst_oid(l);
 
 		cmd->subtype = AT_SetTableSpace;
 		cmd->name = stmt->new_tablespacename;
 
 		cmds = lappend(cmds, cmd);
 
-		AlterTableInternal(lfirst_oid(l), cmds, false);
+		EventTriggerComplexCmdStart((Node *) stmt, OBJECT_TABLE);
+		EventTriggerComplexCmdSetOid(relid);
+		AlterTableInternal(relid, cmds, false);
+		EventTriggerComplexCmdEnd();
 	}
 
 	return new_tablespaceoid;

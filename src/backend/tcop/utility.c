@@ -510,10 +510,6 @@ standard_ProcessUtility(Node *parsetree,
 			ExecuteTruncate((TruncateStmt *) parsetree);
 			break;
 
-		case T_SecLabelStmt:
-			ExecSecLabelStmt((SecLabelStmt *) parsetree);
-			break;
-
 		case T_CopyStmt:
 			{
 				uint64		processed;
@@ -1419,6 +1415,10 @@ ProcessUtilitySlow(Node *parsetree,
 										 parsetree);
 				break;
 
+			case T_AlterTableMoveAllStmt:
+				AlterTableMoveAll((AlterTableMoveAllStmt *) parsetree);
+				break;
+
 			case T_CommentStmt:
 				{
 					uint32	objectSubId;
@@ -1443,6 +1443,14 @@ ProcessUtilitySlow(Node *parsetree,
 				ExecAlterDefaultPrivilegesStmt((AlterDefaultPrivilegesStmt *) parsetree);
 				break;
 
+			case T_SecLabelStmt:
+				{
+					SecLabelStmt *stmt = (SecLabelStmt *) parsetree;
+
+					objectId = ExecSecLabelStmt(stmt);
+					EventTriggerStashCommand(objectId, 0, stmt->objtype, parsetree);
+					break;
+				}
 			default:
 				elog(ERROR, "unrecognized node type: %d",
 					 (int) nodeTag(parsetree));

@@ -3927,10 +3927,19 @@ deparse_CommentStmt(Oid objectId, Oid objectSubId, Node *parsetree)
 	char	   *fmt;
 	char	   *command;
 
-	fmt = psprintf("COMMENT ON %s %%{identity}s IS %%{comment}L",
-				   stringify_objtype(node->objtype));
-	comment = new_objtree_VA(fmt, 0);
-	append_string_object(comment, "comment", node->comment);
+	if (node->comment)
+	{
+		fmt = psprintf("COMMENT ON %s %%{identity}s IS %%{comment}L",
+					   stringify_objtype(node->objtype));
+		comment = new_objtree_VA(fmt, 0);
+		append_string_object(comment, "comment", node->comment);
+	}
+	else
+	{
+		fmt = psprintf("COMMENT ON %s %%{identity}s IS NULL",
+					   stringify_objtype(node->objtype));
+		comment = new_objtree_VA(fmt, 0);
+	}
 
 	addr.classId = get_objtype_catalog_oid(node->objtype);
 	addr.objectId = objectId;
@@ -3941,6 +3950,35 @@ deparse_CommentStmt(Oid objectId, Oid objectSubId, Node *parsetree)
 
 	command = jsonize_objtree(comment);
 	free_objtree(comment);
+
+	return command;
+}
+
+static char *
+deparse_SecLabelStmt(Oid objectId, Oid objectSubId, Node *parsetree)
+{
+	SecLabelStmt *node = (SecLabelStmt *) parsetree;
+	ObjTree	   *label;
+	ObjectAddress addr;
+	char	   *fmt;
+	char	   *command;
+
+	fmt = psprintf("SECURITY LABEL FOR %%{provider}s ON %s %%{identity}s IS %%{label}L",
+				   stringify_objtype(node->objtype));
+	label = new_objtree_VA(fmt, 0);
+
+	append_string_object(label, "label", node->label);
+	append_string_object(label, "provider", node->provider);
+
+	addr.classId = get_objtype_catalog_oid(node->objtype);
+	addr.objectId = objectId;
+	addr.objectSubId = objectSubId;
+
+	append_string_object(label, "identity",
+						 getObjectIdentity(&addr));
+
+	command = jsonize_objtree(label);
+	free_objtree(label);
 
 	return command;
 }
@@ -4754,6 +4792,7 @@ deparse_parsenode_cmd(StashedCommand *cmd)
 			break;
 
 		case T_AlterTableStmt:
+		case T_AlterTableMoveAllStmt:
 			command = deparse_AlterTableStmt(cmd);
 			break;
 
@@ -4767,6 +4806,10 @@ deparse_parsenode_cmd(StashedCommand *cmd)
 
 		case T_CommentStmt:
 			command = deparse_CommentStmt(objectId, objectSubId, parsetree);
+			break;
+
+		case T_SecLabelStmt:
+			command = deparse_SecLabelStmt(objectId, objectSubId, parsetree);
 			break;
 
 		case T_GrantStmt:
