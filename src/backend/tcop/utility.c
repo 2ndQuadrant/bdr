@@ -1415,10 +1415,6 @@ ProcessUtilitySlow(Node *parsetree,
 										 parsetree);
 				break;
 
-			case T_AlterTableMoveAllStmt:
-				AlterTableMoveAll((AlterTableMoveAllStmt *) parsetree);
-				break;
-
 			case T_CommentStmt:
 				{
 					uint32	objectSubId;
