@@ -3938,6 +3938,35 @@ deparse_CommentStmt(Oid objectId, Oid objectSubId, Node *parsetree)
 }
 
 static char *
+deparse_SecLabelStmt(Oid objectId, Oid objectSubId, Node *parsetree)
+{
+	SecLabelStmt *node = (SecLabelStmt *) parsetree;
+	ObjTree	   *label;
+	ObjectAddress addr;
+	char	   *fmt;
+	char	   *command;
+
+	fmt = psprintf("SECURITY LABEL FOR %%{provider}s ON %s %%{identity}s IS %%{label}L",
+				   stringify_objtype(node->objtype));
+	label = new_objtree_VA(fmt, 0);
+
+	append_string_object(label, "label", node->label);
+	append_string_object(label, "provider", node->provider);
+
+	addr.classId = get_objtype_catalog_oid(node->objtype);
+	addr.objectId = objectId;
+	addr.objectSubId = objectSubId;
+
+	append_string_object(label, "identity",
+						 getObjectIdentity(&addr));
+
+	command = jsonize_objtree(label);
+	free_objtree(label);
+
+	return command;
+}
+
+static char *
 deparse_CreateConversion(Oid objectId, Node *parsetree)
 {
 	HeapTuple   conTup;
@@ -4760,6 +4789,10 @@ deparse_parsenode_cmd(StashedCommand *cmd)
 
 		case T_CommentStmt:
 			command = deparse_CommentStmt(objectId, objectSubId, parsetree);
+			break;
+
+		case T_SecLabelStmt:
+			command = deparse_SecLabelStmt(objectId, objectSubId, parsetree);
 			break;
 
 		case T_GrantStmt:
