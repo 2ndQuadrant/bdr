@@ -512,10 +512,6 @@ standard_ProcessUtility(Node *parsetree,
 			ExecuteTruncate((TruncateStmt *) parsetree);
 			break;
 
-		case T_SecLabelStmt:
-			ExecSecLabelStmt((SecLabelStmt *) parsetree);
-			break;
-
 		case T_CopyStmt:
 			{
 				uint64		processed;
@@ -846,6 +842,19 @@ standard_ProcessUtility(Node *parsetree,
 									   dest, completionTag);
 				else
 					CommentObject((CommentStmt *) parsetree, NULL);
+				break;
+			}
+
+		case T_SecLabelStmt:
+			{
+				SecLabelStmt *stmt = (SecLabelStmt *) parsetree;
+
+				if (EventTriggerSupportsObjectType(stmt->objtype))
+					ProcessUtilitySlow(parsetree, queryString,
+									   context, params,
+									   dest, completionTag);
+				else
+					ExecSecLabelStmt(stmt);
 				break;
 			}
 
@@ -1467,6 +1476,15 @@ ProcessUtilitySlow(Node *parsetree,
 			case T_AlterPolicyStmt:		/* ALTER POLICY */
 				objectId = AlterPolicy((AlterPolicyStmt *) parsetree);
 				EventTriggerStashCommand(objectId, 0, OBJECT_POLICY, parsetree);
+				break;
+
+			case T_SecLabelStmt:
+				{
+					SecLabelStmt *stmt = (SecLabelStmt *) parsetree;
+
+					objectId = ExecSecLabelStmt(stmt);
+					EventTriggerStashCommand(objectId, 0, stmt->objtype, parsetree);
+				}
 				break;
 
 			default:
