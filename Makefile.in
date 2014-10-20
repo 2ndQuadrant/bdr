@@ -43,6 +43,8 @@ export GIT_WORK_TREE
 
 include $(PGXS)
 
+-include ${bdr_abs_srcdir}/Makefile.custom
+
 #top_srcdir := $(bdr_abs_srcdir)
 #srcdir := $(top_srcdir)
 #top_builddir=/tmp/frak
