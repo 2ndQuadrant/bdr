@@ -16,6 +16,7 @@
 
 #include "bdr.h"
 #include "bdr_locks.h"
+#include "bdr_label.h"
 
 #include "libpq-fe.h"
 #include "funcapi.h"
@@ -575,6 +576,12 @@ bdr_apply_main(Datum main_arg)
 	appendStringInfo(&query, ", integer_datetimes '%d'", bdr_get_integer_timestamps());
 	appendStringInfo(&query, ", bigendian '%d'", bdr_get_bigendian());
 	appendStringInfo(&query, ", db_encoding '%s'", GetDatabaseEncodingName());
+	if (bdr_apply_config->replication_sets != NULL &&
+		bdr_apply_config->replication_sets[0] != 0)
+		appendStringInfo(&query, ", replication_sets '%s'",
+						 bdr_apply_config->replication_sets);
+
+	appendStringInfo(&query, ", db_encoding '%s'", GetDatabaseEncodingName());
 	if (bdr_apply_worker->forward_changesets)
 		appendStringInfo(&query, ", forward_changesets 't'");
 
@@ -657,6 +664,7 @@ bdr_create_con_gucs(char  *name,
 	char	   *optname_replica = palloc(strlen(name) + 30);
 	char	   *optname_local_dsn = palloc(strlen(name) + 30);
 	char	   *optname_local_dbname = palloc(strlen(name) + 30);
+	char	   *optname_replication_sets = palloc(strlen(name) + 30);
 
 	Assert(process_shared_preload_libraries_in_progress);
 
@@ -720,6 +728,15 @@ bdr_create_con_gucs(char  *name,
 							   &opts->dbname,
 							   NULL, PGC_POSTMASTER,
 							   GUC_NOT_IN_SAMPLE,
+							   NULL, NULL, NULL);
+
+	sprintf(optname_replication_sets, "bdr.%s_replication_sets", name);
+	DefineCustomStringVariable(optname_replication_sets,
+							   optname_replication_sets,
+	                           NULL,
+							   &opts->replication_sets,
+							   NULL, PGC_POSTMASTER,
+							   GUC_LIST_INPUT | GUC_LIST_QUOTE,
 							   NULL, NULL, NULL);
 
 
@@ -966,7 +983,7 @@ bdr_perdb_worker_main(Datum main_arg)
 	 */
 	foreach(c, apply_workers)
 	{
-		BackgroundWorkerHandle *h = (BackgroundWorkerHandle*)lfirst(c);
+		BackgroundWorkerHandle *h = (BackgroundWorkerHandle *) lfirst(c);
 		pfree(h);
 	}
 
@@ -1523,6 +1540,7 @@ _PG_init(void)
 							 PGC_BACKEND,
 							 0,
 							 NULL, NULL, NULL);
+	bdr_label_init();
 
 	/* if nothing is configured, we're done */
 	if (connections == NULL)

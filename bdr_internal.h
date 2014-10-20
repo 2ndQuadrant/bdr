@@ -24,12 +24,15 @@ typedef struct BdrConnectionConfig
 	int   apply_delay;
 	bool  init_replica;
 	char *replica_local_dsn;
+	char *replication_sets;
+
 	/*
 	 * These aren't technically GUCs, but are per-connection config
 	 * information obtained from the GUCs.
 	 */
 	char *name;
 	char *dbname;
+
 	/* Connection config might be broken (blank dsn, etc) */
 	bool is_valid;
 } BdrConnectionConfig;

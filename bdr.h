@@ -112,6 +112,10 @@ typedef struct BDRRelation
 
 	BDRConflictHandler *conflict_handlers;
 	size_t		conflict_handlers_len;
+
+	/* ordered list of replication sets of length num_* */
+	char	      **replication_sets;
+	int		num_replication_sets;
 } BDRRelation;
 
 typedef struct BDRTupleData
@@ -385,6 +389,10 @@ bdr_establish_connection_and_slot(BdrConnectionConfig *cfg,
 /* use instead of heap_open()/heap_close() */
 extern BDRRelation *bdr_heap_open(Oid reloid, LOCKMODE lockmode);
 extern void bdr_heap_close(BDRRelation * rel, LOCKMODE lockmode);
+
+extern void bdr_parse_relation_options(const char *label, BDRRelation *rel);
+extern void bdr_parse_database_options(const char *label);
+
 
 /* conflict handlers API */
 extern void bdr_conflict_handlers_init(void);

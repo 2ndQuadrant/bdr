@@ -713,9 +713,16 @@ bdr_commandfilter(Node *parsetree,
 			break;
 
 		case T_SecLabelStmt:
-			error_unsupported_command(CreateCommandTag(parsetree));
-			break;
+			{
+				SecLabelStmt *sstmt;
+				sstmt = (SecLabelStmt *) parsetree;
 
+				if (sstmt->provider == NULL ||
+					strcmp(sstmt->provider, "bdr") == 0)
+					break;
+				error_unsupported_command(CreateCommandTag(parsetree));
+				break;
+			}
 		default:
 			elog(ERROR, "unrecognized node type: %d",
 				 (int) nodeTag(parsetree));

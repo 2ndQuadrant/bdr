@@ -72,8 +72,12 @@ typedef struct
 	bool client_float8_byval;
 	bool client_int_datetime;
 	char *client_db_encoding;
+	Oid bdr_schema_oid;
 	Oid bdr_conflict_handlers_reloid;
 	Oid bdr_locks_reloid;
+
+	int num_replication_sets;
+	char **replication_sets;
 } BdrOutputData;
 
 /* These must be available to pg_dlsym() */
@@ -159,6 +163,33 @@ bdr_parse_bool(DefElem *elem, bool *res)
 				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 				 errmsg("could not parse boolean value \"%s\" for parameter \"%s\": %m",
 						strVal(elem->arg), elem->defname)));
+}
+
+static void
+bdr_parse_identifier_list_arr(DefElem *elem, char ***list, int *len)
+{
+	List	   *namelist;
+	ListCell   *c;
+
+	bdr_parse_notnull(elem, "list");
+
+	if (!SplitIdentifierString(pstrdup(strVal(elem->arg)),
+							  ',', &namelist))
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("could not identifier list value \"%s\" for parameter \"%s\": %m",
+						strVal(elem->arg), elem->defname)));
+	}
+
+	*len = 0;
+	*list = palloc(list_length(namelist) * sizeof(char *));
+
+	foreach(c, namelist)
+	{
+		(*list)[(*len)++] = pstrdup(lfirst(c));
+	}
+	list_free(namelist);
 }
 
 static void
@@ -299,6 +330,9 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 
 	data->bdr_conflict_handlers_reloid = InvalidOid;
 	data->bdr_locks_reloid = InvalidOid;
+	data->bdr_schema_oid = InvalidOid;
+
+	data->num_replication_sets = -1;
 
 	/* parse options passed in by the client */
 
@@ -336,6 +370,14 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 			data->client_db_encoding = pstrdup(strVal(elem->arg));
 		else if (strcmp(elem->defname, "forward_changesets") == 0)
 			bdr_parse_bool(elem, &data->forward_changesets);
+		else if (strcmp(elem->defname, "replication_sets") == 0)
+		{
+			bdr_parse_identifier_list_arr(elem,
+										  &data->replication_sets,
+										  &data->num_replication_sets);
+			qsort(data->replication_sets, data->num_replication_sets,
+				  sizeof(char *), pg_qsort_strcmp);
+		}
 		else
 		{
 			ereport(ERROR,
@@ -438,6 +480,7 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 		}
 
 		schema_oid = get_namespace_oid("bdr", true);
+		data->bdr_schema_oid = schema_oid;
 		if (schema_oid != InvalidOid)
 		{
 			data->bdr_conflict_handlers_reloid =
@@ -473,10 +516,54 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
  * to the client unless we're in changeset forwarding mode.
  */
 static inline bool
-should_forward_changeset(LogicalDecodingContext *ctx, ReorderBufferTXN *txn)
+should_forward_changeset(LogicalDecodingContext *ctx, BdrOutputData *data,
+						 ReorderBufferTXN *txn)
 {
-	return (txn->origin_id == InvalidRepNodeId)
-		   || ((BdrOutputData*)ctx->output_plugin_private)->forward_changesets;
+	return txn->origin_id == InvalidRepNodeId || data->forward_changesets;
+}
+
+static inline bool
+should_forward_change(LogicalDecodingContext *ctx, BdrOutputData *data,
+					  BDRRelation *r)
+{
+	int i, j;
+
+	/* internal bdr relations that may not be replicated */
+	if(RelationGetRelid(r->rel) == data->bdr_conflict_handlers_reloid ||
+	   RelationGetRelid(r->rel) == data->bdr_locks_reloid)
+		return false;
+
+	/* always replicate other stuff in the bdr schema */
+	if (r->rel->rd_rel->relnamespace == data->bdr_schema_oid)
+		return true;
+
+	/* no explicit configuration */
+	if (data->num_replication_sets == -1 ||
+		r->num_replication_sets == -1)
+	{
+		return true;
+	}
+
+
+	/*
+	 * Compare the two ordered list of replication sets and find overlapping
+	 * elements.
+	 */
+	i = j = 0;
+	while (i < data->num_replication_sets && j < r->num_replication_sets)
+	{
+		int cmp = strcmp(data->replication_sets[i],
+						 r->replication_sets[j]);
+
+		if (cmp < 0)
+			i++;
+		else if (cmp == 0)
+			return true;
+		else
+			j++;
+	}
+
+	return false;
 }
 
 /*
@@ -493,7 +580,7 @@ pg_decode_begin_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *txn)
 
 	AssertVariableIsOfType(&pg_decode_begin_txn, LogicalDecodeBeginCB);
 
-	if (!should_forward_changeset(ctx, txn))
+	if (!should_forward_changeset(ctx, data, txn))
 		return;
 
 	OutputPluginPrepareWrite(ctx, true);
@@ -557,13 +644,11 @@ void
 pg_decode_commit_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 					 XLogRecPtr commit_lsn)
 {
-#ifdef NOT_YET
 	BdrOutputData *data = ctx->output_plugin_private;
-#endif
 
 	int flags = 0;
 
-	if (!should_forward_changeset(ctx, txn))
+	if (!should_forward_changeset(ctx, data, txn))
 		return;
 
 	OutputPluginPrepareWrite(ctx, true);
@@ -586,17 +671,19 @@ pg_decode_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 {
 	BdrOutputData *data;
 	MemoryContext old;
+	BDRRelation *bdr_relation;
+
+	bdr_relation = bdr_heap_open(RelationGetRelid(relation), NoLock);
 
 	data = ctx->output_plugin_private;
 
 	/* Avoid leaking memory by using and resetting our own context */
 	old = MemoryContextSwitchTo(data->context);
 
-	if (!should_forward_changeset(ctx, txn))
+	if (!should_forward_changeset(ctx, data, txn))
 		return;
 
-	if(RelationGetRelid(relation) == data->bdr_conflict_handlers_reloid ||
-	   RelationGetRelid(relation) == data->bdr_locks_reloid)
+	if (!should_forward_change(ctx, data, bdr_relation))
 		return;
 
 	OutputPluginPrepareWrite(ctx, true);
@@ -641,6 +728,8 @@ pg_decode_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 
 	MemoryContextSwitchTo(old);
 	MemoryContextReset(data->context);
+
+	bdr_heap_close(bdr_relation, NoLock);
 }
 
 /*
