@@ -1113,7 +1113,7 @@ bdr_conflict_last_update_wins(RepNodeId local_node_id,
 
 static void
 bdr_conflict_default_apply_resolve(bool *perform_update, bool *log_update,
-						   BdrConflictResolution *resolution)
+								   BdrConflictResolution *resolution)
 {
 	*perform_update = bdr_conflict_default_apply;
 	/* For UDR conflicts are never expected so they should always be logged. */
@@ -1169,6 +1169,19 @@ check_apply_update(BdrConflictType conflict_type,
 		*perform_update = true;
 		return;
 	}
+
+#ifdef BUILDING_UDR
+	/*
+	 * In UDR we can't correctly detect UPDATE/UPDATE conflicts as we don't
+	 * have origin_id which means every UPDATE looks like conflict so let's
+	 * just ignore them here.
+	 */
+	if (conflict_type == BdrConflictType_UpdateUpdate)
+	{
+		*perform_update = true;
+		return;
+	}
+#endif
 
 	/*
 	 * Decide whether to keep the remote or local tuple based on a conflict
