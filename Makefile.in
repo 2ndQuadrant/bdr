@@ -85,6 +85,9 @@ bdr_init_copy: bdr_init_copy.o
 scripts/bdr_initial_load: scripts/bdr_initial_load.in
 	mkdir -p scripts
 	sed -e "s/BDR_VERSION/$(BDR_VERSION)/" -e "s/PG_VERSION/$(VERSION)/" $< > $@
+ifeq "@BUILDING_UDR@" "1"
+	sed -e "s/pg_dump/bdr_dump/" -i $@
+endif
 
 bdr--0.8.0.1.sql: bdr--0.8.0.sql bdr--0.8.0--0.8.0.1.sql
 	cat $^ > $@

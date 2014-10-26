@@ -62,6 +62,7 @@ typedef struct
 	uint32 client_pg_version;
 	uint32 client_pg_catversion;
 	uint32 client_bdr_version;
+	char *client_bdr_variant;
 	uint32 client_min_bdr_version;
 	size_t client_sizeof_int;
 	size_t client_sizeof_long;
@@ -197,6 +198,13 @@ bdr_parse_identifier_list_arr(DefElem *elem, char ***list, int *len)
 }
 
 static void
+bdr_parse_str(DefElem *elem, char **res)
+{
+	bdr_parse_notnull(elem, "string");
+	*res = pstrdup(strVal(elem->arg));
+}
+
+static void
 bdr_req_param(const char *param)
 {
 	ereport(ERROR,
@@ -214,7 +222,6 @@ bdr_req_param(const char *param)
 static void
 bdr_ensure_node_ready()
 {
-#ifdef BUILDING_BDR
 	int spi_ret;
 	const uint64 sysid = GetSystemIdentifier();
 	char status;
@@ -242,6 +249,25 @@ bdr_ensure_node_ready()
 	SPI_finish();
 
 	CommitTransactionCommand();
+
+/*
+ * There is no local node status for UDR as we have only connection to this
+ * node coming from a slave. The above is still useful to make sure the
+ * extension is installed in the db.
+ */
+#ifdef BUILDING_UDR
+	switch (status)
+	{
+		case 'r':
+		case '\0':
+		case 'c':
+		case 'i':
+			break;
+		default:
+			elog(ERROR, "Unhandled case status=%c", status);
+			break;
+	}
+#else
 
 	/* Complain if node isn't ready. */
 	/* TODO: Allow soft error so caller can sleep and recheck? */
@@ -353,6 +379,8 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 			bdr_parse_uint32(elem, &data->client_pg_catversion);
 		else if (strcmp(elem->defname, "bdr_version") == 0)
 			bdr_parse_uint32(elem, &data->client_bdr_version);
+		else if (strcmp(elem->defname, "bdr_variant") == 0)
+			bdr_parse_str(elem, &data->client_bdr_variant);
 		else if (strcmp(elem->defname, "min_bdr_version") == 0)
 			bdr_parse_uint32(elem, &data->client_min_bdr_version);
 		else if (strcmp(elem->defname, "sizeof_int") == 0)

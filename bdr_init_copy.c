@@ -18,6 +18,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "bdr_config.h"
 #include "bdr_internal.h"
 
 #define LLOGCDIR "pg_logical/checkpoints"
@@ -603,6 +604,43 @@ initialize_replication_slots(bool init_replica)
 }
 
 /*
+ * Get database Oid of the remotedb.
+ *
+ * Can't use the bdr_get_remote_dboid because it needs elog :(
+ */
+static Oid
+get_remote_dboid(char *conninfo_db)
+{
+	PGconn	   *dbConn;
+	PGresult   *res;
+	char	   *remote_dboid;
+	Oid			remote_dboid_i;
+
+	dbConn = PQconnectdb(conninfo_db);
+	if (PQstatus(dbConn) != CONNECTION_OK)
+	{
+		die(_("Could not connect to the primary server: %s"), PQerrorMessage(dbConn));
+	}
+
+	res = PQexec(dbConn, "SELECT oid FROM pg_database WHERE datname = current_database()");
+	if (PQresultStatus(res) != PGRES_TUPLES_OK)
+		die(_("Could fetch database oid: %s"), PQerrorMessage(dbConn));
+
+	if (PQntuples(res) != 1 || PQnfields(res) != 1)
+		die(_("Could not identify system: got %d rows and %d fields, expected %d rows and %d fields\n"),
+			 PQntuples(res), PQnfields(res), 1, 1);
+
+	remote_dboid = PQgetvalue(res, 0, 0);
+	if (sscanf(remote_dboid, "%u", &remote_dboid_i) != 1)
+		die(_("could not parse remote database OID %s"), remote_dboid);
+
+	PQclear(res);
+	PQfinish(dbConn);
+
+	return remote_dboid_i;
+}
+
+/*
  * Read replication info about remote connection
  */
 static RemoteInfo *
@@ -640,30 +678,7 @@ get_remote_info(PGconn *conn, char* aux_connstr)
 	}
 	else
 	{
-		PGconn	   *db_conn;
-		PGresult   *res2;
-
-		db_conn = PQconnectdb(aux_connstr);
-		if (PQstatus(db_conn) != CONNECTION_OK)
-		{
-			PQfinish(db_conn);
-			die(_("Could not connect to the primary server: %s"), PQerrorMessage(db_conn));
-		}
-
-		res2 = PQexec(db_conn, "SELECT oid FROM pg_database WHERE datname = current_database()");
-		if (PQresultStatus(res2) != PGRES_TUPLES_OK)
-			die(_("Could fetch database oid: %s"), PQerrorMessage(db_conn));
-
-		if (PQntuples(res2) != 1 || PQnfields(res2) != 1)
-			die(_("Could not identify system: got %d rows and %d fields, expected %d rows and %d fields\n"),
-				 PQntuples(res2), PQnfields(res2), 1, 1);
-
-		remote_dboid = PQgetvalue(res2, 0, 0);
-		if (sscanf(remote_dboid, "%u", &ri->dboid) != 1)
-			die(_("could not parse remote database OID %s"), remote_dboid);
-
-		PQclear(res2);
-		PQfinish(db_conn);
+		ri->dboid = get_remote_dboid(aux_connstr);
 	}
 
 #ifdef HAVE_STRTOULL

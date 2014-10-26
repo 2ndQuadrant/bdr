@@ -162,6 +162,51 @@ bdr_sighup(SIGNAL_ARGS)
 }
 
 /*
+ * Get database Oid of the remotedb.
+ */
+static Oid
+bdr_get_remote_dboid(char *conninfo_db)
+{
+	PGconn	   *dbConn;
+	PGresult   *res;
+	char	   *remote_dboid;
+	Oid			remote_dboid_i;
+
+	elog(DEBUG3, "Fetching database oid via standard connection");
+
+	dbConn = PQconnectdb(conninfo_db);
+	if (PQstatus(dbConn) != CONNECTION_OK)
+	{
+		ereport(FATAL,
+				(errcode(ERRCODE_CONNECTION_FAILURE),
+				 errmsg("could not connect to the primary server: %s",
+						PQerrorMessage(dbConn)),
+				 errdetail("Connection string is '%s'", conninfo_db)));
+	}
+
+	res = PQexec(dbConn, "SELECT oid FROM pg_database WHERE datname = current_database()");
+	if (PQresultStatus(res) != PGRES_TUPLES_OK)
+	{
+		elog(FATAL, "could not fetch database oid: %s",
+			 PQerrorMessage(dbConn));
+	}
+	if (PQntuples(res) != 1 || PQnfields(res) != 1)
+	{
+		elog(FATAL, "could not identify system: got %d rows and %d fields, expected %d rows and %d fields\n",
+			 PQntuples(res), PQnfields(res), 1, 1);
+	}
+
+	remote_dboid = PQgetvalue(res, 0, 0);
+	if (sscanf(remote_dboid, "%u", &remote_dboid_i) != 1)
+		elog(ERROR, "could not parse remote database OID %s", remote_dboid);
+
+	PQclear(res);
+	PQfinish(dbConn);
+
+	return remote_dboid_i;
+}
+
+/*
  * Establish a BDR connection
  *
  * Connects to the remote node, identifies it, and generates local and remote
@@ -191,7 +236,6 @@ bdr_connect(char *conninfo_repl,
 	char	   *remote_sysid;
 	char	   *remote_tlid;
 	char	   *remote_dbname;
-	char	   *remote_dboid;
 	char		local_sysid[32];
 	NameData	replication_name;
 
@@ -227,45 +271,14 @@ bdr_connect(char *conninfo_repl,
 	remote_dbname = PQgetvalue(res, 0, 3);
 	if (PQnfields(res) == 5)
 	{
-		remote_dboid = PQgetvalue(res, 0, 4);
+		char	   *remote_dboid = PQgetvalue(res, 0, 4);
+
 		if (sscanf(remote_dboid, "%u", remote_dboid_i) != 1)
 			elog(ERROR, "could not parse remote database OID %s", remote_dboid);
 	}
 	else
 	{
-		PGconn	   *dbConn;
-		PGresult   *res2;
-
-		elog(DEBUG3, "Fetching database oid via standard connection");
-
-		dbConn = PQconnectdb(conninfo_db);
-		if (PQstatus(dbConn) != CONNECTION_OK)
-		{
-			ereport(FATAL,
-					(errcode(ERRCODE_CONNECTION_FAILURE),
-					 errmsg("could not connect to the primary server: %s",
-							PQerrorMessage(dbConn)),
-					 errdetail("Connection string is '%s'", conninfo_db)));
-		}
-
-		res2 = PQexec(dbConn, "SELECT oid FROM pg_database WHERE datname = current_database()");
-		if (PQresultStatus(res2) != PGRES_TUPLES_OK)
-		{
-			elog(FATAL, "could fetch database oid: %s",
-				 PQerrorMessage(dbConn));
-		}
-		if (PQntuples(res2) != 1 || PQnfields(res2) != 1)
-		{
-			elog(FATAL, "could not identify system: got %d rows and %d fields, expected %d rows and %d fields\n",
-				 PQntuples(res2), PQnfields(res2), 1, 1);
-		}
-
-		remote_dboid = PQgetvalue(res2, 0, 0);
-		if (sscanf(remote_dboid, "%u", remote_dboid_i) != 1)
-			elog(ERROR, "could not parse remote database OID %s", remote_dboid);
-
-		PQclear(res2);
-		PQfinish(dbConn);
+		*remote_dboid_i = bdr_get_remote_dboid(conninfo_db);
 	}
 
 	if (sscanf(remote_sysid, UINT64_FORMAT, remote_sysid_i) != 1)
@@ -288,9 +301,9 @@ bdr_connect(char *conninfo_repl,
 				 remote_sysid, remote_tlid, remote_dbname)));
 	}
 	else
-		elog(DEBUG2, "local node (%s,%u,%u), remote node (%s,%s,%s)",
+		elog(DEBUG2, "local node (%s,%u,%u), remote node (%s,%s,%u)",
 			 local_sysid, ThisTimeLineID, MyDatabaseId, remote_sysid,
-			 remote_tlid, remote_dboid);
+			 remote_tlid, *remote_dboid_i);
 
 	/*
 	 * build slot name.
@@ -1884,14 +1897,10 @@ bdr_maintain_schema(void)
 		bdr_lookup_relid("bdr_global_locks", schema_oid);
 	BdrLocksByOwnerRelid =
 		bdr_lookup_relid("bdr_global_locks_byowner", schema_oid);
+#endif
+
 	BdrReplicationSetConfigRelid  =
 		bdr_lookup_relid("bdr_replication_set_config", schema_oid);
-#else
-	ReplicationIdentifierRelationId =
-		bdr_lookup_relid("bdr_replication_identifier", schema_oid);
-	ReplicationLocalIdentIndex =
-		bdr_lookup_relid("bdr_replication_identifier_riiident_index", schema_oid);
-#endif
 
 	bdr_conflict_handlers_init();
 
