@@ -113,7 +113,6 @@ BdrWorkerControl *BdrWorkerCtl = NULL;
 PG_MODULE_MAGIC;
 
 void		_PG_init(void);
-static void bdr_maintain_schema(void);
 static void bdr_worker_shmem_startup(void);
 static void bdr_worker_shmem_create_workers(void);
 
@@ -1728,15 +1727,21 @@ bdr_lookup_relid(const char *relname, Oid schema_oid)
  *
  * Concurrent executions will block, but not fail.
  */
-static void
+void
 bdr_maintain_schema(void)
 {
 	Relation	extrel;
 	Oid			btree_gist_oid;
 	Oid			bdr_oid;
 	Oid			schema_oid;
+	bool tx_started = true;
 
-	StartTransactionCommand();
+	if (!IsTransactionState())
+	{
+		tx_started = false;
+		StartTransactionCommand();
+	}
+
 	PushActiveSnapshot(GetTransactionSnapshot());
 
 	set_config_option("bdr.skip_ddl_replication", "true",
@@ -1814,7 +1819,8 @@ bdr_maintain_schema(void)
 	bdr_conflict_handlers_init();
 
 	PopActiveSnapshot();
-	CommitTransactionCommand();
+	if (!tx_started)
+		CommitTransactionCommand();
 }
 
 Datum

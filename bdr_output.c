@@ -492,6 +492,11 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 		}
 
 		schema_oid = get_namespace_oid("bdr", true);
+		if (schema_oid == InvalidOid)
+		{
+			bdr_maintain_schema();
+			schema_oid = get_namespace_oid("bdr", true);
+		}
 		data->bdr_schema_oid = schema_oid;
 		if (schema_oid != InvalidOid)
 		{
