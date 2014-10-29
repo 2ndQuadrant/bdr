@@ -1,11 +1,25 @@
 -- contrib datatypes
-CREATE EXTENSION IF NOT EXISTS cube;
-CREATE EXTENSION IF NOT EXISTS hstore;
-CREATE TABLE contrib_dml (
-    id serial primary key,
-    fixed cube,
-    variable hstore
-);
+\i sql/setup.sql
+select
+	current_setting('bdrtest.readdb1') as readdb1, current_setting('bdrtest.readdb2') as readdb2,
+	current_setting('bdrtest.writedb1') as writedb1 , current_setting('bdrtest.writedb2') as writedb2
+\gset
+\c :writedb1
+SELECT bdr.bdr_replicate_ddl_command($$
+	CREATE EXTENSION IF NOT EXISTS cube SCHEMA public;
+	CREATE EXTENSION IF NOT EXISTS hstore SCHEMA public;
+
+	CREATE TABLE public.contrib_dml (
+		id serial primary key,
+		fixed public.cube,
+		variable public.hstore
+	);
+$$);
+ bdr_replicate_ddl_command 
+---------------------------
+ 
+(1 row)
+
 -- check basic insert replication
 INSERT INTO contrib_dml(fixed, variable)
 VALUES ('(1,2)', 'a=>1,b=>2'),
@@ -15,14 +29,13 @@ VALUES ('(1,2)', 'a=>1,b=>2'),
        ('(1,2,3)', 'a=>1,b=>2,c=>3'),
        ('(4,5,6)', 'c=>1,d=>2,e=>3'),
        (NULL, NULL);
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
  pg_xlog_wait_remote_apply 
 ---------------------------
  
- 
-(2 rows)
+(1 row)
 
-\c postgres
+\c :readdb2
 SELECT id, fixed, variable FROM contrib_dml ORDER BY id;
  id |   fixed   |           variable           
 ----+-----------+------------------------------
@@ -36,15 +49,15 @@ SELECT id, fixed, variable FROM contrib_dml ORDER BY id;
 (7 rows)
 
 -- update one row
+\c :writedb2
 UPDATE contrib_dml SET fixed = '(1,2,3,4)', variable = 'a=>NULL,b=>1' WHERE id = 1;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
  pg_xlog_wait_remote_apply 
 ---------------------------
  
- 
-(2 rows)
+(1 row)
 
-\c regression
+\c :readdb1
 SELECT id, fixed, variable FROM contrib_dml ORDER BY id;
  id |    fixed     |           variable           
 ----+--------------+------------------------------
@@ -58,80 +71,86 @@ SELECT id, fixed, variable FROM contrib_dml ORDER BY id;
 (7 rows)
 
 -- update multiple rows
-UPDATE contrib_dml SET fixed = cube_enlarge(fixed, 1, 1), variable = variable || 'x=>99' WHERE '(1,6)' && fixed;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+\c :writedb1
+UPDATE contrib_dml SET fixed = cube_enlarge(fixed, 1, 1), variable = variable || 'x=>99' WHERE '1' <@ fixed;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
  pg_xlog_wait_remote_apply 
 ---------------------------
  
- 
-(2 rows)
+(1 row)
 
-\c postgres
+\c :readdb2
 SELECT id, fixed, variable FROM contrib_dml ORDER BY id;
- id |    fixed     |           variable           
-----+--------------+------------------------------
-  1 | (1, 2, 3, 4) | "a"=>NULL, "b"=>"1"
-  2 | (3, 4)       | "c"=>"3", "d"=>"4"
-  3 | (5, 6)       | "e"=>"5", "f"=>"6"
-  4 | (7, 8)       | "g"=>"7", "h"=>"8"
-  5 | (1, 2, 3)    | "a"=>"1", "b"=>"2", "c"=>"3"
-  6 | (4, 5, 6)    | "c"=>"1", "d"=>"2", "e"=>"3"
-  7 |              | 
+ id |           fixed           |                variable                 
+----+---------------------------+-----------------------------------------
+  1 | (0, 1, 2, 3),(2, 3, 4, 5) | "a"=>NULL, "b"=>"1", "x"=>"99"
+  2 | (3, 4)                    | "c"=>"3", "d"=>"4"
+  3 | (5, 6)                    | "e"=>"5", "f"=>"6"
+  4 | (7, 8)                    | "g"=>"7", "h"=>"8"
+  5 | (0, 1, 2),(2, 3, 4)       | "a"=>"1", "b"=>"2", "c"=>"3", "x"=>"99"
+  6 | (4, 5, 6)                 | "c"=>"1", "d"=>"2", "e"=>"3"
+  7 |                           | 
 (7 rows)
 
 -- delete one row
+\c :writedb2
 DELETE FROM contrib_dml WHERE id = 2;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
  pg_xlog_wait_remote_apply 
 ---------------------------
  
- 
-(2 rows)
+(1 row)
 
-\c regression
+\c :readdb1
 SELECT id, fixed, variable FROM contrib_dml ORDER BY id;
- id |    fixed     |           variable           
-----+--------------+------------------------------
-  1 | (1, 2, 3, 4) | "a"=>NULL, "b"=>"1"
-  3 | (5, 6)       | "e"=>"5", "f"=>"6"
-  4 | (7, 8)       | "g"=>"7", "h"=>"8"
-  5 | (1, 2, 3)    | "a"=>"1", "b"=>"2", "c"=>"3"
-  6 | (4, 5, 6)    | "c"=>"1", "d"=>"2", "e"=>"3"
-  7 |              | 
+ id |           fixed           |                variable                 
+----+---------------------------+-----------------------------------------
+  1 | (0, 1, 2, 3),(2, 3, 4, 5) | "a"=>NULL, "b"=>"1", "x"=>"99"
+  3 | (5, 6)                    | "e"=>"5", "f"=>"6"
+  4 | (7, 8)                    | "g"=>"7", "h"=>"8"
+  5 | (0, 1, 2),(2, 3, 4)       | "a"=>"1", "b"=>"2", "c"=>"3", "x"=>"99"
+  6 | (4, 5, 6)                 | "c"=>"1", "d"=>"2", "e"=>"3"
+  7 |                           | 
 (6 rows)
 
 -- delete multiple rows
+\c :writedb1
 DELETE FROM contrib_dml WHERE id < 4;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
  pg_xlog_wait_remote_apply 
 ---------------------------
  
- 
-(2 rows)
+(1 row)
 
-\c postgres
+\c :readdb2
 SELECT id, fixed, variable FROM contrib_dml ORDER BY id;
- id |   fixed   |           variable           
-----+-----------+------------------------------
-  4 | (7, 8)    | "g"=>"7", "h"=>"8"
-  5 | (1, 2, 3) | "a"=>"1", "b"=>"2", "c"=>"3"
-  6 | (4, 5, 6) | "c"=>"1", "d"=>"2", "e"=>"3"
-  7 |           | 
+ id |        fixed        |                variable                 
+----+---------------------+-----------------------------------------
+  4 | (7, 8)              | "g"=>"7", "h"=>"8"
+  5 | (0, 1, 2),(2, 3, 4) | "a"=>"1", "b"=>"2", "c"=>"3", "x"=>"99"
+  6 | (4, 5, 6)           | "c"=>"1", "d"=>"2", "e"=>"3"
+  7 |                     | 
 (4 rows)
 
 -- truncate
+\c :writedb2
 TRUNCATE contrib_dml;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
  pg_xlog_wait_remote_apply 
 ---------------------------
  
- 
-(2 rows)
+(1 row)
 
-\c regression
+\c :readdb1
 SELECT id, fixed, variable FROM contrib_dml ORDER BY id;
  id | fixed | variable 
 ----+-------+----------
 (0 rows)
 
-DROP TABLE contrib_dml;
+\c :writedb1
+SELECT bdr.bdr_replicate_ddl_command($$DROP TABLE public.contrib_dml;$$);
+ bdr_replicate_ddl_command 
+---------------------------
+ 
+(1 row)
+

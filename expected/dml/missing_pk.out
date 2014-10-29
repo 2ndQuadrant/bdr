@@ -1,15 +1,27 @@
-\c postgres
-CREATE TABLE bdr_missing_pk(a serial);
-CREATE VIEW bdr_missing_pk_view AS SELECT * FROM bdr_missing_pk;
+-- test sanity checks for tables without pk
+\i sql/setup.sql
+select
+	current_setting('bdrtest.readdb1') as readdb1, current_setting('bdrtest.readdb2') as readdb2,
+	current_setting('bdrtest.writedb1') as writedb1 , current_setting('bdrtest.writedb2') as writedb2
+\gset
+\c :writedb1
+SELECT bdr.bdr_replicate_ddl_command($$
+	CREATE TABLE public.bdr_missing_pk(a serial);
+	CREATE VIEW public.bdr_missing_pk_view AS SELECT * FROM public.bdr_missing_pk;
+$$);
+ bdr_replicate_ddl_command 
+---------------------------
+ 
+(1 row)
+
 INSERT INTO bdr_missing_pk SELECT generate_series(1, 10);
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
  pg_xlog_wait_remote_apply 
 ---------------------------
  
- 
-(2 rows)
+(1 row)
 
-\c regression
+\c :readdb2
 SELECT * FROM bdr_missing_pk;
  a  
 ----
@@ -25,7 +37,8 @@ SELECT * FROM bdr_missing_pk;
  10
 (10 rows)
 
--- these should fails
+-- these should fail
+\c :writedb2
 UPDATE bdr_missing_pk SET a = 1;
 ERROR:  Cannot UPDATE table bdr_missing_pk because it does not have primary key.
 HINT:  Add primary key to the table
@@ -60,18 +73,24 @@ ERROR:  Cannot DELETE table bdr_missing_pk because it does not have primary key.
 HINT:  Add primary key to the table
 -- success again
 TRUNCATE bdr_missing_pk;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
  pg_xlog_wait_remote_apply 
 ---------------------------
  
- 
-(2 rows)
+(1 row)
 
-\c postgres
+\c :readdb1
 SELECT * FROM bdr_missing_pk;
  a 
 ---
 (0 rows)
 
-DROP TABLE bdr_missing_pk CASCADE;
-NOTICE:  drop cascades to view bdr_missing_pk_view
+\c :writedb1
+SELECT bdr.bdr_replicate_ddl_command($$DROP TABLE public.bdr_missing_pk CASCADE;$$);
+NOTICE:  drop cascades to view public.bdr_missing_pk_view
+CONTEXT:  during DDL replay of ddl statement: DROP TABLE public.bdr_missing_pk CASCADE;
+ bdr_replicate_ddl_command 
+---------------------------
+ 
+(1 row)
+

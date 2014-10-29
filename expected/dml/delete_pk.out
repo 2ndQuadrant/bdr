@@ -1,27 +1,38 @@
 -- RT #37826 "issuing a DELETE broken replication"
-CREATE TABLE test (
-    id TEXT,
-    ts TIMESTAMP DEFAULT ('now'::TEXT)::TIMESTAMP,
-    PRIMARY KEY (id)
+\i sql/setup.sql
+select
+	current_setting('bdrtest.readdb1') as readdb1, current_setting('bdrtest.readdb2') as readdb2,
+	current_setting('bdrtest.writedb1') as writedb1 , current_setting('bdrtest.writedb2') as writedb2
+\gset
+\c :writedb1
+SELECT bdr.bdr_replicate_ddl_command($$
+	CREATE TABLE public.test (
+		id TEXT,
+		ts TIMESTAMP DEFAULT ('now'::TEXT)::TIMESTAMP,
+		PRIMARY KEY (id)
 	);
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+$$);
+ bdr_replicate_ddl_command 
+---------------------------
+ 
+(1 row)
+
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
  pg_xlog_wait_remote_apply 
 ---------------------------
  
- 
-(2 rows)
+(1 row)
 
 -- INSERT data
 INSERT INTO test (id, ts) VALUES ('row', '1970-07-21 12:00:00');
 INSERT INTO test (id) VALUES ('broken');
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
  pg_xlog_wait_remote_apply 
 ---------------------------
  
- 
-(2 rows)
+(1 row)
 
-\c postgres
+\c :readdb2
 SELECT id FROM test ORDER BY ts;
    id   
 --------
@@ -30,13 +41,13 @@ SELECT id FROM test ORDER BY ts;
 (2 rows)
 
 -- DELETE one row by PK
+\c :writedb2
 DELETE FROM test WHERE id = 'row';
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
  pg_xlog_wait_remote_apply 
 ---------------------------
  
- 
-(2 rows)
+(1 row)
 
 SELECT id FROM test ORDER BY ts;
    id   
@@ -44,30 +55,36 @@ SELECT id FROM test ORDER BY ts;
  broken
 (1 row)
 
-\c regression
+\c :readdb1
 SELECT id FROM test ORDER BY ts;
    id   
 --------
  broken
 (1 row)
 
+\c :writedb1
 DELETE FROM test WHERE id = 'broken';
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
  pg_xlog_wait_remote_apply 
 ---------------------------
  
+(1 row)
+
+SELECT id FROM test ORDER BY ts;
+ id 
+----
+(0 rows)
+
+\c :readdb2
+SELECT id FROM test ORDER BY ts;
+ id 
+----
+(0 rows)
+
+\c :writedb1
+SELECT bdr.bdr_replicate_ddl_command($$DROP TABLE public.test;$$);
+ bdr_replicate_ddl_command 
+---------------------------
  
-(2 rows)
+(1 row)
 
-SELECT id FROM test ORDER BY ts;
- id 
-----
-(0 rows)
-
-\c postgres
-SELECT id FROM test ORDER BY ts;
- id 
-----
-(0 rows)
-
-DROP TABLE test;

@@ -127,16 +127,22 @@ additional-maintainer-clean: clean
 # typical installcheck users do not have (e.g. buildfarm clients).
 installcheck: ;
 
+
+ifeq "@BUILDING_BDR@" "1"
 check: regresscheck isolationcheck
+DDLREGRESSCHECKS=ddl/create ddl/alter_table ddl/extension ddl/function \
+				 ddl/grant ddl/mixed ddl/namespace ddl/replication_set \
+				 ddl/sequence ddl/view
+else
+check: regresscheck
+DDLREGRESSCHECKS=
+endif
 
 REGRESSCHECKS= \
 	init \
 	upgrade \
-	ddl/create ddl/alter_table ddl/extension ddl/function \
-	ddl/grant ddl/namespace ddl/replication_set ddl/sequence ddl/view \
-	\
-	dml/basic dml/contrib dml/delete_pk dml/extended \
-	dml/missing_pk dml/mixed dml/toasted
+	$(DDLREGRESSCHECKS) \
+	dml/basic dml/contrib dml/delete_pk dml/extended dml/missing_pk dml/toasted
 
 
 ISOLATIONCHECKS=\
@@ -155,13 +161,19 @@ ISOLATIONCHECKS=\
 REQUIRED_EXTENSIONS="btree_gist"
 REQUIRED_TEST_EXTENSIONS="pg_trgm cube hstore"
 
+ifeq "@BUILDING_BDR@" "1"
+REGRESSCONFIG=bdr_regress_bdr.conf
+else
+REGRESSCONFIG=bdr_regress_udr.conf
+endif
+
 regresscheck: all install
 	[ -e pg_hba.conf ] || ln -s $(bdr_abs_srcdir)/pg_hba.conf .
 
 	mkdir -p results/ddl
 	mkdir -p results/dml
 
-	./run_tests --config $(bdr_abs_srcdir)/bdr_regress.conf \
+	./run_tests --config $(bdr_abs_srcdir)/$(REGRESSCONFIG) \
 		--testbinary src/test/regress/pg_regress \
 		$(REGRESSCHECKS)
 

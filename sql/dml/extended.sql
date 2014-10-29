@@ -1,74 +1,80 @@
 -- complex datatype handling
-CREATE TABLE tst_one_array (
-    a INTEGER PRIMARY KEY,
-    b INTEGER[]
-    );
-CREATE TABLE tst_arrays (
-    a INTEGER[] PRIMARY KEY,
-    b TEXT[],
-    c FLOAT[],
-    d INTERVAL[]
-    );
+\i sql/setup.sql
 
-CREATE TYPE tst_enum_t AS ENUM ('a', 'b', 'c', 'd', 'e');
-CREATE TABLE tst_one_enum (
-    a INTEGER PRIMARY KEY,
-    b tst_enum_t
-    );
-CREATE TABLE tst_enums (
-    a tst_enum_t PRIMARY KEY,
-    b tst_enum_t[]
-    );
+\c :writedb1
 
-CREATE TYPE tst_comp_basic_t AS (a FLOAT, b TEXT, c INTEGER);
-CREATE TYPE tst_comp_enum_t AS (a FLOAT, b tst_enum_t, c INTEGER);
-CREATE TYPE tst_comp_enum_array_t AS (a FLOAT, b tst_enum_t[], c INTEGER);
-CREATE TABLE tst_one_comp (
-    a INTEGER PRIMARY KEY,
-    b tst_comp_basic_t
-    );
-CREATE TABLE tst_comps (
-    a tst_comp_basic_t PRIMARY KEY,
-    b tst_comp_basic_t[]
-    );
-CREATE TABLE tst_comp_enum (
-    a INTEGER PRIMARY KEY,
-    b tst_comp_enum_t
-    );
-CREATE TABLE tst_comp_enum_array (
-    a tst_comp_enum_t PRIMARY KEY,
-    b tst_comp_enum_t[]
-    );
-CREATE TABLE tst_comp_one_enum_array (
-    a INTEGER PRIMARY KEY,
-    b tst_comp_enum_array_t
-    );
-CREATE TABLE tst_comp_enum_what (
-    a tst_comp_enum_array_t PRIMARY KEY,
-    b tst_comp_enum_array_t[]
-    );
+SELECT bdr.bdr_replicate_ddl_command($$
+	CREATE TABLE public.tst_one_array (
+		a INTEGER PRIMARY KEY,
+		b INTEGER[]
+		);
+	CREATE TABLE public.tst_arrays (
+		a INTEGER[] PRIMARY KEY,
+		b TEXT[],
+		c FLOAT[],
+		d INTERVAL[]
+		);
 
-CREATE TYPE tst_comp_mix_t AS (
-    a tst_comp_basic_t,
-    b tst_comp_basic_t[],
-    c tst_enum_t,
-    d tst_enum_t[]
-    );
-CREATE TABLE tst_comp_mix_array (
-    a tst_comp_mix_t PRIMARY KEY,
-    b tst_comp_mix_t[]
-    );
-CREATE TABLE tst_range (
-    a INTEGER PRIMARY KEY,
-    b int4range
-);
-CREATE TABLE tst_range_array (
-    a INTEGER PRIMARY KEY,
-    b TSTZRANGE,
-    c int8range[]
-);
+	CREATE TYPE public.tst_enum_t AS ENUM ('a', 'b', 'c', 'd', 'e');
+	CREATE TABLE public.tst_one_enum (
+		a INTEGER PRIMARY KEY,
+		b public.tst_enum_t
+		);
+	CREATE TABLE public.tst_enums (
+		a public.tst_enum_t PRIMARY KEY,
+		b public.tst_enum_t[]
+		);
 
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+	CREATE TYPE public.tst_comp_basic_t AS (a FLOAT, b TEXT, c INTEGER);
+	CREATE TYPE public.tst_comp_enum_t AS (a FLOAT, b public.tst_enum_t, c INTEGER);
+	CREATE TYPE public.tst_comp_enum_array_t AS (a FLOAT, b public.tst_enum_t[], c INTEGER);
+	CREATE TABLE public.tst_one_comp (
+		a INTEGER PRIMARY KEY,
+		b public.tst_comp_basic_t
+		);
+	CREATE TABLE public.tst_comps (
+		a public.tst_comp_basic_t PRIMARY KEY,
+		b public.tst_comp_basic_t[]
+		);
+	CREATE TABLE public.tst_comp_enum (
+		a INTEGER PRIMARY KEY,
+		b public.tst_comp_enum_t
+		);
+	CREATE TABLE public.tst_comp_enum_array (
+		a public.tst_comp_enum_t PRIMARY KEY,
+		b public.tst_comp_enum_t[]
+		);
+	CREATE TABLE public.tst_comp_one_enum_array (
+		a INTEGER PRIMARY KEY,
+		b public.tst_comp_enum_array_t
+		);
+	CREATE TABLE public.tst_comp_enum_what (
+		a public.tst_comp_enum_array_t PRIMARY KEY,
+		b public.tst_comp_enum_array_t[]
+		);
+
+	CREATE TYPE public.tst_comp_mix_t AS (
+		a public.tst_comp_basic_t,
+		b public.tst_comp_basic_t[],
+		c public.tst_enum_t,
+		d public.tst_enum_t[]
+		);
+	CREATE TABLE public.tst_comp_mix_array (
+		a public.tst_comp_mix_t PRIMARY KEY,
+		b public.tst_comp_mix_t[]
+		);
+	CREATE TABLE public.tst_range (
+		a INTEGER PRIMARY KEY,
+		b int4range
+	);
+	CREATE TABLE public.tst_range_array (
+		a INTEGER PRIMARY KEY,
+		b TSTZRANGE,
+		c int8range[]
+	);
+$$);
+
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
 
 -- test_tbl_one_array_col
 INSERT INTO tst_one_array (a, b) VALUES
@@ -187,8 +193,8 @@ INSERT INTO tst_range_array (a, b, c) VALUES
     (4, tstzrange('Mon Aug 04 00:00:00 2014 CEST'::timestamptz - interval '4 days', 'Mon Aug 04 00:00:00 2014 CEST'::timestamptz), '{"[4,5]", NULL, "[40,50]"}'),
     (5, NULL, NULL);
 
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c postgres
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb2
 SELECT a, b FROM tst_one_array ORDER BY a;
 SELECT a, b, c, d FROM tst_arrays ORDER BY a;
 SELECT a, b FROM tst_one_enum ORDER BY a;
@@ -204,296 +210,358 @@ SELECT a, b FROM tst_range ORDER BY a;
 SELECT a, b, c FROM tst_range_array ORDER BY a;
 
 -- test_tbl_one_array_col
+\c :writedb2
 UPDATE tst_one_array SET b = '{4, 5, 6}' WHERE a = 1;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c postgres
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb1
 SELECT a, b FROM tst_one_array ORDER BY a;
+\c :writedb1
 UPDATE tst_one_array SET b = '{4, 5, 6, 1}' WHERE a > 3;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c regression
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb2
 SELECT a, b FROM tst_one_array ORDER BY a;
 
+\c :writedb2
 DELETE FROM tst_one_array WHERE a = 1;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c postgres
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb1
 SELECT a, b FROM tst_one_array ORDER BY a;
+\c :writedb1
 DELETE FROM tst_one_array WHERE b = '{2, 3, 1}';
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c regression
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb2
 SELECT a, b FROM tst_one_array ORDER BY a;
+\c :writedb2
 DELETE FROM tst_one_array WHERE 1 = ANY(b);
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c postgres
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb1
 SELECT a, b FROM tst_one_array ORDER BY a;
 
 -- test_tbl_arrays
+\c :writedb1
 UPDATE tst_arrays SET b = '{"1a", "2b", "3c"}', c = '{1.0, 2.0, 3.0}', d = '{"1 day 1 second", "2 days 2 seconds", "3 days 3 second"}' WHERE a = '{1, 2, 3}';
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c regression
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb2
 SELECT a, b, c, d FROM tst_arrays ORDER BY a;
+\c :writedb2
 UPDATE tst_arrays SET b = '{"c", "d", "e"}', c = '{3.0, 4.0, 5.0}', d = '{"3 day 1 second", "4 days 2 seconds", "5 days 3 second"}' WHERE a[1] > 3;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c postgres
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb1
 SELECT a, b, c, d FROM tst_arrays ORDER BY a;
 
+\c :writedb1
 DELETE FROM tst_arrays WHERE a = '{1, 2, 3}';
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c regression
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb2
 SELECT a, b, c, d FROM tst_arrays ORDER BY a;
+\c :writedb2
 DELETE FROM tst_arrays WHERE a[1] = 2;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c postgres
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb1
 SELECT a, b, c, d FROM tst_arrays ORDER BY a;
+\c :writedb1
 DELETE FROM tst_arrays WHERE b[1] = 'c';
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c regression
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb2
 SELECT a, b, c, d FROM tst_arrays ORDER BY a;
 
 -- test_tbl_single_enum
+\c :writedb2
 UPDATE tst_one_enum SET b = 'c' WHERE a = 1;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c postgres
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb1
 SELECT a, b FROM tst_one_enum ORDER BY a;
+\c :writedb1
 UPDATE tst_one_enum SET b = NULL WHERE a > 3;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c regression
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb2
 SELECT a, b FROM tst_one_enum ORDER BY a;
 
+\c :writedb2
 DELETE FROM tst_one_enum WHERE a = 1;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c postgres
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb1
 SELECT a, b FROM tst_one_enum ORDER BY a;
+\c :writedb1
 DELETE FROM tst_one_enum WHERE b = 'b';
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c regression
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb2
 SELECT a, b FROM tst_one_enum ORDER BY a;
 
 -- test_tbl_enums
+\c :writedb2
 UPDATE tst_enums SET b = '{e, NULL}' WHERE a = 'a';
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c postgres
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb1
 SELECT a, b FROM tst_enums;
+\c :writedb1
 UPDATE tst_enums SET b = '{e, d}' WHERE a > 'c';
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c regression
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb2
 SELECT a, b FROM tst_enums;
 
+\c :writedb2
 DELETE FROM tst_enums WHERE a = 'a';
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c postgres
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb1
 SELECT a, b FROM tst_enums;
+\c :writedb1
 DELETE FROM tst_enums WHERE 'c' = ANY(b);
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c regression
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb2
 SELECT a, b FROM tst_enums;
+\c :writedb2
 DELETE FROM tst_enums WHERE b[1] = 'b';
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c postgres
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb1
 SELECT a, b FROM tst_enums;
 
 -- test_tbl_single_composites
+\c :writedb1
 UPDATE tst_one_comp SET b = ROW(1.0, 'A', 1) WHERE a = 1;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c regression
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb2
 SELECT a, b from tst_one_comp ORDER BY a;
+\c :writedb2
 UPDATE tst_one_comp SET b = ROW(NULL, 'x', -1) WHERE a > 3;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c postgres
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb1
 SELECT a, b from tst_one_comp ORDER BY a;
 
+\c :writedb1
 DELETE FROM tst_one_comp WHERE a = 1;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c regression
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb2
 SELECT a, b from tst_one_comp ORDER BY a;
+\c :writedb2
 DELETE FROM tst_one_comp WHERE (b).a = 2.0;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c postgres
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb1
 SELECT a, b from tst_one_comp ORDER BY a;
 
 -- test_tbl_composites
+\c :writedb1
 UPDATE tst_comps SET b = ARRAY[ROW(9, 'x', -1)::tst_comp_basic_t] WHERE (a).a = 1.0;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c regression
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb2
 SELECT a, b from tst_comps ORDER BY a;
+\c :writedb2
 UPDATE tst_comps SET b = ARRAY[NULL, ROW(9, 'x', NULL)::tst_comp_basic_t] WHERE (a).a > 3.9;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c postgres
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb1
 SELECT a, b from tst_comps ORDER BY a;
 
+\c :writedb1
 DELETE FROM tst_comps WHERE (a).b = 'a';
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c regression
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb2
 SELECT a, b FROM tst_comps ORDER BY a;
+\c :writedb2
 DELETE FROM tst_comps WHERE (b[1]).a = 2.0;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c postgres
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb1
 SELECT a, b FROM tst_comps ORDER BY a;
+\c :writedb1
 DELETE FROM tst_comps WHERE ROW(3, 'c', 3)::tst_comp_basic_t = ANY(b);
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c regression
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb2
 SELECT a, b FROM tst_comps ORDER BY a;
 
 -- test_tbl_composite_with_enums
+\c :writedb2
 UPDATE tst_comp_enum SET b = ROW(1.0, NULL, NULL) WHERE a = 1;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c regression
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb1
 SELECT a, b from tst_comp_enum ORDER BY a;
+\c :writedb1
 UPDATE tst_comp_enum SET b = ROW(4.0, 'd', 44) WHERE a > 3;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c postgres
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb2
 SELECT a, b from tst_comp_enum ORDER BY a;
 
+\c :writedb2
 DELETE FROM tst_comp_enum WHERE a = 1;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c regression
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb1
 SELECT a, b FROM tst_comp_enum ORDER BY a;
+\c :writedb1
 DELETE FROM tst_comp_enum WHERE (b).a = 2.0;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c postgres
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb2
 SELECT a, b FROM tst_comp_enum ORDER BY a;
 
 -- test_tbl_composite_with_enums_array
+\c :writedb2
 UPDATE tst_comp_enum_array SET b = ARRAY[NULL, ROW(3, 'd', 3)::tst_comp_enum_t] WHERE a = ROW(1.0, 'a', 1)::tst_comp_enum_t;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c regression
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb1
 SELECT a, b from tst_comp_enum_array ORDER BY a;
+\c :writedb1
 UPDATE tst_comp_enum_array SET b = ARRAY[ROW(1, 'a', 1)::tst_comp_enum_t, ROW(2, 'b', 2)::tst_comp_enum_t] WHERE (a).a > 3;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c postgres
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb2
 SELECT a, b from tst_comp_enum_array ORDER BY a;
 
+\c :writedb2
 DELETE FROM tst_comp_enum_array WHERE a = ROW(1.0, 'a', 1)::tst_comp_enum_t;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c regression
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb1
 SELECT a, b FROM tst_comp_enum_array ORDER BY a;
+\c :writedb1
 DELETE FROM tst_comp_enum_array WHERE (b[1]).b = 'b';
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c postgres
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb2
 SELECT a, b FROM tst_comp_enum_array ORDER BY a;
+\c :writedb2
 DELETE FROM tst_comp_enum_array WHERE ROW(3, 'c', 3)::tst_comp_enum_t = ANY(b);
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c regression
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb1
 SELECT a, b FROM tst_comp_enum_array ORDER BY a;
 
 -- test_tbl_composite_with_single_enums_array_in_composite
+\c :writedb1
 UPDATE tst_comp_one_enum_array SET b = ROW(1.0, '{a, e, c}', NULL) WHERE a = 1;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c postgres
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb2
 SELECT a, b from tst_comp_one_enum_array ORDER BY a;
+\c :writedb2
 UPDATE tst_comp_one_enum_array SET b = ROW(4.0, '{c, b, d}', 4) WHERE a > 3;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c regression
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb1
 SELECT a, b from tst_comp_one_enum_array ORDER BY a;
 
+\c :writedb1
 DELETE FROM tst_comp_one_enum_array WHERE a = 1;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c postgres
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb2
 SELECT a, b FROM tst_comp_one_enum_array ORDER BY a;
+\c :writedb2
 DELETE FROM tst_comp_one_enum_array WHERE (b).c = 2;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c regression
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb1
 SELECT a, b FROM tst_comp_one_enum_array ORDER BY a;
+\c :writedb1
 DELETE FROM tst_comp_one_enum_array WHERE 'a' = ANY((b).b);
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c postgres
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb2
 SELECT a, b FROM tst_comp_one_enum_array ORDER BY a;
 
 -- test_tbl_composite_with_enums_array_in_composite
+\c :writedb2
 UPDATE tst_comp_enum_what SET b = ARRAY[NULL, ROW(1, '{a, b, c}', 1)::tst_comp_enum_array_t, ROW(NULL, '{a, e, c}', 2)::tst_comp_enum_array_t] WHERE (a).a = 1;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c regression
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb1
 SELECT a, b from tst_comp_enum_what ORDER BY a;
+\c :writedb1
 UPDATE tst_comp_enum_what SET b = ARRAY[ROW(5, '{a, b, c}', 5)::tst_comp_enum_array_t] WHERE (a).a > 3;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c postgres
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb2
 SELECT a, b from tst_comp_enum_what ORDER BY a;
 
+\c :writedb2
 DELETE FROM tst_comp_enum_what WHERE (a).a = 1;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c regression
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb1
 SELECT a, b FROM tst_comp_enum_what ORDER BY a;
+\c :writedb1
 DELETE FROM tst_comp_enum_what WHERE (b[1]).a = 2;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c postgres
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb2
 SELECT a, b FROM tst_comp_enum_what ORDER BY a;
+\c :writedb2
 DELETE FROM tst_comp_enum_what WHERE (b[1]).b = '{c, a, b}';
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c regression
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb1
 SELECT a, b FROM tst_comp_enum_what ORDER BY a;
 
 -- test_tbl_mixed_composites
+\c :writedb1
 UPDATE tst_comp_mix_array SET b[2] = NULL WHERE ((a).a).a = 1;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c postgres
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb2
 SELECT a, b FROM tst_comp_mix_array ORDER BY a;
 
+\c :writedb2
 DELETE FROM tst_comp_mix_array WHERE ((a).a).a = 1;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c regression
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb1
 SELECT a, b FROM tst_comp_mix_array ORDER BY a;
 
 -- test_tbl_range
+\c :writedb1
 UPDATE tst_range SET b = '[100, 1000]' WHERE a = 1;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c postgres
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb2
 SELECT a, b FROM tst_range ORDER BY a;
+\c :writedb2
 UPDATE tst_range SET b = '(1, 90)' WHERE a > 3;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c regression
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb1
 SELECT a, b FROM tst_range ORDER BY a;
 
+\c :writedb1
 DELETE FROM tst_range WHERE a = 1;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c postgres
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb2
 SELECT a, b FROM tst_range ORDER BY a;
+\c :writedb2
 DELETE FROM tst_range WHERE b = '[2, 20]';
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c regression
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb1
 SELECT a, b FROM tst_range ORDER BY a;
+\c :writedb1
 DELETE FROM tst_range WHERE '[10,20]' && b;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c postgres
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb2
 SELECT a, b FROM tst_range ORDER BY a;
 
 -- test_tbl_range_array
+\c :writedb2
 UPDATE tst_range_array SET c = '{"[100, 1000]"}' WHERE a = 1;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c regression
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb1
 SELECT a, b, c FROM tst_range_array ORDER BY a;
+\c :writedb1
 UPDATE tst_range_array SET b = tstzrange('Mon Aug 04 00:00:00 2014 CEST'::timestamptz, 'infinity'), c = '{NULL, "[11,9999999]"}' WHERE a > 3;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c postgres
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb2
 SELECT a, b, c FROM tst_range_array ORDER BY a;
 
+\c :writedb2
 DELETE FROM tst_range_array WHERE a = 1;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c regression
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb1
 SELECT a, b, c FROM tst_range_array ORDER BY a;
+\c :writedb1
 DELETE FROM tst_range_array WHERE b = tstzrange('Mon Aug 04 00:00:00 2014 CEST'::timestamptz - interval '2 days', 'Mon Aug 04 00:00:00 2014 CEST'::timestamptz);
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c postgres
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb2
 SELECT a, b, c FROM tst_range_array ORDER BY a;
+\c :writedb2
 DELETE FROM tst_range_array WHERE tstzrange('Mon Aug 04 00:00:00 2014 CEST'::timestamptz, 'Mon Aug 05 00:00:00 2014 CEST'::timestamptz) && b;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c regression
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb1
 SELECT a, b, c FROM tst_range_array ORDER BY a;
 
-DROP TABLE tst_one_array;
-DROP TABLE tst_arrays;
-DROP TABLE tst_one_enum;
-DROP TABLE tst_enums;
-DROP TABLE tst_one_comp;
-DROP TABLE tst_comps;
-DROP TABLE tst_comp_enum;
-DROP TABLE tst_comp_enum_array;
-DROP TABLE tst_comp_one_enum_array;
-DROP TABLE tst_comp_enum_what;
-DROP TABLE tst_comp_mix_array;
-DROP TABLE tst_range;
-DROP TABLE tst_range_array;
+\c :writedb1
+SELECT bdr.bdr_replicate_ddl_command($$
+	DROP TABLE public.tst_one_array;
+	DROP TABLE public.tst_arrays;
+	DROP TABLE public.tst_one_enum;
+	DROP TABLE public.tst_enums;
+	DROP TABLE public.tst_one_comp;
+	DROP TABLE public.tst_comps;
+	DROP TABLE public.tst_comp_enum;
+	DROP TABLE public.tst_comp_enum_array;
+	DROP TABLE public.tst_comp_one_enum_array;
+	DROP TABLE public.tst_comp_enum_what;
+	DROP TABLE public.tst_comp_mix_array;
+	DROP TABLE public.tst_range;
+	DROP TABLE public.tst_range_array;
 
-DROP TYPE tst_comp_mix_t;
-DROP TYPE tst_comp_enum_array_t;
-DROP TYPE tst_comp_enum_t;
-DROP TYPE tst_comp_basic_t;
-DROP TYPE tst_enum_t;
+	DROP TYPE public.tst_comp_mix_t;
+	DROP TYPE public.tst_comp_enum_array_t;
+	DROP TYPE public.tst_comp_enum_t;
+	DROP TYPE public.tst_comp_basic_t;
+	DROP TYPE public.tst_enum_t;
+$$);

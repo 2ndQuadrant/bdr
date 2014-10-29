@@ -1,13 +1,20 @@
-\c postgres
-CREATE TABLE bdr_missing_pk(a serial);
-CREATE VIEW bdr_missing_pk_view AS SELECT * FROM bdr_missing_pk;
+-- test sanity checks for tables without pk
+\i sql/setup.sql
+
+\c :writedb1
+
+SELECT bdr.bdr_replicate_ddl_command($$
+	CREATE TABLE public.bdr_missing_pk(a serial);
+	CREATE VIEW public.bdr_missing_pk_view AS SELECT * FROM public.bdr_missing_pk;
+$$);
 
 INSERT INTO bdr_missing_pk SELECT generate_series(1, 10);
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c regression
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb2
 SELECT * FROM bdr_missing_pk;
 
--- these should fails
+-- these should fail
+\c :writedb2
 UPDATE bdr_missing_pk SET a = 1;
 DELETE FROM bdr_missing_pk WHERE a = 1;
 
@@ -32,8 +39,9 @@ WITH foo AS (
 
 -- success again
 TRUNCATE bdr_missing_pk;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c postgres
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+\c :readdb1
 SELECT * FROM bdr_missing_pk;
 
-DROP TABLE bdr_missing_pk CASCADE;
+\c :writedb1
+SELECT bdr.bdr_replicate_ddl_command($$DROP TABLE public.bdr_missing_pk CASCADE;$$);

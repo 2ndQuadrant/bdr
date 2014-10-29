@@ -1,10 +1,23 @@
 -- basic builtin datatypes
-CREATE TABLE basic_dml (
-    id serial primary key,
-    other integer,
-    data text,
-    something interval
-);
+\i sql/setup.sql
+select
+	current_setting('bdrtest.readdb1') as readdb1, current_setting('bdrtest.readdb2') as readdb2,
+	current_setting('bdrtest.writedb1') as writedb1 , current_setting('bdrtest.writedb2') as writedb2
+\gset
+\c :writedb1
+SELECT bdr.bdr_replicate_ddl_command($$
+	CREATE TABLE public.basic_dml (
+		id serial primary key,
+		other integer,
+		data text,
+		something interval
+	);
+$$);
+ bdr_replicate_ddl_command 
+---------------------------
+ 
+(1 row)
+
 -- check basic insert replication
 INSERT INTO basic_dml(other, data, something)
 VALUES (5, 'foo', '1 minute'::interval),
@@ -12,14 +25,13 @@ VALUES (5, 'foo', '1 minute'::interval),
        (3, 'baz', '2 years 1 hour'::interval),
        (2, 'qux', '8 months 2 days'::interval),
        (1, NULL, NULL);
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
  pg_xlog_wait_remote_apply 
 ---------------------------
  
- 
-(2 rows)
+(1 row)
 
-\c postgres
+\c :readdb2
 SELECT id, other, data, something FROM basic_dml ORDER BY id;
  id | other | data |    something     
 ----+-------+------+------------------
@@ -31,15 +43,15 @@ SELECT id, other, data, something FROM basic_dml ORDER BY id;
 (5 rows)
 
 -- update one row
+\c :writedb2
 UPDATE basic_dml SET other = '4', data = NULL, something = '3 days'::interval WHERE id = 4;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
  pg_xlog_wait_remote_apply 
 ---------------------------
  
- 
-(2 rows)
+(1 row)
 
-\c regression
+\c :readdb1
 SELECT id, other, data, something FROM basic_dml ORDER BY id;
  id | other | data |    something     
 ----+-------+------+------------------
@@ -51,15 +63,15 @@ SELECT id, other, data, something FROM basic_dml ORDER BY id;
 (5 rows)
 
 -- update multiple rows
+\c :writedb1
 UPDATE basic_dml SET other = id, data = data || id::text;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
  pg_xlog_wait_remote_apply 
 ---------------------------
  
- 
-(2 rows)
+(1 row)
 
-\c postgres
+\c :readdb2
 SELECT id, other, data, something FROM basic_dml ORDER BY id;
  id | other | data |    something     
 ----+-------+------+------------------
@@ -70,36 +82,16 @@ SELECT id, other, data, something FROM basic_dml ORDER BY id;
   5 |     5 |      | 
 (5 rows)
 
--- update non-conflicting rows on both sides without wait
+\c :writedb2
 UPDATE basic_dml SET other = id, something = something - '10 seconds'::interval WHERE id < 3;
-\c regression
 UPDATE basic_dml SET other = id, something = something + '10 seconds'::interval WHERE id > 3;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
  pg_xlog_wait_remote_apply 
 ---------------------------
  
- 
-(2 rows)
+(1 row)
 
-\c postgres
-SELECT id, other, data, something FROM basic_dml ORDER BY id;
- id | other | data |     something      
-----+-------+------+--------------------
-  1 |     1 | foo1 | @ 50 secs
-  2 |     2 | bar2 | @ 84 days -10 secs
-  3 |     3 | baz3 | @ 2 years 1 hour
-  4 |     4 |      | @ 3 days 10 secs
-  5 |     5 |      | 
-(5 rows)
-
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
- pg_xlog_wait_remote_apply 
----------------------------
- 
- 
-(2 rows)
-
-\c regression
+\c :readdb1
 SELECT id, other, data, something FROM basic_dml ORDER BY id;
  id | other | data |     something      
 ----+-------+------+--------------------
@@ -111,15 +103,15 @@ SELECT id, other, data, something FROM basic_dml ORDER BY id;
 (5 rows)
 
 -- delete one row
+\c :writedb1
 DELETE FROM basic_dml WHERE id = 2;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
  pg_xlog_wait_remote_apply 
 ---------------------------
  
- 
-(2 rows)
+(1 row)
 
-\c postgres
+\c :readdb2
 SELECT id, other, data, something FROM basic_dml ORDER BY id;
  id | other | data |    something     
 ----+-------+------+------------------
@@ -130,15 +122,15 @@ SELECT id, other, data, something FROM basic_dml ORDER BY id;
 (4 rows)
 
 -- delete multiple rows
+\c :writedb2
 DELETE FROM basic_dml WHERE id < 4;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
  pg_xlog_wait_remote_apply 
 ---------------------------
  
- 
-(2 rows)
+(1 row)
 
-\c regression
+\c :readdb1
 SELECT id, other, data, something FROM basic_dml ORDER BY id;
  id | other | data |    something     
 ----+-------+------+------------------
@@ -147,30 +139,30 @@ SELECT id, other, data, something FROM basic_dml ORDER BY id;
 (2 rows)
 
 -- truncate
+\c :writedb1
 TRUNCATE basic_dml;
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
  pg_xlog_wait_remote_apply 
 ---------------------------
  
- 
-(2 rows)
+(1 row)
 
-\c postgres
+\c :readdb2
 SELECT id, other, data, something FROM basic_dml ORDER BY id;
  id | other | data | something 
 ----+-------+------+-----------
 (0 rows)
 
 -- copy
+\c :writedb2
 \COPY basic_dml FROM STDIN WITH CSV
-SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
  pg_xlog_wait_remote_apply 
 ---------------------------
  
- 
-(2 rows)
+(1 row)
 
-\c regression
+\c :readdb1
 SELECT id, other, data, something FROM basic_dml ORDER BY id;
   id  | other | data | something 
 ------+-------+------+-----------
@@ -180,4 +172,10 @@ SELECT id, other, data, something FROM basic_dml ORDER BY id;
  9003 |     4 | ddd  | @ 4 days
 (4 rows)
 
-DROP TABLE basic_dml;
+\c :writedb1
+SELECT bdr.bdr_replicate_ddl_command($$DROP TABLE public.basic_dml;$$);
+ bdr_replicate_ddl_command 
+---------------------------
+ 
+(1 row)
+
