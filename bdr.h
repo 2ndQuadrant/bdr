@@ -115,6 +115,7 @@ typedef struct BDRRelation
 
 	/* ordered list of replication sets of length num_* */
 	char	      **replication_sets;
+	/* -1 for no configured set */
 	int		num_replication_sets;
 } BDRRelation;
 

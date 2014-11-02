@@ -190,6 +190,9 @@ bdr_parse_relation_options(const char *label, BDRRelation *rel)
 				elog(ERROR, "unexpected key: %s",
 					 pnstrdup(v.val.string.val, v.val.string.len));
 			parsing_sets = true;
+
+			if (rel != NULL)
+				rel->num_replication_sets = 0;
 		}
 		else if (r == WJB_BEGIN_ARRAY || r == WJB_BEGIN_OBJECT)
 		{
@@ -274,6 +277,7 @@ bdr_heap_open(Oid reloid, LOCKMODE lockmode)
 
 	entry->reloid = reloid;
 	entry->rel = rel;
+	entry->num_replication_sets = -1;
 
 	object.classId = RelationRelationId;
 	object.objectId = reloid;

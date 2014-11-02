@@ -78,6 +78,7 @@ typedef struct
 
 	int num_replication_sets;
 	char **replication_sets;
+	bool replication_sets_include_default;
 } BdrOutputData;
 
 /* These must be available to pg_dlsym() */
@@ -333,6 +334,7 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 	data->bdr_schema_oid = InvalidOid;
 
 	data->num_replication_sets = -1;
+	data->replication_sets_include_default = false;
 
 	/* parse options passed in by the client */
 
@@ -379,6 +381,8 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 										  &data->replication_sets,
 										  &data->num_replication_sets);
 
+			Assert(data->num_replication_sets >= 0);
+
 			/* validate elements */
 			for (i = 0; i < data->num_replication_sets; i++)
 				bdr_validate_replication_set_name(data->replication_sets[i],
@@ -387,6 +391,28 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 			/* make it bsearch()able */
 			qsort(data->replication_sets, data->num_replication_sets,
 				  sizeof(char *), pg_qsort_strcmp);
+
+			/* handle special case/implicit sets */
+			for (i = 0; i < data->num_replication_sets; i++)
+			{
+				/* no need to perform any checks */
+				if (strcmp(data->replication_sets[i], "all") == 0)
+				{
+					data->num_replication_sets = -1;
+					break;
+				}
+
+				/*
+				 * Simpler handling, because we don't need to search the list
+				 * later.
+				 */
+				if (strcmp(data->replication_sets[i], "default") == 0)
+				{
+					data->replication_sets_include_default = true;
+					continue;
+				}
+			}
+
 		}
 		else
 		{
@@ -548,12 +574,19 @@ should_forward_change(LogicalDecodingContext *ctx, BdrOutputData *data,
 		return true;
 
 	/* no explicit configuration */
-	if (data->num_replication_sets == -1 ||
-		r->num_replication_sets == -1)
+	if (data->num_replication_sets == -1)
 	{
 		return true;
 	}
 
+	/*
+	 * Handle the 'default' set.
+	 */
+	if (data->replication_sets_include_default &&
+		r->num_replication_sets == -1)
+	{
+		return true;
+	}
 
 	/*
 	 * Compare the two ordered list of replication sets and find overlapping
