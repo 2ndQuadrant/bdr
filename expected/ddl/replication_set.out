@@ -1,3 +1,4 @@
+/* First test whether a table's replication set can be properly manipulated */
 \c postgres
 CREATE TABLE switcheroo(id serial primary key, data text);
 -- show initial replication sets
@@ -122,3 +123,90 @@ CONTEXT:  SQL statement "SECURITY LABEL FOR bdr ON TABLE switcheroo IS '{ "sets"
 PL/pgSQL function bdr.table_set_replication_sets(regclass,text[]) line 30 at EXECUTE statement
 \c postgres
 DROP TABLE switcheroo;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+/*
+ * Now test whether sets properly control the replication of data.
+ *
+ * node1: dbname regression, sets: default, important, for-node-1
+ * node2: dbname postgres, sets: default, important, for-node-2
+ */
+\c regression
+CREATE TABLE settest_1(data text primary key);
+INSERT INTO settest_1(data) VALUES ('should-replicate-via-default');
+SELECT bdr.table_set_replication_sets('settest_1', '{}');
+ table_set_replication_sets 
+----------------------------
+ 
+(1 row)
+
+INSERT INTO settest_1(data) VALUES ('should-no-replicate-no-sets');
+SELECT bdr.table_set_replication_sets('settest_1', '{unknown-set}');
+ table_set_replication_sets 
+----------------------------
+ 
+(1 row)
+
+INSERT INTO settest_1(data) VALUES ('should-no-replicate-unknown-set');
+SELECT bdr.table_set_replication_sets('settest_1', '{for-node-2}');
+ table_set_replication_sets 
+----------------------------
+ 
+(1 row)
+
+INSERT INTO settest_1(data) VALUES ('should-replicate-via-for-node-2');
+SELECT bdr.table_set_replication_sets('settest_1', '{}');
+ table_set_replication_sets 
+----------------------------
+ 
+(1 row)
+
+INSERT INTO settest_1(data) VALUES ('should-not-replicate-empty-again');
+SELECT bdr.table_set_replication_sets('settest_1', '{unknown-set,for-node-2}');
+ table_set_replication_sets 
+----------------------------
+ 
+(1 row)
+
+INSERT INTO settest_1(data) VALUES ('should-replicate-via-for-node-2-even-though-unknown');
+SELECT bdr.table_set_replication_sets('settest_1', '{unknown-set,important,for-node-2}');
+ table_set_replication_sets 
+----------------------------
+ 
+(1 row)
+
+INSERT INTO settest_1(data) VALUES ('should-replicate-via-for-node-2-and-important');
+SELECT * FROM settest_1 ORDER BY data;
+                        data                         
+-----------------------------------------------------
+ should-no-replicate-no-sets
+ should-no-replicate-unknown-set
+ should-not-replicate-empty-again
+ should-replicate-via-default
+ should-replicate-via-for-node-2
+ should-replicate-via-for-node-2-and-important
+ should-replicate-via-for-node-2-even-though-unknown
+(7 rows)
+
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\c postgres
+SELECT * FROM settest_1 ORDER BY data;
+                        data                         
+-----------------------------------------------------
+ should-replicate-via-default
+ should-replicate-via-for-node-2
+ should-replicate-via-for-node-2-and-important
+ should-replicate-via-for-node-2-even-though-unknown
+(4 rows)
+
