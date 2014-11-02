@@ -46,9 +46,9 @@ include $(PGXS)
 
 -include ${bdr_abs_srcdir}/Makefile.custom
 
-#top_srcdir := $(bdr_abs_srcdir)
-#srcdir := $(top_srcdir)
-#top_builddir=/tmp/frak
+# Ensure Makefiles are up2date
+Makefile: Makefile.in $(shell pwd)/config.status
+	./config.status $@
 
 DATE=$(shell date "+%Y-%m-%d")
 GITHASH=$(shell if [ -e .distgitrev ]; then cat .distgitrev; else GIT_DIR=$(USE_VPATH)/.git git rev-parse --short HEAD; fi)
