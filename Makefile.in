@@ -93,8 +93,11 @@ installcheck: ;
 check: regresscheck isolationcheck
 
 REGRESSCHECKS=init \
-	ddl/create ddl/alter_table ddl/extension ddl/function ddl/grant ddl/namespace ddl/sequence ddl/view \
-	dml/basic dml/contrib dml/delete_pk dml/extended dml/missing_pk dml/mixed dml/toasted
+	ddl/create ddl/alter_table ddl/extension ddl/function \
+	ddl/grant ddl/namespace ddl/replication_set ddl/sequence ddl/view \
+	\
+	dml/basic dml/contrib dml/delete_pk dml/extended \
+	dml/missing_pk dml/mixed dml/toasted
 
 
 ISOLATIONCHECKS=\

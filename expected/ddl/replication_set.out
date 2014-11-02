@@ -1,0 +1,124 @@
+\c postgres
+CREATE TABLE switcheroo(id serial primary key, data text);
+-- show initial replication sets
+SELECT * FROM bdr.table_get_replication_sets('switcheroo');
+     sets      
+---------------
+ {default,all}
+(1 row)
+
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\c regression
+SELECT * FROM bdr.table_get_replication_sets('switcheroo');
+     sets      
+---------------
+ {default,all}
+(1 row)
+
+\c postgres
+-- empty replication set (just 'all')
+SELECT bdr.table_set_replication_sets('switcheroo', '{}');
+ table_set_replication_sets 
+----------------------------
+ 
+(1 row)
+
+SELECT * FROM bdr.table_get_replication_sets('switcheroo');
+ sets  
+-------
+ {all}
+(1 row)
+
+-- configure a couple
+SELECT bdr.table_set_replication_sets('switcheroo', '{fascinating, is-it-not}');
+ table_set_replication_sets 
+----------------------------
+ 
+(1 row)
+
+SELECT * FROM bdr.table_get_replication_sets('switcheroo');
+            sets             
+-----------------------------
+ {fascinating,is-it-not,all}
+(1 row)
+
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\c regression
+SELECT * FROM bdr.table_get_replication_sets('switcheroo');
+            sets             
+-----------------------------
+ {fascinating,is-it-not,all}
+(1 row)
+
+\c postgres
+-- make sure we can reset replication sets to the default again
+-- configure a couple
+SELECT bdr.table_set_replication_sets('switcheroo', NULL);
+ table_set_replication_sets 
+----------------------------
+ 
+(1 row)
+
+SELECT * FROM bdr.table_get_replication_sets('switcheroo');
+     sets      
+---------------
+ {default,all}
+(1 row)
+
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\c regression
+SELECT * FROM bdr.table_get_replication_sets('switcheroo');
+     sets      
+---------------
+ {default,all}
+(1 row)
+
+\c postgres
+-- make sure reserved names can't be set
+SELECT bdr.table_set_replication_sets('switcheroo', '{default,blubber}');
+ERROR:  replication set name "default" is reserved
+CONTEXT:  SQL statement "SECURITY LABEL FOR bdr ON TABLE switcheroo IS '{ "sets" : ["default","blubber"] }'"
+PL/pgSQL function bdr.table_set_replication_sets(regclass,text[]) line 30 at EXECUTE statement
+SELECT bdr.table_set_replication_sets('switcheroo', '{blubber,default}');
+ERROR:  replication set name "default" is reserved
+CONTEXT:  SQL statement "SECURITY LABEL FOR bdr ON TABLE switcheroo IS '{ "sets" : ["blubber","default"] }'"
+PL/pgSQL function bdr.table_set_replication_sets(regclass,text[]) line 30 at EXECUTE statement
+SELECT bdr.table_set_replication_sets('switcheroo', '{frakbar,all}');
+ERROR:  replication set name "all" is reserved
+CONTEXT:  SQL statement "SECURITY LABEL FOR bdr ON TABLE switcheroo IS '{ "sets" : ["frakbar","all"] }'"
+PL/pgSQL function bdr.table_set_replication_sets(regclass,text[]) line 30 at EXECUTE statement
+--invalid characters
+SELECT bdr.table_set_replication_sets('switcheroo', '{///}');
+ERROR:  replication set name "///" contains invalid character
+HINT:  Replication set names may only contain letters, numbers, and the underscore character.
+CONTEXT:  SQL statement "SECURITY LABEL FOR bdr ON TABLE switcheroo IS '{ "sets" : ["///"] }'"
+PL/pgSQL function bdr.table_set_replication_sets(regclass,text[]) line 30 at EXECUTE statement
+--too short/long
+SELECT bdr.table_set_replication_sets('switcheroo', '{""}');
+ERROR:  replication set name "" is too short
+CONTEXT:  SQL statement "SECURITY LABEL FOR bdr ON TABLE switcheroo IS '{ "sets" : [""] }'"
+PL/pgSQL function bdr.table_set_replication_sets(regclass,text[]) line 30 at EXECUTE statement
+SELECT bdr.table_set_replication_sets('switcheroo', '{12345678901234567890123456789012345678901234567890123456789012345678901234567890}');
+ERROR:  replication set name "12345678901234567890123456789012345678901234567890123456789012345678901234567890" is too long
+CONTEXT:  SQL statement "SECURITY LABEL FOR bdr ON TABLE switcheroo IS '{ "sets" : ["12345678901234567890123456789012345678901234567890123456789012345678901234567890"] }'"
+PL/pgSQL function bdr.table_set_replication_sets(regclass,text[]) line 30 at EXECUTE statement
+\c postgres
+DROP TABLE switcheroo;
