@@ -3946,11 +3946,21 @@ deparse_SecLabelStmt(Oid objectId, Oid objectSubId, Node *parsetree)
 	char	   *fmt;
 	char	   *command;
 
-	fmt = psprintf("SECURITY LABEL FOR %%{provider}s ON %s %%{identity}s IS %%{label}L",
+	if (node->label)
+	{
+		fmt = psprintf("SECURITY LABEL FOR %%{provider}s ON %s %%{identity}s IS %%{label}L",
 				   stringify_objtype(node->objtype));
-	label = new_objtree_VA(fmt, 0);
+		label = new_objtree_VA(fmt, 0);
 
-	append_string_object(label, "label", node->label);
+		append_string_object(label, "label", node->label);
+	}
+	else
+	{
+		fmt = psprintf("SECURITY LABEL FOR %%{provider}s ON %s %%{identity}s IS NULL",
+				   stringify_objtype(node->objtype));
+		label = new_objtree_VA(fmt, 0);
+	}
+
 	append_string_object(label, "provider", node->provider);
 
 	addr.classId = get_objtype_catalog_oid(node->objtype);
