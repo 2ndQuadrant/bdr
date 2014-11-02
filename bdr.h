@@ -404,6 +404,9 @@ extern HeapTuple bdr_conflict_handlers_resolve(BDRRelation * rel,
 											   BdrConflictType event_type,
 											   uint64 timeframe, bool *skip);
 
+/* replication set stuff */
+void bdr_validate_replication_set_name(const char *name, bool allow_implicit);
+
 /*
  * Global to identify the type of BDR worker the current process is. Primarily
  * useful for assertions and debugging.

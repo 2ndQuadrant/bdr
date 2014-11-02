@@ -372,9 +372,19 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 			bdr_parse_bool(elem, &data->forward_changesets);
 		else if (strcmp(elem->defname, "replication_sets") == 0)
 		{
+			int i;
+
+			/* parse list */
 			bdr_parse_identifier_list_arr(elem,
 										  &data->replication_sets,
 										  &data->num_replication_sets);
+
+			/* validate elements */
+			for (i = 0; i < data->num_replication_sets; i++)
+				bdr_validate_replication_set_name(data->replication_sets[i],
+												  true);
+
+			/* make it bsearch()able */
 			qsort(data->replication_sets, data->num_replication_sets,
 				  sizeof(char *), pg_qsort_strcmp);
 		}
@@ -548,6 +558,9 @@ should_forward_change(LogicalDecodingContext *ctx, BdrOutputData *data,
 	/*
 	 * Compare the two ordered list of replication sets and find overlapping
 	 * elements.
+	 *
+	 * XXX: At some point in the future we probably want to cache this
+	 * computation in the bdr relcache entry.
 	 */
 	i = j = 0;
 	while (i < data->num_replication_sets && j < r->num_replication_sets)

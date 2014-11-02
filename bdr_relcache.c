@@ -23,6 +23,9 @@
 
 #include "utils/catcache.h"
 #include "utils/inval.h"
+#include "utils/jsonapi.h"
+#include "utils/json.h"
+#include "utils/jsonb.h"
 
 static HTAB *BDRRelcacheHash = NULL;
 
@@ -106,9 +109,54 @@ bdr_initialize_cache()
 								  (Datum) 0);
 }
 
-#include "utils/jsonapi.h"
-#include "utils/json.h"
-#include "utils/jsonb.h"
+void
+bdr_validate_replication_set_name(const char *name,
+								  bool allow_implicit)
+{
+	const char *cp;
+
+	if (strlen(name) == 0)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_NAME),
+				 errmsg("replication set name \"%s\" is too short",
+						name)));
+	}
+
+	if (strlen(name) >= NAMEDATALEN)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_NAME_TOO_LONG),
+				 errmsg("replication set name \"%s\" is too long",
+						name)));
+	}
+
+	for (cp = name; *cp; cp++)
+	{
+		if (!((*cp >= 'a' && *cp <= 'z')
+			  || (*cp >= '0' && *cp <= '9')
+			  || (*cp == '_')
+			  || (*cp == '-')))
+		{
+			ereport(ERROR,
+					(errcode(ERRCODE_INVALID_NAME),
+					 errmsg("replication set name \"%s\" contains invalid character",
+							name),
+					 errhint("Replication set names may only contain letters, numbers, and the underscore character.")));
+		}
+	}
+
+	if (!allow_implicit && (
+			strcmp(name, "default") == 0 ||
+			strcmp(name, "all") == 0
+			))
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_NAME_TOO_LONG),
+				 errmsg("replication set name \"%s\" is reserved",
+						name)));
+	}
+}
 
 void
 bdr_parse_relation_options(const char *label, BDRRelation *rel)
@@ -161,21 +209,26 @@ bdr_parse_relation_options(const char *label, BDRRelation *rel)
 		else if (parsing_sets)
 		{
 			char *setname;
+			MemoryContext oldcontext;
 
 			if (r != WJB_ELEM)
 				elog(ERROR, "unexpected element type %u", r);
 			if (level != 2)
 				elog(ERROR, "unexpected level for set %d", level);
 
+			oldcontext = MemoryContextSwitchTo(CacheMemoryContext);
+
+			setname = pnstrdup(v.val.string.val, v.val.string.len);
+			bdr_validate_replication_set_name(setname, false);
+
 			if (rel != NULL)
 			{
-				MemoryContext oldcontext;
-
-				oldcontext = MemoryContextSwitchTo(CacheMemoryContext);
-				setname = pnstrdup(v.val.string.val, v.val.string.len);
 				rel->replication_sets[rel->num_replication_sets++] = setname;
-				MemoryContextSwitchTo(oldcontext);
 			}
+			else
+				pfree(setname);
+
+			MemoryContextSwitchTo(oldcontext);
 		}
 		else
 			elog(ERROR, "unexpected content: %u at level %d", r, level);
