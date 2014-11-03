@@ -119,6 +119,11 @@ typedef struct BDRRelation
 	char	  **replication_sets;
 	/* -1 for no configured set */
 	int			num_replication_sets;
+
+	bool		computed_repl_valid;
+	bool		computed_repl_insert;
+	bool		computed_repl_update;
+	bool		computed_repl_delete;
 } BDRRelation;
 
 typedef struct BDRTupleData
@@ -392,6 +397,10 @@ bdr_establish_connection_and_slot(BdrConnectionConfig *cfg,
 /* use instead of heap_open()/heap_close() */
 extern BDRRelation *bdr_heap_open(Oid reloid, LOCKMODE lockmode);
 extern void bdr_heap_close(BDRRelation * rel, LOCKMODE lockmode);
+extern void bdr_heap_compute_replication_settings(
+	BDRRelation *rel,
+	int			num_replication_sets,
+	char	  **replication_sets);
 
 extern void bdr_parse_relation_options(const char *label, BDRRelation *rel);
 extern void bdr_parse_database_options(const char *label);

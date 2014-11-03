@@ -298,3 +298,85 @@ bdr_heap_close(BDRRelation * rel, LOCKMODE lockmode)
 	heap_close(rel->rel, lockmode);
 	rel->rel = NULL;
 }
+
+
+static bool
+relation_in_replication_set(BDRRelation *r, const char *setname)
+{
+	/* "all" set contains, surprise, all relations */
+	if (strcmp(setname, "all") == 0)
+		return true;
+
+	/* "default" set contains all relations without a replication set configuration */
+	if (strcmp(setname, "default") == 0 && r->num_replication_sets == -1)
+		return true;
+
+	/* if no set is configured, it's not in there */
+	if (r->num_replication_sets <= 0)
+		return false;
+
+	/* look whether the relation is the named set */
+	if (bsearch(&setname,
+				r->replication_sets, r->num_replication_sets, sizeof(char *),
+				pg_qsort_strcmp))
+		return true;
+
+	return false;
+}
+
+/*
+ * Compute whether modifications to this relation should be replicated or not
+ * and cache the result in the relation descriptor.
+ *
+ * NB: This can only sensibly used from inside logical decoding as we require
+ * a constant set of 'to be replicated' sets to be passed in - which happens
+ * to be what we need for logical decoding. As there really isn't another need
+ * for this functionality so far...
+ */
+void
+bdr_heap_compute_replication_settings(BDRRelation *r,
+									  int		   conf_num_replication_sets,
+									  char		 **conf_replication_sets)
+{
+	int i;
+
+	Assert(!r->computed_repl_valid);
+
+	/* Implicit "replicate everything" configuration */
+	if (conf_num_replication_sets == -1)
+	{
+		r->computed_repl_insert = true;
+		r->computed_repl_update = true;
+		r->computed_repl_delete = true;
+
+		r->computed_repl_valid = true;
+		return;
+	}
+
+	/*
+	 * Build the union of all replicated actions across all configured
+	 * replication sets.
+	 */
+	for (i = 0; i < conf_num_replication_sets; i++)
+	{
+		const char* setname = conf_replication_sets[i];
+
+		if (!relation_in_replication_set(r, setname))
+			continue;
+
+		/*
+		 * In the future we'll lookup configuration for individual sets here.
+		 */
+		r->computed_repl_insert = true;
+		r->computed_repl_update = true;
+		r->computed_repl_delete = true;
+
+		/* no need to look any further, we replicate everything */
+		if (r->computed_repl_insert &&
+			r->computed_repl_update &&
+			r->computed_repl_delete)
+			break;
+	}
+
+	r->computed_repl_valid = true;
+}

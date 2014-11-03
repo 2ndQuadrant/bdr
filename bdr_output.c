@@ -78,7 +78,6 @@ typedef struct
 
 	int num_replication_sets;
 	char **replication_sets;
-	bool replication_sets_include_default;
 } BdrOutputData;
 
 /* These must be available to pg_dlsym() */
@@ -334,7 +333,6 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 	data->bdr_schema_oid = InvalidOid;
 
 	data->num_replication_sets = -1;
-	data->replication_sets_include_default = false;
 
 	/* parse options passed in by the client */
 
@@ -391,28 +389,6 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 			/* make it bsearch()able */
 			qsort(data->replication_sets, data->num_replication_sets,
 				  sizeof(char *), pg_qsort_strcmp);
-
-			/* handle special case/implicit sets */
-			for (i = 0; i < data->num_replication_sets; i++)
-			{
-				/* no need to perform any checks */
-				if (strcmp(data->replication_sets[i], "all") == 0)
-				{
-					data->num_replication_sets = -1;
-					break;
-				}
-
-				/*
-				 * Simpler handling, because we don't need to search the list
-				 * later.
-				 */
-				if (strcmp(data->replication_sets[i], "default") == 0)
-				{
-					data->replication_sets_include_default = true;
-					continue;
-				}
-			}
-
 		}
 		else
 		{
@@ -560,10 +536,8 @@ should_forward_changeset(LogicalDecodingContext *ctx, BdrOutputData *data,
 
 static inline bool
 should_forward_change(LogicalDecodingContext *ctx, BdrOutputData *data,
-					  BDRRelation *r)
+					  BDRRelation *r, enum ReorderBufferChangeType change)
 {
-	int i, j;
-
 	/* internal bdr relations that may not be replicated */
 	if(RelationGetRelid(r->rel) == data->bdr_conflict_handlers_reloid ||
 	   RelationGetRelid(r->rel) == data->bdr_locks_reloid)
@@ -573,43 +547,23 @@ should_forward_change(LogicalDecodingContext *ctx, BdrOutputData *data,
 	if (r->rel->rd_rel->relnamespace == data->bdr_schema_oid)
 		return true;
 
-	/* no explicit configuration */
-	if (data->num_replication_sets == -1)
+	if (!r->computed_repl_valid)
+		bdr_heap_compute_replication_settings(r,
+											  data->num_replication_sets,
+											  data->replication_sets);
+
+	/* Check whether the current action is configured to be replicated */
+	switch (change)
 	{
-		return true;
+		case REORDER_BUFFER_CHANGE_INSERT:
+			return r->computed_repl_insert;
+		case REORDER_BUFFER_CHANGE_UPDATE:
+			return r->computed_repl_update;
+		case REORDER_BUFFER_CHANGE_DELETE:
+			return r->computed_repl_delete;
+		default:
+			elog(ERROR, "should be unreachable");
 	}
-
-	/*
-	 * Handle the 'default' set.
-	 */
-	if (data->replication_sets_include_default &&
-		r->num_replication_sets == -1)
-	{
-		return true;
-	}
-
-	/*
-	 * Compare the two ordered list of replication sets and find overlapping
-	 * elements.
-	 *
-	 * XXX: At some point in the future we probably want to cache this
-	 * computation in the bdr relcache entry.
-	 */
-	i = j = 0;
-	while (i < data->num_replication_sets && j < r->num_replication_sets)
-	{
-		int cmp = strcmp(data->replication_sets[i],
-						 r->replication_sets[j]);
-
-		if (cmp < 0)
-			i++;
-		else if (cmp == 0)
-			return true;
-		else
-			j++;
-	}
-
-	return false;
 }
 
 /*
@@ -729,7 +683,7 @@ pg_decode_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 	if (!should_forward_changeset(ctx, data, txn))
 		return;
 
-	if (!should_forward_change(ctx, data, bdr_relation))
+	if (!should_forward_change(ctx, data, bdr_relation, change->action))
 		return;
 
 	OutputPluginPrepareWrite(ctx, true);
