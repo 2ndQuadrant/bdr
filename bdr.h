@@ -108,15 +108,17 @@ typedef struct BDRRelation
 	/* hash key */
 	Oid			reloid;
 
+	bool		valid;
+
 	Relation	rel;
 
 	BDRConflictHandler *conflict_handlers;
 	size_t		conflict_handlers_len;
 
 	/* ordered list of replication sets of length num_* */
-	char	      **replication_sets;
+	char	  **replication_sets;
 	/* -1 for no configured set */
-	int		num_replication_sets;
+	int			num_replication_sets;
 } BDRRelation;
 
 typedef struct BDRTupleData
