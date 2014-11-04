@@ -101,7 +101,9 @@ installcheck: ;
 
 check: regresscheck isolationcheck
 
-REGRESSCHECKS=init \
+REGRESSCHECKS= \
+	init \
+	upgrade \
 	ddl/create ddl/alter_table ddl/extension ddl/function \
 	ddl/grant ddl/namespace ddl/replication_set ddl/sequence ddl/view \
 	\
