@@ -5,7 +5,12 @@
 MODULE_big = bdr
 
 EXTENSION = bdr
-DATA = bdr--0.8.0.sql bdr--0.7--0.7.1.sql bdr--0.7.1--0.8.0.sql
+DATA = bdr--0.8.0.sql \
+	bdr--0.7--0.7.1.sql bdr--0.7.1--0.8.0.sql \
+	bdr--0.8.0--0.8.0.1.sql
+
+DATA_built = bdr--0.8.0.1.sql
+
 DOCS = bdr.conf.sample README.bdr
 SCRIPTS = scripts/bdr_initial_load bdr_init_copy
 
@@ -66,6 +71,9 @@ scripts/bdr_initial_load: scripts/bdr_initial_load.in
 	mkdir -p scripts
 	sed -e "s/BDR_VERSION/$(BDR_VERSION)/" -e "s/PG_VERSION/$(VERSION)/" $< > $@
 
+bdr--0.8.0.1.sql: bdr--0.8.0.sql bdr--0.8.0--0.8.0.1.sql
+	cat $^ > $@
+
 all: all-lib bdr_init_copy
 
 clean: additional-clean
@@ -84,6 +92,7 @@ additional-maintainer-clean: clean
 	rm -f config.status config.log
 	rm -f bdr_config.h.in Makefile
 	rm -f run_tests
+	rm -f bdr--0.8.0.1.sql
 	@rm -rf autom4te.cache/
 
 # Disabled because these tests require "wal_level=logical", which

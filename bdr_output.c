@@ -491,13 +491,11 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 			StartTransactionCommand();
 		}
 
-		schema_oid = get_namespace_oid("bdr", true);
-		if (schema_oid == InvalidOid)
-		{
-			bdr_maintain_schema();
-			schema_oid = get_namespace_oid("bdr", true);
-		}
-		data->bdr_schema_oid = schema_oid;
+		bdr_maintain_schema();
+
+		data->bdr_schema_oid = get_namespace_oid("bdr", true);
+		schema_oid = data->bdr_schema_oid;
+
 		if (schema_oid != InvalidOid)
 		{
 			data->bdr_conflict_handlers_reloid =
@@ -547,6 +545,13 @@ should_forward_change(LogicalDecodingContext *ctx, BdrOutputData *data,
 	if(RelationGetRelid(r->rel) == data->bdr_conflict_handlers_reloid ||
 	   RelationGetRelid(r->rel) == data->bdr_locks_reloid)
 		return false;
+
+	/*
+	 * Quite ugly, but there's no neat way right now: Flush replication set
+	 * configuration from bdr's relcache.
+	 */
+	if (RelationGetRelid(r->rel) == BdrReplicationSetConfigRelid)
+		BDRRelcacheHashInvalidateCallback(0, InvalidOid);
 
 	/* always replicate other stuff in the bdr schema */
 	if (r->rel->rd_rel->relnamespace == data->bdr_schema_oid)

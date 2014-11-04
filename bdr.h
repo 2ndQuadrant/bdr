@@ -272,6 +272,7 @@ extern Oid	BdrVotesRelid;
 extern Oid	BdrLocksRelid;
 extern Oid	BdrLocksByOwnerRelid;
 
+extern Oid  BdrReplicationSetConfigRelid;
 
 /* apply support */
 extern void bdr_process_remote_action(StringInfo s);
@@ -402,6 +403,7 @@ extern void bdr_heap_compute_replication_settings(
 	BDRRelation *rel,
 	int			num_replication_sets,
 	char	  **replication_sets);
+extern void BDRRelcacheHashInvalidateCallback(Datum arg, Oid relid);
 
 extern void bdr_parse_relation_options(const char *label, BDRRelation *rel);
 extern void bdr_parse_database_options(const char *label);

@@ -79,6 +79,7 @@ Oid   BdrNodesRelid;
 Oid   BdrConflictHistoryRelId;
 Oid   BdrLocksRelid;
 Oid   BdrLocksByOwnerRelid;
+Oid   BdrReplicationSetConfigRelid;
 
 BdrConnectionConfig  **bdr_connection_configs;
 /* All databases for which BDR is configured, valid after _PG_init */
@@ -1815,6 +1816,8 @@ bdr_maintain_schema(void)
 		bdr_lookup_relid("bdr_global_locks", schema_oid);
 	BdrLocksByOwnerRelid =
 		bdr_lookup_relid("bdr_global_locks_byowner", schema_oid);
+	BdrReplicationSetConfigRelid  =
+		bdr_lookup_relid("bdr_replication_set_config", schema_oid);
 
 	bdr_conflict_handlers_init();
 

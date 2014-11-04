@@ -46,7 +46,7 @@ BDRRelcacheHashInvalidateEntry(BDRRelation *entry)
 	}
 }
 
-static void
+void
 BDRRelcacheHashInvalidateCallback(Datum arg, Oid relid)
 {
 	HASH_SEQ_STATUS status;
@@ -324,6 +324,41 @@ relation_in_replication_set(BDRRelation *r, const char *setname)
 	return false;
 }
 
+#include "access/genam.h"
+#include "utils/builtins.h"
+#include "utils/fmgroids.h"
+
+static HeapTuple
+replset_lookup(Relation rel, const char *cname)
+{
+	ScanKey			key;
+	NameData		name;
+	SysScanDesc		scan;
+	HeapTuple		tuple = NULL;
+
+	namestrcpy(&name, cname);
+
+	key = (ScanKey) palloc(sizeof(ScanKeyData) * 1);
+
+	ScanKeyInit(&key[0],
+				1,
+				BTEqualStrategyNumber, F_NAMEEQ,
+				NameGetDatum(&name)
+		);
+
+	/* FIXME: should use index */
+	scan = systable_beginscan(rel, 0, true, NULL, 1, key);
+
+	while ((tuple = systable_getnext(scan)) != NULL)
+	{
+		tuple = heap_copytuple(tuple);
+		break;
+	}
+
+	systable_endscan(scan);
+	return tuple;
+}
+
 /*
  * Compute whether modifications to this relation should be replicated or not
  * and cache the result in the relation descriptor.
@@ -332,6 +367,8 @@ relation_in_replication_set(BDRRelation *r, const char *setname)
  * a constant set of 'to be replicated' sets to be passed in - which happens
  * to be what we need for logical decoding. As there really isn't another need
  * for this functionality so far...
+ * Another reason restricting this to backends in decoding is that we
+ * currently can't invalidate the czache correctly otherwise.
  */
 void
 bdr_heap_compute_replication_settings(BDRRelation *r,
@@ -339,6 +376,8 @@ bdr_heap_compute_replication_settings(BDRRelation *r,
 									  char		 **conf_replication_sets)
 {
 	int i;
+
+	Assert(MyReplicationSlot); /* in decoding */
 
 	Assert(!r->computed_repl_valid);
 
@@ -359,17 +398,42 @@ bdr_heap_compute_replication_settings(BDRRelation *r,
 	 */
 	for (i = 0; i < conf_num_replication_sets; i++)
 	{
-		const char* setname = conf_replication_sets[i];
+		Relation repl_sets;
+		HeapTuple tuple;
+		const char* setname;
+
+		setname = conf_replication_sets[i];
 
 		if (!relation_in_replication_set(r, setname))
 			continue;
 
-		/*
-		 * In the future we'll lookup configuration for individual sets here.
-		 */
-		r->computed_repl_insert = true;
-		r->computed_repl_update = true;
-		r->computed_repl_delete = true;
+		repl_sets = heap_open(BdrReplicationSetConfigRelid, AccessShareLock);
+		tuple = replset_lookup(repl_sets, setname);
+
+		if (tuple != NULL)
+		{
+			bool		isnull;
+			TupleDesc	desc = RelationGetDescr(repl_sets);
+
+			if (DatumGetBool(fastgetattr(tuple, 2, desc, &isnull)))
+				r->computed_repl_insert = true;
+
+			if (DatumGetBool(fastgetattr(tuple, 3, desc, &isnull)))
+				r->computed_repl_update = true;
+
+			if (DatumGetBool(fastgetattr(tuple, 4, desc, &isnull)))
+				r->computed_repl_delete = true;
+
+			pfree(tuple);
+		}
+		else
+		{
+			r->computed_repl_insert = true;
+			r->computed_repl_update = true;
+			r->computed_repl_delete = true;
+		}
+
+		heap_close(repl_sets, AccessShareLock);
 
 		/* no need to look any further, we replicate everything */
 		if (r->computed_repl_insert &&

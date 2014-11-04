@@ -77,3 +77,93 @@ SELECT * FROM settest_1 ORDER BY data;
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 \c postgres
 SELECT * FROM settest_1 ORDER BY data;
+\c regression
+DROP TABLE settest_1;
+
+
+/*
+ * Now test configurations where only some actions are replicated.
+ */
+CREATE TABLE settest_2(data text primary key);
+
+-- Test 1: ensure that inserts are replicated while update/delete are filtered
+SELECT bdr.table_set_replication_sets('settest_2', '{for-node-2-insert}');
+INSERT INTO bdr.bdr_replication_set_config(set_name, replicate_inserts, replicate_updates, replicate_deletes)
+VALUES ('for-node-2-insert', true, false, false),
+       ('for-node-2-update', false, true, false),
+       ('for-node-2-delete', false, false, true);
+
+INSERT INTO settest_2(data) VALUES ('repl-insert--insert-#1');
+INSERT INTO settest_2(data) VALUES ('repl-insert--insert-#2-then-update');
+INSERT INTO settest_2(data) VALUES ('repl-insert--insert-#3-then-delete');
+UPDATE settest_2
+SET data = 'repl-insert--insert-#2-update'
+WHERE data = 'repl-insert--insert-#2-then-update';
+
+DELETE FROM settest_2
+WHERE data = 'repl-insert--insert-#3-then-delete';
+
+-- Test 2: ensure that updates are replicated while inserts/deletes are filtered
+-- insert before filtering
+INSERT INTO settest_2(data) VALUES ('repl-update--insert-#1-then-update');
+INSERT INTO settest_2(data) VALUES ('repl-update--insert-#2-then-delete');
+
+SELECT bdr.table_set_replication_sets('settest_2', '{for-node-2-update}');
+
+UPDATE settest_2
+SET data = 'repl-update--insert-#1-update'
+WHERE data = 'repl-update--insert-#1-then-update';
+
+DELETE FROM settest_2
+WHERE data = 'repl-update--insert-#2-then-delete';
+
+INSERT INTO settest_2(data) VALUES ('repl-update--insert-#3');
+
+
+-- verify that changing the pg_replication_sets row has effects
+UPDATE bdr.bdr_replication_set_config
+SET replicate_inserts = true
+WHERE set_name = 'for-node-2-update';
+INSERT INTO settest_2(data) VALUES ('repl-update--insert-#4');
+
+-- but reset to normal meaning afterwards
+UPDATE bdr.bdr_replication_set_config
+SET replicate_inserts = false
+WHERE set_name = 'for-node-2-update';
+
+
+-- Test 3: ensure that deletes are replicated while inserts/updates are filtered
+-- insert before filtering
+SELECT bdr.table_set_replication_sets('settest_2', NULL);
+INSERT INTO settest_2(data) VALUES ('repl-delete--insert-#1-then-update');
+INSERT INTO settest_2(data) VALUES ('repl-delete--insert-#2-then-delete');
+SELECT bdr.table_set_replication_sets('settest_2', '{for-node-2-delete}');
+
+UPDATE settest_2
+SET data = 'repl-delete--insert-#1-update'
+WHERE data = 'repl-delete--insert-#1-then-update';
+
+DELETE FROM settest_2
+WHERE data = 'repl-delete--insert-#2-then-delete';
+
+INSERT INTO settest_2(data) VALUES ('repl-delete--insert-#3');
+
+
+-- Test 4: ensure that all partial sets together replicate everything
+SELECT bdr.table_set_replication_sets('settest_2',
+    '{for-node-2-insert,for-node-2-update,for-node-2-delete}');
+INSERT INTO settest_2(data) VALUES ('repl-combined--insert-#1-then-update');
+INSERT INTO settest_2(data) VALUES ('repl-combined--insert-#2-then-delete');
+
+UPDATE settest_2
+SET data = 'repl-combined--insert-#1-update'
+WHERE data = 'repl-combined--insert-#1-then-update';
+
+DELETE FROM settest_2
+WHERE data = 'repl-combined--insert-#2-then-delete';
+
+SELECT * FROM settest_2 ORDER BY data;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+\c postgres
+SELECT * FROM settest_2 ORDER BY data;
+\c regression

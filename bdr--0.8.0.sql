@@ -8,8 +8,9 @@ GRANT USAGE ON SCHEMA bdr TO public;
 
 SET LOCAL search_path = bdr;
 -- We must be able to use exclusion constraints for global sequences
-SET bdr.permit_unsafe_ddl_commands=true;
-
+SET bdr.permit_unsafe_ddl_commands = true;
+-- We don't want to replicate commands from in here
+SET bdr.skip_ddl_replication = true;
 CREATE OR REPLACE FUNCTION bdr_version()
 RETURNS TEXT
 LANGUAGE C
@@ -530,14 +531,10 @@ BEGIN
 END;
 $$;
 
-
----
---- this should always be last to avoid replicating our internal schema
----
-
 CREATE EVENT TRIGGER bdr_queue_ddl_commands
 ON ddl_command_end
 EXECUTE PROCEDURE bdr.bdr_queue_ddl_commands();
 
-SET bdr.permit_unsafe_ddl_commands = false;
+RESET bdr.permit_unsafe_ddl_commands;
+RESET bdr.skip_ddl_replication;
 RESET search_path;
