@@ -141,7 +141,7 @@ static int	serializable_deferrable = 0;
 
 static void help(const char *progname);
 static void setup_connection(Archive *AH, const char *dumpencoding,
-				 char *use_role);
+				 const char *dumpsnapshot, char *use_role);
 static ArchiveFormat parseArchiveFormat(const char *format, ArchiveMode *mode);
 static void expand_schema_name_patterns(Archive *fout,
 							SimpleStringList *patterns,
@@ -278,6 +278,7 @@ main(int argc, char **argv)
 	const char *pgport = NULL;
 	const char *username = NULL;
 	const char *dumpencoding = NULL;
+	const char *dumpsnapshot = NULL;
 	bool		oids = false;
 	TableInfo  *tblinfo;
 	int			numTables;
@@ -358,6 +359,7 @@ main(int argc, char **argv)
 		{"no-security-labels", no_argument, &no_security_labels, 1},
 		{"no-synchronized-snapshots", no_argument, &no_synchronized_snapshots, 1},
 		{"no-unlogged-table-data", no_argument, &no_unlogged_table_data, 1},
+		{"snapshot", required_argument, NULL, 6},
 
 		{NULL, 0, NULL, 0}
 	};
@@ -535,6 +537,10 @@ main(int argc, char **argv)
 				set_dump_section(optarg, &dumpSections);
 				break;
 
+			case 6:				/* snapshot */
+				dumpsnapshot = pg_strdup(optarg);
+				break;
+
 			default:
 				fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
 				exit_nicely(1);
@@ -643,7 +649,7 @@ main(int argc, char **argv)
 	 * death.
 	 */
 	ConnectDatabase(fout, dbname, pghost, pgport, username, prompt_password);
-	setup_connection(fout, dumpencoding, use_role);
+	setup_connection(fout, dumpencoding, dumpsnapshot, use_role);
 
 	/*
 	 * Disable security label support if server version < v9.1.x (prevents
@@ -686,6 +692,10 @@ main(int argc, char **argv)
 		 "Synchronized snapshots are not supported by this server version.\n"
 		  "Run with --no-synchronized-snapshots instead if you do not need\n"
 					  "synchronized snapshots.\n");
+
+	if (dumpsnapshot && fout->remoteVersion < 90200)
+		exit_horribly(NULL,
+					  "Exported snapshots are not supported by this server version.\n");
 
 	/* Find the last built-in OID, if needed */
 	if (fout->remoteVersion < 70300)
@@ -902,6 +912,7 @@ help(const char *progname)
 	printf(_("  --inserts                    dump data as INSERT commands, rather than COPY\n"));
 	printf(_("  --no-security-labels         do not dump security label assignments\n"));
 	printf(_("  --no-synchronized-snapshots  do not use synchronized snapshots in parallel jobs\n"));
+	printf(_("  --snapshot=NAME              attach to externally exported snapshot\n"));
 	printf(_("  --no-tablespaces             do not dump tablespace assignments\n"));
 	printf(_("  --no-unlogged-table-data     do not dump unlogged table data\n"));
 	printf(_("  --quote-all-identifiers      quote all identifiers, even if not key words\n"));
@@ -926,7 +937,8 @@ help(const char *progname)
 }
 
 static void
-setup_connection(Archive *AH, const char *dumpencoding, char *use_role)
+setup_connection(Archive *AH, const char *dumpencoding,
+				 const char *dumpsnapshot, char *use_role)
 {
 	PGconn	   *conn = GetConnection(AH);
 	const char *std_strings;
@@ -1034,20 +1046,21 @@ setup_connection(Archive *AH, const char *dumpencoding, char *use_role)
 		ExecuteSqlStatement(AH,
 							"SET TRANSACTION ISOLATION LEVEL SERIALIZABLE");
 
+	if (dumpsnapshot)
+		AH->sync_snapshot_id = strdup(dumpsnapshot);
 
-
-	if (AH->numWorkers > 1 && AH->remoteVersion >= 90200 && !no_synchronized_snapshots)
+	if (AH->sync_snapshot_id)
 	{
-		if (AH->sync_snapshot_id)
-		{
-			PQExpBuffer query = createPQExpBuffer();
+		PQExpBuffer query = createPQExpBuffer();
 
-			appendPQExpBufferStr(query, "SET TRANSACTION SNAPSHOT ");
-			appendStringLiteralConn(query, AH->sync_snapshot_id, conn);
-			ExecuteSqlStatement(AH, query->data);
-			destroyPQExpBuffer(query);
-		}
-		else
+		appendPQExpBuffer(query, "SET TRANSACTION SNAPSHOT ");
+		appendStringLiteralConn(query, AH->sync_snapshot_id, conn);
+		ExecuteSqlStatement(AH, query->data);
+		destroyPQExpBuffer(query);
+	}
+	else if (AH->numWorkers > 1 && AH->remoteVersion >= 90200 && !no_synchronized_snapshots)
+	{
+		if (AH->sync_snapshot_id == NULL)
 			AH->sync_snapshot_id = get_synchronized_snapshot(AH);
 	}
 }
@@ -1055,7 +1068,7 @@ setup_connection(Archive *AH, const char *dumpencoding, char *use_role)
 static void
 setupDumpWorker(Archive *AHX, RestoreOptions *ropt)
 {
-	setup_connection(AHX, NULL, NULL);
+	setup_connection(AHX, NULL, NULL, NULL);
 }
 
 static char *
@@ -8978,6 +8991,7 @@ dumpCompositeType(Archive *fout, TypeInfo *tyinfo)
 	int			i_attalign;
 	int			i_attisdropped;
 	int			i_attcollation;
+	int			i_typrelid;
 	int			i;
 	int			actual_atts;
 
@@ -8998,7 +9012,8 @@ dumpCompositeType(Archive *fout, TypeInfo *tyinfo)
 			"pg_catalog.format_type(a.atttypid, a.atttypmod) AS atttypdefn, "
 						  "a.attlen, a.attalign, a.attisdropped, "
 						  "CASE WHEN a.attcollation <> at.typcollation "
-						  "THEN a.attcollation ELSE 0 END AS attcollation "
+						  "THEN a.attcollation ELSE 0 END AS attcollation, "
+						  "ct.typrelid "
 						  "FROM pg_catalog.pg_type ct "
 				"JOIN pg_catalog.pg_attribute a ON a.attrelid = ct.typrelid "
 					"LEFT JOIN pg_catalog.pg_type at ON at.oid = a.atttypid "
@@ -9016,7 +9031,8 @@ dumpCompositeType(Archive *fout, TypeInfo *tyinfo)
 		appendPQExpBuffer(query, "SELECT a.attname, "
 			"pg_catalog.format_type(a.atttypid, a.atttypmod) AS atttypdefn, "
 						  "a.attlen, a.attalign, a.attisdropped, "
-						  "0 AS attcollation "
+						  "0 AS attcollation, "
+						  "ct.typrelid "
 					 "FROM pg_catalog.pg_type ct, pg_catalog.pg_attribute a "
 						  "WHERE ct.oid = '%u'::pg_catalog.oid "
 						  "AND a.attrelid = ct.typrelid "
@@ -9034,12 +9050,15 @@ dumpCompositeType(Archive *fout, TypeInfo *tyinfo)
 	i_attalign = PQfnumber(res, "attalign");
 	i_attisdropped = PQfnumber(res, "attisdropped");
 	i_attcollation = PQfnumber(res, "attcollation");
+	i_typrelid = PQfnumber(res, "typrelid");
 
 	if (binary_upgrade)
 	{
+		Oid			typrelid = atooid(PQgetvalue(res, 0, i_typrelid));
+
 		binary_upgrade_set_type_oids_by_type_oid(fout, q,
 												 tyinfo->dobj.catId.oid);
-		binary_upgrade_set_pg_class_oids(fout, q, tyinfo->typrelid, false);
+		binary_upgrade_set_pg_class_oids(fout, q, typrelid, false);
 	}
 
 	qtypname = pg_strdup(fmtId(tyinfo->dobj.name));
@@ -14256,7 +14275,8 @@ dumpSequence(Archive *fout, TableInfo *tbinfo)
 			   *incby,
 			   *maxv = NULL,
 			   *minv = NULL,
-			   *cache;
+			   *cache,
+			   *amname = "local";
 	char		bufm[100],
 				bufx[100];
 	bool		cycled;
@@ -14326,14 +14346,39 @@ dumpSequence(Archive *fout, TableInfo *tbinfo)
 	}
 #endif
 
-	startv = PQgetvalue(res, 0, 1);
-	incby = PQgetvalue(res, 0, 2);
+	startv = pg_strdup(PQgetvalue(res, 0, 1));
+	incby = pg_strdup(PQgetvalue(res, 0, 2));
 	if (!PQgetisnull(res, 0, 3))
-		maxv = PQgetvalue(res, 0, 3);
+		maxv = pg_strdup(PQgetvalue(res, 0, 3));
 	if (!PQgetisnull(res, 0, 4))
-		minv = PQgetvalue(res, 0, 4);
-	cache = PQgetvalue(res, 0, 5);
+		minv = pg_strdup(PQgetvalue(res, 0, 4));
+	cache = pg_strdup(PQgetvalue(res, 0, 5));
 	cycled = (strcmp(PQgetvalue(res, 0, 6), "t") == 0);
+
+	PQclear(res);
+
+	res = ExecuteSqlQuery(fout, "SELECT EXISTS(SELECT 1 "
+								"FROM pg_catalog.pg_class c, "
+								"pg_catalog.pg_namespace n "
+								"WHERE n.oid = c.relnamespace "
+								"AND c.relname = 'pg_seqam' "
+								"AND c.relkind = 'r');",
+						  PGRES_TUPLES_OK);
+	if (strcmp(PQgetvalue(res, 0, 0), "t") == 0)
+	{
+		PQclear(res);
+
+		printfPQExpBuffer(query, "SELECT a.seqamname\n"
+								 "FROM pg_catalog.pg_seqam a, pg_catalog.pg_class c\n"
+								 "WHERE c.relam = a.oid AND c.oid = %u",
+						  tbinfo->dobj.catId.oid);
+
+		res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
+
+		amname = pg_strdup(PQgetvalue(res, 0, 0));
+	}
+
+	PQclear(res);
 
 	/*
 	 * DROP must be fully qualified in case same name appears in pg_catalog
@@ -14376,6 +14421,7 @@ dumpSequence(Archive *fout, TableInfo *tbinfo)
 					  "    CACHE %s%s",
 					  cache, (cycled ? "\n    CYCLE" : ""));
 
+	appendPQExpBuffer(query, "\n    USING %s", fmtId(amname));
 	appendPQExpBufferStr(query, ";\n");
 
 	appendPQExpBuffer(labelq, "SEQUENCE %s", fmtId(tbinfo->dobj.name));
@@ -14441,8 +14487,6 @@ dumpSequence(Archive *fout, TableInfo *tbinfo)
 	dumpSecLabel(fout, labelq->data,
 				 tbinfo->dobj.namespace->dobj.name, tbinfo->rolname,
 				 tbinfo->dobj.catId, 0, tbinfo->dobj.dumpId);
-
-	PQclear(res);
 
 	destroyPQExpBuffer(query);
 	destroyPQExpBuffer(delqry);

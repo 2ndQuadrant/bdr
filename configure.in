@@ -43,6 +43,7 @@ else
 fi;
 
 AC_CONFIG_FILES([Makefile])
+AC_CONFIG_FILES([pg_dump/Makefile])
 AC_CONFIG_FILES([run_tests], [chmod +x run_tests])
 AC_CONFIG_HEADERS([bdr_config.h])
 AC_OUTPUT

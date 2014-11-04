@@ -1,5 +1,2 @@
-/kwlookup.c
-
-/pg_dump
-/pg_dumpall
-/pg_restore
+/bdr_dump
+/Makefile

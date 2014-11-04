@@ -12,7 +12,9 @@ DATA = bdr--0.8.0.sql \
 DATA_built = bdr--0.8.0.1.sql
 
 DOCS = bdr.conf.sample README.bdr
-SCRIPTS = scripts/bdr_initial_load bdr_init_copy bdr_resetxlog
+SCRIPTS = scripts/bdr_initial_load bdr_init_copy bdr_resetxlog pg_dump/bdr_dump
+
+SUBDIRS = pg_dump
 
 PG_CPPFLAGS = -I$(libpq_srcdir)
 SHLIB_LINK = $(libpq)
@@ -178,3 +180,5 @@ PHONY: submake-regress
 # phony target...
 
 .PHONY: all check regresscheck isolationcheck
+
+$(recurse)
