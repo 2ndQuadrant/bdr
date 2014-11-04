@@ -54,6 +54,7 @@
 #include "common/fe_memutils.h"
 #include "storage/large_object.h"
 #include "pg_getopt.h"
+#include "replication/logical.h"
 
 
 static ControlFileData ControlFile;		/* pg_control values */
@@ -67,7 +68,10 @@ static MultiXactId set_mxid = 0;
 static MultiXactOffset set_mxoff = (MultiXactOffset) -1;
 static uint32 minXlogTli = 0;
 static XLogSegNo minXlogSegNo = 0;
+static uint64 set_sysid = 0;
+static XLogRecPtr oldCheckPoint = 0;
 
+static uint64 GenerateSystemIdentifier(void);
 static bool ReadControlFile(void);
 static void GuessControlValues(void);
 static void PrintControlValues(bool guessed);
@@ -77,8 +81,8 @@ static void FindEndOfXLOG(void);
 static void KillExistingXLOG(void);
 static void KillExistingArchiveStatus(void);
 static void WriteEmptyXLOG(void);
+static void UpdateLogicalCheckpoints(void);
 static void usage(void);
-
 
 int
 main(int argc, char *argv[])
@@ -92,7 +96,7 @@ main(int argc, char *argv[])
 	char	   *DataDir;
 	int			fd;
 
-	set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("pg_resetxlog"));
+	set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("bdr_resetxlog"));
 
 	progname = get_progname(argv[0]);
 
@@ -105,13 +109,13 @@ main(int argc, char *argv[])
 		}
 		if (strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-V") == 0)
 		{
-			puts("pg_resetxlog (PostgreSQL) " PG_VERSION);
+			puts("bdr_resetxlog (PostgreSQL) " PG_VERSION);
 			exit(0);
 		}
 	}
 
 
-	while ((c = getopt(argc, argv, "fl:m:no:O:x:e:")) != -1)
+	while ((c = getopt(argc, argv, "fl:m:no:O:x:e:c:s::")) != -1)
 	{
 		switch (c)
 		{
@@ -225,6 +229,22 @@ main(int argc, char *argv[])
 					exit(1);
 				}
 				XLogFromFileName(optarg, &minXlogTli, &minXlogSegNo);
+				break;
+
+			case 's':
+				if (optarg)
+				{
+					if (sscanf(optarg, UINT64_FORMAT, &set_sysid) != 1)
+					{
+						fprintf(stderr, _("%s: invalid argument for option -s\n"), progname);
+						fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
+						exit(1);
+					}
+				}
+				else
+				{
+					set_sysid = GenerateSystemIdentifier();
+				}
 				break;
 
 			default:
@@ -354,6 +374,12 @@ main(int argc, char *argv[])
 	if (minXlogSegNo > newXlogSegNo)
 		newXlogSegNo = minXlogSegNo;
 
+	if (set_sysid != 0)
+		ControlFile.system_identifier = set_sysid;
+
+	/* Keep the old checkpoint for later use */
+	oldCheckPoint = ControlFile.checkPoint;
+
 	/*
 	 * If we had to guess anything, and -f was not given, just print the
 	 * guessed values and exit.  Also print if -n is given.
@@ -388,9 +414,30 @@ main(int argc, char *argv[])
 	KillExistingXLOG();
 	KillExistingArchiveStatus();
 	WriteEmptyXLOG();
+	UpdateLogicalCheckpoints();
 
 	printf(_("Transaction log reset\n"));
 	return 0;
+}
+
+
+/*
+ * Create a new unique installation identifier.
+ *
+ * See notes in xlog.c about the algorithm.
+ */
+static uint64
+GenerateSystemIdentifier(void)
+{
+	uint64			sysidentifier;
+	struct timeval	tv;
+
+	gettimeofday(&tv, NULL);
+	sysidentifier = ((uint64) tv.tv_sec) << 32;
+	sysidentifier |= ((uint64) tv.tv_usec) << 12;
+	sysidentifier |= getpid() & 0xFFF;
+
+	return sysidentifier;
 }
 
 
@@ -476,7 +523,6 @@ static void
 GuessControlValues(void)
 {
 	uint64		sysidentifier;
-	struct timeval tv;
 
 	/*
 	 * Set up a completely default set of pg_control values.
@@ -489,12 +535,9 @@ GuessControlValues(void)
 
 	/*
 	 * Create a new unique installation identifier, since we can no longer use
-	 * any old XLOG records.  See notes in xlog.c about the algorithm.
+	 * any old XLOG records.
 	 */
-	gettimeofday(&tv, NULL);
-	sysidentifier = ((uint64) tv.tv_sec) << 32;
-	sysidentifier |= ((uint64) tv.tv_usec) << 12;
-	sysidentifier |= getpid() & 0xFFF;
+	sysidentifier = GenerateSystemIdentifier();
 
 	ControlFile.system_identifier = sysidentifier;
 
@@ -1072,6 +1115,64 @@ WriteEmptyXLOG(void)
 	close(fd);
 }
 
+/*
+ * Copy the last logical checkpoint to new name
+ */
+static void
+UpdateLogicalCheckpoints(void)
+{
+	int	 sourcefd;
+	int	 targetfd;
+	char sourcepath[MAXPGPATH];
+	char targetpath[MAXPGPATH];
+	char buffer[8192];
+	size_t len;
+
+	/* Checkpoint didn't change (it was guessed?), return */
+	if (oldCheckPoint == ControlFile.checkPoint)
+		return;
+
+	sprintf(sourcepath, "pg_logical/checkpoints/%X-%X.ckpt",
+		(uint32)(oldCheckPoint >> 32), (uint32)oldCheckPoint);
+
+	sprintf(targetpath, "pg_logical/checkpoints/%X-%X.ckpt",
+		(uint32)(ControlFile.checkPoint >> 32), (uint32)ControlFile.checkPoint);
+
+	/* If there is no checkpoint file, we just silently return */
+	if ((sourcefd = open(sourcepath, O_RDONLY | PG_BINARY, 0)) < 0)
+		return;
+
+	if ((targetfd = open(targetpath, O_RDWR | O_CREAT | O_EXCL | PG_BINARY,
+								S_IRUSR | S_IWUSR)) < 0)
+	{
+		fprintf(stderr, _("%s: could not open file \"%s\": %s\n"),
+				progname, targetpath, strerror(errno));
+		exit(1);
+	}
+
+	while ((len = read(sourcefd, buffer, sizeof(buffer))) > 0)
+	{
+		errno = 0;
+		if (write(targetfd, buffer, len) != len)
+		{
+			/* if write didn't set errno, assume problem is no disk space */
+			if (errno == 0)
+				errno = ENOSPC;
+			fprintf(stderr, _("%s: could not write file \"%s\": %s\n"),
+					progname, targetpath, strerror(errno));
+			exit(1);
+		}
+	}
+
+	close(sourcefd);
+
+	if (fsync(targetfd) != 0)
+	{
+		fprintf(stderr, _("%s: fsync error: %s\n"), progname, strerror(errno));
+		exit(1);
+	}
+	close(targetfd);
+}
 
 static void
 usage(void)
@@ -1087,7 +1188,9 @@ usage(void)
 	printf(_("  -o OID           set next OID\n"));
 	printf(_("  -O OFFSET        set next multitransaction offset\n"));
 	printf(_("  -V, --version    output version information, then exit\n"));
+	printf(_("  -s [SYSID]       set system identifier (or generate one)\n"));
 	printf(_("  -x XID           set next transaction ID\n"));
+	printf(_("  -c XID           set the oldest retrievable commit timestamp\n"));
 	printf(_("  -?, --help       show this help, then exit\n"));
 	printf(_("\nReport bugs to <pgsql-bugs@postgresql.org>.\n"));
 }

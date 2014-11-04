@@ -12,7 +12,7 @@ DATA = bdr--0.8.0.sql \
 DATA_built = bdr--0.8.0.1.sql
 
 DOCS = bdr.conf.sample README.bdr
-SCRIPTS = scripts/bdr_initial_load bdr_init_copy
+SCRIPTS = scripts/bdr_initial_load bdr_init_copy bdr_resetxlog
 
 PG_CPPFLAGS = -I$(libpq_srcdir)
 SHLIB_LINK = $(libpq)
@@ -74,7 +74,10 @@ scripts/bdr_initial_load: scripts/bdr_initial_load.in
 bdr--0.8.0.1.sql: bdr--0.8.0.sql bdr--0.8.0--0.8.0.1.sql
 	cat $^ > $@
 
-all: all-lib bdr_init_copy
+bdr_resetxlog: pg_resetxlog.o
+	$(CC) $(CFLAGS) $^ $(LDFLAGS) $(LDFLAGS_EX) $(libpq_pgport) $(LIBS) -o $@$(X)
+
+all: all-lib bdr_init_copy bdr_resetxlog
 
 clean: additional-clean
 
