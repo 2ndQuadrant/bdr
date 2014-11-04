@@ -68,8 +68,8 @@ fi
 SNAP=${SNAPSHOT:+"--snapshot $SNAPSHOT"}
 
 errlog "Dumping remote database \"$SOURCE\" with $JOBS concurrent workers to \"$TMPDIR\""
-if ! pg_dump -j $JOBS $SNAP -F d -f $TMPDIR "$SOURCE"; then
-    errlog "pg_dump of "$SOURCE" failed, aborting"
+if ! bdr_dump -j $JOBS $SNAP -F d -f $TMPDIR "$SOURCE"; then
+    errlog "bdr_dump of "$SOURCE" failed, aborting"
     exit 1
 fi
 

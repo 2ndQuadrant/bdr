@@ -378,7 +378,7 @@ set_sysid(void)
 {
 	int			 ret;
 	PQExpBuffer  cmd = createPQExpBuffer();
-	char		*exec_path = find_other_exec_or_die(argv0, "pg_resetxlog", "pg_resetxlog (PostgreSQL) " PG_VERSION "\n");
+	char		*exec_path = find_other_exec_or_die(argv0, "bdr_resetxlog", "bdr_resetxlog (PostgreSQL) " PG_VERSION "\n");
 
 	appendPQExpBuffer(cmd, "%s \"-s "UINT64_FORMAT"\" \"%s\"", exec_path, system_identifier, data_dir);
 
