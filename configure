@@ -2734,8 +2734,6 @@ fi;
 
 ac_config_files="$ac_config_files Makefile"
 
-ac_config_files="$ac_config_files pg_dump/Makefile"
-
 ac_config_files="$ac_config_files run_tests"
 
 ac_config_headers="$ac_config_headers bdr_config.h"
@@ -3431,7 +3429,6 @@ for ac_config_target in $ac_config_targets
 do
   case $ac_config_target in
     "Makefile") CONFIG_FILES="$CONFIG_FILES Makefile" ;;
-    "pg_dump/Makefile") CONFIG_FILES="$CONFIG_FILES pg_dump/Makefile" ;;
     "run_tests") CONFIG_FILES="$CONFIG_FILES run_tests" ;;
     "bdr_config.h") CONFIG_HEADERS="$CONFIG_HEADERS bdr_config.h" ;;
 
