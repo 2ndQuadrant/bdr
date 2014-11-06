@@ -3189,7 +3189,7 @@ deparse_RenameStmt(Oid objectId, Node *parsetree)
 				subthing = "ATTRIBUTE";
 
 			fmtstr = psprintf("ALTER %s %%{if_exists}s %%{identity}D RENAME %s %%{colname}I TO %%{newname}I",
-							  stringify_objtype(node->renameType),
+							  stringify_objtype(node->relationType),
 							  subthing);
 			renameStmt = new_objtree_VA(fmtstr, 0);
 			append_object_object(renameStmt, "identity",
