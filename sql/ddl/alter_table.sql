@@ -119,4 +119,10 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
 \c postgres
 \d+ test_tbl
 
+ALTER TABLE test_tbl RENAME COLUMN col1 TO foobar;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+\d+ test_tbl
+\c regression
+\d+ test_tbl
+
 DROP TABLE test_tbl;
