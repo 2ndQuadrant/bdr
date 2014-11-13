@@ -199,6 +199,9 @@ typedef struct BdrPerdbWorker
 
 /*
  * Type of BDR worker in a BdrWorker struct
+ *
+ * Note that the supervisor worker doesn't appear here, it has its own
+ * dedicated entry in the shmem segment.
  */
 typedef enum {
 	/*
@@ -206,7 +209,7 @@ typedef enum {
 	 * it's set by memset(...) during shm segment init.
 	 */
 	BDR_WORKER_EMPTY_SLOT = 0,
-	/* This shm array slot contains data for a */
+	/* This shm array slot contains data for a BdrApplyWorker */
 	BDR_WORKER_APPLY,
 	/* This is data for a per-database worker BdrPerdbWorker */
 	BDR_WORKER_PERDB,
@@ -426,10 +429,17 @@ extern void bdr_execute_ddl_command(char *cmdstr, char *perpetrator, bool tx_jus
 extern void bdr_locks_shmem_init(Size num_used_databases);
 extern void bdr_locks_check_query(void);
 
-/* background workers */
-extern void bdr_worker_init(char* dbname);
+/* background workers and supporting functions for them */
 PGDLLEXPORT extern void bdr_apply_main(Datum main_arg);
 PGDLLEXPORT extern void bdr_perdb_worker_main(Datum main_arg);
+PGDLLEXPORT extern void bdr_supervisor_worker_main(Datum main_arg);
+
+extern void bdr_worker_init(char* dbname);
+extern void bdr_supervisor_register(void);
+extern void bdr_register_perdb_worker(const char * dbname, int worker_slot_number);
+
+extern void bdr_sighup(SIGNAL_ARGS);
+extern void bdr_sigterm(SIGNAL_ARGS);
 
 /* manipulation of bdr catalogs */
 extern char bdr_nodes_get_local_status(uint64 sysid, TimeLineID tli, Oid dboid);

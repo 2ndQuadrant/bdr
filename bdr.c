@@ -119,7 +119,7 @@ PG_FUNCTION_INFO_V1(bdr_version);
 PG_FUNCTION_INFO_V1(bdr_variant);
 PG_FUNCTION_INFO_V1(bdr_get_local_nodeid);
 
-static void
+void
 bdr_sigterm(SIGNAL_ARGS)
 {
 	int			save_errno = errno;
@@ -140,7 +140,7 @@ bdr_sigterm(SIGNAL_ARGS)
 	errno = save_errno;
 }
 
-static void
+void
 bdr_sighup(SIGNAL_ARGS)
 {
 	int			save_errno = errno;
@@ -1343,6 +1343,8 @@ _PG_init(void)
 			bdr_max_workers = 0;
 		goto out;
 	}
+
+	bdr_supervisor_register();
 
 	/* Copy 'connections' guc so SplitIdentifierString can modify it in-place */
 	connections_tmp = pstrdup(connections);
