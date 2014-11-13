@@ -8,4 +8,6 @@
  * bdr_label.h
  */
 
+#define BDR_SECLABEL_PROVIDER "bdr"
+
 extern void bdr_label_init(void);
