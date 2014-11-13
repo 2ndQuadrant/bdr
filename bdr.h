@@ -275,6 +275,8 @@ typedef struct BdrWorkerControl
 	LWLockId     lock;
 	/* Set/unset by bdr_apply_pause()/_replay(). */
 	bool		 pause_apply;
+	/* Is this the first startup of the supervisor? */
+	bool		 is_supervisor_restart;
 	/* Array members, of size bdr_max_workers */
 	BdrWorker    slots[FLEXIBLE_ARRAY_MEMBER];
 } BdrWorkerControl;
