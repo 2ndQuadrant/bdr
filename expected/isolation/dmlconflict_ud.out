@@ -51,13 +51,13 @@ a              b              c
 step s1h: SELECT object_schema, object_name, conflict_type, conflict_resolution, local_tuple, remote_tuple, error_sqlstate FROM bdr.bdr_conflict_history ORDER BY conflict_id;
 object_schema  object_name    conflict_type  conflict_resolutionlocal_tuple    remote_tuple   error_sqlstate 
 
-public         test_dmlconflictupdate_delete  conflict_trigger_skip_change               {"a":"y","b":1,"c":"bar"}               
-public         test_dmlconflictupdate_delete  conflict_trigger_skip_change               {"a":"y","b":1,"c":"baz"}               
+public         test_dmlconflictupdate_delete  skip_change                   {"a":"y","b":1,"c":"bar"}               
+public         test_dmlconflictupdate_delete  skip_change                   {"a":"y","b":1,"c":"baz"}               
 step s2h: SELECT object_schema, object_name, conflict_type, conflict_resolution, local_tuple, remote_tuple, error_sqlstate FROM bdr.bdr_conflict_history ORDER BY conflict_id;
 object_schema  object_name    conflict_type  conflict_resolutionlocal_tuple    remote_tuple   error_sqlstate 
 
-public         test_dmlconflictupdate_delete  conflict_trigger_skip_change               {"a":"y","b":1,"c":"baz"}               
+public         test_dmlconflictupdate_delete  skip_change                   {"a":"y","b":1,"c":"baz"}               
 step s3h: SELECT object_schema, object_name, conflict_type, conflict_resolution, local_tuple, remote_tuple, error_sqlstate FROM bdr.bdr_conflict_history ORDER BY conflict_id;
 object_schema  object_name    conflict_type  conflict_resolutionlocal_tuple    remote_tuple   error_sqlstate 
 
-public         test_dmlconflictupdate_delete  conflict_trigger_skip_change               {"a":"y","b":1,"c":"bar"}               
+public         test_dmlconflictupdate_delete  skip_change                   {"a":"y","b":1,"c":"bar"}               

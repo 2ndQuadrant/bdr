@@ -89,6 +89,8 @@ typedef enum BdrConflictResolution
 	BdrConflictResolution_ConflictTriggerReturnedTuple,
 	BdrConflictResolution_LastUpdateWins_KeepLocal,
 	BdrConflictResolution_LastUpdateWins_KeepRemote,
+	BdrConflictResolution_DefaultApplyChange,
+	BdrConflictResolution_DefaultSkipChange,
 	BdrConflictResolution_UnhandledTxAbort
 } BdrConflictResolution;
 
@@ -297,16 +299,55 @@ extern bool find_pkey_tuple(struct ScanKeyData *skey, BDRRelation *rel,
 							bool lock, enum LockTupleMode mode);
 
 /* conflict logging (usable in apply only) */
-extern void bdr_conflict_logging_startup(void);
 
-extern void bdr_conflict_log(BdrConflictType conflict_type,
-							 BdrConflictResolution resolution,
-							 TransactionId remote_txid,
-							 BDRRelation *conflict_relation,
-							 struct TupleTableSlot *local_tuple,
-							 RepNodeId local_tuple_origin_id,
-							 struct TupleTableSlot *remote_tuple,
-							 struct ErrorData *apply_error);
+/*
+ * Details of a conflict detected by an apply process, destined for logging
+ * output and/or conflict triggers.
+ *
+ * Closely related to bdr.bdr_conflict_history SQL table.
+ */
+typedef struct BdrApplyConflict
+{
+	TransactionId			local_conflict_txid;
+	XLogRecPtr				local_conflict_lsn;
+	TimestampTz				local_conflict_time;
+	const char			   *object_schema; /* unused if apply_error */
+	const char			   *object_name;   /* unused if apply_error */
+	uint64					remote_sysid;
+	TimeLineID				remote_tli;
+	Oid						remote_dboid;
+	TransactionId			remote_txid;
+	TimestampTz				remote_commit_time;
+	XLogRecPtr				remote_commit_lsn;
+	BdrConflictType			conflict_type;
+	BdrConflictResolution	conflict_resolution;
+	bool					local_tuple_null;
+	Datum					local_tuple;    /* composite */
+	TransactionId			local_tuple_xmin;
+	uint64					local_tuple_origin_sysid; /* init to 0 if unknown */
+	TimeLineID				local_tuple_origin_tli;
+	Oid						local_tuple_origin_dboid;
+	bool					remote_tuple_null;
+	Datum					remote_tuple;   /* composite */
+	ErrorData			   *apply_error;
+} BdrApplyConflict;
+
+extern void bdr_conflict_logging_startup(void);
+extern void bdr_conflict_logging_cleanup(void);
+
+extern BdrApplyConflict * bdr_make_apply_conflict(BdrConflictType conflict_type,
+									BdrConflictResolution resolution,
+									TransactionId remote_txid,
+									BDRRelation *conflict_relation,
+									struct TupleTableSlot *local_tuple,
+									RepNodeId local_tuple_origin_id,
+									struct TupleTableSlot *remote_tuple,
+									struct ErrorData *apply_error);
+
+extern void bdr_conflict_log_serverlog(BdrApplyConflict *conflict);
+extern void bdr_conflict_log_table(BdrApplyConflict *conflict);
+
+extern void tuple_to_stringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple);
 
 /* sequence support */
 extern void bdr_sequencer_shmem_init(int nnodes, int sequencers);

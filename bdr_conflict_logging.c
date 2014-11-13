@@ -13,8 +13,6 @@
 
 #include "commands/sequence.h"
 
-#include "replication/replication_identifier.h"
-
 #include "tcop/tcopprot.h"
 
 #include "utils/builtins.h"
@@ -24,6 +22,8 @@
 #include "utils/memutils.h"
 #include "utils/pg_lsn.h"
 #include "utils/syscache.h"
+#include "utils/typcache.h"
+
 
 /* GUCs */
 bool bdr_log_conflicts_to_table = false;
@@ -42,33 +42,8 @@ extern BdrApplyWorker *bdr_apply_worker;
 #define BDR_CONFLICT_HISTORY_COLS 30
 #define SYSID_DIGITS 33
 
-/*
- * Details of a conflict detected by an apply process, destined for logging
- * output and/or conflict triggers.
- *
- * Closely related to bdr.bdr_conflict_history SQL table.
- */
-typedef struct BdrApplyConflict
-{
-	TransactionId			local_conflict_txid;
-	XLogRecPtr				local_conflict_lsn;
-	TimestampTz				local_conflict_time;
-	const char			   *object_schema; /* unused if apply_error */
-	const char			   *object_name;   /* unused if apply_error */
-	uint64					remote_sysid;
-	TransactionId			remote_txid;
-	TimestampTz				remote_commit_time;
-	XLogRecPtr				remote_commit_lsn;
-	BdrConflictType			conflict_type;
-	BdrConflictResolution	conflict_resolution;
-	bool					local_tuple_null;
-	Datum					local_tuple;    /* composite */
-	TransactionId			local_tuple_xmin;
-	uint64					local_tuple_origin_sysid; /* init to 0 if unknown */
-	bool					remote_tuple_null;
-	Datum					remote_tuple;   /* composite */
-	ErrorData			   *apply_error;
-} BdrApplyConflict;
+/* We want our own memory ctx to clean up easily & reliably */
+MemoryContext conflict_log_context;
 
 /*
  * Perform syscache lookups etc for BDR conflict logging.
@@ -83,6 +58,10 @@ void
 bdr_conflict_logging_startup()
 {
 	Oid schema_oid;
+
+	conflict_log_context = AllocSetContextCreate(CurrentMemoryContext,
+		"bdr_log_conflict_ctx", ALLOCSET_DEFAULT_MINSIZE,
+		ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
 
 	StartTransactionCommand();
 
@@ -101,6 +80,17 @@ bdr_conflict_logging_startup()
 
 	CommitTransactionCommand();
 }
+
+/*
+ * Cleanup our memory context.
+ */
+void
+bdr_conflict_logging_cleanup(void)
+{
+	if (conflict_log_context)
+		MemoryContextResetAndDeleteChildren(conflict_log_context);
+}
+
 
 /* Get the enum oid for a given BdrConflictType */
 static Datum
@@ -139,11 +129,10 @@ bdr_conflict_type_get_datum(BdrConflictType conflict_type)
 	return conflict_type_oid;
 }
 
-/* Get the enum oid for a given BdrConflictResolution */
-static Datum
-bdr_conflict_resolution_get_datum(BdrConflictResolution conflict_resolution)
+/* Get the enum name for a given BdrConflictResolution */
+static char *
+bdr_conflict_resolution_get_name(BdrConflictResolution conflict_resolution)
 {
-	Oid conflict_resolution_oid;
 	char *enumname = NULL;
 
 	switch (conflict_resolution)
@@ -160,11 +149,29 @@ bdr_conflict_resolution_get_datum(BdrConflictResolution conflict_resolution)
 		case BdrConflictResolution_LastUpdateWins_KeepRemote:
 			enumname = "last_update_wins_keep_remote";
 			break;
+		case BdrConflictResolution_DefaultApplyChange:
+			enumname = "apply_change";
+			break;
+		case BdrConflictResolution_DefaultSkipChange:
+			enumname = "skip_change";
+			break;
 		case BdrConflictResolution_UnhandledTxAbort:
 			enumname = "unhandled_tx_abort";
 			break;
 	}
+
 	Assert(enumname != NULL);
+	return enumname;
+}
+
+/* Get the enum oid for a given BdrConflictResolution */
+static Datum
+bdr_conflict_resolution_get_datum(BdrConflictResolution conflict_resolution)
+{
+	Oid conflict_resolution_oid;
+
+	char *enumname = bdr_conflict_resolution_get_name(conflict_resolution);
+
 	conflict_resolution_oid = GetSysCacheOid2(ENUMTYPOIDNAME,
 		BdrConflictResolutionOid, CStringGetDatum(enumname));
 	if (conflict_resolution_oid == InvalidOid)
@@ -202,6 +209,121 @@ bdr_conflict_row_to_json(Datum row, bool row_isnull, bool *ret_isnull)
 	return row_json;
 }
 
+/* print the tuple 'tuple' into the StringInfo s */
+void
+tuple_to_stringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple)
+{
+	int			natt;
+	Oid			oid;
+
+	/* print oid of tuple, it's not included in the TupleDesc */
+	if ((oid = HeapTupleHeaderGetOid(tuple->t_data)) != InvalidOid)
+	{
+		appendStringInfo(s, " oid[oid]:%u", oid);
+	}
+
+	/* print all columns individually */
+	for (natt = 0; natt < tupdesc->natts; natt++)
+	{
+		Form_pg_attribute attr; /* the attribute itself */
+		Oid			typid;		/* type of current attribute */
+		HeapTuple	type_tuple; /* information about a type */
+		Form_pg_type type_form;
+		Oid			typoutput;	/* output function */
+		bool		typisvarlena;
+		Datum		origval;	/* possibly toasted Datum */
+		Datum		val;		/* definitely detoasted Datum */
+		char	   *outputstr = NULL;
+		bool		isnull;		/* column is null? */
+
+		attr = tupdesc->attrs[natt];
+
+		/*
+		 * don't print dropped columns, we can't be sure everything is
+		 * available for them
+		 */
+		if (attr->attisdropped)
+			continue;
+
+		/*
+		 * Don't print system columns
+		 */
+		if (attr->attnum < 0)
+			continue;
+
+		typid = attr->atttypid;
+
+		/* gather type name */
+		type_tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typid));
+		if (!HeapTupleIsValid(type_tuple))
+			elog(ERROR, "cache lookup failed for type %u", typid);
+		type_form = (Form_pg_type) GETSTRUCT(type_tuple);
+
+		/* print attribute name */
+		appendStringInfoChar(s, ' ');
+		appendStringInfoString(s, NameStr(attr->attname));
+
+		/* print attribute type */
+		appendStringInfoChar(s, '[');
+		appendStringInfoString(s, NameStr(type_form->typname));
+		appendStringInfoChar(s, ']');
+
+		/* query output function */
+		getTypeOutputInfo(typid,
+						  &typoutput, &typisvarlena);
+
+		ReleaseSysCache(type_tuple);
+
+		/* get Datum from tuple */
+		origval = heap_getattr(tuple, natt + 1, tupdesc, &isnull);
+
+		if (isnull)
+			outputstr = "(null)";
+		else if (typisvarlena && VARATT_IS_EXTERNAL_ONDISK(origval))
+			outputstr = "(unchanged-toast-datum)";
+		else if (typisvarlena)
+			val = PointerGetDatum(PG_DETOAST_DATUM(origval));
+		else
+			val = origval;
+
+		/* print data */
+		if (outputstr == NULL)
+			outputstr = OidOutputFunctionCall(typoutput, val);
+
+		appendStringInfoChar(s, ':');
+		appendStringInfoString(s, outputstr);
+	}
+}
+
+
+static void
+row_to_stringinfo(StringInfo s, Datum composite)
+{
+	HeapTupleHeader td;
+	Oid			tupType;
+	int32		tupTypmod;
+	TupleDesc	tupdesc;
+	HeapTupleData tmptup,
+			   *tuple;
+
+	td = DatumGetHeapTupleHeader(composite);
+
+	/* Extract rowtype info and find a tupdesc */
+	tupType = HeapTupleHeaderGetTypeId(td);
+	tupTypmod = HeapTupleHeaderGetTypMod(td);
+	tupdesc = lookup_rowtype_tupdesc(tupType, tupTypmod);
+
+	/* Build a temporary HeapTuple control structure */
+	tmptup.t_len = HeapTupleHeaderGetDatumLength(td);
+	tmptup.t_data = td;
+	tuple = &tmptup;
+
+	/* Print the tuple to stringinfo */
+	tuple_to_stringinfo(s, tupdesc, tuple);
+
+	ReleaseTupleDesc(tupdesc);
+}
+
 static void
 bdr_conflict_strtodatum(bool *nulls, Datum *values, int idx,
 						const char *in_str)
@@ -223,7 +345,7 @@ bdr_conflict_strtodatum(bool *nulls, Datum *values, int idx,
  *
  * The change will then be replicated to other nodes.
  */
-static void
+void
 bdr_conflict_log_table(BdrApplyConflict *conflict)
 {
 	Datum		 	values[BDR_CONFLICT_HISTORY_COLS];
@@ -238,6 +360,12 @@ bdr_conflict_log_table(BdrApplyConflict *conflict)
 	char			local_sysid[SYSID_DIGITS];
 	char			remote_sysid[SYSID_DIGITS];
 	char			origin_sysid[SYSID_DIGITS];
+
+	if (IsAbortedTransactionBlockState())
+		elog(ERROR, "bdr: attempt to log conflict in aborted transaction");
+
+	if (!IsTransactionState())
+		elog(ERROR, "bdr: attempt to log conflict without surrounding transaction");
 
 	if (!bdr_log_conflicts_to_table)
 		/* No logging enabled and we don't own any memory, just bail */
@@ -392,6 +520,67 @@ bdr_conflict_log_table(BdrApplyConflict *conflict)
 }
 
 /*
+ * Log a BDR apply conflict to the postgreql log.
+ */
+void
+bdr_conflict_log_serverlog(BdrApplyConflict *conflict)
+{
+	StringInfoData	s_key;
+	char		   *resolution_name;
+
+#define CONFLICT_MSG_PREFIX "CONFLICT: remote %s on relation %s.%s originating at node " UINT64_FORMAT ":%u:%u at ts %s;"
+
+	/* Create text representation of the PKEY tuple */
+	initStringInfo(&s_key);
+	if (!conflict->local_tuple_null)
+		row_to_stringinfo(&s_key, conflict->local_tuple);
+
+	resolution_name = bdr_conflict_resolution_get_name(conflict->conflict_resolution);
+
+	switch(conflict->conflict_type)
+	{
+		case BdrConflictType_InsertInsert:
+		case BdrConflictType_UpdateUpdate:
+			ereport(LOG,
+					(errcode(ERRCODE_INTEGRITY_CONSTRAINT_VIOLATION),
+					 errmsg(CONFLICT_MSG_PREFIX " row was previously updated at node " UINT64_FORMAT ":%u. Resolution: %s; PKEY:%s",
+							BdrConflictType_InsertInsert ? "INSERT" : "UPDATE",
+							conflict->object_schema, conflict->object_name,
+							conflict->remote_sysid, conflict->remote_tli,
+							conflict->remote_dboid,
+							timestamptz_to_str(conflict->remote_commit_time),
+							conflict->local_tuple_origin_sysid,
+							conflict->local_tuple_origin_tli,
+							resolution_name,
+							s_key.data)));
+			break;
+		case BdrConflictType_UpdateDelete:
+		case BdrConflictType_DeleteDelete:
+			ereport(LOG,
+					(errcode(ERRCODE_INTEGRITY_CONSTRAINT_VIOLATION),
+					 errmsg(CONFLICT_MSG_PREFIX " could not find existing row. Resolution: %s; PKEY:%s",
+							BdrConflictType_UpdateDelete ? "UPDATE" : "DELETE",
+							conflict->object_schema, conflict->object_name,
+							conflict->remote_sysid, conflict->remote_tli,
+							conflict->remote_dboid,
+							timestamptz_to_str(conflict->remote_commit_time),
+							resolution_name,
+							s_key.data)));
+
+			break;
+		case BdrConflictType_InsertUpdate:
+			/* XXX? */
+			break;
+		case BdrConflictType_UnhandledTxAbort:
+			/* XXX? */
+			break;
+	}
+
+	resetStringInfo(&s_key);
+}
+
+
+/*
  * Log a BDR apply conflict to the bdr.bdr_conflict_history table and/or
  * system log.
  *
@@ -417,105 +606,100 @@ bdr_conflict_log_table(BdrApplyConflict *conflict)
  * TupleTableSlot for the tuple. It isn't done here because the caller
  * frequently already has the node id to hand.
  */
-void
-bdr_conflict_log(BdrConflictType conflict_type,
-				 BdrConflictResolution resolution, TransactionId remote_txid,
-				 BDRRelation *conflict_relation, TupleTableSlot *local_tuple,
-				 RepNodeId local_tuple_origin_id, TupleTableSlot *remote_tuple,
-				 ErrorData *apply_error)
+BdrApplyConflict *
+bdr_make_apply_conflict(BdrConflictType conflict_type,
+						BdrConflictResolution resolution,
+						TransactionId remote_txid,
+						BDRRelation *conflict_relation,
+						TupleTableSlot *local_tuple,
+						RepNodeId local_tuple_origin_id,
+						TupleTableSlot *remote_tuple,
+						ErrorData *apply_error)
 {
-	MemoryContext	log_context, old_context;
-	BdrApplyConflict conflict;
-	TimeLineID tli;
-	Oid dboid;
+	MemoryContext	old_context;
+	BdrApplyConflict *conflict;
 
-	if (IsAbortedTransactionBlockState())
-		elog(ERROR, "bdr: attempt to log conflict in aborted transaction");
+	old_context = MemoryContextSwitchTo(conflict_log_context);
 
-	if (!IsTransactionState())
-		elog(ERROR, "bdr: attempt to log conflict without surrounding transaction");
-
-	/* We want our own memory ctx to clean up easily & reliably */
-	log_context = AllocSetContextCreate(CurrentMemoryContext,
-		"bdr_log_conflict_ctx", ALLOCSET_DEFAULT_MINSIZE,
-		ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
-	old_context = MemoryContextSwitchTo(log_context);
+	conflict = palloc0(sizeof(BdrApplyConflict));
 
 	/* Populate the conflict record we're going to log */
-	conflict.conflict_type = conflict_type;
-	conflict.conflict_resolution = resolution;
+	conflict->conflict_type = conflict_type;
+	conflict->conflict_resolution = resolution;
 
-	conflict.local_conflict_txid = GetTopTransactionIdIfAny();
-	conflict.local_conflict_lsn = GetXLogInsertRecPtr();
-	conflict.local_conflict_time = GetCurrentTimestamp();
-	conflict.remote_txid = remote_txid;
+	conflict->local_conflict_txid = GetTopTransactionIdIfAny();
+	conflict->local_conflict_lsn = GetXLogInsertRecPtr();
+	conflict->local_conflict_time = GetCurrentTimestamp();
+	conflict->remote_txid = remote_txid;
 
 	/* set using bdr_conflict_setrel */
 	if (conflict_relation == NULL)
 	{
-		conflict.object_schema = NULL;
-		conflict.object_name = NULL;
+		conflict->object_schema = NULL;
+		conflict->object_name = NULL;
 	}
 	else
 	{
-		conflict.object_name = RelationGetRelationName(conflict_relation->rel);
-		conflict.object_schema =
+		conflict->object_name = RelationGetRelationName(conflict_relation->rel);
+		conflict->object_schema =
 			get_namespace_name(RelationGetNamespace(conflict_relation->rel));
 	}
 
 	/* TODO: May make sense to cache the remote sysid in a global too... */
 	bdr_fetch_sysid_via_node_id(replication_origin_id,
-			&conflict.remote_sysid, &tli, &dboid);
-	conflict.remote_commit_time = replication_origin_timestamp;
-	conflict.remote_txid = remote_txid;
-	conflict.remote_commit_lsn = replication_origin_lsn;
+								&conflict->remote_sysid,
+								&conflict->remote_tli,
+								&conflict->remote_dboid);
+	conflict->remote_commit_time = replication_origin_timestamp;
+	conflict->remote_txid = remote_txid;
+	conflict->remote_commit_lsn = replication_origin_lsn;
 
 	if (local_tuple != NULL)
 	{
 		/* Log local tuple xmin even if actual tuple value logging is off */
-		conflict.local_tuple_xmin =
+		conflict->local_tuple_xmin =
 			HeapTupleHeaderGetXmin(local_tuple->tts_tuple->t_data);
-		Assert(conflict.local_tuple_xmin >= FirstNormalTransactionId ||
-			   conflict.local_tuple_xmin == FrozenTransactionId);
+		Assert(conflict->local_tuple_xmin >= FirstNormalTransactionId ||
+			   conflict->local_tuple_xmin == FrozenTransactionId);
 		if (bdr_conflict_logging_include_tuples)
 		{
-			conflict.local_tuple = ExecFetchSlotTupleDatum(local_tuple);
-			conflict.local_tuple_null = false;
+			conflict->local_tuple = ExecFetchSlotTupleDatum(local_tuple);
+			conflict->local_tuple_null = false;
 		}
 	}
 	else
 	{
-		conflict.local_tuple_null = true;
-		conflict.local_tuple = (Datum) 0;
-		conflict.local_tuple_xmin = InvalidTransactionId;
+		conflict->local_tuple_null = true;
+		conflict->local_tuple = (Datum) 0;
+		conflict->local_tuple_xmin = InvalidTransactionId;
 	}
 
 	if (local_tuple_origin_id != InvalidRepNodeId)
 	{
 		bdr_fetch_sysid_via_node_id(local_tuple_origin_id,
-									&conflict.local_tuple_origin_sysid, &tli,
-									&dboid);
+									&conflict->local_tuple_origin_sysid,
+									&conflict->local_tuple_origin_tli,
+									&conflict->local_tuple_origin_dboid);
 	}
 	else
 	{
-		conflict.local_tuple_origin_sysid = 0;
+		conflict->local_tuple_origin_sysid = 0;
 	}
 
 	if (remote_tuple != NULL && bdr_conflict_logging_include_tuples)
 	{
-		conflict.remote_tuple = ExecFetchSlotTupleDatum(remote_tuple);
-		conflict.remote_tuple_null = false;
+		conflict->remote_tuple = ExecFetchSlotTupleDatum(remote_tuple);
+		conflict->remote_tuple_null = false;
 	}
 	else
 	{
-		conflict.remote_tuple_null = true;
-		conflict.remote_tuple = (Datum) 0;
+		conflict->remote_tuple_null = true;
+		conflict->remote_tuple = (Datum) 0;
 	}
 
-	conflict.apply_error = apply_error;
-
-	bdr_conflict_log_table(&conflict);
+	conflict->apply_error = apply_error;
 
 	MemoryContextSwitchTo(old_context);
-	MemoryContextDelete(log_context);
+
+	return conflict;
 }
