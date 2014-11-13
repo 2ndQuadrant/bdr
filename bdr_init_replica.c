@@ -1108,7 +1108,9 @@ bdr_catchup_to_lsn(int cfg_index,
 		 (uint32)(target_lsn>>32), (uint32)target_lsn);
 
 	/* Create the shmem entry for the catchup worker */
+	LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
 	worker = bdr_worker_shmem_alloc(BDR_WORKER_APPLY, &worker_shmem_idx);
+	LWLockRelease(BdrWorkerCtl->lock);
 
 	/*
 	 * Launch the catchup worker, ensuring that we free the shmem slot for the

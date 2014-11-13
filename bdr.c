@@ -823,6 +823,8 @@ bdr_worker_shmem_create_workers(void)
 {
 	uint32 off;
 
+	LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
+
 	/*
 	 * ----
 	 * TODO DYNCONF We still create the apply worker configs here, because the
@@ -852,6 +854,7 @@ bdr_worker_shmem_create_workers(void)
 		if (cfg == NULL || !cfg->is_valid)
 			continue;
 
+		/* We already hold the shmem control lock here */
 		shmworker = (BdrWorker *) bdr_worker_shmem_alloc(BDR_WORKER_APPLY, NULL);
 		Assert(shmworker->worker_type == BDR_WORKER_APPLY);
 		worker = &shmworker->worker_data.apply_worker;
@@ -869,6 +872,8 @@ bdr_worker_shmem_create_workers(void)
 		 */
 		worker->bgw_is_registered = bdr_is_restart;
 	}
+
+	LWLockRelease(BdrWorkerCtl->lock);
 
 	/*
 	 * Make sure that we don't register workers if the postmaster restarts and
@@ -893,12 +898,16 @@ bdr_worker_shmem_create_workers(void)
  * ctl_idx, if passed, is set to the index of the worker within BdrWorkerCtl.
  *
  * To release a block, use bdr_worker_shmem_release(...)
+ *
+ * You must hold BdrWorkerCtl->lock in LW_EXCLUSIVE mode for
+ * this call.
  */
 BdrWorker*
 bdr_worker_shmem_alloc(BdrWorkerType worker_type, uint32 *ctl_idx)
 {
 	int i;
-	LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
+
+	Assert(LWLockHeldByMe(BdrWorkerCtl->lock));
 	for (i = 0; i < bdr_max_workers; i++)
 	{
 		BdrWorker *new_entry = &BdrWorkerCtl->slots[i];
@@ -906,13 +915,11 @@ bdr_worker_shmem_alloc(BdrWorkerType worker_type, uint32 *ctl_idx)
 		{
 			memset(new_entry, 0, sizeof(BdrWorker));
 			new_entry->worker_type = worker_type;
-			LWLockRelease(BdrWorkerCtl->lock);
 			if (ctl_idx)
 				*ctl_idx = i;
 			return new_entry;
 		}
 	}
-	LWLockRelease(BdrWorkerCtl->lock);
 	ereport(ERROR,
 			(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 			errmsg("No free bdr worker slots - bdr.max_workers is too low")));
