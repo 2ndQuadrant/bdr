@@ -7,11 +7,14 @@
 
 #include "access/relscan.h"
 #include "access/skey.h"
+#include "access/xact.h"
 
+#include "catalog/objectaddress.h" //XXX DYNCONF this is temporary
 #include "catalog/pg_database.h"
 #include "catalog/pg_shseclabel.h"
 
 #include "commands/dbcommands.h"
+#include "commands/seclabel.h" //XXX DYNCONF this is temporary
 
 #include "postmaster/bgworker.h"
 
@@ -27,57 +30,33 @@
 #include "utils/fmgroids.h"
 #include "utils/guc.h"
 
-/*
- * TODO DYNCONF Because perdb workers are currently created after
- * the apply workers in shmem, we need to do some temporary extra
- * work to set them up.
- */
-static int
-count_connections_for_db(const char * dbname)
-{
-	int i;
-
-	int nnodes = 0;
-
-	for (i = 0; i < bdr_max_workers; i++)
-	{
-		BdrApplyWorker *apply;
-		BdrWorker *entry = &BdrWorkerCtl->slots[i];
-
-		if (entry->worker_type != BDR_WORKER_APPLY)
-			continue;
-
-		apply = &entry->worker_data.apply_worker;
-
-		if (strcmp(NameStr(apply->dbname), dbname) != 0)
-			continue;
-
-		nnodes++;
-		break;
-	}
-
-	return nnodes;
-}
+static void bdr_copy_labels_from_config(void);
+static int count_connections_for_db(const char * dbname);
 
 /*
- * Register a new perdb worker for the named database, assigning it to the free
- * shmem slot identified by worker_slot_number.
+ * Register a new perdb worker for the named database.
  *
  * This is called by the supervisor during startup, and by user backends when
  * the first connection is added for a database.
  */
 void
-bdr_register_perdb_worker(const char * dbname, int worker_slot_number)
+bdr_register_perdb_worker(const char * dbname)
 {
 	BackgroundWorkerHandle *bgw_handle;
 	BackgroundWorker		bgw;
 	BdrWorker			   *worker;
 	BdrPerdbWorker		   *perdb;
+	unsigned int			worker_slot_number;
+
+	elog(DEBUG2, "Registering per-db worker for %s", dbname);
 
 	Assert(LWLockHeldByMe(BdrWorkerCtl->lock));
 
-	worker = &BdrWorkerCtl->slots[worker_slot_number];
-	worker->worker_type = BDR_WORKER_PERDB;
+	/* We already hold the shmem lock here */
+	worker = bdr_worker_shmem_alloc(
+				BDR_WORKER_PERDB,
+				&worker_slot_number
+			);
 
 	perdb = &worker->worker_data.perdb_worker;
 
@@ -105,6 +84,8 @@ bdr_register_perdb_worker(const char * dbname, int worker_slot_number)
 				(errcode(ERRCODE_CONFIGURATION_LIMIT_EXCEEDED),
 				 errmsg("Registering BDR worker failed, check prior log messages for details")));
 	}
+
+	elog(DEBUG2, "Registered per-db worker for %s successfully", dbname);
 }
 
 /*
@@ -120,6 +101,10 @@ bdr_supervisor_rescan_dbs()
 	ScanKeyData	skey[2];
 	SysScanDesc scan;
 	HeapTuple	secTuple;
+
+	elog(DEBUG1, "Supervisor scanning for BDR-enabled databases");
+
+	StartTransactionCommand();
 
 	/* 
 	 * Scan pg_seclabel looking for entries for pg_database with the bdr label
@@ -146,8 +131,11 @@ bdr_supervisor_rescan_dbs()
 	/*
 	 * We need to scan the shmem segment that tracks BDR workers and possibly
 	 * modify it, so lock it.
+	 *
+	 * We have to take an exclusive lock in case we need to modify it,
+	 * otherwise we'd be faced with a lock upgrade.
 	 */
-    LWLockAcquire(BdrWorkerCtl->lock, LW_SHARED);
+    LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
 
 	/*
 	 * Now examine each label and if there's no worker for the labled
@@ -157,7 +145,6 @@ bdr_supervisor_rescan_dbs()
 	{
 		FormData_pg_shseclabel *sec;
 		bool					found = false;
-		int						lowest_free_slot = -1;
 		char 				   *label_dbname;
 		int						i;
 
@@ -175,6 +162,9 @@ bdr_supervisor_rescan_dbs()
 		 * PostgreSQL before BDR notices.
 		 */
 		label_dbname = get_database_name(sec->objoid);
+
+		elog(DEBUG1, "Found BDR-enabled database %s (oid=%i)",
+			 label_dbname, sec->objoid);
 
 		/*
 		 * TODO DYNCONF: Right now the label *value* is completely ignored.
@@ -205,29 +195,15 @@ bdr_supervisor_rescan_dbs()
 					break;
 				}
 			}
-			else if (lowest_free_slot < 0
-					 && worker->worker_type == BDR_WORKER_EMPTY_SLOT)
-			{
-				lowest_free_slot = i;
-			}
 		}
+
+		elog(DEBUG2, "worker exists? %s", (found?"true":"false")); //XXX
 
 		if (!found)
 		{
-			if (lowest_free_slot < 0)
-			{
-				/*
-				 * TODO DYNCONF: Allocate a dynamic shmem segment with a continuation
-				 * pointer to store more workers instead of bailing out, i.e.
-				 * get rid of bdr_max_workers.
-				 */
-				ereport(ERROR,
-						(errcode(ERRCODE_CONFIGURATION_LIMIT_EXCEEDED),
-						 errmsg("Not enough free BDR worker slots, increase bdr_max_workers")));
-			}
-
+			elog(DEBUG2, "registering..."); //XXX
 			/* No perdb worker exists for this DB, make one */
-			bdr_register_perdb_worker(label_dbname, lowest_free_slot);
+			bdr_register_perdb_worker(label_dbname);
 		}
 
 		pfree(label_dbname);
@@ -237,6 +213,8 @@ bdr_supervisor_rescan_dbs()
 
 	systable_endscan(scan);
 	heap_close(secrel, AccessShareLock);
+
+	CommitTransactionCommand();
 }
 
 
@@ -279,6 +257,13 @@ bdr_supervisor_worker_main(Datum main_arg)
 	appendStringInfo(&si, "bdr supervisor");
 	SetConfigOption("application_name", si.data, PGC_USERSET, PGC_S_SESSION);
 
+	/*
+	 * XXX DYNCONF Because config isn't fully migrated yet, we need to
+	 * scan the configured list of DBs and apply security labels for each
+	 * during startup so that "make check" can actually work.
+	 */
+	bdr_copy_labels_from_config();
+
 	bdr_supervisor_rescan_dbs();
 
 	for (;;) {
@@ -310,14 +295,14 @@ bdr_supervisor_worker_main(Datum main_arg)
 	 * XXX TODO FIXME DYNCONF
 	 *
 	 * Change is_bdr_db to use seclabels
-	 * Remove old perdb registration code
-	 * Move perdb into separate C file
+	 *
+	 * Connect to template1 and create 'bdr' db, set a shmem flag and
+	 * reconnect.
+	 *
 	 * Add the code to security-label DBs when BDR activated
 	 * Add connection tracking table to bdr extension
 	 * add connection manip functions
 	 * have connection manip functions send signals, do seclabels
-	 *
-	 * Keep track of bgworkers we registered?
 	 *
 	 * handle drop/removal
 	 */
@@ -360,4 +345,107 @@ bdr_supervisor_register()
 	bgw.bgw_main_arg = Int32GetDatum(0); /* unused */
 
 	RegisterBackgroundWorker(&bgw);
+}
+
+
+
+
+/***
+ * Code after this point is throwaway code for the interim
+ * half-dynamic configuration support.
+ ***/
+
+/*
+ * TODO DYNCONF For each DB configured, apply a security label.
+ *
+ * Temporary code during the transition to dynamic config.
+ *
+ * Don't care in the slightest if it's slow and ugly, it's
+ * throwaway code.
+ */
+static void
+bdr_copy_labels_from_config()
+{
+	char **distinct_dbnames;
+	int n_distinct_dbnames = 0, i, j;
+
+	distinct_dbnames = (char**)palloc0(sizeof(char*) * bdr_max_workers);
+
+	StartTransactionCommand();
+
+	for (i = 0; i < bdr_max_workers; i++)
+	{
+		BdrApplyWorker *apply;
+		BdrWorker *entry = &BdrWorkerCtl->slots[i];
+		bool found = false;
+
+		if (entry->worker_type != BDR_WORKER_APPLY)
+			continue;
+
+		apply = &entry->worker_data.apply_worker;
+
+		/* Does this worker's db already exist in the namelist? */
+		for (j = 0; j < n_distinct_dbnames; j++)
+		{
+			if (strcmp(NameStr(apply->dbname), distinct_dbnames[j]) == 0)
+			{
+				found = true;
+				break;
+			}
+		}
+		if (!found)
+		{
+			elog(LOG, "Found distinct dbname %s", NameStr(apply->dbname));
+			distinct_dbnames[n_distinct_dbnames++] = NameStr(apply->dbname);
+		}
+	}
+
+	elog(LOG, "XXX Found %i distinct dbnames", n_distinct_dbnames);
+
+	/* Right-o, now set labels for each */
+	for (i = 0; i < n_distinct_dbnames; i++)
+	{
+		ObjectAddress addr;
+		addr.objectId = get_database_oid(distinct_dbnames[i], false);
+		addr.classId = DatabaseRelationId;
+		addr.objectSubId = 0;
+
+		SetSecurityLabel(&addr, "bdr", "enabled");
+	}
+
+	CommitTransactionCommand();
+
+	pfree(distinct_dbnames);
+}
+
+/*
+ * TODO DYNCONF Because perdb workers are currently created after
+ * the apply workers in shmem, we need to do some temporary extra
+ * work to set them up.
+ */
+static int
+count_connections_for_db(const char * dbname)
+{
+	int i;
+
+	int nnodes = 0;
+
+	for (i = 0; i < bdr_max_workers; i++)
+	{
+		BdrApplyWorker *apply;
+		BdrWorker *entry = &BdrWorkerCtl->slots[i];
+
+		if (entry->worker_type != BDR_WORKER_APPLY)
+			continue;
+
+		apply = &entry->worker_data.apply_worker;
+
+		if (strcmp(NameStr(apply->dbname), dbname) != 0)
+			continue;
+
+		nnodes++;
+		break;
+	}
+
+	return nnodes;
 }

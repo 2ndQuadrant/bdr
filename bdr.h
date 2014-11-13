@@ -443,7 +443,7 @@ PGDLLEXPORT extern void bdr_supervisor_worker_main(Datum main_arg);
 
 extern void bdr_worker_init(char* dbname);
 extern void bdr_supervisor_register(void);
-extern void bdr_register_perdb_worker(const char * dbname, int worker_slot_number);
+extern void bdr_register_perdb_worker(const char * dbname);
 
 extern void bdr_sighup(SIGNAL_ARGS);
 extern void bdr_sigterm(SIGNAL_ARGS);
