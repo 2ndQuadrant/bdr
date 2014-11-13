@@ -27,6 +27,45 @@
 #include "utils/fmgroids.h"
 #include "utils/guc.h"
 
+/*
+ * TODO DYNCONF Because perdb workers are currently created after
+ * the apply workers in shmem, we need to do some temporary extra
+ * work to set them up.
+ */
+static int
+count_connections_for_db(const char * dbname)
+{
+	int i;
+
+	int nnodes = 0;
+
+	for (i = 0; i < bdr_max_workers; i++)
+	{
+		BdrApplyWorker *apply;
+		BdrWorker *entry = &BdrWorkerCtl->slots[i];
+
+		if (entry->worker_type != BDR_WORKER_APPLY)
+			continue;
+
+		apply = &entry->worker_data.apply_worker;
+
+		if (strcmp(NameStr(apply->dbname), dbname) != 0)
+			continue;
+
+		nnodes++;
+		break;
+	}
+
+	return nnodes;
+}
+
+/*
+ * Register a new perdb worker for the named database, assigning it to the free
+ * shmem slot identified by worker_slot_number.
+ *
+ * This is called by the supervisor during startup, and by user backends when
+ * the first connection is added for a database.
+ */
 void
 bdr_register_perdb_worker(const char * dbname, int worker_slot_number)
 {
@@ -34,6 +73,8 @@ bdr_register_perdb_worker(const char * dbname, int worker_slot_number)
 	BackgroundWorker		bgw;
 	BdrWorker			   *worker;
 	BdrPerdbWorker		   *perdb;
+
+	Assert(LWLockHeldByMe(BdrWorkerCtl->lock));
 
 	worker = &BdrWorkerCtl->slots[worker_slot_number];
 	worker->worker_type = BDR_WORKER_PERDB;
@@ -43,7 +84,7 @@ bdr_register_perdb_worker(const char * dbname, int worker_slot_number)
 	strncpy(NameStr(perdb->dbname),
 			dbname, NAMEDATALEN);
 	NameStr(perdb->dbname)[NAMEDATALEN-1] = '\0';
-	perdb->nnodes = 0;
+	perdb->nnodes = count_connections_for_db(dbname);
 	perdb->seq_slot = worker_slot_number;
 
 	bgw.bgw_flags = BGWORKER_SHMEM_ACCESS |

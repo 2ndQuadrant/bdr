@@ -824,53 +824,13 @@ bdr_worker_shmem_create_workers(void)
 	uint32 off;
 
 	/*
-	 * Create a BdrPerdbWorker for each distinct database found during
-	 * _PG_init. The bgworker for each has already been registered and assigned
-	 * a slot position during _PG_init, but the slot doesn't have anything
-	 * useful in it yet. Because it was already registered we don't need
-	 * any protection against duplicate launches on restart here.
+	 * ----
+	 * TODO DYNCONF We still create the apply worker configs here, because the
+	 * perdb workers don't yet have a way of looking up their config in the
+	 * local database. They still need it configured here, where they can
+	 * look it up from shmem.
+	 * ----
 	 *
-	 * Because these slots are pre-assigned before shmem is bought up they
-	 * MUST be reserved first, before any shmem entries are allocated, so
-	 * they get the first slots.
-	 *
-	 * When started, this worker will continue setup - doing any required
-	 * initialization of the database, then registering dynamic bgworkers for
-	 * the DB's individual BDR connections.
-	 *
-	 * If we ever want to support dynamically adding/removing DBs from BDR at
-	 * runtime, this'll need to move into a static bgworker because dynamic
-	 * bgworkers can't be launched directly from the postmaster. We'll need a
-	 * "bdr manager" static bgworker.
-	 */
-
-	for (off = 0; off < bdr_distinct_dbnames_count; off++)
-	{
-		BdrWorker	   *shmworker;
-		BdrPerdbWorker *perdb;
-		uint32		ctl_idx;
-
-		shmworker = (BdrWorker *) bdr_worker_shmem_alloc(BDR_WORKER_PERDB, &ctl_idx);
-		Assert(shmworker->worker_type == BDR_WORKER_PERDB);
-		/*
-		 * The workers have already been assigned shmem indexes during
-		 * _PG_init, so they MUST get the same index here. So long as these
-		 * entries are assigned before any other shmem slots they will.
-		 */
-		Assert(ctl_idx == off);
-		perdb = &shmworker->worker_data.perdb_worker;
-
-		strncpy(NameStr(perdb->dbname), bdr_distinct_dbnames[off], NAMEDATALEN);
-		NameStr(perdb->dbname)[NAMEDATALEN-1] = '\0';
-
-		perdb->nnodes = 0;
-		perdb->seq_slot = off;
-
-		elog(DEBUG1, "Assigning shmem bdr database worker for db %s",
-			 NameStr(perdb->dbname));
-	}
-
-	/*
 	 * Populate shmem with a BdrApplyWorker for each valid BdrConnectionConfig
 	 * found during _PG_init so that the per-db worker will register it for
 	 * startup after performing any BDR initialisation work.
@@ -888,8 +848,6 @@ bdr_worker_shmem_create_workers(void)
 		BdrConnectionConfig *cfg = bdr_connection_configs[off];
 		BdrWorker	   *shmworker;
 		BdrApplyWorker *worker;
-		int				i;
-		bool			found_perdb = false;
 
 		if (cfg == NULL || !cfg->is_valid)
 			continue;
@@ -901,35 +859,9 @@ bdr_worker_shmem_create_workers(void)
 		worker->replay_stop_lsn = InvalidXLogRecPtr;
 		worker->forward_changesets = false;
 
-		/*
-		 * Now search for the perdb worker belonging to this slot.
-		 */
-		for (i = 0; i < bdr_max_workers; i++)
-		{
-			BdrPerdbWorker *perdb;
-			BdrWorker *entry = &BdrWorkerCtl->slots[i];
-
-			if (entry->worker_type != BDR_WORKER_PERDB)
-				continue;
-
-			perdb = &entry->worker_data.perdb_worker;
-
-			if (strcmp(NameStr(perdb->dbname), cfg->dbname) != 0)
-				continue;
-
-			/*
-			 * Remember how many connections there are for this node. This
-			 * will, e.g., be used to determine the quorum for ddl locks and
-			 * sequencer votes.
-			 */
-			perdb->nnodes++;
-			found_perdb = true;
-			worker->perdb_worker_off = i;
-			break;
-		}
-
-		if (!found_perdb)
-			elog(ERROR, "couldn't find perdb entry for apply worker");
+		/* XXX DYNCONF Need to store dbname for each apply worker for now */
+		strncpy(NameStr(worker->dbname), cfg->dbname, NAMEDATALEN);
+		(NameStr(worker->dbname))[NAMEDATALEN-1] = '\0';
 
 		/*
 		 * If this is a postmaster restart, don't register the worker a second
@@ -1178,8 +1110,6 @@ _PG_init(void)
 	char      **database_initcons;
 	Size		num_used_databases = 0;
 	int			connection_config_idx;
-	BackgroundWorker bgw;
-	uint32		off;
 
 	if (!process_shared_preload_libraries_in_progress)
 		ereport(ERROR,
@@ -1453,32 +1383,7 @@ _PG_init(void)
 	num_used_databases = 0;
 	used_databases = NULL;
 
-	/*
-	 * Register the per-db workers and assign them an index in shmem. The
-	 * memory doesn't actually exist yet, it'll be allocated in shmem init.
-	 *
-	 * No protection against multiple launches is requried because this
-	 * only runs once, in _PG_init.
-	 */
-	bgw.bgw_flags = BGWORKER_SHMEM_ACCESS |
-		BGWORKER_BACKEND_DATABASE_CONNECTION;
-	bgw.bgw_start_time = BgWorkerStart_RecoveryFinished;
-	bgw.bgw_main = NULL;
-	strncpy(bgw.bgw_library_name, BDR_LIBRARY_NAME, BGW_MAXLEN);
-	strncpy(bgw.bgw_function_name, "bdr_perdb_worker_main", BGW_MAXLEN);
-	bgw.bgw_restart_time = 5;
-	bgw.bgw_notify_pid = 0;
-	for (off = 0; off < bdr_distinct_dbnames_count; off++)
-	{
-		snprintf(bgw.bgw_name, BGW_MAXLEN,
-				 "bdr: %s", bdr_distinct_dbnames[off]);
-		/*
-		 * This index into BdrWorkerCtl shmem hasn't been populated yet. It'll
-		 * be set up in bdr_worker_shmem_create_workers .
-		 */
-		bgw.bgw_main_arg = Int32GetDatum(off);
-		RegisterBackgroundWorker(&bgw);
-	}
+	/* TODO DYNCONF Note that per-db workers aren't registered here anymore */
 
 	EmitWarningsOnPlaceholders("bdr");
 

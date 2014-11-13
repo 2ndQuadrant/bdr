@@ -178,7 +178,14 @@ typedef struct BdrApplyWorker
 	 */
 	bool bgw_is_registered;
 
-	size_t perdb_worker_off;
+	/*
+	 * TODO DYNCONF Since we now create apply workers before perdb workers we
+	 * don't know their offsets, so we must store the dbname instead.
+	 *
+	 * Delete this when they're moved into dynconfig.
+	 */
+	NameData dbname;
+
 } BdrApplyWorker;
 
 /*
