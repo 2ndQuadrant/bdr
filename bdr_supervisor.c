@@ -209,12 +209,67 @@ bdr_supervisor_rescan_dbs()
 		pfree(label_dbname);
 	}
 
+	elog(DEBUG2, "Registered all per-db workers");
+
 	LWLockRelease(BdrWorkerCtl->lock);
 
 	systable_endscan(scan);
 	heap_close(secrel, AccessShareLock);
 
 	CommitTransactionCommand();
+
+	elog(DEBUG2, "Finished scanning for BDR-enabled databases");
+}
+
+/*
+ * Create the database the supervisor remains connected
+ * to, a DB with no user connections permitted.
+ *
+ * This is a workaorund for the inability to use pg_shseclabel
+ * without a DB connection; see comments in bdr_supervisor_main
+ */
+static void
+bdr_supervisor_createdb()
+{
+	Oid dboid;
+
+	StartTransactionCommand();
+
+	/* If the DB already exists, no need to create it */
+	dboid = get_database_oid("bdr", true);
+
+	if (dboid == InvalidOid)
+	{
+		CreatedbStmt stmt;
+		DefElem de_template;
+		DefElem de_connlimit;
+
+		de_template.defname = "template";
+		de_template.type = T_String;
+		de_template.arg = (Node*) makeString("template1");
+
+		de_connlimit.defname = "connectionlimit";
+		de_template.type = T_Integer;
+		de_connlimit.arg = (Node*) makeInteger(1);
+
+		stmt.dbname = "bdr";
+		stmt.options = list_make2(&de_template, &de_connlimit);
+
+		dboid = createdb(&stmt);
+		
+		if (dboid == InvalidOid)
+			elog(ERROR, "Failed to create 'bdr' DB");
+
+		elog(LOG, "Created database 'bdr' (oid=%i) during BDR startup", dboid);
+	}
+	else
+	{
+		elog(DEBUG3, "Database 'bdr' (oid=%i) already exists, not creating", dboid);
+	}
+
+	CommitTransactionCommand();
+
+	Assert(dboid != InvalidOid);
 }
 
 
@@ -249,20 +304,68 @@ bdr_supervisor_worker_main(Datum main_arg)
 	 * 
 	 * This will permit us to query shared relations without requiring
 	 * a connection to any specific database.
+	 *
+	 * XXX DYNCONF for this to work you have to patch src/backend/utils/init/postinit.c,
+	 * changing
+	 * 	if (IsAutoVacuumLauncherProcess())
+	 * to
+	 *  if (IsAutoVacuumLauncherProcess() || (in_dbname == NULL && dboid == InvalidOid && !bootstrap))
+	 * at line 620, in InitPostgres
+	 *
+	 * Even with that change we still fail, because you can't access pg_class oids w/o a DB:
+	 *
+	 *   FATAL:  XX000: cannot read pg_class without having selected a database
+	 *   LOCATION:  ScanPgRelation, relcache.c:316
+	 *
+	 * so right now we're just going to require a DB to exist. 
 	 */
-	BackgroundWorkerInitializeConnection(NULL, NULL);
+	/* BackgroundWorkerInitializeConnection(NULL, NULL); *///
+	
+	/*
+	 * We can't connect to no db, because InitPostgres only lets the autovacuum
+	 * manager do that.
+	 * 
+	 * See http://www.postgresql.org/message-id/flat/CA+M2pVU4GoHW2wwvE1jd32pYKYwXUpEuT=s1Ji7YAgnLFFARzA@mail.gmail.com
+	 *
+	 * XXX DYNCONF
+	 */
+
+	/*
+	 * Because we can't connect to "no database" because of the issues outlined
+	 * above, we must connect to a usable one, like template1, then use it to
+	 * create a dummy database to operate in.
+	 *
+	 * We can't use template0, as dataisconn must be enabled for the DB. We don't use
+	 * postgres because it might not exist, wheras 'template1' is pretty much guaranteed
+	 * to.
+	 *
+	 * Once created we set a shmem flag and restart so we know we can connect
+	 * to the newly created database.
+	 */
+	if (!BdrWorkerCtl->is_supervisor_restart)
+	{
+		BackgroundWorkerInitializeConnection("template1", NULL);
+		bdr_supervisor_createdb();
+
+		/*
+		 * XXX DYNCONF Because config isn't fully migrated yet, we need to
+		 * scan the configured list of DBs and apply security labels for each
+		 * during startup so that "make check" can actually work.
+		 */
+		bdr_copy_labels_from_config();
+
+		BdrWorkerCtl->is_supervisor_restart = true;
+		elog(DEBUG1, "BDR supervisor restarting to connect to 'bdr' DB");
+		proc_exit(1);
+	}
+
+	BackgroundWorkerInitializeConnection("bdr", NULL);
+	elog(DEBUG1, "BDR supervisor connected to DB 'bdr'");
 
 	initStringInfo(&si);
 
 	appendStringInfo(&si, "bdr supervisor");
 	SetConfigOption("application_name", si.data, PGC_USERSET, PGC_S_SESSION);
-
-	/*
-	 * XXX DYNCONF Because config isn't fully migrated yet, we need to
-	 * scan the configured list of DBs and apply security labels for each
-	 * during startup so that "make check" can actually work.
-	 */
-	bdr_copy_labels_from_config();
 
 	bdr_supervisor_rescan_dbs();
 
@@ -338,7 +441,7 @@ bdr_supervisor_register()
 	bgw.bgw_main = NULL;
 	strncpy(bgw.bgw_library_name, BDR_LIBRARY_NAME, BGW_MAXLEN);
 	strncpy(bgw.bgw_function_name, "bdr_supervisor_worker_main", BGW_MAXLEN);
-	bgw.bgw_restart_time = 5;
+	bgw.bgw_restart_time = 1;
 	bgw.bgw_notify_pid = 0;
 	snprintf(bgw.bgw_name, BGW_MAXLEN,
 			 "bdr supervisor");
