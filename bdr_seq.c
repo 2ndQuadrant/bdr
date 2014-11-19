@@ -50,7 +50,7 @@ typedef struct BdrSequencerSlot
 
 typedef struct BdrSequencerControl
 {
-	size_t		slot;
+	int	        next_slot;
 	BdrSequencerSlot slots[FLEXIBLE_ARRAY_MEMBER];
 } BdrSequencerControl;
 
@@ -429,6 +429,11 @@ bdr_sequencer_shmem_startup(void)
 	{
 		/* initialize */
 		memset(BdrSequencerCtl, 0, bdr_sequencer_shmem_size());
+		/* XXX DYNCONF
+		 * This is temporary, allowing perdb workers to allocate seq slots
+		 * until seq slots are unified with perdb workers and/or made dynamic.
+		 */
+		BdrSequencerCtl->next_slot = 0; //XXX DYNCONF
 	}
 	LWLockRelease(AddinShmemInitLock);
 
@@ -448,6 +453,17 @@ bdr_sequencer_shmem_init(int nnodes, int sequencers)
 
 	prev_shmem_startup_hook = shmem_startup_hook;
 	shmem_startup_hook = bdr_sequencer_shmem_startup;
+}
+
+/*
+ * XXX DYNCONF
+ *
+ * This is temporary, until perdb gets merged with sequencers.
+ */
+int
+bdr_sequencer_get_next_free_slot(void)
+{
+	return BdrSequencerCtl->next_slot ++;
 }
 
 void
