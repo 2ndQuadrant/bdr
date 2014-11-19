@@ -397,6 +397,9 @@ extern Datum bdr_sequence_setval(PG_FUNCTION_ARGS);
 extern Datum bdr_sequence_options(PG_FUNCTION_ARGS);
 #endif
 
+extern int bdr_sequencer_get_next_free_slot(void); //XXX PERDB temp
+
+
 /* statistic functions */
 extern void bdr_count_shmem_init(size_t nnodes);
 extern void bdr_count_set_current_node(RepNodeId node_id);
