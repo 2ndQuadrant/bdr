@@ -519,6 +519,8 @@ bdr_sequencer_shmem_shutdown(int code, Datum arg)
 	if (seq_slot < 0)
 		return;
 
+	Assert(seq_slot < bdr_seq_nsequencers);
+
 	slot = &BdrSequencerCtl->slots[seq_slot];
 
 	slot->database_oid = InvalidOid;
@@ -552,6 +554,7 @@ void
 bdr_sequencer_shmem_init(int nnodes, int sequencers)
 {
 	Assert(process_shared_preload_libraries_in_progress);
+	Assert(nnodes >= sequencers);
 
 	bdr_seq_nnodes = nnodes;
 	bdr_seq_nsequencers = sequencers;
@@ -569,7 +572,7 @@ bdr_sequencer_wakeup(void)
 	BdrSequencerSlot *slot;
 
 
-	for (off = 0; off < bdr_seq_nnodes; off++)
+	for (off = 0; off < bdr_seq_nsequencers; off++)
 	{
 		slot = &BdrSequencerCtl->slots[off];
 
