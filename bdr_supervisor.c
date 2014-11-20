@@ -369,7 +369,8 @@ bdr_supervisor_worker_main(Datum main_arg)
 
 	bdr_supervisor_rescan_dbs();
 
-	for (;;) {
+	while (!got_SIGTERM)
+	{
 		int rc;
 
 		/*
@@ -388,11 +389,19 @@ bdr_supervisor_worker_main(Datum main_arg)
 		if (rc & WL_POSTMASTER_DEATH)
 			proc_exit(1);
 
+		if (got_SIGHUP)
+		{
+			got_SIGHUP = false;
+			ProcessConfigFile(PGC_SIGHUP);
+		}
+
 		/*
 		 * TODO DYNCONF: We should probably react to SIGHUP and re-run
 		 * bdr_supervisor_rescan_dbs() here.
 		 */
 	}
+
+	proc_exit(0);
 
 	/*
 	 * XXX TODO FIXME DYNCONF
