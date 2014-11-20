@@ -32,6 +32,51 @@
 #include "utils/memutils.h"
 #include "utils/snapmgr.h"
 
+PG_FUNCTION_INFO_V1(bdr_start_perdb_worker);
+
+Datum
+bdr_start_perdb_worker(PG_FUNCTION_ARGS);
+
+/* In the commit hook, should we attempt to start a per-db worker? */
+static bool start_perdb_worker = false;
+
+static void
+bdr_perdb_xact_callback(XactEvent event, void *arg)
+{
+	switch (event)
+	{
+		case XACT_EVENT_COMMIT:
+			if (start_perdb_worker)
+			{
+				start_perdb_worker = false;
+				bdr_register_perdb_worker(get_database_name(MyDatabaseId));
+			}
+			break;
+		default:
+			/* We're not interested in other tx events */
+			break;
+	}
+}
+
+/*
+ * Prepare to launch a perdb worker for the current DB if it's not already
+ * running, and register a XACT_EVENT_COMMIT hook to perform the actual launch
+ * when the addition of the worker commits.
+ */
+Datum
+bdr_start_perdb_worker(PG_FUNCTION_ARGS)
+{
+	/* XXX DYNCONF Check to make sure the security label exists and is valid? */
+
+	/* If there's already a per-db worker for our DB we have nothing to do */
+	if (!bdr_is_bdr_activated_db())
+	{
+		start_perdb_worker = true;
+		RegisterXactCallback(bdr_perdb_xact_callback, NULL);
+	}
+	PG_RETURN_VOID();
+}
+
 /*
  * Launch a dynamic bgworker to run bdr_apply_main for each bdr connection on
  * the database identified by dbname.

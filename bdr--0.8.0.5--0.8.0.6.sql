@@ -9,6 +9,13 @@ RETURNS record LANGUAGE c AS 'MODULE_PATHNAME';
 
 -- bdr_get_local_nodeid is intentionally not revoked from all, it's read-only
 
+CREATE FUNCTION bdr_start_perdb_worker()
+RETURNS void LANGUAGE c AS 'MODULE_PATHNAME';
+
+REVOKE ALL ON FUNCTION bdr_start_perdb_worker() FROM public;
+
+COMMENT ON FUNCTION bdr_start_perdb_worker() IS 'Internal BDR function, do not call directly.';
+
 RESET bdr.permit_unsafe_ddl_commands;
 RESET bdr.skip_ddl_replication;
 RESET search_path;
