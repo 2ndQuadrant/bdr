@@ -165,6 +165,10 @@ bdr_launch_apply_workers(char *dbname)
 	return apply_workers;
 }
 
+/* XXX DYNCONF */
+static void
+bdr_copy_connections_from_config(void);
+
 /*
  * Each database with BDR enabled on it has a static background worker,
  * registered at shared_preload_libraries time during postmaster start. This is
@@ -211,6 +215,8 @@ bdr_perdb_worker_main(Datum main_arg)
 	/* need to be able to perform writes ourselves */
 	bdr_executor_always_allow_writes(true);
 	bdr_locks_startup(bdr_perdb_worker->nnodes);
+
+	bdr_copy_connections_from_config(); /* XXX DYNCONF */
 
 	/*
 	 * Do we need to init the local DB from a remote node?
@@ -297,4 +303,91 @@ bdr_perdb_worker_main(Datum main_arg)
 	}
 
 	proc_exit(0);
+}
+
+/*
+ * XXX DYNCONF throwaway code
+ *
+ * Read the configured connections from the config file and copy them into
+ * bdr.bdr_connections.
+ */
+static void
+bdr_copy_connections_from_config()
+{
+#define BDR_CONNECTIONS_NATTS 9
+	int   i, ret;
+	char *my_dbname;
+	bool save_unsafe;
+
+	save_unsafe = bdr_permit_unsafe_commands;
+
+	StartTransactionCommand();
+
+	my_dbname = get_database_name(MyDatabaseId);
+
+	SPI_connect();
+
+	bdr_permit_unsafe_commands = true;
+
+	ret = SPI_exec("DELETE FROM bdr.bdr_connections;", 0);
+	if (ret != SPI_OK_DELETE)
+		elog(ERROR, "Couldn't clean out bdr.bdr_connections");
+
+	for (i = 0; i < bdr_max_workers; i++)
+	{
+		BdrConnectionConfig *cfg = bdr_connection_configs[i];
+		NameData conname, replication_name;
+		char  nulls[BDR_CONNECTIONS_NATTS];
+		Datum values[BDR_CONNECTIONS_NATTS];
+		Oid   argtypes[BDR_CONNECTIONS_NATTS] = {OIDOID, OIDOID, OIDOID, NAMEOID, NAMEOID, TEXTOID, BOOLOID, TEXTOID, INT4OID};
+
+		if (cfg == NULL)
+			continue;
+
+		if (strcmp(cfg->dbname, my_dbname) != 0)
+			continue;
+
+		memset(values, 0, sizeof(values));
+		strncpy(nulls, "         ", BDR_CONNECTIONS_NATTS);
+
+		values[0] = ObjectIdGetDatum(GetSystemIdentifier());
+		values[1] = ObjectIdGetDatum(ThisTimeLineID);
+		values[2] = ObjectIdGetDatum(MyDatabaseId);
+		/* local conn name */
+		strncpy(NameStr(conname), cfg->name, NAMEDATALEN);
+		NameStr(conname)[NAMEDATALEN-1] = '\0';
+		values[3] = NameGetDatum(&conname);
+		/* replication name is unused and must be the empty string */
+		NameStr(replication_name)[0] = '\0';
+		values[4] = NameGetDatum(&replication_name);
+		/* DSN to connect to */
+		values[5] = CStringGetTextDatum(cfg->dsn);
+		values[6] = BoolGetDatum(cfg->init_replica);
+		if (cfg->init_replica)
+			values[7] = CStringGetTextDatum(cfg->replica_local_dsn);
+		else
+			nulls[7] = 'n';
+		if (cfg->apply_delay >= 0)
+			values[8] = Int32GetDatum(cfg->apply_delay);
+		else
+			nulls[8] = 'n';
+		/* TODO DYNCONF replication sets */
+
+		ret = SPI_execute_with_args(
+					"INSERT INTO bdr.bdr_connections "
+					"(conn_sysid, conn_timeline, conn_dboid, conn_local_name, conn_replication_name, conn_dsn, conn_init_replica, conn_replica_local_dsn, conn_apply_delay) "
+					"VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+					9, argtypes, values, nulls, false, 0
+					);
+
+		if (ret != SPI_OK_INSERT)
+			elog(ERROR, "Failed to copy record into bdr.bdr_connections");
+
+	}
+
+	SPI_finish();
+	pfree(my_dbname);
+	CommitTransactionCommand();
+
+	bdr_permit_unsafe_commands = save_unsafe;
 }
