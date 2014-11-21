@@ -64,7 +64,9 @@ bdr_register_perdb_worker(const char * dbname)
 			dbname, NAMEDATALEN);
 	NameStr(perdb->dbname)[NAMEDATALEN-1] = '\0';
 	perdb->nnodes = count_connections_for_db(dbname);
+#ifdef BUILDING_BDR
 	perdb->seq_slot = bdr_sequencer_get_next_free_slot(); //XXX DYNCONF Temporary
+#endif
 
 	bgw.bgw_flags = BGWORKER_SHMEM_ACCESS |
 		BGWORKER_BACKEND_DATABASE_CONNECTION;
