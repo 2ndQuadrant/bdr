@@ -430,6 +430,28 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 			qsort(data->replication_sets, data->num_replication_sets,
 				  sizeof(char *), pg_qsort_strcmp);
 		}
+		else if (strcmp(elem->defname, "interactive") == 0)
+		{
+			/*
+			 * Set defaults for interactive mode
+			 *
+			 * This is used for examining the replication queue from SQL.
+			 */
+			data->client_pg_version = PG_VERSION_NUM;
+			data->client_pg_catversion = CATALOG_VERSION_NO;
+			data->client_bdr_version = BDR_VERSION_NUM;
+			data->client_bdr_variant = BDR_VARIANT;
+			data->client_min_bdr_version = BDR_VERSION_NUM;
+			data->client_sizeof_int = sizeof(int);
+			data->client_sizeof_long = sizeof(long);
+			data->client_sizeof_datum = sizeof(Datum);
+			data->client_maxalign = MAXIMUM_ALIGNOF;
+			data->client_bigendian = bdr_get_bigendian();
+			data->client_float4_byval = bdr_get_float4byval();
+			data->client_float8_byval = bdr_get_float8byval();
+			data->client_int_datetime = bdr_get_integer_timestamps();
+			data->client_db_encoding = pstrdup(GetDatabaseEncodingName());
+		}
 		else
 		{
 			ereport(ERROR,
