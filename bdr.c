@@ -424,7 +424,9 @@ bdr_worker_init(char *dbname)
 
 	/* make sure BDR extension exists */
 	bdr_executor_always_allow_writes(true);
+	StartTransactionCommand();
 	bdr_maintain_schema();
+	CommitTransactionCommand();
 	bdr_executor_always_allow_writes(false);
 
 	/* always work in our own schema */
@@ -1844,6 +1846,8 @@ bdr_lookup_relid(const char *relname, Oid schema_oid)
  * the current database.
  *
  * Concurrent executions will block, but not fail.
+ *
+ * Must be called inside transaction.
  */
 void
 bdr_maintain_schema(void)
@@ -1852,13 +1856,6 @@ bdr_maintain_schema(void)
 	Oid			btree_gist_oid;
 	Oid			bdr_oid;
 	Oid			schema_oid;
-	bool tx_started = true;
-
-	if (!IsTransactionState())
-	{
-		tx_started = false;
-		StartTransactionCommand();
-	}
 
 	PushActiveSnapshot(GetTransactionSnapshot());
 
@@ -1943,8 +1940,6 @@ bdr_maintain_schema(void)
 	bdr_conflict_handlers_init();
 
 	PopActiveSnapshot();
-	if (!tx_started)
-		CommitTransactionCommand();
 }
 
 Datum

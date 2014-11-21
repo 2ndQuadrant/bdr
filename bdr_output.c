@@ -19,6 +19,7 @@
 #include "access/tuptoaster.h"
 #include "access/xact.h"
 
+#include "catalog/catversion.h"
 #include "catalog/index.h"
 
 #include "catalog/namespace.h"
@@ -222,6 +223,8 @@ bdr_req_param(const char *param)
  * raise an error.
  *
  * If this function returns it's safe to begin replay.
+ *
+ * Must be called inside transaction.
  */
 static void
 bdr_ensure_node_ready()
@@ -231,8 +234,6 @@ bdr_ensure_node_ready()
 	char status;
 	NameData dbname;
 	char *tmp_dbname;
-
-	StartTransactionCommand();
 
 	/* We need dbname valid outside this transaction, so copy it */
 	tmp_dbname = get_database_name(MyDatabaseId);
@@ -251,8 +252,6 @@ bdr_ensure_node_ready()
 	status = bdr_nodes_get_local_status(sysid, ThisTimeLineID, MyDatabaseId);
 
 	SPI_finish();
-
-	CommitTransactionCommand();
 
 /*
  * There is no local node status for UDR as we have only connection to this
@@ -562,14 +561,14 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 		else
 			elog(WARNING, "cache lookup for schema bdr failed");
 
-		if (!tx_started)
-			CommitTransactionCommand();
-
 		/*
 		 * Make sure it's safe to begin playing changes to the remote end.
 		 * This'll ERROR out if we're not ready.
 		 */
 		bdr_ensure_node_ready();
+
+		if (!tx_started)
+			CommitTransactionCommand();
 	}
 }
 
