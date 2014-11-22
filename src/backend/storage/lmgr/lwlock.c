@@ -486,6 +486,7 @@ static inline bool
 LWLockAcquireCommon(LWLock *l, LWLockMode mode, uint64 *valptr, uint64 val)
 {
 	volatile LWLock *lock = l;
+	volatile uint64 *valp = valptr;
 	PGPROC	   *proc = MyProc;
 	bool		retry = false;
 	bool		result = true;
@@ -641,8 +642,8 @@ LWLockAcquireCommon(LWLock *l, LWLockMode mode, uint64 *valptr, uint64 val)
 	}
 
 	/* If there's a variable associated with this lock, initialize it */
-	if (valptr)
-		*valptr = val;
+	if (valp)
+		*valp = val;
 
 	/* We are done updating shared state of the lock itself. */
 	SpinLockRelease(&lock->mutex);
@@ -972,13 +973,17 @@ LWLockWaitForVar(LWLock *l, uint64 *valptr, uint64 oldval, uint64 *newval)
 		 */
 		proc->lwWaiting = true;
 		proc->lwWaitMode = LW_WAIT_UNTIL_FREE;
-		proc->lwWaitLink = NULL;
-
 		/* waiters are added to the front of the queue */
 		proc->lwWaitLink = lock->head;
 		if (lock->head == NULL)
 			lock->tail = proc;
 		lock->head = proc;
+
+		/*
+		 * Set releaseOK, to make sure we get woken up as soon as the lock is
+		 * released.
+		 */
+		lock->releaseOK = true;
 
 		/* Can release the mutex now */
 		SpinLockRelease(&lock->mutex);
