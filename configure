@@ -2718,7 +2718,10 @@ done
 
 
 if test "$ac_cv_header_replication_replication_identifier_h" != 'yes'; then
-   as_fn_error $? "bdr can only be compiled against postgres-bdr" "$LINENO" 5
+   { $as_echo "$as_me:${as_lineno-$LINENO}: postgres-bdr patches missing, forcing UDR build" >&5
+$as_echo "$as_me: postgres-bdr patches missing, forcing UDR build" >&6;}
+
+   BUILDING_UDR=1
 
 
 $as_echo "#define BUILDING_UDR 1" >>confdefs.h
@@ -2726,6 +2729,8 @@ $as_echo "#define BUILDING_UDR 1" >>confdefs.h
 else
    { $as_echo "$as_me:${as_lineno-$LINENO}: building against appropriately patched PostgreSQL" >&5
 $as_echo "$as_me: building against appropriately patched PostgreSQL" >&6;}
+
+   BUILDING_BDR=1
 
 
 $as_echo "#define BUILDING_BDR 1" >>confdefs.h
@@ -2736,7 +2741,8 @@ ac_config_files="$ac_config_files Makefile"
 
 ac_config_files="$ac_config_files run_tests"
 
-ac_config_headers="$ac_config_headers bdr_config.h"
+ac_config_headers="$ac_config_headers bdr_config_generated.h"
+
 
 cat >confcache <<\_ACEOF
 # This file is a shell script that caches the results of configure
@@ -3430,7 +3436,7 @@ do
   case $ac_config_target in
     "Makefile") CONFIG_FILES="$CONFIG_FILES Makefile" ;;
     "run_tests") CONFIG_FILES="$CONFIG_FILES run_tests" ;;
-    "bdr_config.h") CONFIG_HEADERS="$CONFIG_HEADERS bdr_config.h" ;;
+    "bdr_config_generated.h") CONFIG_HEADERS="$CONFIG_HEADERS bdr_config_generated.h" ;;
 
   *) as_fn_error $? "invalid argument: \`$ac_config_target'" "$LINENO" 5;;
   esac
