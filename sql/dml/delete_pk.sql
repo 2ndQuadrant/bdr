@@ -1,5 +1,6 @@
 -- RT #37826 "issuing a DELETE broken replication"
-\i sql/setup.sql
+SELECT * FROM public.bdr_regress_variables()
+\gset
 
 \c :writedb1
 

@@ -1,5 +1,6 @@
 -- contrib datatypes
-\i sql/setup.sql
+SELECT * FROM public.bdr_regress_variables()
+\gset
 
 \c :writedb1
 

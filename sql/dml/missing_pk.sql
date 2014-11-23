@@ -1,5 +1,6 @@
 -- test sanity checks for tables without pk
-\i sql/setup.sql
+SELECT * FROM public.bdr_regress_variables()
+\gset
 
 \c :writedb1
 
