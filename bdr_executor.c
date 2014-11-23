@@ -609,7 +609,8 @@ bdr_queue_dropped_objects(PG_FUNCTION_ARGS)
 	nprocessed = SPI_processed;
 	tuptable = SPI_tuptable;
 
-	droppedobjs = (Datum *) palloc(sizeof(Datum) * nprocessed);
+	droppedobjs = (Datum *) MemoryContextAlloc(fcinfo->flinfo->fn_mcxt,
+											   sizeof(Datum) * nprocessed);
 
 	schema_oid = get_namespace_oid("bdr", false);
 	elmtype = bdr_lookup_relid("dropped_object", schema_oid);
@@ -625,6 +626,7 @@ bdr_queue_dropped_objects(PG_FUNCTION_ARGS)
 		Datum		values[3];
 		bool		nulls[3];
 		HeapTuple	tuple;
+		MemoryContext oldcontext;
 
 		/* this is the tuple reported by event triggers */
 		heap_deform_tuple(tuptable->vals[i], tuptable->tupdesc,
@@ -642,9 +644,11 @@ bdr_queue_dropped_objects(PG_FUNCTION_ARGS)
 		values[1] = cmdvalues[3];
 		values[2] = cmdvalues[4];
 
+		oldcontext = MemoryContextSwitchTo(fcinfo->flinfo->fn_mcxt);
 		tuple = heap_form_tuple(tupdesc, values, nulls);
 		droppedobjs[droppedcnt] = HeapTupleGetDatum(tuple);
 		droppedcnt++;
+		MemoryContextSwitchTo(oldcontext);
 	}
 
 	SPI_finish();
