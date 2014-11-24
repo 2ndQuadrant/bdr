@@ -928,9 +928,14 @@ format_operator_parts(Oid operator_oid, List **objnames, List **objargs)
 	if (oprForm->oprleft)
 		*objargs = lappend(*objargs,
 						   format_type_be_qualified(oprForm->oprleft));
+	else
+		*objargs = lappend(*objargs, "NONE");
+
 	if (oprForm->oprright)
 		*objargs = lappend(*objargs,
 						   format_type_be_qualified(oprForm->oprright));
+	else
+		*objargs = lappend(*objargs, "NONE");
 
 	ReleaseSysCache(opertup);
 }
