@@ -861,7 +861,7 @@ deparse_DefineStmt_Aggregate(Oid objectId, DefineStmt *define)
 			elog(ERROR, "cache lookup failed for operator with OID %u", sortop);
 		op = (Form_pg_operator) GETSTRUCT(tup);
 
-		tmp = new_objtree_VA("SORTOP=%{operator}O", 0);
+		tmp = new_objtree_VA("SORTOP=%{operator}D", 0);
 		append_object_object(tmp, "operator",
 							 new_objtree_for_qualname(op->oprnamespace,
 													  NameStr(op->oprname)));
@@ -951,7 +951,7 @@ deparse_DefineStmt_Operator(Oid objectId, DefineStmt *define)
 
 	if (OidIsValid(oprForm->oprcom))
 	{
-		tmp = new_objtree_VA("COMMUTATOR=%{oper}O", 0);
+		tmp = new_objtree_VA("COMMUTATOR=%{oper}D", 0);
 		append_object_object(tmp, "oper",
 							 new_objtree_for_qualname_id(OperatorRelationId,
 														 oprForm->oprcom));
@@ -960,7 +960,7 @@ deparse_DefineStmt_Operator(Oid objectId, DefineStmt *define)
 
 	if (OidIsValid(oprForm->oprnegate))
 	{
-		tmp = new_objtree_VA("NEGATOR=%{oper}O", 0);
+		tmp = new_objtree_VA("NEGATOR=%{oper}D", 0);
 		append_object_object(tmp, "oper",
 							 new_objtree_for_qualname_id(OperatorRelationId,
 														 oprForm->oprnegate));
