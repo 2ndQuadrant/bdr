@@ -1565,6 +1565,15 @@ queued_drop_error_callback(void *arg)
 	resetStringInfo(s);
 }
 
+static TypeName *
+oper_typeStringToTypeName(const char *str)
+{
+	if (pg_strcasecmp(str, "none") == 0)
+		return NULL;
+	else
+		return typeStringToTypeName(str);
+}
+
 static HeapTuple
 process_queued_drop(HeapTuple cmdtup)
 {
@@ -1700,17 +1709,23 @@ process_queued_drop(HeapTuple cmdtup)
 			if (isnull)
 			{
 				elog(WARNING, "null typename !?");
-				continue;
+
+				if (objtype != OBJECT_AGGREGATE)
+					continue;
 			}
-
-			deconstruct_array(DatumGetArrayTypeP(datum),
-							  TEXTOID, -1, false, 'i',
-							  &values, &nulls, &nelems);
-
-			for (i = 0; i < nelems; i++)
+			else
 			{
-				typestring = TextDatumGetCString(values[i]);
-				objargs = lappend(objargs, typeStringToTypeName(typestring));
+				deconstruct_array(DatumGetArrayTypeP(datum),
+								  TEXTOID, -1, false, 'i',
+								  &values, &nulls, &nelems);
+
+				for (i = 0; i < nelems; i++)
+				{
+					typestring = TextDatumGetCString(values[i]);
+					objargs = lappend(objargs, objtype == OBJECT_OPERATOR ?
+									  oper_typeStringToTypeName(typestring) :
+									  typeStringToTypeName(typestring));
+				}
 			}
 		}
 		else

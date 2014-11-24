@@ -603,9 +603,23 @@ bdr_commandfilter(Node *parsetree,
 			break;
 
 		case T_DefineStmt:
-			/* XXX: we could support some of these, primarily CREATE TYPE */
-			error_unsupported_command(CreateCommandTag(parsetree));
-			break;
+			{
+				DefineStmt *stmt = (DefineStmt *) parsetree;
+
+				switch (stmt->kind)
+				{
+					case OBJECT_AGGREGATE:
+					case OBJECT_OPERATOR:
+					case OBJECT_TYPE:
+						break;
+
+					default:
+						error_unsupported_command(CreateCommandTag(parsetree));
+						break;
+				}
+
+				break;
+			}
 
 		case T_IndexStmt:
 			{

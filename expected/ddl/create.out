@@ -753,3 +753,232 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
 \d+ test_tbl_inh_*
 \c regression
 \d+ test_tbl_inh_*
+--- AGGREGATE ---
+\c postgres
+CREATE AGGREGATE test_avg (
+   sfunc = int4_avg_accum, basetype = int4, stype = _int8,
+   finalfunc = int8_avg,
+   initcond1 = '{0,0}',
+   sortop = =
+);
+-- without finalfunc; test obsolete spellings 'sfunc1' etc
+CREATE AGGREGATE test_sum (
+   sfunc1 = int4pl, basetype = int4, stype1 = int4,
+   initcond1 = '0'
+);
+-- zero-argument aggregate
+CREATE AGGREGATE test_cnt (*) (
+   sfunc = int8inc, stype = int8,
+   initcond = '0'
+);
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\dfa test_*
+                         List of functions
+ Schema |   Name   | Result data type | Argument data types | Type 
+--------+----------+------------------+---------------------+------
+ public | test_avg | numeric          | integer             | agg
+ public | test_cnt | bigint           |                     | agg
+ public | test_sum | integer          | integer             | agg
+(3 rows)
+
+\c regression
+\dfa test_*
+                         List of functions
+ Schema |   Name   | Result data type | Argument data types | Type 
+--------+----------+------------------+---------------------+------
+ public | test_avg | numeric          | integer             | agg
+ public | test_cnt | bigint           |                     | agg
+ public | test_sum | integer          | integer             | agg
+(3 rows)
+
+DROP AGGREGATE test_avg(int4);
+DROP AGGREGATE test_sum(int4);
+DROP AGGREGATE test_cnt(*);
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\dfa test_*
+                       List of functions
+ Schema | Name | Result data type | Argument data types | Type 
+--------+------+------------------+---------------------+------
+(0 rows)
+
+\c postgres
+\dfa test_*
+                       List of functions
+ Schema | Name | Result data type | Argument data types | Type 
+--------+------+------------------+---------------------+------
+(0 rows)
+
+create type aggtype as (a integer, b integer, c text);
+create function aggf_trans(aggtype[],integer,integer,text) returns aggtype[]
+as 'select array_append($1,ROW($2,$3,$4)::aggtype)'
+language sql strict immutable;
+create function aggfns_trans(aggtype[],integer,integer,text) returns aggtype[]
+as 'select array_append($1,ROW($2,$3,$4)::aggtype)'
+language sql immutable;
+create aggregate test_aggfstr(integer,integer,text) (
+   sfunc = aggf_trans, stype = aggtype[],
+   initcond = '{}'
+);
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\dfa test_*
+                            List of functions
+ Schema |     Name     | Result data type |  Argument data types   | Type 
+--------+--------------+------------------+------------------------+------
+ public | test_aggfstr | aggtype[]        | integer, integer, text | agg
+(1 row)
+
+\c regression
+\dfa test_*
+                            List of functions
+ Schema |     Name     | Result data type |  Argument data types   | Type 
+--------+--------------+------------------+------------------------+------
+ public | test_aggfstr | aggtype[]        | integer, integer, text | agg
+(1 row)
+
+DROP AGGREGATE test_aggfstr(integer,integer,text);
+DROP FUNCTION aggf_trans(aggtype[],integer,integer,text);
+DROP FUNCTION aggfns_trans(aggtype[],integer,integer,text);
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\dfa test_*
+                       List of functions
+ Schema | Name | Result data type | Argument data types | Type 
+--------+------+------------------+---------------------+------
+(0 rows)
+
+\c postgres
+\dfa test_*
+                       List of functions
+ Schema | Name | Result data type | Argument data types | Type 
+--------+------+------------------+---------------------+------
+(0 rows)
+
+--- OPERATOR ---
+\c postgres
+CREATE OPERATOR ## (
+   leftarg = path,
+   rightarg = path,
+   procedure = path_inter,
+   commutator = ##
+);
+CREATE OPERATOR @#@ (
+   rightarg = int8,		-- left unary
+   procedure = numeric_fac
+);
+CREATE OPERATOR #@# (
+   leftarg = int8,		-- right unary
+   procedure = numeric_fac
+);
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\do public.##
+                                      List of operators
+ Schema | Name | Left arg type | Right arg type | Result type |          Description          
+--------+------+---------------+----------------+-------------+-------------------------------
+ public | ##   | path          | path           | boolean     | implementation of ?# operator
+(1 row)
+
+\do public.@#@
+                                      List of operators
+ Schema | Name | Left arg type | Right arg type | Result type |         Description          
+--------+------+---------------+----------------+-------------+------------------------------
+ public | @#@  |               | bigint         | numeric     | implementation of ! operator
+(1 row)
+
+\do public.#@#
+                                      List of operators
+ Schema | Name | Left arg type | Right arg type | Result type |         Description          
+--------+------+---------------+----------------+-------------+------------------------------
+ public | #@#  | bigint        |                | numeric     | implementation of ! operator
+(1 row)
+
+\c regression
+\do public.##
+                                      List of operators
+ Schema | Name | Left arg type | Right arg type | Result type |          Description          
+--------+------+---------------+----------------+-------------+-------------------------------
+ public | ##   | path          | path           | boolean     | implementation of ?# operator
+(1 row)
+
+\do public.@#@
+                                      List of operators
+ Schema | Name | Left arg type | Right arg type | Result type |         Description          
+--------+------+---------------+----------------+-------------+------------------------------
+ public | @#@  |               | bigint         | numeric     | implementation of ! operator
+(1 row)
+
+\do public.#@#
+                                      List of operators
+ Schema | Name | Left arg type | Right arg type | Result type |         Description          
+--------+------+---------------+----------------+-------------+------------------------------
+ public | #@#  | bigint        |                | numeric     | implementation of ! operator
+(1 row)
+
+DROP OPERATOR ##(path, path);
+DROP OPERATOR @#@(none,int8);
+DROP OPERATOR #@#(int8,none);
+\do public.##
+                             List of operators
+ Schema | Name | Left arg type | Right arg type | Result type | Description 
+--------+------+---------------+----------------+-------------+-------------
+(0 rows)
+
+\do public.@#@
+                             List of operators
+ Schema | Name | Left arg type | Right arg type | Result type | Description 
+--------+------+---------------+----------------+-------------+-------------
+(0 rows)
+
+\do public.#@#
+                             List of operators
+ Schema | Name | Left arg type | Right arg type | Result type | Description 
+--------+------+---------------+----------------+-------------+-------------
+(0 rows)
+
+\c postgres
+\do public.##
+                             List of operators
+ Schema | Name | Left arg type | Right arg type | Result type | Description 
+--------+------+---------------+----------------+-------------+-------------
+(0 rows)
+
+\do public.@#@
+                             List of operators
+ Schema | Name | Left arg type | Right arg type | Result type | Description 
+--------+------+---------------+----------------+-------------+-------------
+(0 rows)
+
+\do public.#@#
+                             List of operators
+ Schema | Name | Left arg type | Right arg type | Result type | Description 
+--------+------+---------------+----------------+-------------+-------------
+(0 rows)
+
