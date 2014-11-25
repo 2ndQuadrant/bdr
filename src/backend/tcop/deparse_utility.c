@@ -4551,7 +4551,15 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 				break;
 
 			case AT_SetStatistics:
-				elog(ERROR, "unimplemented deparse of ALTER TABLE SET STATISTICS");
+				{
+					Assert(IsA(subcmd->def, Integer));
+					tmp = new_objtree_VA("ALTER COLUMN %{column}I SET STATISTICS %{statistics}s",
+										 3, "type", ObjTypeString, "set statistics",
+										 "column", ObjTypeString, subcmd->name,
+										 "statistics", ObjTypeInteger,
+										 intVal((Value *) subcmd->def));
+					subcmds = lappend(subcmds, new_object_object(NULL, tmp));
+				}
 				break;
 
 			case AT_SetOptions:
