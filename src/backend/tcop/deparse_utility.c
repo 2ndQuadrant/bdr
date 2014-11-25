@@ -92,6 +92,7 @@ typedef enum
 	ObjTypeNull,
 	ObjTypeBool,
 	ObjTypeString,
+	ObjTypeInteger,
 	ObjTypeArray,
 	ObjTypeObject
 } ObjType;
@@ -108,6 +109,7 @@ typedef struct ObjElem
 	ObjType		objtype;
 	bool		bool_value;
 	char	   *str_value;
+	int			int_value;
 	ObjTree	   *obj_value;
 	List	   *array_value;
 	slist_node	node;
@@ -116,6 +118,7 @@ typedef struct ObjElem
 static ObjElem *new_null_object(char *name);
 static ObjElem *new_bool_object(char *name, bool value);
 static ObjElem *new_string_object(char *name, char *value);
+static ObjElem *new_integer_object(char *name, int value);
 static ObjElem *new_object_object(char *name, ObjTree *value);
 static ObjElem *new_array_object(char *name, List *array);
 static void append_null_object(ObjTree *tree, char *name);
@@ -168,6 +171,7 @@ new_objtree_VA(char *fmt, int numobjs,...)
 		ObjElem	   *elem;
 		char	   *name;
 		char	   *strval;
+		int			intval;
 		bool		boolval;
 		List	   *list;
 
@@ -194,6 +198,10 @@ new_objtree_VA(char *fmt, int numobjs,...)
 			case ObjTypeString:
 				strval = va_arg(args, char *);
 				elem = new_string_object(name, strval);
+				break;
+			case ObjTypeInteger:
+				intval = va_arg(args, int);
+				elem = new_integer_object(name, intval);
 				break;
 			case ObjTypeObject:
 				value = va_arg(args, ObjTree *);
@@ -274,6 +282,21 @@ new_string_object(char *name, char *value)
 	param->name = name ? pstrdup(name) : NULL;
 	param->objtype = ObjTypeString;
 	param->str_value = value;	/* XXX not duped */
+
+	return param;
+}
+
+/* Allocate a new integer object */
+static ObjElem *
+new_integer_object(char *name, int value)
+{
+	ObjElem    *param;
+
+	param = palloc0(sizeof(ObjElem));
+
+	param->name = name ? pstrdup(name) : NULL;
+	param->objtype = ObjTypeInteger;
+	param->int_value = value;
 
 	return param;
 }
@@ -391,6 +414,9 @@ jsonize_objtree(ObjTree *tree)
 			case ObjTypeBool:
 				typeid = BOOLOID;
 				break;
+			case ObjTypeInteger:
+				typeid = INT4OID;
+				break;
 			case ObjTypeArray:
 			case ObjTypeObject:
 				typeid = JSONOID;
@@ -413,6 +439,9 @@ jsonize_objtree(ObjTree *tree)
 				break;
 			case ObjTypeString:
 				values[i - 1] = CStringGetTextDatum(object->str_value);
+				break;
+			case ObjTypeInteger:
+				values[i - 1] = Int32GetDatum(object->int_value);
 				break;
 			case ObjTypeArray:
 				{
