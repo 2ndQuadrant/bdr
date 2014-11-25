@@ -329,6 +329,7 @@ filter_AlterTableStmt(Node *parsetree,
 					break;
 
 				case AT_SetStatistics:
+					break;
 				case AT_SetOptions:
 				case AT_ResetOptions:
 					error_on_persistent_rv(astmt->relation,
