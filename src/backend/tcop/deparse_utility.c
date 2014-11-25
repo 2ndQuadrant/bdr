@@ -67,6 +67,7 @@
 #include "nodes/makefuncs.h"
 #include "nodes/parsenodes.h"
 #include "parser/analyze.h"
+#include "parser/parse_clause.h"
 #include "parser/parse_collate.h"
 #include "parser/parse_expr.h"
 #include "parser/parse_relation.h"
@@ -4337,13 +4338,17 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 	List	   *subcmds = NIL;
 	ListCell   *cell;
 	char	   *command;
+	AlterTableStmt *node = (AlterTableStmt *) cmd->parsetree;
 
 	rel = heap_open(cmd->d.alterTable.objectId, AccessShareLock);
 	dpcontext = deparse_context_for(RelationGetRelationName(rel),
 									cmd->d.alterTable.objectId);
 
 	alterTableStmt =
-		new_objtree_VA("ALTER TABLE %{identity}D %{subcmds:, }s", 0);
+		new_objtree_VA("ALTER TABLE %{only}s %{identity}D %{subcmds:, }s", 0);
+	append_string_object(alterTableStmt, "only",
+						 interpretInhOption(node->relation->inhOpt) ?
+						 "" : "ONLY");
 	tmp = new_objtree_for_qualname(rel->rd_rel->relnamespace,
 								   RelationGetRelationName(rel));
 	append_object_object(alterTableStmt, "identity", tmp);
@@ -4371,8 +4376,10 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 								  new_object_object(NULL, tmp));
 				break;
 
+			case AT_DropColumn:
 			case AT_DropColumnRecurse:
 			case AT_ValidateConstraintRecurse:
+			case AT_DropConstraint:
 			case AT_DropConstraintRecurse:
 			case AT_AddOidsRecurse:
 			case AT_AddIndexConstraint:
@@ -4458,13 +4465,6 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 				subcmds = lappend(subcmds, new_object_object(NULL, tmp));
 				break;
 
-			case AT_DropColumn:
-				tmp = new_objtree_VA("DROP COLUMN %{column}I",
-									 2, "type", ObjTypeString, "drop column",
-								 "column", ObjTypeString, subcmd->name);
-				subcmds = lappend(subcmds, new_object_object(NULL, tmp));
-				break;
-
 			case AT_AddIndex:
 				{
 					Oid			idxOid = substashed->oid;
@@ -4517,13 +4517,6 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 			case AT_ValidateConstraint:
 				tmp = new_objtree_VA("VALIDATE CONSTRAINT %{constraint}I", 2,
 									 "type", ObjTypeString, "validate constraint",
-									 "constraint", ObjTypeString, subcmd->name);
-				subcmds = lappend(subcmds, new_object_object(NULL, tmp));
-				break;
-
-			case AT_DropConstraint:
-				tmp = new_objtree_VA("DROP CONSTRAINT %{constraint}I", 2,
-									 "type", ObjTypeString, "drop constraint",
 									 "constraint", ObjTypeString, subcmd->name);
 				subcmds = lappend(subcmds, new_object_object(NULL, tmp));
 				break;
