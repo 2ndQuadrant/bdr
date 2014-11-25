@@ -513,3 +513,176 @@ Triggers:
     truncate_trigger AFTER TRUNCATE ON test_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
 DROP TABLE test_tbl;
+--- INHERITANCE ---
+\c postgres
+CREATE TABLE test_inh_root (id int, val1 varchar, val2 int);
+CREATE TABLE test_inh_chld1 () INHERITS (test_inh_root);
+CREATE TABLE test_inh_chld2 () INHERITS (test_inh_chld1);
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\d+ test_inh_root
+                          Table "public.test_inh_root"
+ Column |       Type        | Modifiers | Storage  | Stats target | Description 
+--------+-------------------+-----------+----------+--------------+-------------
+ id     | integer           |           | plain    |              | 
+ val1   | character varying |           | extended |              | 
+ val2   | integer           |           | plain    |              | 
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_inh_root FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+Child tables: test_inh_chld1
+
+\d+ test_inh_chld1
+                         Table "public.test_inh_chld1"
+ Column |       Type        | Modifiers | Storage  | Stats target | Description 
+--------+-------------------+-----------+----------+--------------+-------------
+ id     | integer           |           | plain    |              | 
+ val1   | character varying |           | extended |              | 
+ val2   | integer           |           | plain    |              | 
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_inh_chld1 FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+Inherits: test_inh_root
+Child tables: test_inh_chld2
+
+\d+ test_inh_chld2
+                         Table "public.test_inh_chld2"
+ Column |       Type        | Modifiers | Storage  | Stats target | Description 
+--------+-------------------+-----------+----------+--------------+-------------
+ id     | integer           |           | plain    |              | 
+ val1   | character varying |           | extended |              | 
+ val2   | integer           |           | plain    |              | 
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_inh_chld2 FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+Inherits: test_inh_chld1
+
+\c regression
+\d+ test_inh_root
+                          Table "public.test_inh_root"
+ Column |       Type        | Modifiers | Storage  | Stats target | Description 
+--------+-------------------+-----------+----------+--------------+-------------
+ id     | integer           |           | plain    |              | 
+ val1   | character varying |           | extended |              | 
+ val2   | integer           |           | plain    |              | 
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_inh_root FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+Child tables: test_inh_chld1
+
+\d+ test_inh_chld1
+                         Table "public.test_inh_chld1"
+ Column |       Type        | Modifiers | Storage  | Stats target | Description 
+--------+-------------------+-----------+----------+--------------+-------------
+ id     | integer           |           | plain    |              | 
+ val1   | character varying |           | extended |              | 
+ val2   | integer           |           | plain    |              | 
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_inh_chld1 FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+Inherits: test_inh_root
+Child tables: test_inh_chld2
+
+\d+ test_inh_chld2
+                         Table "public.test_inh_chld2"
+ Column |       Type        | Modifiers | Storage  | Stats target | Description 
+--------+-------------------+-----------+----------+--------------+-------------
+ id     | integer           |           | plain    |              | 
+ val1   | character varying |           | extended |              | 
+ val2   | integer           |           | plain    |              | 
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_inh_chld2 FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+Inherits: test_inh_chld1
+
+SET bdr.permit_unsafe_ddl_commands = true;
+ALTER TABLE test_inh_root ADD CONSTRAINT idchk CHECK (id > 0);
+ALTER TABLE ONLY test_inh_chld1 ALTER COLUMN id SET DEFAULT 1;
+ALTER TABLE ONLY test_inh_root DROP CONSTRAINT idchk;
+RESET bdr.permit_unsafe_ddl_commands;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\d+ test_inh_root
+                          Table "public.test_inh_root"
+ Column |       Type        | Modifiers | Storage  | Stats target | Description 
+--------+-------------------+-----------+----------+--------------+-------------
+ id     | integer           |           | plain    |              | 
+ val1   | character varying |           | extended |              | 
+ val2   | integer           |           | plain    |              | 
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_inh_root FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+Child tables: test_inh_chld1
+
+\d+ test_inh_chld1
+                         Table "public.test_inh_chld1"
+ Column |       Type        | Modifiers | Storage  | Stats target | Description 
+--------+-------------------+-----------+----------+--------------+-------------
+ id     | integer           | default 1 | plain    |              | 
+ val1   | character varying |           | extended |              | 
+ val2   | integer           |           | plain    |              | 
+Check constraints:
+    "idchk" CHECK (id > 0)
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_inh_chld1 FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+Inherits: test_inh_root
+Child tables: test_inh_chld2
+
+\d+ test_inh_chld2
+                         Table "public.test_inh_chld2"
+ Column |       Type        | Modifiers | Storage  | Stats target | Description 
+--------+-------------------+-----------+----------+--------------+-------------
+ id     | integer           |           | plain    |              | 
+ val1   | character varying |           | extended |              | 
+ val2   | integer           |           | plain    |              | 
+Check constraints:
+    "idchk" CHECK (id > 0)
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_inh_chld2 FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+Inherits: test_inh_chld1
+
+\c postgres
+\d+ test_inh_root
+                          Table "public.test_inh_root"
+ Column |       Type        | Modifiers | Storage  | Stats target | Description 
+--------+-------------------+-----------+----------+--------------+-------------
+ id     | integer           |           | plain    |              | 
+ val1   | character varying |           | extended |              | 
+ val2   | integer           |           | plain    |              | 
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_inh_root FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+Child tables: test_inh_chld1
+
+\d+ test_inh_chld1
+                         Table "public.test_inh_chld1"
+ Column |       Type        | Modifiers | Storage  | Stats target | Description 
+--------+-------------------+-----------+----------+--------------+-------------
+ id     | integer           | default 1 | plain    |              | 
+ val1   | character varying |           | extended |              | 
+ val2   | integer           |           | plain    |              | 
+Check constraints:
+    "idchk" CHECK (id > 0)
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_inh_chld1 FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+Inherits: test_inh_root
+Child tables: test_inh_chld2
+
+\d+ test_inh_chld2
+                         Table "public.test_inh_chld2"
+ Column |       Type        | Modifiers | Storage  | Stats target | Description 
+--------+-------------------+-----------+----------+--------------+-------------
+ id     | integer           |           | plain    |              | 
+ val1   | character varying |           | extended |              | 
+ val2   | integer           |           | plain    |              | 
+Check constraints:
+    "idchk" CHECK (id > 0)
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON test_inh_chld2 FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+Inherits: test_inh_chld1
+
+DROP TABLE test_inh_chld2;
+DROP TABLE test_inh_chld1;
+DROP TABLE test_inh_root;

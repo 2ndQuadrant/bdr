@@ -126,3 +126,38 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
 \d+ test_tbl
 
 DROP TABLE test_tbl;
+
+--- INHERITANCE ---
+\c postgres
+
+CREATE TABLE test_inh_root (id int, val1 varchar, val2 int);
+CREATE TABLE test_inh_chld1 () INHERITS (test_inh_root);
+CREATE TABLE test_inh_chld2 () INHERITS (test_inh_chld1);
+
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+\d+ test_inh_root
+\d+ test_inh_chld1
+\d+ test_inh_chld2
+\c regression
+\d+ test_inh_root
+\d+ test_inh_chld1
+\d+ test_inh_chld2
+
+SET bdr.permit_unsafe_ddl_commands = true;
+ALTER TABLE test_inh_root ADD CONSTRAINT idchk CHECK (id > 0);
+ALTER TABLE ONLY test_inh_chld1 ALTER COLUMN id SET DEFAULT 1;
+ALTER TABLE ONLY test_inh_root DROP CONSTRAINT idchk;
+RESET bdr.permit_unsafe_ddl_commands;
+
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+\d+ test_inh_root
+\d+ test_inh_chld1
+\d+ test_inh_chld2
+\c postgres
+\d+ test_inh_root
+\d+ test_inh_chld1
+\d+ test_inh_chld2
+
+DROP TABLE test_inh_chld2;
+DROP TABLE test_inh_chld1;
+DROP TABLE test_inh_root;
