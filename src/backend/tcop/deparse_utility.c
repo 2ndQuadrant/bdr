@@ -4733,7 +4733,8 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_SecLabelStmt:
-			command = deparse_SecLabelStmt(objectId, objectSubId, parsetree);
+			command = deparse_SecLabelStmt(objectId, cmd->d.simple.objectSubId,
+										   parsetree);
 			break;
 
 		case T_GrantStmt:
