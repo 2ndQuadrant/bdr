@@ -1376,7 +1376,7 @@ ProcessUtilitySlow(Node *parsetree,
 			case T_RenameStmt:
 				{
 					RenameStmt *stmt = (RenameStmt *) parsetree;
-					int		objsubid;
+					int		objsubid = 0;
 
 					objectId = ExecRenameStmt(stmt, &objsubid);
 					EventTriggerStashCommand(objectId, objsubid,
