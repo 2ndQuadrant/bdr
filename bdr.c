@@ -71,7 +71,6 @@ extern Oid			origin_dboid;
 /* end externs for bdr apply state */
 
 ResourceOwner bdr_saved_resowner;
-static bool bdr_is_restart = false;
 Oid   BdrNodesRelid;
 Oid   BdrConflictHistoryRelId;
 Oid   BdrLocksRelid;
@@ -108,7 +107,6 @@ PG_MODULE_MAGIC;
 
 void		_PG_init(void);
 static void bdr_worker_shmem_startup(void);
-static void bdr_worker_shmem_create_workers(void);
 
 Datum bdr_apply_pause(PG_FUNCTION_ARGS);
 Datum bdr_apply_resume(PG_FUNCTION_ARGS);
@@ -796,98 +794,12 @@ bdr_worker_shmem_startup(void)
 		/* Init shm segment header after postmaster start or restart */
 		memset(BdrWorkerCtl, 0, bdr_worker_shmem_size());
 		BdrWorkerCtl->lock = LWLockAssign();
-
-		/*
-		 * Now that the shm segment is initialized, we can populate it with
-		 * BdrWorker entries for the connections we created GUCs for during
-		 * _PG_init.
-		 *
-		 * We must do this whether it's initial launch or a postmaster restart,
-		 * as shmem gets cleared on postmaster restart.
-		 */
-		bdr_worker_shmem_create_workers();
 	}
 	LWLockRelease(AddinShmemInitLock);
 
 	/*
 	 * We don't have anything to preserve on shutdown and don't support being
 	 * unloaded from a running Pg, so don't register any shutdown hook.
-	 */
-}
-
-/*
- * After _PG_init we've read the GUCs for the workers but haven't populated the
- * shared memory segment at BdrWorkerCtl with BDRWorker entries yet.
- *
- * The shm segment is initialized now, so do that.
- */
-static void
-bdr_worker_shmem_create_workers(void)
-{
-	uint32 off;
-
-	LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
-
-	/*
-	 * ----
-	 * TODO DYNCONF We still create the apply worker configs here, because the
-	 * perdb workers don't yet have a way of looking up their config in the
-	 * local database. They still need it configured here, where they can
-	 * look it up from shmem.
-	 * ----
-	 *
-	 * Populate shmem with a BdrApplyWorker for each valid BdrConnectionConfig
-	 * found during _PG_init so that the per-db worker will register it for
-	 * startup after performing any BDR initialisation work.
-	 *
-	 * Use of shared memory for this is required for EXEC_BACKEND (windows)
-	 * where we can't share postmaster memory, and for when we're launching a
-	 * bgworker from another bgworker where the fork() from postmaster doesn't
-	 * provide access to the launching bgworker's memory.
-	 *
-	 * The workers aren't actually launched here, they get launched by
-	 * launch_apply_workers(), called by the database's per-db static worker.
-	 */
-	for (off = 0; off < bdr_max_workers; off++)
-	{
-		BdrConnectionConfig *cfg = bdr_connection_configs[off];
-		BdrWorker	   *shmworker;
-		BdrApplyWorker *worker;
-
-		if (cfg == NULL || !cfg->is_valid)
-			continue;
-
-		/* We already hold the shmem control lock here */
-		shmworker = (BdrWorker *) bdr_worker_shmem_alloc(BDR_WORKER_APPLY, NULL);
-		Assert(shmworker->worker_type == BDR_WORKER_APPLY);
-		worker = &shmworker->worker_data.apply_worker;
-		worker->connection_config_idx = off;
-		worker->replay_stop_lsn = InvalidXLogRecPtr;
-		worker->forward_changesets = false;
-
-		/* XXX DYNCONF Need to store dbname for each apply worker for now */
-		strncpy(NameStr(worker->dbname), cfg->dbname, NAMEDATALEN);
-		(NameStr(worker->dbname))[NAMEDATALEN-1] = '\0';
-
-		/*
-		 * If this is a postmaster restart, don't register the worker a second
-		 * time when the per-db worker starts up.
-		 */
-		worker->bgw_is_registered = bdr_is_restart;
-	}
-
-	LWLockRelease(BdrWorkerCtl->lock);
-
-	/*
-	 * Make sure that we don't register workers if the postmaster restarts and
-	 * clears shmem, by keeping a record that we've asked for registration once
-	 * already.
-	 */
-	bdr_is_restart = true;
-
-	/*
-	 * We might need to re-populate shared memory after a postmaster restart.
-	 * So we don't free the bdr_startup_context or its contents.
 	 */
 }
 
