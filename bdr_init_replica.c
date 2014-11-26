@@ -58,43 +58,8 @@ bool bdr_init_from_basedump = false;
 
 static void bdr_exec_init_replica(BdrConnectionConfig *cfg, char *snapshot);
 
-static void bdr_catchup_to_lsn(int cfg_index,
+static void bdr_catchup_to_lsn(BdrConnectionConfig *cfg,
 							   XLogRecPtr target_lsn);
-
-/*
- * Search BdrWorkerCtl for a worker in dbname with init_replica set and
- * return it. The first worker found is returned (previous code should've
- * ensured there can only be one). If no match is found, return null.
- *
- * Must be called with at least a share lock on BdrWorkerCtl->lock
- *
- */
-static BdrWorker*
-find_init_replica_worker(Name dbname)
-{
-	int off;
-
-	Assert(LWLockHeldByMe(BdrWorkerCtl->lock));
-	/* Check whether one of our connections has init_replica set */
-	for (off = 0; off < bdr_max_workers; off++)
-	{
-		BdrApplyWorker 	       *aw;
-		BdrConnectionConfig	   *cfg;
-
-		if (BdrWorkerCtl->slots[off].worker_type != BDR_WORKER_APPLY)
-			continue;
-
-		aw = &BdrWorkerCtl->slots[off].worker_data.apply_worker;
-		cfg = bdr_connection_configs[aw->connection_config_idx];
-
-		if ((strcmp(cfg->dbname, NameStr(*dbname)) == 0)
-			&& cfg->init_replica)
-		{
-			return &BdrWorkerCtl->slots[off];
-		}
-	}
-	return NULL;
-}
 
 /*
  * Get this node's status value from the remote's bdr.bdr_nodes table
@@ -678,24 +643,6 @@ bdr_exec_init_replica(BdrConnectionConfig *cfg, char *snapshot)
 #endif
 }
 
-static void
-bdr_init_replica_conn_close(int code, Datum connptr)
-{
-	PGconn **conn_p;
-	PGconn *conn;
-
-	conn_p = (PGconn**) DatumGetPointer(connptr);
-	Assert(conn_p != NULL);
-	conn = *conn_p;
-
-	if (conn == NULL)
-		return;
-	if (PQstatus(conn) != CONNECTION_OK)
-		return;
-	PQfinish(conn);
-}
-
-
 /*
  * Determine whether we need to initialize the database from a remote
  * node and perform the required initialization if so.
@@ -707,9 +654,9 @@ bdr_init_replica(Name dbname)
 	XLogRecPtr min_remote_lsn;
 	PGconn *nonrepl_init_conn;
 	StringInfoData dsn;
-	BdrWorker  *init_replica_worker;
-	BdrConnectionConfig *init_replica_config;
 	int spi_ret;
+	List *configs;
+	BdrConnectionConfig *init_replica_config;
 
 	initStringInfo(&dsn);
 
@@ -741,10 +688,24 @@ bdr_init_replica(Name dbname)
 	if (status == 'r')
 	{
 		/* Already in ready state, nothing more to do */
-		elog(DEBUG2, "init_replica: Already inited");
 		SPI_finish();
 		CommitTransactionCommand();
 		return;
+	}
+
+	SPI_push();
+	configs = bdr_read_connection_configs(NULL, dbname, true);
+	SPI_pop();
+
+	if (configs == NIL)
+	{
+		init_replica_config = NULL;
+	}
+	else
+	{
+		Assert(list_length(configs) == 1);
+		init_replica_config = (BdrConnectionConfig*)linitial(configs);
+		list_free(configs);
 	}
 
 	/*
@@ -754,10 +715,7 @@ bdr_init_replica(Name dbname)
 	 * have an entry in the local "bdr.bdr_nodes" table for our node
 	 * ID showing initialisation to be complete.
 	 */
-	LWLockAcquire(BdrWorkerCtl->lock, LW_SHARED);
-	init_replica_worker = find_init_replica_worker(dbname);
-	LWLockRelease(BdrWorkerCtl->lock);
-	if (!init_replica_worker)
+	if (init_replica_config == NULL)
 	{
 		if (status != '\0')
 		{
@@ -782,8 +740,10 @@ bdr_init_replica(Name dbname)
 		 * No connections have init_replica=t, so there's no remote copy to do.
 		 * We still have to ensure that bdr.bdr_nodes.status is 'r' for this
 		 * node so that slot creation is permitted.
+		 *
+		 * XXX DYNCONF Lack of init_replica should become an error except for
+		 * the "root" BDR node.
 		 */
-		elog(DEBUG2, "init_replica: Marking as root/standalone node");
 		bdr_nodes_set_local_status('r');
 	}
 	/*
@@ -795,12 +755,10 @@ bdr_init_replica(Name dbname)
 	SPI_finish();
 	CommitTransactionCommand();
 
-	if (!init_replica_worker)
+	if (init_replica_config == NULL)
 		/* Cleanup done and nothing more to do */
 		return;
 
-	init_replica_config = bdr_connection_configs
-		[init_replica_worker->worker_data.apply_worker.connection_config_idx];
 	elog(LOG, "bdr %s: bdr_init_replica init from connection %s",
 		 NameStr(*dbname), init_replica_config->name);
 
@@ -824,233 +782,206 @@ bdr_init_replica(Name dbname)
 						PQerrorMessage(nonrepl_init_conn))));
 	}
 
-	PG_ENSURE_ERROR_CLEANUP(bdr_init_replica_conn_close,
-			PointerGetDatum(&nonrepl_init_conn));
+	bdr_ensure_ext_installed(nonrepl_init_conn, dbname);
+
+	/* Get the bdr.bdr_nodes status field for our node id from the remote */
+	status = bdr_get_remote_status(nonrepl_init_conn);
+
+	if (bdr_init_from_basedump)
 	{
-		bdr_ensure_ext_installed(nonrepl_init_conn, dbname);
-
-		/* Get the bdr.bdr_nodes status field for our node id from the remote */
-		status = bdr_get_remote_status(nonrepl_init_conn);
-
-		if (bdr_init_from_basedump)
-		{
-			status = bdr_set_remote_status(nonrepl_init_conn, 'c', status);
-		}
-		else
-		{
-			switch (status)
-			{
-				case '\0':
-					elog(DEBUG2, "bdr %s: initializing from clean state",
-						 NameStr(*dbname));
-					break;
-
-				case 'r':
-					/*
-					 * Init has been completed, but we didn't check our local
-					 * bdr.bdr_nodes, or the final update hasn't propagated yet.
-					 *
-					 * All we need to do is catch up, we already replayed enough to be
-					 * consistent and start up in normal mode last time around
-					 */
-					elog(DEBUG2, "bdr %s: init already completed, nothing to do",
-						 NameStr(*dbname));
-					return;
-
-				case 'c':
-					/*
-					 * We were in catchup mode when we died. We need to resume catchup
-					 * mode up to the expected LSN before switching over.
-					 *
-					 * To do that all we need to do is fall through without doing any
-					 * slot re-creation, dump/apply, etc, and pick up when we do
-					 * catchup.
-					 *
-					 * We won't know what the original catchup target point is, but we
-					 * can just catch up to whatever xlog position the server is
-					 * currently at.
-					 */
-					elog(DEBUG2, "bdr %s: dump applied, need to continue catchup",
-						 NameStr(*dbname));
-					break;
-
-				case 'i':
-					/*
-					 * A previous init attempt seems to have failed. Clean up, then
-					 * fall through to start setup again.
-					 *
-					 * We can't just re-use the slot and replication identifier that
-					 * were created last time (if they were), because we have no way
-					 * of getting the slot's exported snapshot after
-					 * CREATE_REPLICATION_SLOT.
-					 */
-					elog(DEBUG2, "bdr %s: previous failed initalization detected, cleaning up",
-						 NameStr(*dbname));
-					bdr_drop_slot_and_replication_identifier(init_replica_config);
-					status = bdr_set_remote_status(nonrepl_init_conn, '\0', status);
-					break;
-
-				default:
-					elog(ERROR, "unreachable"); /* Unhandled case */
-					break;
-			}
-		}
-
-		if (status == '\0')
-		{
-			int			off;
-			int		   *my_conn_idxs;
-			int			n_conns = 0;
-			char	   *init_snapshot = NULL;
-			PGconn	   *init_repl_conn = NULL;
-
-			elog(LOG, "bdr %s: initializing from remote db", NameStr(*dbname));
-
-			/*
-			 * We're starting from scratch or have cleaned up a previous failed
-			 * attempt.
-			 */
-			status = bdr_set_remote_status(nonrepl_init_conn, 'i', status);
-
-			/*
-			 * A list of all connections to make slots for, as indexes into
-			 * BdrWorkerCtl.
-			 */
-			my_conn_idxs = (int*)palloc(sizeof(Size) * bdr_max_workers);
-
-			/* Collect a list of connections to make slots for. */
-			LWLockAcquire(BdrWorkerCtl->lock, LW_SHARED);
-			for (off = 0; off < bdr_max_workers; off++)
-			{
-				BdrWorker 			   *worker = &BdrWorkerCtl->slots[off];
-
-				if (worker->worker_type == BDR_WORKER_APPLY)
-				{
-					BdrConnectionConfig * const cfg = bdr_connection_configs
-						[worker->worker_data.apply_worker.connection_config_idx];
-
-					if (strcmp(cfg->dbname, NameStr(*dbname)) == 0)
-						my_conn_idxs[n_conns++] = off;
-				}
-			}
-			LWLockRelease(BdrWorkerCtl->lock);
-
-			elog(DEBUG2, "bdr %s: creating slots for %d nodes",
-				 NameStr(*dbname), n_conns);
-
-			/*
-			 * For each connection, ensure its slot exists.
-			 *
-			 * Do it one by one rather than fiddling with async libpq queries. If
-			 * this needs to be parallelized later, it should probably be done by
-			 * launching each apply worker and letting them create their own
-			 * slots, then having them wait until signalled/unlatched before
-			 * proceeding with actual replication. That'll save us another round
-			 * of connections too.
-			 *
-			 * We don't attempt any cleanup if slot creation fails, we just bail out
-			 * and leave any already-created slots in place.
-			 */
-			for (off = 0; off < n_conns; off++)
-			{
-				BdrWorker *w = &BdrWorkerCtl->slots[my_conn_idxs[off]];
-				BdrConnectionConfig *cfg;
-				char *snapshot = NULL;
-				PGconn *conn = NULL;
-				RepNodeId replication_identifier;
-				NameData slot_name;
-				uint64 sysid;
-				Oid dboid;
-				TimeLineID timeline;
-
-				cfg = bdr_connection_configs
-					[w->worker_data.apply_worker.connection_config_idx];
-
-				ereport(LOG,
-						(errmsg("bdr %s: checking/creating slot for %s at %s",
-								NameStr(*dbname), cfg->name, cfg->dsn)));
-				/*
-				 * Create the slot on the remote. The returned remote sysid and
-				 * timeline, the slot name, and the local replication identifier
-				 * are all discarded; they're not needed here, and will be obtained
-				 * again by the apply workers when they're launched after init.
-				 */
-				conn = bdr_establish_connection_and_slot(cfg, "create slot",
-					&slot_name, &sysid, &timeline, &dboid, &replication_identifier,
-					&snapshot);
-
-				/* Always throws rather than returning failure */
-				Assert(conn);
-
-				if (w == init_replica_worker)
-				{
-					/*
-					 * We need to keep the snapshot ID returned by CREATE SLOT so
-					 * we can pass it to pg_dump to get a consistent dump from the
-					 * remote slot's start point.
-					 *
-					 * The snapshot is only valid for the lifetime of the
-					 * replication connection we created it with, so we must keep
-					 * that connection around until the dump finishes.
-					 */
-					if (!snapshot)
-						elog(ERROR, "bdr %s: init_replica failed to create snapshot!",
-							 NameStr(*dbname));
-					init_snapshot = snapshot;
-					init_repl_conn = conn;
-				}
-				else
-				{
-					/*
-					 * Just throw the returned info away; we only needed to create
-					 * the slot so its replication identifier can be advanced
-					 * during catchup.
-					 */
-					if (snapshot)
-						pfree(snapshot);
-					PQfinish(conn);
-				}
-			}
-
-			pfree(my_conn_idxs);
-
-			/* If we get here, we should have a valid snapshot to dump */
-			Assert(init_snapshot != NULL);
-			Assert(init_repl_conn != NULL);
-
-			/*
-			 * Execute the dump and apply its self.
-			 *
-			 * Note that the bdr extension tables override pg_dump's default and
-			 * ask to be included in dumps. In particular, bdr.bdr_nodes will get
-			 * copied over.
-			 */
-			elog(DEBUG1, "bdr %s: creating and restoring dump for %s",
-				 NameStr(*dbname), init_replica_config->name);
-			bdr_exec_init_replica(init_replica_config, init_snapshot);
-			PQfinish(init_repl_conn);
-
-			pfree(init_snapshot);
-			status = bdr_set_remote_status(nonrepl_init_conn, 'c', status);
-		}
-
-		Assert(status == 'c');
-
-		/* Launch the catchup worker and wait for it to finish */
-		elog(DEBUG1, "bdr %s: launching catchup mode apply worker", NameStr(*dbname));
-		min_remote_lsn = bdr_get_remote_lsn(nonrepl_init_conn);
-		bdr_catchup_to_lsn(
-			init_replica_worker->worker_data.apply_worker.connection_config_idx,
-			min_remote_lsn);
-		status = bdr_set_remote_status(nonrepl_init_conn, 'r', status);
-
-		elog(INFO, "bdr %s: catchup worker finished, ready for normal replication",
-			 NameStr(*dbname));
+		status = bdr_set_remote_status(nonrepl_init_conn, 'c', status);
 	}
-	PG_END_ENSURE_ERROR_CLEANUP(bdr_init_replica_conn_close,
-			PointerGetDatum(&nonrepl_init_conn));
+	else
+	{
+		switch (status)
+		{
+			case '\0':
+				elog(DEBUG2, "bdr %s: initializing from clean state",
+					 NameStr(*dbname));
+				break;
 
+			case 'r':
+				/*
+				 * Init has been completed, but we didn't check our local
+				 * bdr.bdr_nodes, or the final update hasn't propagated yet.
+				 *
+				 * All we need to do is catch up, we already replayed enough to be
+				 * consistent and start up in normal mode last time around
+				 */
+				elog(DEBUG2, "bdr %s: init already completed, nothing to do",
+					 NameStr(*dbname));
+				return;
+
+			case 'c':
+				/*
+				 * We were in catchup mode when we died. We need to resume catchup
+				 * mode up to the expected LSN before switching over.
+				 *
+				 * To do that all we need to do is fall through without doing any
+				 * slot re-creation, dump/apply, etc, and pick up when we do
+				 * catchup.
+				 *
+				 * We won't know what the original catchup target point is, but we
+				 * can just catch up to whatever xlog position the server is
+				 * currently at.
+				 */
+				elog(DEBUG2, "bdr %s: dump applied, need to continue catchup",
+					 NameStr(*dbname));
+				break;
+
+			case 'i':
+				/*
+				 * A previous init attempt seems to have failed. Clean up, then
+				 * fall through to start setup again.
+				 *
+				 * We can't just re-use the slot and replication identifier that
+				 * were created last time (if they were), because we have no way
+				 * of getting the slot's exported snapshot after
+				 * CREATE_REPLICATION_SLOT.
+				 */
+				elog(DEBUG2, "bdr %s: previous failed initalization detected, cleaning up",
+					 NameStr(*dbname));
+				bdr_drop_slot_and_replication_identifier(init_replica_config);
+				status = bdr_set_remote_status(nonrepl_init_conn, '\0', status);
+				break;
+
+			default:
+				elog(ERROR, "unreachable"); /* Unhandled case */
+				break;
+		}
+	}
+
+	if (status == '\0')
+	{
+		char	   *init_snapshot = NULL;
+		PGconn	   *init_repl_conn = NULL;
+		ListCell   *lc;
+
+		elog(LOG, "bdr %s: initializing from remote db", NameStr(*dbname));
+
+		/*
+		 * We're starting from scratch or have cleaned up a previous failed
+		 * attempt.
+		 */
+		status = bdr_set_remote_status(nonrepl_init_conn, 'i', status);
+
+		/* Collect a list of connections to make slots for. */
+		configs = bdr_read_connection_configs(NULL, dbname, false);
+
+		elog(DEBUG2, "bdr %s: creating slots for %d nodes",
+			 NameStr(*dbname), list_length(configs));
+
+		/*
+		 * For each connection, ensure its slot exists.
+		 *
+		 * Do it one by one rather than fiddling with async libpq queries. If
+		 * this needs to be parallelized later, it should probably be done by
+		 * launching each apply worker and letting them create their own
+		 * slots, then having them wait until signalled/unlatched before
+		 * proceeding with actual replication. That'll save us another round
+		 * of connections too.
+		 *
+		 * We don't attempt any cleanup if slot creation fails, we just bail out
+		 * and leave any already-created slots in place.
+		 */
+		foreach(lc, configs)
+		{
+			BdrConnectionConfig *cfg = lfirst(lc);
+			char *snapshot = NULL;
+			PGconn *conn = NULL;
+			RepNodeId replication_identifier;
+			NameData slot_name;
+			uint64 sysid;
+			Oid dboid;
+			TimeLineID timeline;
+
+			ereport(LOG,
+					(errmsg("bdr %s: checking/creating slot for %s at %s",
+							NameStr(*dbname), cfg->name, cfg->dsn)));
+			/*
+			 * Create the slot on the remote. The returned remote sysid and
+			 * timeline, the slot name, and the local replication identifier
+			 * are all discarded; they're not needed here, and will be obtained
+			 * again by the apply workers when they're launched after init.
+			 */
+			conn = bdr_establish_connection_and_slot(cfg, "create slot",
+				&slot_name, &sysid, &timeline, &dboid, &replication_identifier,
+				&snapshot);
+
+			/* Always throws rather than returning failure */
+			Assert(conn);
+
+			if (cfg->init_replica)
+			{
+				/*
+				 * We need to keep the snapshot ID returned by CREATE SLOT so
+				 * we can pass it to pg_dump to get a consistent dump from the
+				 * remote slot's start point.
+				 *
+				 * The snapshot is only valid for the lifetime of the
+				 * replication connection we created it with, so we must keep
+				 * that connection around until the dump finishes.
+				 */
+				if (!snapshot)
+					elog(ERROR, "bdr %s: init_replica failed to create snapshot!",
+						 NameStr(*dbname));
+				init_snapshot = snapshot;
+				init_repl_conn = conn;
+			}
+			else
+			{
+				/*
+				 * Just throw the returned info away; we only needed to create
+				 * the slot so its replication identifier can be advanced
+				 * during catchup.
+				 */
+				if (snapshot)
+					pfree(snapshot);
+				PQfinish(conn);
+			}
+
+			bdr_free_connection_config(cfg);
+		}
+
+		list_free(configs);
+
+		/* If we get here, we should have a valid snapshot to dump */
+		Assert(init_snapshot != NULL);
+		Assert(init_repl_conn != NULL);
+
+		/*
+		 * Execute the dump and apply its self.
+		 *
+		 * Note that the bdr extension tables override pg_dump's default and
+		 * ask to be included in dumps. In particular, bdr.bdr_nodes will get
+		 * copied over.
+		 *
+		 * XXX DYNCONF Relying on pg_dump copying bdr_nodes etc makes dumping
+		 * BDR databases painful for backup purposes, and should not be
+		 * something we rely on. We should probably be copying our catalog
+		 * tables from the remote end manually.
+		 */
+		elog(DEBUG1, "bdr %s: creating and restoring dump for %s",
+			 NameStr(*dbname), init_replica_config->name);
+		bdr_exec_init_replica(init_replica_config, init_snapshot);
+		PQfinish(init_repl_conn);
+
+		pfree(init_snapshot);
+		status = bdr_set_remote_status(nonrepl_init_conn, 'c', status);
+	}
+
+	Assert(status == 'c');
+
+	/* Launch the catchup worker and wait for it to finish */
+	elog(DEBUG1, "bdr %s: launching catchup mode apply worker", NameStr(*dbname));
+	min_remote_lsn = bdr_get_remote_lsn(nonrepl_init_conn);
+	bdr_catchup_to_lsn(init_replica_config, min_remote_lsn);
+	status = bdr_set_remote_status(nonrepl_init_conn, 'r', status);
+
+	elog(INFO, "bdr %s: catchup worker finished, ready for normal replication",
+		 NameStr(*dbname));
 	PQfinish(nonrepl_init_conn);
+	bdr_free_connection_config(init_replica_config);
 }
 
 /*
@@ -1086,20 +1017,18 @@ bdr_catchup_to_lsn_cleanup(int code, Datum offset)
  *
  * Arguments:
  *
- * cfg_index: Index of the bdr connection for this dbname with init_worker=t
+ * cfg: Connection configuration for the init_replica worker
  * set within bdr_connection_configs. Used to start the worker.
  *
  * target_lsn: LSN of immediate origin node at which catchup should stop.
  */
 static void
-bdr_catchup_to_lsn(int cfg_index,
+bdr_catchup_to_lsn(BdrConnectionConfig *cfg,
 				   XLogRecPtr target_lsn)
 {
 	uint32 worker_shmem_idx;
 	BdrWorker *worker;
-	BdrConnectionConfig *cfg;
 
-	cfg = bdr_connection_configs[cfg_index];
 	Assert(cfg != NULL);
 	Assert(cfg->init_replica);
 
@@ -1130,8 +1059,11 @@ bdr_catchup_to_lsn(int cfg_index,
 		pid_t prev_bgw_pid = 0;
 		BdrApplyWorker *catchup_worker = &worker->worker_data.apply_worker;
 
-		/* Make sure the catchup worker can find its bdr.xxx_ GUCs */
-		catchup_worker->connection_config_idx = cfg_index;
+		strncpy(NameStr(catchup_worker->conn_local_name), cfg->name,
+				NAMEDATALEN);
+		NameStr(catchup_worker->conn_local_name)[NAMEDATALEN-1] = '\0';
+
+		catchup_worker->perdb_worker_idx = perdb_worker_idx;
 
 		/* Special parameters for a catchup worker only */
 		catchup_worker->replay_stop_lsn = target_lsn;

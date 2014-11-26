@@ -410,13 +410,9 @@ bdr_supervisor_worker_main(Datum main_arg)
 	 *
 	 * Change is_bdr_db to use seclabels
 	 *
-	 * Connect to template1 and create 'bdr' db, set a shmem flag and
-	 * reconnect.
-	 *
-	 * Add the code to security-label DBs when BDR activated
-	 * Add connection tracking table to bdr extension
 	 * add connection manip functions
 	 * have connection manip functions send signals, do seclabels
+	 * fix crash/restart repeat worker launch
 	 *
 	 * handle drop/removal
 	 */
@@ -489,19 +485,16 @@ bdr_copy_labels_from_config()
 
 	for (i = 0; i < bdr_max_workers; i++)
 	{
-		BdrApplyWorker *apply;
-		BdrWorker *entry = &BdrWorkerCtl->slots[i];
+		BdrConnectionConfig *cfg = bdr_connection_configs[i];
 		bool found = false;
 
-		if (entry->worker_type != BDR_WORKER_APPLY)
+		if (cfg == NULL)
 			continue;
-
-		apply = &entry->worker_data.apply_worker;
 
 		/* Does this worker's db already exist in the namelist? */
 		for (j = 0; j < n_distinct_dbnames; j++)
 		{
-			if (strcmp(NameStr(apply->dbname), distinct_dbnames[j]) == 0)
+			if (strcmp(cfg->dbname, distinct_dbnames[j]) == 0)
 			{
 				found = true;
 				break;
@@ -509,8 +502,8 @@ bdr_copy_labels_from_config()
 		}
 		if (!found)
 		{
-			elog(LOG, "Found distinct dbname %s", NameStr(apply->dbname));
-			distinct_dbnames[n_distinct_dbnames++] = NameStr(apply->dbname);
+			elog(LOG, "Found distinct dbname %s", cfg->dbname);
+			distinct_dbnames[n_distinct_dbnames++] = cfg->dbname;
 		}
 	}
 
@@ -546,15 +539,11 @@ count_connections_for_db(const char * dbname)
 
 	for (i = 0; i < bdr_max_workers; i++)
 	{
-		BdrApplyWorker *apply;
-		BdrWorker *entry = &BdrWorkerCtl->slots[i];
-
-		if (entry->worker_type != BDR_WORKER_APPLY)
+		BdrConnectionConfig *cfg = bdr_connection_configs[i];
+		if (cfg == NULL)
 			continue;
 
-		apply = &entry->worker_data.apply_worker;
-
-		if (strcmp(NameStr(apply->dbname), dbname) != 0)
+		if (strcmp(cfg->dbname, dbname) != 0)
 			continue;
 
 		nnodes++;

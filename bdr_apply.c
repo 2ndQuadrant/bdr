@@ -35,6 +35,8 @@
 #include "catalog/namespace.h"
 #include "catalog/pg_type.h"
 
+#include "executor/spi.h"
+
 #include "libpq/pqformat.h"
 
 #include "mb/pg_wchar.h"
@@ -97,16 +99,11 @@ static RepNodeId		remote_origin_id = InvalidRepNodeId;
 /*
  * This code only runs within an apply bgworker, so we can stash a pointer to our
  * state in shm in a global for convenient access.
- *
- * TODO: make static once bdr_apply_main moved into bdr.c
  */
-BdrApplyWorker *bdr_apply_worker = NULL;
+static BdrApplyWorker *bdr_apply_worker = NULL;
 
-/*
- * GUCs for this apply worker - again, this is fixed for the lifetime of the
- * worker so we can stash it in a global.
- */
-BdrConnectionConfig *bdr_apply_config = NULL;
+/* XXX DYNCONF temp */
+static BdrConnectionConfig *bdr_apply_config = NULL;
 
 dlist_head bdr_lsn_association = DLIST_STATIC_INIT(bdr_lsn_association);
 
@@ -2351,6 +2348,192 @@ bdr_apply_work(PGconn* streamConn)
 	}
 }
 
+static int
+getattno(const char *colname)
+{
+	int attno;
+
+	attno = SPI_fnumber(SPI_tuptable->tupdesc, colname);
+	if (attno == SPI_ERROR_NOATTRIBUTE)
+		elog(ERROR, "SPI error while reading %s from bdr.bdr_connections", colname);
+
+	return attno;
+}
+
+/*
+ * Read connection configuration data from the DB and return zero or more
+ * matching palloc'd BdrConnectionConfig results in a list.
+ *
+ * Each BdrConnectionConfig's char* fields are palloc'd copies.
+ *
+ * Connections are identified by conn_local_name and/or init_replica flag; you
+ * can search for a connection by name, or for the connection with init_replica
+ * set for this db. Omit both to get a list of all connections for the current
+ * node.
+ *
+ * XXX PERDB The dbname param is just copied into the struct when found, and is otherwise unused.
+ *
+ * Uses the SPI, so push/pop caller's SPI state if needed.
+ *
+ * May raise exceptions from queries, SPI errors, etc.
+ */
+List*
+bdr_read_connection_configs(Name conn_local_name, Name dbname,
+						    bool init_replica)
+{
+#define BDR_RDCON_Q_MAXARGS 4
+	Oid argtypes[BDR_RDCON_Q_MAXARGS];
+	Datum values[BDR_RDCON_Q_MAXARGS];
+	HeapTuple tuple;
+	StringInfoData query;
+	int			n_params;
+	int			i;
+	int			ret;
+	List	   *configs = NIL;
+
+	initStringInfo(&query);
+
+	Assert(IsTransactionState());
+
+	appendStringInfo(&query, "SELECT * FROM bdr.bdr_connections "
+							 "WHERE conn_sysid = $1 "
+							 "  AND conn_timeline = $2 "
+							 "  AND conn_dboid = $3 ");
+
+	n_params = 0;
+
+	values[n_params] = ObjectIdGetDatum(GetSystemIdentifier());
+	argtypes[n_params++] = OIDOID;
+
+	values[n_params] = ObjectIdGetDatum(ThisTimeLineID);
+	argtypes[n_params++] = OIDOID;
+
+	values[n_params] = ObjectIdGetDatum(MyDatabaseId);
+	argtypes[n_params++] = OIDOID;
+
+	if (conn_local_name != NULL)
+	{
+		values[n_params] = NameGetDatum(conn_local_name);
+		argtypes[n_params] = NAMEOID;
+		appendStringInfo(&query, "  AND conn_local_name = %d", n_params++);
+	}
+
+	if (init_replica)
+		appendStringInfo(&query, "  AND conn_init_replica");
+
+	Assert(n_params <= BDR_RDCON_Q_MAXARGS);
+
+	SPI_connect();
+
+	ret = SPI_execute_with_args(query.data,
+								n_params, argtypes, values, NULL,
+								1, 0);
+
+	if (ret != SPI_OK_SELECT)
+		elog(ERROR, "SPI error while querying bdr.bdr_connections");
+
+	for (i = 0; i < SPI_processed; i++)
+	{
+		Datum		tmp_datum;
+		bool		isnull;
+		const char *conn_replication_name,
+				   *conn_dsn,
+				   *conn_replica_local_dsn;
+
+		BdrConnectionConfig *bdr_apply_config = palloc(sizeof(BdrConnectionConfig));
+
+		tuple = SPI_tuptable->vals[i];
+
+		/* Fetch tuple attributes */
+		conn_replication_name = SPI_getvalue(tuple, SPI_tuptable->tupdesc,
+											 getattno("conn_replication_name"));
+
+		Assert(strcmp(conn_replication_name, "") == 0); /* we don't use it */
+
+		conn_dsn = SPI_getvalue(tuple, SPI_tuptable->tupdesc,
+								getattno("conn_dsn"));
+		bdr_apply_config->dsn = pstrdup(conn_dsn);
+
+		tmp_datum = SPI_getbinval(tuple, SPI_tuptable->tupdesc,
+								  getattno("conn_init_replica"),
+								  &isnull);
+		Assert(!isnull);
+		bdr_apply_config->init_replica = DatumGetBool(tmp_datum);
+
+		conn_replica_local_dsn = SPI_getvalue(tuple,
+											  SPI_tuptable->tupdesc,
+											  getattno("conn_replica_local_dsn"));
+		bdr_apply_config->replica_local_dsn = pstrdup(conn_replica_local_dsn);
+
+		tmp_datum = SPI_getbinval(tuple, SPI_tuptable->tupdesc,
+								  getattno("conn_apply_delay"), &isnull);
+		if (isnull)
+			bdr_apply_config->apply_delay = -1;
+		else
+			bdr_apply_config->apply_delay = DatumGetInt32(tmp_datum);
+
+		/* XXX DYNCONF todo replication sets */
+		bdr_apply_config->replication_sets = NULL;
+
+		bdr_apply_config->dbname = pstrdup(NameStr(*dbname));
+		bdr_apply_config->is_valid = true;
+
+		configs = lcons(bdr_apply_config, configs);
+	}
+
+	SPI_finish();
+
+	return configs;
+}
+
+/* 
+ * Given a BdrConnectionConfig with palloc'd string contents,
+ * free the strings then the config its self.
+ */
+void
+bdr_free_connection_config(BdrConnectionConfig *cfg)
+{
+	if (cfg->dsn != NULL)
+		pfree(cfg->dsn);
+	if (cfg->replica_local_dsn != NULL)
+		pfree(cfg->replica_local_dsn);
+	if (cfg->replication_sets != NULL)
+		pfree(cfg->replication_sets);
+	if (cfg->name != NULL)
+		pfree(cfg->name);
+	if (cfg->dbname != NULL)
+		pfree(cfg->dbname);
+	pfree(cfg);
+}
+
+static void
+get_bdr_connection_config(Name conn_local_name, Name dbname)
+{
+	List *configs;
+
+	StartTransactionCommand();
+
+	configs = bdr_read_connection_configs(conn_local_name, dbname, false);
+	if (configs == NIL)
+		elog(ERROR, "Failed to find expected row "
+					"(conn_sysid,conn_timeline,conn_dboid,conn_local_name) = "
+					"("UINT64_FORMAT",%u,%u,%s) "
+					"in bdr.bdr_connections",
+					GetSystemIdentifier(), ThisTimeLineID,
+					MyDatabaseId, NameStr(*conn_local_name));
+	
+	if (list_length(configs) != 1)
+		elog(ERROR, "Got %d configs for node where 1 expected",
+			 list_length(configs));
+
+	CommitTransactionCommand();
+
+	bdr_apply_config = (BdrConnectionConfig*)linitial(configs);
+
+	list_free(configs);
+}
+
+
 /*
  * Entry point for a BDR apply worker.
  *
@@ -2367,7 +2550,8 @@ bdr_apply_main(Datum main_arg)
 	RepNodeId	replication_identifier;
 	XLogRecPtr	start_from;
 	NameData	slot_name;
-	BdrWorker  *bdr_worker_slot;
+	Name		dbname;
+	BdrWorker  *perdb;
 
 	Assert(IsBackgroundWorker);
 
@@ -2378,16 +2562,24 @@ bdr_apply_main(Datum main_arg)
 	bdr_apply_worker = &bdr_worker_slot->worker_data.apply_worker;
 	bdr_worker_type = BDR_WORKER_APPLY;
 
-	bdr_apply_config = bdr_connection_configs[bdr_apply_worker->connection_config_idx];
-	Assert(bdr_apply_config != NULL);
+	/* Get the database name to connect to from the perdb worker for this db */
+	Assert(bdr_apply_worker->perdb_worker_idx >= 0);
+	Assert(bdr_apply_worker->perdb_worker_idx < bdr_max_workers);
+	perdb = &BdrWorkerCtl->slots[bdr_apply_worker->perdb_worker_idx];
+	Assert(perdb->worker_type == BDR_WORKER_PERDB);
+	dbname = &perdb->worker_data.perdb_worker.dbname;
 
-	bdr_worker_init(bdr_apply_config->dbname);
+	/* Then unblock signals, connect to the db, etc */
+	bdr_worker_init(NameStr(*dbname));
+
+	/* Read our configuration from the database */
+	get_bdr_connection_config(&bdr_apply_worker->conn_local_name, dbname);
 
 	CurrentResourceOwner = ResourceOwnerCreate(NULL, "bdr apply top-level resource owner");
 	bdr_saved_resowner = CurrentResourceOwner;
 
 	elog(DEBUG1, "%s initialized on %s",
-		 MyBgworkerEntry->bgw_name, bdr_apply_config->dbname);
+		 MyBgworkerEntry->bgw_name, NameStr(*dbname));
 
 	/* Set our local application_name for our SPI connections */
 	resetStringInfo(&query);

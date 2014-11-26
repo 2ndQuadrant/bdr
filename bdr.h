@@ -156,10 +156,9 @@ typedef struct BDRTupleData
 typedef struct BdrApplyWorker
 {
 	/*
-	 * Index in bdr_connection_configs of this workers's GUCs
-	 * and config info (including dbname, name, etc).
+	 * The name of this apply worker in bdr.bdr_connections
 	 */
-	int connection_config_idx;
+	NameData conn_local_name;
 
 	/*
 	 * If not InvalidXLogRecPtr, stop replay at this point and exit.
@@ -173,19 +172,13 @@ typedef struct BdrApplyWorker
 	bool forward_changesets;
 
 	/*
-	 * Ensure this worker doesn't get registered a second time if there's a
-	 * perdb worker restart or postmaster restart. Ideally we'd store the
-	 * BackgroundWorkerHandle, but it's an opaque struct.
-	 */
-	bool bgw_is_registered;
-
-	/*
-	 * TODO DYNCONF Since we now create apply workers before perdb workers we
-	 * don't know their offsets, so we must store the dbname instead.
+	 * Rather than store many copies of the dbname to connect to in shmem,
+	 * just note the perdb worker for this db's shmem index.
 	 *
-	 * Delete this when they're moved into dynconfig.
+	 * (We can't use the db oid instead, because oid to name lookups are
+	 * only possible once we're connected to a DB).
 	 */
-	NameData dbname;
+	int perdb_worker_idx;
 
 } BdrApplyWorker;
 
@@ -436,6 +429,9 @@ extern BdrWorker* bdr_worker_shmem_alloc(BdrWorkerType worker_type,
 extern void bdr_worker_shmem_release(BdrWorker* worker, BackgroundWorkerHandle *handle);
 extern bool bdr_is_bdr_activated_db(void);
 
+/* Really private to perdb workers, but init_replica perdb code needs it too */
+extern int perdb_worker_idx;
+
 /* forbid commands we do not support currently (or never will) */
 extern void init_bdr_commandfilter(void);
 extern void bdr_commandfilter_always_allow_ddl(bool always_allow);
@@ -463,6 +459,12 @@ extern void bdr_sigterm(SIGNAL_ARGS);
 /* manipulation of bdr catalogs */
 extern char bdr_nodes_get_local_status(uint64 sysid, TimeLineID tli, Oid dboid);
 extern void bdr_nodes_set_local_status(char status);
+
+extern List*
+bdr_read_connection_configs(Name conn_local_name, Name dbname,
+							bool init_replica);
+
+extern void bdr_free_connection_config(BdrConnectionConfig *cfg);
 
 extern Oid GetSysCacheOidError(int cacheId, Datum key1, Datum key2, Datum key3,
 							   Datum key4);
