@@ -1798,7 +1798,8 @@ typedef enum
 {
 	JsonTypeArray,
 	JsonTypeObject,
-	JsonTypeString
+	JsonTypeString,
+	JsonTypeNumber
 } JsonType;
 
 typedef enum
@@ -1807,6 +1808,7 @@ typedef enum
 	SpecOperatorname,
 	SpecDottedName,
 	SpecString,
+	SpecNumber,
 	SpecStringLiteral,
 	SpecIdentifier
 } convSpecifier;
@@ -1903,6 +1905,8 @@ jsonval_get_type(Datum jsonval, char **typename)
 		json_elt_type = JsonTypeObject;
 	else if (strcmp(paramtype, "string") == 0)
 		json_elt_type = JsonTypeString;
+	else if (strcmp(paramtype, "number") == 0)
+		json_elt_type = JsonTypeNumber;
 	else
 		/* XXX improve this; need to specify array index or param name */
 		elog(ERROR, "unexpected JSON element type %s",
@@ -2159,6 +2163,12 @@ expand_jsonval_string(StringInfo buf, Datum jsonval, JsonType json_elt_type)
 	}
 }
 
+static void
+expand_jsonval_number(StringInfo buf, Datum jsonval)
+{
+	appendStringInfoString(buf, TextDatumGetCString(jsonval));
+}
+
 /*
  * Expand a json value as a string literal
  */
@@ -2243,6 +2253,11 @@ expand_one_element(StringInfo buf, char *param,
 				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 				 errmsg("expected JSON string or object for %%s element \"%s\", got %s",
 						param, valtype)));
+	if (specifier == SpecNumber && json_elt_type != JsonTypeNumber)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("expected JSON string or object for %%d element \"%s\", got %s",
+						param, valtype)));
 
 	switch (specifier)
 	{
@@ -2260,6 +2275,10 @@ expand_one_element(StringInfo buf, char *param,
 
 		case SpecStringLiteral:
 			expand_jsonval_strlit(buf, jsonval);
+			break;
+
+		case SpecNumber:
+			expand_jsonval_number(buf, jsonval);
 			break;
 
 		case SpecTypename:
@@ -2316,6 +2335,7 @@ expand_one_array_element(StringInfo buf, Datum array, int idx, char *param,
  * O		expand as an operator name
  * L		expand as a string literal (quote using single quotes)
  * s		expand as a simple string (no quoting)
+ * d		expand as a simple number (no quoting)
  *
  * The element name may have an optional separator specification preceded
  * by a colon.	Its presence indicates that the element is expected to be
@@ -2431,6 +2451,7 @@ pg_event_trigger_expand_command(PG_FUNCTION_ARGS)
 		 * 'O' -- expand as an operator name. Same as 'D', but the objname
 		 *		  element is not quoted.
 		 * 's' -- expand as a simple string; no quoting.
+		 * 'd' -- expand as a number.
 		 * 'T' -- expand as a typename, with ad-hoc rules
 		 */
 		switch (*cp)
@@ -2443,6 +2464,9 @@ pg_event_trigger_expand_command(PG_FUNCTION_ARGS)
 				break;
 			case 's':
 				specifier = SpecString;
+				break;
+			case 'd':
+				specifier = SpecNumber;
 				break;
 			case 'L':
 				specifier = SpecStringLiteral;
