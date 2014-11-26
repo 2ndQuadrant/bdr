@@ -416,7 +416,7 @@ jsonize_objtree(ObjTree *tree)
 				typeid = BOOLOID;
 				break;
 			case ObjTypeInteger:
-				typeid = INT4OID;
+				typeid = INT8OID;
 				break;
 			case ObjTypeArray:
 			case ObjTypeObject:
@@ -442,7 +442,7 @@ jsonize_objtree(ObjTree *tree)
 				values[i - 1] = CStringGetTextDatum(object->str_value);
 				break;
 			case ObjTypeInteger:
-				values[i - 1] = Int32GetDatum(object->int_value);
+				values[i - 1] = Int64GetDatum(object->int_value);
 				break;
 			case ObjTypeArray:
 				{
@@ -4422,7 +4422,7 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 			case AT_SetStatistics:
 				{
 					Assert(IsA(subcmd->def, Integer));
-					tmp = new_objtree_VA("ALTER COLUMN %{column}I SET STATISTICS %{statistics}s",
+					tmp = new_objtree_VA("ALTER COLUMN %{column}I SET STATISTICS %{statistics}d",
 										 3, "type", ObjTypeString, "set statistics",
 										 "column", ObjTypeString, subcmd->name,
 										 "statistics", ObjTypeInteger, intVal((Value *) subcmd->def));
