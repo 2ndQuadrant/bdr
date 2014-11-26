@@ -127,6 +127,23 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
 
 DROP TABLE test_tbl;
 
+-- ALTER COLUMN ... SET STATISTICS
+\c postgres
+CREATE TABLE test_tbl(id int);
+ALTER TABLE test_tbl ALTER COLUMN id SET STATISTICS 10;
+\d+ test_tbl
+ALTER TABLE test_tbl ALTER COLUMN id SET STATISTICS 0;
+\d+ test_tbl
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+\c regression
+\d+ test_tbl
+ALTER TABLE test_tbl ALTER COLUMN id SET STATISTICS -1;
+\d+ test_tbl
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+\c postgres
+\d+ test_tbl
+DROP TABLE test_tbl;
+
 --- INHERITANCE ---
 \c postgres
 
