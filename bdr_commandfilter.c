@@ -484,6 +484,73 @@ statement_affects_only_temp(Node *parsetree)
 				CreateStmt *stmt = (CreateStmt *) parsetree;
 				return stmt->relation->relpersistence == RELPERSISTENCE_TEMP;
 			}
+		case T_DropStmt:
+			{
+				DropStmt *stmt = (DropStmt *) parsetree;
+				ListCell   *cell;
+
+				/*
+				 * It doesn't make any sense to drop temporary tables
+				 * concurrently.
+				 */
+				if (stmt->concurrent)
+					return false;
+
+				/*
+				 * Figure out if only temporary objects are affected - we can
+				 * only guarantee that if they're fully specified,
+				 * i.e. include the schema name in the RV. It'd be much better
+				 * to get away without that requirement
+				 */
+
+				/*
+				 * Only do this for temporary relations, not other objects for
+				 * now.
+				 */
+				switch (stmt->removeType)
+				{
+					case OBJECT_TABLE:
+					case OBJECT_SEQUENCE:
+					case OBJECT_VIEW:
+					case OBJECT_MATVIEW:
+					case OBJECT_FOREIGN_TABLE:
+						break;
+					default:
+						return false;
+
+				}
+
+				/* Now check each dropped relation. */
+				foreach(cell, stmt->objects)
+				{
+					Oid			relOid;
+					RangeVar   *rv = makeRangeVarFromNameList((List *) lfirst(cell));
+					Relation	rel;
+					bool		istemp;
+
+					/* Can't be sure the next lookup will hit the same relation */
+					if (rv->schemaname == NULL)
+						return false;
+
+					relOid = RangeVarGetRelidExtended(rv,
+													  AccessExclusiveLock,
+													  stmt->missing_ok,
+													  false,
+													  NULL,
+													  NULL);
+					if (relOid == InvalidOid)
+						continue;
+
+					rel = relation_open(relOid, AccessExclusiveLock);
+					istemp = rel->rd_rel->relpersistence == RELPERSISTENCE_TEMP;
+					relation_close(rel, NoLock);
+
+					if (!istemp)
+						return false;
+				}
+				return true;
+				break;
+			}
 		/* FIXME: Add more types of statements */
 		default:
 			break;
