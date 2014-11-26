@@ -469,6 +469,28 @@ filter_CreateTableAs(Node *parsetree)
 		error_unsupported_command(CreateCommandTag(parsetree));
 }
 
+static bool
+statement_affects_only_temp(Node *parsetree)
+{
+	switch (nodeTag(parsetree))
+	{
+		case T_CreateTableAsStmt:
+			{
+				CreateTableAsStmt *stmt = (CreateTableAsStmt *) parsetree;
+				return stmt->into->rel->relpersistence == RELPERSISTENCE_TEMP;
+			}
+		case T_CreateStmt:
+			{
+				CreateStmt *stmt = (CreateStmt *) parsetree;
+				return stmt->relation->relpersistence == RELPERSISTENCE_TEMP;
+			}
+		/* FIXME: Add more types of statements */
+		default:
+			break;
+	}
+	return false;
+}
+
 static void
 bdr_commandfilter(Node *parsetree,
 				  const char *queryString,
@@ -791,7 +813,7 @@ bdr_commandfilter(Node *parsetree,
 	}
 
 	/* now lock other nodes in the bdr flock against ddl */
-	if (!bdr_skip_ddl_locking)
+	if (!bdr_skip_ddl_locking && !statement_affects_only_temp(parsetree))
 		bdr_acquire_ddl_lock();
 
 done:
