@@ -92,7 +92,7 @@ static bool bdr_synchronous_commit;
 int bdr_default_apply_delay;
 int bdr_max_workers;
 static bool bdr_skip_ddl_replication;
-
+bool bdr_skip_ddl_locking;
 /*
  * These globals are valid only for apply bgworkers, not for
  * bdr running in the postmaster or for per-db workers.
@@ -1622,6 +1622,15 @@ _PG_init(void)
 							 "Internal. Set during local restore during init_replica only",
 							 NULL,
 							 &bdr_skip_ddl_replication,
+							 false,
+							 PGC_SUSET,
+							 0,
+							 NULL, NULL, NULL);
+
+	DefineCustomBoolVariable("bdr.skip_ddl_locking",
+							 "Don't acquire global DDL locks while performing DDL.",
+							 "Note that it's quite dangerous to do so.",
+							 &bdr_skip_ddl_locking,
 							 false,
 							 PGC_SUSET,
 							 0,

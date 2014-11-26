@@ -768,7 +768,8 @@ bdr_commandfilter(Node *parsetree,
 	}
 
 	/* now lock other nodes in the bdr flock against ddl */
-	bdr_acquire_ddl_lock();
+	if (!bdr_skip_ddl_locking)
+		bdr_acquire_ddl_lock();
 
 done:
 	if (next_ProcessUtility_hook)

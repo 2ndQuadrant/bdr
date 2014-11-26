@@ -57,7 +57,7 @@
  *       updated to the 'acquired' state and a 'confirm_lock' message will be sent out.
  *
  *    9) Once all nodes have replied with 'confirm_lock' messages the ddl lock
- *    	 has been acquired.
+ *       has been acquired.
  *
  *    There's some additional complications to handle crash safety:
  *
