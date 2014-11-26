@@ -199,6 +199,19 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
 \c regression
 \d+ test_tbl_inh_*
 
+-- ensure tables WITH OIDs can't be created
+SHOW default_with_oids;
+CREATE TABLE tbl_with_oids() WITH oids;
+CREATE TABLE tbl_without_oids() WITHOUT oids;
+DROP TABLE tbl_without_oids;
+CREATE TABLE tbl_without_oids();
+DROP TABLE tbl_without_oids;
+SET default_with_oids = true;
+CREATE TABLE tbl_with_oids();
+CREATE TABLE tbl_with_oids() WITH OIDS;
+CREATE TABLE tbl_without_oids() WITHOUT oids;
+DROP TABLE tbl_without_oids;
+SET default_with_oids = false;
 
 --- AGGREGATE ---
 \c postgres
