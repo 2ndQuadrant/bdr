@@ -1,0 +1,37 @@
+# ddl-schedule
+
+# Regression test schedule for DDL deparse functions
+
+# Initialise DDL event trigger and table to store expanded DDL deparse
+# items; this is not a regression-test per se, but is required by the final
+# DDL deparse test
+
+test: deparse_init
+
+# DDL tests
+test: create_extension
+test: create_schema
+test: create_type_enum
+test: create_type_range
+test: create_type
+test: create_operator
+test: create_conversion
+test: create_domain
+test: create_sequence_1
+test: create_table
+test: create_sequence_2
+test: create_index
+test: create_view
+test: create_function
+test: create_trigger
+test: create_rule
+test: security_label
+test: comment_on
+test: alter_extension
+test: alter_function
+test: alter_sequence
+test: alter_type_enum
+test: alter_owner
+
+# Final DDL deparse test (pg_dump output comparison)
+test: deparse_test
