@@ -1,0 +1,9 @@
+---
+--- DEPARSE_TEST
+---
+
+-- temporary destination
+\copy (SELECT command || ';' FROM deparse_test_commands ORDER BY id) TO '/tmp/deparse-test.sql'
+\! @psqldir@/psql --dbname=reg2 < /tmp/deparse-test.sql > /dev/null
+
+\! @psqldir@/pg_dump --schema-only --no-owner --no-privileges -Fp reg2

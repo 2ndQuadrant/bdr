@@ -587,6 +587,7 @@ convert_sourcefiles_in(char *source_subdir, char *dest_dir, char *dest_subdir, c
 			replace_string(line, "@testtablespace@", testtablespace);
 			replace_string(line, "@libdir@", dlpath);
 			replace_string(line, "@DLSUFFIX@", DLSUFFIX);
+			replace_string(line, "@psqldir@", psqldir);
 			fputs(line, outfile);
 		}
 		fclose(infile);

@@ -1,0 +1,4 @@
+CREATE FUNCTION check_foreign_key ()
+	RETURNS trigger
+	AS '@libdir@/refint@DLSUFFIX@'
+	LANGUAGE C;
