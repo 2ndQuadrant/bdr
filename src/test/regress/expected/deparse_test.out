@@ -1,0 +1,62 @@
+---
+--- DEPARSE_TEST
+---
+\copy (SELECT command || ';' FROM deparse_test_commands ORDER BY id) TO './sql/deparse_dump.sql'
+\! /space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/./tmp_check/install//home/ibarwick/devel/builds/DEPARSE/bin/psql --dbname=regression_deparse < ./sql/deparse_dump.sql > /dev/null
+\! /space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/./tmp_check/install//home/ibarwick/devel/builds/DEPARSE/bin/pg_dump --schema-only --no-owner --no-privileges -Fp regression_deparse | egrep -v "^-- Dumped"
+--
+-- PostgreSQL database dump
+--
+
+
+SET row_security = off;
+SET statement_timeout = 0;
+SET lock_timeout = 0;
+SET client_encoding = 'UTF8';
+SET standard_conforming_strings = on;
+SET check_function_bodies = false;
+SET client_min_messages = warning;
+
+--
+-- Name: plpgsql; Type: EXTENSION; Schema: -; Owner: -
+--
+
+CREATE EXTENSION IF NOT EXISTS plpgsql WITH SCHEMA pg_catalog;
+
+
+--
+-- Name: EXTENSION plpgsql; Type: COMMENT; Schema: -; Owner: -
+--
+
+COMMENT ON EXTENSION plpgsql IS 'PL/pgSQL procedural language';
+
+
+SET search_path = public, pg_catalog;
+
+--
+-- Name: check_foreign_key(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION check_foreign_key() RETURNS trigger
+    LANGUAGE c
+    AS '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/refint.so', 'check_foreign_key';
+
+
+SET default_tablespace = '';
+
+SET default_with_oids = false;
+
+--
+-- Name: hobbies_r; Type: TABLE; Schema: public; Owner: -; Tablespace: 
+--
+
+CREATE TABLE hobbies_r (
+    name text,
+    person text
+);
+
+
+--
+-- PostgreSQL database dump complete
+--
+
