@@ -7,6 +7,5 @@
 /security_label.sql
 /tablespace.sql
 /create_function_ddl_demo.sql
-/create_table_ddl_demo.sql
 /deparse_init.sql
 /deparse_test.sql
