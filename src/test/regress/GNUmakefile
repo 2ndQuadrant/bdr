@@ -133,6 +133,10 @@ tablespace-setup:
 generate-files:
 	$(top_builddir)/src/test/regress/pg_regress --generate-files-only --inputdir=$(srcdir)/input
 
+ddl_deparse_schedule: serial_schedule
+	echo "test: deparse_init" > $@
+	grep -v tablespace $(srcdir)/serial_schedule >> $@
+	echo "test: deparse_test" >> $@
 
 ##
 ## Run tests
@@ -157,6 +161,9 @@ installcheck-tests: all tablespace-setup
 
 standbycheck: all
 	$(pg_regress_installcheck) $(REGRESS_OPTS) --schedule=$(srcdir)/standby_schedule --use-existing
+
+deparsecheck: all generate-files ddl_deparse_schedule
+	$(pg_regress_check) $(REGRESS_OPTS) --schedule=ddl_deparse_schedule
 
 # old interfaces follow...
 
