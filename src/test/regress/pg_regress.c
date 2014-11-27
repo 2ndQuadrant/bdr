@@ -109,6 +109,7 @@ static _stringlist *extraroles = NULL;
 static _stringlist *extra_install = NULL;
 static char *config_auth_datadir = NULL;
 static bool generate_files_only = false;
+static bool keep_install = false;
 
 /* internal variables */
 static const char *progname;
@@ -2058,6 +2059,7 @@ help(void)
 	printf(_("                            (can be used multiple times to concatenate)\n"));
 	printf(_("  --temp-install=DIR        create a temporary installation in DIR\n"));
 	printf(_("  --use-existing            use an existing installation\n"));
+	printf(_("  --keep-install            don't destroy nor stop the installation\n"));
 	printf(_("\n"));
 	printf(_("Options for \"temp-install\" mode:\n"));
 	printf(_("  --extra-install=DIR       additional directory to install (e.g., contrib)\n"));
@@ -2109,6 +2111,7 @@ regression_main(int argc, char *argv[], init_function ifunc, test_function tfunc
 		{"config-auth", required_argument, NULL, 24},
 		{"dbname-deparse", required_argument, NULL, 25},
 		{"generate-files-only", no_argument, NULL, 26},
+		{"keep-install", no_argument, NULL, 27},
 		{NULL, 0, NULL, 0}
 	};
 
@@ -2239,6 +2242,9 @@ regression_main(int argc, char *argv[], init_function ifunc, test_function tfunc
 				break;
 			case 26:
 				generate_files_only = true;
+				break;
+			case 27:
+				keep_install = true;
 				break;
 			default:
 				/* getopt_long already emitted a complaint */
@@ -2589,7 +2595,7 @@ regression_main(int argc, char *argv[], init_function ifunc, test_function tfunc
 	/*
 	 * Shut down temp installation's postmaster
 	 */
-	if (temp_install)
+	if (temp_install && !keep_install)
 	{
 		header(_("shutting down postmaster"));
 		stop_postmaster();
@@ -2600,7 +2606,7 @@ regression_main(int argc, char *argv[], init_function ifunc, test_function tfunc
 	 * conserve disk space.  (If there were errors, we leave the installation
 	 * in place for possible manual investigation.)
 	 */
-	if (temp_install && fail_count == 0 && fail_ignore_count == 0)
+	if (temp_install && fail_count == 0 && fail_ignore_count == 0 && !keep_install)
 	{
 		header(_("removing temporary installation"));
 		if (!rmtree(temp_install, true))

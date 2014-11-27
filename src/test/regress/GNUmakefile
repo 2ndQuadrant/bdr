@@ -133,6 +133,10 @@ tablespace-setup:
 generate-files:
 	$(top_builddir)/src/test/regress/pg_regress --generate-files-only --inputdir=$(srcdir)/input
 
+ddl_deparse_schedule: serial_schedule
+	echo "test: deparse_init" > $@
+	grep -v tablespace $(srcdir)/serial_schedule >> $@
+	echo "test: deparse_test" >> $@
 
 ##
 ## Run tests
@@ -157,6 +161,17 @@ installcheck-tests: all tablespace-setup
 
 standbycheck: all
 	$(pg_regress_installcheck) $(REGRESS_OPTS) --schedule=$(srcdir)/standby_schedule --use-existing
+
+deparsecheck: REGRESS_OPTS += --keep-install
+deparsecheck: all generate-files ddl_deparse_schedule
+	$(pg_regress_check) $(REGRESS_OPTS) --schedule=ddl_deparse_schedule
+	grep ERROR results/deparse_dump.out > results/deparse_dump.errors
+	$(bindir)/pg_ctl -w start -D ./tmp_check/data -l /dev/null
+	$(bindir)/pg_dump -d regression_deparse -s -f results/deparse.dump
+	$(bindir)/pg_dump -d regression -s -f results/regression.dump
+	$(bindir)/pg_ctl -D ./tmp_check/data stop
+	diff -c results/deparse.dump results/regression.dump
+	diff -c results/deparse_dump.errors $(srcdir)/expected/deparse_dump.errors
 
 # old interfaces follow...
 
