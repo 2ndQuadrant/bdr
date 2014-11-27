@@ -464,8 +464,6 @@ extern List*
 bdr_read_connection_configs(Name conn_local_name, Name dbname,
 							bool init_replica);
 
-extern void bdr_free_connection_config(BdrConnectionConfig *cfg);
-
 extern Oid GetSysCacheOidError(int cacheId, Datum key1, Datum key2, Datum key3,
 							   Datum key4);
 

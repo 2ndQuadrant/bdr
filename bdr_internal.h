@@ -24,6 +24,7 @@ typedef struct BdrConnectionConfig
 	int   apply_delay;
 	bool  init_replica;
 	char *replica_local_dsn;
+	/* Quoted identifier-list of replication sets */
 	char *replication_sets;
 
 	/*

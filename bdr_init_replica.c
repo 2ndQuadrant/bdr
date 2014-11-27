@@ -746,18 +746,19 @@ bdr_init_replica(Name dbname)
 		 */
 		bdr_nodes_set_local_status('r');
 	}
+
 	/*
-	 * We no longer require the transaction for SPI; further work gets done on
-	 * the remote machine's bdr.bdr_nodes table and replicated back to us via
-	 * pg_dump/pg_restore, or over the walsender protocol once we start
-	 * replay. If we aren't just about to exit anyway.
+	 * No further direct SPI use, but we'll retain the transaction for some
+	 * later queries and to keep its memory context alive.
 	 */
 	SPI_finish();
-	CommitTransactionCommand();
 
 	if (init_replica_config == NULL)
+	{
 		/* Cleanup done and nothing more to do */
+		CommitTransactionCommand();
 		return;
+	}
 
 	elog(LOG, "bdr %s: bdr_init_replica init from connection %s",
 		 NameStr(*dbname), init_replica_config->name);
@@ -939,11 +940,7 @@ bdr_init_replica(Name dbname)
 					pfree(snapshot);
 				PQfinish(conn);
 			}
-
-			bdr_free_connection_config(cfg);
 		}
-
-		list_free(configs);
 
 		/* If we get here, we should have a valid snapshot to dump */
 		Assert(init_snapshot != NULL);
@@ -981,7 +978,13 @@ bdr_init_replica(Name dbname)
 	elog(INFO, "bdr %s: catchup worker finished, ready for normal replication",
 		 NameStr(*dbname));
 	PQfinish(nonrepl_init_conn);
-	bdr_free_connection_config(init_replica_config);
+
+	/*
+	 * We delay commit until here because the connection configs were
+	 * allocated in the transaction's memory context, so until now we
+	 * needed them.
+	 */
+	CommitTransactionCommand();
 }
 
 /*
