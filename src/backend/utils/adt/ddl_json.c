@@ -425,13 +425,14 @@ expand_jsonval_strlit(StringInfo buf, JsonbValue *jsonval)
 	static const char dqsuffixes[] = "_XYZZYX_";
 	int         dqnextchar = 0;
 
-	str = jsonval->val.string.val;
+	str = pnstrdup(jsonval->val.string.val, jsonval->val.string.len);
 
 	/* easy case: if there are no ' and no \, just use a single quote */
 	if (strchr(str, '\'') == NULL &&
 		strchr(str, '\\') == NULL)
 	{
 		appendStringInfo(buf, "'%s'", str);
+		pfree(str);
 		return;
 	}
 
@@ -449,6 +450,7 @@ expand_jsonval_strlit(StringInfo buf, JsonbValue *jsonval)
 	/* And finally produce the quoted literal into the output StringInfo */
 	appendStringInfo(buf, "%s%s%s", dqdelim.data, str, dqdelim.data);
 	pfree(dqdelim.data);
+	pfree(str);
 }
 
 /*
