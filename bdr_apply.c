@@ -2361,10 +2361,54 @@ getattno(const char *colname)
 }
 
 /*
+ * Given a text[] Datum guaranteed to contain no nulls, return an
+ * identifier-quoted comma-separated string allocated in the current memory
+ * context.
+ */
+static char*
+bdr_textarr_to_identliststr(ArrayType *textarray)
+{
+	Datum		   *elems;
+	int				nelems, i;
+	StringInfoData	si;
+
+	deconstruct_array(textarray,
+					  TEXTOID, -1, false, 'i',
+					  &elems, NULL, &nelems);
+
+	if (nelems == 0)
+		return pstrdup("");
+
+	initStringInfo(&si);
+
+	appendStringInfoString(&si,
+		quote_identifier(TextDatumGetCString(elems[0])));
+	for (i = 1; i < nelems; i++)
+	{
+		appendStringInfoString(&si, ",");
+		appendStringInfoString(&si,
+			quote_identifier(TextDatumGetCString(elems[i])));
+	}
+
+	/*
+	 * The stringinfo is on the stack, but its data element is palloc'd
+	 * in the caller's context and can be returned safely.
+	 */
+	return si.data;
+
+}
+
+/*
  * Read connection configuration data from the DB and return zero or more
  * matching palloc'd BdrConnectionConfig results in a list.
  *
- * Each BdrConnectionConfig's char* fields are palloc'd copies.
+ * A transaction must be open.
+ *
+ * The list and values are allocated in the calling memory context. By default
+ * this is the transaction memory context, but you can switch to contexts
+ * before calling.
+ *
+ * Each BdrConnectionConfig's char* fields are palloc'd values.
  *
  * Connections are identified by conn_local_name and/or init_replica flag; you
  * can search for a connection by name, or for the connection with init_replica
@@ -2390,6 +2434,10 @@ bdr_read_connection_configs(Name conn_local_name, Name dbname,
 	int			i;
 	int			ret;
 	List	   *configs = NIL;
+	MemoryContext caller_ctx, saved_ctx;
+
+	/* Save the calling memory context, which we'll allocate results in */
+	caller_ctx = MemoryContextSwitchTo(CurTransactionContext);
 
 	initStringInfo(&query);
 
@@ -2415,7 +2463,8 @@ bdr_read_connection_configs(Name conn_local_name, Name dbname,
 	{
 		values[n_params] = NameGetDatum(conn_local_name);
 		argtypes[n_params] = NAMEOID;
-		appendStringInfo(&query, "  AND conn_local_name = %d", n_params++);
+		appendStringInfo(&query, "  AND conn_local_name = $%d", n_params+1);
+		n_params++;
 	}
 
 	if (init_replica)
@@ -2427,18 +2476,21 @@ bdr_read_connection_configs(Name conn_local_name, Name dbname,
 
 	ret = SPI_execute_with_args(query.data,
 								n_params, argtypes, values, NULL,
-								1, 0);
+								false, 0);
 
 	if (ret != SPI_OK_SELECT)
 		elog(ERROR, "SPI error while querying bdr.bdr_connections");
 
+	/* Switch to calling memory context to copy results */
+	saved_ctx = MemoryContextSwitchTo(caller_ctx);
+
 	for (i = 0; i < SPI_processed; i++)
 	{
-		Datum		tmp_datum;
-		bool		isnull;
-		const char *conn_replication_name,
-				   *conn_dsn,
-				   *conn_replica_local_dsn;
+		Datum			tmp_datum;
+		bool			isnull;
+		const char	   *conn_replication_name;
+		ArrayType	   *conn_replication_sets;
+
 
 		BdrConnectionConfig *bdr_apply_config = palloc(sizeof(BdrConnectionConfig));
 
@@ -2450,9 +2502,13 @@ bdr_read_connection_configs(Name conn_local_name, Name dbname,
 
 		Assert(strcmp(conn_replication_name, "") == 0); /* we don't use it */
 
-		conn_dsn = SPI_getvalue(tuple, SPI_tuptable->tupdesc,
-								getattno("conn_dsn"));
-		bdr_apply_config->dsn = pstrdup(conn_dsn);
+		/*
+		 * Note: SPI_getvalue calls the output function for the type, so the
+		 * string is allocated in our memory context and doesn't need copying.
+		 */
+		bdr_apply_config->dsn = SPI_getvalue(tuple,
+											 SPI_tuptable->tupdesc,
+											 getattno("conn_dsn"));
 
 		tmp_datum = SPI_getbinval(tuple, SPI_tuptable->tupdesc,
 								  getattno("conn_init_replica"),
@@ -2460,10 +2516,9 @@ bdr_read_connection_configs(Name conn_local_name, Name dbname,
 		Assert(!isnull);
 		bdr_apply_config->init_replica = DatumGetBool(tmp_datum);
 
-		conn_replica_local_dsn = SPI_getvalue(tuple,
-											  SPI_tuptable->tupdesc,
-											  getattno("conn_replica_local_dsn"));
-		bdr_apply_config->replica_local_dsn = pstrdup(conn_replica_local_dsn);
+		bdr_apply_config->replica_local_dsn
+			= SPI_getvalue(tuple, SPI_tuptable->tupdesc,
+						   getattno("conn_replica_local_dsn"));
 
 		tmp_datum = SPI_getbinval(tuple, SPI_tuptable->tupdesc,
 								  getattno("conn_apply_delay"), &isnull);
@@ -2472,48 +2527,51 @@ bdr_read_connection_configs(Name conn_local_name, Name dbname,
 		else
 			bdr_apply_config->apply_delay = DatumGetInt32(tmp_datum);
 
-		/* XXX DYNCONF todo replication sets */
-		bdr_apply_config->replication_sets = NULL;
+		/*
+		 * Replication sets are stored in the catalogs as a text[]
+		 * of identifiers, so we'll want to unpack that.
+		 */
+
+		conn_replication_sets = (ArrayType*)
+			SPI_getbinval(tuple, SPI_tuptable->tupdesc,
+						  getattno("conn_replication_sets"), &isnull);
+
+		if (isnull)
+			bdr_apply_config->replication_sets = NULL;
+		else
+		{
+			bdr_apply_config->replication_sets =
+				bdr_textarr_to_identliststr(DatumGetArrayTypeP(conn_replication_sets));
+		}
 
 		bdr_apply_config->dbname = pstrdup(NameStr(*dbname));
 		bdr_apply_config->is_valid = true;
 
 		configs = lcons(bdr_apply_config, configs);
+
 	}
+
+	MemoryContextSwitchTo(saved_ctx);
 
 	SPI_finish();
 
-	return configs;
-}
+	MemoryContextSwitchTo(caller_ctx);
 
-/* 
- * Given a BdrConnectionConfig with palloc'd string contents,
- * free the strings then the config its self.
- */
-void
-bdr_free_connection_config(BdrConnectionConfig *cfg)
-{
-	if (cfg->dsn != NULL)
-		pfree(cfg->dsn);
-	if (cfg->replica_local_dsn != NULL)
-		pfree(cfg->replica_local_dsn);
-	if (cfg->replication_sets != NULL)
-		pfree(cfg->replication_sets);
-	if (cfg->name != NULL)
-		pfree(cfg->name);
-	if (cfg->dbname != NULL)
-		pfree(cfg->dbname);
-	pfree(cfg);
+	return configs;
 }
 
 static void
 get_bdr_connection_config(Name conn_local_name, Name dbname)
 {
 	List *configs;
+	MemoryContext saved_ctx;
 
 	StartTransactionCommand();
 
+	saved_ctx = MemoryContextSwitchTo(TopMemoryContext);
 	configs = bdr_read_connection_configs(conn_local_name, dbname, false);
+	MemoryContextSwitchTo(saved_ctx);
+
 	if (configs == NIL)
 		elog(ERROR, "Failed to find expected row "
 					"(conn_sysid,conn_timeline,conn_dboid,conn_local_name) = "

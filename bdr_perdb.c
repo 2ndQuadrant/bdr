@@ -127,7 +127,7 @@ bdr_launch_apply_workers(char *dbname)
 								"  AND conn_timeline = $2 "
 								"  AND conn_dboid = $3 ",
 								BDR_CON_Q_NARGS, argtypes, values, NULL,
-								true, 0);
+								false, 0);
 
 	if (ret != SPI_OK_SELECT)
 		elog(ERROR, "SPI error while querying bdr.bdr_connections");
@@ -148,6 +148,7 @@ bdr_launch_apply_workers(char *dbname)
 		unsigned int			slot;
 		BdrWorker			   *worker;
 		BdrApplyWorker		   *apply;
+		MemoryContext			oldcontext;
 
 		tuple = SPI_tuptable->vals[i];
 
@@ -175,7 +176,13 @@ bdr_launch_apply_workers(char *dbname)
 		apply->forward_changesets = false;
 		apply->perdb_worker_idx = perdb_worker_idx;
 
-		/* Finally, register the worker for launch */
+		/*
+		 * Finally, register the worker for launch.
+		 *
+		 * TopMemoryContext is used so we can retain the handle
+		 * after this SPI transaction finishes.
+		 */
+		oldcontext = MemoryContextSwitchTo(TopMemoryContext);
 		if (!RegisterDynamicBackgroundWorker(&bgw,
 											 &bgw_handle))
 		{
@@ -184,8 +191,8 @@ bdr_launch_apply_workers(char *dbname)
 							" %s, see previous log messages",
 							conn_local_name)));
 		}
-
 		apply_workers = lcons(bgw_handle, apply_workers);
+		MemoryContextSwitchTo(oldcontext);
 	}
 
 	SPI_finish();
@@ -347,7 +354,7 @@ bdr_perdb_worker_main(Datum main_arg)
 static void
 bdr_copy_connections_from_config()
 {
-#define BDR_CONNECTIONS_NATTS 9
+#define BDR_CONNECTIONS_NATTS 10
 	int   i, ret;
 	char *my_dbname;
 	bool save_unsafe;
@@ -372,7 +379,7 @@ bdr_copy_connections_from_config()
 		NameData conname, replication_name;
 		char  nulls[BDR_CONNECTIONS_NATTS];
 		Datum values[BDR_CONNECTIONS_NATTS];
-		Oid   argtypes[BDR_CONNECTIONS_NATTS] = {OIDOID, OIDOID, OIDOID, NAMEOID, NAMEOID, TEXTOID, BOOLOID, TEXTOID, INT4OID};
+		Oid   argtypes[BDR_CONNECTIONS_NATTS] = {OIDOID, OIDOID, OIDOID, NAMEOID, NAMEOID, TEXTOID, BOOLOID, TEXTOID, INT4OID, TEXTARRAYOID};
 
 		if (cfg == NULL)
 			continue;
@@ -404,13 +411,45 @@ bdr_copy_connections_from_config()
 			values[8] = Int32GetDatum(cfg->apply_delay);
 		else
 			nulls[8] = 'n';
-		/* TODO DYNCONF replication sets */
+
+		if (cfg->replication_sets != NULL)
+		{
+			/*
+			 * cfg->replication_sets is a comma separated list of quoted identifiers, which is what
+			 * the output plugin expects to receive. For database storage we'd rather store an array
+			 * of identifiers, so we need to split them up.
+			 *
+			 * We leak a bunch here, but it's throwaway code inside a transaction memory context,
+			 * so who cares.
+			 */
+			List *namelist;
+
+			if (!SplitIdentifierString(pstrdup(cfg->replication_sets),
+									   ',', &namelist))
+				elog(ERROR, "Whoops, couldn't parse replication identifier list");
+
+			if (namelist == NIL)
+				nulls[9] = 'n';
+			else 
+			{
+				int len = 0;
+				Datum *idents = palloc(list_length(namelist) * sizeof(Datum));
+				ListCell *c;
+
+				foreach(c, namelist)
+					idents[len++] = CStringGetTextDatum(lfirst(c));
+
+				values[9] = (Datum)construct_array(idents, len, TEXTOID, -1, false, 'i');
+			}
+		}
+		else
+			nulls[9] = 'n';
 
 		ret = SPI_execute_with_args(
 					"INSERT INTO bdr.bdr_connections "
-					"(conn_sysid, conn_timeline, conn_dboid, conn_local_name, conn_replication_name, conn_dsn, conn_init_replica, conn_replica_local_dsn, conn_apply_delay) "
-					"VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
-					9, argtypes, values, nulls, false, 0
+					"(conn_sysid, conn_timeline, conn_dboid, conn_local_name, conn_replication_name, conn_dsn, conn_init_replica, conn_replica_local_dsn, conn_apply_delay, conn_replication_sets) "
+					"VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::text[])",
+					BDR_CONNECTIONS_NATTS, argtypes, values, nulls, false, 0
 					);
 
 		if (ret != SPI_OK_INSERT)
