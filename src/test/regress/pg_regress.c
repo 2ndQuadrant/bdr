@@ -2428,6 +2428,7 @@ regression_main(int argc, char *argv[], init_function ifunc, test_function tfunc
 		{
 			for (sl = dblist; sl; sl = sl->next)
 				drop_database_if_exists(sl->str);
+			drop_database_if_exists(deparse_test_db);
 			for (sl = extraroles; sl; sl = sl->next)
 				drop_role_if_exists(sl->str);
 		}
