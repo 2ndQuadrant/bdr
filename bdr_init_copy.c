@@ -396,7 +396,6 @@ get_postgres_guc_value(char *guc, char *defval)
 static int
 set_sysid(void)
 {
-#ifdef BUILDING_BDR
 	int			 ret;
 	PQExpBuffer  cmd = createPQExpBuffer();
 	char		*exec_path = find_other_exec_or_die(argv0, "bdr_resetxlog", "bdr_resetxlog (PostgreSQL) " PG_VERSION "\n");
@@ -408,7 +407,6 @@ set_sysid(void)
 	destroyPQExpBuffer(cmd);
 
 	return ret;
-#endif
 }
 
 
