@@ -43,6 +43,8 @@ extern XLogRecPtr RemoteCommitFromCachedReplicationIdentifier(void);
 extern void GetReplicationInfoByIdentifier(RepNodeId riident, bool missing_ok, char **riname);
 
 extern Datum bdr_replication_identifier_is_replaying(PG_FUNCTION_ARGS);
+extern Datum bdr_replication_identifier_advance(PG_FUNCTION_ARGS);
+extern Datum bdr_replication_identifier_drop(PG_FUNCTION_ARGS);
 
 /*
  * bdr_replication_identifier struct

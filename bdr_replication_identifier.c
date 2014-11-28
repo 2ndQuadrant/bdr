@@ -99,6 +99,8 @@ typedef struct ReplicationState
 static ReplicationState *local_replication_state = NULL;
 
 PG_FUNCTION_INFO_V1(bdr_replication_identifier_is_replaying);
+PG_FUNCTION_INFO_V1(bdr_replication_identifier_advance);
+PG_FUNCTION_INFO_V1(bdr_replication_identifier_drop);
 
 static void
 EnsureReplicationIdentifierRelationId(void)
@@ -327,6 +329,7 @@ DropReplicationIdentifier(RepNodeId riident)
 
 	/* now release lock again,  */
 	heap_close(rel, ExclusiveLock);
+	heap_close(relpos, ExclusiveLock);
 }
 
 void
@@ -494,4 +497,36 @@ bdr_replication_identifier_is_replaying(PG_FUNCTION_ARGS)
 	CheckReplicationIdentifierPrerequisites(true);
 
 	PG_RETURN_BOOL(replication_origin_id != InvalidRepNodeId);
+}
+
+Datum
+bdr_replication_identifier_advance(PG_FUNCTION_ARGS)
+{
+	text	   *name = PG_GETARG_TEXT_P(0);
+	XLogRecPtr	remote_lsn = PG_GETARG_LSN(1);
+	XLogRecPtr	local_lsn = PG_GETARG_LSN(2);
+	RepNodeId	node;
+
+	CheckReplicationIdentifierPrerequisites(true);
+
+	node = GetReplicationIdentifier(text_to_cstring(name), false);
+
+	AdvanceReplicationIdentifier(node, remote_lsn, local_lsn);
+
+	PG_RETURN_VOID();
+}
+
+Datum
+bdr_replication_identifier_drop(PG_FUNCTION_ARGS)
+{
+	text	   *name = PG_GETARG_TEXT_P(0);
+	RepNodeId	node;
+
+	CheckReplicationIdentifierPrerequisites(true);
+
+	node = GetReplicationIdentifier(text_to_cstring(name), false);
+
+	DropReplicationIdentifier(node);
+
+	PG_RETURN_VOID();
 }

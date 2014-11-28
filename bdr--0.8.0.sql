@@ -529,24 +529,15 @@ IF bdr.bdr_variant() = 'UDR' THEN
 	END;
 	$func$ STRICT LANGUAGE plpgsql;
 
-	CREATE OR REPLACE FUNCTION bdr_replication_identifier_advance(i_riname text, i_remote_lsn pg_lsn, i_local_lsn pg_lsn) RETURNS void
-	AS $func$
-	BEGIN
-		UPDATE bdr.bdr_replication_identifier SET riremote_lsn = i_remote_lsn, rilocal_lsn = i_local_lsn WHERE riname = i_riname;
-	END;
-	$func$ STRICT LANGUAGE plpgsql;
+	CREATE OR REPLACE FUNCTION bdr_replication_identifier_advance(i_riname text, i_remote_lsn pg_lsn, i_local_lsn pg_lsn)
+	RETURNS VOID
+	LANGUAGE C
+	AS 'MODULE_PATHNAME';
 
-	CREATE OR REPLACE FUNCTION bdr_replication_identifier_drop(i_riname text) RETURNS void
-	AS $func$
-	DECLARE
-		v_riident int;
-	BEGIN
-		DELETE FROM bdr.bdr_replication_identifier WHERE riname = i_riname RETURNING riident INTO v_riident;
-		IF FOUND THEN
-			DELETE FROM bdr.bdr_replication_identifier_pos WHERE riident = v_riident;
-		END IF;
-	END;
-	$func$ STRICT LANGUAGE plpgsql;
+	CREATE OR REPLACE FUNCTION bdr_replication_identifier_drop(i_riname text)
+	RETURNS VOID
+	LANGUAGE C
+	AS 'MODULE_PATHNAME';
 
 	CREATE OR REPLACE FUNCTION bdr.bdr_replication_identifier_is_replaying()
 	RETURNS boolean
