@@ -254,6 +254,7 @@ extern BdrConnectionConfig	**bdr_connection_configs;
 /* GUCs */
 extern int	bdr_default_apply_delay;
 extern int bdr_max_workers;
+extern int bdr_max_databases;
 extern char *bdr_temp_dump_directory;
 extern bool bdr_init_from_basedump;
 extern bool bdr_log_conflicts_to_table;
@@ -278,6 +279,8 @@ typedef struct BdrWorkerControl
 	bool		 pause_apply;
 	/* Is this the first startup of the supervisor? */
 	bool		 is_supervisor_restart;
+	/* Latch for the supervisor worker */
+	Latch		*supervisor_latch;
 	/* Array members, of size bdr_max_workers */
 	BdrWorker    slots[FLEXIBLE_ARRAY_MEMBER];
 } BdrWorkerControl;
@@ -309,6 +312,9 @@ extern Oid	BdrLocksByOwnerRelid;
 extern Oid  BdrReplicationSetConfigRelid;
 
 extern Oid bdr_lookup_relid(const char *relname, Oid schema_oid);
+
+extern void bdr_sequencer_set_nnodes(Size nnodes);
+
 
 /* apply support */
 extern void bdr_fetch_sysid_via_node_id(RepNodeId node_id, uint64 *sysid,
@@ -403,7 +409,7 @@ extern int bdr_sequencer_get_next_free_slot(void); //XXX PERDB temp
 
 
 /* statistic functions */
-extern void bdr_count_shmem_init(size_t nnodes);
+extern void bdr_count_shmem_init(Size nnodes);
 extern void bdr_count_set_current_node(RepNodeId node_id);
 extern void bdr_count_commit(void);
 extern void bdr_count_rollback(void);
@@ -443,7 +449,7 @@ extern void bdr_executor_always_allow_writes(bool always_allow);
 extern void bdr_queue_ddl_command(char *command_tag, char *command);
 extern void bdr_execute_ddl_command(char *cmdstr, char *perpetrator, bool tx_just_started);
 
-extern void bdr_locks_shmem_init(Size num_used_databases);
+extern void bdr_locks_shmem_init(void);
 extern void bdr_locks_check_query(void);
 
 /* background workers and supporting functions for them */
@@ -453,10 +459,13 @@ PGDLLEXPORT extern void bdr_supervisor_worker_main(Datum main_arg);
 
 extern void bdr_worker_init(char* dbname);
 extern void bdr_supervisor_register(void);
-extern void bdr_register_perdb_worker(const char * dbname);
 
 extern void bdr_sighup(SIGNAL_ARGS);
 extern void bdr_sigterm(SIGNAL_ARGS);
+
+extern int find_perdb_worker_slot(const char *dbname,
+									 BdrWorker **worker_found);
+
 
 /* manipulation of bdr catalogs */
 extern char bdr_nodes_get_local_status(uint64 sysid, TimeLineID tli, Oid dboid);

@@ -87,6 +87,7 @@ static char *connections = NULL;
 static bool bdr_synchronous_commit;
 int bdr_default_apply_delay;
 int bdr_max_workers;
+int bdr_max_databases;
 static bool bdr_skip_ddl_replication;
 bool bdr_skip_ddl_locking;
 bool bdr_do_not_replicate;
@@ -798,6 +799,8 @@ bdr_worker_shmem_startup(void)
 		/* Init shm segment header after postmaster start or restart */
 		memset(BdrWorkerCtl, 0, bdr_worker_shmem_size());
 		BdrWorkerCtl->lock = LWLockAssign();
+ 		/* Assigned on supervisor launch */
+		BdrWorkerCtl->supervisor_latch = NULL;
 
 		/*
 		 * The postmaster keeps track of a generation number for BDR workers
@@ -1147,10 +1150,19 @@ _PG_init(void)
 	 * memory array.
 	 */
 	DefineCustomIntVariable("bdr.max_workers",
-							"max number of bdr connections + distinct databases. -1 auto-calculates.",
+							"max number of bdr connections + distinct databases.",
 							NULL,
 							&bdr_max_workers,
-							-1, -1, 100,
+							20, 2, 100,
+							PGC_POSTMASTER,
+							0,
+							NULL, NULL, NULL);
+
+	DefineCustomIntVariable("bdr.max_databases",
+							"max number of distinct databases on which BDR may be active",
+							NULL,
+							&bdr_max_databases,
+							-1, -1, 50,
 							PGC_POSTMASTER,
 							0,
 							NULL, NULL, NULL);
@@ -1229,12 +1241,7 @@ _PG_init(void)
 
 	/* if nothing is configured, we're done */
 	if (connections == NULL)
-	{
-		/* If worker count autoconfigured, use zero */
-		if (bdr_max_workers == -1)
-			bdr_max_workers = 0;
 		goto out;
-	}
 
 	bdr_supervisor_register();
 
@@ -1251,20 +1258,6 @@ _PG_init(void)
 	}
 
 	/*
-	 * If bdr.max_connections is -1, the default, auto-set it with the
-	 * most workers we might need with the current number of connections
-	 * configured. Per-db workers are due to use shmem too, so we might
-	 * have up to one per-db worker for each configured connection if
-	 * each is on a different DB.
-	 */
-	if (bdr_max_workers == -1)
-	{
-		bdr_max_workers = list_length(connames) * 3;
-		elog(DEBUG1, "bdr: bdr_max_workers unset, configuring for %d workers",
-				bdr_max_workers);
-	}
-
-	/*
 	 * Sanity check max_worker_processes to make sure it's at least big enough
 	 * to hold all our BDR workers. There's no way to reserve them or guarantee
 	 * anyone else won't claim some, but this'll spot the most obvious
@@ -1276,6 +1269,17 @@ _PG_init(void)
 				(errcode(ERRCODE_CONFIGURATION_LIMIT_EXCEEDED),
 				 errmsg("bdr_max_workers is greater than max_worker_processes, may fail to start workers"),
 				 errhint("Set max_worker_processes to at least %d", bdr_max_workers)));
+	}
+
+	/*
+	 * If bdr.max_databases is not explicitly specified, assume the worst case
+	 * of many DBs with one connection per DB.
+	 */
+	if (bdr_max_databases == -1)
+	{
+		bdr_max_databases = bdr_max_workers / 2;
+		elog(DEBUG1, "Autoconfiguring bdr.max_databases to %d (bdr.max_workers/2)",
+			 bdr_max_databases);
 	}
 
 	/*
@@ -1364,9 +1368,9 @@ out:
 	bdr_count_shmem_init(bdr_max_workers);
 	bdr_executor_init();
 #ifdef BUILDING_BDR
-	bdr_sequencer_shmem_init(bdr_max_workers, bdr_distinct_dbnames_count);
+	bdr_sequencer_shmem_init(bdr_max_workers, bdr_max_databases);
 #endif
-	bdr_locks_shmem_init(bdr_distinct_dbnames_count);
+	bdr_locks_shmem_init();
 	/* Set up a ProcessUtility_hook to stop unsupported commands being run */
 	init_bdr_commandfilter();
 

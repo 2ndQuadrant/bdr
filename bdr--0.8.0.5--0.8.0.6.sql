@@ -31,7 +31,10 @@ CREATE TABLE bdr_connections (
     CHECK(conn_replica_local_dsn IS NOT NULL = conn_init_replica),
     conn_apply_delay integer
         CHECK (conn_apply_delay >= 0),
-    conn_replication_sets text[]
+    conn_replication_sets text[],
+
+    -- XXX DYNCONF temporary hack for BC with config file
+    from_config_file boolean not null default 'f'
 );
 
 REVOKE ALL ON TABLE bdr_connections FROM public;
@@ -74,6 +77,68 @@ REVOKE ALL ON FUNCTION bdr_start_perdb_worker() FROM public;
 
 COMMENT ON FUNCTION bdr_start_perdb_worker() IS 'Internal BDR function, do not call directly.';
 
+
+
+CREATE FUNCTION bdr_connection_add(
+    conn_name text, dsn text,
+    init_replica boolean DEFAULT false, replica_local_dsn text DEFAULT NULL,
+    replication_sets text[] DEFAULT ARRAY['default']
+    )
+RETURNS void LANGUAGE plpgsql VOLATILE
+SET search_path = bdr, pg_catalog
+SET bdr.permit_unsafe_ddl_commands = on
+SET bdr.skip_ddl_replication = on
+AS $$
+DECLARE
+    v_label json;
+    nodeid record;
+BEGIN
+    LOCK TABLE bdr.bdr_connections IN EXCLUSIVE MODE;
+
+    -- We're doing a read-modify-write on our seclabel entry, so try to avoid
+    -- races. This won't lock out writers from other DBs, but we only ever
+    -- write to our own.
+    LOCK TABLE pg_catalog.pg_shseclabel IN EXCLUSIVE MODE;
+
+    SELECT sysid, timeline, dboid INTO nodeid
+    FROM bdr.bdr_get_local_nodeid();
+
+    -- Null/empty checks are skipped, the underlying constraints on the table
+    -- will catch that for us.
+    INSERT INTO bdr.bdr_connections(
+        conn_sysid, conn_timeline, conn_dboid, conn_replication_name,
+        conn_local_name, conn_dsn,
+        conn_init_replica, conn_replica_local_dsn,
+        conn_replication_sets
+    )
+    VALUES (
+        nodeid.sysid, nodeid.timeline, nodeid.dboid, '',
+        conn_name, dsn,
+        init_replica, replica_local_dsn,
+        replication_sets
+    );
+
+    -- Is there a current label?
+    -- (XXX DYNCONF Right now there's not much point to this check but later
+    -- we'll be possibly updating it.)
+    SELECT label::json INTO v_label
+    FROM pg_catalog.pg_shseclabel
+    WHERE provider = 'bdr'
+      AND classoid = 'pg_database'::regclass
+      AND objoid = (SELECT oid FROM pg_database WHERE datname = current_database());
+
+    -- Inserted without error? Ensure there's a security label on the
+    -- database.
+    -- TODO DYNCONF: Use something other than a dummy value for the seclabel
+    EXECUTE format('SECURITY LABEL FOR bdr ON DATABASE %I IS %L',
+                   current_database(), '{"bdr": true}'::json::text);
+
+    -- Now ensure the per-db worker is started if it's not already running.
+    -- This won't actually take effect until commit time, it just adds a commit
+    -- hook to start the worker when we commit.
+    PERFORM bdr.bdr_start_perdb_worker();
+END;
+$$;
 
 RESET bdr.permit_unsafe_ddl_commands;
 RESET bdr.skip_ddl_replication;

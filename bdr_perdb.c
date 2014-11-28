@@ -38,7 +38,7 @@ Datum
 bdr_start_perdb_worker(PG_FUNCTION_ARGS);
 
 /* In the commit hook, should we attempt to start a per-db worker? */
-static bool start_perdb_worker = false;
+static bool xacthook_connection_added = false;
 
 /*
  * Offset of this perdb worker in shmem; must be retained so it can
@@ -46,16 +46,112 @@ static bool start_perdb_worker = false;
  */
 uint16 perdb_worker_idx = -1;
 
+/* 
+ * Scan shmem looking for a perdb worker for the named DB and
+ * return its offset. If not found, return -1.
+ *
+ * Must hold the LWLock on the worker control segment in at
+ * least share mode.
+ */
+int
+find_perdb_worker_slot(const char *dbname, BdrWorker **worker_found)
+{
+	int i, found = -1;
+
+	Assert(LWLockHeldByMe(BdrWorkerCtl->lock));
+
+	for (i = 0; i < bdr_max_workers; i++)
+	{
+		BdrWorker *w = &BdrWorkerCtl->slots[i];
+		if (w->worker_type == BDR_WORKER_PERDB)
+		{
+			BdrPerdbWorker *pw = &w->worker_data.perdb_worker;
+			if (strcmp(NameStr(pw->dbname), dbname) == 0)
+			{
+				found = i;
+				if (worker_found != NULL)
+					*worker_found = w;
+				break;
+			}
+		}
+	}
+
+	return found;
+}
+
+/* 
+ * Scan shmem looking for an apply worker for the current perdb worker and
+ * specified apply worker name and return its offset. If not found, return
+ * -1.
+ *
+ * Must hold the LWLock on the worker control segment in at
+ * least share mode.
+ */
+static int
+find_apply_worker_slot(const char *worker_name, BdrWorker **worker_found)
+{
+	int i, found = -1;
+
+	Assert(LWLockHeldByMe(BdrWorkerCtl->lock));
+
+	for (i = 0; i < bdr_max_workers; i++)
+	{
+		BdrWorker *w = &BdrWorkerCtl->slots[i];
+		if (w->worker_type == BDR_WORKER_APPLY)
+		{
+			BdrApplyWorker *aw = &w->worker_data.apply_worker;
+			if (aw->perdb_worker_idx == perdb_worker_idx
+				&& strcmp(NameStr(aw->conn_local_name), worker_name) == 0)
+			{
+				found = i;
+				if (worker_found != NULL)
+					*worker_found = w;
+				break;
+			}
+		}
+	}
+
+	return found;
+}
+
 static void
 bdr_perdb_xact_callback(XactEvent event, void *arg)
 {
+	/* This hook is only called from normal backends */
+	Assert(!IsBackgroundWorker);
+	/* ... so it's safe to use the dbname from the procport */
+	Assert(MyProcPort->database_name != NULL);
+
 	switch (event)
 	{
 		case XACT_EVENT_COMMIT:
-			if (start_perdb_worker)
+			if (xacthook_connection_added)
 			{
-				start_perdb_worker = false;
-				bdr_register_perdb_worker(get_database_name(MyDatabaseId));
+				int slotno;
+				BdrWorker *w;
+
+				xacthook_connection_added = false;
+
+				LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
+
+				/*
+				 * If a perdb worker already exists, wake it and tell it to
+				 * check for new connections.
+				 */
+				slotno = find_perdb_worker_slot(MyProcPort->database_name, &w);
+				if (slotno >= 0)
+					SetLatch(w->worker_data.perdb_worker.proclatch);
+				else
+				{
+					/*
+					 * Per-db worker doesn't exist, ask the supervisor to check for
+					 * changes and register new per-db workers for labeled
+					 * databases.
+					 */
+					SetLatch(BdrWorkerCtl->supervisor_latch);
+				}
+
+				LWLockRelease(BdrWorkerCtl->lock);
 			}
 			break;
 		default:
@@ -75,10 +171,10 @@ bdr_start_perdb_worker(PG_FUNCTION_ARGS)
 	/* XXX DYNCONF Check to make sure the security label exists and is valid? */
 
 	/* If there's already a per-db worker for our DB we have nothing to do */
-	if (!bdr_is_bdr_activated_db())
+	if (!xacthook_connection_added)
 	{
-		start_perdb_worker = true;
 		RegisterXactCallback(bdr_perdb_xact_callback, NULL);
+		xacthook_connection_added = true;
 	}
 	PG_RETURN_VOID();
 }
@@ -96,12 +192,21 @@ bdr_launch_apply_workers(char *dbname)
 	List			   *apply_workers = NIL;
 	BackgroundWorker	bgw;
 	int					i, ret;
+	Size				nnodes = 0;
 	int					attno_conn_local_name;
 #define BDR_CON_Q_NARGS 3
 	Oid					argtypes[BDR_CON_Q_NARGS] = { OIDOID, OIDOID, OIDOID };
 	Datum				values[BDR_CON_Q_NARGS];
 
+	/* Should be called from the perdb worker */
 	Assert(IsBackgroundWorker);
+	Assert(perdb_worker_idx != -1);
+
+	/*
+	 * It's easy enough to make this tolerant of an open tx, but in general
+	 * rollback doesn't make sense here.
+	 */
+	Assert(!IsTransactionState());
 
 	/* Common apply worker values */
 	bgw.bgw_flags = BGWORKER_SHMEM_ACCESS |
@@ -138,14 +243,14 @@ bdr_launch_apply_workers(char *dbname)
 	if (attno_conn_local_name == SPI_ERROR_NOATTRIBUTE)
 		elog(ERROR, "SPI error while reading conn_local_name from bdr.bdr_connections");
 
-	/* XXX DYNCONF prevent repeat launch */
+	nnodes = SPI_processed;
 
 	for (i = 0; i < SPI_processed; i++)
 	{
 		BackgroundWorkerHandle *bgw_handle;
 		HeapTuple				tuple;
 		char				   *conn_local_name;
-		unsigned int			slot;
+		uint32					slot;
 		uint32					worker_arg;
 		BdrWorker			   *worker;
 		BdrApplyWorker		   *apply;
@@ -156,15 +261,28 @@ bdr_launch_apply_workers(char *dbname)
 		conn_local_name = SPI_getvalue(tuple, SPI_tuptable->tupdesc,
 									   attno_conn_local_name);
 
+		Assert(!LWLockHeldByMe(BdrWorkerCtl->lock));
+		LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
+
+		/*
+		 * Is there already a worker registered for this
+		 * connection?
+		 */
+		if (find_apply_worker_slot(conn_local_name, NULL) != -1)
+		{
+			elog(DEBUG2, "Skipping registration of worker %s on db %s: already registered",
+				 conn_local_name, dbname);
+			LWLockRelease(BdrWorkerCtl->lock);
+			continue;
+		}
+
 		/* Set the display name in 'ps' etc */
 		snprintf(bgw.bgw_name, BGW_MAXLEN,
 				 BDR_LOCALID_FORMAT": %s: apply",
 				 BDR_LOCALID_FORMAT_ARGS, conn_local_name);
 
 		/* Allocate a new shmem slot for this apply worker */
-		LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
 		worker = bdr_worker_shmem_alloc(BDR_WORKER_APPLY, &slot);
-		LWLockRelease(BdrWorkerCtl->lock);
 
 		/* Tell the apply worker what its shmem slot is */
 		Assert(slot <= UINT16_MAX);
@@ -179,6 +297,8 @@ bdr_launch_apply_workers(char *dbname)
 		apply->forward_changesets = false;
 		apply->perdb_worker_idx = perdb_worker_idx;
 
+		LWLockRelease(BdrWorkerCtl->lock);
+
 		/*
 		 * Finally, register the worker for launch.
 		 *
@@ -189,6 +309,7 @@ bdr_launch_apply_workers(char *dbname)
 		if (!RegisterDynamicBackgroundWorker(&bgw,
 											 &bgw_handle))
 		{
+			/* XXX DYNCONF Should clean up already-registered workers? */
 			ereport(ERROR,
 					(errmsg("bdr: Failed to register background worker"
 							" %s, see previous log messages",
@@ -201,6 +322,18 @@ bdr_launch_apply_workers(char *dbname)
 	SPI_finish();
 
 	CommitTransactionCommand();
+
+	/*
+	 * Now we need to tell the lock manager and the sequence
+	 * manager about the changed node count.
+	 *
+	 * There's no truly safe way to do this without a proper
+	 * part/join protocol, so all we're going to do is update
+	 * the node count in shared memory.
+	 */
+	bdr_worker_slot->worker_data.perdb_worker.nnodes = nnodes;
+	bdr_locks_set_nnodes(nnodes);
+	bdr_sequencer_set_nnodes(nnodes);
 
 	return apply_workers;
 }
@@ -257,6 +390,8 @@ bdr_perdb_worker_main(Datum main_arg)
 
 	bdr_worker_init(NameStr(bdr_perdb_worker->dbname));
 
+	bdr_perdb_worker->nnodes = 0;
+
 	elog(DEBUG1, "per-db worker for node " BDR_LOCALID_FORMAT " starting", BDR_LOCALID_FORMAT_ARGS);
 
 	appendStringInfo(&si, BDR_LOCALID_FORMAT": %s", BDR_LOCALID_FORMAT_ARGS, "perdb worker");
@@ -267,7 +402,7 @@ bdr_perdb_worker_main(Datum main_arg)
 
 	/* need to be able to perform writes ourselves */
 	bdr_executor_always_allow_writes(true);
-	bdr_locks_startup(bdr_perdb_worker->nnodes);
+	bdr_locks_startup();
 
 	bdr_copy_connections_from_config(); /* XXX DYNCONF */
 
@@ -354,6 +489,15 @@ bdr_perdb_worker_main(Datum main_arg)
 			/* emergency bailout if postmaster has died */
 			if (rc & WL_POSTMASTER_DEATH)
 				proc_exit(1);
+
+			if (rc & WL_LATCH_SET)
+			{
+				/*
+				 * If the perdb worker's latch is set we're being asked
+				 * to rescan and launch new apply workers.
+				 */
+				bdr_launch_apply_workers(NameStr(bdr_perdb_worker->dbname));
+			}
 		}
 	}
 
@@ -385,7 +529,7 @@ bdr_copy_connections_from_config()
 
 	bdr_permit_unsafe_commands = true;
 
-	ret = SPI_exec("DELETE FROM bdr.bdr_connections;", 0);
+	ret = SPI_exec("DELETE FROM bdr.bdr_connections WHERE from_config_file;", 0);
 	if (ret != SPI_OK_DELETE)
 		elog(ERROR, "Couldn't clean out bdr.bdr_connections");
 
@@ -463,14 +607,13 @@ bdr_copy_connections_from_config()
 
 		ret = SPI_execute_with_args(
 					"INSERT INTO bdr.bdr_connections "
-					"(conn_sysid, conn_timeline, conn_dboid, conn_local_name, conn_replication_name, conn_dsn, conn_init_replica, conn_replica_local_dsn, conn_apply_delay, conn_replication_sets) "
-					"VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::text[])",
+					"(conn_sysid, conn_timeline, conn_dboid, conn_local_name, conn_replication_name, conn_dsn, conn_init_replica, conn_replica_local_dsn, conn_apply_delay, conn_replication_sets, from_config_file) "
+					"VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::text[], 't')",
 					BDR_CONNECTIONS_NATTS, argtypes, values, nulls, false, 0
 					);
 
 		if (ret != SPI_OK_INSERT)
 			elog(ERROR, "Failed to copy record into bdr.bdr_connections");
-
 	}
 
 	SPI_finish();
