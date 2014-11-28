@@ -63,6 +63,7 @@ static char *get_postgres_guc_value(char *guc, char *defval);
 static void wait_postmaster_connection(char **out_connstr);
 static void wait_postgres_shutdown(void);
 
+static void initialize_bdr(PGconn *conn);
 static void remove_unwanted_state(void);
 static void initialize_replication_identifiers(char *remote_lsn);
 static void create_replication_identifier(PGconn *conn,
@@ -228,7 +229,13 @@ main(int argc, char **argv)
 	appendPQExpBuffer(recoveryconfcontents, "primary_conninfo = '%s'\n", remote_connstr);
 	WriteRecoveryConf(recoveryconfcontents);
 
-	run_pg_ctl("start -w -l \"bdr_init_copy_postgres.log\"", "-c shared_preload_libraries=''");
+	run_pg_ctl("start -w -l \"bdr_init_copy_postgres.log\"",
+#ifdef BUILDING_BDR
+			   "-c shared_preload_libraries=''"
+#else
+			   ""
+#endif
+			   );
 	wait_postmaster_connection(&local_connstr);
 
 	if (local_connstr == NULL)
@@ -241,6 +248,12 @@ main(int argc, char **argv)
 	local_conn = PQconnectdb(local_connstr);
 	if (PQstatus(local_conn) != CONNECTION_OK)
 		die(_("Connection to database failed: %s"), PQerrorMessage(local_conn));
+
+	print_msg(_("Ensuring bdr extension is installed...\n"));
+#ifdef BUILDING_UDR
+	initialize_bdr(remote_conn);
+#endif
+	initialize_bdr(local_conn);
 
 	print_msg(_("Creating secondary replication slots...\n"));
 	initialize_replication_slots(false);
@@ -752,6 +765,52 @@ create_replication_slot(PGconn *conn, Name slot_name)
 	destroyPQExpBuffer(query);
 }
 
+static void
+install_extension_if_not_exists(PGconn *conn, const char *extname)
+{
+	PQExpBuffer		query = createPQExpBuffer();
+	PGresult	   *res;
+
+	printfPQExpBuffer(query, "SELECT 1 FROM pg_catalog.pg_extension WHERE extname = %s;",
+					  PQescapeLiteral(local_conn, extname, strlen(extname)));
+	res = PQexec(local_conn, query->data);
+
+	if (PQresultStatus(res) != PGRES_TUPLES_OK)
+	{
+		PQclear(res);
+		die(_("Could not read extension info: %s\n"), PQerrorMessage(local_conn));
+	}
+
+	if (PQntuples(res) != 1)
+	{
+		PQclear(res);
+
+		printfPQExpBuffer(query, "CREATE EXTENSION %s;",
+						  PQescapeIdentifier(local_conn, extname, strlen(extname)));
+		res = PQexec(local_conn, query->data);
+
+		if (PQresultStatus(res) != PGRES_COMMAND_OK)
+		{
+			PQclear(res);
+			die(_("Could not install %s extension: %s\n"), extname, PQerrorMessage(local_conn));
+		}
+	}
+
+	PQclear(res);
+	destroyPQExpBuffer(query);
+}
+
+/*
+ * Initialize bdr extension (if not already initialized).
+ *
+ * Should have similar logic as bdr_maintain_schema in bdr.c.
+ */
+static void
+initialize_bdr(PGconn *conn)
+{
+	install_extension_if_not_exists(conn, "btree_gist");
+	install_extension_if_not_exists(conn,"bdr");
+}
 
 /*
  * Initialize new remote identifiers to specific position.
