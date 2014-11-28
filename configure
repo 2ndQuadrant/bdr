@@ -642,6 +642,7 @@ SHELL'
 ac_subst_files=''
 ac_user_opts='
 enable_option_checking
+enable_bdr
 '
       ac_precious_vars='build_alias
 host_alias
@@ -1258,6 +1259,13 @@ if test -n "$ac_init_help"; then
    esac
   cat <<\_ACEOF
 
+Optional Features:
+  --disable-option-checking  ignore unrecognized --enable/--with options
+  --disable-FEATURE       do not include FEATURE (same as --enable-FEATURE=no)
+  --enable-FEATURE[=ARG]  include FEATURE [ARG=yes]
+  --enable-bdr            enable full bi-directional replication for patched
+                          PostgreSQL 9.4 [yes/no/auto] [default=auto]
+
 Some influential environment variables:
   CC          C compiler command
   CFLAGS      C compiler flags
@@ -1777,6 +1785,14 @@ ac_compiler_gnu=$ac_cv_c_compiler_gnu
 
 
 configure_args=$ac_configure_args
+
+
+# Check whether --enable-bdr was given.
+if test "${enable_bdr+set}" = set; then :
+  enableval=$enable_bdr;
+else
+  enable_bdr=auto
+fi
 
 
 { $as_echo "$as_me:${as_lineno-$LINENO}: checking for a sed that does not truncate output" >&5
@@ -2726,6 +2742,9 @@ $as_echo "$as_me: postgres-bdr patches missing, forcing UDR build" >&6;}
 
 $as_echo "#define BUILDING_UDR 1" >>confdefs.h
 
+   if test "$enable_bdr" = "yes"; then
+     as_fn_error $? "--enable-bdr=yes specified, but suitably patched PostgreSQL not found" "$LINENO" 5
+   fi
 else
    { $as_echo "$as_me:${as_lineno-$LINENO}: building against appropriately patched PostgreSQL" >&5
 $as_echo "$as_me: building against appropriately patched PostgreSQL" >&6;}
@@ -2735,7 +2754,11 @@ $as_echo "$as_me: building against appropriately patched PostgreSQL" >&6;}
 
 $as_echo "#define BUILDING_BDR 1" >>confdefs.h
 
+   if test "$enable_bdr" = "no"; then
+     as_fn_error $? "--enable-bdr=no specified, but compiling against BDR-patched PostgreSQL" "$LINENO" 5
+   fi
 fi;
+
 
 ac_config_files="$ac_config_files Makefile"
 
