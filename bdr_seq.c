@@ -657,6 +657,7 @@ bdr_sequencer_lock(void)
 bool
 bdr_sequencer_vote(void)
 {
+	static SPIPlanPtr plan;
 	Oid			argtypes[4];
 	Datum		values[4];
 	char		nulls[4];
@@ -690,11 +691,16 @@ bdr_sequencer_vote(void)
 	bdr_sequencer_lock();
 	PushActiveSnapshot(GetTransactionSnapshot());
 
+	if (plan == NULL)
+	{
+		plan = SPI_prepare(vote_sql, 4, argtypes);
+		SPI_keepplan(plan);
+	}
+
 again:
 	SetCurrentStatementStartTimestamp();
 	pgstat_report_activity(STATE_RUNNING, "sequence voting");
-	ret = SPI_execute_with_args(vote_sql, 4, argtypes,
-								values, nulls, false, 0);
+	ret = SPI_execute_plan(plan, values, nulls, false, 0);
 
 	if (ret != SPI_OK_INSERT)
 		elog(ERROR, "expected SPI state %u, got %u", SPI_OK_INSERT, ret);
@@ -727,6 +733,7 @@ again:
 void
 bdr_sequencer_start_elections(void)
 {
+	static SPIPlanPtr plan;
 	Oid			argtypes[4];
 	Datum		values[4];
 	char		nulls[4];
@@ -738,9 +745,6 @@ bdr_sequencer_start_elections(void)
 
 	StartTransactionCommand();
 	SPI_connect();
-
-	bdr_sequencer_lock();
-	PushActiveSnapshot(GetTransactionSnapshot());
 
 	argtypes[0] = TEXTOID;
 	nulls[0] = false;
@@ -758,10 +762,19 @@ bdr_sequencer_start_elections(void)
 	values[3] = CStringGetTextDatum("");
 	nulls[3] = false;
 
+	bdr_sequencer_lock();
+	PushActiveSnapshot(GetTransactionSnapshot());
+
+	if (plan == NULL)
+	{
+		plan = SPI_prepare(start_elections_sql, 4, argtypes);
+		SPI_keepplan(plan);
+	}
+
 	SetCurrentStatementStartTimestamp();
 	pgstat_report_activity(STATE_RUNNING, "start_elections");
-	ret = SPI_execute_with_args(start_elections_sql, 4, argtypes,
-								values, nulls, false, 0);
+
+	ret = SPI_execute_plan(plan, values, nulls, false, 0);
 
 	if (ret != SPI_OK_INSERT_RETURNING)
 		elog(ERROR, "expected SPI state %u, got %u", SPI_OK_INSERT_RETURNING, ret);
@@ -780,6 +793,7 @@ bdr_sequencer_start_elections(void)
 void
 bdr_sequencer_tally(void)
 {
+	static SPIPlanPtr plan;
 	Oid			argtypes[5];
 	Datum		values[5];
 	char		nulls[5];
@@ -791,9 +805,6 @@ bdr_sequencer_tally(void)
 
 	StartTransactionCommand();
 	SPI_connect();
-
-	bdr_sequencer_lock();
-	PushActiveSnapshot(GetTransactionSnapshot());
 
 	argtypes[0] = TEXTOID;
 	nulls[0] = false;
@@ -815,10 +826,19 @@ bdr_sequencer_tally(void)
 	values[4] = Int32GetDatum(BdrSequencerCtl->slots[seq_slot].nnodes);
 	nulls[4] = false;
 
+	bdr_sequencer_lock();
+	PushActiveSnapshot(GetTransactionSnapshot());
+
+	if (plan == NULL)
+	{
+		plan = SPI_prepare(tally_elections_sql, 5, argtypes);
+		SPI_keepplan(plan);
+	}
+
 	SetCurrentStatementStartTimestamp();
 	pgstat_report_activity(STATE_RUNNING, "tally_elections");
-	ret = SPI_execute_with_args(tally_elections_sql, 5, argtypes,
-								values, nulls, false, 0);
+
+	ret = SPI_execute_plan(plan, values, nulls, false, 0);
 
 	if (ret != SPI_OK_SELECT)
 		elog(ERROR, "expected SPI state %u, got %u", SPI_OK_SELECT, ret);
@@ -854,6 +874,7 @@ static bool
 bdr_sequencer_fill_chunk(Oid seqoid, char *seqschema, char *seqname,
 						 BdrSequenceValues *curval)
 {
+	static SPIPlanPtr plan;
 	Oid			argtypes[6];
 	Datum		values[6];
 	char		nulls[6];
@@ -895,8 +916,13 @@ bdr_sequencer_fill_chunk(Oid seqoid, char *seqschema, char *seqname,
 	SetCurrentStatementStartTimestamp();
 	pgstat_report_activity(STATE_RUNNING, "get_chunk");
 
-	ret = SPI_execute_with_args(get_chunk_sql, 6, argtypes,
-								values, nulls, false, 0);
+	if (plan == NULL)
+	{
+		plan = SPI_prepare(get_chunk_sql, 6, argtypes);
+		SPI_keepplan(plan);
+	}
+
+	ret = SPI_execute_plan(plan, values, nulls, false, 0);
 	if (ret != SPI_OK_UPDATE_RETURNING)
 		elog(ERROR, "expected SPI state %u, got %u", SPI_OK_UPDATE_RETURNING, ret);
 
@@ -1045,7 +1071,7 @@ done_with_sequence:
 void
 bdr_sequencer_fill_sequences(void)
 {
-	SPIPlanPtr  plan;
+	static SPIPlanPtr plan;
 	Portal		cursor;
 
 	StartTransactionCommand();
@@ -1054,11 +1080,16 @@ bdr_sequencer_fill_sequences(void)
 	bdr_sequencer_lock();
 	PushActiveSnapshot(GetTransactionSnapshot());
 
-	plan = SPI_prepare(fill_sequences_sql, 0, NULL);
-	cursor = SPI_cursor_open("seq", plan, NULL, NULL, 0);
+	if (plan == NULL)
+	{
+		plan = SPI_prepare(fill_sequences_sql, 0, NULL);
+		SPI_keepplan(plan);
+	}
 
 	SetCurrentStatementStartTimestamp();
 	pgstat_report_activity(STATE_RUNNING, "fill_sequences");
+
+	cursor = SPI_cursor_open("seq", plan, NULL, NULL, 0);
 
 	SPI_cursor_fetch(cursor, true, 1);
 
