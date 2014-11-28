@@ -1053,9 +1053,33 @@ bdr_perdb_worker_main(Datum main_arg)
 	bdr_sequencer_init(bdr_perdb_worker->seq_slot, bdr_perdb_worker->nnodes);
 #endif
 
-	wait = true;
 	while (!got_SIGTERM)
 	{
+		wait = true;
+
+		if (got_SIGHUP)
+		{
+			got_SIGHUP = false;
+			ProcessConfigFile(PGC_SIGHUP);
+		}
+
+#ifdef BUILDING_BDR
+		/* check whether we need to vote */
+		if (bdr_sequencer_vote())
+			wait = false;
+
+		/* check whether any of our elections needs to be tallied */
+		bdr_sequencer_tally();
+
+		/* check all bdr sequences for used up chunks */
+		bdr_sequencer_fill_sequences();
+
+		/* check whether we need to start new elections */
+		bdr_sequencer_start_elections();
+#endif
+
+		pgstat_report_activity(STATE_IDLE, NULL);
+
 		/*
 		 * Background workers mustn't call usleep() or any direct equivalent:
 		 * instead, they may wait on their process latch, which sleeps as
@@ -1073,36 +1097,11 @@ bdr_perdb_worker_main(Datum main_arg)
 						   180000L);
 
 			ResetLatch(&MyProc->procLatch);
+
+			/* emergency bailout if postmaster has died */
+			if (rc & WL_POSTMASTER_DEATH)
+				proc_exit(1);
 		}
-
-		/* emergency bailout if postmaster has died */
-		if (rc & WL_POSTMASTER_DEATH)
-			proc_exit(1);
-
-		if (got_SIGHUP)
-		{
-			got_SIGHUP = false;
-			ProcessConfigFile(PGC_SIGHUP);
-		}
-
-#ifdef BUILDING_BDR
-		/* check whether we need to vote */
-		if (bdr_sequencer_vote())
-			wait = false;
-		else
-			wait = true;
-
-		/* check whether any of our elections needs to be tallied */
-		bdr_sequencer_tally();
-
-		/* check all bdr sequences for used up chunks */
-		bdr_sequencer_fill_sequences();
-
-		/* check whether we need to start new elections */
-		bdr_sequencer_start_elections();
-#endif
-
-		pgstat_report_activity(STATE_IDLE, NULL);
 	}
 
 	proc_exit(0);
