@@ -81,6 +81,7 @@ const char *pretty_diff_opts = "-w -C3";
 
 /* options settable from command line */
 _stringlist *dblist = NULL;
+char	   *deparse_test_db = NULL;
 bool		debug = false;
 char	   *inputdir = ".";
 char	   *outputdir = ".";
@@ -588,6 +589,7 @@ convert_sourcefiles_in(char *source_subdir, char *dest_dir, char *dest_subdir, c
 			replace_string(line, "@libdir@", dlpath);
 			replace_string(line, "@DLSUFFIX@", DLSUFFIX);
 			replace_string(line, "@psqldir@", psqldir);
+			replace_string(line, "@deparse_test_db@", deparse_test_db);
 			fputs(line, outfile);
 		}
 		fclose(infile);
@@ -1960,6 +1962,8 @@ help(void)
 	printf(_("Options:\n"));
 	printf(_("  --create-role=ROLE        create the specified role before testing\n"));
 	printf(_("  --dbname=DB               use database DB (default \"regression\")\n"));
+	printf(_("  --dbname-deparse=DB       use database DB for DDL deparse test (default\n"));
+	printf(_("                            \"regression_deparse\")\n"));
 	printf(_("  --debug                   turn on debug mode in programs that are run\n"));
 	printf(_("  --dlpath=DIR              look for dynamic libraries in DIR\n"));
 	printf(_("  --encoding=ENCODING       use ENCODING as the encoding\n"));
@@ -2024,6 +2028,7 @@ regression_main(int argc, char *argv[], init_function ifunc, test_function tfunc
 		{"launcher", required_argument, NULL, 21},
 		{"load-extension", required_argument, NULL, 22},
 		{"extra-install", required_argument, NULL, 23},
+		{"dbname-deparse", required_argument, NULL, 24},
 		{NULL, 0, NULL, 0}
 	};
 
@@ -2137,6 +2142,9 @@ regression_main(int argc, char *argv[], init_function ifunc, test_function tfunc
 				break;
 			case 23:
 				add_stringlist_item(&extra_install, optarg);
+				break;
+			case 24:
+				deparse_test_db = strdup(optarg);
 				break;
 			default:
 				/* getopt_long already emitted a complaint */
@@ -2432,6 +2440,7 @@ regression_main(int argc, char *argv[], init_function ifunc, test_function tfunc
 	{
 		for (sl = dblist; sl; sl = sl->next)
 			create_database(sl->str);
+		create_database(deparse_test_db);
 		for (sl = extraroles; sl; sl = sl->next)
 			create_role(sl->str, dblist);
 	}

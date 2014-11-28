@@ -2,8 +2,8 @@
 --- DEPARSE_TEST
 ---
 \copy (SELECT command || ';' FROM deparse_test_commands ORDER BY id) TO './sql/deparse_dump.sql'
-\! @psqldir@/psql --dbname=reg2 < ./sql/deparse_dump.sql > /dev/null
-\! @psqldir@/pg_dump --schema-only --no-owner --no-privileges -Fp reg2
+\! @psqldir@/psql --dbname=@deparse_test_db@ < ./sql/deparse_dump.sql > /dev/null
+\! @psqldir@/pg_dump --schema-only --no-owner --no-privileges -Fp @deparse_test_db@
 --
 -- PostgreSQL database dump
 --
