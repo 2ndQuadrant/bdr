@@ -31,15 +31,15 @@
 #include "utils/guc.h"
 
 static void bdr_copy_labels_from_config(void);
-static int count_connections_for_db(const char * dbname);
 
 /*
- * Register a new perdb worker for the named database.
+ * Register a new perdb worker for the named database. The worker MUST
+ * not already exist.
  *
  * This is called by the supervisor during startup, and by user backends when
  * the first connection is added for a database.
  */
-void
+static void
 bdr_register_perdb_worker(const char * dbname)
 {
 	BackgroundWorkerHandle *bgw_handle;
@@ -49,11 +49,11 @@ bdr_register_perdb_worker(const char * dbname)
 	unsigned int			worker_slot_number;
 	uint32					worker_arg;
 
+	Assert(LWLockHeldByMe(BdrWorkerCtl->lock));
+	Assert(find_perdb_worker_slot(dbname, NULL) == -1);
+
 	elog(DEBUG2, "Registering per-db worker for %s", dbname);
 
-	Assert(LWLockHeldByMe(BdrWorkerCtl->lock));
-
-	/* We already hold the shmem lock here */
 	worker = bdr_worker_shmem_alloc(
 				BDR_WORKER_PERDB,
 				&worker_slot_number
@@ -64,7 +64,8 @@ bdr_register_perdb_worker(const char * dbname)
 	strncpy(NameStr(perdb->dbname),
 			dbname, NAMEDATALEN);
 	NameStr(perdb->dbname)[NAMEDATALEN-1] = '\0';
-	perdb->nnodes = count_connections_for_db(dbname);
+	/* Nodecount is set when apply workers are registered */
+	perdb->nnodes = 0;
 #ifdef BUILDING_BDR
 	perdb->seq_slot = bdr_sequencer_get_next_free_slot(); //XXX DYNCONF Temporary
 #endif
@@ -155,9 +156,7 @@ bdr_supervisor_rescan_dbs()
 	while (HeapTupleIsValid(secTuple = systable_getnext(scan)))
 	{
 		FormData_pg_shseclabel *sec;
-		bool					found = false;
 		char 				   *label_dbname;
-		int						i;
 
  		sec = (FormData_pg_shseclabel*) GETSTRUCT(secTuple);
 
@@ -184,35 +183,15 @@ bdr_supervisor_rescan_dbs()
 		 */
 
 		/*
-		 * Check if we have a per-db worker for this db oid already. Since we're
-		 * going to need to start one if we don't find one, also make a note
-		 * of the lowest free slot in the workers array.
+		 * Check if we have a per-db worker for this db oid already and if
+		 * we don't, start one.
 		 *
 		 * This is O(n^2) for n BDR-enabled DBs; to be more scalable we could
 		 * accumulate and sort the oids, then do a single scan of the shmem
 		 * segment. But really, if you have that many DBs this cost is nothing.
 		 */
-		for (i = 0; i < bdr_max_workers; i++)
+		if (find_perdb_worker_slot(label_dbname, NULL) == -1)
 		{
-			BdrWorker *worker = &BdrWorkerCtl->slots[i];
-
-			if (worker->worker_type == BDR_WORKER_PERDB)
-			{
-				BdrPerdbWorker *perdb_worker = &worker->worker_data.perdb_worker;
-
-				if (strcmp(NameStr(perdb_worker->dbname), label_dbname) == 0)
-				{
-					found = true;
-					break;
-				}
-			}
-		}
-
-		elog(DEBUG2, "worker exists? %s", (found?"true":"false")); //XXX
-
-		if (!found)
-		{
-			elog(DEBUG2, "registering..."); //XXX
 			/* No perdb worker exists for this DB, make one */
 			bdr_register_perdb_worker(label_dbname);
 		}
@@ -270,6 +249,8 @@ bdr_supervisor_createdb()
 		
 		if (dboid == InvalidOid)
 			elog(ERROR, "Failed to create 'bdr' DB");
+
+		/* TODO DYNCONF: Add a comment to the db, and/or a dummy table */
 
 		elog(LOG, "Created database 'bdr' (oid=%i) during BDR startup", dboid);
 	}
@@ -373,6 +354,8 @@ bdr_supervisor_worker_main(Datum main_arg)
 	BackgroundWorkerInitializeConnection("bdr", NULL);
 	elog(DEBUG1, "BDR supervisor connected to DB 'bdr'");
 
+	BdrWorkerCtl->supervisor_latch = &MyProc->procLatch;
+
 	initStringInfo(&si);
 
 	appendStringInfo(&si, "bdr supervisor");
@@ -406,10 +389,14 @@ bdr_supervisor_worker_main(Datum main_arg)
 			ProcessConfigFile(PGC_SIGHUP);
 		}
 
-		/*
-		 * TODO DYNCONF: We should probably react to SIGHUP and re-run
-		 * bdr_supervisor_rescan_dbs() here.
-		 */
+		if (rc & WL_LATCH_SET)
+		{
+			/*
+			 * We've been asked to launch new perdb workers if there are any
+			 * changes to security labels.
+			 */
+			bdr_supervisor_rescan_dbs();
+		}
 	}
 
 	proc_exit(0);
@@ -526,38 +513,10 @@ bdr_copy_labels_from_config()
 		addr.classId = DatabaseRelationId;
 		addr.objectSubId = 0;
 
-		SetSecurityLabel(&addr, "bdr", "enabled");
+		SetSecurityLabel(&addr, "bdr", "{\"bdr\": true}");
 	}
 
 	CommitTransactionCommand();
 
 	pfree(distinct_dbnames);
-}
-
-/*
- * TODO DYNCONF Because perdb workers are currently created after
- * the apply workers in shmem, we need to do some temporary extra
- * work to set them up.
- */
-static int
-count_connections_for_db(const char * dbname)
-{
-	int i;
-
-	int nnodes = 0;
-
-	for (i = 0; i < bdr_max_workers; i++)
-	{
-		BdrConnectionConfig *cfg = bdr_connection_configs[i];
-		if (cfg == NULL)
-			continue;
-
-		if (strcmp(cfg->dbname, dbname) != 0)
-			continue;
-
-		nnodes++;
-		break;
-	}
-
-	return nnodes;
 }

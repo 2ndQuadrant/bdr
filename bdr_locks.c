@@ -147,9 +147,6 @@ static BdrLocksCtl *bdr_locks_ctl;
 /* shmem init hook to chain to on startup, if any */
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
 
-/* number of per database slots */
-static int bdr_locks_num_databases;
-
 /* this database's state */
 static BdrLocksDBState *bdr_my_locks_database = NULL;
 
@@ -161,7 +158,7 @@ bdr_locks_shmem_size(void)
 	Size		size = 0;
 
 	size = add_size(size, sizeof(BdrLocksCtl));
-	size = add_size(size, mul_size(sizeof(BdrLocksDBState), bdr_locks_num_databases));
+	size = add_size(size, mul_size(sizeof(BdrLocksDBState), bdr_max_databases));
 
 	return size;
 }
@@ -188,13 +185,12 @@ bdr_locks_shmem_startup(void)
 
 /* Needs to be called from a shared_preload_library _PG_init() */
 void
-bdr_locks_shmem_init(Size num_used_databases)
+bdr_locks_shmem_init()
 {
 	/* Must be called from postmaster its self */
 	Assert(IsPostmasterEnvironment && !IsUnderPostmaster);
 
 	bdr_locks_ctl = NULL;
-	bdr_locks_num_databases = num_used_databases;
 
 	RequestAddinShmemSpace(bdr_locks_shmem_size());
 	RequestAddinLWLocks(1);
@@ -212,7 +208,7 @@ bdr_locks_find_database(Oid dboid, bool create)
 	int off;
 	int free_off = -1;
 
-	for(off = 0; off < bdr_locks_num_databases; off++)
+	for(off = 0; off < bdr_max_databases; off++)
 	{
 		BdrLocksDBState *db = &bdr_locks_ctl->dbstate[off];
 
@@ -243,14 +239,11 @@ bdr_locks_find_database(Oid dboid, bool create)
 		db->in_use = true;
 		return db;
 	}
-	/*
-	 * Shouldn't happen with BDR statically configured, as the shmem segment
-	 * gets sized for the number of BDR-enabled databases. Later will be
-	 * affected by any bdr_max_databases setting or whatever we add.
-	 */
-	ereport(PANIC,
+
+	ereport(ERROR,
 			(errcode(ERRCODE_CONFIGURATION_LIMIT_EXCEEDED),
-			"Too many databases in use with BDR"));
+			errmsg("Too many databases BDR-enabled for bdr.max_databases"),
+			errhint("Increase bdr.max_databases above the current limit of %d", bdr_max_databases)));
 }
 
 static void
@@ -273,7 +266,7 @@ bdr_locks_find_my_database(bool create)
  * Called from the per-db worker.
  */
 void
-bdr_locks_startup(Size nnodes)
+bdr_locks_startup()
 {
 	Relation		rel;
 	SysScanDesc		scan;
@@ -296,7 +289,8 @@ bdr_locks_startup(Size nnodes)
 	if (bdr_my_locks_database->locked_and_loaded)
 		return;
 
-	bdr_my_locks_database->nnodes = nnodes;
+	/* XXX DYNCONF We haven't yet established how many nodes we're connected to. */
+	bdr_my_locks_database->nnodes = 0;
 
 	initStringInfo(&s);
 
@@ -385,6 +379,40 @@ bdr_locks_startup(Size nnodes)
 
 	/* allow local DML */
 	bdr_my_locks_database->locked_and_loaded = true;
+}
+
+void
+bdr_locks_set_nnodes(Size nnodes)
+{
+	Assert(IsBackgroundWorker);
+	Assert(perdb_worker_idx != -1);
+	Assert(bdr_my_locks_database != NULL);
+
+	/*
+	 * XXX DYNCONF
+	 *
+	 * Node counts are currently grabbed straight from the perdb worker's shmem
+	 * and could change whenever someone adds a worker, with no locking or
+	 * protection.
+	 *
+	 * We could acquire the local DDL lock before setting the nodecount, which
+	 * would cause requests from other nodes to get rejected and cause other
+	 * local tx's to fail to request the global DDL lock. However, we'd have to
+	 * acquire it when we committed to adding the new worker, which happens in
+	 * a user backend, and release it from the perdb worker once the new worker
+	 * is registered. Fragile.
+	 *
+	 * Doing so also fails to solve the other half of the problem, which is
+	 * that DDL locking expects there to be one bdr walsender for each apply
+	 * worker, i.e. each connection should be reciprocal. We could connect to
+	 * the other end and register a connection back to us, but that's getting
+	 * complicated for what's always going to be a temporary option before a
+	 * full part/join protocol is added.
+	 *
+	 * So we're just going to cross our fingers. Worst case is that DDL locking
+	 * gets stuck and we have to restart all the nodes.
+	 */
+	bdr_my_locks_database->nnodes = nnodes;
 }
 
 
@@ -505,6 +533,14 @@ bdr_acquire_ddl_lock(void)
 	initStringInfo(&s);
 
 	bdr_locks_find_my_database(false);
+
+	if (bdr_my_locks_database->nnodes == 0)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("No peer nodes or peer node count unknown, cannot acquire DDL lock"),
+				 errhint("BDR is probably still starting up, wait a while")));
+	}
 
 	elog(DEBUG2, "attempting to acquire global DDL lock for (" BDR_LOCALID_FORMAT ")", BDR_LOCALID_FORMAT_ARGS);
 
@@ -1255,12 +1291,12 @@ bdr_locks_check_query(void)
 
 /* bdr_locks are not used by UDR at the moment */
 void
-bdr_locks_startup(Size nnodes)
+bdr_locks_startup()
 {
 }
 
 void
-bdr_locks_shmem_init(Size num_used_databases)
+bdr_locks_shmem_init()
 {
 }
 

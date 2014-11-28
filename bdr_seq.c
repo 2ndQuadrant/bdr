@@ -526,6 +526,13 @@ bdr_schedule_eoxact_sequencer_wakeup(void)
 }
 
 void
+bdr_sequencer_set_nnodes(Size nnodes)
+{
+	BdrSequencerSlot *slot = &BdrSequencerCtl->slots[seq_slot];
+	slot->nnodes = nnodes;
+}
+
+void
 bdr_sequencer_init(int new_seq_slot, Size nnodes)
 {
 	BdrSequencerSlot *slot;

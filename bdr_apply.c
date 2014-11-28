@@ -2436,14 +2436,18 @@ bdr_read_connection_configs(Name conn_local_name, Name dbname,
 	List	   *configs = NIL;
 	MemoryContext caller_ctx, saved_ctx;
 
+	Assert(IsTransactionState());
+
 	/* Save the calling memory context, which we'll allocate results in */
 	caller_ctx = MemoryContextSwitchTo(CurTransactionContext);
 
 	initStringInfo(&query);
 
-	Assert(IsTransactionState());
-
-	appendStringInfo(&query, "SELECT * FROM bdr.bdr_connections "
+	appendStringInfo(&query, "SELECT conn_local_name, conn_replication_name, "
+							 "       conn_dsn, conn_init_replica, "
+							 "       conn_replica_local_dsn, conn_apply_delay, "
+							 "       conn_replication_sets "
+							 "FROM bdr.bdr_connections "
 							 "WHERE conn_sysid = $1 "
 							 "  AND conn_timeline = $2 "
 							 "  AND conn_dboid = $3 ");
@@ -2497,6 +2501,10 @@ bdr_read_connection_configs(Name conn_local_name, Name dbname,
 		tuple = SPI_tuptable->vals[i];
 
 		/* Fetch tuple attributes */
+		bdr_apply_config->name = SPI_getvalue(tuple,
+											  SPI_tuptable->tupdesc,
+											  getattno("conn_local_name"));
+
 		conn_replication_name = SPI_getvalue(tuple, SPI_tuptable->tupdesc,
 											 getattno("conn_replication_name"));
 

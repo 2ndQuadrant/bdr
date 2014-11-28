@@ -50,6 +50,7 @@
 #include "storage/shmem.h"
 
 #include "utils/builtins.h"
+#include "utils/memutils.h"
 #include "utils/pg_lsn.h"
 #include "utils/syscache.h"
 
@@ -657,6 +658,7 @@ bdr_init_replica(Name dbname)
 	int spi_ret;
 	List *configs;
 	BdrConnectionConfig *init_replica_config;
+	MemoryContext saved_ctx;
 
 	initStringInfo(&dsn);
 
@@ -694,7 +696,10 @@ bdr_init_replica(Name dbname)
 	}
 
 	SPI_push();
+	/* init_replica is short lived and doesn't repeat this fn, so be lazy */
+	saved_ctx = MemoryContextSwitchTo(TopMemoryContext);
 	configs = bdr_read_connection_configs(NULL, dbname, true);
+	MemoryContextSwitchTo(saved_ctx);
 	SPI_pop();
 
 	if (configs == NIL)
@@ -747,16 +752,13 @@ bdr_init_replica(Name dbname)
 		bdr_nodes_set_local_status('r');
 	}
 
-	/*
-	 * No further direct SPI use, but we'll retain the transaction for some
-	 * later queries and to keep its memory context alive.
-	 */
+	/* No further direct SPI use */
 	SPI_finish();
+	CommitTransactionCommand();
 
 	if (init_replica_config == NULL)
 	{
 		/* Cleanup done and nothing more to do */
-		CommitTransactionCommand();
 		return;
 	}
 
@@ -866,8 +868,16 @@ bdr_init_replica(Name dbname)
 		 */
 		status = bdr_set_remote_status(nonrepl_init_conn, 'i', status);
 
-		/* Collect a list of connections to make slots for. */
+		/*
+		 * Collect a list of connections to make slots for, allocated in
+		 * TopMemoryContext to outlive the transaction. We won't bother to free
+		 * them, since we're just going to terminate anyway.
+		 */
+		StartTransactionCommand();
+		saved_ctx = MemoryContextSwitchTo(TopMemoryContext);
 		configs = bdr_read_connection_configs(NULL, dbname, false);
+		MemoryContextSwitchTo(saved_ctx);
+		CommitTransactionCommand();
 
 		elog(DEBUG2, "bdr %s: creating slots for %d nodes",
 			 NameStr(*dbname), list_length(configs));
@@ -984,7 +994,6 @@ bdr_init_replica(Name dbname)
 	 * allocated in the transaction's memory context, so until now we
 	 * needed them.
 	 */
-	CommitTransactionCommand();
 }
 
 /*
@@ -1031,6 +1040,7 @@ bdr_catchup_to_lsn(BdrConnectionConfig *cfg,
 {
 	uint32 worker_shmem_idx;
 	BdrWorker *worker;
+	BdrApplyWorker *catchup_worker;
 
 	Assert(cfg != NULL);
 	Assert(cfg->init_replica);
@@ -1042,6 +1052,9 @@ bdr_catchup_to_lsn(BdrConnectionConfig *cfg,
 	/* Create the shmem entry for the catchup worker */
 	LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
 	worker = bdr_worker_shmem_alloc(BDR_WORKER_APPLY, &worker_shmem_idx);
+	catchup_worker = &worker->worker_data.apply_worker;
+	strncpy(NameStr(catchup_worker->conn_local_name), cfg->name,
+			NAMEDATALEN);
 	LWLockRelease(BdrWorkerCtl->lock);
 
 	/*
@@ -1060,10 +1073,8 @@ bdr_catchup_to_lsn(BdrConnectionConfig *cfg,
 		BackgroundWorkerHandle *bgw_handle;
 		pid_t bgw_pid;
 		pid_t prev_bgw_pid = 0;
-		BdrApplyWorker *catchup_worker = &worker->worker_data.apply_worker;
+		uint32 worker_arg;
 
-		strncpy(NameStr(catchup_worker->conn_local_name), cfg->name,
-				NAMEDATALEN);
 		NameStr(catchup_worker->conn_local_name)[NAMEDATALEN-1] = '\0';
 
 		catchup_worker->perdb_worker_idx = perdb_worker_idx;
@@ -1082,7 +1093,10 @@ bdr_catchup_to_lsn(BdrConnectionConfig *cfg,
 
 		bgw.bgw_restart_time = BGW_NEVER_RESTART;
 		bgw.bgw_notify_pid = MyProc->pid;
-		bgw.bgw_main_arg = Int32GetDatum(worker_shmem_idx);
+
+		Assert(worker_shmem_idx <= UINT16_MAX);
+		worker_arg = (((uint32)BdrWorkerCtl->worker_generation) << 16) | (uint32)worker_shmem_idx;
+		bgw.bgw_main_arg = Int32GetDatum(worker_arg);
 
 		snprintf(bgw.bgw_name, BGW_MAXLEN,
 				 "bdr %s: catchup apply to %X/%X on %s",
