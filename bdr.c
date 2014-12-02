@@ -1064,6 +1064,10 @@ bdr_perdb_worker_main(Datum main_arg)
 		}
 
 #ifdef BUILDING_BDR
+		/* check whether we need to start new elections */
+		if (bdr_sequencer_start_elections())
+			wait = false;
+
 		/* check whether we need to vote */
 		if (bdr_sequencer_vote())
 			wait = false;
@@ -1073,9 +1077,6 @@ bdr_perdb_worker_main(Datum main_arg)
 
 		/* check all bdr sequences for used up chunks */
 		bdr_sequencer_fill_sequences();
-
-		/* check whether we need to start new elections */
-		bdr_sequencer_start_elections();
 #endif
 
 		pgstat_report_activity(STATE_IDLE, NULL);

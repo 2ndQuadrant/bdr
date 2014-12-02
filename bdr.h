@@ -368,7 +368,7 @@ extern void bdr_sequencer_shmem_init(int nnodes, int sequencers);
 extern void bdr_sequencer_init(int seq_slot, Size nnodes);
 extern bool bdr_sequencer_vote(void);
 extern void bdr_sequencer_tally(void);
-extern void bdr_sequencer_start_elections(void);
+extern bool bdr_sequencer_start_elections(void);
 extern void bdr_sequencer_fill_sequences(void);
 
 extern void bdr_sequencer_wakeup(void);

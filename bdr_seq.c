@@ -547,8 +547,7 @@ bdr_sequencer_vote(void)
 	char		nulls[4];
 	char		local_sysid[32];
 	int			ret;
-	int			loops = 0;
-	int			total_processed = 0;
+	int			processed = 0;
 
 	snprintf(local_sysid, sizeof(local_sysid), UINT64_FORMAT,
 			 GetSystemIdentifier());
@@ -581,40 +580,40 @@ bdr_sequencer_vote(void)
 		SPI_keepplan(plan);
 	}
 
-again:
 	SetCurrentStatementStartTimestamp();
 	pgstat_report_activity(STATE_RUNNING, "sequence voting");
 	ret = SPI_execute_plan(plan, values, nulls, false, 0);
 
-	if (ret != SPI_OK_INSERT)
+	if (ret != SPI_OK_SELECT)
 		elog(ERROR, "expected SPI state %u, got %u", SPI_OK_INSERT, ret);
 
-	total_processed += SPI_processed;
+	if (SPI_processed > 0)
+	{
+		HeapTuple	tuple = SPI_tuptable->vals[0];
+		TupleDesc	tupdesc = SPI_tuptable->tupdesc;
+		Datum		inserted;
+		bool		isnull;
 
-	/*
-	 * The voting query currently only works one vote at a time. To avoid
-	 * having to be called too often, which would delay voting in comparison
-	 * to starting new elections, processes several votes in one go. But don't
-	 * do too much in one xact, that'd make this function run too long in one
-	 * xact.
-	 */
-	if (SPI_processed > 0 && loops++ < 5)
-		goto again;
+		inserted = SPI_getbinval(tuple, tupdesc, 1, &isnull);
+		Assert(!isnull);
+
+		processed = DatumGetInt32(inserted);
+	}
 
 	PopActiveSnapshot();
 	SPI_finish();
 	CommitTransactionCommand();
 
-	elog(DEBUG1, "started %d votes", total_processed);
+	elog(DEBUG1, "started %d votes", processed);
 
-	return loops == 5;
+	return processed > 0;
 }
 
 /*
  * Check whether we need to initiate a voting procedure for getting new
  * sequence chunks.
  */
-void
+bool
 bdr_sequencer_start_elections(void)
 {
 	static SPIPlanPtr plan;
@@ -623,6 +622,7 @@ bdr_sequencer_start_elections(void)
 	char		nulls[4];
 	char		local_sysid[32];
 	int			ret;
+	int			processed;
 
 	snprintf(local_sysid, sizeof(local_sysid), UINT64_FORMAT,
 			 GetSystemIdentifier());
@@ -664,10 +664,13 @@ bdr_sequencer_start_elections(void)
 		elog(ERROR, "expected SPI state %u, got %u", SPI_OK_INSERT_RETURNING, ret);
 
 	elog(DEBUG1, "started %d elections", SPI_processed);
+	processed = SPI_processed;
 
 	PopActiveSnapshot();
 	SPI_finish();
 	CommitTransactionCommand();
+
+	return processed > 0;
 }
 
 /*
@@ -957,6 +960,7 @@ bdr_sequencer_fill_sequences(void)
 {
 	static SPIPlanPtr plan;
 	Portal		cursor;
+	int			total = 0;
 
 	StartTransactionCommand();
 	SPI_connect();
@@ -997,11 +1001,15 @@ bdr_sequencer_fill_sequences(void)
 									NameStr(*DatumGetName(seqname)));
 
 		SPI_cursor_fetch(cursor, true, 1);
+
+		total += 1;
 	}
 
 	PopActiveSnapshot();
 	SPI_finish();
 	CommitTransactionCommand();
+
+	elog(DEBUG1, "checked %d sequences for filling", total);
 }
 
 
