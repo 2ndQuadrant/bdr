@@ -48,13 +48,13 @@ CREATE VIEW pg_stat_bdr AS SELECT * FROM pg_stat_get_bdr();
 
 CREATE TABLE bdr_sequence_values
 (
-    owning_sysid text NOT NULL,
+    owning_sysid text NOT NULL COLLATE "C",
     owning_tlid oid NOT NULL,
     owning_dboid oid NOT NULL,
-    owning_riname text NOT NULL,
+    owning_riname text NOT NULL COLLATE "C",
 
-    seqschema text NOT NULL,
-    seqname text NOT NULL,
+    seqschema text NOT NULL COLLATE "C",
+    seqname text NOT NULL COLLATE "C",
     seqrange int8range NOT NULL,
 
     -- could not acquire chunk
@@ -80,19 +80,19 @@ CREATE INDEX bdr_sequence_values_newchunk ON bdr_sequence_values(seqschema, seqn
 
 CREATE TABLE bdr_sequence_elections
 (
-    owning_sysid text NOT NULL,
+    owning_sysid text NOT NULL COLLATE "C",
     owning_tlid oid NOT NULL,
     owning_dboid oid NOT NULL,
-    owning_riname text NOT NULL,
+    owning_riname text NOT NULL COLLATE "C",
     owning_election_id bigint NOT NULL,
 
-    seqschema text NOT NULL,
-    seqname text NOT NULL,
+    seqschema text NOT NULL COLLATE "C",
+    seqname text NOT NULL COLLATE "C",
     seqrange int8range NOT NULL,
 
     /* XXX id */
 
-    vote_type text NOT NULL,
+    vote_type text NOT NULL COLLATE "C",
 
     open bool NOT NULL,
     success bool NOT NULL DEFAULT false,
@@ -109,19 +109,19 @@ CREATE INDEX bdr_sequence_elections__owner_range ON bdr.bdr_sequence_elections U
 
 CREATE TABLE bdr_votes
 (
-    vote_sysid text NOT NULL,
+    vote_sysid text NOT NULL COLLATE "C",
     vote_tlid oid NOT NULL,
     vote_dboid oid NOT NULL,
-    vote_riname text NOT NULL,
+    vote_riname text NOT NULL COLLATE "C",
     vote_election_id bigint NOT NULL,
 
-    voter_sysid text NOT NULL,
+    voter_sysid text NOT NULL COLLATE "C",
     voter_tlid oid NOT NULL,
     voter_dboid oid NOT NULL,
-    voter_riname text NOT NULL,
+    voter_riname text NOT NULL COLLATE "C",
 
     vote bool NOT NULL,
-    reason text CHECK (reason IS NULL OR vote = false),
+    reason text COLLATE "C" CHECK (reason IS NULL OR vote = false),
     UNIQUE(vote_sysid, vote_tlid, vote_dboid, vote_riname, vote_election_id, voter_sysid, voter_tlid, voter_dboid, voter_riname)
 );
 REVOKE ALL ON TABLE bdr_votes FROM PUBLIC;

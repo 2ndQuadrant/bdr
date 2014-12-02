@@ -7,9 +7,13 @@ MODULE_big = bdr
 EXTENSION = bdr
 DATA = bdr--0.8.0.sql \
 	bdr--0.7--0.7.1.sql bdr--0.7.1--0.8.0.sql \
-	bdr--0.8.0--0.8.0.1.sql bdr--0.8.0.1--0.8.0.2.sql
+	bdr--0.8.0--0.8.0.1.sql \
+	bdr--0.8.0.1--0.8.0.2.sql \
+	bdr--0.8.0.2--0.8.0.3.sql
 
-DATA_built = bdr--0.8.0.1.sql bdr--0.8.0.2.sql
+DATA_built = bdr--0.8.0.1.sql \
+	bdr--0.8.0.2.sql \
+	bdr--0.8.0.3.sql
 
 DOCS = bdr.conf.sample README.bdr
 SCRIPTS = scripts/bdr_initial_load bdr_init_copy bdr_resetxlog bdr_dump
@@ -92,7 +96,12 @@ endif
 bdr--0.8.0.1.sql: bdr--0.8.0.sql bdr--0.8.0--0.8.0.1.sql
 	cat $^ > $@
 
-bdr--0.8.0.2.sql: bdr--0.8.0.sql bdr--0.8.0--0.8.0.1.sql bdr--0.8.0.1--0.8.0.2.sql
+bdr--0.8.0.2.sql: bdr--0.8.0.sql bdr--0.8.0--0.8.0.1.sql \
+	bdr--0.8.0.1--0.8.0.2.sql
+	cat $^ > $@
+
+bdr--0.8.0.3.sql: bdr--0.8.0.sql bdr--0.8.0--0.8.0.1.sql \
+	bdr--0.8.0.1--0.8.0.2.sql bdr--0.8.0.2--0.8.0.3.sql
 	cat $^ > $@
 
 bdr_resetxlog: pg_resetxlog.o
