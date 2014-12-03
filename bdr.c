@@ -103,6 +103,10 @@ BdrWorkerControl *BdrWorkerCtl = NULL;
 /* This worker's block within BdrWorkerCtl - only valid in bdr workers */
 BdrWorker  *bdr_worker_slot = NULL;
 
+/* Worker generation number; see bdr_worker_shmem_startup comments */
+static uint16 bdr_worker_generation;
+
+
 PG_MODULE_MAGIC;
 
 void		_PG_init(void);
@@ -794,6 +798,33 @@ bdr_worker_shmem_startup(void)
 		/* Init shm segment header after postmaster start or restart */
 		memset(BdrWorkerCtl, 0, bdr_worker_shmem_size());
 		BdrWorkerCtl->lock = LWLockAssign();
+
+		/*
+		 * The postmaster keeps track of a generation number for BDR workers
+		 * and increments it at each restart.
+		 *
+		 * Background workers aren't unregistered when the postmaster restarts
+		 * and clears shared memory, so after a restart the supervisor and
+		 * per-db workers have no idea what workers are/aren't running, nor any
+		 * way to control them. To make a clean BDR restart possible the
+		 * workers registered before the restart need to find out about the
+		 * restart and terminate.
+		 *
+		 * To make that possible we pass the generation number to the worker
+		 * in its main argument, and also set it in shared memory. The two
+		 * must match. If they don't, the worker will proc_exit(0), causing its
+		 * self to be unregistered.
+		 *
+		 * This should really be part of the bgworker API its self, handled via
+		 * a BGW_NO_RESTART_ON_CRASH flag or by providing a generation number
+		 * as a bgworker argument. However, for now we're stuck with this
+		 * workaround.
+		 */
+		if (bdr_worker_generation == UINT16_MAX)
+			/* We could handle wrap-around, but really ... */
+			elog(FATAL, "Too many postmaster crash/restart cycles. Restart the PostgreSQL server.");
+
+		BdrWorkerCtl->worker_generation = ++bdr_worker_generation;
 	}
 	LWLockRelease(AddinShmemInitLock);
 
@@ -1044,6 +1075,15 @@ _PG_init(void)
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("bdr requires \"track_commit_timestamp\" to be enabled")));
 #endif
+	
+	/*
+	 * _PG_init only runs on first load, not on postmaster restart, so
+	 * set the worker generation here. See bdr_worker_shmem_startup.
+	 *
+	 * It starts at 1 because the postmaster zeroes shmem on restart, so 0 can
+	 * mean "just restarted, hasn't run shmem setup callback yet".
+	 */
+	bdr_worker_generation = 1;
 
 	/*
 	 * Force btree_gist to be loaded - its absolutely not required at this

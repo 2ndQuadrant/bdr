@@ -47,6 +47,7 @@ bdr_register_perdb_worker(const char * dbname)
 	BdrWorker			   *worker;
 	BdrPerdbWorker		   *perdb;
 	unsigned int			worker_slot_number;
+	uint32					worker_arg;
 
 	elog(DEBUG2, "Registering per-db worker for %s", dbname);
 
@@ -78,7 +79,15 @@ bdr_register_perdb_worker(const char * dbname)
 	bgw.bgw_notify_pid = 0;
 	snprintf(bgw.bgw_name, BGW_MAXLEN,
 			 "bdr db: %s", dbname);
-	bgw.bgw_main_arg = Int32GetDatum(worker_slot_number);
+
+	/*
+	 * The main arg is composed of two uint16 parts - the worker
+	 * generation number (see bdr_worker_shmem_startup) and the index into
+	 * BdrWorkerCtl->slots in shared memory.
+	 */
+	Assert(worker_slot_number <= UINT16_MAX);
+	worker_arg = (((uint32)BdrWorkerCtl->worker_generation) << 16) | (uint32)worker_slot_number;
+	bgw.bgw_main_arg = Int32GetDatum(worker_arg);
 
 	if (!RegisterDynamicBackgroundWorker(&bgw, &bgw_handle))
 	{

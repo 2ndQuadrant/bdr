@@ -2610,12 +2610,27 @@ bdr_apply_main(Datum main_arg)
 	NameData	slot_name;
 	Name		dbname;
 	BdrWorker  *perdb;
+	uint32		worker_arg;
+	uint16		apply_worker_idx,
+				worker_generation;
 
 	Assert(IsBackgroundWorker);
 
+	worker_arg = DatumGetInt32(main_arg);
+
+	worker_generation = (uint16)(worker_arg >> 16);
+	apply_worker_idx = (uint16)(worker_arg & 0x0000FFFF);
+
+	if (worker_generation != BdrWorkerCtl->worker_generation)
+	{
+		elog(DEBUG1, "apply worker from generation %d exiting after finding shmem generation is %d",
+			 worker_generation, BdrWorkerCtl->worker_generation);
+		proc_exit(0);
+	}
+
 	initStringInfo(&query);
 
-	bdr_worker_slot = &BdrWorkerCtl->slots[ DatumGetInt32(main_arg) ];
+	bdr_worker_slot = &BdrWorkerCtl->slots[ apply_worker_idx ];
 	Assert(bdr_worker_slot->worker_type == BDR_WORKER_APPLY);
 	bdr_apply_worker = &bdr_worker_slot->worker_data.apply_worker;
 	bdr_worker_type = BDR_WORKER_APPLY;

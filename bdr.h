@@ -178,7 +178,7 @@ typedef struct BdrApplyWorker
 	 * (We can't use the db oid instead, because oid to name lookups are
 	 * only possible once we're connected to a DB).
 	 */
-	int perdb_worker_idx;
+	uint16 perdb_worker_idx;
 
 } BdrApplyWorker;
 
@@ -272,6 +272,8 @@ typedef struct BdrWorkerControl
 {
 	/* Must hold this lock when writing to BdrWorkerControl members */
 	LWLockId     lock;
+	/* Worker generation number, incremented on postmaster restart */
+	uint16       worker_generation;
 	/* Set/unset by bdr_apply_pause()/_replay(). */
 	bool		 pause_apply;
 	/* Is this the first startup of the supervisor? */
@@ -430,7 +432,7 @@ extern void bdr_worker_shmem_release(BdrWorker* worker, BackgroundWorkerHandle *
 extern bool bdr_is_bdr_activated_db(void);
 
 /* Really private to perdb workers, but init_replica perdb code needs it too */
-extern int perdb_worker_idx;
+extern uint16 perdb_worker_idx;
 
 /* forbid commands we do not support currently (or never will) */
 extern void init_bdr_commandfilter(void);
