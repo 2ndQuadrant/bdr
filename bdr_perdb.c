@@ -44,7 +44,7 @@ static bool start_perdb_worker = false;
  * Offset of this perdb worker in shmem; must be retained so it can
  * be passed to apply workers.
  */
-int perdb_worker_idx = -1;
+uint16 perdb_worker_idx = -1;
 
 static void
 bdr_perdb_xact_callback(XactEvent event, void *arg)
@@ -146,6 +146,7 @@ bdr_launch_apply_workers(char *dbname)
 		HeapTuple				tuple;
 		char				   *conn_local_name;
 		unsigned int			slot;
+		uint32					worker_arg;
 		BdrWorker			   *worker;
 		BdrApplyWorker		   *apply;
 		MemoryContext			oldcontext;
@@ -166,7 +167,9 @@ bdr_launch_apply_workers(char *dbname)
 		LWLockRelease(BdrWorkerCtl->lock);
 
 		/* Tell the apply worker what its shmem slot is */
-		bgw.bgw_main_arg = Int32GetDatum(slot);
+		Assert(slot <= UINT16_MAX);
+		worker_arg = (((uint32)BdrWorkerCtl->worker_generation) << 16) | (uint32)slot;
+		bgw.bgw_main_arg = Int32GetDatum(worker_arg);
 
 		/* Now populate the apply worker state */
 		apply = &worker->worker_data.apply_worker;
@@ -228,12 +231,25 @@ bdr_perdb_worker_main(Datum main_arg)
 	BdrPerdbWorker   *bdr_perdb_worker;
 	StringInfoData	  si;
 	bool			  wait;
+	uint32			  worker_arg;
+	uint16			  worker_generation;
 
 	initStringInfo(&si);
 
 	Assert(IsBackgroundWorker);
 
-	perdb_worker_idx = DatumGetInt32(main_arg);
+	worker_arg = DatumGetInt32(main_arg);
+
+	worker_generation = (uint16)(worker_arg >> 16);
+	perdb_worker_idx = (uint16)(worker_arg & 0x0000FFFF);
+
+	if (worker_generation != BdrWorkerCtl->worker_generation)
+	{
+		elog(DEBUG1, "perdb worker from generation %d exiting after finding shmem generation is %d",
+			 worker_generation, BdrWorkerCtl->worker_generation);
+		proc_exit(0);
+	}
+
 	bdr_worker_slot = &BdrWorkerCtl->slots[perdb_worker_idx];
 	Assert(bdr_worker_slot->worker_type == BDR_WORKER_PERDB);
 	bdr_perdb_worker = &bdr_worker_slot->worker_data.perdb_worker;
