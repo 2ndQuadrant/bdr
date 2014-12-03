@@ -81,7 +81,7 @@ const char *pretty_diff_opts = "-w -C3";
 
 /* options settable from command line */
 _stringlist *dblist = NULL;
-char	   *deparse_test_db = NULL;
+char	    deparse_test_db[NAMEDATALEN];
 bool		debug = false;
 char	   *inputdir = ".";
 char	   *outputdir = ".";
@@ -2076,6 +2076,14 @@ regression_main(int argc, char *argv[], init_function ifunc, test_function tfunc
 				 */
 				free_stringlist(&dblist);
 				split_to_stringlist(strdup(optarg), ", ", &dblist);
+
+				/*
+				 * We need to update the default deparse test db name
+				 * to be a suffix of the provided database name
+				 */
+				snprintf(deparse_test_db, sizeof(deparse_test_db),
+						 "%s_deparse",
+						 dblist->str);
 				break;
 			case 2:
 				debug = true;
@@ -2144,7 +2152,7 @@ regression_main(int argc, char *argv[], init_function ifunc, test_function tfunc
 				add_stringlist_item(&extra_install, optarg);
 				break;
 			case 24:
-				deparse_test_db = strdup(optarg);
+				strncpy(deparse_test_db, optarg, sizeof(deparse_test_db));
 				break;
 			default:
 				/* getopt_long already emitted a complaint */

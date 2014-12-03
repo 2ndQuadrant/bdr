@@ -38,7 +38,7 @@ extern char *datadir;
 extern char *host_platform;
 
 extern _stringlist *dblist;
-extern char *deparse_test_db;
+extern char deparse_test_db[NAMEDATALEN];
 extern bool debug;
 extern char *inputdir;
 extern char *outputdir;
