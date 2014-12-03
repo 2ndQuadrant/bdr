@@ -3,13 +3,11 @@
 ---
 \copy (SELECT command || ';' FROM deparse_test_commands ORDER BY id) TO './sql/deparse_dump.sql'
 \! @psqldir@/psql --dbname=@deparse_test_db@ < ./sql/deparse_dump.sql > /dev/null
-\! @psqldir@/pg_dump --schema-only --no-owner --no-privileges -Fp @deparse_test_db@
+\! @psqldir@/pg_dump --schema-only --no-owner --no-privileges -Fp @deparse_test_db@ | egrep -v "^-- Dumped"
 --
 -- PostgreSQL database dump
 --
 
--- Dumped from database version 9.5devel
--- Dumped by pg_dump version 9.5devel
 
 SET row_security = off;
 SET statement_timeout = 0;
