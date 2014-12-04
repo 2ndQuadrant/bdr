@@ -114,7 +114,7 @@ bdr_resetxlog: pg_resetxlog.o
 pg_dump_dir:
 	mkdir -p pg_dump
 
-bdr_dump: pg_dump_dir $(DUMPOBJS) | submake-libpq submake-libpgport
+bdr_dump: pg_dump_dir $(DUMPOBJS)
 	$(CC) $(CFLAGS) $(DUMPOBJS) $(libpq_pgport) $(LDFLAGS) $(LDFLAGS_EX) $(LIBS) -o $@$(X)
 
 all: all-lib bdr_init_copy bdr_resetxlog bdr_dump
