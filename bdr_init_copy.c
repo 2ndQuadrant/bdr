@@ -249,11 +249,11 @@ main(int argc, char **argv)
 	if (PQstatus(local_conn) != CONNECTION_OK)
 		die(_("Connection to database failed: %s"), PQerrorMessage(local_conn));
 
-	print_msg(_("Ensuring bdr extension is installed...\n"));
 #ifdef BUILDING_UDR
+	print_msg(_("Ensuring bdr extension is installed...\n"));
 	initialize_bdr(remote_conn);
-#endif
 	initialize_bdr(local_conn);
+#endif
 
 	print_msg(_("Creating secondary replication slots...\n"));
 	initialize_replication_slots(false);
@@ -770,13 +770,13 @@ install_extension_if_not_exists(PGconn *conn, const char *extname)
 	PGresult	   *res;
 
 	printfPQExpBuffer(query, "SELECT 1 FROM pg_catalog.pg_extension WHERE extname = %s;",
-					  PQescapeLiteral(local_conn, extname, strlen(extname)));
-	res = PQexec(local_conn, query->data);
+					  PQescapeLiteral(conn, extname, strlen(extname)));
+	res = PQexec(conn, query->data);
 
 	if (PQresultStatus(res) != PGRES_TUPLES_OK)
 	{
 		PQclear(res);
-		die(_("Could not read extension info: %s\n"), PQerrorMessage(local_conn));
+		die(_("Could not read extension info: %s\n"), PQerrorMessage(conn));
 	}
 
 	if (PQntuples(res) != 1)
@@ -784,13 +784,13 @@ install_extension_if_not_exists(PGconn *conn, const char *extname)
 		PQclear(res);
 
 		printfPQExpBuffer(query, "CREATE EXTENSION %s;",
-						  PQescapeIdentifier(local_conn, extname, strlen(extname)));
-		res = PQexec(local_conn, query->data);
+						  PQescapeIdentifier(conn, extname, strlen(extname)));
+		res = PQexec(conn, query->data);
 
 		if (PQresultStatus(res) != PGRES_COMMAND_OK)
 		{
 			PQclear(res);
-			die(_("Could not install %s extension: %s\n"), extname, PQerrorMessage(local_conn));
+			die(_("Could not install %s extension: %s\n"), extname, PQerrorMessage(conn));
 		}
 	}
 
