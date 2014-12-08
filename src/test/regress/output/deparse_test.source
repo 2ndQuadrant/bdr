@@ -3,7 +3,7 @@
 ---
 \copy (SELECT command || ';' FROM deparse_test_commands ORDER BY id) TO './sql/deparse_dump.sql'
 \! @psqldir@/psql --dbname=@deparse_test_db@ < ./sql/deparse_dump.sql > /dev/null
-\! @psqldir@/pg_dump --schema-only --no-owner --no-privileges -Fp @deparse_test_db@ | egrep -v "^-- Dumped"
+\! @psqldir@/pg_dump --schema-only --no-owner --no-privileges -Fp @deparse_test_db@ | perl -n -e 'print unless /^-- Dumped/'
 --
 -- PostgreSQL database dump
 --
