@@ -244,13 +244,6 @@ typedef struct BdrWorker
 
 } BdrWorker;
 
-/*
- * Params for every connection in bdr.connections.
- *
- * Contains n=bdr_max_workers elements, may have NULL entries.
- */
-extern BdrConnectionConfig	**bdr_connection_configs;
-
 /* GUCs */
 extern int	bdr_default_apply_delay;
 extern int bdr_max_workers;
