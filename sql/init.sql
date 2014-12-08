@@ -12,6 +12,33 @@ GRANT ALL ON SCHEMA public TO nonsuper;
 \c regression
 GRANT ALL ON SCHEMA public TO nonsuper;
 
+\c postgres
+CREATE EXTENSION btree_gist;
+CREATE EXTENSION bdr;
+
+\c regression
+CREATE EXTENSION btree_gist;
+CREATE EXTENSION bdr;
+
+\c postgres
+-- XXX DYNCONF Shouldn't need to create ext in each DB before -- creating connection in any.
+SELECT bdr.bdr_connection_add(
+	conn_name := 'regression',
+	dsn := 'dbname=regression',
+	replication_sets := ARRAY['default', 'important', 'for-node-2', 'for-node-2-insert', 'for-node-2-update', 'for-node-2-delete']
+	);
+
+\c regression
+SELECT bdr.bdr_connection_add(
+	conn_name := 'postgres',
+	dsn := 'dbname=postgres',
+	init_replica := true,
+	replica_local_dsn := 'dbname=regression',
+	replication_sets := ARRAY['default', 'important', 'for-node-1']
+	);
+
+
+-- Wait for BDR to start up
 SELECT pg_sleep(10);
 
 -- emulate the pg_xlog_wait_remote_apply on vanilla postgres

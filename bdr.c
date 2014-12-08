@@ -77,11 +77,6 @@ Oid   BdrLocksRelid;
 Oid   BdrLocksByOwnerRelid;
 Oid   BdrReplicationSetConfigRelid;
 
-BdrConnectionConfig  **bdr_connection_configs;
-/* All databases for which BDR is configured, valid after _PG_init */
-char **bdr_distinct_dbnames;
-uint32 bdr_distinct_dbnames_count = 0;
-
 /* GUC storage */
 static char *connections = NULL;
 static bool bdr_synchronous_commit;
@@ -523,215 +518,6 @@ bdr_establish_connection_and_slot(BdrConnectionConfig *cfg,
 	return streamConn;
 }
 
-/*
- * In postmaster, at shared_preload_libaries time, create the GUCs for a
- * connection. They'll be accessed by the apply worker that uses these GUCs
- * later.
- *
- * Returns false if the config wasn't created for some reason (missing
- * required options, etc); true if it's ok. Out parameters are not changed if
- * false is returned.
- *
- * Params:
- *
- *  name
- *  Name of this conn - bdr.<name>
- *
- *  used_databases
- *  Array of char*, names of distinct databases named in configured conns
- *
- *  num_used_databases
- *  Number of distinct databases named in conns
- *
- *	out_config
- *  Assigned a palloc'd pointer to GUC storage for this config'd connection
- *
- * out_config is set even if false is returned, as the GUCs have still been
- * created. Test out_config->is_valid to see whether the connection is usable.
- */
-static bool
-bdr_create_con_gucs(char  *name,
-					char **used_databases,
-					Size  *num_used_databases,
-					char **database_initcons,
-					BdrConnectionConfig **out_config)
-{
-	Size		off;
-	char	   *errormsg = NULL;
-	PQconninfoOption *options;
-	PQconninfoOption *cur_option;
-	BdrConnectionConfig *opts;
-
-	/* don't free, referenced by the guc machinery! */
-	char	   *optname_dsn = palloc(strlen(name) + 30);
-	char	   *optname_delay = palloc(strlen(name) + 30);
-	char	   *optname_replica = palloc(strlen(name) + 30);
-	char	   *optname_local_dsn = palloc(strlen(name) + 30);
-	char	   *optname_local_dbname = palloc(strlen(name) + 30);
-	char	   *optname_replication_sets = palloc(strlen(name) + 30);
-
-	Assert(process_shared_preload_libraries_in_progress);
-
-	/* Ensure the connection name is legal */
-	if (strchr(name, '_') != NULL)
-	{
-		ereport(ERROR,
-				(errmsg("bdr.connections entry '%s' contains the '_' character, which is not permitted", name)));
-	}
-
-	/* allocate storage for connection parameters */
-	opts = palloc0(sizeof(BdrConnectionConfig));
-	opts->is_valid = false;
-	*out_config = opts;
-
-	opts->name = pstrdup(name);
-
-	/* Define GUCs for this connection */
-	sprintf(optname_dsn, "bdr.%s_dsn", name);
-	DefineCustomStringVariable(optname_dsn,
-							   optname_dsn,
-							   NULL,
-							   &opts->dsn,
-							   NULL, PGC_POSTMASTER,
-							   GUC_NOT_IN_SAMPLE,
-							   NULL, NULL, NULL);
-
-	sprintf(optname_delay, "bdr.%s_apply_delay", name);
-	DefineCustomIntVariable(optname_delay,
-							optname_delay,
-							NULL,
-							&opts->apply_delay,
-							-1, -1, INT_MAX,
-							PGC_SIGHUP,
-							GUC_UNIT_MS,
-							NULL, NULL, NULL);
-
-	sprintf(optname_replica, "bdr.%s_init_replica", name);
-	DefineCustomBoolVariable(optname_replica,
-							 optname_replica,
-							 NULL,
-							 &opts->init_replica,
-							 false,
-							 PGC_SIGHUP,
-							 0,
-							 NULL, NULL, NULL);
-
-	sprintf(optname_local_dsn, "bdr.%s_replica_local_dsn", name);
-	DefineCustomStringVariable(optname_local_dsn,
-							   optname_local_dsn,
-							   NULL,
-							   &opts->replica_local_dsn,
-							   NULL, PGC_POSTMASTER,
-							   GUC_NOT_IN_SAMPLE,
-							   NULL, NULL, NULL);
-
-	sprintf(optname_local_dbname, "bdr.%s_local_dbname", name);
-	DefineCustomStringVariable(optname_local_dbname,
-							   optname_local_dbname,
-							   NULL,
-							   &opts->dbname,
-							   NULL, PGC_POSTMASTER,
-							   GUC_NOT_IN_SAMPLE,
-							   NULL, NULL, NULL);
-
-	sprintf(optname_replication_sets, "bdr.%s_replication_sets", name);
-	DefineCustomStringVariable(optname_replication_sets,
-							   optname_replication_sets,
-	                           NULL,
-							   &opts->replication_sets,
-							   NULL, PGC_POSTMASTER,
-							   GUC_LIST_INPUT | GUC_LIST_QUOTE,
-							   NULL, NULL, NULL);
-
-
-	if (!opts->dsn)
-	{
-		elog(WARNING, "bdr %s: no connection information", name);
-		return false;
-	}
-
-	elog(DEBUG2, "bdr %s: dsn=%s", name, opts->dsn);
-
-	options = PQconninfoParse(opts->dsn, &errormsg);
-	if (errormsg != NULL)
-	{
-		char	   *str = pstrdup(errormsg);
-
-		PQfreemem(errormsg);
-		ereport(ERROR,
-				(errcode(ERRCODE_CONFIG_FILE_ERROR),
-				 errmsg("bdr %s: error in dsn: %s", name, str)));
-	}
-
-	if (opts->dbname == NULL)
-	{
-		cur_option = options;
-		while (cur_option->keyword != NULL)
-		{
-			if (strcmp(cur_option->keyword, "dbname") == 0)
-			{
-				if (cur_option->val == NULL)
-					ereport(ERROR,
-							(errcode(ERRCODE_CONFIG_FILE_ERROR),
-							 errmsg("bdr %s: no dbname set", name)));
-
-				opts->dbname = pstrdup(cur_option->val);
-				elog(DEBUG2, "bdr %s: dbname=%s", name, opts->dbname);
-			}
-
-			if (cur_option->val != NULL)
-			{
-				elog(DEBUG3, "bdr %s: opt %s, val: %s",
-					 name, cur_option->keyword, cur_option->val);
-			}
-			cur_option++;
-		}
-	}
-
-	/* cleanup */
-	PQconninfoFree(options);
-
-	/*
-	 * If this is a DB name we haven't seen yet, add it to our set of known
-	 * DBs.
-	 */
-	for (off = 0; off < *num_used_databases; off++)
-	{
-		if (strcmp(opts->dbname, used_databases[off]) == 0)
-			break;
-	}
-
-	if (off == *num_used_databases)
-	{
-		/* Didn't find a match, add new db name */
-		used_databases[(*num_used_databases)++] =
-			pstrdup(opts->dbname);
-		elog(DEBUG2, "bdr %s: Saw new database %s, now %i known dbs",
-			 name, opts->dbname, (int)(*num_used_databases));
-	}
-
-	/*
-	 * Make sure that at most one of the worker configs for each DB can be
-	 * configured to run initialization.
-	 */
-	if (opts->init_replica)
-	{
-		elog(DEBUG2, "bdr %s: has init_replica=t", name);
-		if (database_initcons[off] != NULL)
-			ereport(ERROR,
-					(errcode(ERRCODE_CONFIG_FILE_ERROR),
-					 errmsg("Connections %s and %s on database %s both have bdr_init_replica enabled, cannot continue",
-							name, database_initcons[off], used_databases[off])));
-		else
-			database_initcons[off] = name; /* no need to pstrdup, see _PG_init */
-	}
-
-	opts->is_valid = true;
-
-	/* optname vars intentionally leaked, see above */
-	return true;
-}
-
 static size_t
 bdr_worker_shmem_size()
 {
@@ -1057,15 +843,7 @@ bdr_do_not_replicate_assign_hook(bool newvalue, void *extra)
 void
 _PG_init(void)
 {
-	List	   *connames;
-	ListCell   *c;
 	MemoryContext old_context;
-	char	   *connections_tmp;
-
-	char	  **used_databases;
-	char      **database_initcons;
-	Size		num_used_databases = 0;
-	int			connection_config_idx;
 
 	if (!process_shared_preload_libraries_in_progress)
 		ereport(ERROR,
@@ -1239,23 +1017,7 @@ _PG_init(void)
 
 	bdr_label_init();
 
-	/* if nothing is configured, we're done */
-	if (connections == NULL)
-		goto out;
-
 	bdr_supervisor_register();
-
-	/* Copy 'connections' guc so SplitIdentifierString can modify it in-place */
-	connections_tmp = pstrdup(connections);
-
-	/* Get the list of BDR connection names to iterate over. */
-	if (!SplitIdentifierString(connections_tmp, ',', &connames))
-	{
-		/* syntax error in list */
-		ereport(FATAL,
-				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-				 errmsg("invalid list syntax for \"bdr.connections\"")));
-	}
 
 	/*
 	 * Sanity check max_worker_processes to make sure it's at least big enough
@@ -1292,76 +1054,10 @@ _PG_init(void)
 	 */
 	bdr_worker_alloc_shmem_segment();
 
-	/* Allocate space for BDR connection GUCs */
-	bdr_connection_configs = (BdrConnectionConfig**)
-		palloc0(bdr_max_workers * sizeof(BdrConnectionConfig*));
-
-	/* Names of all databases we're going to be doing BDR for */
-	used_databases = palloc0(sizeof(char *) * list_length(connames));
-	/*
-	 * For each db named in used_databases, the corresponding index is the name
-	 * of the conn with bdr_init_replica=t if any.
-	 */
-	database_initcons = palloc0(sizeof(char *) * list_length(connames));
-
-	/*
-	 * Read all connections, create/validate parameters for them and do sanity
-	 * checks as we go.
-	 */
-	connection_config_idx = 0;
-	foreach(c, connames)
-	{
-		char		   *name;
-		name = (char *) lfirst(c);
-
-		if (!bdr_create_con_gucs(name, used_databases, &num_used_databases,
-								 database_initcons,
-								 &bdr_connection_configs[connection_config_idx]))
-			continue;
-
-		Assert(bdr_connection_configs[connection_config_idx] != NULL);
-		connection_config_idx++;
-	}
-
-	/*
-	 * Free the connames list cells. The strings are just pointers into
-	 * 'connections' and must not be freed'd.
-	 */
-	list_free(connames);
-	connames = NIL;
-
-	/*
-	 * We've ensured there are no duplicate init connections, no need to
-	 * remember which conn is the bdr_init_replica conn anymore. The contents
-	 * are just pointers into connections_tmp so we don't want to free them.
-	 */
-	pfree(database_initcons);
-
-	/*
-	 * Copy the list of used databases into a global where we can
-	 * use it for registering the per-database workers during shmem init.
-	 */
-	bdr_distinct_dbnames = palloc(sizeof(char*)*num_used_databases);
-	memcpy(bdr_distinct_dbnames, used_databases,
-		   sizeof(char*)*num_used_databases);
-	bdr_distinct_dbnames_count = num_used_databases;
-	pfree(used_databases);
-	num_used_databases = 0;
-	used_databases = NULL;
-
-	/* TODO DYNCONF Note that per-db workers aren't registered here anymore */
-
 	EmitWarningsOnPlaceholders("bdr");
-
-	pfree(connections_tmp);
-
-out:
 
 	/*
 	 * initialize other modules that need shared memory
-	 *
-	 * Do so even if we haven't any remote nodes setup, the shared memory might
-	 * still be needed for some sql callable functions or such.
 	 */
 
 	/* register a slot for every remote node */

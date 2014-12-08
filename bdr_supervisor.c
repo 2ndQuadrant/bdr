@@ -30,8 +30,6 @@
 #include "utils/fmgroids.h"
 #include "utils/guc.h"
 
-static void bdr_copy_labels_from_config(void);
-
 /*
  * Register a new perdb worker for the named database. The worker MUST
  * not already exist.
@@ -339,13 +337,6 @@ bdr_supervisor_worker_main(Datum main_arg)
 		BackgroundWorkerInitializeConnection("template1", NULL);
 		bdr_supervisor_createdb();
 
-		/*
-		 * XXX DYNCONF Because config isn't fully migrated yet, we need to
-		 * scan the configured list of DBs and apply security labels for each
-		 * during startup so that "make check" can actually work.
-		 */
-		bdr_copy_labels_from_config();
-
 		BdrWorkerCtl->is_supervisor_restart = true;
 		elog(DEBUG1, "BDR supervisor restarting to connect to 'bdr' DB");
 		proc_exit(1);
@@ -451,72 +442,4 @@ bdr_supervisor_register()
 	bgw.bgw_main_arg = Int32GetDatum(0); /* unused */
 
 	RegisterBackgroundWorker(&bgw);
-}
-
-
-
-
-/***
- * Code after this point is throwaway code for the interim
- * half-dynamic configuration support.
- ***/
-
-/*
- * TODO DYNCONF For each DB configured, apply a security label.
- *
- * Temporary code during the transition to dynamic config.
- *
- * Don't care in the slightest if it's slow and ugly, it's
- * throwaway code.
- */
-static void
-bdr_copy_labels_from_config()
-{
-	char **distinct_dbnames;
-	int n_distinct_dbnames = 0, i, j;
-
-	distinct_dbnames = (char**)palloc0(sizeof(char*) * bdr_max_workers);
-
-	StartTransactionCommand();
-
-	for (i = 0; i < bdr_max_workers; i++)
-	{
-		BdrConnectionConfig *cfg = bdr_connection_configs[i];
-		bool found = false;
-
-		if (cfg == NULL)
-			continue;
-
-		/* Does this worker's db already exist in the namelist? */
-		for (j = 0; j < n_distinct_dbnames; j++)
-		{
-			if (strcmp(cfg->dbname, distinct_dbnames[j]) == 0)
-			{
-				found = true;
-				break;
-			}
-		}
-		if (!found)
-		{
-			elog(LOG, "Found distinct dbname %s", cfg->dbname);
-			distinct_dbnames[n_distinct_dbnames++] = cfg->dbname;
-		}
-	}
-
-	elog(LOG, "XXX Found %i distinct dbnames", n_distinct_dbnames);
-
-	/* Right-o, now set labels for each */
-	for (i = 0; i < n_distinct_dbnames; i++)
-	{
-		ObjectAddress addr;
-		addr.objectId = get_database_oid(distinct_dbnames[i], false);
-		addr.classId = DatabaseRelationId;
-		addr.objectSubId = 0;
-
-		SetSecurityLabel(&addr, "bdr", "{\"bdr\": true}");
-	}
-
-	CommitTransactionCommand();
-
-	pfree(distinct_dbnames);
 }
