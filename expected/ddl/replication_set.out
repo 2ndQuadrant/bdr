@@ -1,6 +1,10 @@
 /* First test whether a table's replication set can be properly manipulated */
 \c postgres
+CREATE SCHEMA normalschema;
+CREATE SCHEMA "strange.schema-IS";
 CREATE TABLE switcheroo(id serial primary key, data text);
+CREATE TABLE normalschema.sometbl_normalschema();
+CREATE TABLE "strange.schema-IS".sometbl_strangeschema();
 -- show initial replication sets
 SELECT * FROM bdr.table_get_replication_sets('switcheroo');
      sets      
@@ -36,8 +40,32 @@ SELECT * FROM bdr.table_get_replication_sets('switcheroo');
  {all}
 (1 row)
 
+SELECT * FROM bdr.table_get_replication_sets('normalschema.sometbl_normalschema');
+     sets      
+---------------
+ {default,all}
+(1 row)
+
+SELECT * FROM bdr.table_get_replication_sets('"strange.schema-IS".sometbl_strangeschema');
+     sets      
+---------------
+ {default,all}
+(1 row)
+
 -- configure a couple
 SELECT bdr.table_set_replication_sets('switcheroo', '{fascinating, is-it-not}');
+ table_set_replication_sets 
+----------------------------
+ 
+(1 row)
+
+SELECT * FROM bdr.table_set_replication_sets('normalschema.sometbl_normalschema', '{a}');
+ table_set_replication_sets 
+----------------------------
+ 
+(1 row)
+
+SELECT * FROM bdr.table_set_replication_sets('"strange.schema-IS".sometbl_strangeschema', '{a}');
  table_set_replication_sets 
 ----------------------------
  
@@ -47,6 +75,18 @@ SELECT * FROM bdr.table_get_replication_sets('switcheroo');
             sets             
 -----------------------------
  {fascinating,is-it-not,all}
+(1 row)
+
+SELECT * FROM bdr.table_get_replication_sets('normalschema.sometbl_normalschema');
+  sets   
+---------
+ {a,all}
+(1 row)
+
+SELECT * FROM bdr.table_get_replication_sets('"strange.schema-IS".sometbl_strangeschema');
+  sets   
+---------
+ {a,all}
 (1 row)
 
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
@@ -61,6 +101,18 @@ SELECT * FROM bdr.table_get_replication_sets('switcheroo');
             sets             
 -----------------------------
  {fascinating,is-it-not,all}
+(1 row)
+
+SELECT * FROM bdr.table_get_replication_sets('normalschema.sometbl_normalschema');
+  sets   
+---------
+ {a,all}
+(1 row)
+
+SELECT * FROM bdr.table_get_replication_sets('"strange.schema-IS".sometbl_strangeschema');
+  sets   
+---------
+ {a,all}
 (1 row)
 
 \c postgres
@@ -123,6 +175,8 @@ CONTEXT:  SQL statement "SECURITY LABEL FOR bdr ON TABLE switcheroo IS '{ "sets"
 PL/pgSQL function bdr.table_set_replication_sets(regclass,text[]) line 30 at EXECUTE statement
 \c postgres
 DROP TABLE switcheroo;
+DROP TABLE normalschema.sometbl_normalschema;
+DROP TABLE "strange.schema-IS".sometbl_strangeschema;
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
  pg_xlog_wait_remote_apply 
 ---------------------------

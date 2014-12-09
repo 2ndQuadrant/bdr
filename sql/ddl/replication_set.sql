@@ -1,6 +1,10 @@
 /* First test whether a table's replication set can be properly manipulated */
 \c postgres
+CREATE SCHEMA normalschema;
+CREATE SCHEMA "strange.schema-IS";
 CREATE TABLE switcheroo(id serial primary key, data text);
+CREATE TABLE normalschema.sometbl_normalschema();
+CREATE TABLE "strange.schema-IS".sometbl_strangeschema();
 
 -- show initial replication sets
 SELECT * FROM bdr.table_get_replication_sets('switcheroo');
@@ -12,12 +16,22 @@ SELECT * FROM bdr.table_get_replication_sets('switcheroo');
 -- empty replication set (just 'all')
 SELECT bdr.table_set_replication_sets('switcheroo', '{}');
 SELECT * FROM bdr.table_get_replication_sets('switcheroo');
+SELECT * FROM bdr.table_get_replication_sets('normalschema.sometbl_normalschema');
+SELECT * FROM bdr.table_get_replication_sets('"strange.schema-IS".sometbl_strangeschema');
 -- configure a couple
 SELECT bdr.table_set_replication_sets('switcheroo', '{fascinating, is-it-not}');
+SELECT * FROM bdr.table_set_replication_sets('normalschema.sometbl_normalschema', '{a}');
+SELECT * FROM bdr.table_set_replication_sets('"strange.schema-IS".sometbl_strangeschema', '{a}');
+
 SELECT * FROM bdr.table_get_replication_sets('switcheroo');
+SELECT * FROM bdr.table_get_replication_sets('normalschema.sometbl_normalschema');
+SELECT * FROM bdr.table_get_replication_sets('"strange.schema-IS".sometbl_strangeschema');
+
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 \c regression
 SELECT * FROM bdr.table_get_replication_sets('switcheroo');
+SELECT * FROM bdr.table_get_replication_sets('normalschema.sometbl_normalschema');
+SELECT * FROM bdr.table_get_replication_sets('"strange.schema-IS".sometbl_strangeschema');
 
 \c postgres
 -- make sure we can reset replication sets to the default again
@@ -41,6 +55,9 @@ SELECT bdr.table_set_replication_sets('switcheroo', '{12345678901234567890123456
 
 \c postgres
 DROP TABLE switcheroo;
+DROP TABLE normalschema.sometbl_normalschema;
+DROP TABLE "strange.schema-IS".sometbl_strangeschema;
+
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 
 /*
