@@ -583,7 +583,7 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 		if (data->client_pg_version / 100 != PG_VERSION_NUM / 100)
 			data->allow_sendrecv_protocol = false;
 
-		bdr_maintain_schema();
+		bdr_maintain_schema(false);
 
 		data->bdr_schema_oid = get_namespace_oid("bdr", true);
 		schema_oid = data->bdr_schema_oid;
