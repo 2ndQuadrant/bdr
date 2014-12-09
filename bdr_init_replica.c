@@ -644,6 +644,17 @@ bdr_exec_init_replica(BdrConnectionConfig *cfg, char *snapshot)
 #endif
 }
 
+static void
+bdr_init_replica_conn_close(int code, Datum connptr)
+{
+	PGconn *conn = (PGconn*) DatumGetPointer(connptr);
+	if (conn == NULL)
+		return;
+	if (PQstatus(conn) != CONNECTION_OK)
+		return;
+	PQfinish(conn);
+}
+
 /*
  * Determine whether we need to initialize the database from a remote
  * node and perform the required initialization if so.
@@ -767,7 +778,7 @@ bdr_init_replica(Name dbname)
 
 	resetStringInfo(&dsn);
 	appendStringInfo(&dsn,
-					 "%s fallback_application_name='"BDR_LOCALID_FORMAT": %s: init_replica setup'",
+					 "%s fallback_application_name='"BDR_LOCALID_FORMAT": %s: init'",
 					 init_replica_config->dsn, BDR_LOCALID_FORMAT_ARGS,
 					 init_replica_config->name);
 
@@ -785,215 +796,215 @@ bdr_init_replica(Name dbname)
 						PQerrorMessage(nonrepl_init_conn))));
 	}
 
-	bdr_ensure_ext_installed(nonrepl_init_conn, dbname);
-
-	/* Get the bdr.bdr_nodes status field for our node id from the remote */
-	status = bdr_get_remote_status(nonrepl_init_conn);
-
-	if (bdr_init_from_basedump)
+	PG_ENSURE_ERROR_CLEANUP(bdr_init_replica_conn_close,
+							PointerGetDatum(nonrepl_init_conn));
 	{
-		status = bdr_set_remote_status(nonrepl_init_conn, 'c', status);
-	}
-	else
-	{
-		switch (status)
+		bdr_ensure_ext_installed(nonrepl_init_conn, dbname);
+
+		/* Get the bdr.bdr_nodes status field for our node id from the remote */
+		status = bdr_get_remote_status(nonrepl_init_conn);
+
+		if (bdr_init_from_basedump)
 		{
-			case '\0':
-				elog(DEBUG2, "bdr %s: initializing from clean state",
-					 NameStr(*dbname));
-				break;
-
-			case 'r':
-				/*
-				 * Init has been completed, but we didn't check our local
-				 * bdr.bdr_nodes, or the final update hasn't propagated yet.
-				 *
-				 * All we need to do is catch up, we already replayed enough to be
-				 * consistent and start up in normal mode last time around
-				 */
-				elog(DEBUG2, "bdr %s: init already completed, nothing to do",
-					 NameStr(*dbname));
-				return;
-
-			case 'c':
-				/*
-				 * We were in catchup mode when we died. We need to resume catchup
-				 * mode up to the expected LSN before switching over.
-				 *
-				 * To do that all we need to do is fall through without doing any
-				 * slot re-creation, dump/apply, etc, and pick up when we do
-				 * catchup.
-				 *
-				 * We won't know what the original catchup target point is, but we
-				 * can just catch up to whatever xlog position the server is
-				 * currently at.
-				 */
-				elog(DEBUG2, "bdr %s: dump applied, need to continue catchup",
-					 NameStr(*dbname));
-				break;
-
-			case 'i':
-				/*
-				 * A previous init attempt seems to have failed. Clean up, then
-				 * fall through to start setup again.
-				 *
-				 * We can't just re-use the slot and replication identifier that
-				 * were created last time (if they were), because we have no way
-				 * of getting the slot's exported snapshot after
-				 * CREATE_REPLICATION_SLOT.
-				 */
-				elog(DEBUG2, "bdr %s: previous failed initalization detected, cleaning up",
-					 NameStr(*dbname));
-				bdr_drop_slot_and_replication_identifier(init_replica_config);
-				status = bdr_set_remote_status(nonrepl_init_conn, '\0', status);
-				break;
-
-			default:
-				elog(ERROR, "unreachable"); /* Unhandled case */
-				break;
+			status = bdr_set_remote_status(nonrepl_init_conn, 'c', status);
 		}
-	}
-
-	if (status == '\0')
-	{
-		char	   *init_snapshot = NULL;
-		PGconn	   *init_repl_conn = NULL;
-		ListCell   *lc;
-
-		elog(LOG, "bdr %s: initializing from remote db", NameStr(*dbname));
-
-		/*
-		 * We're starting from scratch or have cleaned up a previous failed
-		 * attempt.
-		 */
-		status = bdr_set_remote_status(nonrepl_init_conn, 'i', status);
-
-		/*
-		 * Collect a list of connections to make slots for, allocated in
-		 * TopMemoryContext to outlive the transaction. We won't bother to free
-		 * them, since we're just going to terminate anyway.
-		 */
-		StartTransactionCommand();
-		saved_ctx = MemoryContextSwitchTo(TopMemoryContext);
-		configs = bdr_read_connection_configs(NULL, dbname, false);
-		MemoryContextSwitchTo(saved_ctx);
-		CommitTransactionCommand();
-
-		elog(DEBUG2, "bdr %s: creating slots for %d nodes",
-			 NameStr(*dbname), list_length(configs));
-
-		/*
-		 * For each connection, ensure its slot exists.
-		 *
-		 * Do it one by one rather than fiddling with async libpq queries. If
-		 * this needs to be parallelized later, it should probably be done by
-		 * launching each apply worker and letting them create their own
-		 * slots, then having them wait until signalled/unlatched before
-		 * proceeding with actual replication. That'll save us another round
-		 * of connections too.
-		 *
-		 * We don't attempt any cleanup if slot creation fails, we just bail out
-		 * and leave any already-created slots in place.
-		 */
-		foreach(lc, configs)
+		else
 		{
-			BdrConnectionConfig *cfg = lfirst(lc);
-			char *snapshot = NULL;
-			PGconn *conn = NULL;
-			RepNodeId replication_identifier;
-			NameData slot_name;
-			uint64 sysid;
-			Oid dboid;
-			TimeLineID timeline;
-
-			ereport(LOG,
-					(errmsg("bdr %s: checking/creating slot for %s at %s",
-							NameStr(*dbname), cfg->name, cfg->dsn)));
-			/*
-			 * Create the slot on the remote. The returned remote sysid and
-			 * timeline, the slot name, and the local replication identifier
-			 * are all discarded; they're not needed here, and will be obtained
-			 * again by the apply workers when they're launched after init.
-			 */
-			conn = bdr_establish_connection_and_slot(cfg, "create slot",
-				&slot_name, &sysid, &timeline, &dboid, &replication_identifier,
-				&snapshot);
-
-			/* Always throws rather than returning failure */
-			Assert(conn);
-
-			if (cfg->init_replica)
+			switch (status)
 			{
-				/*
-				 * We need to keep the snapshot ID returned by CREATE SLOT so
-				 * we can pass it to pg_dump to get a consistent dump from the
-				 * remote slot's start point.
-				 *
-				 * The snapshot is only valid for the lifetime of the
-				 * replication connection we created it with, so we must keep
-				 * that connection around until the dump finishes.
-				 */
-				if (!snapshot)
-					elog(ERROR, "bdr %s: init_replica failed to create snapshot!",
+				case '\0':
+					elog(DEBUG2, "bdr %s: initializing from clean state",
 						 NameStr(*dbname));
-				init_snapshot = snapshot;
-				init_repl_conn = conn;
-			}
-			else
-			{
-				/*
-				 * Just throw the returned info away; we only needed to create
-				 * the slot so its replication identifier can be advanced
-				 * during catchup.
-				 */
-				if (snapshot)
-					pfree(snapshot);
-				PQfinish(conn);
+					break;
+
+				case 'r':
+					/*
+					 * Init has been completed, but we didn't check our local
+					 * bdr.bdr_nodes, or the final update hasn't propagated yet.
+					 *
+					 * All we need to do is catch up, we already replayed enough to be
+					 * consistent and start up in normal mode last time around
+					 */
+					elog(DEBUG2, "bdr %s: init already completed, nothing to do",
+						 NameStr(*dbname));
+					return;
+
+				case 'c':
+					/*
+					 * We were in catchup mode when we died. We need to resume catchup
+					 * mode up to the expected LSN before switching over.
+					 *
+					 * To do that all we need to do is fall through without doing any
+					 * slot re-creation, dump/apply, etc, and pick up when we do
+					 * catchup.
+					 *
+					 * We won't know what the original catchup target point is, but we
+					 * can just catch up to whatever xlog position the server is
+					 * currently at.
+					 */
+					elog(DEBUG2, "bdr %s: dump applied, need to continue catchup",
+						 NameStr(*dbname));
+					break;
+
+				case 'i':
+					/*
+					 * A previous init attempt seems to have failed. Clean up, then
+					 * fall through to start setup again.
+					 *
+					 * We can't just re-use the slot and replication identifier that
+					 * were created last time (if they were), because we have no way
+					 * of getting the slot's exported snapshot after
+					 * CREATE_REPLICATION_SLOT.
+					 */
+					elog(DEBUG2, "bdr %s: previous failed initalization detected, cleaning up",
+						 NameStr(*dbname));
+					bdr_drop_slot_and_replication_identifier(init_replica_config);
+					status = bdr_set_remote_status(nonrepl_init_conn, '\0', status);
+					break;
+
+				default:
+					elog(ERROR, "unreachable"); /* Unhandled case */
+					break;
 			}
 		}
 
-		/* If we get here, we should have a valid snapshot to dump */
-		Assert(init_snapshot != NULL);
-		Assert(init_repl_conn != NULL);
+		if (status == '\0')
+		{
+			char	   *init_snapshot = NULL;
+			PGconn	   *init_repl_conn = NULL;
+			ListCell   *lc;
 
-		/*
-		 * Execute the dump and apply its self.
-		 *
-		 * Note that the bdr extension tables override pg_dump's default and
-		 * ask to be included in dumps. In particular, bdr.bdr_nodes will get
-		 * copied over.
-		 *
-		 * XXX DYNCONF Relying on pg_dump copying bdr_nodes etc makes dumping
-		 * BDR databases painful for backup purposes, and should not be
-		 * something we rely on. We should probably be copying our catalog
-		 * tables from the remote end manually.
-		 */
-		elog(DEBUG1, "bdr %s: creating and restoring dump for %s",
-			 NameStr(*dbname), init_replica_config->name);
-		bdr_exec_init_replica(init_replica_config, init_snapshot);
-		PQfinish(init_repl_conn);
+			elog(LOG, "bdr %s: initializing from remote db", NameStr(*dbname));
 
-		pfree(init_snapshot);
-		status = bdr_set_remote_status(nonrepl_init_conn, 'c', status);
+			/*
+			 * We're starting from scratch or have cleaned up a previous failed
+			 * attempt.
+			 */
+			status = bdr_set_remote_status(nonrepl_init_conn, 'i', status);
+
+			/*
+			 * Collect a list of connections to make slots for, allocated in
+			 * TopMemoryContext to outlive the transaction. We won't bother to free
+			 * them, since we're just going to terminate anyway.
+			 */
+			StartTransactionCommand();
+			saved_ctx = MemoryContextSwitchTo(TopMemoryContext);
+			configs = bdr_read_connection_configs(NULL, dbname, false);
+			MemoryContextSwitchTo(saved_ctx);
+			CommitTransactionCommand();
+
+			elog(DEBUG2, "bdr %s: creating slots for %d nodes",
+				 NameStr(*dbname), list_length(configs));
+
+			/*
+			 * For each connection, ensure its slot exists.
+			 *
+			 * Do it one by one rather than fiddling with async libpq queries. If
+			 * this needs to be parallelized later, it should probably be done by
+			 * launching each apply worker and letting them create their own
+			 * slots, then having them wait until signalled/unlatched before
+			 * proceeding with actual replication. That'll save us another round
+			 * of connections too.
+			 *
+			 * We don't attempt any cleanup if slot creation fails, we just bail out
+			 * and leave any already-created slots in place.
+			 */
+			foreach(lc, configs)
+			{
+				BdrConnectionConfig *cfg = lfirst(lc);
+				char *snapshot = NULL;
+				PGconn *conn = NULL;
+				RepNodeId replication_identifier;
+				NameData slot_name;
+				uint64 sysid;
+				Oid dboid;
+				TimeLineID timeline;
+
+				ereport(LOG,
+						(errmsg("bdr %s: checking/creating slot for %s at %s",
+								NameStr(*dbname), cfg->name, cfg->dsn)));
+				/*
+				 * Create the slot on the remote. The returned remote sysid and
+				 * timeline, the slot name, and the local replication identifier
+				 * are all discarded; they're not needed here, and will be obtained
+				 * again by the apply workers when they're launched after init.
+				 */
+				conn = bdr_establish_connection_and_slot(cfg, "create slot",
+					&slot_name, &sysid, &timeline, &dboid, &replication_identifier,
+					&snapshot);
+
+				/* Always throws rather than returning failure */
+				Assert(conn);
+
+				if (cfg->init_replica)
+				{
+					/*
+					 * We need to keep the snapshot ID returned by CREATE SLOT so
+					 * we can pass it to pg_dump to get a consistent dump from the
+					 * remote slot's start point.
+					 *
+					 * The snapshot is only valid for the lifetime of the
+					 * replication connection we created it with, so we must keep
+					 * that connection around until the dump finishes.
+					 */
+					if (!snapshot)
+						elog(ERROR, "bdr %s: init_replica failed to create snapshot!",
+							 NameStr(*dbname));
+					init_snapshot = snapshot;
+					init_repl_conn = conn;
+				}
+				else
+				{
+					/*
+					 * Just throw the returned info away; we only needed to create
+					 * the slot so its replication identifier can be advanced
+					 * during catchup.
+					 */
+					if (snapshot)
+						pfree(snapshot);
+					PQfinish(conn);
+				}
+			}
+
+			/* If we get here, we should have a valid snapshot to dump */
+			Assert(init_snapshot != NULL);
+			Assert(init_repl_conn != NULL);
+
+			/*
+			 * Execute the dump and apply its self.
+			 *
+			 * Note that the bdr extension tables override pg_dump's default and
+			 * ask to be included in dumps. In particular, bdr.bdr_nodes will get
+			 * copied over.
+			 *
+			 * XXX DYNCONF Relying on pg_dump copying bdr_nodes etc makes dumping
+			 * BDR databases painful for backup purposes, and should not be
+			 * something we rely on. We should probably be copying our catalog
+			 * tables from the remote end manually.
+			 */
+			elog(DEBUG1, "bdr %s: creating and restoring dump for %s",
+				 NameStr(*dbname), init_replica_config->name);
+			bdr_exec_init_replica(init_replica_config, init_snapshot);
+			PQfinish(init_repl_conn);
+
+			pfree(init_snapshot);
+			status = bdr_set_remote_status(nonrepl_init_conn, 'c', status);
+		}
+
+		Assert(status == 'c');
+
+		/* Launch the catchup worker and wait for it to finish */
+		elog(DEBUG1, "bdr %s: launching catchup mode apply worker", NameStr(*dbname));
+		min_remote_lsn = bdr_get_remote_lsn(nonrepl_init_conn);
+		bdr_catchup_to_lsn(init_replica_config, min_remote_lsn);
+		status = bdr_set_remote_status(nonrepl_init_conn, 'r', status);
 	}
-
-	Assert(status == 'c');
-
-	/* Launch the catchup worker and wait for it to finish */
-	elog(DEBUG1, "bdr %s: launching catchup mode apply worker", NameStr(*dbname));
-	min_remote_lsn = bdr_get_remote_lsn(nonrepl_init_conn);
-	bdr_catchup_to_lsn(init_replica_config, min_remote_lsn);
-	status = bdr_set_remote_status(nonrepl_init_conn, 'r', status);
+	PG_END_ENSURE_ERROR_CLEANUP(bdr_init_replica_conn_close,
+							PointerGetDatum(nonrepl_init_conn));
 
 	elog(INFO, "bdr %s: catchup worker finished, ready for normal replication",
 		 NameStr(*dbname));
 	PQfinish(nonrepl_init_conn);
-
-	/*
-	 * We delay commit until here because the connection configs were
-	 * allocated in the transaction's memory context, so until now we
-	 * needed them.
-	 */
 }
 
 /*
