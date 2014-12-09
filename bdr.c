@@ -418,7 +418,7 @@ bdr_worker_init(char *dbname)
 	/* make sure BDR extension exists */
 	bdr_executor_always_allow_writes(true);
 	StartTransactionCommand();
-	bdr_maintain_schema();
+	bdr_maintain_schema(true);
 	CommitTransactionCommand();
 	bdr_executor_always_allow_writes(false);
 
@@ -1094,9 +1094,12 @@ bdr_lookup_relid(const char *relname, Oid schema_oid)
  * Concurrent executions will block, but not fail.
  *
  * Must be called inside transaction.
+ *
+ * If update_extensions is true, ALTER EXTENSION commands will be issued to
+ * ensure the required extension(s) are at the current version.
  */
 void
-bdr_maintain_schema(void)
+bdr_maintain_schema(bool update_extensions)
 {
 	Relation	extrel;
 	Oid			btree_gist_oid;
@@ -1115,17 +1118,13 @@ bdr_maintain_schema(void)
 	btree_gist_oid = get_extension_oid("btree_gist", true);
 	bdr_oid = get_extension_oid("bdr", true);
 
-	/* create required extension if they don't exists yet */
 	if (btree_gist_oid == InvalidOid)
-	{
-		CreateExtensionStmt create_stmt;
+		elog(ERROR, "btree_gist is required by BDR but not installed in the current database");
 
-		create_stmt.if_not_exists = false;
-		create_stmt.options = NIL;
-		create_stmt.extname = (char *)"btree_gist";
-		CreateExtension(&create_stmt);
-	}
-	else
+	if (bdr_oid == InvalidOid)
+		elog(ERROR, "bdr extension is not installed in the current database");
+
+	if (update_extensions)
 	{
 		AlterExtensionStmt alter_stmt;
 
@@ -1133,20 +1132,6 @@ bdr_maintain_schema(void)
 		alter_stmt.options = NIL;
 		alter_stmt.extname = (char *)"btree_gist";
 		ExecAlterExtensionStmt(&alter_stmt);
-	}
-
-	if (bdr_oid == InvalidOid)
-	{
-		CreateExtensionStmt create_stmt;
-
-		create_stmt.if_not_exists = false;
-		create_stmt.options = NIL;
-		create_stmt.extname = (char *)"bdr";
-		CreateExtension(&create_stmt);
-	}
-	else
-	{
-		AlterExtensionStmt alter_stmt;
 
 		/* TODO: only do this if necessary */
 		alter_stmt.options = NIL;
