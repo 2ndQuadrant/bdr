@@ -1,0 +1,991 @@
+make: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr'
+make -C src install
+make[1]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src'
+make -C common install
+make[2]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/common'
+make -C ../backend submake-errcodes
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[3]: Nothing to be done for `submake-errcodes'.
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64'
+/usr/bin/install -c -m 644  libpgcommon.a '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/libpgcommon.a'
+make[2]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/common'
+make -C port install
+make[2]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/port'
+make -C ../backend submake-errcodes
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[3]: Nothing to be done for `submake-errcodes'.
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64'
+/usr/bin/install -c -m 644  libpgport.a '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/libpgport.a'
+make[2]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/port'
+make -C timezone install
+make[2]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/timezone'
+make -C ../../src/port all
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/port'
+make -C ../backend submake-errcodes
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[4]: Nothing to be done for `submake-errcodes'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/port'
+make -C ../../src/common all
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/common'
+make -C ../backend submake-errcodes
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[4]: Nothing to be done for `submake-errcodes'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/common'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/share/postgresql'
+./zic -d '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/share/postgresql/timezone' -p 'US/Eastern' ./data/africa ./data/antarctica ./data/asia ./data/australasia ./data/europe ./data/northamerica ./data/southamerica ./data/pacificnew ./data/etcetera ./data/factory ./data/backward ./data/systemv
+make -C tznames install
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/timezone/tznames'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/share/postgresql/timezonesets'
+/usr/bin/install -c -m 644 ./Africa.txt ./America.txt ./Antarctica.txt ./Asia.txt ./Atlantic.txt ./Australia.txt ./Etc.txt ./Europe.txt ./Indian.txt ./Pacific.txt '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/share/postgresql/timezonesets'
+/usr/bin/install -c -m 644 ./Default ./Australia ./India '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/share/postgresql/timezonesets'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/timezone/tznames'
+make[2]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/timezone'
+make -C backend install
+make[2]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make -C ../../src/port all
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/port'
+make -C ../backend submake-errcodes
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[4]: Nothing to be done for `submake-errcodes'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/port'
+make -C ../../src/common all
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/common'
+make -C ../backend submake-errcodes
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[4]: Nothing to be done for `submake-errcodes'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/common'
+make -C catalog schemapg.h
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/catalog'
+make[3]: `schemapg.h' is up to date.
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/catalog'
+make -C access all
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/access'
+make -C common all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/access/common'
+make[4]: Nothing to be done for `all'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/access/common'
+make -C gin all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/access/gin'
+make[4]: Nothing to be done for `all'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/access/gin'
+make -C gist all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/access/gist'
+make[4]: Nothing to be done for `all'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/access/gist'
+make -C hash all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/access/hash'
+make[4]: Nothing to be done for `all'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/access/hash'
+make -C heap all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/access/heap'
+make[4]: Nothing to be done for `all'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/access/heap'
+make -C index all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/access/index'
+make[4]: Nothing to be done for `all'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/access/index'
+make -C nbtree all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/access/nbtree'
+make[4]: Nothing to be done for `all'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/access/nbtree'
+make -C rmgrdesc all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/access/rmgrdesc'
+make[4]: Nothing to be done for `all'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/access/rmgrdesc'
+make -C spgist all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/access/spgist'
+make[4]: Nothing to be done for `all'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/access/spgist'
+make -C transam all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/access/transam'
+make[4]: Nothing to be done for `all'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/access/transam'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/access'
+make -C bootstrap all
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/bootstrap'
+make[3]: Nothing to be done for `all'.
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/bootstrap'
+make -C catalog all
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/catalog'
+make[3]: Nothing to be done for `all'.
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/catalog'
+make -C parser all
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/parser'
+make[3]: Nothing to be done for `all'.
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/parser'
+make -C commands all
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/commands'
+make[3]: Nothing to be done for `all'.
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/commands'
+make -C executor all
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/executor'
+make[3]: Nothing to be done for `all'.
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/executor'
+make -C foreign all
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/foreign'
+make[3]: Nothing to be done for `all'.
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/foreign'
+make -C lib all
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/lib'
+make[3]: Nothing to be done for `all'.
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/lib'
+make -C libpq all
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/libpq'
+make[3]: Nothing to be done for `all'.
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/libpq'
+make -C main all
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/main'
+make[3]: Nothing to be done for `all'.
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/main'
+make -C nodes all
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/nodes'
+make[3]: Nothing to be done for `all'.
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/nodes'
+make -C optimizer all
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/optimizer'
+make -C geqo all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/optimizer/geqo'
+make[4]: Nothing to be done for `all'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/optimizer/geqo'
+make -C path all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/optimizer/path'
+make[4]: Nothing to be done for `all'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/optimizer/path'
+make -C plan all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/optimizer/plan'
+make[4]: Nothing to be done for `all'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/optimizer/plan'
+make -C prep all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/optimizer/prep'
+make[4]: Nothing to be done for `all'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/optimizer/prep'
+make -C util all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/optimizer/util'
+make[4]: Nothing to be done for `all'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/optimizer/util'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/optimizer'
+make -C port all
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/port'
+make[3]: Nothing to be done for `all'.
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/port'
+make -C postmaster all
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/postmaster'
+make[3]: Nothing to be done for `all'.
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/postmaster'
+make -C regex all
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/regex'
+make[3]: Nothing to be done for `all'.
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/regex'
+make -C replication all
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/replication'
+make -C logical all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/replication/logical'
+make[4]: Nothing to be done for `all'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/replication/logical'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/replication'
+make -C rewrite all
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/rewrite'
+make[3]: Nothing to be done for `all'.
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/rewrite'
+make -C storage all
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/storage'
+make -C buffer all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/storage/buffer'
+make[4]: Nothing to be done for `all'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/storage/buffer'
+make -C file all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/storage/file'
+make[4]: Nothing to be done for `all'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/storage/file'
+make -C freespace all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/storage/freespace'
+make[4]: Nothing to be done for `all'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/storage/freespace'
+make -C ipc all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/storage/ipc'
+make[4]: Nothing to be done for `all'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/storage/ipc'
+make -C large_object all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/storage/large_object'
+make[4]: Nothing to be done for `all'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/storage/large_object'
+make -C lmgr all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/storage/lmgr'
+make[4]: Nothing to be done for `all'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/storage/lmgr'
+make -C page all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/storage/page'
+make[4]: Nothing to be done for `all'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/storage/page'
+make -C smgr all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/storage/smgr'
+make[4]: Nothing to be done for `all'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/storage/smgr'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/storage'
+make -C tcop all
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/tcop'
+make[3]: Nothing to be done for `all'.
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/tcop'
+make -C tsearch all
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/tsearch'
+make[3]: Nothing to be done for `all'.
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/tsearch'
+make -C utils all
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils'
+make -C adt all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/adt'
+make[4]: Nothing to be done for `all'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/adt'
+make -C cache all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/cache'
+make[4]: Nothing to be done for `all'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/cache'
+make -C error all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/error'
+make[4]: Nothing to be done for `all'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/error'
+make -C fmgr all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/fmgr'
+make[4]: Nothing to be done for `all'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/fmgr'
+make -C hash all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/hash'
+make[4]: Nothing to be done for `all'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/hash'
+make -C init all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/init'
+make[4]: Nothing to be done for `all'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/init'
+make -C mb all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb'
+make[4]: Nothing to be done for `all'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb'
+make -C misc all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/misc'
+make[4]: Nothing to be done for `all'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/misc'
+make -C mmgr all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mmgr'
+make[4]: Nothing to be done for `all'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mmgr'
+make -C resowner all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/resowner'
+make[4]: Nothing to be done for `all'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/resowner'
+make -C sort all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/sort'
+make[4]: Nothing to be done for `all'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/sort'
+make -C time all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/time'
+make[4]: Nothing to be done for `all'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/time'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils'
+make -C ../../src/timezone all
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/timezone'
+make -C ../../src/port all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/port'
+make -C ../backend submake-errcodes
+make[5]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[5]: Nothing to be done for `submake-errcodes'.
+make[5]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/port'
+make -C ../../src/common all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/common'
+make -C ../backend submake-errcodes
+make[5]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[5]: Nothing to be done for `submake-errcodes'.
+make[5]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/common'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/timezone'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/bin' '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/share/postgresql'
+/usr/bin/install -c  postgres '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/bin/postgres'
+ln -s postgres '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/bin/postmaster'
+make -C catalog install-data
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/catalog'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/share/postgresql'
+/usr/bin/install -c -m 644 `for f in ./postgres.bki; do test -r $f && echo $f && break; done` '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/share/postgresql/postgres.bki'
+/usr/bin/install -c -m 644 `for f in ./postgres.description; do test -r $f && echo $f && break; done` '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/share/postgresql/postgres.description'
+/usr/bin/install -c -m 644 `for f in ./postgres.shdescription; do test -r $f && echo $f && break; done` '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/share/postgresql/postgres.shdescription'
+/usr/bin/install -c -m 644 ./system_views.sql '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/share/postgresql/system_views.sql'
+/usr/bin/install -c -m 644 ./information_schema.sql '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/share/postgresql/information_schema.sql'
+/usr/bin/install -c -m 644 ./sql_features.txt '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/share/postgresql/sql_features.txt'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/catalog'
+make -C tsearch install-data
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/tsearch'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/share/postgresql' '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/share/postgresql/tsearch_data'
+/usr/bin/install -c -m 644 ./synonym_sample.syn ./thesaurus_sample.ths ./hunspell_sample.affix ./ispell_sample.affix ./ispell_sample.dict '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/share/postgresql/tsearch_data/'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/tsearch'
+/usr/bin/install -c -m 644 ./libpq/pg_hba.conf.sample '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/share/postgresql/pg_hba.conf.sample'
+/usr/bin/install -c -m 644 ./libpq/pg_ident.conf.sample '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/share/postgresql/pg_ident.conf.sample'
+/usr/bin/install -c -m 644 ./utils/misc/postgresql.conf.sample '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/share/postgresql/postgresql.conf.sample'
+/usr/bin/install -c -m 644 ./access/transam/recovery.conf.sample '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/share/postgresql/recovery.conf.sample'
+make[2]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make -C backend/utils/mb/conversion_procs install
+make[2]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs'
+make -C ascii_and_mic installdirs
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/ascii_and_mic'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/ascii_and_mic'
+make -C cyrillic_and_mic installdirs
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/cyrillic_and_mic'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/cyrillic_and_mic'
+make -C euc_cn_and_mic installdirs
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/euc_cn_and_mic'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/euc_cn_and_mic'
+make -C euc_jp_and_sjis installdirs
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/euc_jp_and_sjis'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/euc_jp_and_sjis'
+make -C euc_kr_and_mic installdirs
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/euc_kr_and_mic'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/euc_kr_and_mic'
+make -C euc_tw_and_big5 installdirs
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/euc_tw_and_big5'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/euc_tw_and_big5'
+make -C latin2_and_win1250 installdirs
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/latin2_and_win1250'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/latin2_and_win1250'
+make -C latin_and_mic installdirs
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/latin_and_mic'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/latin_and_mic'
+make -C utf8_and_ascii installdirs
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_ascii'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_ascii'
+make -C utf8_and_big5 installdirs
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_big5'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_big5'
+make -C utf8_and_cyrillic installdirs
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_cyrillic'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_cyrillic'
+make -C utf8_and_euc_cn installdirs
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_euc_cn'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_euc_cn'
+make -C utf8_and_euc_jp installdirs
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_euc_jp'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_euc_jp'
+make -C utf8_and_euc_kr installdirs
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_euc_kr'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_euc_kr'
+make -C utf8_and_euc_tw installdirs
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_euc_tw'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_euc_tw'
+make -C utf8_and_gb18030 installdirs
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_gb18030'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_gb18030'
+make -C utf8_and_gbk installdirs
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_gbk'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_gbk'
+make -C utf8_and_iso8859 installdirs
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_iso8859'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_iso8859'
+make -C utf8_and_iso8859_1 installdirs
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_iso8859_1'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_iso8859_1'
+make -C utf8_and_johab installdirs
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_johab'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_johab'
+make -C utf8_and_sjis installdirs
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_sjis'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_sjis'
+make -C utf8_and_win installdirs
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_win'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_win'
+make -C utf8_and_uhc installdirs
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_uhc'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_uhc'
+make -C utf8_and_euc2004 installdirs
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_euc2004'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_euc2004'
+make -C utf8_and_sjis2004 installdirs
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_sjis2004'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_sjis2004'
+make -C euc2004_sjis2004 installdirs
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/euc2004_sjis2004'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/euc2004_sjis2004'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/share/postgresql' '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+make -C ascii_and_mic install
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/ascii_and_mic'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+/usr/bin/install -c -m 755  ascii_and_mic.so '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql/ascii_and_mic.so'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/ascii_and_mic'
+make -C cyrillic_and_mic install
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/cyrillic_and_mic'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+/usr/bin/install -c -m 755  cyrillic_and_mic.so '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql/cyrillic_and_mic.so'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/cyrillic_and_mic'
+make -C euc_cn_and_mic install
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/euc_cn_and_mic'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+/usr/bin/install -c -m 755  euc_cn_and_mic.so '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql/euc_cn_and_mic.so'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/euc_cn_and_mic'
+make -C euc_jp_and_sjis install
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/euc_jp_and_sjis'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+/usr/bin/install -c -m 755  euc_jp_and_sjis.so '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql/euc_jp_and_sjis.so'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/euc_jp_and_sjis'
+make -C euc_kr_and_mic install
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/euc_kr_and_mic'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+/usr/bin/install -c -m 755  euc_kr_and_mic.so '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql/euc_kr_and_mic.so'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/euc_kr_and_mic'
+make -C euc_tw_and_big5 install
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/euc_tw_and_big5'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+/usr/bin/install -c -m 755  euc_tw_and_big5.so '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql/euc_tw_and_big5.so'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/euc_tw_and_big5'
+make -C latin2_and_win1250 install
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/latin2_and_win1250'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+/usr/bin/install -c -m 755  latin2_and_win1250.so '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql/latin2_and_win1250.so'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/latin2_and_win1250'
+make -C latin_and_mic install
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/latin_and_mic'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+/usr/bin/install -c -m 755  latin_and_mic.so '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql/latin_and_mic.so'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/latin_and_mic'
+make -C utf8_and_ascii install
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_ascii'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+/usr/bin/install -c -m 755  utf8_and_ascii.so '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql/utf8_and_ascii.so'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_ascii'
+make -C utf8_and_big5 install
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_big5'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+/usr/bin/install -c -m 755  utf8_and_big5.so '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql/utf8_and_big5.so'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_big5'
+make -C utf8_and_cyrillic install
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_cyrillic'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+/usr/bin/install -c -m 755  utf8_and_cyrillic.so '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql/utf8_and_cyrillic.so'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_cyrillic'
+make -C utf8_and_euc_cn install
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_euc_cn'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+/usr/bin/install -c -m 755  utf8_and_euc_cn.so '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql/utf8_and_euc_cn.so'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_euc_cn'
+make -C utf8_and_euc_jp install
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_euc_jp'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+/usr/bin/install -c -m 755  utf8_and_euc_jp.so '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql/utf8_and_euc_jp.so'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_euc_jp'
+make -C utf8_and_euc_kr install
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_euc_kr'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+/usr/bin/install -c -m 755  utf8_and_euc_kr.so '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql/utf8_and_euc_kr.so'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_euc_kr'
+make -C utf8_and_euc_tw install
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_euc_tw'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+/usr/bin/install -c -m 755  utf8_and_euc_tw.so '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql/utf8_and_euc_tw.so'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_euc_tw'
+make -C utf8_and_gb18030 install
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_gb18030'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+/usr/bin/install -c -m 755  utf8_and_gb18030.so '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql/utf8_and_gb18030.so'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_gb18030'
+make -C utf8_and_gbk install
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_gbk'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+/usr/bin/install -c -m 755  utf8_and_gbk.so '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql/utf8_and_gbk.so'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_gbk'
+make -C utf8_and_iso8859 install
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_iso8859'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+/usr/bin/install -c -m 755  utf8_and_iso8859.so '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql/utf8_and_iso8859.so'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_iso8859'
+make -C utf8_and_iso8859_1 install
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_iso8859_1'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+/usr/bin/install -c -m 755  utf8_and_iso8859_1.so '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql/utf8_and_iso8859_1.so'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_iso8859_1'
+make -C utf8_and_johab install
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_johab'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+/usr/bin/install -c -m 755  utf8_and_johab.so '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql/utf8_and_johab.so'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_johab'
+make -C utf8_and_sjis install
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_sjis'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+/usr/bin/install -c -m 755  utf8_and_sjis.so '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql/utf8_and_sjis.so'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_sjis'
+make -C utf8_and_win install
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_win'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+/usr/bin/install -c -m 755  utf8_and_win.so '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql/utf8_and_win.so'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_win'
+make -C utf8_and_uhc install
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_uhc'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+/usr/bin/install -c -m 755  utf8_and_uhc.so '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql/utf8_and_uhc.so'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_uhc'
+make -C utf8_and_euc2004 install
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_euc2004'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+/usr/bin/install -c -m 755  utf8_and_euc2004.so '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql/utf8_and_euc2004.so'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_euc2004'
+make -C utf8_and_sjis2004 install
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_sjis2004'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+/usr/bin/install -c -m 755  utf8_and_sjis2004.so '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql/utf8_and_sjis2004.so'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/utf8_and_sjis2004'
+make -C euc2004_sjis2004 install
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/euc2004_sjis2004'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+/usr/bin/install -c -m 755  euc2004_sjis2004.so '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql/euc2004_sjis2004.so'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs/euc2004_sjis2004'
+/usr/bin/install -c -m 644 conversion_create.sql '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/share/postgresql'
+make[2]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/utils/mb/conversion_procs'
+make -C backend/snowball install
+make[2]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/snowball'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/share/postgresql' '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/share/postgresql/tsearch_data'
+/usr/bin/install -c -m 755  dict_snowball.so '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql/dict_snowball.so'
+/usr/bin/install -c -m 644 snowball_create.sql '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/share/postgresql'
+make[2]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/snowball'
+make -C include install
+make[2]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/include'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/libpq' '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/internal/libpq'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server'/access '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server'/bootstrap '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server'/catalog '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server'/commands '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server'/common '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server'/datatype '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server'/executor '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server'/foreign '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server'/lib '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server'/libpq '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server'/mb '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server'/nodes '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server'/optimizer '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server'/parser '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server'/postmaster '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server'/regex '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server'/replication '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server'/rewrite '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server'/storage '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server'/tcop '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server'/snowball '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server'/snowball/libstemmer '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server'/tsearch '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server'/tsearch/dicts '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server'/utils '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server'/port '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server'/port/atomics '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server'/port/win32 '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server'/port/win32_msvc '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server'/port/win32_msvc/sys '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server'/port/win32/arpa '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server'/port/win32/netinet '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server'/port/win32/sys '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server'/portability
+/usr/bin/install -c -m 644 ./postgres_ext.h   '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include'
+/usr/bin/install -c -m 644 ./libpq/libpq-fs.h '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/libpq'
+/usr/bin/install -c -m 644 pg_config.h     '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include'
+/usr/bin/install -c -m 644 pg_config_ext.h '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include'
+/usr/bin/install -c -m 644 pg_config_os.h  '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include'
+/usr/bin/install -c -m 644 ./pg_config_manual.h '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include'
+/usr/bin/install -c -m 644 ./c.h            '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/internal'
+/usr/bin/install -c -m 644 ./port.h         '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/internal'
+/usr/bin/install -c -m 644 ./postgres_fe.h  '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/internal'
+/usr/bin/install -c -m 644 ./libpq/pqcomm.h '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/internal/libpq'
+/usr/bin/install -c -m 644 pg_config.h     '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server'
+/usr/bin/install -c -m 644 pg_config_ext.h '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server'
+/usr/bin/install -c -m 644 pg_config_os.h  '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server'
+/usr/bin/install -c -m 644 utils/errcodes.h '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server/utils'
+/usr/bin/install -c -m 644 utils/fmgroids.h '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server/utils'
+cp ./*.h '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server'/ || exit; \
+chmod 644 '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server'/*.h  || exit; \
+for dir in access bootstrap catalog commands common datatype executor foreign lib libpq mb nodes optimizer parser postmaster regex replication rewrite storage tcop snowball snowball/libstemmer tsearch tsearch/dicts utils port port/atomics port/win32 port/win32_msvc port/win32_msvc/sys port/win32/arpa port/win32/netinet port/win32/sys portability; do \
+  cp ./$dir/*.h '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server'/$dir/ || exit; \
+  chmod 644 '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server'/$dir/*.h  || exit; \
+done
+make[2]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/include'
+make -C interfaces install
+make[2]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/interfaces'
+make -C libpq install
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/interfaces/libpq'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64' '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/pkgconfig'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include' '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/internal' '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/share/postgresql'
+/usr/bin/install -c -m 755  libpq.so.5.8 '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/libpq.so.5.8'
+cd '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64' && \
+rm -f libpq.so.5 && \
+ln -s libpq.so.5.8 libpq.so.5
+cd '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64' && \
+rm -f libpq.so && \
+ln -s libpq.so.5.8 libpq.so
+/usr/bin/install -c -m 644  libpq.a '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/libpq.a'
+/usr/bin/install -c -m 644 libpq.pc '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/pkgconfig/libpq.pc'
+/usr/bin/install -c -m 644 ./libpq-fe.h '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include'
+/usr/bin/install -c -m 644 ./libpq-events.h '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include'
+/usr/bin/install -c -m 644 ./libpq-int.h '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/internal'
+/usr/bin/install -c -m 644 ./pqexpbuffer.h '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/internal'
+/usr/bin/install -c -m 644 ./pg_service.conf.sample '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/share/postgresql/pg_service.conf.sample'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/interfaces/libpq'
+make -C ecpg install
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/interfaces/ecpg'
+make -C include install
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/interfaces/ecpg/include'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include' '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/informix/esql'
+/usr/bin/install -c -m 644 ./ecpgerrno.h ./ecpglib.h ./ecpgtype.h ./sqlca.h ./sql3types.h ./ecpg_informix.h ./pgtypes_error.h ./pgtypes_numeric.h ./pgtypes_timestamp.h ./pgtypes_date.h ./pgtypes_interval.h ./sqlda.h ./sqlda-compat.h ./sqlda-native.h '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/'
+/usr/bin/install -c -m 644 ./datetime.h ./decimal.h ./sqltypes.h '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/informix/esql/'
+/usr/bin/install -c -m 644 ../../../../src/interfaces/ecpg/include/ecpg_config.h '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include'
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/interfaces/ecpg/include'
+make -C pgtypeslib install
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/interfaces/ecpg/pgtypeslib'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64' '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/pkgconfig'
+/usr/bin/install -c -m 755  libpgtypes.so.3.6 '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/libpgtypes.so.3.6'
+cd '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64' && \
+rm -f libpgtypes.so.3 && \
+ln -s libpgtypes.so.3.6 libpgtypes.so.3
+cd '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64' && \
+rm -f libpgtypes.so && \
+ln -s libpgtypes.so.3.6 libpgtypes.so
+/usr/bin/install -c -m 644  libpgtypes.a '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/libpgtypes.a'
+/usr/bin/install -c -m 644 libpgtypes.pc '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/pkgconfig/libpgtypes.pc'
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/interfaces/ecpg/pgtypeslib'
+make -C ecpglib install
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/interfaces/ecpg/ecpglib'
+make -C ../../../../src/interfaces/libpq all
+make[5]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/interfaces/libpq'
+make[5]: Nothing to be done for `all'.
+make[5]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/interfaces/libpq'
+make -C ../../../../src/interfaces/ecpg/pgtypeslib all
+make[5]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/interfaces/ecpg/pgtypeslib'
+make[5]: Nothing to be done for `all'.
+make[5]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/interfaces/ecpg/pgtypeslib'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64' '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/pkgconfig'
+/usr/bin/install -c -m 755  libecpg.so.6.7 '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/libecpg.so.6.7'
+cd '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64' && \
+rm -f libecpg.so.6 && \
+ln -s libecpg.so.6.7 libecpg.so.6
+cd '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64' && \
+rm -f libecpg.so && \
+ln -s libecpg.so.6.7 libecpg.so
+/usr/bin/install -c -m 644  libecpg.a '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/libecpg.a'
+/usr/bin/install -c -m 644 libecpg.pc '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/pkgconfig/libecpg.pc'
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/interfaces/ecpg/ecpglib'
+make -C compatlib install
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/interfaces/ecpg/compatlib'
+make -C ../../../../src/interfaces/ecpg/ecpglib all
+make[5]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/interfaces/ecpg/ecpglib'
+make -C ../../../../src/interfaces/libpq all
+make[6]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/interfaces/libpq'
+make[6]: Nothing to be done for `all'.
+make[6]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/interfaces/libpq'
+make -C ../../../../src/interfaces/ecpg/pgtypeslib all
+make[6]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/interfaces/ecpg/pgtypeslib'
+make[6]: Nothing to be done for `all'.
+make[6]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/interfaces/ecpg/pgtypeslib'
+make[5]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/interfaces/ecpg/ecpglib'
+make -C ../../../../src/interfaces/ecpg/pgtypeslib all
+make[5]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/interfaces/ecpg/pgtypeslib'
+make[5]: Nothing to be done for `all'.
+make[5]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/interfaces/ecpg/pgtypeslib'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64' '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/pkgconfig'
+/usr/bin/install -c -m 755  libecpg_compat.so.3.7 '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/libecpg_compat.so.3.7'
+cd '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64' && \
+rm -f libecpg_compat.so.3 && \
+ln -s libecpg_compat.so.3.7 libecpg_compat.so.3
+cd '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64' && \
+rm -f libecpg_compat.so && \
+ln -s libecpg_compat.so.3.7 libecpg_compat.so
+/usr/bin/install -c -m 644  libecpg_compat.a '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/libecpg_compat.a'
+/usr/bin/install -c -m 644 libecpg_compat.pc '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/pkgconfig/libecpg_compat.pc'
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/interfaces/ecpg/compatlib'
+make -C preproc install
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/interfaces/ecpg/preproc'
+make -C ../../../../src/port all
+make[5]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/port'
+make -C ../backend submake-errcodes
+make[6]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[6]: Nothing to be done for `submake-errcodes'.
+make[6]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[5]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/port'
+make -C ../../../../src/common all
+make[5]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/common'
+make -C ../backend submake-errcodes
+make[6]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[6]: Nothing to be done for `submake-errcodes'.
+make[6]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[5]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/common'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/bin'
+/usr/bin/install -c  ecpg '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/bin'
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/interfaces/ecpg/preproc'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/interfaces/ecpg'
+make[2]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/interfaces'
+make -C backend/replication/libpqwalreceiver install
+make[2]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/replication/libpqwalreceiver'
+make -C ../../../../src/interfaces/libpq all
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/interfaces/libpq'
+make[3]: Nothing to be done for `all'.
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/interfaces/libpq'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+/usr/bin/install -c -m 755  libpqwalreceiver.so '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql/libpqwalreceiver.so'
+make[2]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend/replication/libpqwalreceiver'
+make -C bin install
+make[2]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/bin'
+make -C initdb install
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/bin/initdb'
+make -C ../../../src/port all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/port'
+make -C ../backend submake-errcodes
+make[5]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[5]: Nothing to be done for `submake-errcodes'.
+make[5]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/port'
+make -C ../../../src/common all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/common'
+make -C ../backend submake-errcodes
+make[5]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[5]: Nothing to be done for `submake-errcodes'.
+make[5]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/common'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/bin'
+/usr/bin/install -c  initdb '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/bin/initdb'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/bin/initdb'
+make -C pg_ctl install
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/bin/pg_ctl'
+make -C ../../../src/interfaces/libpq all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/interfaces/libpq'
+make[4]: Nothing to be done for `all'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/interfaces/libpq'
+make -C ../../../src/port all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/port'
+make -C ../backend submake-errcodes
+make[5]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[5]: Nothing to be done for `submake-errcodes'.
+make[5]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/port'
+make -C ../../../src/common all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/common'
+make -C ../backend submake-errcodes
+make[5]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[5]: Nothing to be done for `submake-errcodes'.
+make[5]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/common'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/bin'
+/usr/bin/install -c  pg_ctl '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/bin/pg_ctl'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/bin/pg_ctl'
+make -C pg_dump install
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/bin/pg_dump'
+make -C ../../../src/interfaces/libpq all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/interfaces/libpq'
+make[4]: Nothing to be done for `all'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/interfaces/libpq'
+make -C ../../../src/port all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/port'
+make -C ../backend submake-errcodes
+make[5]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[5]: Nothing to be done for `submake-errcodes'.
+make[5]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/port'
+make -C ../../../src/common all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/common'
+make -C ../backend submake-errcodes
+make[5]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[5]: Nothing to be done for `submake-errcodes'.
+make[5]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/common'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/bin'
+/usr/bin/install -c  pg_dump '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/bin'/pg_dump
+/usr/bin/install -c  pg_restore '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/bin'/pg_restore
+/usr/bin/install -c  pg_dumpall '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/bin'/pg_dumpall
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/bin/pg_dump'
+make -C psql install
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/bin/psql'
+make -C ../../../src/interfaces/libpq all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/interfaces/libpq'
+make[4]: Nothing to be done for `all'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/interfaces/libpq'
+make -C ../../../src/port all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/port'
+make -C ../backend submake-errcodes
+make[5]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[5]: Nothing to be done for `submake-errcodes'.
+make[5]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/port'
+make -C ../../../src/common all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/common'
+make -C ../backend submake-errcodes
+make[5]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[5]: Nothing to be done for `submake-errcodes'.
+make[5]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/common'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/bin' '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/share/postgresql'
+/usr/bin/install -c  psql '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/bin/psql'
+/usr/bin/install -c -m 644 ./psqlrc.sample '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/share/postgresql/psqlrc.sample'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/bin/psql'
+make -C scripts install
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/bin/scripts'
+make -C ../../../src/interfaces/libpq all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/interfaces/libpq'
+make[4]: Nothing to be done for `all'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/interfaces/libpq'
+make -C ../../../src/port all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/port'
+make -C ../backend submake-errcodes
+make[5]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[5]: Nothing to be done for `submake-errcodes'.
+make[5]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/port'
+make -C ../../../src/common all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/common'
+make -C ../backend submake-errcodes
+make[5]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[5]: Nothing to be done for `submake-errcodes'.
+make[5]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/common'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/bin'
+/usr/bin/install -c  createdb   '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/bin'/createdb
+/usr/bin/install -c  dropdb     '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/bin'/dropdb
+/usr/bin/install -c  createlang '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/bin'/createlang
+/usr/bin/install -c  droplang   '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/bin'/droplang
+/usr/bin/install -c  createuser '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/bin'/createuser
+/usr/bin/install -c  dropuser   '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/bin'/dropuser
+/usr/bin/install -c  clusterdb  '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/bin'/clusterdb
+/usr/bin/install -c  vacuumdb   '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/bin'/vacuumdb
+/usr/bin/install -c  reindexdb  '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/bin'/reindexdb
+/usr/bin/install -c  pg_isready '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/bin'/pg_isready
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/bin/scripts'
+make -C pg_config install
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/bin/pg_config'
+make -C ../../../src/port all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/port'
+make -C ../backend submake-errcodes
+make[5]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[5]: Nothing to be done for `submake-errcodes'.
+make[5]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/port'
+make -C ../../../src/common all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/common'
+make -C ../backend submake-errcodes
+make[5]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[5]: Nothing to be done for `submake-errcodes'.
+make[5]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/common'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/bin'
+/usr/bin/install -c -m 755 pg_config '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/bin/pg_config'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/bin/pg_config'
+make -C pg_controldata install
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/bin/pg_controldata'
+make -C ../../../src/port all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/port'
+make -C ../backend submake-errcodes
+make[5]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[5]: Nothing to be done for `submake-errcodes'.
+make[5]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/port'
+make -C ../../../src/common all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/common'
+make -C ../backend submake-errcodes
+make[5]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[5]: Nothing to be done for `submake-errcodes'.
+make[5]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/common'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/bin'
+/usr/bin/install -c  pg_controldata '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/bin/pg_controldata'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/bin/pg_controldata'
+make -C pg_resetxlog install
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/bin/pg_resetxlog'
+make -C ../../../src/port all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/port'
+make -C ../backend submake-errcodes
+make[5]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[5]: Nothing to be done for `submake-errcodes'.
+make[5]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/port'
+make -C ../../../src/common all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/common'
+make -C ../backend submake-errcodes
+make[5]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[5]: Nothing to be done for `submake-errcodes'.
+make[5]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/common'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/bin'
+/usr/bin/install -c  pg_resetxlog '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/bin/pg_resetxlog'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/bin/pg_resetxlog'
+make -C pg_basebackup install
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/bin/pg_basebackup'
+make -C ../../../src/interfaces/libpq all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/interfaces/libpq'
+make[4]: Nothing to be done for `all'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/interfaces/libpq'
+make -C ../../../src/port all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/port'
+make -C ../backend submake-errcodes
+make[5]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[5]: Nothing to be done for `submake-errcodes'.
+make[5]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/port'
+make -C ../../../src/common all
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/common'
+make -C ../backend submake-errcodes
+make[5]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[5]: Nothing to be done for `submake-errcodes'.
+make[5]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/common'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/bin'
+/usr/bin/install -c  pg_basebackup '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/bin/pg_basebackup'
+/usr/bin/install -c  pg_receivexlog '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/bin/pg_receivexlog'
+/usr/bin/install -c  pg_recvlogical '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/bin/pg_recvlogical'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/bin/pg_basebackup'
+make[2]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/bin'
+make -C pl install
+make[2]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/pl'
+make -C plpgsql install
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/pl/plpgsql'
+make -C src install
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/pl/plpgsql/src'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql'
+/usr/bin/install -c -m 755  plpgsql.so '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql/plpgsql.so'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/share/postgresql/extension'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server'
+/usr/bin/install -c -m 644 ./plpgsql.control ./plpgsql--1.0.sql ./plpgsql--unpackaged--1.0.sql '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/share/postgresql/extension/'
+/usr/bin/install -c -m 644 './plpgsql.h' '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/include/postgresql/server'
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/pl/plpgsql/src'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/pl/plpgsql'
+make[2]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/pl'
+make -C makefiles install
+make[2]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/makefiles'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql/pgxs/src/makefiles'
+/usr/bin/install -c -m 644 ./pgxs.mk '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql/pgxs/src/makefiles/'
+make[2]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/makefiles'
+make -C test/regress install
+make[2]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress'
+make -C ../../../src/port all
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/port'
+make -C ../backend submake-errcodes
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[4]: Nothing to be done for `submake-errcodes'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/port'
+make -C ../../../src/common all
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/common'
+make -C ../backend submake-errcodes
+make[4]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[4]: Nothing to be done for `submake-errcodes'.
+make[4]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/backend'
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/common'
+make -C ../../../contrib/spi
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/contrib/spi'
+make[3]: Nothing to be done for `all'.
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/contrib/spi'
+make -C ../../../contrib/dummy_seclabel
+make[3]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/contrib/dummy_seclabel'
+make[3]: Nothing to be done for `all'.
+make[3]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/contrib/dummy_seclabel'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql/pgxs/src/test/regress'
+/usr/bin/install -c  pg_regress '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql/pgxs/src/test/regress/pg_regress'
+make[2]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql/pgxs/src'
+/usr/bin/install -c -m 644 Makefile.global '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql/pgxs/src/Makefile.global'
+/usr/bin/install -c -m 644 Makefile.port '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql/pgxs/src/Makefile.port'
+/usr/bin/install -c -m 644 ./Makefile.shlib '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql/pgxs/src/Makefile.shlib'
+/usr/bin/install -c -m 644 ./nls-global.mk '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql/pgxs/src/nls-global.mk'
+make[1]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/src'
+make -C config install
+make[1]: Entering directory `/space/sda1/ibarwick/2ndquadrant_bdr/config'
+/usr/bin/mkdir -p '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql/pgxs/config'
+/usr/bin/install -c -m 755 ./install-sh '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/./tmp_check/install/home/ibarwick/devel/builds/DEPARSE/lib64/postgresql/pgxs/config/install-sh'
+make[1]: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr/config'
+PostgreSQL installation complete.
+make: Leaving directory `/space/sda1/ibarwick/2ndquadrant_bdr'

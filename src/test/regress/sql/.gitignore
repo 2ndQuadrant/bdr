@@ -6,7 +6,3 @@
 /misc.sql
 /security_label.sql
 /tablespace.sql
-/create_function_ddl_demo.sql
-/deparse_init.sql
-/deparse_test.sql
-/deparse_dump.sql
