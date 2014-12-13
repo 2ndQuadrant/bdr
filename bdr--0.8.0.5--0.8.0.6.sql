@@ -94,7 +94,10 @@ DECLARE
     v_label json;
     nodeid record;
 BEGIN
+    -- Only one tx can be adding connections
     LOCK TABLE bdr.bdr_connections IN EXCLUSIVE MODE;
+    -- Deny concurrent security label changes
+    LOCK TABLE pg_catalog.pg_shseclabel IN EXCLUSIVE MODE;
 
     -- We're doing a read-modify-write on our seclabel entry, so try to avoid
     -- races. This won't lock out writers from other DBs, but we only ever

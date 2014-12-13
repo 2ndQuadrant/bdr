@@ -122,8 +122,14 @@ bdr_supervisor_rescan_dbs()
 	 *
 	 * The only index present isn't much use for this scan and using it makes
 	 * us set up more keys, so do a heap scan.
+	 *
+	 * The lock taken on pg_shseclabel must be strong enough to conflict with
+	 * the lock taken be bdr.bdr_connection_add(...) to ensure that any
+	 * transactions adding new labels have commited and cleaned up before we
+	 * read it. Otherwise a race between the supervisor latch being set in a
+	 * commit hook and the tuples actually becoming visible is possible.
 	 */
-	secrel = heap_open(SharedSecLabelRelationId, AccessShareLock);
+	secrel = heap_open(SharedSecLabelRelationId, RowShareLock);
 
 	ScanKeyInit(&skey[0],
 				Anum_pg_shseclabel_classoid,
@@ -208,7 +214,7 @@ bdr_supervisor_rescan_dbs()
 	LWLockRelease(BdrWorkerCtl->lock);
 
 	systable_endscan(scan);
-	heap_close(secrel, AccessShareLock);
+	heap_close(secrel, RowShareLock);
 
 	CommitTransactionCommand();
 
