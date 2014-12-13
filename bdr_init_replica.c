@@ -500,7 +500,8 @@ bdr_exec_init_replica(BdrConnectionConfig *cfg, char *snapshot)
 	char *bindir;
 	char *tmpdir;
 	char  bdr_init_replica_script_path[MAXPGPATH];
-	const char *envvar;
+	char  bdr_dump_path[MAXPGPATH];
+	char  bdr_restore_path[MAXPGPATH];
 	StringInfoData path;
 	StringInfoData origin_dsn;
 	StringInfoData local_dsn;
@@ -518,9 +519,28 @@ bdr_exec_init_replica(BdrConnectionConfig *cfg, char *snapshot)
 	                    &bdr_init_replica_script_path[0]) < 0)
 	{
 		elog(ERROR, "bdr: failed to find " BDR_INIT_REPLICA_CMD
-			 " in Pg bin dir or wrong version (expected %s)",
-			 PG_VERSION);
+			 " relative to binary %s or wrong version (expected %s)",
+			 my_exec_path, PG_VERSION);
 	}
+
+	if (find_other_exec(my_exec_path, BDR_DUMP_CMD,
+	                    "pg_dump (PostgreSQL) " PG_VERSION "\n",
+	                    &bdr_dump_path[0]) < 0)
+	{
+		elog(ERROR, "bdr: failed to find " BDR_DUMP_CMD
+			 " relative to binary %s or wrong version (expected %s)",
+			 my_exec_path, PG_VERSION);
+	}
+
+	if (find_other_exec(my_exec_path, BDR_RESTORE_CMD,
+	                    BDR_RESTORE_CMD " (PostgreSQL) " PG_VERSION "\n",
+	                    &bdr_restore_path[0]) < 0)
+	{
+		elog(ERROR, "bdr: failed to find " BDR_RESTORE_CMD
+			 " relative to binary %s or wrong version (expected %s)",
+			 my_exec_path, PG_VERSION);
+	}
+
 
 	appendStringInfo(&origin_dsn,
 					 "%s fallback_application_name='"BDR_LOCALID_FORMAT": %s: init_replica dump'",
@@ -563,35 +583,24 @@ bdr_exec_init_replica(BdrConnectionConfig *cfg, char *snapshot)
 	{
 		int n = 0;
 
-		char * envp[] = {
-			NULL, /* to be replaced with PATH */
-			NULL
-		};
 		char *const argv[] = {
 			bdr_init_replica_script_path,
 			"--snapshot", snapshot,
 			"--source", origin_dsn.data,
 			"--target", local_dsn.data,
 			"--tmp-directory", tmpdir,
+			"--pg-dump-path", bdr_dump_path,
+			"--pg-restore-path", bdr_restore_path,
 			NULL
 		};
 
-		envvar = getenv("PATH");
-		appendStringInfoString(&path, "PATH=");
-		appendStringInfoString(&path, bindir);
-		if (envvar != NULL)
-		{
-			appendStringInfoString(&path, ":");
-			appendStringInfoString(&path, envvar);
-		}
-		envp[0] = path.data;
-
 		ereport(LOG,
-				(errmsg("Creating replica with: %s --snapshot %s --source \"%s\" --target \"%s\" --tmp-directory \"%s\"",
+				(errmsg("Creating replica with: %s --snapshot %s --source \"%s\" --target \"%s\" --tmp-directory \"%s\", --pg-dump-path \"%s\", --pg-restore-path \"%s\"",
 						bdr_init_replica_script_path, snapshot, cfg->dsn,
-						cfg->replica_local_dsn, tmpdir)));
+						cfg->replica_local_dsn, tmpdir,
+						bdr_dump_path, bdr_restore_path)));
 
-		n = execve(bdr_init_replica_script_path, argv, envp);
+		n = execv(bdr_init_replica_script_path, argv);
 		if (n < 0)
 			_exit(n);
 	}
@@ -703,6 +712,7 @@ bdr_init_replica(Name dbname)
 	if (status == 'r')
 	{
 		/* Already in ready state, nothing more to do */
+		elog(DEBUG2, "init_replica: Already inited");
 		SPI_finish();
 		CommitTransactionCommand();
 		return;
@@ -744,6 +754,7 @@ bdr_init_replica(Name dbname)
 		 * We still have to ensure that bdr.bdr_nodes.status is 'r' for this
 		 * node so that slot creation is permitted.
 		 */
+		elog(DEBUG2, "init_replica: Marking as root/standalone node");
 		bdr_nodes_set_local_status('r');
 	}
 	/*
