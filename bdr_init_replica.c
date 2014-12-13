@@ -644,10 +644,21 @@ bdr_exec_init_replica(BdrConnectionConfig *cfg, char *snapshot)
 #endif
 }
 
+/*
+ * Close a connection if it exists. The connection passed
+ * is a pointer to a *PGconn; if the target is NULL, it's
+ * presumed not inited or already closed and is ignored.
+ */
 static void
 bdr_init_replica_conn_close(int code, Datum connptr)
 {
-	PGconn *conn = (PGconn*) DatumGetPointer(connptr);
+	PGconn **conn_p;
+	PGconn *conn;
+
+	conn_p = (PGconn**) DatumGetPointer(connptr);
+	Assert(conn_p != NULL);
+	conn = *conn_p;
+
 	if (conn == NULL)
 		return;
 	if (PQstatus(conn) != CONNECTION_OK)
@@ -701,6 +712,7 @@ bdr_init_replica(Name dbname)
 	if (status == 'r')
 	{
 		/* Already in ready state, nothing more to do */
+		elog(DEBUG2, "init_replica: Already inited");
 		SPI_finish();
 		CommitTransactionCommand();
 		return;
@@ -760,6 +772,7 @@ bdr_init_replica(Name dbname)
 		 * XXX DYNCONF Lack of init_replica should become an error except for
 		 * the "root" BDR node.
 		 */
+		elog(DEBUG2, "init_replica: Marking as root/standalone node");
 		bdr_nodes_set_local_status('r');
 	}
 
@@ -797,7 +810,7 @@ bdr_init_replica(Name dbname)
 	}
 
 	PG_ENSURE_ERROR_CLEANUP(bdr_init_replica_conn_close,
-							PointerGetDatum(nonrepl_init_conn));
+							PointerGetDatum(&nonrepl_init_conn));
 	{
 		bdr_ensure_ext_installed(nonrepl_init_conn, dbname);
 
@@ -1000,7 +1013,7 @@ bdr_init_replica(Name dbname)
 		status = bdr_set_remote_status(nonrepl_init_conn, 'r', status);
 	}
 	PG_END_ENSURE_ERROR_CLEANUP(bdr_init_replica_conn_close,
-							PointerGetDatum(nonrepl_init_conn));
+							PointerGetDatum(&nonrepl_init_conn));
 
 	elog(INFO, "bdr %s: catchup worker finished, ready for normal replication",
 		 NameStr(*dbname));

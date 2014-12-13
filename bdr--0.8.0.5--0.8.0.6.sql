@@ -88,6 +88,7 @@ RETURNS void LANGUAGE plpgsql VOLATILE
 SET search_path = bdr, pg_catalog
 SET bdr.permit_unsafe_ddl_commands = on
 SET bdr.skip_ddl_replication = on
+SET bdr.skip_ddl_locking = on
 AS $$
 DECLARE
     v_label json;
