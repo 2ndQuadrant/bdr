@@ -338,6 +338,9 @@ bdr_queue_ddl_command(char *command_tag, char *command)
 	Datum			values[5];
 	bool			nulls[5];
 
+	elog(DEBUG2, "node " BDR_LOCALID_FORMAT " enqueuing DDL command \"%s\"",
+		 BDR_LOCALID_FORMAT_ARGS, command);
+
 	/* prepare bdr.bdr_queued_commands for insert */
 	rv = makeRangeVar("bdr", "bdr_queued_commands", -1);
 	queuedcmds = heap_openrv(rv, RowExclusiveLock);
