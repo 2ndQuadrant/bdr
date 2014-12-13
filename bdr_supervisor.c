@@ -9,12 +9,10 @@
 #include "access/skey.h"
 #include "access/xact.h"
 
-#include "catalog/objectaddress.h" //XXX DYNCONF this is temporary
 #include "catalog/pg_database.h"
 #include "catalog/pg_shseclabel.h"
 
 #include "commands/dbcommands.h"
-#include "commands/seclabel.h" //XXX DYNCONF this is temporary
 
 #include "postmaster/bgworker.h"
 
@@ -50,7 +48,7 @@ bdr_register_perdb_worker(const char * dbname)
 	Assert(LWLockHeldByMe(BdrWorkerCtl->lock));
 	Assert(find_perdb_worker_slot(dbname, NULL) == -1);
 
-	elog(DEBUG2, "Registering per-db worker for %s", dbname);
+	elog(DEBUG2, "Registering per-db worker for db %s", dbname);
 
 	worker = bdr_worker_shmem_alloc(
 				BDR_WORKER_PERDB,
@@ -111,6 +109,7 @@ bdr_supervisor_rescan_dbs()
 	ScanKeyData	skey[2];
 	SysScanDesc scan;
 	HeapTuple	secTuple;
+	int			n_new_workers = 0, bdr_dbs = 0;
 
 	elog(DEBUG1, "Supervisor scanning for BDR-enabled databases");
 
@@ -174,6 +173,8 @@ bdr_supervisor_rescan_dbs()
 		elog(DEBUG1, "Found BDR-enabled database %s (oid=%i)",
 			 label_dbname, sec->objoid);
 
+		bdr_dbs++;
+
 		/*
 		 * TODO DYNCONF: Right now the label *value* is completely ignored.
 		 * Instead we should probably be parsing it as json so we can do
@@ -192,12 +193,17 @@ bdr_supervisor_rescan_dbs()
 		{
 			/* No perdb worker exists for this DB, make one */
 			bdr_register_perdb_worker(label_dbname);
+			n_new_workers++;
+		} else {
+			elog(DEBUG2, "per-db worker for db %s already exists, not registering",
+				 label_dbname);
 		}
 
 		pfree(label_dbname);
 	}
 
-	elog(DEBUG2, "Registered all per-db workers");
+	elog(DEBUG2, "Found %i BDR-labeled DBs; registered %i new per-db workers",
+		 bdr_dbs, n_new_workers);
 
 	LWLockRelease(BdrWorkerCtl->lock);
 
