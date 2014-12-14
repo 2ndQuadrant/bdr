@@ -176,7 +176,7 @@ REGRESSCHECKS= \
 
 
 ISOLATIONCHECKS=\
-	isolation/waitforstart \
+	isolation/init \
 	isolation/ddlconflict \
 	isolation/dmlconflict_ii \
 	isolation/dmlconflict_uu \
