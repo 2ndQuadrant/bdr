@@ -1,8 +1,0 @@
-LOG:  database system was shut down at 2014-12-12 15:37:20 JST
-LOG:  autovacuum launcher started
-LOG:  database system is ready to accept connections
-LOG:  received fast shutdown request
-LOG:  aborting any active transactions
-LOG:  autovacuum launcher shutting down
-LOG:  shutting down
-LOG:  database system is shut down

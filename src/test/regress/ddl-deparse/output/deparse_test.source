@@ -34,12 +34,15 @@ COMMENT ON EXTENSION plpgsql IS 'PL/pgSQL procedural language';
 SET search_path = public, pg_catalog;
 
 --
--- Name: check_foreign_key(); Type: FUNCTION; Schema: public; Owner: -
+-- Name: datatype_table_id_seq; Type: SEQUENCE; Schema: public; Owner: -
 --
 
-CREATE FUNCTION check_foreign_key() RETURNS trigger
-    LANGUAGE c
-    AS '@libdir@/refint@DLSUFFIX@', 'check_foreign_key';
+CREATE SEQUENCE datatype_table_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
 
 
 SET default_tablespace = '';
@@ -47,12 +50,13 @@ SET default_tablespace = '';
 SET default_with_oids = false;
 
 --
--- Name: hobbies_r; Type: TABLE; Schema: public; Owner: -; Tablespace: 
+-- Name: fkey_table; Type: TABLE; Schema: public; Owner: -; Tablespace: 
 --
 
-CREATE TABLE hobbies_r (
-    name text,
-    person text
+CREATE TABLE fkey_table (
+    id integer NOT NULL,
+    datatype_id integer NOT NULL,
+    big_id bigint NOT NULL
 );
 
 
