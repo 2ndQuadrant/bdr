@@ -52,6 +52,9 @@ uint16 perdb_worker_idx = -1;
  *
  * Must hold the LWLock on the worker control segment in at
  * least share mode.
+ *
+ * Note that there's no guarantee that the worker is actually
+ * started up.
  */
 int
 find_perdb_worker_slot(const char *dbname, BdrWorker **worker_found)
@@ -86,6 +89,9 @@ find_perdb_worker_slot(const char *dbname, BdrWorker **worker_found)
  *
  * Must hold the LWLock on the worker control segment in at
  * least share mode.
+ *
+ * Note that there's no guarantee that the worker is actually
+ * started up.
  */
 static int
 find_apply_worker_slot(const char *worker_name, BdrWorker **worker_found)
@@ -140,7 +146,20 @@ bdr_perdb_xact_callback(XactEvent event, void *arg)
 				 */
 				slotno = find_perdb_worker_slot(MyProcPort->database_name, &w);
 				if (slotno >= 0)
-					SetLatch(w->worker_data.perdb_worker.proclatch);
+				{
+					/*
+					 * The worker is registered, but might not be started yet
+					 * (or could be crashing and restarting). If it's not
+					 * started the latch will be zero. If it's started but
+					 * dead, the latch will be bogus, but it's safe to set a
+					 * proclatch to a dead process. At worst we'll set a latch
+					 * for the wrong process, and that's fine. If it's zero
+					 * then the worker is still starting and will see our new
+					 * changes anyway.
+					 */
+					if (w->worker_data.perdb_worker.proclatch != NULL)
+						SetLatch(w->worker_data.perdb_worker.proclatch);
+				}
 				else
 				{
 					/*
@@ -431,8 +450,19 @@ bdr_perdb_worker_main(Datum main_arg)
 	/* initialize sequencer */
 	bdr_sequencer_init(bdr_perdb_worker->seq_slot, bdr_perdb_worker->nnodes);
 #endif
+
+	/*
+	 * It's necessary to acquire a a lock here so that a concurrent
+	 * bdr_perdb_xact_callback can't try to set our latch at the same
+	 * time as we write to it.
+	 *
+	 * There's no per-worker lock, so we just take the lock on the
+	 * whole segment.
+	 */
+	LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
 	bdr_perdb_worker->proclatch = &MyProc->procLatch;
 	bdr_perdb_worker->database_oid = MyDatabaseId;
+	LWLockRelease(BdrWorkerCtl->lock);
 
 	while (!got_SIGTERM)
 	{
