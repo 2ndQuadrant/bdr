@@ -13,6 +13,6 @@ test: create_sequence_1
 test: create_table
 test: create_sequence_2
 test: create_function
-
-# Final DDL deparse test
+test: create_view
+# Final DDL deparse test (pg_dump output comparison)
 test: deparse_test

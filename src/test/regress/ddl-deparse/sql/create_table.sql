@@ -84,6 +84,7 @@ CREATE UNLOGGED TABLE unlogged_table (
 CREATE TEMP TABLE temp_table (
     id INT PRIMARY KEY
 );
+
 CREATE TEMP TABLE temp_table_commit_delete (
     id INT PRIMARY KEY
 )
