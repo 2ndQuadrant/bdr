@@ -1212,6 +1212,10 @@ bdr_locks_process_remote_startup(uint64 sysid, TimeLineID tli, Oid datid)
 void
 bdr_locks_check_query(void)
 {
+
+	if (bdr_skip_ddl_locking)
+		return;
+
 	bdr_locks_find_my_database(false);
 
 	/* is the database still starting up and hasn't loaded locks */
