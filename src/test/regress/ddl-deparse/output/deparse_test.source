@@ -21,6 +21,48 @@ SET check_function_bodies = false;
 SET client_min_messages = warning;
 
 --
+-- Name: bar; Type: SCHEMA; Schema: -; Owner: -
+--
+
+CREATE SCHEMA bar;
+
+
+--
+-- Name: baz; Type: SCHEMA; Schema: -; Owner: -
+--
+
+CREATE SCHEMA baz;
+
+
+--
+-- Name: element_test; Type: SCHEMA; Schema: -; Owner: -
+--
+
+CREATE SCHEMA element_test;
+
+
+--
+-- Name: foo; Type: SCHEMA; Schema: -; Owner: -
+--
+
+CREATE SCHEMA foo;
+
+
+--
+-- Name: SCHEMA foo; Type: COMMENT; Schema: -; Owner: -
+--
+
+COMMENT ON SCHEMA foo IS 'This is schema foo';
+
+
+--
+-- Name: zzz; Type: SCHEMA; Schema: -; Owner: -
+--
+
+CREATE SCHEMA zzz;
+
+
+--
 -- Name: plpgsql; Type: EXTENSION; Schema: -; Owner: -
 --
 
@@ -90,7 +132,7 @@ $$;
 --
 
 CREATE FUNCTION plpgsql_function_srf(v_input text DEFAULT 'foo'::text) RETURNS SETOF text
-    LANGUAGE plpgsql IMMUTABLE ROWS 2
+    LANGUAGE plpgsql IMMUTABLE STRICT SECURITY DEFINER LEAKPROOF ROWS 3
     AS $$
 BEGIN
   RETURN NEXT 'Input value:';
@@ -132,9 +174,31 @@ CREATE FUNCTION sql_function_in_out_default(text DEFAULT 'foo'::text, OUT text) 
 $_$;
 
 
+SET search_path = element_test, pg_catalog;
+
 SET default_tablespace = '';
 
 SET default_with_oids = false;
+
+--
+-- Name: foo; Type: TABLE; Schema: element_test; Owner: -; Tablespace: 
+--
+
+CREATE TABLE foo (
+    id integer
+);
+
+
+--
+-- Name: bar; Type: VIEW; Schema: element_test; Owner: -
+--
+
+CREATE VIEW bar AS
+ SELECT foo.id
+   FROM foo;
+
+
+SET search_path = public, pg_catalog;
 
 --
 -- Name: datatype_table; Type: TABLE; Schema: public; Owner: -; Tablespace: 
@@ -158,6 +222,13 @@ CREATE TABLE datatype_table (
     v_timestamp_tz timestamp with time zone,
     v_point point
 );
+
+
+--
+-- Name: TABLE datatype_table; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE datatype_table IS 'This table should contain all native datatypes';
 
 
 --
@@ -199,6 +270,37 @@ ALTER SEQUENCE datatype_table_id_seq OWNED BY datatype_table.id;
 
 
 --
+-- Name: datatype_view; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW datatype_view AS
+ SELECT datatype_table.id,
+    datatype_table.id_big,
+    datatype_table.v_smallint,
+    datatype_table.v_int,
+    datatype_table.v_bigint,
+    datatype_table.v_char,
+    datatype_table.v_varchar,
+    datatype_table.v_text,
+    datatype_table.v_bool,
+    datatype_table.v_inet,
+    datatype_table.v_numeric,
+    datatype_table.v_float,
+    datatype_table.v_tsvector,
+    datatype_table.v_timestamp,
+    datatype_table.v_timestamp_tz,
+    datatype_table.v_point
+   FROM datatype_table;
+
+
+--
+-- Name: VIEW datatype_view; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON VIEW datatype_view IS 'This is a view';
+
+
+--
 -- Name: person; Type: TABLE; Schema: public; Owner: -; Tablespace: 
 --
 
@@ -224,16 +326,15 @@ INHERITS (person);
 
 
 --
--- Name: fkey_table_seq; Type: SEQUENCE; Schema: public; Owner: -
+-- Name: fkey_table_seq_renamed; Type: SEQUENCE; Schema: public; Owner: -
 --
 
-CREATE SEQUENCE fkey_table_seq
-    START WITH 10
+CREATE SEQUENCE fkey_table_seq_renamed
+    START WITH 20
     INCREMENT BY 1
-    MINVALUE 0
+    MINVALUE 10
     MAXVALUE 1000000
-    CACHE 10
-    CYCLE;
+    CACHE 1;
 
 
 SET default_with_oids = false;
@@ -243,7 +344,7 @@ SET default_with_oids = false;
 --
 
 CREATE TABLE fkey_table (
-    id integer DEFAULT nextval('fkey_table_seq'::regclass) NOT NULL,
+    id integer DEFAULT nextval('fkey_table_seq_renamed'::regclass) NOT NULL,
     datatype_id integer NOT NULL,
     big_id bigint NOT NULL
 );
@@ -254,10 +355,26 @@ CREATE TABLE fkey_table (
 --
 
 CREATE TABLE like_fkey_table (
-    id integer DEFAULT nextval('fkey_table_seq'::regclass) NOT NULL,
+    id integer DEFAULT nextval('fkey_table_seq_renamed'::regclass) NOT NULL,
     datatype_id integer NOT NULL,
     big_id bigint NOT NULL
 );
+
+
+--
+-- Name: nums_1_100; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW nums_1_100 AS
+ WITH RECURSIVE nums_1_100(n) AS (
+         VALUES (1)
+        UNION ALL
+         SELECT (nums_1_100_1.n + 1)
+           FROM nums_1_100 nums_1_100_1
+          WHERE (nums_1_100_1.n < 100)
+        )
+ SELECT nums_1_100.n
+   FROM nums_1_100;
 
 
 --
@@ -278,6 +395,36 @@ CREATE SEQUENCE person_id_seq
 --
 
 ALTER SEQUENCE person_id_seq OWNED BY person.id;
+
+
+--
+-- Name: person_view; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW person_view WITH (security_barrier=true) AS
+ SELECT person.id,
+    person.name,
+    person.age,
+    person.location
+   FROM person
+  WHERE (person.id > 100)
+  WITH LOCAL CHECK OPTION;
+
+
+--
+-- Name: static_values_view; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW static_values_view AS
+ VALUES ('bar'::text);
+
+
+--
+-- Name: static_view; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW static_view AS
+ SELECT 'bar'::text AS col;
 
 
 --
