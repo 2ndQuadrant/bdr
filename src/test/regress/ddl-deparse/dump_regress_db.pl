@@ -79,7 +79,7 @@ my $pg_ctl= sprintf(
 `${pg_ctl} start`;
 
 my $psql_cmd = sprintf(
-    q|%s/src/bin/psql/psql -p %s -d regression -c 'DROP EVENT TRIGGER deparse_test_trg_ddl_command_end'|,
+    q|%s/src/bin/psql/psql -p %s -d regression -c 'DROP EVENT TRIGGER IF EXISTS deparse_test_trg_ddl_command_end'|,
     $options{'top-builddir'},
     $options{'port'},
 );
