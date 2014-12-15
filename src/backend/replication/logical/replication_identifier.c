@@ -158,7 +158,7 @@ CreateReplicationIdentifier(char *riname)
 
 	rel = heap_open(ReplicationIdentifierRelationId, ExclusiveLock);
 
-	for (riident = InvalidOid + 1; riident <= UINT16_MAX; riident++)
+	for (riident = InvalidOid + 1; riident < UINT16_MAX; riident++)
 	{
 		bool		nulls[Natts_pg_replication_identifier];
 		Datum		values[Natts_pg_replication_identifier];

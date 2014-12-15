@@ -13,6 +13,8 @@
 #include "replication/logical.h"
 
 #define InvalidRepNodeId 0
+#define DoNotReplicateRepNodeId USHRT_MAX
+
 extern PGDLLIMPORT RepNodeId replication_origin_id;
 extern PGDLLIMPORT XLogRecPtr replication_origin_lsn;
 extern PGDLLIMPORT TimestampTz replication_origin_timestamp;
