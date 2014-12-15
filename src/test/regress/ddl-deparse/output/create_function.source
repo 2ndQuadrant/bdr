@@ -17,3 +17,58 @@ CREATE OR REPLACE FUNCTION sql_function()
 AS $$
   SELECT 'Test function replaced'::TEXT;
 $$;
+CREATE FUNCTION sql_function_in_out(IN TEXT, OUT TEXT)
+    LANGUAGE SQL
+    STABLE
+AS $$
+    SELECT 'Input: ' || $1;
+$$;
+CREATE FUNCTION sql_function_in_out_default(IN TEXT DEFAULT 'foo', OUT TEXT)
+    LANGUAGE SQL
+    STABLE
+AS $$
+    SELECT 'Input: ' || $1;
+$$;
+CREATE FUNCTION plpgsql_function()
+    RETURNS TEXT
+    LANGUAGE plpgsql
+AS $$
+BEGIN
+  RETURN 'Stable output'::TEXT;
+END;
+$$;
+CREATE FUNCTION plpgsql_function_complex()
+    RETURNS TEXT
+    LANGUAGE plpgsql
+    VOLATILE
+    NOT LEAKPROOF
+    RETURNS NULL ON NULL INPUT
+    SECURITY DEFINER
+    COST 10
+    SET enable_bitmapscan = FALSE
+AS $$
+BEGIN
+  RETURN 'Volatile output: ' || CLOCK_TIMESTAMP()::TEXT;
+END;
+$$;
+CREATE FUNCTION plpgsql_function_srf(v_input TEXT DEFAULT 'foo')
+    RETURNS SETOF TEXT
+    LANGUAGE plpgsql
+    IMMUTABLE
+    NOT LEAKPROOF
+    ROWS 2
+    SECURITY INVOKER
+AS $$
+BEGIN
+  RETURN NEXT 'Input value:';
+  RETURN NEXT v_input;
+END;
+$$;
+CREATE FUNCTION plpgsql_function_old_attributes(v_input TEXT)
+    RETURNS TEXT
+    LANGUAGE plpgsql
+AS $$
+BEGIN
+  RETURN v_input;
+END;
+$$ WITH(isStrict, isCachable);
