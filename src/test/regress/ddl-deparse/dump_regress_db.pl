@@ -12,19 +12,24 @@
 use strict;
 use warnings;
 
+use Cwd;
 use File::Temp qw(tempfile);
 use Getopt::Long;
 use IO::Socket::INET;
 
 our %options = (
-    'pgdata' => undef,
-    'port' => 9999,
+    'dlpath'       => getcwd(),
+    'DLSUFFIX'     => '.so',
+    'pgdata'       => undef,
+    'port'         => 9999,
     'top-builddir' => undef,
 );
 
 our %option_defs = (
-    'pgdata:s'       => \$options{pgdata},
-    'port:i'         => \$options{port},
+    'dlpath:s'       => \$options{'dlpath'},
+    'DLSUFFIX:s'     => \$options{'DLSUFFIX'},
+    'pgdata:s'       => \$options{'pgdata'},
+    'port:i'         => \$options{'port'},
     'top-builddir:s' => \$options{'top-builddir'},
 );
 
@@ -79,17 +84,26 @@ my $pg_dump_cmd = sprintf(
     $options{'port'},
 );
 
-my $dump_output = `$pg_dump_cmd`;
+my $pg_dump_output = `$pg_dump_cmd`;
 
-# TODO: replace hard-coded paths
 
-# Dump input/deparse_test.source
+
+# Dump `input/deparse_test.source`, which needs to be prepended to the
+# pg_dump output
 
 open(SRC, '< ./input/deparse_test.source');
 while(<SRC>) {
     print unless /^\s*$/;
 }
+my @pg_dump_lines = split(/\n/, $pg_dump_output);
 
-print $dump_output;
+# Replace hard-coded paths with pg_regress tokens
+foreach my $line (@pg_dump_lines) {
+    $line =~ s/$options{'dlpath'}/\@libdir\@/;
+    $line =~ s/$options{'DLSUFFIX'}/\@DLSUFFIX\@/;
+    print qq|$line\n|;
+}
+
+print qq|\n|;
 
 `${pg_ctl} -m fast stop`;
