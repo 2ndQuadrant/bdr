@@ -702,23 +702,30 @@ bdr_worker_shmem_release(BdrWorker* worker, BackgroundWorkerHandle *handle)
 
 /*
  * Is the current database configured for bdr?
+ *
+ * TODO: Right now this is rechecked for every call. It'd be good to cache it
+ * in future. To do that, we can register a syscache invalidation callback on
+ * our pg_database row. Then when BDR is enabled or disabled on a DB, we
+ * invalidate the pg_database cache entry. Callbacks are registered with
+ * CacheRegisterSyscacheCallback . This can be used to set/clear an enabled
+ * flag.
+ *
+ * We don't check pg_shseclabel for the DB because that's very expensive,
+ * requiring a snapshot and a heavyweight lock. There's no syscache for
+ * pg_shseclable to make it sane.
  */
 bool
 bdr_is_bdr_activated_db(void)
 {
 	const char *mydb;
-	static int	is_bdr_db = -1;
 	int			i;
+	bool		bdr_active = false;
 
 	/* won't know until we've forked/execed */
 	Assert(IsUnderPostmaster);
 
 	/* potentially need to access syscaches */
 	Assert(IsTransactionState());
-
-	/* fast path after the first call */
-	if (is_bdr_db != -1)
-		return is_bdr_db;
 
 	/*
 	 * Accessing the database name via MyProcPort is faster, but only works in
@@ -729,7 +736,13 @@ bdr_is_bdr_activated_db(void)
 	else
 		mydb = get_database_name(MyDatabaseId);
 
-	/* Look for the perdb worker's entries, they have the database name */
+	/*
+	 * Look for the perdb worker's shmem entries, they have the database name.
+	 *
+	 * These will be present even if the worker isn't actually running (not
+	 * started yet, crashed & restarting, etc).
+	 */
+	LWLockAcquire(BdrWorkerCtl->lock, LW_SHARED);
 	for (i = 0; i < bdr_max_workers; i++)
 	{
 		BdrWorker *worker;
@@ -744,10 +757,14 @@ bdr_is_bdr_activated_db(void)
 
 		if (strcmp(mydb, workerdb) == 0)
 		{
-			is_bdr_db = true;
-			return true;
+			bdr_active = true;
+			break;
 		}
 	}
+	LWLockRelease(BdrWorkerCtl->lock);
+
+	if (bdr_active)
+		return true;
 
 	/*
 	 * Make sure nobody changes the replication slot list concurrently
@@ -779,19 +796,12 @@ bdr_is_bdr_activated_db(void)
 		if (database == MyDatabaseId && strcmp(NameStr(plugin), "bdr") == 0)
 		{
 			LWLockRelease(ReplicationSlotControlLock);
-
-			/*
-			 * XXX: we might not wan't to set is_bdr_db here because slot can
-			 * be dropped without restart.
-			 */
-			is_bdr_db = true;
 			return true;
 		}
 	}
 
 	LWLockRelease(ReplicationSlotControlLock);
 
-	is_bdr_db = false;
 	return false;
 }
 
