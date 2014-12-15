@@ -106,9 +106,10 @@ while(<SRC>) {
 my @pg_dump_lines = split(/\n/, $pg_dump_output);
 
 # Replace hard-coded paths with pg_regress tokens
+my $DL_SUFFIX = quotemeta($options{'DLSUFFIX'});
 foreach my $line (@pg_dump_lines) {
     $line =~ s/$options{'dlpath'}/\@libdir\@/;
-    $line =~ s/$options{'DLSUFFIX'}/\@DLSUFFIX\@/;
+    $line =~ s/$DL_SUFFIX/\@DLSUFFIX\@/;
     print qq|$line\n|;
 }
 
