@@ -78,6 +78,14 @@ my $pg_ctl= sprintf(
 # TODO: check success
 `${pg_ctl} start`;
 
+my $psql_cmd = sprintf(
+    q|%s/src/bin/psql/psql -p %s -d regression -c 'DROP EVENT TRIGGER deparse_test_trg_ddl_command_end'|,
+    $options{'top-builddir'},
+    $options{'port'},
+);
+
+`${psql_cmd}`;
+
 my $pg_dump_cmd = sprintf(
     q`%s/src/bin/pg_dump/pg_dump -p %s --schema-only --no-owner --no-privileges --exclude-schema=deparse -Fp regression | egrep -v '^-- Dumped'`,
     $options{'top-builddir'},
