@@ -20,6 +20,7 @@ CREATE TABLE datatype_table (
     v_timestamp    TIMESTAMP,
     v_timestamp_tz TIMESTAMP WITH TIME ZONE,
     v_point        POINT,
+    v_enum         ENUM_TEST,
     PRIMARY KEY (id),
     UNIQUE (id_big)
 );

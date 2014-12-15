@@ -79,6 +79,17 @@ COMMENT ON EXTENSION plpgsql IS 'PL/pgSQL procedural language';
 SET search_path = public, pg_catalog;
 
 --
+-- Name: enum_test; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE enum_test AS ENUM (
+    'foo',
+    'bar',
+    'baz'
+);
+
+
+--
 -- Name: c_function_test(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -220,7 +231,8 @@ CREATE TABLE datatype_table (
     v_tsvector tsvector,
     v_timestamp timestamp without time zone,
     v_timestamp_tz timestamp with time zone,
-    v_point point
+    v_point point,
+    v_enum enum_test
 );
 
 
@@ -289,7 +301,8 @@ CREATE VIEW datatype_view AS
     datatype_table.v_tsvector,
     datatype_table.v_timestamp,
     datatype_table.v_timestamp_tz,
-    datatype_table.v_point
+    datatype_table.v_point,
+    datatype_table.v_enum
    FROM datatype_table;
 
 
