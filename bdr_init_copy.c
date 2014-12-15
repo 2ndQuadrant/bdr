@@ -60,10 +60,12 @@ __attribute__((format(PG_PRINTF_ATTRIBUTE, 1, 2)));
 
 static int run_pg_ctl(const char *arg, const char *opts);
 static char *get_postgres_guc_value(char *guc, char *defval);
-static void wait_postmaster_connection(char **out_connstr);
+static bool wait_postmaster_connection(void);
 static void wait_postgres_shutdown(void);
 
+#ifdef BUILDING_UDR
 static void initialize_bdr(PGconn *conn);
+#endif
 static void remove_unwanted_state(void);
 static void initialize_replication_identifiers(char *remote_lsn);
 static void create_replication_identifier(PGconn *conn,
@@ -80,6 +82,7 @@ static int set_sysid(void);
 static void read_bdr_config(void);
 static void WriteRecoveryConf(PQExpBuffer contents);
 
+static char *detect_local_conninfo(void);
 static char *detect_remote_conninfo(void);
 char *get_conninfo(char *dbname, char *dbhost, char *dbport, char *dbuser);
 static char *PQconninfoParams_to_conninfo(const char *const * keywords, const char *const * values);
@@ -199,6 +202,10 @@ main(int argc, char **argv)
 	if (!remote_connstr || !strlen(remote_connstr))
 		die(_("Could not detect remote connection\n"));
 
+	local_connstr = detect_local_conninfo();
+	if (local_connstr == NULL)
+		die(_("Failed to detect local connection info. Please specify replica_local_dsn in the postgresql.conf.\n"));
+
 	/* Hot standby would start cluster in read only mode, we don't want that. */
 	if (!parse_bool(get_postgres_guc_value("hot_standby", NULL), &hot_standby))
 		die(_("Invalid boolean value for configuration parameter \"hot_standby\"\n"));
@@ -236,10 +243,8 @@ main(int argc, char **argv)
 			   ""
 #endif
 			   );
-	wait_postmaster_connection(&local_connstr);
-
-	if (local_connstr == NULL)
-		die(_("Failed to detect local connection info.\n"));
+	if (!wait_postmaster_connection())
+		die(_("Could not connect to local node"));
 
 	/*
 	 * Postgres should have reached restore point and is accepting connections,
@@ -441,11 +446,13 @@ read_bdr_config(void)
 	{
 		char	*name = (char *) connames[connection_config_idx];
 		char	*optname_dsn = pg_malloc(strlen(name) + 30);
+		char	*optname_local_dsn = pg_malloc(strlen(name) + 30);
 		char	*optname_replica = pg_malloc(strlen(name) + 30);
 		char	*optname_local_dbname = pg_malloc(strlen(name) + 30);
 		BdrConnectionConfig *opts;
 
 		sprintf(optname_dsn, "bdr.%s_dsn", name);
+		sprintf(optname_local_dsn, "bdr.%s_replica_local_dsn", name);
 		sprintf(optname_replica, "bdr.%s_init_replica", name);
 		sprintf(optname_local_dbname, "bdr.%s_local_dbname", name);
 
@@ -458,6 +465,8 @@ read_bdr_config(void)
 		opts->dsn = get_postgres_guc_value(optname_dsn, NULL);
 		if (!opts->dsn)
 			continue;
+
+		opts->replica_local_dsn = get_postgres_guc_value(optname_local_dsn, NULL);
 
 		if (!parse_bool(get_postgres_guc_value(optname_replica, "false"), &opts->init_replica))
 			die(_("Invalid boolean value for configuration parameter \"%s\"\n"), optname_replica);
@@ -488,6 +497,7 @@ read_bdr_config(void)
 				cur_option++;
 			}
 		}
+
 
 		opts->is_valid = true;
 
@@ -763,6 +773,7 @@ create_replication_slot(PGconn *conn, Name slot_name)
 	destroyPQExpBuffer(query);
 }
 
+#ifdef BUILDING_UDR
 static void
 install_extension_if_not_exists(PGconn *conn, const char *extname)
 {
@@ -809,6 +820,7 @@ initialize_bdr(PGconn *conn)
 	install_extension_if_not_exists(conn, "btree_gist");
 	install_extension_if_not_exists(conn,"bdr");
 }
+#endif
 
 /*
  * Initialize new remote identifiers to specific position.
@@ -943,6 +955,24 @@ create_restore_point(char *remote_connstr)
 	return remote_lsn;
 }
 
+static char *
+detect_local_conninfo(void)
+{
+	int i;
+
+	for (i = 0; i < bdr_connection_config_count; i++)
+	{
+		BdrConnectionConfig *cfg = bdr_connection_configs[i];
+
+		if (!cfg || !cfg->is_valid || !cfg->init_replica ||
+			!cfg->replica_local_dsn)
+			continue;
+
+		return pg_strdup(cfg->replica_local_dsn);
+	}
+
+	return NULL;
+}
 
 static char *
 detect_remote_conninfo(void)
@@ -1314,14 +1344,13 @@ split_list_guc(char *str, size_t *count)
  *
  * Based on pg_ctl.c:test_postmaster_connection
  */
-static void
-wait_postmaster_connection(char **out_connstr)
+static bool
+wait_postmaster_connection(void)
 {
 	PGPing		res;
 	long		pm_pid = 0;
 	char		connstr[MAXPGPATH * 2 + 256];
 
-	*out_connstr = NULL;
 	connstr[0] = '\0';
 
 	for (;;)
@@ -1410,7 +1439,7 @@ wait_postmaster_connection(char **out_connstr)
 					if (host_str[0] == '\0')
 					{
 						fprintf(stderr, _("Relative socket directory is not supported\n"));
-						return;
+						return false;
 					}
 
 					/* If postmaster is listening on "*", use localhost */
@@ -1442,11 +1471,10 @@ wait_postmaster_connection(char **out_connstr)
 			res = PQping(connstr);
 			if (res == PQPING_OK)
 			{
-				*out_connstr = connstr;
 				break;
 			}
 			else if (res == PQPING_NO_ATTEMPT)
-				break;
+				return false;
 		}
 
 		/*
@@ -1456,12 +1484,14 @@ wait_postmaster_connection(char **out_connstr)
 		 * it.
 		 */
 		if (pm_pid > 0 && !postmaster_is_alive((pid_t) pm_pid))
-			return;
+			return false;
 
 		/* No response, or startup still in process; wait */
 		pg_usleep(1000000);		/* 1 sec */
 		print_msg(".");
 	}
+
+	return true;
 }
 
 /*
