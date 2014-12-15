@@ -219,12 +219,13 @@ bdr_req_param(const char *param)
 }
 
 /*
- * Check bdr.bdr_nodes entry in local DB and if status != r,
- * raise an error.
+ * Check bdr.bdr_nodes entry in local DB and if status != r
+ * and we're trying to begin logical replay, raise an error.
+ *
+ * Also prevents slot creation if the BDR extension isn't installed in the
+ * local node.
  *
  * If this function returns it's safe to begin replay.
- *
- * Must be called inside transaction.
  */
 static void
 bdr_ensure_node_ready()
@@ -348,7 +349,7 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 	ListCell   *option;
 	BdrOutputData *data;
 	Oid schema_oid;
-	bool tx_started = true;
+	bool tx_started = false;
 
 	bdr_worker_type = BDR_WORKER_WALSENDER;
 
@@ -462,6 +463,41 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 		}
 	}
 
+	/*
+	 * Ensure that the BDR extension is installed on this database.
+	 *
+	 * We must prevent slot creation before the BDR extension is created,
+	 * otherwise the event trigger for DDL replication will record the
+	 * extension's creation in bdr.bdr_queued_commands and the slot position
+	 * will be before then, causing CREATE EXTENSION to be replayed. Since
+	 * the other end already has the BDR extension (obviously) this will
+	 * cause replay to fail.
+	 *
+	 * TODO: Should really test for the extension its self, but this is faster
+	 * and easier...
+	 */
+	if (!IsTransactionState())
+	{
+		tx_started = true;
+		StartTransactionCommand();
+	}
+
+#ifdef BUILDING_BDR
+	/*
+	 * If running BDR, we expect the remote end (us) to have the BDR extension
+	 * installed before we permit slot creation. This prevents replication of
+	 * the CREATE EXTENSION bdr; command its self.
+	 */
+	if (get_namespace_oid("bdr", true) == InvalidOid)
+	{
+		ereport(ERROR,
+			    (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("bdr extension does not exist on " BDR_LOCALID_FORMAT,
+						BDR_LOCALID_FORMAT_ARGS),
+				 errdetail("Cannot create a BDR slot without the BDR extension installed")));
+	}
+#endif
+
 	/* no options are passed in during initialization, so don't complain there */
 	if (!is_init)
 	{
@@ -547,12 +583,6 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 		if (data->client_pg_version / 100 != PG_VERSION_NUM / 100)
 			data->allow_sendrecv_protocol = false;
 
-		if (!IsTransactionState())
-		{
-			tx_started = false;
-			StartTransactionCommand();
-		}
-
 		bdr_maintain_schema();
 
 		data->bdr_schema_oid = get_namespace_oid("bdr", true);
@@ -585,13 +615,14 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 
 		/*
 		 * Make sure it's safe to begin playing changes to the remote end.
-		 * This'll ERROR out if we're not ready.
+		 * This'll ERROR out if we're not ready. Note that this does NOT
+		 * prevent slot creation, only START_REPLICATION from the slot.
 		 */
 		bdr_ensure_node_ready();
-
-		if (!tx_started)
-			CommitTransactionCommand();
 	}
+
+	if (tx_started)
+		CommitTransactionCommand();
 }
 
 /*

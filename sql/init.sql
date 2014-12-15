@@ -12,7 +12,7 @@ GRANT ALL ON SCHEMA public TO nonsuper;
 \c regression
 GRANT ALL ON SCHEMA public TO nonsuper;
 
-SELECT pg_sleep(5);
+SELECT pg_sleep(10);
 
 -- emulate the pg_xlog_wait_remote_apply on vanilla postgres
 DO $DO$BEGIN
