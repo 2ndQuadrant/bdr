@@ -1,15 +1,15 @@
 --
 -- DEPARSE_INIT
 --
-CREATE TABLE deparse_test_commands (
+CREATE SCHEMA deparse;
+CREATE TABLE deparse.deparse_test_commands (
   id SERIAL PRIMARY KEY,
   command TEXT
 );
-CREATE FUNCTION deparse_test_ddl_command_end()
+CREATE FUNCTION deparse.deparse_test_ddl_command_end()
   RETURNS event_trigger
   LANGUAGE C
-AS '@libdir@/regress@DLSUFFIX@', 'deparse_test_ddl_command_end';
-/* This should come last - we don't want to log anything defined here */
+AS '/space/sda1/ibarwick/2ndquadrant_bdr/src/test/regress/ddl-deparse/regress.so', 'deparse_test_ddl_command_end';
 CREATE EVENT TRIGGER deparse_test_trg_ddl_command_end
   ON ddl_command_end
-  EXECUTE PROCEDURE deparse_test_ddl_command_end();
+  EXECUTE PROCEDURE deparse.deparse_test_ddl_command_end();

@@ -56,7 +56,7 @@ deparse_test_ddl_command_end(PG_FUNCTION_ARGS)
 		"SELECT command FROM pg_event_trigger_get_creation_commands()";
 
 	save_command_text =
-		"INSERT INTO deparse_test_commands (command) VALUES ($1)";
+		"INSERT INTO deparse.deparse_test_commands (command) VALUES ($1)";
 
 	tmpcontext = AllocSetContextCreate(CurrentMemoryContext,
 									   "deparse_test_ddl_command_end temporary context",

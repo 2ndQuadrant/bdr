@@ -1,4 +1,19 @@
+--
+-- CREATE FUNCTION
+--
 CREATE FUNCTION c_function_test ()
 	RETURNS INT
 	AS '@libdir@/regress@DLSUFFIX@', 'c_function_test'
 	LANGUAGE C;
+CREATE FUNCTION sql_function()
+    RETURNS TEXT
+    LANGUAGE SQL
+AS $$
+  SELECT 'Test function'::TEXT;
+$$;
+CREATE OR REPLACE FUNCTION sql_function()
+    RETURNS TEXT
+    LANGUAGE SQL
+AS $$
+  SELECT 'Test function replaced'::TEXT;
+$$;

@@ -79,7 +79,7 @@ my $pg_ctl= sprintf(
 `${pg_ctl} start`;
 
 my $pg_dump_cmd = sprintf(
-    q`%s/src/bin/pg_dump/pg_dump -p %s --schema-only --no-owner --no-privileges -Fp regression | egrep -v '^-- Dumped'`,
+    q`%s/src/bin/pg_dump/pg_dump -p %s --schema-only --no-owner --no-privileges --exclude-schema=deparse -Fp regression | egrep -v '^-- Dumped'`,
     $options{'top-builddir'},
     $options{'port'},
 );
