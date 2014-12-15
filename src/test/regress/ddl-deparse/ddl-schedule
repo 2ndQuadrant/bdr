@@ -10,7 +10,7 @@ test: deparse_init
 
 # DDL tests
 test: create_table
-#test: create_function
+test: create_function
 
 # Final DDL deparse test
 test: deparse_test

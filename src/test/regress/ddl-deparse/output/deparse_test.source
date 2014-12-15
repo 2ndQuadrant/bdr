@@ -34,6 +34,15 @@ COMMENT ON EXTENSION plpgsql IS 'PL/pgSQL procedural language';
 SET search_path = public, pg_catalog;
 
 --
+-- Name: c_function_test(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION c_function_test() RETURNS integer
+    LANGUAGE c
+    AS '@libdir@/regress@DLSUFFIX@', 'c_function_test';
+
+
+--
 -- Name: datatype_table_id_seq; Type: SEQUENCE; Schema: public; Owner: -
 --
 

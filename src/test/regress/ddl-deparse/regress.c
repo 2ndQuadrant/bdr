@@ -10,6 +10,23 @@
 PG_MODULE_MAGIC;
 #endif
 
+
+/*
+ * c_function_test()
+ *
+ * Simple C-language function
+ */
+
+PG_FUNCTION_INFO_V1(c_function_test);
+Datum
+c_function_test(PG_FUNCTION_ARGS)
+{
+	int32   arg = PG_GETARG_INT32(0);
+
+	PG_RETURN_INT32(arg + 1);
+}
+
+
 /*
  * deparse_test_ddl_command_end()
  *
@@ -24,7 +41,7 @@ PG_FUNCTION_INFO_V1(deparse_test_ddl_command_end);
 Datum
 deparse_test_ddl_command_end(PG_FUNCTION_ARGS)
 {
-	int               ret, row;
+	int				  ret, row;
 	TupleDesc		  spi_tupdesc;
 	const char		 *get_creation_commands;
 	const char		 *save_command_text;
@@ -64,7 +81,7 @@ deparse_test_ddl_command_end(PG_FUNCTION_ARGS)
 		Datum	   json;
 		Datum	   command;
 		bool	   isnull;
-		Oid 	   argtypes[1];
+		Oid		   argtypes[1];
 		Datum	   values[1];
 
 		spi_tuple = SPI_tuptable->vals[row];

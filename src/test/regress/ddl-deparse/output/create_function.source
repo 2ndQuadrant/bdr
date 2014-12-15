@@ -1,4 +1,4 @@
-CREATE FUNCTION check_foreign_key ()
-	RETURNS trigger
-	AS '@libdir@/refint@DLSUFFIX@'
+CREATE FUNCTION c_function_test ()
+	RETURNS INT
+	AS '@libdir@/regress@DLSUFFIX@', 'c_function_test'
 	LANGUAGE C;
