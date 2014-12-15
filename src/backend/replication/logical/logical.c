@@ -38,6 +38,7 @@
 #include "replication/decode.h"
 #include "replication/logical.h"
 #include "replication/reorderbuffer.h"
+#include "replication/replication_identifier.h"
 #include "replication/snapbuild.h"
 
 #include "storage/proc.h"

@@ -12,6 +12,11 @@
 #include "catalog/pg_replication_identifier.h"
 #include "replication/logical.h"
 
+#define InvalidRepNodeId 0
+extern PGDLLIMPORT RepNodeId replication_origin_id;
+extern PGDLLIMPORT XLogRecPtr replication_origin_lsn;
+extern PGDLLIMPORT TimestampTz replication_origin_timestamp;
+
 /* API for querying & manipulating replication identifiers */
 extern RepNodeId GetReplicationIdentifier(char *name, bool missing_ok);
 extern RepNodeId CreateReplicationIdentifier(char *name);

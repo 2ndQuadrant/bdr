@@ -75,11 +75,6 @@ typedef struct LogicalDecodingContext
 	TransactionId write_xid;
 } LogicalDecodingContext;
 
-#define InvalidRepNodeId 0
-extern PGDLLIMPORT RepNodeId replication_origin_id;
-extern PGDLLIMPORT XLogRecPtr replication_origin_lsn;
-extern PGDLLIMPORT TimestampTz replication_origin_timestamp;
-
 extern void CheckLogicalDecodingRequirements(void);
 
 extern LogicalDecodingContext *CreateInitDecodingContext(char *plugin,

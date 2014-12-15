@@ -55,6 +55,7 @@
 #include "storage/large_object.h"
 #include "pg_getopt.h"
 #include "replication/logical.h"
+#include "replication/replication_identifier.h"
 
 
 static ControlFileData ControlFile;		/* pg_control values */
