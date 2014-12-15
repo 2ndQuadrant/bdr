@@ -106,6 +106,9 @@ while(<SRC>) {
 my @pg_dump_lines = split(/\n/, $pg_dump_output);
 
 # Replace hard-coded paths with pg_regress tokens
+# Note: this will probably need tightening up, as at the
+# moment it will match stuff like 'some_schema.some_table'
+
 my $DL_SUFFIX = quotemeta($options{'DLSUFFIX'});
 foreach my $line (@pg_dump_lines) {
     $line =~ s/$options{'dlpath'}/\@libdir\@/;
