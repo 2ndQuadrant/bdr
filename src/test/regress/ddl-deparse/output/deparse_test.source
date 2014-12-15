@@ -78,8 +78,9 @@ CREATE TABLE datatype_table (
     v_numeric numeric(1,0),
     v_float real,
     v_tsvector tsvector,
-    v_timestamp1 timestamp without time zone,
-    v_timestamp2 timestamp with time zone
+    v_timestamp timestamp without time zone,
+    v_timestamp_tz timestamp with time zone,
+    v_point point
 );
 
 
@@ -122,13 +123,106 @@ ALTER SEQUENCE datatype_table_id_seq OWNED BY datatype_table.id;
 
 
 --
+-- Name: person; Type: TABLE; Schema: public; Owner: -; Tablespace: 
+--
+
+CREATE TABLE person (
+    id integer NOT NULL,
+    name text,
+    age integer,
+    location point
+);
+
+
+SET default_with_oids = true;
+
+--
+-- Name: emp; Type: TABLE; Schema: public; Owner: -; Tablespace: 
+--
+
+CREATE TABLE emp (
+    salary integer,
+    manager name
+)
+INHERITS (person);
+
+
+--
+-- Name: fkey_table_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE fkey_table_seq
+    START WITH 10
+    INCREMENT BY 1
+    MINVALUE 0
+    MAXVALUE 1000000
+    CACHE 10
+    CYCLE;
+
+
+SET default_with_oids = false;
+
+--
 -- Name: fkey_table; Type: TABLE; Schema: public; Owner: -; Tablespace: 
 --
 
 CREATE TABLE fkey_table (
-    id integer NOT NULL,
+    id integer DEFAULT nextval('fkey_table_seq'::regclass) NOT NULL,
     datatype_id integer NOT NULL,
     big_id bigint NOT NULL
+);
+
+
+--
+-- Name: person_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE person_id_seq
+    START WITH 1000
+    INCREMENT BY 10
+    MINVALUE 1000
+    MAXVALUE 5000000
+    CACHE 10
+    CYCLE;
+
+
+--
+-- Name: person_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE person_id_seq OWNED BY person.id;
+
+
+--
+-- Name: student; Type: TABLE; Schema: public; Owner: -; Tablespace: 
+--
+
+CREATE TABLE student (
+    gpa double precision
+)
+INHERITS (person);
+
+
+SET default_with_oids = true;
+
+--
+-- Name: stud_emp; Type: TABLE; Schema: public; Owner: -; Tablespace: 
+--
+
+CREATE TABLE stud_emp (
+    percent integer
+)
+INHERITS (emp, student);
+
+
+SET default_with_oids = false;
+
+--
+-- Name: unlogged_table; Type: TABLE; Schema: public; Owner: -; Tablespace: 
+--
+
+CREATE UNLOGGED TABLE unlogged_table (
+    id integer NOT NULL
 );
 
 
@@ -163,6 +257,30 @@ ALTER TABLE ONLY datatype_table
 
 
 --
+-- Name: fkey_table_pkey; Type: CONSTRAINT; Schema: public; Owner: -; Tablespace: 
+--
+
+ALTER TABLE ONLY fkey_table
+    ADD CONSTRAINT fkey_table_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: person_pkey; Type: CONSTRAINT; Schema: public; Owner: -; Tablespace: 
+--
+
+ALTER TABLE ONLY person
+    ADD CONSTRAINT person_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: unlogged_table_pkey; Type: CONSTRAINT; Schema: public; Owner: -; Tablespace: 
+--
+
+ALTER TABLE ONLY unlogged_table
+    ADD CONSTRAINT unlogged_table_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: fkey_big_id; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -176,14 +294,6 @@ ALTER TABLE ONLY fkey_table
 
 ALTER TABLE ONLY fkey_table
     ADD CONSTRAINT fkey_table_datatype_id_fkey FOREIGN KEY (datatype_id) REFERENCES datatype_table(id);
-
-
---
--- Name: deparse_test_trg_ddl_command_end; Type: EVENT TRIGGER; Schema: -; Owner: -
---
-
-CREATE EVENT TRIGGER deparse_test_trg_ddl_command_end ON ddl_command_end 
-   EXECUTE PROCEDURE deparse.deparse_test_ddl_command_end();
 
 
 --

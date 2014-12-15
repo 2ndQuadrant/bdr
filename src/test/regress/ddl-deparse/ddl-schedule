@@ -9,7 +9,9 @@
 test: deparse_init
 
 # DDL tests
+test: create_sequence_1
 test: create_table
+test: create_sequence_2
 test: create_function
 
 # Final DDL deparse test
