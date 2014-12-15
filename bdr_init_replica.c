@@ -921,6 +921,22 @@ bdr_init_replica(Name dbname)
 			 *
 			 * We don't attempt any cleanup if slot creation fails, we just bail out
 			 * and leave any already-created slots in place.
+			 *
+			 * The initial replay position for the init_replication
+			 * slot corresponds to the snapshot position, which is
+			 * what we want to start replaying at.
+			 *
+			 * The initial replay position the slots save when they
+			 * are created does not matter for connections other than
+			 * the init_replica connection. It's disregarded on slots
+			 * for other nodes because the local replication
+			 * identifier is always used for START_REPLICATION instead
+			 * of the slot default position, and the replication
+			 * identifier position for each slot gets advanced during
+			 * catchup mode apply. The default position only gets used
+			 * if there were no transactions from a node during
+			 * catchup mode - in which case it doesn't matter because
+			 * there's nothing to replay.
 			 */
 			foreach(lc, configs)
 			{
