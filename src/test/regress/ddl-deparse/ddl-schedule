@@ -19,6 +19,7 @@ test: create_view
 test: comment_on
 test: alter_function
 test: alter_sequence
+test: alter_type_enum
 
 # Final DDL deparse test (pg_dump output comparison)
 test: deparse_test
