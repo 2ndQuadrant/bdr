@@ -65,7 +65,8 @@ CREATE TABLE stud_emp (
 CREATE TABLE storage (
     id INT
 ) WITH (
-    
+    fillfactor = 10,
+    autovacuum_enabled = FALSE
 );
 
 CREATE TABLE like_fkey_table (
@@ -88,7 +89,7 @@ CREATE TEMP TABLE temp_table_commit_delete (
 )
 ON COMMIT DELETE ROWS;
 
-CREATE TEMP TABLE temp_table_commit_delete (
+CREATE TEMP TABLE temp_table_commit_drop (
     id INT PRIMARY KEY
 )
 ON COMMIT DROP;

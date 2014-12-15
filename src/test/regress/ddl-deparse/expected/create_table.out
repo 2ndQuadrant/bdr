@@ -57,11 +57,9 @@ NOTICE:  merging multiple inherited definitions of column "location"
 CREATE TABLE storage (
     id INT
 ) WITH (
-    
+    fillfactor = 10,
+    autovacuum_enabled = FALSE
 );
-ERROR:  syntax error at or near ")"
-LINE 5: );
-        ^
 CREATE TABLE like_fkey_table (
   LIKE fkey_table
   INCLUDING DEFAULTS
@@ -79,8 +77,7 @@ CREATE TEMP TABLE temp_table_commit_delete (
     id INT PRIMARY KEY
 )
 ON COMMIT DELETE ROWS;
-CREATE TEMP TABLE temp_table_commit_delete (
+CREATE TEMP TABLE temp_table_commit_drop (
     id INT PRIMARY KEY
 )
 ON COMMIT DROP;
-ERROR:  relation "temp_table_commit_delete" already exists
