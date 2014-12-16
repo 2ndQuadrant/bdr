@@ -52,8 +52,9 @@ bdr_launch_apply_workers(char *dbname)
 	apply_worker.bgw_flags = BGWORKER_SHMEM_ACCESS |
 		BGWORKER_BACKEND_DATABASE_CONNECTION;
 	apply_worker.bgw_start_time = BgWorkerStart_RecoveryFinished;
-	/* TODO: For EXEC_BACKEND we must use bgw_library_name & bgw_function_name */
-	apply_worker.bgw_main = bdr_apply_main;
+	apply_worker.bgw_main = NULL;
+	strncpy(apply_worker.bgw_library_name, BDR_LIBRARY_NAME, BGW_MAXLEN);
+	strncpy(apply_worker.bgw_function_name, "bdr_apply_main", BGW_MAXLEN);
 	apply_worker.bgw_restart_time = 5;
 	apply_worker.bgw_notify_pid = 0;
 
