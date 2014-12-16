@@ -12,14 +12,16 @@ test: deparse_init
 test: create_extension
 test: create_schema
 test: create_type_enum
+test: create_type_range
 test: create_domain
 test: create_sequence_1
 test: create_table
 test: create_sequence_2
+test: create_index
 test: create_view
 test: create_function
 test: create_trigger
-test: create_index
+test: create_rule
 test: comment_on
 test: alter_extension
 test: alter_function

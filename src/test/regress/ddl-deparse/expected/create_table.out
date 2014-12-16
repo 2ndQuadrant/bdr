@@ -21,6 +21,7 @@ CREATE TABLE datatype_table (
     v_point        POINT,
     v_enum         ENUM_TEST,
     v_postal_code  japanese_postal_code,
+    v_int2range    int2range,
     PRIMARY KEY (id),
     UNIQUE (id_big)
 );
