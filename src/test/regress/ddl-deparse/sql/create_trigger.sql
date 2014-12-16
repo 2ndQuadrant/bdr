@@ -26,3 +26,9 @@ CREATE TRIGGER trigger_4
   FOR EACH ROW
   WHEN ( NEW.id > 100 )
   EXECUTE PROCEDURE plpgsql_function_trigger_1();
+
+CREATE TRIGGER trigger_4
+  INSTEAD OF INSERT
+  ON datatype_view
+  FOR EACH ROW
+  EXECUTE PROCEDURE plpgsql_function_trigger_1();
