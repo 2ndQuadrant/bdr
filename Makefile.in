@@ -25,6 +25,7 @@ SHLIB_LINK = $(libpq)
 OBJS = \
 	bdr.o \
 	bdr_apply.o \
+	bdr_perdb.o \
 	bdr_catalogs.o \
 	bdr_conflict_handlers.o \
 	bdr_conflict_logging.o \
