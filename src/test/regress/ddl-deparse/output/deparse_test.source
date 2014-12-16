@@ -76,17 +76,48 @@ CREATE EXTENSION IF NOT EXISTS plpgsql WITH SCHEMA pg_catalog;
 COMMENT ON EXTENSION plpgsql IS 'PL/pgSQL procedural language';
 
 
+--
+-- Name: pg_stat_statements; Type: EXTENSION; Schema: -; Owner: -
+--
+
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements WITH SCHEMA public;
+
+
+--
+-- Name: EXTENSION pg_stat_statements; Type: COMMENT; Schema: -; Owner: -
+--
+
+COMMENT ON EXTENSION pg_stat_statements IS 'track execution statistics of all SQL statements executed';
+
+
 SET search_path = public, pg_catalog;
+
+--
+-- Name: domainvarchar; Type: DOMAIN; Schema: public; Owner: -
+--
+
+CREATE DOMAIN domainvarchar AS character varying(5);
+
 
 --
 -- Name: enum_test; Type: TYPE; Schema: public; Owner: -
 --
 
 CREATE TYPE enum_test AS ENUM (
+    'aaa',
     'foo',
     'bar',
-    'baz'
+    'baz',
+    'zzz'
 );
+
+
+--
+-- Name: japanese_postal_code; Type: DOMAIN; Schema: public; Owner: -
+--
+
+CREATE DOMAIN japanese_postal_code AS text
+	CONSTRAINT japanese_postal_code_check CHECK (((VALUE ~ '^\d{3}$'::text) OR (VALUE ~ '^\d{3}-\d{4}$'::text)));
 
 
 --
@@ -232,7 +263,8 @@ CREATE TABLE datatype_table (
     v_timestamp timestamp without time zone,
     v_timestamp_tz timestamp with time zone,
     v_point point,
-    v_enum enum_test
+    v_enum enum_test,
+    v_postal_code japanese_postal_code
 );
 
 
@@ -302,7 +334,8 @@ CREATE VIEW datatype_view AS
     datatype_table.v_timestamp,
     datatype_table.v_timestamp_tz,
     datatype_table.v_point,
-    datatype_table.v_enum
+    datatype_table.v_enum,
+    datatype_table.v_postal_code
    FROM datatype_table;
 
 
@@ -543,6 +576,111 @@ ALTER TABLE ONLY person
 
 ALTER TABLE ONLY unlogged_table
     ADD CONSTRAINT unlogged_table_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: test_gin_1; Type: INDEX; Schema: public; Owner: -; Tablespace: 
+--
+
+CREATE INDEX test_gin_1 ON datatype_table USING gin (v_tsvector);
+
+
+--
+-- Name: test_gin_2; Type: INDEX; Schema: public; Owner: -; Tablespace: 
+--
+
+CREATE INDEX test_gin_2 ON datatype_table USING gin (v_tsvector) WITH (fastupdate=off);
+
+
+--
+-- Name: test_gist_1; Type: INDEX; Schema: public; Owner: -; Tablespace: 
+--
+
+CREATE INDEX test_gist_1 ON datatype_table USING gist (v_tsvector) WITH (buffering=on);
+
+
+--
+-- Name: test_hash_1; Type: INDEX; Schema: public; Owner: -; Tablespace: 
+--
+
+CREATE INDEX test_hash_1 ON datatype_table USING hash (v_text);
+
+
+--
+-- Name: test_index_1; Type: INDEX; Schema: public; Owner: -; Tablespace: 
+--
+
+CREATE INDEX test_index_1 ON datatype_table USING btree (v_smallint);
+
+
+--
+-- Name: test_index_10; Type: INDEX; Schema: public; Owner: -; Tablespace: 
+--
+
+CREATE INDEX test_index_10 ON datatype_table USING btree (v_bigint DESC);
+
+
+--
+-- Name: test_index_11; Type: INDEX; Schema: public; Owner: -; Tablespace: 
+--
+
+CREATE INDEX test_index_11 ON datatype_table USING btree (v_smallint);
+
+
+--
+-- Name: test_index_2; Type: INDEX; Schema: public; Owner: -; Tablespace: 
+--
+
+CREATE INDEX test_index_2 ON datatype_table USING btree (v_smallint, v_int);
+
+
+--
+-- Name: test_index_3; Type: INDEX; Schema: public; Owner: -; Tablespace: 
+--
+
+CREATE INDEX test_index_3 ON datatype_table USING btree (v_int) WHERE (v_int > 100);
+
+
+--
+-- Name: test_index_4; Type: INDEX; Schema: public; Owner: -; Tablespace: 
+--
+
+CREATE UNIQUE INDEX test_index_4 ON datatype_table USING btree (v_bigint);
+
+
+--
+-- Name: test_index_5; Type: INDEX; Schema: public; Owner: -; Tablespace: 
+--
+
+CREATE INDEX test_index_5 ON datatype_table USING btree (v_int);
+
+
+--
+-- Name: test_index_6; Type: INDEX; Schema: public; Owner: -; Tablespace: 
+--
+
+CREATE INDEX test_index_6 ON datatype_table USING btree (v_text) WITH (fillfactor=50);
+
+
+--
+-- Name: test_index_7; Type: INDEX; Schema: public; Owner: -; Tablespace: 
+--
+
+CREATE INDEX test_index_7 ON datatype_table USING btree (v_text COLLATE "ja_JP");
+
+
+--
+-- Name: test_index_8; Type: INDEX; Schema: public; Owner: -; Tablespace: 
+--
+
+CREATE INDEX test_index_8 ON datatype_table USING btree (lower(v_text));
+
+
+--
+-- Name: test_index_9; Type: INDEX; Schema: public; Owner: -; Tablespace: 
+--
+
+CREATE INDEX test_index_9 ON datatype_table USING btree (v_smallint NULLS FIRST);
 
 
 --
