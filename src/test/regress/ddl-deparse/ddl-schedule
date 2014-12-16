@@ -9,6 +9,7 @@
 test: deparse_init
 
 # DDL tests
+test: create_extension
 test: create_schema
 test: create_type_enum
 test: create_domain
