@@ -113,11 +113,80 @@ CREATE TYPE enum_test AS ENUM (
 
 
 --
+-- Name: TYPE enum_test; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TYPE enum_test IS 'ENUM test';
+
+
+--
+-- Name: int2range; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE int2range AS RANGE (
+    subtype = smallint
+);
+
+
+--
+-- Name: TYPE int2range; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TYPE int2range IS 'RANGE test';
+
+
+--
 -- Name: japanese_postal_code; Type: DOMAIN; Schema: public; Owner: -
 --
 
 CREATE DOMAIN japanese_postal_code AS text
 	CONSTRAINT japanese_postal_code_check CHECK (((VALUE ~ '^\d{3}$'::text) OR (VALUE ~ '^\d{3}-\d{4}$'::text)));
+
+
+--
+-- Name: DOMAIN japanese_postal_code; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON DOMAIN japanese_postal_code IS 'DOMAIN test';
+
+
+--
+-- Name: text_w_default; Type: SHELL TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE text_w_default;
+
+
+--
+-- Name: text_w_default_in(cstring); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION text_w_default_in(cstring) RETURNS text_w_default
+    LANGUAGE internal STABLE STRICT
+    AS $$textin$$;
+
+
+--
+-- Name: text_w_default_out(text_w_default); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION text_w_default_out(text_w_default) RETURNS cstring
+    LANGUAGE internal STABLE STRICT
+    AS $$textout$$;
+
+
+--
+-- Name: text_w_default; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE text_w_default (
+    INTERNALLENGTH = variable,
+    INPUT = text_w_default_in,
+    OUTPUT = text_w_default_out,
+    DEFAULT = 'foo',
+    ALIGNMENT = int4,
+    STORAGE = plain
+);
 
 
 --
@@ -127,6 +196,13 @@ CREATE DOMAIN japanese_postal_code AS text
 CREATE FUNCTION c_function_test() RETURNS integer
     LANGUAGE c
     AS '@libdir@/regress@DLSUFFIX@', 'c_function_test';
+
+
+--
+-- Name: FUNCTION c_function_test(); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION c_function_test() IS 'FUNCTION test';
 
 
 --
@@ -290,7 +366,8 @@ CREATE TABLE datatype_table (
     v_timestamp_tz timestamp with time zone,
     v_point point,
     v_enum enum_test,
-    v_postal_code japanese_postal_code
+    v_postal_code japanese_postal_code,
+    v_int2range int2range
 );
 
 
@@ -361,7 +438,8 @@ CREATE VIEW datatype_view AS
     datatype_table.v_timestamp_tz,
     datatype_table.v_point,
     datatype_table.v_enum,
-    datatype_table.v_postal_code
+    datatype_table.v_postal_code,
+    datatype_table.v_int2range
    FROM datatype_table;
 
 
@@ -409,6 +487,13 @@ CREATE SEQUENCE fkey_table_seq_renamed
     CACHE 1;
 
 
+--
+-- Name: SEQUENCE fkey_table_seq_renamed; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON SEQUENCE fkey_table_seq_renamed IS 'SEQUENCE test';
+
+
 SET default_with_oids = false;
 
 --
@@ -420,6 +505,33 @@ CREATE TABLE fkey_table (
     datatype_id integer NOT NULL,
     big_id bigint NOT NULL
 );
+
+
+--
+-- Name: like_datatype_table; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW like_datatype_table AS
+ SELECT datatype_view.id,
+    datatype_view.id_big,
+    datatype_view.v_smallint,
+    datatype_view.v_int,
+    datatype_view.v_bigint,
+    datatype_view.v_char,
+    datatype_view.v_varchar,
+    datatype_view.v_text,
+    datatype_view.v_bool,
+    datatype_view.v_inet,
+    datatype_view.v_numeric,
+    datatype_view.v_float,
+    datatype_view.v_tsvector,
+    datatype_view.v_timestamp,
+    datatype_view.v_timestamp_tz,
+    datatype_view.v_point,
+    datatype_view.v_enum,
+    datatype_view.v_postal_code,
+    datatype_view.v_int2range
+   FROM datatype_view;
 
 
 --
@@ -640,6 +752,13 @@ CREATE INDEX test_index_1 ON datatype_table USING btree (v_smallint);
 
 
 --
+-- Name: INDEX test_index_1; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON INDEX test_index_1 IS 'INDEX test';
+
+
+--
 -- Name: test_index_10; Type: INDEX; Schema: public; Owner: -; Tablespace: 
 --
 
@@ -710,6 +829,40 @@ CREATE INDEX test_index_9 ON datatype_table USING btree (v_smallint NULLS FIRST)
 
 
 --
+-- Name: rule_1; Type: RULE; Schema: public; Owner: -
+--
+
+CREATE RULE rule_1 AS
+    ON INSERT TO datatype_table DO NOTHING;
+
+
+--
+-- Name: rule_2; Type: RULE; Schema: public; Owner: -
+--
+
+CREATE RULE rule_2 AS
+    ON UPDATE TO datatype_table DO  INSERT INTO unlogged_table (id)
+  VALUES (new.id);
+
+
+--
+-- Name: rule_3; Type: RULE; Schema: public; Owner: -
+--
+
+CREATE RULE rule_3 AS
+    ON DELETE TO datatype_table DO NOTHING;
+
+
+--
+-- Name: rule_3; Type: RULE; Schema: public; Owner: -
+--
+
+CREATE RULE rule_3 AS
+    ON DELETE TO like_datatype_table
+   WHERE (old.id < 100) DO NOTHING;
+
+
+--
 -- Name: trigger_1; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -735,6 +888,13 @@ CREATE TRIGGER trigger_3 AFTER TRUNCATE ON datatype_table FOR EACH STATEMENT EXE
 --
 
 CREATE TRIGGER trigger_4 BEFORE INSERT OR UPDATE ON datatype_table FOR EACH ROW WHEN ((new.id > 100)) EXECUTE PROCEDURE plpgsql_function_trigger_1();
+
+
+--
+-- Name: trigger_4; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trigger_4 INSTEAD OF INSERT ON datatype_view FOR EACH ROW EXECUTE PROCEDURE plpgsql_function_trigger_1();
 
 
 --

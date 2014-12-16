@@ -13,6 +13,7 @@ test: create_extension
 test: create_schema
 test: create_type_enum
 test: create_type_range
+test: create_type
 test: create_domain
 test: create_sequence_1
 test: create_table
