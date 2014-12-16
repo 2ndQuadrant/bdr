@@ -8,10 +8,6 @@ ALTER SEQUENCE fkey_table_seq
   CACHE 1
   NO CYCLE;
 
-
-ALTER SEQUENCE fkey_table_seq
-  OWNER TO schema_role;
-
 ALTER SEQUENCE fkey_table_seq
   RENAME TO fkey_table_seq_renamed;
 

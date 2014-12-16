@@ -28,6 +28,7 @@ test: alter_extension
 test: alter_function
 test: alter_sequence
 test: alter_type_enum
+test: alter_owner
 
 # Final DDL deparse test (pg_dump output comparison)
 test: deparse_test

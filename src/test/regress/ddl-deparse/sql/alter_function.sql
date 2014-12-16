@@ -6,9 +6,6 @@
 -- ALTER FUNCTION plpgsql_function()
 --   RENAME TO plpgsql_function_renamed;
 
-ALTER FUNCTION c_function_test ()
-  OWNER TO schema_role;
-
 -- XXX ALTER FUNCTION ... SET SCHEMA is "unimplemented deparse"
 -- ALTER FUNCTION c_function_test ()
 --   SET SCHEMA foo;

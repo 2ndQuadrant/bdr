@@ -18,6 +18,5 @@ CREATE TYPE text_w_default (
    output = text_w_default_out,
    alignment = int4,
    default = 'foo',
-   collation = 'es_ES'
+   collatable = TRUE
 );
-WARNING:  type attribute "collation" not recognized
