@@ -290,7 +290,6 @@ extern Oid  BdrReplicationSetConfigRelid;
 extern Oid bdr_lookup_relid(const char *relname, Oid schema_oid);
 
 /* apply support */
-extern void bdr_process_remote_action(StringInfo s);
 extern void bdr_fetch_sysid_via_node_id(RepNodeId node_id, uint64 *sysid,
 										TimeLineID *tli, Oid *remote_dboid);
 extern RepNodeId bdr_fetch_node_id_via_sysid(uint64 sysid, TimeLineID tli, Oid dboid);
@@ -421,8 +420,8 @@ extern void bdr_locks_shmem_init(Size num_used_databases);
 extern void bdr_locks_check_query(void);
 
 /* background workers */
+extern void bdr_worker_init(char* dbname);
 extern void bdr_apply_main(Datum main_arg);
-extern void bdr_apply_work(PGconn* streamConn);
 
 /* manipulation of bdr catalogs */
 extern char bdr_nodes_get_local_status(uint64 sysid, TimeLineID tli, Oid dboid);
