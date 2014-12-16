@@ -184,6 +184,32 @@ $$;
 
 
 --
+-- Name: plpgsql_function_trigger_1(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION plpgsql_function_trigger_1() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: plpgsql_function_trigger_2(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION plpgsql_function_trigger_2() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  RETURN OLD;
+END;
+$$;
+
+
+--
 -- Name: sql_function(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -681,6 +707,34 @@ CREATE INDEX test_index_8 ON datatype_table USING btree (lower(v_text));
 --
 
 CREATE INDEX test_index_9 ON datatype_table USING btree (v_smallint NULLS FIRST);
+
+
+--
+-- Name: trigger_1; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trigger_1 BEFORE INSERT OR UPDATE ON datatype_table FOR EACH ROW EXECUTE PROCEDURE plpgsql_function_trigger_1();
+
+
+--
+-- Name: trigger_2; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trigger_2 AFTER DELETE ON datatype_table FOR EACH ROW EXECUTE PROCEDURE plpgsql_function_trigger_2();
+
+
+--
+-- Name: trigger_3; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trigger_3 AFTER TRUNCATE ON datatype_table FOR EACH STATEMENT EXECUTE PROCEDURE plpgsql_function_trigger_2();
+
+
+--
+-- Name: trigger_4; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trigger_4 BEFORE INSERT OR UPDATE ON datatype_table FOR EACH ROW WHEN ((new.id > 100)) EXECUTE PROCEDURE plpgsql_function_trigger_1();
 
 
 --

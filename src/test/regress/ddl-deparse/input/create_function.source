@@ -81,3 +81,23 @@ BEGIN
   RETURN v_input;
 END;
 $$ WITH(isStrict, isCachable);
+
+-- Following functions needed for CREATE TRIGGER tests
+
+CREATE FUNCTION plpgsql_function_trigger_1()
+  RETURNS TRIGGER
+  LANGUAGE plpgsql
+AS $$
+BEGIN
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION plpgsql_function_trigger_2()
+  RETURNS TRIGGER
+  LANGUAGE plpgsql
+AS $$
+BEGIN
+  RETURN OLD;
+END;
+$$;
