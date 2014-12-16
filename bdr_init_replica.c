@@ -1128,8 +1128,9 @@ bdr_catchup_to_lsn(int cfg_index,
 		bgw.bgw_flags = BGWORKER_SHMEM_ACCESS |
 			BGWORKER_BACKEND_DATABASE_CONNECTION;
 		bgw.bgw_start_time = BgWorkerStart_RecoveryFinished;
-		/* TODO: For EXEC_BACKEND we must use bgw_library_name & bgw_function_name */
-		bgw.bgw_main = bdr_apply_main;
+		bgw.bgw_main = NULL;
+		strncpy(bgw.bgw_library_name, BDR_LIBRARY_NAME, BGW_MAXLEN);
+		strncpy(bgw.bgw_function_name, "bdr_apply_main", BGW_MAXLEN);
 
 		bgw.bgw_restart_time = BGW_NEVER_RESTART;
 		bgw.bgw_notify_pid = MyProc->pid;
