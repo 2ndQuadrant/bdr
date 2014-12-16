@@ -1,0 +1,5 @@
+---
+--- ALTER_EXTENSION
+---
+ALTER EXTENSION pg_stat_statements UPDATE;
+NOTICE:  version "1.2" of extension "pg_stat_statements" is already installed
