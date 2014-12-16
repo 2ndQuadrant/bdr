@@ -71,12 +71,20 @@ CREATE TABLE storage (
     autovacuum_enabled = FALSE
 );
 
+-- LIKE
+
+CREATE TABLE like_datatype_table (
+  LIKE datatype_table
+  EXCLUDING ALL
+);
+
 CREATE TABLE like_fkey_table (
   LIKE fkey_table
   INCLUDING DEFAULTS
   INCLUDING INDEXES
   INCLUDING STORAGE
 );
+
 
 -- Volatile table types
 CREATE UNLOGGED TABLE unlogged_table (
