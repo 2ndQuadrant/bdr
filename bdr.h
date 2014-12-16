@@ -422,6 +422,7 @@ extern void bdr_locks_check_query(void);
 /* background workers */
 extern void bdr_worker_init(char* dbname);
 extern void bdr_apply_main(Datum main_arg);
+extern void bdr_perdb_worker_main(Datum main_arg);
 
 /* manipulation of bdr catalogs */
 extern char bdr_nodes_get_local_status(uint64 sysid, TimeLineID tli, Oid dboid);
