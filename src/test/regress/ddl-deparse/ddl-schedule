@@ -25,6 +25,7 @@ test: create_view
 test: create_function
 test: create_trigger
 test: create_rule
+test: security_label
 test: comment_on
 test: alter_extension
 test: alter_function
