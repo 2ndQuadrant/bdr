@@ -282,6 +282,7 @@ typedef struct BdrWorkerControl
 } BdrWorkerControl;
 
 extern BdrWorkerControl *BdrWorkerCtl;
+extern BdrWorker		*bdr_worker_slot;
 
 extern ResourceOwner bdr_saved_resowner;
 

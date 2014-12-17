@@ -101,6 +101,9 @@ BdrWorkerType bdr_worker_type = BDR_WORKER_EMPTY_SLOT;
 /* shortcut for finding the the worker shmem block */
 BdrWorkerControl *BdrWorkerCtl = NULL;
 
+/* This worker's block within BdrWorkerCtl - only valid in bdr workers */
+BdrWorker  *bdr_worker_slot = NULL;
+
 PG_MODULE_MAGIC;
 
 void		_PG_init(void);
