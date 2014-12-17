@@ -100,6 +100,16 @@ CREATE DOMAIN domainvarchar AS character varying(5);
 
 
 --
+-- Name: employee_type; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE employee_type AS (
+	name text,
+	salary numeric
+);
+
+
+--
 -- Name: enum_test; Type: TYPE; Schema: public; Owner: -
 --
 
@@ -534,6 +544,18 @@ CREATE TABLE emp (
 INHERITS (person);
 
 
+SET default_with_oids = false;
+
+--
+-- Name: employees; Type: TABLE; Schema: public; Owner: -; Tablespace: 
+--
+
+CREATE TABLE employees OF public.employee_type (
+    name WITH OPTIONS NOT NULL,
+    salary WITH OPTIONS DEFAULT 1000
+);
+
+
 --
 -- Name: fkey_table_seq_renamed; Type: SEQUENCE; Schema: public; Owner: -
 --
@@ -553,8 +575,6 @@ CREATE SEQUENCE fkey_table_seq_renamed
 COMMENT ON SEQUENCE fkey_table_seq_renamed IS 'SEQUENCE test';
 
 
-SET default_with_oids = false;
-
 --
 -- Name: fkey_table; Type: TABLE; Schema: public; Owner: -; Tablespace: 
 --
@@ -562,7 +582,11 @@ SET default_with_oids = false;
 CREATE TABLE fkey_table (
     id integer DEFAULT nextval('fkey_table_seq_renamed'::regclass) NOT NULL,
     datatype_id integer NOT NULL,
-    big_id bigint NOT NULL
+    big_id bigint NOT NULL,
+    sometext text COLLATE pg_catalog."ja_JP",
+    check_col_1 integer NOT NULL,
+    check_col_2 integer NOT NULL,
+    CONSTRAINT fkey_table_check_col_1_check CHECK ((check_col_1 < 10))
 );
 
 
@@ -600,7 +624,10 @@ CREATE VIEW like_datatype_table AS
 CREATE TABLE like_fkey_table (
     id integer DEFAULT nextval('fkey_table_seq_renamed'::regclass) NOT NULL,
     datatype_id integer NOT NULL,
-    big_id bigint NOT NULL
+    big_id bigint NOT NULL,
+    sometext text COLLATE pg_catalog."ja_JP",
+    check_col_1 integer NOT NULL,
+    check_col_2 integer NOT NULL
 );
 
 
@@ -702,7 +729,20 @@ CREATE TABLE stud_emp (
 INHERITS (emp, student);
 
 
+SET default_tablespace = test_tablespace;
+
 SET default_with_oids = false;
+
+--
+-- Name: tablespace_test; Type: TABLE; Schema: public; Owner: -; Tablespace: test_tablespace
+--
+
+CREATE TABLE tablespace_test (
+    id integer NOT NULL
+);
+
+
+SET default_tablespace = '';
 
 --
 -- Name: unlogged_table; Type: TABLE; Schema: public; Owner: -; Tablespace: 
@@ -744,11 +784,35 @@ ALTER TABLE ONLY datatype_table
 
 
 --
+-- Name: employees_pkey; Type: CONSTRAINT; Schema: public; Owner: -; Tablespace: 
+--
+
+ALTER TABLE ONLY employees
+    ADD CONSTRAINT employees_pkey PRIMARY KEY (name);
+
+
+--
+-- Name: fkey_table_check_col_2_excl; Type: CONSTRAINT; Schema: public; Owner: -; Tablespace: 
+--
+
+ALTER TABLE ONLY fkey_table
+    ADD CONSTRAINT fkey_table_check_col_2_excl EXCLUDE USING btree (check_col_2 WITH =);
+
+
+--
 -- Name: fkey_table_pkey; Type: CONSTRAINT; Schema: public; Owner: -; Tablespace: 
 --
 
 ALTER TABLE ONLY fkey_table
     ADD CONSTRAINT fkey_table_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: like_fkey_table_check_col_2_excl; Type: CONSTRAINT; Schema: public; Owner: -; Tablespace: 
+--
+
+ALTER TABLE ONLY like_fkey_table
+    ADD CONSTRAINT like_fkey_table_check_col_2_excl EXCLUDE USING btree (check_col_2 WITH =);
 
 
 --
@@ -766,6 +830,18 @@ ALTER TABLE ONLY like_fkey_table
 ALTER TABLE ONLY person
     ADD CONSTRAINT person_pkey PRIMARY KEY (id);
 
+
+SET default_tablespace = test_tablespace;
+
+--
+-- Name: tablespace_test_pkey; Type: CONSTRAINT; Schema: public; Owner: -; Tablespace: test_tablespace
+--
+
+ALTER TABLE ONLY tablespace_test
+    ADD CONSTRAINT tablespace_test_pkey PRIMARY KEY (id);
+
+
+SET default_tablespace = '';
 
 --
 -- Name: unlogged_table_pkey; Type: CONSTRAINT; Schema: public; Owner: -; Tablespace: 
