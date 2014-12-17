@@ -183,6 +183,7 @@ CREATE TYPE text_w_default (
     INTERNALLENGTH = variable,
     INPUT = text_w_default_in,
     OUTPUT = text_w_default_out,
+    COLLATABLE = true,
     DEFAULT = 'foo',
     ALIGNMENT = int4,
     STORAGE = plain
@@ -203,6 +204,17 @@ CREATE FUNCTION c_function_test() RETURNS integer
 --
 
 COMMENT ON FUNCTION c_function_test() IS 'FUNCTION test';
+
+
+--
+-- Name: fn_op2(boolean, boolean); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION fn_op2(boolean, boolean) RETURNS boolean
+    LANGUAGE sql IMMUTABLE
+    AS $$
+  SELECT NULL::BOOLEAN;
+$$;
 
 
 --
@@ -316,6 +328,53 @@ CREATE FUNCTION sql_function_in_out_default(text DEFAULT 'foo'::text, OUT text) 
     AS $_$
     SELECT 'Input: ' || $1;
 $_$;
+
+
+--
+-- Name: #%#; Type: OPERATOR; Schema: public; Owner: -
+--
+
+CREATE OPERATOR #%# (
+    PROCEDURE = numeric_fac,
+    LEFTARG = bigint
+);
+
+
+--
+-- Name: #@#; Type: OPERATOR; Schema: public; Owner: -
+--
+
+CREATE OPERATOR #@# (
+    PROCEDURE = numeric_fac,
+    LEFTARG = bigint
+);
+
+
+--
+-- Name: ===; Type: OPERATOR; Schema: public; Owner: -
+--
+
+CREATE OPERATOR === (
+    PROCEDURE = fn_op2,
+    LEFTARG = boolean,
+    RIGHTARG = boolean,
+    COMMUTATOR = ===,
+    NEGATOR = !==,
+    MERGES,
+    HASHES,
+    RESTRICT = contsel,
+    JOIN = contjoinsel
+);
+
+
+--
+-- Name: @#@; Type: OPERATOR; Schema: public; Owner: -
+--
+
+CREATE OPERATOR @#@ (
+    PROCEDURE = numeric_fac,
+    RIGHTARG = bigint
+);
 
 
 SET search_path = element_test, pg_catalog;

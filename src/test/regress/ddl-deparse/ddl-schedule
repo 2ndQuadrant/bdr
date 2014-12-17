@@ -15,6 +15,7 @@ test: create_type_enum
 test: create_type_range
 test: create_type
 test: create_operator
+test: create_conversion
 test: create_domain
 test: create_sequence_1
 test: create_table
