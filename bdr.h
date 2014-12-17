@@ -14,6 +14,7 @@
 #include "postmaster/bgworker.h"
 #include "replication/logical.h"
 #include "utils/resowner.h"
+#include "storage/latch.h"
 #include "storage/lock.h"
 
 #include "libpq-fe.h"
@@ -194,14 +195,19 @@ typedef struct BdrApplyWorker
  */
 typedef struct BdrPerdbWorker
 {
-	/* local database name */
+	/* local database name to connect to */
 	NameData dbname;
 
 	/* number of outgoing connections from this database */
-	size_t nnodes;
+	Size nnodes;
 
 	size_t seq_slot;
 
+	/* The perdb worker's latch from the PROC array, for use from other backends */
+	Latch	   *proclatch;
+
+	/* Oid of the database the worker is attached to - populated after start */
+	Oid	database_oid;
 } BdrPerdbWorker;
 
 /*
