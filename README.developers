@@ -10,6 +10,9 @@ Before tagging a release:
 
 * run "make check"
 
+  Note that you need contrib/{btree_gist,cube,hstore,pg_trgm} installed to run
+  tests.
+
 * Ensure that the version in bdr_version.h.in matches the intended tag
 
 * Ensure that bdr--[ver].sql matches the version in bdr_version.h.in
