@@ -189,7 +189,6 @@ bdr_perdb_worker_main(Datum main_arg)
 	List			 *apply_workers;
 	ListCell		 *c;
 	BdrPerdbWorker   *bdr_perdb_worker;
-	BdrWorker		 *bdr_worker_slot;
 	StringInfoData	  si;
 	bool			  wait;
 
