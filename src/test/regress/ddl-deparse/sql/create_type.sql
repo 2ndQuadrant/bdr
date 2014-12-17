@@ -20,3 +20,6 @@ CREATE TYPE text_w_default (
    default = 'foo',
    collatable = TRUE
 );
+
+CREATE TYPE employee_type AS (name TEXT, salary NUMERIC);
+
