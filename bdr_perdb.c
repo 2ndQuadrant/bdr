@@ -248,6 +248,8 @@ bdr_perdb_worker_main(Datum main_arg)
 	/* initialize sequencer */
 	bdr_sequencer_init(bdr_perdb_worker->seq_slot, bdr_perdb_worker->nnodes);
 #endif
+	bdr_perdb_worker->proclatch = &MyProc->procLatch;
+	bdr_perdb_worker->database_oid = MyDatabaseId;
 
 	while (!got_SIGTERM)
 	{
@@ -301,6 +303,7 @@ bdr_perdb_worker_main(Datum main_arg)
 		}
 	}
 
+	bdr_perdb_worker->database_oid = InvalidOid;
 	proc_exit(0);
 }
 
