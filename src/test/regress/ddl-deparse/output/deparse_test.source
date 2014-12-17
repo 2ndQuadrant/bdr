@@ -420,6 +420,8 @@ SET search_path = public, pg_catalog;
 CREATE TABLE datatype_table (
     id integer NOT NULL,
     id_big bigint NOT NULL,
+    is_small smallint NOT NULL,
+    v_bytea bytea,
     v_smallint smallint,
     v_int integer,
     v_bigint bigint,
@@ -428,12 +430,35 @@ CREATE TABLE datatype_table (
     v_text text,
     v_bool boolean,
     v_inet inet,
+    v_cidr cidr,
+    v_macaddr macaddr,
     v_numeric numeric(1,0),
+    v_real real,
     v_float real,
+    v_float8 double precision,
+    v_money money,
+    v_tsquery tsquery,
     v_tsvector tsvector,
+    v_date date,
+    v_time time without time zone,
+    v_time_tz time with time zone,
     v_timestamp timestamp without time zone,
     v_timestamp_tz timestamp with time zone,
+    v_interval interval,
+    v_bit bit(1),
+    v_bit4 bit(4),
+    v_varbit bit varying,
+    v_varbit4 bit varying(4),
+    v_box box,
+    v_circle circle,
+    v_lseg lseg,
+    v_path path,
     v_point point,
+    v_polygon polygon,
+    v_json json,
+    v_xml xml,
+    v_uuid uuid,
+    v_txid_snapshot txid_snapshot,
     v_enum enum_test,
     v_postal_code japanese_postal_code,
     v_int2range int2range
@@ -486,12 +511,33 @@ ALTER SEQUENCE datatype_table_id_seq OWNED BY datatype_table.id;
 
 
 --
+-- Name: datatype_table_is_small_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE datatype_table_is_small_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: datatype_table_is_small_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE datatype_table_is_small_seq OWNED BY datatype_table.is_small;
+
+
+--
 -- Name: datatype_view; Type: VIEW; Schema: public; Owner: -
 --
 
 CREATE VIEW datatype_view AS
  SELECT datatype_table.id,
     datatype_table.id_big,
+    datatype_table.is_small,
+    datatype_table.v_bytea,
     datatype_table.v_smallint,
     datatype_table.v_int,
     datatype_table.v_bigint,
@@ -500,12 +546,35 @@ CREATE VIEW datatype_view AS
     datatype_table.v_text,
     datatype_table.v_bool,
     datatype_table.v_inet,
+    datatype_table.v_cidr,
+    datatype_table.v_macaddr,
     datatype_table.v_numeric,
+    datatype_table.v_real,
     datatype_table.v_float,
+    datatype_table.v_float8,
+    datatype_table.v_money,
+    datatype_table.v_tsquery,
     datatype_table.v_tsvector,
+    datatype_table.v_date,
+    datatype_table.v_time,
+    datatype_table.v_time_tz,
     datatype_table.v_timestamp,
     datatype_table.v_timestamp_tz,
+    datatype_table.v_interval,
+    datatype_table.v_bit,
+    datatype_table.v_bit4,
+    datatype_table.v_varbit,
+    datatype_table.v_varbit4,
+    datatype_table.v_box,
+    datatype_table.v_circle,
+    datatype_table.v_lseg,
+    datatype_table.v_path,
     datatype_table.v_point,
+    datatype_table.v_polygon,
+    datatype_table.v_json,
+    datatype_table.v_xml,
+    datatype_table.v_uuid,
+    datatype_table.v_txid_snapshot,
     datatype_table.v_enum,
     datatype_table.v_postal_code,
     datatype_table.v_int2range
@@ -597,6 +666,8 @@ CREATE TABLE fkey_table (
 CREATE VIEW like_datatype_table AS
  SELECT datatype_view.id,
     datatype_view.id_big,
+    datatype_view.is_small,
+    datatype_view.v_bytea,
     datatype_view.v_smallint,
     datatype_view.v_int,
     datatype_view.v_bigint,
@@ -605,12 +676,35 @@ CREATE VIEW like_datatype_table AS
     datatype_view.v_text,
     datatype_view.v_bool,
     datatype_view.v_inet,
+    datatype_view.v_cidr,
+    datatype_view.v_macaddr,
     datatype_view.v_numeric,
+    datatype_view.v_real,
     datatype_view.v_float,
+    datatype_view.v_float8,
+    datatype_view.v_money,
+    datatype_view.v_tsquery,
     datatype_view.v_tsvector,
+    datatype_view.v_date,
+    datatype_view.v_time,
+    datatype_view.v_time_tz,
     datatype_view.v_timestamp,
     datatype_view.v_timestamp_tz,
+    datatype_view.v_interval,
+    datatype_view.v_bit,
+    datatype_view.v_bit4,
+    datatype_view.v_varbit,
+    datatype_view.v_varbit4,
+    datatype_view.v_box,
+    datatype_view.v_circle,
+    datatype_view.v_lseg,
+    datatype_view.v_path,
     datatype_view.v_point,
+    datatype_view.v_polygon,
+    datatype_view.v_json,
+    datatype_view.v_xml,
+    datatype_view.v_uuid,
+    datatype_view.v_txid_snapshot,
     datatype_view.v_enum,
     datatype_view.v_postal_code,
     datatype_view.v_int2range
@@ -765,6 +859,13 @@ ALTER TABLE ONLY datatype_table ALTER COLUMN id SET DEFAULT nextval('datatype_ta
 --
 
 ALTER TABLE ONLY datatype_table ALTER COLUMN id_big SET DEFAULT nextval('datatype_table_id_big_seq'::regclass);
+
+
+--
+-- Name: is_small; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY datatype_table ALTER COLUMN is_small SET DEFAULT nextval('datatype_table_is_small_seq'::regclass);
 
 
 --
