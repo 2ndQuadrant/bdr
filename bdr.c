@@ -30,7 +30,6 @@
 #include "access/heapam.h"
 #include "access/xact.h"
 
-#include "catalog/catversion.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_extension.h"
 
@@ -41,8 +40,6 @@
 
 #include "libpq/libpq-be.h"
 #include "libpq/pqformat.h"
-
-#include "mb/pg_wchar.h"
 
 #include "nodes/execnodes.h"
 
