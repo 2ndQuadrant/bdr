@@ -23,6 +23,7 @@
 
 typedef uint16 RepNodeId;
 #define InvalidRepNodeId 0
+#define DoNotReplicateRepNodeId USHRT_MAX
 
 extern PGDLLIMPORT RepNodeId replication_origin_id;
 extern PGDLLIMPORT TimestampTz replication_origin_timestamp;
