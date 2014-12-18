@@ -2,10 +2,6 @@ Parsed test spec with 1 sessions
 
 starting permutation: wait
 step wait: 
-	-- pg_xlog_wait_remote_apply isn't good enough alone
-	-- as it doesn't permit us to say how many nodes must be present.
-	-- It'll succeed if there are zero nodes. So we first have to wait
-	-- for enough replication connections.
 	DO $$
 	DECLARE
 		nodecount integer := 0;
@@ -14,6 +10,8 @@ step wait:
 		WHILE nodecount <> 6
 		LOOP
 			PERFORM pg_sleep(1);
+			PERFORM pg_stat_clear_snapshot();
+			-- Now find out how many walsenders are running
 			nodecount := (SELECT count(*)
 						  FROM pg_catalog.pg_stat_replication);
 			RAISE NOTICE 'Found % nodes',nodecount;
