@@ -17,6 +17,12 @@ step "wait"
 		WHILE nodecount <> 6
 		LOOP
 			PERFORM pg_sleep(1);
+			-- pg_stat_activity is cached when first accessed so repeat access
+			-- within the same transaction sees unchanging results. As pg_stat_replication
+			-- joins pg_stat_get_wal_senders() on pg_stat_activity, new walsenders
+			-- are filtered out by the join unles we force a refresh of pg_stat_activity.
+			PERFORM pg_stat_clear_snapshot();
+			-- Now find out how many walsenders are running
 			nodecount := (SELECT count(*)
 						  FROM pg_catalog.pg_stat_replication);
 			RAISE NOTICE 'Found % nodes',nodecount;
