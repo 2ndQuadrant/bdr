@@ -90,6 +90,7 @@ int bdr_default_apply_delay;
 int bdr_max_workers;
 static bool bdr_skip_ddl_replication;
 bool bdr_skip_ddl_locking;
+bool bdr_do_not_replicate;
 
 /* shmem init hook to chain to on startup, if any */
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
@@ -1120,6 +1121,43 @@ bdr_is_bdr_activated_db(void)
 	return false;
 }
 
+static bool
+bdr_do_not_replicate_check_hook(bool *newvalue, void **extra, GucSource source)
+{
+	if (!(*newvalue))
+		/* False is always acceptable */
+		return true;
+
+	/*
+	 * Only set bdr.do_not_replicate if configured via startup packet from the
+	 * client application. This prevents possibly unsafe accesses to the
+	 * replication identifier state in postmaster context, etc.
+	 */
+	if (source != PGC_S_CLIENT)
+		return false;
+
+	Assert(IsUnderPostmaster);
+	Assert(!IsBackgroundWorker);
+
+	return true;
+}
+
+/*
+ * Override the origin replication identifier that this session will record for
+ * its transactions. We need this mainly when applying dumps during
+ * init_replica.
+ */
+static void
+bdr_do_not_replicate_assign_hook(bool newvalue, void *extra)
+{
+	if (newvalue)
+	{
+		/* Mark these transactions as not to be replicated to other nodes */
+		SetupCachedReplicationIdentifier(DoNotReplicateRepNodeId);
+	}
+}
+
+
 /*
  * Entrypoint of this module - called at shared_preload_libraries time in the
  * context of the postmaster.
@@ -1283,6 +1321,18 @@ _PG_init(void)
 							 PGC_BACKEND,
 							 0,
 							 NULL, NULL, NULL);
+
+	DefineCustomBoolVariable("bdr.do_not_replicate",
+							 "Internal. Set during local initialization from basebackup only",
+							 NULL,
+							 &bdr_do_not_replicate,
+							 false,
+							 PGC_BACKEND,
+							 0,
+							 bdr_do_not_replicate_check_hook,
+							 bdr_do_not_replicate_assign_hook,
+							 NULL);
+
 	bdr_label_init();
 
 	/* if nothing is configured, we're done */
