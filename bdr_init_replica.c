@@ -552,6 +552,17 @@ bdr_exec_init_replica(BdrConnectionConfig *cfg, char *snapshot)
 					 "%s fallback_application_name='"BDR_LOCALID_FORMAT": %s: init_replica restore'",
 					 cfg->replica_local_dsn, BDR_LOCALID_FORMAT_ARGS, cfg->name);
 
+	/*
+	 * Suppress replication of changes applied via pg_restore back to
+	 * the local node.
+	 *
+	 * XXX DYNCONF: This should PQconninfoParse, modify the options keyword or
+	 * add it, and reconstruct the string using the functions from pg_dumpall
+	 * (also to be used for init_copy). This is a hack.
+	 */
+	appendStringInfoString(&local_dsn,
+						   " options='-c bdr.do_not_replicate=on'");
+
 	tmpdir = palloc(strlen(bdr_temp_dump_directory)+32);
 	sprintf(tmpdir, "%s/postgres-bdr-%s.%d", bdr_temp_dump_directory,
 			snapshot, getpid());
