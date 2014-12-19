@@ -92,7 +92,7 @@ if ! "$PGDUMP" -j $JOBS $SNAP -F d -f $TMPDIR "$SOURCE"; then
 fi
 
 errlog "Restoring dump to local DB \"$TARGET\" with $JOBS concurrent workers from \"$TMPDIR\""
-if ! PGOPTIONS="-c bdr.permit_unsafe_ddl_commands=true -c bdr.skip_ddl_replication=true" "$PGRESTORE" --exit-on-error --single-transaction -j $JOBS -F d -d "$TARGET" $TMPDIR; then
+if ! "$PGRESTORE" --exit-on-error --single-transaction -j $JOBS -F d -d "$TARGET" $TMPDIR; then
     errlog "pg_restore to "$TARGET" failed, aborting"
     exit 2
 fi
