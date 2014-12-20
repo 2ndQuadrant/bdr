@@ -2139,11 +2139,11 @@ deparse_CreateStmt(Oid objectId, Node *parsetree)
 	if (node->ofTypename)
 		fmtstr = "CREATE %{persistence}s TABLE %{if_not_exists}s %{identity}D "
 			"OF %{of_type}T %{table_elements}s "
-			"%{on_commit}s WITH (%{with:, }s) %{tablespace}s";
+			"WITH (%{with:, }s) %{on_commit}s %{tablespace}s";
 	else
 		fmtstr = "CREATE %{persistence}s TABLE %{if_not_exists}s %{identity}D "
 			"(%{table_elements:, }s) %{inherits}s "
-			"%{on_commit}s WITH (%{with:, }s) %{tablespace}s";
+			"WITH (%{with:, }s) %{on_commit}s %{tablespace}s";
 
 	createStmt =
 		new_objtree_VA(fmtstr, 1,
