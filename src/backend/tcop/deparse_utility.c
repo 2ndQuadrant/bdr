@@ -2627,7 +2627,7 @@ deparse_CreateDomain(Oid objectId, Node *parsetree)
 		elog(ERROR, "cache lookup failed for domain with OID %u", objectId);
 	typForm = (Form_pg_type) GETSTRUCT(typTup);
 
-	createDomain = new_objtree_VA("CREATE DOMAIN %{identity}D AS %{type}D %{not_null}s %{constraints}s %{collation}s",
+	createDomain = new_objtree_VA("CREATE DOMAIN %{identity}D AS %{type}T %{not_null}s %{constraints}s %{collation}s",
 								  0);
 
 	append_object_object(createDomain,
@@ -2636,8 +2636,7 @@ deparse_CreateDomain(Oid objectId, Node *parsetree)
 													 objectId));
 	append_object_object(createDomain,
 						 "type",
-						 new_objtree_for_qualname_id(TypeRelationId,
-													 typForm->typbasetype));
+						 new_objtree_for_type(objectId, typForm->typtypmod));
 
 	if (typForm->typnotnull)
 		append_string_object(createDomain, "not_null", "NOT NULL");
