@@ -3102,14 +3102,25 @@ stringify_objtype(ObjectType objtype)
 	{
 		case OBJECT_AGGREGATE:
 			return "AGGREGATE";
+		case OBJECT_ATTRIBUTE:
+			return "ATTRIBUTE";
+		case OBJECT_CAST:
+			return "CAST";
+/*		case OBJECT_COMPOSITE: */
 		case OBJECT_COLUMN:
 			return "COLUMN";
-		case OBJECT_DOMAIN:
-			return "DOMAIN";
+		case OBJECT_CONSTRAINT:
+			return "CONSTRAINT";
 		case OBJECT_COLLATION:
 			return "COLLATION";
 		case OBJECT_CONVERSION:
 			return "CONVERSION";
+		case OBJECT_DATABASE:
+			return "DATABASE";
+		case OBJECT_DOMAIN:
+			return "DOMAIN";
+		case OBJECT_EVENT_TRIGGER:
+			return "EVENT TRIGGER";
 		case OBJECT_EXTENSION:
 			return "EXTENSION";
 		case OBJECT_FDW:
@@ -3128,18 +3139,26 @@ stringify_objtype(ObjectType objtype)
 			return "LARGE OBJECT";
 		case OBJECT_MATVIEW:
 			return "MATERIALIZED VIEW";
-		case OBJECT_OPERATOR:
-			return "OPERATOR";
 		case OBJECT_OPCLASS:
 			return "OPERATOR CLASS";
+		case OBJECT_OPERATOR:
+			return "OPERATOR";
 		case OBJECT_OPFAMILY:
 			return "OPERATOR FAMILY";
+		case OBJECT_ROLE:
+			return "ROLE";
+		case OBJECT_RULE:
+			return "RULE";
 		case OBJECT_SCHEMA:
 			return "SCHEMA";
 		case OBJECT_SEQUENCE:
 			return "SEQUENCE";
 		case OBJECT_TABLE:
 			return "TABLE";
+		case OBJECT_TABLESPACE:
+			return "TABLESPACE";
+		case OBJECT_TRIGGER:
+			return "TRIGGER";
 		case OBJECT_TSCONFIGURATION:
 			return "TEXT SEARCH CONFIGURATION";
 		case OBJECT_TSDICTIONARY:
@@ -3150,6 +3169,8 @@ stringify_objtype(ObjectType objtype)
 			return "TEXT SEARCH TEMPLATE";
 		case OBJECT_TYPE:
 			return "TYPE";
+		case OBJECT_USER_MAPPING:
+			return "USER MAPPING";
 		case OBJECT_VIEW:
 			return "VIEW";
 
