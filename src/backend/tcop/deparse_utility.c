@@ -3876,7 +3876,7 @@ deparse_CreateConversion(Oid objectId, Node *parsetree)
 	Form_pg_conversion conForm;
 	ObjTree	   *ccStmt;
 
-	conTup = SearchSysCache1(CONDEFAULT, ObjectIdGetDatum(objectId));
+	conTup = SearchSysCache1(CONOID, ObjectIdGetDatum(objectId));
 	if (!HeapTupleIsValid(conTup))
 		elog(ERROR, "cache lookup failed for conversion with OID %u", objectId);
 	conForm = (Form_pg_conversion) GETSTRUCT(conTup);
