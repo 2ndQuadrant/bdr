@@ -4581,6 +4581,8 @@ deparse_SecLabelStmt(ObjectAddress address, Node *parsetree)
 	ObjTree	   *label;
 	char	   *fmt;
 
+	Assert(node->provider);
+
 	if (node->label)
 	{
 		fmt = psprintf("SECURITY LABEL FOR %%{provider}s ON %s %%{identity}s IS %%{label}L",
