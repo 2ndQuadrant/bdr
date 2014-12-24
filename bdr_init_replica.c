@@ -519,8 +519,8 @@ bdr_exec_init_replica(BdrConnectionConfig *cfg, char *snapshot)
 	                    &bdr_init_replica_script_path[0]) < 0)
 	{
 		elog(ERROR, "bdr: failed to find " BDR_INIT_REPLICA_CMD
-			 " relative to binary %s or wrong version (expected %s)",
-			 my_exec_path, PG_VERSION);
+			 " relative to binary %s or wrong version. Expected (PostgreSQL %s, BDR %s)",
+			 my_exec_path, PG_VERSION, BDR_VERSION);
 	}
 
 	if (find_other_exec(my_exec_path, BDR_DUMP_CMD,
@@ -561,7 +561,7 @@ bdr_exec_init_replica(BdrConnectionConfig *cfg, char *snapshot)
 	 * (also to be used for init_copy). This is a hack.
 	 */
 	appendStringInfoString(&local_dsn,
-						   " options='-c bdr.do_not_replicate=on'");
+						   " options='-c bdr.do_not_replicate=on -c bdr.permit_unsafe_ddl_commands=on -c bdr.skip_ddl_replication=on -c bdr.skip_ddl_locking=on'");
 
 	tmpdir = palloc(strlen(bdr_temp_dump_directory)+32);
 	sprintf(tmpdir, "%s/postgres-bdr-%s.%d", bdr_temp_dump_directory,
