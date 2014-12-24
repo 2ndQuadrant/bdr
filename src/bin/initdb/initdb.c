@@ -1361,7 +1361,7 @@ setup_config(void)
 	autoconflines[1] = pg_strdup("# It will be overwritten by the ALTER SYSTEM command.\n");
 	autoconflines[2] = NULL;
 
-	sprintf(path, "%s/%s", pg_data, PG_AUTOCONF_FILENAME);
+	sprintf(path, "%s/postgresql.auto.conf", pg_data);
 
 	writefile(path, autoconflines);
 	if (chmod(path, S_IRUSR | S_IWUSR) != 0)
@@ -1658,8 +1658,12 @@ get_set_pwd(void)
 		}
 		if (!fgets(pwdbuf, sizeof(pwdbuf), pwf))
 		{
-			fprintf(stderr, _("%s: could not read password from file \"%s\": %s\n"),
-					progname, pwfilename, strerror(errno));
+			if (ferror(pwf))
+				fprintf(stderr, _("%s: could not read password from file \"%s\": %s\n"),
+						progname, pwfilename, strerror(errno));
+			else
+				fprintf(stderr, _("%s: password file \"%s\" is empty\n"),
+						progname, pwfilename);
 			exit_nicely();
 		}
 		fclose(pwf);
