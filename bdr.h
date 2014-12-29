@@ -155,10 +155,16 @@ typedef struct BDRTupleData
  */
 typedef struct BdrApplyWorker
 {
+	/* oid of the database this worker is applying changes to */
+	Oid dboid;
+
 	/*
-	 * The name of this apply worker in bdr.bdr_connections
+	 * Identification for the remote db we're connecting to; used to
+	 * find the appropriate bdr.connections row, etc.
 	 */
-	NameData conn_local_name;
+	uint64		remote_sysid;
+	TimeLineID	remote_timeline;
+	Oid			remote_dboid;
 
 	/*
 	 * If not InvalidXLogRecPtr, stop replay at this point and exit.
@@ -170,16 +176,6 @@ typedef struct BdrApplyWorker
 
 	/* Request that the remote forward all changes from other nodes */
 	bool forward_changesets;
-
-	/*
-	 * Rather than store many copies of the dbname to connect to in shmem,
-	 * just note the perdb worker for this db's shmem index.
-	 *
-	 * (We can't use the db oid instead, because oid to name lookups are
-	 * only possible once we're connected to a DB).
-	 */
-	uint16 perdb_worker_idx;
-
 } BdrApplyWorker;
 
 /*
@@ -421,7 +417,7 @@ extern bool bdr_get_integer_timestamps(void);
 extern bool bdr_get_bigendian(void);
 
 /* initialize a new bdr member */
-extern void bdr_init_replica(Name dbname);
+extern void bdr_init_replica(Oid dboid);
 
 /* shared memory management */
 extern void bdr_maintain_schema(bool update_extensions);
@@ -429,9 +425,6 @@ extern BdrWorker* bdr_worker_shmem_alloc(BdrWorkerType worker_type,
 										 uint32 *ctl_idx);
 extern void bdr_worker_shmem_release(BdrWorker* worker, BackgroundWorkerHandle *handle);
 extern bool bdr_is_bdr_activated_db(void);
-
-/* Really private to perdb workers, but init_replica perdb code needs it too */
-extern uint16 perdb_worker_idx;
 
 /* forbid commands we do not support currently (or never will) */
 extern void init_bdr_commandfilter(void);
@@ -456,17 +449,14 @@ extern void bdr_supervisor_register(void);
 extern void bdr_sighup(SIGNAL_ARGS);
 extern void bdr_sigterm(SIGNAL_ARGS);
 
-extern int find_perdb_worker_slot(const char *dbname,
+extern int find_perdb_worker_slot(Oid dboid,
 									 BdrWorker **worker_found);
 
+extern void bdr_launch_apply_workers(Oid dboid);
 
 /* manipulation of bdr catalogs */
 extern char bdr_nodes_get_local_status(uint64 sysid, TimeLineID tli, Oid dboid);
 extern void bdr_nodes_set_local_status(char status);
-
-extern List*
-bdr_read_connection_configs(Name conn_local_name, Name dbname,
-							bool init_replica);
 
 extern Oid GetSysCacheOidError(int cacheId, Datum key1, Datum key2, Datum key3,
 							   Datum key4);
@@ -477,8 +467,8 @@ extern Oid GetSysCacheOidError(int cacheId, Datum key1, Datum key2, Datum key3,
 
 
 /* helpers shared by multiple worker types */
-extern struct pg_conn* bdr_connect(char *conninfo_repl,
-								   char *conninfo_db,
+extern struct pg_conn* bdr_connect(const char *conninfo_repl,
+								   const char *conninfo_db,
 								   char* remote_ident,
 								   size_t remote_ident_length,
 								   NameData* slot_name,
@@ -487,7 +477,7 @@ extern struct pg_conn* bdr_connect(char *conninfo_repl,
 								   Oid *out_dboid_i);
 
 extern struct pg_conn *
-bdr_establish_connection_and_slot(BdrConnectionConfig *cfg,
+bdr_establish_connection_and_slot(const char *dsn,
 								  const char *application_name_suffix,
 								  Name out_slot_name,
 								  uint64 *out_sysid,

@@ -158,7 +158,7 @@ bdr_sighup(SIGNAL_ARGS)
  * Get database Oid of the remotedb.
  */
 static Oid
-bdr_get_remote_dboid(char *conninfo_db)
+bdr_get_remote_dboid(const char *conninfo_db)
 {
 	PGconn	   *dbConn;
 	PGresult   *res;
@@ -216,8 +216,8 @@ bdr_get_remote_dboid(char *conninfo_db)
  *   remote_tlid_i
  */
 PGconn*
-bdr_connect(char *conninfo_repl,
-			char *conninfo_db,
+bdr_connect(const char *conninfo_repl,
+			const char *conninfo_db,
 			char* remote_ident, size_t remote_ident_length,
 			NameData* slot_name,
 			uint64* remote_sysid_i, TimeLineID *remote_tlid_i,
@@ -228,7 +228,6 @@ bdr_connect(char *conninfo_repl,
 	StringInfoData query;
 	char	   *remote_sysid;
 	char	   *remote_tlid;
-	char	   *remote_dbname;
 	char		local_sysid[32];
 	NameData	replication_name;
 
@@ -261,7 +260,6 @@ bdr_connect(char *conninfo_repl,
 
 	remote_sysid = PQgetvalue(res, 0, 0);
 	remote_tlid = PQgetvalue(res, 0, 1);
-	remote_dbname = PQgetvalue(res, 0, 3);
 	if (PQnfields(res) == 5)
 	{
 		char	   *remote_dboid = PQgetvalue(res, 0, 4);
@@ -290,8 +288,8 @@ bdr_connect(char *conninfo_repl,
 		ereport(FATAL,
 				(errcode(ERRCODE_INVALID_NAME),
 				 errmsg("The system identifier, timeline ID and/or database oid must differ between the nodes"),
-				 errdetail("Both keys are (sysid, timelineid, dboid) = (%s,%s,%s)",
-				 remote_sysid, remote_tlid, remote_dbname)));
+				 errdetail("Both keys are (sysid, timelineid, dboid) = (%s,%u,%u)",
+				 remote_sysid, *remote_tlid_i, *remote_dboid_i)));
 	}
 	else
 		elog(DEBUG2, "local node (%s,%u,%u), remote node (%s,%s,%u)",
@@ -464,7 +462,7 @@ bdr_worker_init(char *dbname)
  *----------------------
  */
 PGconn*
-bdr_establish_connection_and_slot(BdrConnectionConfig *cfg,
+bdr_establish_connection_and_slot(const char *dsn,
 	const char *application_name_suffix, Name out_slot_name, uint64 *out_sysid,
 	TimeLineID* out_timeline, Oid *out_dboid,
 	RepNodeId *out_replication_identifier, char **out_snapshot)
@@ -472,25 +470,31 @@ bdr_establish_connection_and_slot(BdrConnectionConfig *cfg,
 	char		remote_ident[256];
 	PGconn	   *streamConn;
 	StringInfoData conninfo_repl;
+	bool		tx_started = false;
 
 	initStringInfo(&conninfo_repl);
 
 	appendStringInfo(&conninfo_repl,
 					 "%s replication=database fallback_application_name='"BDR_LOCALID_FORMAT": %s'",
-					 cfg->dsn, BDR_LOCALID_FORMAT_ARGS,
+					 dsn, BDR_LOCALID_FORMAT_ARGS,
 					 application_name_suffix);
 
 	/* Establish BDR conn and IDENTIFY_SYSTEM */
 	streamConn = bdr_connect(
 		conninfo_repl.data,
-		cfg->dsn,
+		dsn,
 		remote_ident, sizeof(remote_ident),
 		out_slot_name, out_sysid, out_timeline, out_dboid
 		);
 
-	StartTransactionCommand();
+	if (!IsTransactionState())
+	{
+		tx_started = true;
+		StartTransactionCommand();
+	}
 	*out_replication_identifier = GetReplicationIdentifier(remote_ident, true);
-	CommitTransactionCommand();
+	if (tx_started)
+		CommitTransactionCommand();
 
 	if (OidIsValid(*out_replication_identifier))
 	{
@@ -1217,11 +1221,15 @@ bdr_get_local_nodeid(PG_FUNCTION_ARGS)
 	bool		isnull[3] = {false, false, false};
 	TupleDesc	tupleDesc;
 	HeapTuple	returnTuple;
+	char		sysid_str[33];
 
 	if (get_call_result_type(fcinfo, NULL, &tupleDesc) != TYPEFUNC_COMPOSITE)
 		elog(ERROR, "return type must be a row type");
 
-	values[0] = ObjectIdGetDatum(GetSystemIdentifier());
+	snprintf(sysid_str, sizeof(sysid_str), UINT64_FORMAT, GetSystemIdentifier());
+	sysid_str[sizeof(sysid_str)-1] = '\0';
+
+	values[0] = CStringGetTextDatum(sysid_str);
 	values[1] = ObjectIdGetDatum(ThisTimeLineID);
 	values[2] = ObjectIdGetDatum(MyDatabaseId);
 

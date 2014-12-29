@@ -23,19 +23,12 @@ step "setup1"
 }
 
 
-step "connect1_2"
+step "join_root"
 {
-	SELECT bdr.bdr_connection_add(
-		conn_name := 'node2',
-		dsn := 'dbname=node2'
-		);
-}
-
-step "connect1_3"
-{
-	SELECT bdr.bdr_connection_add(
-		conn_name := 'node3',
-		dsn := 'dbname=node3'
+	SELECT bdr.node_join(
+		dsn := 'dbname=node1',
+		init_from_dsn := null,
+		local_dsn := null
 		);
 }
 
@@ -78,22 +71,38 @@ step "setup2"
 }
 
 
-step "connect2_1"
+step "join_2"
 {
-	SELECT bdr.bdr_connection_add(
-		conn_name := 'node1',
-		dsn := 'dbname=node1',
-		init_replica := true,
-		replica_local_dsn := 'dbname=node2'
+	SELECT bdr.node_join(
+		dsn := 'dbname=node2',
+		init_from_dsn := 'dbname=node1'
 		);
 }
 
-step "connect2_3"
+step "wait_join_2"
 {
-	SELECT bdr.bdr_connection_add(
-		conn_name := 'node3',
-		dsn := 'dbname=node3'
-		);
+	DO
+	$$
+	DECLARE
+	BEGIN
+	  LOOP
+	    EXIT WHEN 2 = (SELECT count(*)
+				       FROM bdr.bdr_nodes
+					   WHERE node_status = 'r');
+		PERFORM pg_sleep(1);
+	  END LOOP;
+	  RAISE NOTICE 'Two nodes ready';
+	END;
+	$$;
+}
+
+step "check_join_2"
+{
+	SELECT pg_stat_clear_snapshot();
+	SELECT plugin, slot_type, database, active FROM pg_replication_slots;
+	SELECT count(*) FROM pg_stat_replication;
+	SELECT conn_dsn, conn_local_dsn, conn_init_from_dsn, conn_replication_sets FROM bdr.bdr_connections;
+	SELECT node_status FROM bdr.bdr_nodes;
 }
 
 session "snode3"
@@ -106,24 +115,39 @@ step "setup3"
 }
 
 
-step "connect3_1"
+step "join_3"
 {
-	SELECT bdr.bdr_connection_add(
-		conn_name := 'node1',
-		dsn := 'dbname=node1',
-		init_replica := true,
-		replica_local_dsn := 'dbname=node3'
+	SELECT bdr.node_join(
+		dsn := 'dbname=node3',
+		init_from_dsn := 'dbname=node1',
+		local_dsn := 'dbname=node3'
 		);
 }
 
-step "connect3_2"
+step "wait_join_3"
 {
-	SELECT bdr.bdr_connection_add(
-		conn_name := 'node2',
-		dsn := 'dbname=node2'
-		);
+	DO
+	$$
+	DECLARE
+	BEGIN
+	  LOOP
+	    EXIT WHEN 3 = (SELECT count(*)
+				       FROM bdr.bdr_nodes
+					   WHERE node_status = 'r');
+		PERFORM pg_sleep(1);
+	  END LOOP;
+	  RAISE NOTICE 'Three nodes ready';
+	END;
+	$$;
 }
 
-permutation "setup1" "setup2" "setup3" "connect1_2" "connect1_3" "connect2_1" "connect3_1" "connect2_3" "connect3_2" "wait"
+step "check_join_3"
+{
+	SELECT pg_stat_clear_snapshot();
+	SELECT plugin, slot_type, database, active FROM pg_replication_slots;
+	SELECT count(*) FROM pg_stat_replication;
+	SELECT conn_dsn, conn_local_dsn, conn_init_from_dsn, conn_replication_sets FROM bdr.bdr_connections;
+	SELECT node_status FROM bdr.bdr_nodes;
+}
 
-#permutation "setup1" "connect1_2" "connect1_3" "setup2" "connect2_1" "connect2_3" "setup3" "connect3_1" "connect3_2" "wait"
+permutation "setup1" "setup2" "setup3" "join_root" "join_2" "wait_join_2" "check_join_2" "join_3" "wait_join_3" "check_join_3" "wait"

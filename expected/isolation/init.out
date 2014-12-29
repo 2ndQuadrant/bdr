@@ -1,7 +1,138 @@
-Parsed test spec with 1 sessions
+Parsed test spec with 3 sessions
 
-starting permutation: wait
+starting permutation: setup1 setup2 setup3 join_root join_2 wait_join_2 check_join_2 join_3 wait_join_3 check_join_3 wait
+step setup1: 
+	CREATE EXTENSION btree_gist;
+	CREATE EXTENSION bdr;
+
+step setup2: 
+	CREATE EXTENSION btree_gist;
+	CREATE EXTENSION bdr;
+
+step setup3: 
+	CREATE EXTENSION btree_gist;
+	CREATE EXTENSION bdr;
+
+step join_root: 
+	SELECT bdr.node_join(
+		dsn := 'dbname=node1',
+		init_from_dsn := null,
+		local_dsn := null
+		);
+
+node_join      
+
+               
+step join_2: 
+	SELECT bdr.node_join(
+		dsn := 'dbname=node2',
+		init_from_dsn := 'dbname=node1'
+		);
+
+node_join      
+
+               
+step wait_join_2: 
+	DO
+	$$
+	DECLARE
+	BEGIN
+	  LOOP
+	    EXIT WHEN 2 = (SELECT count(*)
+				       FROM bdr.bdr_nodes
+					   WHERE node_status = 'r');
+		PERFORM pg_sleep(1);
+	  END LOOP;
+	  RAISE NOTICE 'Two nodes ready';
+	END;
+	$$;
+
+step check_join_2: 
+	SELECT pg_stat_clear_snapshot();
+	SELECT plugin, slot_type, database, active FROM pg_replication_slots;
+	SELECT count(*) FROM pg_stat_replication;
+	SELECT conn_dsn, conn_local_dsn, conn_init_from_dsn, conn_replication_sets FROM bdr.bdr_connections;
+	SELECT node_status FROM bdr.bdr_nodes;
+
+pg_stat_clear_snapshot
+
+               
+plugin         slot_type      database       active         
+
+bdr            logical        node1          t              
+bdr            logical        node2          t              
+count          
+
+2              
+conn_dsn       conn_local_dsn conn_init_from_dsnconn_replication_sets
+
+dbname=node1                                 {default}      
+dbname=node2   dbname=node1                  {default}      
+node_status    
+
+r              
+r              
+step join_3: 
+	SELECT bdr.node_join(
+		dsn := 'dbname=node3',
+		init_from_dsn := 'dbname=node1',
+		local_dsn := 'dbname=node3'
+		);
+
+node_join      
+
+               
+step wait_join_3: 
+	DO
+	$$
+	DECLARE
+	BEGIN
+	  LOOP
+	    EXIT WHEN 3 = (SELECT count(*)
+				       FROM bdr.bdr_nodes
+					   WHERE node_status = 'r');
+		PERFORM pg_sleep(1);
+	  END LOOP;
+	  RAISE NOTICE 'Three nodes ready';
+	END;
+	$$;
+
+step check_join_3: 
+	SELECT pg_stat_clear_snapshot();
+	SELECT plugin, slot_type, database, active FROM pg_replication_slots;
+	SELECT count(*) FROM pg_stat_replication;
+	SELECT conn_dsn, conn_local_dsn, conn_init_from_dsn, conn_replication_sets FROM bdr.bdr_connections;
+	SELECT node_status FROM bdr.bdr_nodes;
+
+pg_stat_clear_snapshot
+
+               
+plugin         slot_type      database       active         
+
+bdr            logical        node1          t              
+bdr            logical        node2          t              
+bdr            logical        node1          t              
+bdr            logical        node2          t              
+bdr            logical        node3          t              
+bdr            logical        node3          t              
+count          
+
+6              
+conn_dsn       conn_local_dsn conn_init_from_dsnconn_replication_sets
+
+dbname=node1                                 {default}      
+dbname=node2   dbname=node1                  {default}      
+dbname=node3   dbname=node1   dbname=node3   {default}      
+node_status    
+
+r              
+r              
+r              
 step wait: 
+	-- pg_xlog_wait_remote_apply isn't good enough alone
+	-- as it doesn't permit us to say how many nodes must be present.
+	-- It'll succeed if there are zero nodes. So we first have to wait
+	-- for enough replication connections.
 	DO $$
 	DECLARE
 		nodecount integer := 0;

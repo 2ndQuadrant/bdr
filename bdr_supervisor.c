@@ -200,7 +200,7 @@ bdr_supervisor_rescan_dbs()
 		 * accumulate and sort the oids, then do a single scan of the shmem
 		 * segment. But really, if you have that many DBs this cost is nothing.
 		 */
-		if (find_perdb_worker_slot(label_dbname, NULL) == -1)
+		if (find_perdb_worker_slot(sec->objoid, NULL) == -1)
 		{
 			/* No perdb worker exists for this DB, make one */
 			bdr_register_perdb_worker(label_dbname);

@@ -97,28 +97,19 @@ scripts/bdr_initial_load: scripts/bdr_initial_load.in
 bdr--0.8.0.1.sql: bdr--0.8.0.sql bdr--0.8.0--0.8.0.1.sql
 	cat $^ > $@
 
-bdr--0.8.0.2.sql: bdr--0.8.0.sql bdr--0.8.0--0.8.0.1.sql \
-	bdr--0.8.0.1--0.8.0.2.sql
+bdr--0.8.0.2.sql: bdr--0.8.0.1.sql bdr--0.8.0.1--0.8.0.2.sql
 	cat $^ > $@
 
-bdr--0.8.0.3.sql: bdr--0.8.0.sql bdr--0.8.0--0.8.0.1.sql \
-	bdr--0.8.0.1--0.8.0.2.sql bdr--0.8.0.2--0.8.0.3.sql
+bdr--0.8.0.3.sql: bdr--0.8.0.2.sql bdr--0.8.0.2--0.8.0.3.sql
 	cat $^ > $@
 
-bdr--0.8.0.4.sql: bdr--0.8.0.sql bdr--0.8.0--0.8.0.1.sql \
-	bdr--0.8.0.1--0.8.0.2.sql bdr--0.8.0.2--0.8.0.3.sql \
-	bdr--0.8.0.3--0.8.0.4.sql
+bdr--0.8.0.4.sql: bdr--0.8.0.3.sql bdr--0.8.0.3--0.8.0.4.sql
 	cat $^ > $@
 
-bdr--0.8.0.5.sql: bdr--0.8.0.sql bdr--0.8.0--0.8.0.1.sql \
-	bdr--0.8.0.1--0.8.0.2.sql bdr--0.8.0.2--0.8.0.3.sql \
-	bdr--0.8.0.3--0.8.0.4.sql bdr--0.8.0.4--0.8.0.5.sql
+bdr--0.8.0.5.sql: bdr--0.8.0.4.sql bdr--0.8.0.4--0.8.0.5.sql
 	cat $^ > $@
 
-bdr--0.8.0.6.sql: bdr--0.8.0.sql bdr--0.8.0--0.8.0.1.sql \
-	bdr--0.8.0.1--0.8.0.2.sql bdr--0.8.0.2--0.8.0.3.sql \
-	bdr--0.8.0.3--0.8.0.4.sql bdr--0.8.0.4--0.8.0.5.sql \
-	bdr--0.8.0.5--0.8.0.6.sql
+bdr--0.8.0.6.sql: bdr--0.8.0.5.sql bdr--0.8.0.5--0.8.0.6.sql
 	cat $^ > $@
 
 bdr_resetxlog: pg_resetxlog.o

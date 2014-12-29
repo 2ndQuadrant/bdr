@@ -266,6 +266,7 @@ bdr_ensure_node_ready()
 		case '\0':
 		case 'c':
 		case 'i':
+		case 'o':
 			break;
 		default:
 			elog(ERROR, "Unhandled case status=%c", status);
@@ -273,9 +274,12 @@ bdr_ensure_node_ready()
 	}
 #else
 
-	/* Complain if node isn't ready. */
+	/*
+	 * Complain if node isn't ready,
+	 * i.e. state is fully 'r'eady, or waiting for inbound sl'o't creation.
+	 */
 	/* TODO: Allow soft error so caller can sleep and recheck? */
-	if (status != 'r')
+	if (status != 'r' && status != 'o')
 	{
 		const char * const base_msg =
 			"bdr output plugin: slot creation rejected, bdr.bdr_nodes entry for local node (sysid=" UINT64_FORMAT
@@ -283,6 +287,7 @@ bdr_ensure_node_ready()
 		switch (status)
 		{
 			case 'r':
+			case 'o':
 				break; /* unreachable */
 			case '\0':
 				/*

@@ -385,7 +385,6 @@ void
 bdr_locks_set_nnodes(Size nnodes)
 {
 	Assert(IsBackgroundWorker);
-	Assert(perdb_worker_idx != -1);
 	Assert(bdr_my_locks_database != NULL);
 
 	/*
@@ -1030,7 +1029,7 @@ bdr_process_decline_ddl_lock(uint64 origin_sysid, TimeLineID origin_tli, Oid ori
  * Another node has asked us to confirm that we've replayed up to a given LSN.
  * We've seen the request message, so send the requested confirmation.
  *
- * Runs in the walsender.
+ * Runs in the apply worker.
  */
 void
 bdr_process_request_replay_confirm(uint64 sysid, TimeLineID tli,

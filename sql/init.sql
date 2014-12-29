@@ -21,25 +21,35 @@ CREATE EXTENSION btree_gist;
 CREATE EXTENSION bdr;
 
 \c postgres
--- XXX DYNCONF Shouldn't need to create ext in each DB before -- creating connection in any.
-SELECT bdr.bdr_connection_add(
-	conn_name := 'regression',
-	dsn := 'dbname=regression',
-	replication_sets := ARRAY['default', 'important', 'for-node-2', 'for-node-2-insert', 'for-node-2-update', 'for-node-2-delete']
-	);
-
-\c regression
-SELECT bdr.bdr_connection_add(
-	conn_name := 'postgres',
+SELECT bdr.node_join(
 	dsn := 'dbname=postgres',
-	init_replica := true,
-	replica_local_dsn := 'dbname=regression',
+	init_from_dsn := null,
+	local_dsn := null,
 	replication_sets := ARRAY['default', 'important', 'for-node-1']
 	);
 
+\c regression
+SELECT bdr.node_join(
+	dsn := 'dbname=regression',
+	init_from_dsn := 'dbname=postgres',
+	local_dsn := 'dbname=regression',
+	replication_sets := ARRAY['default', 'important', 'for-node-2', 'for-node-2-insert', 'for-node-2-update', 'for-node-2-delete']
+	);
 
 -- Wait for BDR to start up
 SELECT pg_sleep(10);
+
+-- Make sure we see two slots and two active connections
+SELECT plugin, slot_type, database, active FROM pg_replication_slots;
+SELECT count(*) FROM pg_stat_replication;
+
+\c postgres
+SELECT conn_dsn, conn_local_dsn, conn_init_from_dsn, conn_replication_sets FROM bdr.bdr_connections;
+SELECT node_status FROM bdr.bdr_nodes;
+
+\c regression
+SELECT conn_dsn, conn_local_dsn, conn_init_from_dsn, conn_replication_sets FROM bdr.bdr_connections;
+SELECT node_status FROM bdr.bdr_nodes;
 
 -- emulate the pg_xlog_wait_remote_apply on vanilla postgres
 DO $DO$BEGIN

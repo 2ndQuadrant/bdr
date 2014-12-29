@@ -17,25 +17,21 @@
 #define BDR_SLOT_NAME_FORMAT "bdr_%u_%s_%u_%u__%s"
 #define BDR_NODE_ID_FORMAT "bdr_"UINT64_FORMAT"_%u_%u_%u_%s"
 
-/* GUC storage for a configured BDR connection. */
+/* A configured BDR connection from bdr_connections */
 typedef struct BdrConnectionConfig
 {
+	uint64		sysid;
+	TimeLineID	timeline;
+	Oid			dboid;
+
 	char *dsn;
+	char *local_dsn;
+	char *init_from_dsn;
+
 	int   apply_delay;
-	bool  init_replica;
-	char *replica_local_dsn;
+
 	/* Quoted identifier-list of replication sets */
 	char *replication_sets;
-
-	/*
-	 * These aren't technically GUCs, but are per-connection config
-	 * information obtained from the GUCs.
-	 */
-	char *name;
-	char *dbname;
-
-	/* Connection config might be broken (blank dsn, etc) */
-	bool is_valid;
 } BdrConnectionConfig;
 
 typedef struct BdrFlushPosition
@@ -47,5 +43,10 @@ typedef struct BdrFlushPosition
 
 extern volatile sig_atomic_t got_SIGTERM;
 extern volatile sig_atomic_t got_SIGHUP;
+
+extern List* bdr_read_connection_configs(void);
+extern BdrConnectionConfig* bdr_get_my_connection_config(void);
+extern void bdr_free_connection_config(BdrConnectionConfig *cfg);
+
 
 #endif   /* BDR_INTERNAL_H */
