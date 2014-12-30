@@ -120,9 +120,6 @@ static void check_apply_update(BdrConflictType conflict_type,
 							   bool *perform_update, bool *log_update,
 							   BdrConflictResolution *resolution);
 
-static void do_apply_update(BDRRelation *rel, EState *estate, TupleTableSlot *oldslot,
-				TupleTableSlot *newslot);
-
 static void check_sequencer_wakeup(BDRRelation *rel);
 #ifdef BUILDING_BDR
 static HeapTuple process_queued_drop(HeapTuple cmdtup);
@@ -145,6 +142,10 @@ static void get_local_tuple_origin(HeapTuple tuple,
 static void abs_timestamp_difference(TimestampTz start_time,
 									 TimestampTz stop_time,
 									 long *secs, int *microsecs);
+
+#if defined(VERBOSE_INSERT) || defined(VERBOSE_UPDATE) || defined(VERBOSE_DELETE)
+static void log_tuple(const char *format, TupleDesc desc, HeapTuple tup);
+#endif
 
 static void
 process_remote_begin(StringInfo s)
@@ -410,9 +411,6 @@ process_remote_insert(StringInfo s)
 	TupleTableSlot *oldslot;
 	BDRRelation	*rel;
 	bool		started_tx;
-#ifdef VERBOSE_INSERT
-	StringInfoData o;
-#endif
 	ResultRelInfo *relinfo;
 	ItemPointer conflicts;
 	bool		conflict = false;
@@ -453,12 +451,8 @@ process_remote_insert(StringInfo s)
 
 	/* debug output */
 #ifdef VERBOSE_INSERT
-	initStringInfo(&o);
-	tuple_to_stringinfo(&o, RelationGetDescr(rel), newslot->tts_tuple);
-	elog(DEBUG1, "INSERT:%s", o.data);
-	resetStringInfo(&o);
+	log_tuple("INSERT:%s", RelationGetDescr(rel), newslot->tts_tuple);
 #endif
-
 
 	/*
 	 * Search for conflicting tuples.
@@ -527,6 +521,7 @@ process_remote_insert(StringInfo s)
 		RepNodeId	local_node_id;
 		bool		apply_update;
 		bool		log_update;
+		HeapTuple	user_tuple = NULL;
 		BdrApplyConflict *apply_conflict = NULL; /* Mute compiler */
 		BdrConflictResolution resolution;
 
@@ -538,8 +533,23 @@ process_remote_insert(StringInfo s)
 		 */
 		check_apply_update(BdrConflictType_InsertInsert,
 						   local_node_id, local_ts, rel,
-						   oldslot->tts_tuple, NULL, NULL,
+						   oldslot->tts_tuple, NULL, &user_tuple,
 						   &apply_update, &log_update, &resolution);
+
+		/*
+		 * User specified conflict handler provided a new tuple; form it to
+		 * a bdr tuple.
+		 *
+		 * We do it already here so that following conflict logging code
+		 * gets the correct data.
+		 */
+		if (apply_update && user_tuple)
+		{
+#ifdef VERBOSE_INSERT
+			log_tuple("USER tuple:%s", RelationGetDescr(rel->rel), user_tuple);
+#endif
+			ExecStoreTuple(user_tuple, newslot, InvalidBuffer, true);
+		}
 
 		/*
 		 * Log conflict to server log.
@@ -660,9 +670,6 @@ process_remote_update(StringInfo s)
 	Oid			idxoid;
 	BDRRelation	*rel;
 	Relation	idxrel;
-#ifdef VERBOSE_UPDATE
-	StringInfoData o;
-#endif
 	ScanKeyData skey[INDEX_MAX_KEYS];
 	HeapTuple	user_tuple = NULL,
 				remote_tuple = NULL;
@@ -749,12 +756,15 @@ process_remote_update(StringInfo s)
 		ExecStoreTuple(remote_tuple, newslot, InvalidBuffer, true);
 
 #ifdef VERBOSE_UPDATE
-		initStringInfo(&o);
-		tuple_to_stringinfo(&o, RelationGetDescr(rel->rel), oldslot->tts_tuple);
-		appendStringInfo(&o, " to");
-		tuple_to_stringinfo(&o, RelationGetDescr(rel->rel), remote_tuple);
-		elog(DEBUG1, "UPDATE:%s", o.data);
-		resetStringInfo(&o);
+		{
+			StringInfoData o;
+			initStringInfo(&o);
+			tuple_to_stringinfo(&o, RelationGetDescr(rel->rel), oldslot->tts_tuple);
+			appendStringInfo(&o, " to");
+			tuple_to_stringinfo(&o, RelationGetDescr(rel->rel), remote_tuple);
+			elog(DEBUG1, "UPDATE:%s", o.data);
+			resetStringInfo(&o);
+		}
 #endif
 
 		get_local_tuple_origin(oldslot->tts_tuple, &local_ts, &local_node_id);
@@ -770,7 +780,22 @@ process_remote_update(StringInfo s)
 						   &log_update, &resolution);
 
 		/*
-		 * Log conflict to both server log and table.
+		 * User specified conflict handler provided a new tuple; form it to
+		 * a bdr tuple.
+		 *
+		 * We do it already here so that following conflict logging code
+		 * gets the correct data.
+		 */
+		if (apply_update && user_tuple)
+		{
+#ifdef VERBOSE_UPDATE
+			log_tuple("USER tuple:%s", RelationGetDescr(rel->rel), user_tuple);
+#endif
+			ExecStoreTuple(user_tuple, newslot, InvalidBuffer, true);
+		}
+
+		/*
+		 * Log conflict to server log
 		 */
 		if (log_update)
 		{
@@ -786,20 +811,9 @@ process_remote_update(StringInfo s)
 
 		if (apply_update)
 		{
-			/* user provided a new tuple; form it to a bdr tuple */
-			if (user_tuple != NULL)
-			{
-#ifdef VERBOSE_UPDATE
-				initStringInfo(&o);
-				tuple_to_stringinfo(&o, RelationGetDescr(rel->rel), user_tuple);
-				elog(DEBUG1, "USER tuple:%s", o.data);
-				resetStringInfo(&o);
-#endif
-
-				ExecStoreTuple(user_tuple, newslot, InvalidBuffer, true);
-			}
-
-			do_apply_update(rel, estate, oldslot, newslot);
+			simple_heap_update(rel->rel, &oldslot->tts_tuple->t_self, newslot->tts_tuple);
+			UserTableUpdateIndexes(estate, newslot);
+			bdr_count_update();
 		}
 
 		/* Log conflict to table */
@@ -827,7 +841,6 @@ process_remote_update(StringInfo s)
 
 		ExecStoreTuple(remote_tuple, newslot, InvalidBuffer, true);
 
-		/* FIXME: only use the slot, not remote_tuple henceforth */
 		user_tuple = bdr_conflict_handlers_resolve(rel, NULL,
 												   remote_tuple, "UPDATE",
 												   BdrConflictType_UpdateDelete,
@@ -835,24 +848,36 @@ process_remote_update(StringInfo s)
 
 		bdr_count_update_conflict();
 
-		/* XXX: handle user_tuple */
-		if (user_tuple)
-			ereport(ERROR,
-					(errmsg("UPDATE vs DELETE handler returned a row which"
-							" isn't allowed for now")));
-
 		if (skip)
 			resolution = BdrConflictResolution_ConflictTriggerSkipChange;
 		else if (user_tuple)
+		{
 			resolution = BdrConflictResolution_ConflictTriggerReturnedTuple;
+#ifdef VERBOSE_UPDATE
+			log_tuple("USER tuple:%s", RelationGetDescr(rel->rel), user_tuple);
+#endif
+			ExecStoreTuple(user_tuple, newslot, InvalidBuffer, true);
+		}
 		else
 			resolution = BdrConflictResolution_DefaultSkipChange;
+
 
 		apply_conflict = bdr_make_apply_conflict(
 			BdrConflictType_UpdateDelete, resolution, replication_origin_xid,
 			rel, NULL, InvalidRepNodeId, newslot, NULL /*no error*/);
 
 		bdr_conflict_log_serverlog(apply_conflict);
+
+		/*
+		 * If the user specified conflict handler returned tuple, we insert it
+		 * since there is nothing to update.
+		 */
+		if (resolution == BdrConflictResolution_ConflictTriggerReturnedTuple)
+		{
+			simple_heap_insert(rel->rel, newslot->tts_tuple);
+			UserTableUpdateOpenIndexes(estate, newslot);
+		}
+
 		bdr_conflict_log_table(apply_conflict);
 		bdr_conflict_logging_cleanup();
 	}
@@ -874,9 +899,6 @@ process_remote_update(StringInfo s)
 static void
 process_remote_delete(StringInfo s)
 {
-#ifdef VERBOSE_DELETE
-	StringInfoData o;
-#endif
 	char		action;
 	EState	   *estate;
 	BDRTupleData oldtup;
@@ -936,10 +958,7 @@ process_remote_delete(StringInfo s)
 							  oldtup.values, oldtup.isnull);
 		ExecStoreTuple(tup, oldslot, InvalidBuffer, true);
 	}
-	initStringInfo(&o);
-	tuple_to_stringinfo(&o, RelationGetDescr(idxrel), oldslot->tts_tuple);
-	elog(DEBUG1, "DELETE old-key:%s", o.data);
-	resetStringInfo(&o);
+	log_tuple("DELETE old-key:%s", RelationGetDescr(rel->rel), oldslot->tts_tuple);
 #endif
 
 	PushActiveSnapshot(GetTransactionSnapshot());
@@ -970,22 +989,40 @@ process_remote_delete(StringInfo s)
 		 * as that's effectively a DELETE + INSERT).
 		 */
 
+		bool		skip = false;
+		HeapTuple	remote_tuple,
+					user_tuple = NULL;
 		BdrApplyConflict *apply_conflict;
+		BdrConflictResolution resolution;
 
 		bdr_count_delete_conflict();
 
 		/* Since the local tuple is missing, fill slot from the received data. */
-		{
-			HeapTuple tup;
-			tup = heap_form_tuple(RelationGetDescr(rel->rel),
-								  oldtup.values, oldtup.isnull);
-			ExecStoreTuple(tup, oldslot, InvalidBuffer, true);
-		}
+		remote_tuple = heap_form_tuple(RelationGetDescr(rel->rel),
+									   oldtup.values, oldtup.isnull);
+		ExecStoreTuple(remote_tuple, oldslot, InvalidBuffer, true);
+
+		/*
+		 * Trigger user specified conflict handler so that application may
+		 * react accordingly. Unlike other conflict types we don't allow the
+		 * trigger to return new tuple here (it's DELETE vs DELETE after all).
+		 */
+		user_tuple = bdr_conflict_handlers_resolve(rel, NULL,
+												   remote_tuple, "DELETE",
+												   BdrConflictType_DeleteDelete,
+												   0, &skip);
+
+		/* DELETE vs DELETE can't return new tuple. */
+		if (user_tuple)
+			ereport(ERROR,
+					(errmsg("DELETE vs DELETE handler returned a row which isn't allowed.")));
 
 		apply_conflict = bdr_make_apply_conflict(
 			BdrConflictType_DeleteDelete,
-			BdrConflictResolution_DefaultSkipChange, replication_origin_xid,
-			rel, NULL, InvalidRepNodeId, oldslot, NULL /*no error*/);
+			skip ? BdrConflictResolution_ConflictTriggerSkipChange :
+				   BdrConflictResolution_DefaultSkipChange,
+			replication_origin_xid,	rel, NULL, InvalidRepNodeId,
+			oldslot, NULL /*no error*/);
 
 		bdr_conflict_log_serverlog(apply_conflict);
 		bdr_conflict_log_table(apply_conflict);
@@ -1377,14 +1414,6 @@ process_remote_message(StringInfo s)
 }
 #endif /* BUILDING_BDR */
 
-static void
-do_apply_update(BDRRelation *rel, EState *estate, TupleTableSlot *oldslot,
-				TupleTableSlot *newslot)
-{
-	simple_heap_update(rel->rel, &oldslot->tts_tuple->t_self, newslot->tts_tuple);
-	UserTableUpdateIndexes(estate, newslot);
-	bdr_count_update();
-}
 
 static void
 queued_command_error_callback(void *arg)
@@ -2189,6 +2218,20 @@ abs_timestamp_difference(TimestampTz start_time, TimestampTz stop_time,
 #endif
 	}
 }
+
+#if defined(VERBOSE_INSERT) || defined(VERBOSE_UPDATE) || defined(VERBOSE_DELETE)
+static void
+log_tuple(const char *format, TupleDesc desc, HeapTuple tup);
+{
+	StringInfoData o;
+
+	initStringInfo(&o);
+	tuple_to_stringinfo(&o, desc, tuple);
+	elog(DEBUG1, format, o.data);
+	resetStringInfo(&o);
+
+}
+#endif
 
 /*
  * The actual main loop of a BDR apply worker.
