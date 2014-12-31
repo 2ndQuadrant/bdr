@@ -537,21 +537,6 @@ process_remote_insert(StringInfo s)
 						   &apply_update, &log_update, &resolution);
 
 		/*
-		 * User specified conflict handler provided a new tuple; form it to
-		 * a bdr tuple.
-		 *
-		 * We do it already here so that following conflict logging code
-		 * gets the correct data.
-		 */
-		if (apply_update && user_tuple)
-		{
-#ifdef VERBOSE_INSERT
-			log_tuple("USER tuple:%s", RelationGetDescr(rel->rel), user_tuple);
-#endif
-			ExecStoreTuple(user_tuple, newslot, InvalidBuffer, true);
-		}
-
-		/*
 		 * Log conflict to server log.
 		 */
 		if (log_update)
@@ -571,6 +556,18 @@ process_remote_insert(StringInfo s)
 		 */
 		if (apply_update)
 		{
+			/*
+			 * User specified conflict handler provided a new tuple; form it to
+			 * a bdr tuple.
+			 */
+			if (user_tuple)
+			{
+#ifdef VERBOSE_INSERT
+				log_tuple("USER tuple:%s", RelationGetDescr(rel->rel), user_tuple);
+#endif
+				ExecStoreTuple(user_tuple, newslot, InvalidBuffer, true);
+			}
+
 			simple_heap_update(rel->rel,
 							   &oldslot->tts_tuple->t_self,
 							   newslot->tts_tuple);
@@ -780,21 +777,6 @@ process_remote_update(StringInfo s)
 						   &log_update, &resolution);
 
 		/*
-		 * User specified conflict handler provided a new tuple; form it to
-		 * a bdr tuple.
-		 *
-		 * We do it already here so that following conflict logging code
-		 * gets the correct data.
-		 */
-		if (apply_update && user_tuple)
-		{
-#ifdef VERBOSE_UPDATE
-			log_tuple("USER tuple:%s", RelationGetDescr(rel->rel), user_tuple);
-#endif
-			ExecStoreTuple(user_tuple, newslot, InvalidBuffer, true);
-		}
-
-		/*
 		 * Log conflict to server log
 		 */
 		if (log_update)
@@ -811,6 +793,18 @@ process_remote_update(StringInfo s)
 
 		if (apply_update)
 		{
+			/*
+			 * User specified conflict handler provided a new tuple; form it to
+			 * a bdr tuple.
+			 */
+			if (user_tuple)
+			{
+#ifdef VERBOSE_UPDATE
+				log_tuple("USER tuple:%s", RelationGetDescr(rel->rel), user_tuple);
+#endif
+				ExecStoreTuple(user_tuple, newslot, InvalidBuffer, true);
+			}
+
 			simple_heap_update(rel->rel, &oldslot->tts_tuple->t_self, newslot->tts_tuple);
 			UserTableUpdateIndexes(estate, newslot);
 			bdr_count_update();
@@ -851,13 +845,7 @@ process_remote_update(StringInfo s)
 		if (skip)
 			resolution = BdrConflictResolution_ConflictTriggerSkipChange;
 		else if (user_tuple)
-		{
 			resolution = BdrConflictResolution_ConflictTriggerReturnedTuple;
-#ifdef VERBOSE_UPDATE
-			log_tuple("USER tuple:%s", RelationGetDescr(rel->rel), user_tuple);
-#endif
-			ExecStoreTuple(user_tuple, newslot, InvalidBuffer, true);
-		}
 		else
 			resolution = BdrConflictResolution_DefaultSkipChange;
 
@@ -874,6 +862,11 @@ process_remote_update(StringInfo s)
 		 */
 		if (resolution == BdrConflictResolution_ConflictTriggerReturnedTuple)
 		{
+#ifdef VERBOSE_UPDATE
+			log_tuple("USER tuple:%s", RelationGetDescr(rel->rel), user_tuple);
+#endif
+			ExecStoreTuple(user_tuple, newslot, InvalidBuffer, true);
+
 			simple_heap_insert(rel->rel, newslot->tts_tuple);
 			UserTableUpdateOpenIndexes(estate, newslot);
 		}
