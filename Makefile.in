@@ -87,8 +87,13 @@ bdr_version.h: ${bdr_abs_srcdir}/bdr_version.h.in
 
 bdr.o: bdr_version.h
 
+ifdef XXXDYNCONF
 bdr_init_copy: bdr_init_copy.o
 	$(CC) $(CFLAGS) $^ $(LDFLAGS) $(LDFLAGS_EX) $(libpq_pgport) $(LIBS) -o $@$(X)
+else
+bdr_init_copy:
+	touch bdr_init_copy
+endif
 
 scripts/bdr_initial_load: scripts/bdr_initial_load.in
 	mkdir -p scripts
