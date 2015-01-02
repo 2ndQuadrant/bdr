@@ -46,7 +46,6 @@ bdr_register_perdb_worker(const char * dbname)
 	uint32					worker_arg;
 
 	Assert(LWLockHeldByMe(BdrWorkerCtl->lock));
-	Assert(find_perdb_worker_slot(dbname, NULL) == -1);
 
 	elog(DEBUG2, "Registering per-db worker for db %s", dbname);
 
