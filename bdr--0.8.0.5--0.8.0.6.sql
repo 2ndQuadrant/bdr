@@ -27,14 +27,14 @@ CREATE TABLE bdr_connections (
 
 REVOKE ALL ON TABLE bdr_connections FROM public;
 
-COMMENT ON TABLE bdr_connections IS 'Connections to other BDR nodes. Don''t modify this directly, use the provided functions.';
+COMMENT ON TABLE bdr_connections IS 'Connection information for nodes in the group. Don''t modify this directly, use the provided functions. One entry should exist per node in the group.';
 
-COMMENT ON COLUMN bdr_connections.conn_sysid IS 'Local system identifer for the downstream node in this connection';
-COMMENT ON COLUMN bdr_connections.conn_timeline IS 'Local system timeline ID for the downstream node in this connection';
-COMMENT ON COLUMN bdr_connections.conn_dboid IS 'Local system database OID for the downstream node in this connection';
+COMMENT ON COLUMN bdr_connections.conn_sysid IS 'System identifer for the node this entry''s dsn refers to';
+COMMENT ON COLUMN bdr_connections.conn_timeline IS 'System timeline ID for the node this entry''s dsn refers to';
+COMMENT ON COLUMN bdr_connections.conn_dboid IS 'System database OID for the node this entry''s dsn refers to';
 COMMENT ON COLUMN bdr_connections.conn_dsn IS 'A libpq-style connection string specifying how to make a connection to this node from other nodes.';
-COMMENT ON COLUMN bdr_connections.conn_local_dsn IS 'When copying local state from a remote node during setup, libpq connection string to use to connect to this DB.';
-COMMENT ON COLUMN bdr_connections.conn_init_from_dsn IS 'When copying local state from a remote node during setup, libpq connection string to connect to the remote node to initialize from';
+COMMENT ON COLUMN bdr_connections.conn_local_dsn IS 'When copying local state from a remote node during setup, libpq connection string to use to connect to this DB from the local host. If unspecified, uses ''dsn''.';
+COMMENT ON COLUMN bdr_connections.conn_init_from_dsn IS 'When copying local state from a remote node during setup, libpq connection string to connect to the remote node to initialize from. Not used after init.';
 COMMENT ON COLUMN bdr_connections.conn_apply_delay IS 'If set, milliseconds to wait before applying each transaction from the remote node. Mainly for debugging. If null, the global default applies.';
 COMMENT ON COLUMN bdr_connections.conn_replication_sets IS 'Replication sets this connection should participate in, if non-default.';
 
