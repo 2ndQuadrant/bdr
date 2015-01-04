@@ -397,8 +397,10 @@ bdr_launch_apply_workers(Oid dboid)
 	 * the node count in shared memory.
 	 */
 	bdr_worker_slot->worker_data.perdb_worker.nnodes = nnodes;
+#ifdef BUILDING_BDR
 	bdr_locks_set_nnodes(nnodes);
 	bdr_sequencer_set_nnodes(nnodes);
+#endif
 
 	elog(DEBUG2, "updated worker counts");
 }
