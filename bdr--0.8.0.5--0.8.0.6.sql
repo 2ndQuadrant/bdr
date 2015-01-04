@@ -107,7 +107,7 @@ BEGIN
      conn_apply_delay, conn_replication_sets)
     VALUES
     (sysid, timeline, dboid,
-     dsn, init_from_dsn, local_dsn,
+     dsn, local_dsn, init_from_dsn,
      CASE WHEN apply_delay = -1 THEN NULL ELSE apply_delay END,
      replication_sets);
 
