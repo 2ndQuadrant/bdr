@@ -157,7 +157,8 @@ bdr_perdb_xact_callback(XactEvent event, void *arg)
 					 * changes and register new per-db workers for labeled
 					 * databases.
 					 */
-					SetLatch(BdrWorkerCtl->supervisor_latch);
+					if (BdrWorkerCtl->supervisor_latch)
+						SetLatch(BdrWorkerCtl->supervisor_latch);
 				}
 
 				LWLockRelease(BdrWorkerCtl->lock);

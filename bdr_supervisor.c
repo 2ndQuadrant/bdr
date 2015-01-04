@@ -348,6 +348,9 @@ bdr_supervisor_worker_main(Datum main_arg)
 	 * Once created we set a shmem flag and restart so we know we can connect
 	 * to the newly created database.
 	 */
+
+	LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
+
 	if (!BdrWorkerCtl->is_supervisor_restart)
 	{
 		BackgroundWorkerInitializeConnection("template1", NULL);
@@ -362,6 +365,8 @@ bdr_supervisor_worker_main(Datum main_arg)
 	elog(DEBUG1, "BDR supervisor connected to DB 'bdr'");
 
 	BdrWorkerCtl->supervisor_latch = &MyProc->procLatch;
+
+	LWLockRelease(BdrWorkerCtl->lock);
 
 	initStringInfo(&si);
 
