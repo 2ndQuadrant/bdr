@@ -245,7 +245,6 @@ extern int	bdr_default_apply_delay;
 extern int bdr_max_workers;
 extern int bdr_max_databases;
 extern char *bdr_temp_dump_directory;
-extern bool bdr_init_from_basedump;
 extern bool bdr_log_conflicts_to_table;
 extern bool bdr_conflict_logging_include_tuples;
 extern bool bdr_permit_unsafe_commands;

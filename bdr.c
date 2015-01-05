@@ -1009,15 +1009,6 @@ _PG_init(void)
 							   0,
 							   NULL, NULL, NULL);
 
-	DefineCustomBoolVariable("bdr.init_from_basedump",
-							 "Internal. Set during local initialization from basebackup only",
-							 NULL,
-							 &bdr_init_from_basedump,
-							 false,
-							 PGC_BACKEND,
-							 0,
-							 NULL, NULL, NULL);
-
 	DefineCustomBoolVariable("bdr.do_not_replicate",
 							 "Internal. Set during local initialization from basebackup only",
 							 NULL,

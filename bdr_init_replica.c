@@ -55,7 +55,6 @@
 #include "utils/syscache.h"
 
 char *bdr_temp_dump_directory = NULL;
-bool bdr_init_from_basedump = false;
 
 static void bdr_init_exec_dump_restore(BdrConnectionConfig *cfg, char *snapshot);
 
@@ -1013,80 +1012,73 @@ bdr_init_replica(Oid dboid){
 		/* Get the bdr.bdr_nodes status field for our node id from the remote */
 		status = bdr_get_remote_status(nonrepl_init_conn);
 
-		if (bdr_init_from_basedump)
+		switch (status)
 		{
-			status = bdr_set_remote_status(nonrepl_init_conn, 'c', status);
-		}
-		else
-		{
-			switch (status)
-			{
-				case '\0':
-					elog(DEBUG2, "initializing from clean state");
-					break;
+			case '\0':
+				elog(DEBUG2, "initializing from clean state");
+				break;
 
-				case 'r':
-					/*
-					 * Init has been completed but the final update to the
-					 * local bdr.bdr_nodes hasn't propagated yet. This can only
-					 * happen if we crash after finishing local catchup mode,
-					 * when restarting into normal apply.
-					 *
-					 * All we need to do is resume normal replay, no further
-					 * init or catchup mode replay is required.
-					 */
-					elog(DEBUG2, "init already completed, nothing to do");
-					return;
+			case 'r':
+				/*
+				 * Init has been completed but the final update to the
+				 * local bdr.bdr_nodes hasn't propagated yet. This can only
+				 * happen if we crash after finishing local catchup mode,
+				 * when restarting into normal apply.
+				 *
+				 * All we need to do is resume normal replay, no further
+				 * init or catchup mode replay is required.
+				 */
+				elog(DEBUG2, "init already completed, nothing to do");
+				return;
 
-				case 'c':
-					/*
-					 * We were in catchup mode when we died. We need to resume catchup
-					 * mode up to the expected LSN before switching over.
-					 *
-					 * To do that all we need to do is fall through without doing any
-					 * slot re-creation, dump/apply, etc, and pick up where we do
-					 * catchup.
-					 *
-					 * We won't know what the original catchup target point is, but we
-					 * can just catch up to whatever xlog position the server is
-					 * currently at, it's guaranteed to be later than the target
-					 * position.
-					 */
-					elog(DEBUG2, "dump applied, need to continue catchup");
-					break;
+			case 'c':
+				/*
+				 * We were in catchup mode when we died. We need to resume catchup
+				 * mode up to the expected LSN before switching over.
+				 *
+				 * To do that all we need to do is fall through without doing any
+				 * slot re-creation, dump/apply, etc, and pick up where we do
+				 * catchup.
+				 *
+				 * We won't know what the original catchup target point is, but we
+				 * can just catch up to whatever xlog position the server is
+				 * currently at, it's guaranteed to be later than the target
+				 * position.
+				 */
+				elog(DEBUG2, "dump applied, need to continue catchup");
+				break;
 
-				case 'o':
-					elog(DEBUG2, "dump applied and catchup completed, need to continue slot creation");
-					break;
+			case 'o':
+				elog(DEBUG2, "dump applied and catchup completed, need to continue slot creation");
+				break;
 
-				case 'i':
-					/*
-					 * A previous init attempt seems to have failed. Clean up, then
-					 * fall through to start setup again.
-					 *
-					 * We can't just re-use the slot and replication identifier that
-					 * were created last time (if they were), because we have no way
-					 * of getting the slot's exported snapshot after
-					 * CREATE_REPLICATION_SLOT.
-					 *
-					 * XXX TODO PERDB: The previous approach of removing the
-					 * remote slot, identifier and nodes entry won't work at
-					 * all with sync add, we have to remove the slots and
-					 * replication identifiers from all the other nodes, wait
-					 * on the init node until all the removals have replayed,
-					 * THEN continue. Punt and let the poor user deal with that.
-					 */
-					ereport(ERROR,
-							(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-							 errmsg("previous init failed, manual cleanup is required"),
-							 errdetail("Found bdr.bdr_nodes entry for "BDR_LOCALID_FORMAT" with state=i in remote bdr.bdr_nodes", BDR_LOCALID_FORMAT_ARGS),
-							 errhint("Remove all replication identifiers and slots corresponding to this node from all remotes and delete the bdr.bdr_nodes and bdr.bdr_connections entries")));
-					break;
+			case 'i':
+				/*
+				 * A previous init attempt seems to have failed. Clean up, then
+				 * fall through to start setup again.
+				 *
+				 * We can't just re-use the slot and replication identifier that
+				 * were created last time (if they were), because we have no way
+				 * of getting the slot's exported snapshot after
+				 * CREATE_REPLICATION_SLOT.
+				 *
+				 * XXX TODO PERDB: The previous approach of removing the
+				 * remote slot, identifier and nodes entry won't work at
+				 * all with sync add, we have to remove the slots and
+				 * replication identifiers from all the other nodes, wait
+				 * on the init node until all the removals have replayed,
+				 * THEN continue. Punt and let the poor user deal with that.
+				 */
+				ereport(ERROR,
+						(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+						 errmsg("previous init failed, manual cleanup is required"),
+						 errdetail("Found bdr.bdr_nodes entry for "BDR_LOCALID_FORMAT" with state=i in remote bdr.bdr_nodes", BDR_LOCALID_FORMAT_ARGS),
+						 errhint("Remove all replication identifiers and slots corresponding to this node from all remotes and delete the bdr.bdr_nodes and bdr.bdr_connections entries")));
+				break;
 
-				default:
-					elog(ERROR, "unreachable"); /* Unhandled case */
-					break;
-			}
+			default:
+				elog(ERROR, "unreachable"); /* Unhandled case */
+				break;
 		}
 
 		if (status == '\0')
