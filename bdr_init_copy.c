@@ -99,8 +99,6 @@ char *get_connstr(char *dbname, char *dbhost, char *dbport, char *dbuser);
 static char *PQconninfoParamsToConnstr(const char *const * keywords, const char *const * values);
 static void appendPQExpBufferConnstrValue(PQExpBuffer buf, const char *str);
 
-static char *trimwhitespace(const char *str);
-
 static bool file_exists(const char *path);
 static bool is_pg_dir(const char *path);
 static void copy_file(char *fromfile, char *tofile);
@@ -1299,38 +1297,6 @@ appendPQExpBufferConnstrValue(PQExpBuffer buf, const char *str)
 		appendPQExpBufferStr(buf, str);
 }
 
-/*
- * Remove leading and trailing whitespace from the string,
- * does not change input
- */
-static char *
-trimwhitespace(const char *str)
-{
-	const char *end;
-	char *res;
-	size_t len;
-
-	while(isspace(*str))
-		str++;
-
-	if(*str == 0)
-		return NULL;
-
-	end = str + strlen(str) - 1;
-	while(end > str && isspace(*end))
-		end--;
-
-	len = end-str;
-	if (!len)
-		return NULL;
-
-	len++;
-	res = pg_malloc(len+1);
-	memcpy(res, str, len);
-	res[len] = '\0';
-
-	return res;
-}
 
 /*
  * Find the pgport and try a connection
