@@ -27,6 +27,12 @@ SELECT bdr.node_join(
  
 (1 row)
 
+SELECT bdr.bdr_node_join_wait_for_ready();
+ bdr_node_join_wait_for_ready 
+------------------------------
+ 
+(1 row)
+
 \c regression
 SELECT bdr.node_join(
 	dsn := 'dbname=regression',
@@ -39,10 +45,9 @@ SELECT bdr.node_join(
  
 (1 row)
 
--- Wait for BDR to start up
-SELECT pg_sleep(10);
- pg_sleep 
-----------
+SELECT bdr.bdr_node_join_wait_for_ready();
+ bdr_node_join_wait_for_ready 
+------------------------------
  
 (1 row)
 

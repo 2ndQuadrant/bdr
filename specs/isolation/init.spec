@@ -81,19 +81,7 @@ step "join_2"
 
 step "wait_join_2"
 {
-	DO
-	$$
-	DECLARE
-	BEGIN
-	  LOOP
-	    EXIT WHEN 2 = (SELECT count(*)
-				       FROM bdr.bdr_nodes
-					   WHERE node_status = 'r');
-		PERFORM pg_sleep(1);
-	  END LOOP;
-	  RAISE NOTICE 'Two nodes ready';
-	END;
-	$$;
+	SELECT bdr.bdr_node_join_wait_for_ready();
 }
 
 step "check_join_2"
@@ -126,19 +114,7 @@ step "join_3"
 
 step "wait_join_3"
 {
-	DO
-	$$
-	DECLARE
-	BEGIN
-	  LOOP
-	    EXIT WHEN 3 = (SELECT count(*)
-				       FROM bdr.bdr_nodes
-					   WHERE node_status = 'r');
-		PERFORM pg_sleep(1);
-	  END LOOP;
-	  RAISE NOTICE 'Three nodes ready';
-	END;
-	$$;
+	SELECT bdr.bdr_node_join_wait_for_ready();
 }
 
 step "check_join_3"

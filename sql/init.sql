@@ -28,6 +28,8 @@ SELECT bdr.node_join(
 	replication_sets := ARRAY['default', 'important', 'for-node-1']
 	);
 
+SELECT bdr.bdr_node_join_wait_for_ready();
+
 \c regression
 SELECT bdr.node_join(
 	dsn := 'dbname=regression',
@@ -36,8 +38,7 @@ SELECT bdr.node_join(
 	replication_sets := ARRAY['default', 'important', 'for-node-2', 'for-node-2-insert', 'for-node-2-update', 'for-node-2-delete']
 	);
 
--- Wait for BDR to start up
-SELECT pg_sleep(10);
+SELECT bdr.bdr_node_join_wait_for_ready();
 
 -- Make sure we see two slots and two active connections
 SELECT plugin, slot_type, database, active FROM pg_replication_slots;
