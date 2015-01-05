@@ -1063,11 +1063,13 @@ bdr_init_replica(Oid dboid){
 				 * CREATE_REPLICATION_SLOT.
 				 *
 				 * XXX TODO PERDB: The previous approach of removing the
-				 * remote slot, identifier and nodes entry won't work at
-				 * all with sync add, we have to remove the slots and
-				 * replication identifiers from all the other nodes, wait
-				 * on the init node until all the removals have replayed,
-				 * THEN continue. Punt and let the poor user deal with that.
+				 * remote slot, identifier and nodes entry could still work
+				 * as during 'i' state we only have a connection to the
+				 * init target node + local slots; we haven't made slots
+				 * on all the other nodes yet. However, we have no way to
+				 * undo a failed pg_restore, so if that phase fails it's
+				 * necessary to do manual cleanup, dropping and re-creating
+				 * the db.
 				 */
 				ereport(ERROR,
 						(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
@@ -1258,6 +1260,8 @@ bdr_init_replica(Oid dboid){
 	}
 	PG_END_ENSURE_ERROR_CLEANUP(bdr_init_replica_conn_close,
 							PointerGetDatum(&nonrepl_init_conn));
+
+	Assert(status == 'r');
 
 	PQfinish(nonrepl_init_conn);
 }
