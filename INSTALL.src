@@ -3,10 +3,13 @@
 $ cd ~/src/
 # checkout the sourcecode of postgres 9.4 with bdr patches added
 $ git clone -b bdr-pg/REL9_4_STABLE git://git.postgresql.org/git/2ndquadrant_bdr.git postgresql-bdr
-# checkout the sourcecode of the bdr plugin
-$ git clone -b bdr-plugin/next git://git.postgresql.org/git/2ndquadrant_bdr.git bdr-plugin
+# checkout the sourcecode of the bdr plugin (dynamic configuration branch)
+$ git clone -b bdr-plugin/dynconf git://git.postgresql.org/git/2ndquadrant_bdr.git bdr-plugin
 
 # ==  build postgres ==
+# 
+# --enable-cassert will result in a slower build but one that's easier to debug.
+#
 $ cd postgresql-bdr
 $ ./configure --enable-depend --enable-debug --enable-cassert --prefix ~/bin/
 $ make -j8 -s install-world
