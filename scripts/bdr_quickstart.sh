@@ -5,10 +5,11 @@
 
 set -e -u
 
-GIT_REF="bdr-next"
+BDR_PG_REF="bdr-pg/REL9_4_STABLE"
+BDR_PLUGIN_REF="bdr-plugin/next"
 
-# If you have an existing local PostgreSQL checkout you can put it here
-# to speed the clone or set it in the environment:
+# If you have an existing local BDR checkout you can put it here to speed the
+# clone or set it in the environment:
 #
 GIT_REFERENCE_REPO="${GIT_REFERENCE_REPO:-}"
 
@@ -35,73 +36,87 @@ unexpectedexit() {
     echo "BDR quickstart exited with an unexpected error."
     echo
     echo "Check the log at $LOGFILE for details."
+    echo
+    echo "Alternately see the manual install instructions in INSTALL.src"
     trap "" EXIT
     exit 1
 }
 
 trap unexpectedexit EXIT
 
-echo "Creating $BASEDIR"
+clone_or_update() {
+    SRCDIR="$1"
+    GITREF="$2"
+
+    if test -d $SRCDIR; then
+        echo "A directory named $SRCDIR already exists at $BASEDIR/$SRCDIR."
+        pushd $SRCDIR
+
+        if ! git remote -v | egrep -q '^origin\s+.*2ndquadrant_bdr\.git'; then
+            echo "The data in $BASEDIR/$SRCDIR doesn't seem to be a git clone from 2ndquadrant_bdr.git"
+            echo "Move/rename or delete the directory then try again."
+            trap "" EXIT
+            exit 1
+        fi
+
+        if test "" != "$(git status --porcelain)"; then
+            echo "The script will now clean and update your git checkout. This will delete"
+            echo "the following new or changed files:"
+            git status -s
+            echo "Is that OK?"
+
+            read -p "Enter to continue, control-C to exit" CONTINUE
+            git stash -u
+            git clean -fdxq
+        fi
+
+        if ! git fetch --tags origin; then
+            echo "Failed to update the git repository. Network problems? Look at the git"
+            echo "output above for details."
+            trap "" EXIT
+            exit 1
+        fi
+
+    else
+        echo "Cloning $GITREF sources from git://git.postgresql.org/git/2ndquadrant_bdr.git"
+        echo "This may take some time depending on the speed of your connection."
+
+        if ! git clone -b "$GITREF"  git://git.postgresql.org/git/2ndquadrant_bdr.git $SRCDIR; then
+            echo "The git clone of the BDR repository failed. Network issues?"
+            echo "Try running the script again. If it fails again, look at the git "
+            echo "output to see what went wrong."
+            trap "" EXIT
+            exit 1
+        fi
+
+        pushd $SRCDIR
+    fi
+
+    # Ensures we're on the latest rev if $GIT_REF is a branch, without
+    # causing issues if we're on a detached head.
+    git reset --hard "origin/$GITREF"
+
+    popd
+}
+
 mkdir -p $BASEDIR
 cd $BASEDIR
 
-if test -d bdr-src; then
-    echo "A directory named bdr-src already exists at $BASEDIR/bdr-src."
-    cd bdr-src
-
-    if ! git remote -v | egrep -q '^origin\s+.*2ndquadrant_bdr\.git'; then
-        echo "The data in bdr-src doesn't seem to be a git clone from 2ndquadrant_bdr.git"
-        echo "Move/rename or delete the directory then try again."
-        trap "" EXIT
-        exit 1
-    fi
-
-    if test "" != "$(git status --porcelain)"; then
-        echo "The script will now clean and update your git checkout. This will delete"
-        echo "the following new or changed files:"
-        git status -s
-        echo "Is that OK?"
-
-        read -p "Enter to continue, control-C to exit" CONTINUE
-        git stash -u
-        git clean -fdxq
-    fi
-
-    if ! git fetch --tags origin; then
-        echo "Failed to update the git repository. Network problems? Look at the git"
-        echo "output above for details."
-        trap "" EXIT
-        exit 1
-    fi
-
-else
-    echo "Cloning the BDR sources from git://git.postgresql.org/git/2ndquadrant_bdr.git"
-    echo "This may take some time depending on the speed of your connection."
-
-    if ! git clone git://git.postgresql.org/git/2ndquadrant_bdr.git bdr-src; then
-        echo "The git clone of the BDR repository failed. Network issues?"
-        echo "Try running the script again. If it fails again, look at the git "
-        echo "output to see what went wrong."
-        trap "" EXIT
-        exit 1
-    fi
-
-    cd bdr-src
-fi
-
-if ! git checkout "$GIT_REF"; then
-    echo "Failed to check out $GIT_REF from git. See the output above for details."
-    trap "" EXIT
-    exit 1
-fi
-
-# Ensures we're on the latest rev if $GIT_REF is a branch, without
-# causing issues if we're on a detached head.
-git reset --hard "origin/$GIT_REF"
-
+clone_or_update bdr-pg-src "$BDR_PG_REF"
+pushd bdr-pg-src
 ./configure --prefix=$BASEDIR/bdr 2>&1 | tee -a "$LOGFILE"
 make install 2>&1 | tee -a "$LOGFILE"
 make -C contrib install 2>&1 | tee -a "$LOGFILE"
+popd
+
+echo "PostgreSQL for BDR compiled and installed."
+echo "Preparing BDR extension..."
+
+clone_or_update bdr-plugin-src "$BDR_PLUGIN_REF"
+pushd bdr-plugin-src
+PATH=$BASEDIR/bdr/bin:$PATH ./configure
+make install
+popd
 
 echo
 echo "---------------------------"
