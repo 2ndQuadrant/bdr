@@ -67,7 +67,7 @@ count
 conn_dsn       conn_local_dsn conn_init_from_dsnconn_replication_sets
 
 dbname=node1                                 {default}      
-dbname=node2   dbname=node1                  {default}      
+dbname=node2                  dbname=node1   {default}      
 node_status    
 
 r              
@@ -121,8 +121,8 @@ count
 conn_dsn       conn_local_dsn conn_init_from_dsnconn_replication_sets
 
 dbname=node1                                 {default}      
-dbname=node2   dbname=node1                  {default}      
-dbname=node3   dbname=node1   dbname=node3   {default}      
+dbname=node2                  dbname=node1   {default}      
+dbname=node3   dbname=node3   dbname=node1   {default}      
 node_status    
 
 r              

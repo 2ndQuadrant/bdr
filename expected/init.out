@@ -62,10 +62,10 @@ SELECT count(*) FROM pg_stat_replication;
 
 \c postgres
 SELECT conn_dsn, conn_local_dsn, conn_init_from_dsn, conn_replication_sets FROM bdr.bdr_connections;
-     conn_dsn      | conn_local_dsn  | conn_init_from_dsn |                                conn_replication_sets                                 
--------------------+-----------------+--------------------+--------------------------------------------------------------------------------------
- dbname=postgres   |                 |                    | {default,important,for-node-1}
- dbname=regression | dbname=postgres | dbname=regression  | {default,important,for-node-2,for-node-2-insert,for-node-2-update,for-node-2-delete}
+     conn_dsn      |  conn_local_dsn   | conn_init_from_dsn |                                conn_replication_sets                                 
+-------------------+-------------------+--------------------+--------------------------------------------------------------------------------------
+ dbname=postgres   |                   |                    | {default,important,for-node-1}
+ dbname=regression | dbname=regression | dbname=postgres    | {default,important,for-node-2,for-node-2-insert,for-node-2-update,for-node-2-delete}
 (2 rows)
 
 SELECT node_status FROM bdr.bdr_nodes;
@@ -77,10 +77,10 @@ SELECT node_status FROM bdr.bdr_nodes;
 
 \c regression
 SELECT conn_dsn, conn_local_dsn, conn_init_from_dsn, conn_replication_sets FROM bdr.bdr_connections;
-     conn_dsn      | conn_local_dsn  | conn_init_from_dsn |                                conn_replication_sets                                 
--------------------+-----------------+--------------------+--------------------------------------------------------------------------------------
- dbname=postgres   |                 |                    | {default,important,for-node-1}
- dbname=regression | dbname=postgres | dbname=regression  | {default,important,for-node-2,for-node-2-insert,for-node-2-update,for-node-2-delete}
+     conn_dsn      |  conn_local_dsn   | conn_init_from_dsn |                                conn_replication_sets                                 
+-------------------+-------------------+--------------------+--------------------------------------------------------------------------------------
+ dbname=postgres   |                   |                    | {default,important,for-node-1}
+ dbname=regression | dbname=regression | dbname=postgres    | {default,important,for-node-2,for-node-2-insert,for-node-2-update,for-node-2-delete}
 (2 rows)
 
 SELECT node_status FROM bdr.bdr_nodes;
