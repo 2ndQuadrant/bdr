@@ -201,6 +201,29 @@ ALTER TABLE bdr.bdr_nodes
   ADD CONSTRAINT bdr_nodes_node_status_check
     CHECK (node_status in ('i', 'c', 'o', 'r'));
 
+CREATE FUNCTION bdr.bdr_node_join_wait_for_ready()
+RETURNS void LANGUAGE plpgsql VOLATILE AS $$
+DECLARE
+    _node_status "char";
+BEGIN
+    IF current_setting('transaction_isolation') <> 'read committed' THEN
+        RAISE EXCEPTION 'Can only wait for node join in an ISOLATION LEVEL READ COMMITTED transaction, not %',
+                        current_setting('transaction_isolation');
+    END IF;
+
+    LOOP
+        SELECT INTO _node_status
+          node_status
+        FROM bdr.bdr_nodes
+        WHERE (node_sysid, node_timeline, node_dboid)
+              = bdr.bdr_get_local_nodeid();
+
+        EXIT WHEN _node_status = 'r';
+    END LOOP;
+END;
+$$;
+
+
 RESET bdr.permit_unsafe_ddl_commands;
 RESET bdr.skip_ddl_replication;
 RESET search_path;
