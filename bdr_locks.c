@@ -791,14 +791,16 @@ bdr_process_acquire_ddl_lock(uint64 sysid, TimeLineID tli, Oid datid)
 		wait_for_lsn = GetXLogInsertRecPtr();
 		bdr_prepare_message(&s, BDR_MESSAGE_REQUEST_REPLAY_CONFIRM);
 		pq_sendint64(&s, wait_for_lsn);
-		lsn = LogStandbyMessage(s.data, s.len, false);
-		XLogFlush(lsn);
-		resetStringInfo(&s);
 
 		LWLockAcquire(bdr_locks_ctl->lock, LW_EXCLUSIVE);
+		lsn = LogStandbyMessage(s.data, s.len, false);
+		XLogFlush(lsn);
+
 		bdr_my_locks_database->replay_confirmed = 0;
 		bdr_my_locks_database->replay_confirmed_lsn = wait_for_lsn;
 		LWLockRelease(bdr_locks_ctl->lock);
+
+		resetStringInfo(&s);
 
 		elog(DEBUG1, "DDL lock granted to remote node (" BDR_LOCALID_FORMAT ")",
 			 sysid, tli, datid, "");
