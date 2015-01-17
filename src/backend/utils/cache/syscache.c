@@ -325,6 +325,17 @@ static const struct cachedesc cacheinfo[] = {
 		},
 		8
 	},
+	{ConversionRelationId,		/* CONOID */
+		ConversionOidIndexId,
+		1,
+		{
+			ObjectIdAttributeNumber,
+			0,
+			0,
+			0
+		},
+		8
+	},
 	{ConstraintRelationId,		/* CONSTROID */
 		ConstraintOidIndexId,
 		1,
