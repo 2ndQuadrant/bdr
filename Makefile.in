@@ -63,9 +63,10 @@ bdr_abs_srcdir := @srcdir@
 PG_CONFIG :=@PG_CONFIG@
 PGXS := $(shell $(PG_CONFIG) --pgxs)
 
+VPATH=$(bdr_abs_srcdir)
 USE_VPATH=$(bdr_abs_srcdir)
-GIT_WORK_TREE=$(USE_VPATH)
-GIT_DIR=$(USE_VPATH)/.git
+GIT_WORK_TREE=$(VPATH)
+GIT_DIR=$(VPATH)/.git
 export GIT_DIR
 export GIT_WORK_TREE
 
@@ -78,7 +79,7 @@ Makefile: Makefile.in $(shell pwd)/config.status
 	./config.status $@
 
 DATE=$(shell date "+%Y-%m-%d")
-GITHASH=$(shell if [ -e .distgitrev ]; then cat .distgitrev; else GIT_DIR=$(USE_VPATH)/.git git rev-parse --short HEAD; fi)
+GITHASH=$(shell if [ -e .distgitrev ]; then cat .distgitrev; else GIT_DIR=$(VPATH)/.git git rev-parse --short HEAD; fi)
 BDR_VERSION=$(shell awk '/^\#define BDR_VERSION / { print $3; }' ${bdr_abs_srcdir}/bdr_version.h.in | cut -d '"' -f 2)
 
 bdr_version.h: ${bdr_abs_srcdir}/bdr_version.h.in
