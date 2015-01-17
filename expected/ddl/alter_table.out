@@ -513,6 +513,13 @@ Triggers:
     truncate_trigger AFTER TRUNCATE ON test_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
 DROP TABLE test_tbl;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
 -- ALTER COLUMN ... SET STATISTICS
 \c postgres
 CREATE TABLE test_tbl(id int);

@@ -127,6 +127,8 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
 
 DROP TABLE test_tbl;
 
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+
 -- ALTER COLUMN ... SET STATISTICS
 \c postgres
 CREATE TABLE test_tbl(id int);

@@ -314,6 +314,8 @@ DROP OPERATOR #@#(int8,none);
 \do public.##
 \do public.@#@
 \do public.#@#
+
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 \c postgres
 \do public.##
 \do public.@#@

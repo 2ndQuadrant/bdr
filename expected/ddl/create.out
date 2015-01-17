@@ -984,6 +984,13 @@ DROP OPERATOR #@#(int8,none);
 --------+------+---------------+----------------+-------------+-------------
 (0 rows)
 
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
 \c postgres
 \do public.##
                              List of operators
