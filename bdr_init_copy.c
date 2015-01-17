@@ -620,7 +620,7 @@ initialize_replication_slots(bool init_replica)
 		tlid = cfg->init_replica ? ri->tlid + 1 : ri->tlid;
 
 		snprintf(system_identifier_s, sizeof(system_identifier_s), UINT64_FORMAT, system_identifier);
- 		snprintf(NameStr(slot_name), NAMEDATALEN, BDR_SLOT_NAME_FORMAT,
+		snprintf(NameStr(slot_name), NAMEDATALEN, BDR_SLOT_NAME_FORMAT,
 				 ri->dboid, system_identifier_s, tlid,
 				 dboid, "");
 		NameStr(slot_name)[NAMEDATALEN - 1] = '\0';

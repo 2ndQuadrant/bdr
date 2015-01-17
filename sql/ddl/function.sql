@@ -4,7 +4,6 @@ CREATE FUNCTION test_fn(IN inpar character varying (20), INOUT inoutpar integer,
 $$
 BEGIN
 	PERFORM E'\t\r\n\b\f';
-	
 END;
 $$ LANGUAGE plpgsql IMMUTABLE  STRICT;
 \df+ test_fn

@@ -1,0 +1,10 @@
+*		whitespace=space-before-tab,trailing-space
+*.[chly]	whitespace=space-before-tab,trailing-space,indent-with-non-tab,tabwidth=4
+*.sgml		whitespace=space-before-tab,trailing-space,tab-in-indent,-blank-at-eol
+
+# Test output files that contain extra whitespace
+*.out					-whitespace
+
+
+# These files are maintained or generated elsewhere.  We take them as is.
+configure				-whitespace

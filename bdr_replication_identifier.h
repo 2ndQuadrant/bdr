@@ -53,8 +53,8 @@ extern Datum bdr_replication_identifier_drop(PG_FUNCTION_ARGS);
  * Used by GetReplicationInfoByIdentifier()
  */
 typedef struct {
-        Oid		riident;
-        text	riname;
+	Oid		riident;
+	text	riname;
 } FormData_pg_replication_identifier;
 typedef FormData_pg_replication_identifier *Form_pg_replication_identifier;
 

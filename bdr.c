@@ -449,7 +449,7 @@ bdr_worker_init(char *dbname)
  * Raises an error on failure, will not return null.
  *
  * Arguments:
- * 	  connection_name:  bdr conn name from bdr.connections to get dsn from
+ *	  connection_name:  bdr conn name from bdr.connections to get dsn from
  *
  * Returns:
  *    the libpq connection
@@ -631,7 +631,7 @@ bdr_create_con_gucs(char  *name,
 	sprintf(optname_replication_sets, "bdr.%s_replication_sets", name);
 	DefineCustomStringVariable(optname_replication_sets,
 							   optname_replication_sets,
-	                           NULL,
+							   NULL,
 							   &opts->replication_sets,
 							   NULL, PGC_POSTMASTER,
 							   GUC_LIST_INPUT | GUC_LIST_QUOTE,

@@ -37,4 +37,3 @@ step "n2s1" { UPDATE tst SET c = 'changed' WHERE a = 1; }
 step "n2s2" { UPDATE tst SET b = 'changed' WHERE a = 1; }
 
 permutation "n1s1" "n1sync" "n2read" "n1s2" "n1sync" "n2read" "n1s3" "n1s4" "n1sync" "n2read" "n1s5" "n1s6" "n1sync" "n2read" "n1s7" "n1sync" "n2read" "n1s8" "n1s9" "n1s10" "n2s1" "n2sync" "n1s11" "n1sync" "n2sync" "n2read" "n1read" "n2s2" "n2sync" "n1read"
-

@@ -173,4 +173,3 @@ if [ ! -n "$?" ]; then
 	echo "ERROR: data in databases differ, check $DATADIR/chksum.diff"
 	exit 1
 fi
-

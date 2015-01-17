@@ -78,7 +78,7 @@ find_init_replica_worker(Name dbname)
 	/* Check whether one of our connections has init_replica set */
 	for (off = 0; off < bdr_max_workers; off++)
 	{
-		BdrApplyWorker 	       *aw;
+		BdrApplyWorker		   *aw;
 		BdrConnectionConfig	   *cfg;
 
 		if (BdrWorkerCtl->slots[off].worker_type != BDR_WORKER_APPLY)
@@ -105,10 +105,10 @@ find_init_replica_worker(Name dbname)
 static char
 bdr_get_remote_status(PGconn *pgconn)
 {
-	PGresult 		   *res;
-	char 				status;
-	Oid 				param_types[] = {TEXTOID, OIDOID, OIDOID};
-	const char 		   *param_values[3];
+	PGresult		   *res;
+	char				status;
+	Oid					param_types[] = {TEXTOID, OIDOID, OIDOID};
+	const char		   *param_values[3];
 	/* Needs to fit max length of UINT64_FORMAT */
 	char				sysid_str[33];
 	char				tlid_str[33];
@@ -169,11 +169,11 @@ static char
 bdr_set_remote_status(PGconn *pgconn, const char status,
 					  const char prev_status)
 {
-	PGresult 		   *res;
+	PGresult		   *res;
 	char			   *status_str;
 	const uint64		sysid = GetSystemIdentifier();
 	/* Needs to fit max length of UINT64_FORMAT */
-	char 				sysid_str[33];
+	char				sysid_str[33];
 	char				tlid_str[33];
 	char				mydatabaseid_str[33];
 
@@ -197,7 +197,7 @@ bdr_set_remote_status(PGconn *pgconn, const char status,
 	{
 		Oid			param_types[] = {TEXTOID, OIDOID, OIDOID};
 		const char *param_values[3];
-		char    	new_status;
+		char		new_status;
 
 		param_values[0] = sysid_str;
 		param_values[1] = tlid_str;
@@ -370,7 +370,7 @@ bdr_ensure_ext_installed(PGconn *pgconn, Name bdr_conn_name)
 					 NameStr(*bdr_conn_name)),
 					 errdetail("no entry with name 'bdr' in pg_extensions"),
 					 errhint("add 'bdr' to shared_preload_libraries in postgresql.conf "
-					 		 "on the target server and restart it.")));
+							 "on the target server and restart it.")));
 		}
 	}
 	else if (PQntuples(res) == 0)
@@ -515,8 +515,8 @@ bdr_exec_init_replica(BdrConnectionConfig *cfg, char *snapshot)
 	get_parent_directory(bindir);
 
 	if (find_other_exec(my_exec_path, BDR_INIT_REPLICA_CMD,
-	                    BDR_INIT_REPLICA_CMD " (PostgreSQL " PG_VERSION ", BDR " BDR_VERSION ")\n",
-	                    &bdr_init_replica_script_path[0]) < 0)
+						BDR_INIT_REPLICA_CMD " (PostgreSQL " PG_VERSION ", BDR " BDR_VERSION ")\n",
+						&bdr_init_replica_script_path[0]) < 0)
 	{
 		elog(ERROR, "bdr: failed to find " BDR_INIT_REPLICA_CMD
 			 " relative to binary %s or wrong version. Expected (PostgreSQL %s, BDR %s)",
@@ -524,8 +524,8 @@ bdr_exec_init_replica(BdrConnectionConfig *cfg, char *snapshot)
 	}
 
 	if (find_other_exec(my_exec_path, BDR_DUMP_CMD,
-	                    "pg_dump (PostgreSQL) " PG_VERSION "\n",
-	                    &bdr_dump_path[0]) < 0)
+						"pg_dump (PostgreSQL) " PG_VERSION "\n",
+						&bdr_dump_path[0]) < 0)
 	{
 		elog(ERROR, "bdr: failed to find " BDR_DUMP_CMD
 			 " relative to binary %s or wrong version (expected %s)",
@@ -533,8 +533,8 @@ bdr_exec_init_replica(BdrConnectionConfig *cfg, char *snapshot)
 	}
 
 	if (find_other_exec(my_exec_path, BDR_RESTORE_CMD,
-	                    BDR_RESTORE_CMD " (PostgreSQL) " PG_VERSION "\n",
-	                    &bdr_restore_path[0]) < 0)
+						BDR_RESTORE_CMD " (PostgreSQL) " PG_VERSION "\n",
+						&bdr_restore_path[0]) < 0)
 	{
 		elog(ERROR, "bdr: failed to find " BDR_RESTORE_CMD
 			 " relative to binary %s or wrong version (expected %s)",
@@ -922,7 +922,7 @@ bdr_init_replica(Name dbname)
 			LWLockAcquire(BdrWorkerCtl->lock, LW_SHARED);
 			for (off = 0; off < bdr_max_workers; off++)
 			{
-				BdrWorker 			   *worker = &BdrWorkerCtl->slots[off];
+				BdrWorker			   *worker = &BdrWorkerCtl->slots[off];
 
 				if (worker->worker_type == BDR_WORKER_APPLY)
 				{

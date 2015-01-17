@@ -899,7 +899,7 @@ bdr_process_release_ddl_lock(uint64 origin_sysid, TimeLineID origin_tli, Oid ori
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("Did not find local DDL lock entry for a remotely released global DDL lock"),
 				 errdetail("node ("BDR_LOCALID_FORMAT") sent a release message but the lock isn't held locally",
-				 		   lock_sysid, lock_tli, lock_datid, "")));
+						   lock_sysid, lock_tli, lock_datid, "")));
 
 	LWLockAcquire(bdr_locks_ctl->lock, LW_EXCLUSIVE);
 	if (bdr_my_locks_database->lockcount > 0)

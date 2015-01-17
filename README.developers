@@ -22,7 +22,7 @@ Before tagging a release:
 
 * "git log -- bdr--[ver].sql" to see if there were any changes since it
   was created. If there are, you MUST bump the version in bdr.control to
-  the current release version. 
+  the current release version.
 
 * For non-point releases (e.g. 0.6 to 0.7), increase the version in
   bdr.control even if nothing changed in the bdr extension script.
@@ -32,7 +32,7 @@ Before tagging a release:
   extension version 0.7.1 with code version 0.7.2 .
 
 * If bdr.control's version was changed since the last release, as shown by
-  "git diff bdr/prevver bdr-next -- bdr.control" ensure that a 
+  "git diff bdr/prevver bdr-next -- bdr.control" ensure that a
   "bdr--[oldver]--[ver].sql" script exists and is listed in the Makefile's
   DATA section. Make sure it actually produces the expected results.
 
@@ -62,7 +62,7 @@ repo)
 
 At a version bump a control file upgrade script must be created, e.g
 bdr--0.6--0.7.sql. This needs to be *tested* whenever the main control file is
-modified. It needs to be listed in bdr.control . 
+modified. It needs to be listed in bdr.control .
 
 Dist tarballs
 -------------

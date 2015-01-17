@@ -24,7 +24,7 @@ max_replication_slots = 8
 
 # Generally you want to set max_wal_senders to the same value plus a few for
 # pg_basebackup runs, streaming replicas, etc.
-# 
+#
 # This is a suitable setting for a small installation.
 max_wal_senders = 10
 
@@ -52,6 +52,6 @@ bdr.connections = ''
 # bdr.node2_init_replica=on
 # # and apply it to the local db using this dsn
 # bdr.node2_replica_local_dsn="dbname=mydb user=postgres"
-# 
+#
 # bdr.node3_dsn = "host=node3 dbname=mydb"
 #

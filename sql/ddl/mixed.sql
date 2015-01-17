@@ -18,4 +18,3 @@ UPDATE add_column SET other = 'foobar';
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 \c regression
 SELECT id, data, other FROM add_column ORDER BY id;
-

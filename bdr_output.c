@@ -491,7 +491,7 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 	if (get_namespace_oid("bdr", true) == InvalidOid)
 	{
 		ereport(ERROR,
-			    (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("bdr extension does not exist on " BDR_LOCALID_FORMAT,
 						BDR_LOCALID_FORMAT_ARGS),
 				 errdetail("Cannot create a BDR slot without the BDR extension installed")));
