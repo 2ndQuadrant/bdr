@@ -831,6 +831,19 @@ standard_ProcessUtility(Node *parsetree,
 				break;
 			}
 
+		case T_SecLabelStmt:
+			{
+				SecLabelStmt *stmt = (SecLabelStmt *) parsetree;
+
+				if (EventTriggerSupportsObjectType(stmt->objtype))
+					ProcessUtilitySlow(parsetree, queryString,
+									   context, params,
+									   dest, completionTag);
+				else
+					ExecSecLabelStmt(stmt);
+				break;
+			}
+
 		default:
 			/* All other statement types have event trigger support */
 			ProcessUtilitySlow(parsetree, queryString,
