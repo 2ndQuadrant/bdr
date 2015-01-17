@@ -2520,7 +2520,7 @@ deparse_CreateDomain(Oid objectId, Node *parsetree)
 													 objectId));
 	append_object_object(createDomain,
 						 "type",
-						 new_objtree_for_type(objectId, typForm->typtypmod));
+						 new_objtree_for_type(typForm->typbasetype, typForm->typtypmod));
 
 	if (typForm->typnotnull)
 		append_string_object(createDomain, "not_null", "NOT NULL");
