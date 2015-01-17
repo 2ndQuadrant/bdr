@@ -40,6 +40,8 @@ VERSION = @PACKAGE_VERSION@
 MAJORVERSION = @PG_MAJORVERSION@
 
 # Support for VPATH builds
+# (PGXS VPATH support is handled separately in pgxs.mk)
+ifndef PGXS
 vpath_build = @vpath_build@
 abs_top_srcdir = @abs_top_srcdir@
 
@@ -51,6 +53,7 @@ top_srcdir = $(abs_top_srcdir)
 srcdir = $(top_srcdir)/$(subdir)
 VPATH = $(srcdir)
 endif
+endif # not PGXS
 
 vpathsearch = `for f in $(addsuffix /$(1),$(subst :, ,. $(VPATH))); do test -r $$f && echo $$f && break; done`
 
@@ -314,13 +317,13 @@ endef
 ifeq ($(enable_tap_tests),yes)
 
 define prove_installcheck
-cd $(srcdir) && TESTDIR='$(CURDIR)' PATH="$(bindir):$$PATH" PGPORT='6$(DEF_PGPORT)' $(PROVE) $(PG_PROVE_FLAGS) $(PROVE_FLAGS) t/*.pl
+cd $(srcdir) && TESTDIR='$(CURDIR)' PATH="$(bindir):$$PATH" PGPORT='6$(DEF_PGPORT)' top_builddir='$(CURDIR)/$(top_builddir)' $(PROVE) $(PG_PROVE_FLAGS) $(PROVE_FLAGS) t/*.pl
 endef
 
 define prove_check
 $(MKDIR_P) tmp_check/log
 $(MAKE) -C $(top_builddir) DESTDIR='$(CURDIR)'/tmp_check/install install >'$(CURDIR)'/tmp_check/log/install.log 2>&1
-cd $(srcdir) && TESTDIR='$(CURDIR)' PATH="$(CURDIR)/tmp_check/install$(bindir):$$PATH" $(call add_to_path,$(ld_library_path_var),$(CURDIR)/tmp_check/install$(libdir)) PGPORT='6$(DEF_PGPORT)' $(PROVE) $(PG_PROVE_FLAGS) $(PROVE_FLAGS) t/*.pl
+cd $(srcdir) && TESTDIR='$(CURDIR)' PATH="$(CURDIR)/tmp_check/install$(bindir):$$PATH" $(call add_to_path,$(ld_library_path_var),$(CURDIR)/tmp_check/install$(libdir)) top_builddir='$(CURDIR)/$(top_builddir)' PGPORT='6$(DEF_PGPORT)' $(PROVE) $(PG_PROVE_FLAGS) $(PROVE_FLAGS) t/*.pl
 endef
 
 else
@@ -456,23 +459,13 @@ ifeq ($(PORTNAME),cygwin)
 libpq_pgport += $(LDAP_LIBS_FE)
 endif
 
-# If PGXS is not defined, build libpq and libpgport dependencies as required.
-# If the build is with PGXS, then these are supposed to be already built and
-# installed, and we just ensure that the expected files exist.
-ifndef PGXS
+
 submake-libpq:
 	$(MAKE) -C $(libpq_builddir) all
-else
-submake-libpq: $(libdir)/libpq.so ;
-endif
 
-ifndef PGXS
 submake-libpgport:
 	$(MAKE) -C $(top_builddir)/src/port all
 	$(MAKE) -C $(top_builddir)/src/common all
-else
-submake-libpgport: $(libdir)/libpgport.a $(libdir)/libpgcommon.a ;
-endif
 
 .PHONY: submake-libpq submake-libpgport
 

@@ -87,6 +87,10 @@
 #include <dns_sd.h>
 #endif
 
+#ifdef HAVE_PTHREAD_IS_THREADED_NP
+#include <pthread.h>
+#endif
+
 #include "access/transam.h"
 #include "access/xlog.h"
 #include "bootstrap/bootstrap.h"
@@ -1140,6 +1144,12 @@ PostmasterMain(int argc, char *argv[])
 	}
 
 	/*
+	 * Remove old temporary files.  At this point there can be no other
+	 * Postgres processes running in this directory, so this should be safe.
+	 */
+	RemovePgTempFiles();
+
+	/*
 	 * If enabled, start up syslogger collection subprocess
 	 */
 	SysLoggerPID = SysLogger_Start();
@@ -1196,12 +1206,23 @@ PostmasterMain(int argc, char *argv[])
 		 */
 	}
 
+#ifdef HAVE_PTHREAD_IS_THREADED_NP
 
 	/*
-	 * Remove old temporary files.  At this point there can be no other
-	 * Postgres processes running in this directory, so this should be safe.
+	 * On Darwin, libintl replaces setlocale() with a version that calls
+	 * CFLocaleCopyCurrent() when its second argument is "" and every relevant
+	 * environment variable is unset or empty.  CFLocaleCopyCurrent() makes
+	 * the process multithreaded.  The postmaster calls sigprocmask() and
+	 * calls fork() without an immediate exec(), both of which have undefined
+	 * behavior in a multithreaded program.  A multithreaded postmaster is the
+	 * normal case on Windows, which offers neither fork() nor sigprocmask().
 	 */
-	RemovePgTempFiles();
+	if (pthread_is_threaded_np() != 0)
+		ereport(LOG,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("postmaster became multithreaded during startup"),
+		 errhint("Set the LC_ALL environment variable to a valid locale.")));
+#endif
 
 	/*
 	 * Remember postmaster startup time
@@ -1659,6 +1680,15 @@ ServerLoop(void)
 			TouchSocketLockFiles();
 			last_touch_time = now;
 		}
+
+#ifdef HAVE_PTHREAD_IS_THREADED_NP
+
+		/*
+		 * With assertions enabled, check regularly for appearance of
+		 * additional threads.  All builds check at start and exit.
+		 */
+		Assert(pthread_is_threaded_np() == 0);
+#endif
 
 		/*
 		 * If we already sent SIGQUIT to children and they are slow to shut
@@ -4738,6 +4768,18 @@ SubPostmasterMain(int argc, char *argv[])
 static void
 ExitPostmaster(int status)
 {
+#ifdef HAVE_PTHREAD_IS_THREADED_NP
+
+	/*
+	 * There is no known cause for a postmaster to become multithreaded after
+	 * startup.  Recheck to account for the possibility of unknown causes.
+	 */
+	if (pthread_is_threaded_np() != 0)
+		ereport(LOG,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("postmaster became multithreaded")));
+#endif
+
 	/* should cleanup shared memory and kill all backends */
 
 	/*
@@ -5816,7 +5858,7 @@ read_backend_variables(char *id, Port *port)
 	fp = AllocateFile(id, PG_BINARY_R);
 	if (!fp)
 	{
-		write_stderr("could not read from backend variables file \"%s\": %s\n",
+		write_stderr("could not open backend variables file \"%s\": %s\n",
 					 id, strerror(errno));
 		exit(1);
 	}

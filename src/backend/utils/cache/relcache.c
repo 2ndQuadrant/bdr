@@ -2139,9 +2139,25 @@ RelationClearRelation(Relation relation, bool rebuild)
 		newrel = RelationBuildDesc(save_relid, false);
 		if (newrel == NULL)
 		{
-			/* Should only get here if relation was deleted */
-			RelationCacheDelete(relation);
-			RelationDestroyRelation(relation, false);
+			/*
+			 * We can validly get here, if we're using a historic snapshot in
+			 * which a relation, accessed from outside logical decoding, is
+			 * still invisible. In that case it's fine to just mark the
+			 * relation as invalid and return - it'll fully get reloaded by
+			 * the cache reset at the end of logical decoding (or at the next
+			 * access).  During normal processing we don't want to ignore this
+			 * case as it shouldn't happen there, as explained below.
+			 */
+			if (HistoricSnapshotActive())
+				return;
+
+			/*
+			 * This shouldn't happen as dropping a relation is intended to be
+			 * impossible if still referenced (c.f. CheckTableNotInUse()). But
+			 * if we get here anyway, we can't just delete the relcache entry,
+			 * as it possibly could get accessed later (as e.g. the error
+			 * might get trapped and handled via a subtransaction rollback).
+			 */
 			elog(ERROR, "relation %u deleted while still in use", save_relid);
 		}
 

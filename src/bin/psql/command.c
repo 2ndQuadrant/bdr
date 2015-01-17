@@ -302,14 +302,33 @@ exec_command(const char *cmd,
 	else if (strcmp(cmd, "conninfo") == 0)
 	{
 		char	   *db = PQdb(pset.db);
-		char	   *host = (PQhostaddr(pset.db) != NULL) ? PQhostaddr(pset.db) : PQhost(pset.db);
 
 		if (db == NULL)
 			printf(_("You are currently not connected to a database.\n"));
 		else
 		{
+			char	   *host;
+			PQconninfoOption *connOptions;
+			PQconninfoOption *option;
+
+			host = PQhost(pset.db);
 			if (host == NULL)
 				host = DEFAULT_PGSOCKET_DIR;
+			/* A usable "hostaddr" overrides the basic sense of host. */
+			connOptions = PQconninfo(pset.db);
+			if (connOptions == NULL)
+			{
+				psql_error("out of memory\n");
+				exit(EXIT_FAILURE);
+			}
+			for (option = connOptions; option && option->keyword; option++)
+				if (strcmp(option->keyword, "hostaddr") == 0)
+				{
+					if (option->val != NULL && option->val[0] != '\0')
+						host = option->val;
+					break;
+				}
+
 			/* If the host is an absolute path, the connection is via socket */
 			if (is_absolute_path(host))
 				printf(_("You are connected to database \"%s\" as user \"%s\" via socket in \"%s\" at port \"%s\".\n"),
@@ -318,6 +337,8 @@ exec_command(const char *cmd,
 				printf(_("You are connected to database \"%s\" as user \"%s\" on host \"%s\" at port \"%s\".\n"),
 					   db, PQuser(pset.db), host, PQport(pset.db));
 			printSSLInfo();
+
+			PQconninfoFree(connOptions);
 		}
 	}
 
@@ -1130,12 +1151,7 @@ exec_command(const char *cmd,
 			while ((opt = psql_scan_slash_option(scan_state,
 												 OT_NORMAL, NULL, false)))
 			{
-				newval = realloc(newval, strlen(newval) + strlen(opt) + 1);
-				if (!newval)
-				{
-					psql_error("out of memory\n");
-					exit(EXIT_FAILURE);
-				}
+				newval = pg_realloc(newval, strlen(newval) + strlen(opt) + 1);
 				strcat(newval, opt);
 				free(opt);
 			}
@@ -1343,7 +1359,7 @@ exec_command(const char *cmd,
 												 OT_NORMAL, NULL, false);
 
 		if (opt)
-			pset.timing = ParseVariableBool(opt);
+			pset.timing = ParseVariableBool(opt, "\\timing");
 		else
 			pset.timing = !pset.timing;
 		if (!pset.quiet)
@@ -2307,12 +2323,14 @@ do_pset(const char *param, const char *value, printQueryOpt *popt, bool quiet)
 	}
 
 	/* set expanded/vertical mode */
-	else if (strcmp(param, "x") == 0 || strcmp(param, "expanded") == 0 || strcmp(param, "vertical") == 0)
+	else if (strcmp(param, "x") == 0 ||
+			 strcmp(param, "expanded") == 0 ||
+			 strcmp(param, "vertical") == 0)
 	{
 		if (value && pg_strcasecmp(value, "auto") == 0)
 			popt->topt.expanded = 2;
 		else if (value)
-			popt->topt.expanded = ParseVariableBool(value);
+			popt->topt.expanded = ParseVariableBool(value, param);
 		else
 			popt->topt.expanded = !popt->topt.expanded;
 	}
@@ -2321,7 +2339,7 @@ do_pset(const char *param, const char *value, printQueryOpt *popt, bool quiet)
 	else if (strcmp(param, "numericlocale") == 0)
 	{
 		if (value)
-			popt->topt.numericLocale = ParseVariableBool(value);
+			popt->topt.numericLocale = ParseVariableBool(value, param);
 		else
 			popt->topt.numericLocale = !popt->topt.numericLocale;
 	}
@@ -2376,7 +2394,7 @@ do_pset(const char *param, const char *value, printQueryOpt *popt, bool quiet)
 	else if (strcmp(param, "t") == 0 || strcmp(param, "tuples_only") == 0)
 	{
 		if (value)
-			popt->topt.tuples_only = ParseVariableBool(value);
+			popt->topt.tuples_only = ParseVariableBool(value, param);
 		else
 			popt->topt.tuples_only = !popt->topt.tuples_only;
 	}
@@ -2407,10 +2425,12 @@ do_pset(const char *param, const char *value, printQueryOpt *popt, bool quiet)
 		if (value && pg_strcasecmp(value, "always") == 0)
 			popt->topt.pager = 2;
 		else if (value)
-			if (ParseVariableBool(value))
+		{
+			if (ParseVariableBool(value, param))
 				popt->topt.pager = 1;
 			else
 				popt->topt.pager = 0;
+		}
 		else if (popt->topt.pager == 1)
 			popt->topt.pager = 0;
 		else
@@ -2421,7 +2441,7 @@ do_pset(const char *param, const char *value, printQueryOpt *popt, bool quiet)
 	else if (strcmp(param, "footer") == 0)
 	{
 		if (value)
-			popt->topt.default_footer = ParseVariableBool(value);
+			popt->topt.default_footer = ParseVariableBool(value, param);
 		else
 			popt->topt.default_footer = !popt->topt.default_footer;
 	}
@@ -2759,7 +2779,6 @@ do_watch(PQExpBuffer query_buf, long sleep)
 	 * Set up rendering options, in particular, disable the pager, because
 	 * nobody wants to be prompted while watching the output of 'watch'.
 	 */
-	myopt.nullPrint = NULL;
 	myopt.topt.pager = 0;
 
 	for (;;)
