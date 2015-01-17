@@ -3,9 +3,9 @@
  *
  * BiDirectionalReplication
  *
- * Copyright (c) 2012-2013, PostgreSQL Global Development Group
+ * Copyright (c) 2012-2015, PostgreSQL Global Development Group
  *
- * contrib/bdr/bdr.h
+ * bdr.h
  */
 #ifndef BDR_H
 #define BDR_H

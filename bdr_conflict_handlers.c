@@ -5,10 +5,10 @@
  *
  * User defined handlers for replication conflicts
  *
- * Copyright (C) 2012-2014, PostgreSQL Global Development Group
+ * Copyright (C) 2012-2015, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
- *		contrib/bdr/bdr_conflict_handlers.c
+ *		bdr_conflict_handlers.c
  *
  * -------------------------------------------------------------------------
  */

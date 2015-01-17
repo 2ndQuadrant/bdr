@@ -3,10 +3,10 @@
  * bdr_count.c
  *		Replication replication stats
  *
- * Copyright (C) 2013, PostgreSQL Global Development Group
+ * Copyright (C) 2013-2015, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
- *		contrib/bdr/bdr_count.c
+ *		bdr_count.c
  *
  * -------------------------------------------------------------------------
  */

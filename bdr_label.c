@@ -1,12 +1,15 @@
 /* -------------------------------------------------------------------------
  *
  * bdr_label.c
+ *		BDR security label implementation
  *
  * Provide object metadata for bdr using the security label
  * infrastructure.
  *
- * Copyright (c) 2014, PostgreSQL Global Development Group
+ * Copyright (c) 2014-2015, PostgreSQL Global Development Group
  *
+ * IDENTIFICATION
+ *		bdr_label.c
  * -------------------------------------------------------------------------
  */
 

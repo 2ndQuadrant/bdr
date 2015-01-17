@@ -4,7 +4,7 @@
  *		global ddl/dml interlocking locks
  *
  *
- * Copyright (C) 2014, PostgreSQL Global Development Group
+ * Copyright (C) 2014-2015, PostgreSQL Global Development Group
  *
  * NOTES
  *
@@ -68,7 +68,7 @@
  *    process is re-started at step 6)
  *
  * IDENTIFICATION
- *		contrib/bdr/bdr_locks.c
+ *		bdr_locks.c
  *
  * -------------------------------------------------------------------------
  */

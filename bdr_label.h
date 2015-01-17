@@ -3,7 +3,7 @@
  *
  * BiDirectionalReplication
  *
- * Copyright (c) 2014, PostgreSQL Global Development Group
+ * Copyright (c) 2014-2015, PostgreSQL Global Development Group
  *
  * bdr_label.h
  */

@@ -6,10 +6,10 @@
  * BDR does a lot of direct access to indexes and relations, some of which
  * isn't handled by simple calls into the backend. Most of it lives here.
  *
- * Copyright (C) 2012-2014, PostgreSQL Global Development Group
+ * Copyright (C) 2012-2015, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
- *      contrib/bdr/bdr_executor.c
+ *      bdr_executor.c
  *
  * -------------------------------------------------------------------------
  */

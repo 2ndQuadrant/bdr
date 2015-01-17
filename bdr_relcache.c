@@ -5,10 +5,10 @@
  *
  * Caching relation specific information
  *
- * Copyright (C) 2012-2014, PostgreSQL Global Development Group
+ * Copyright (C) 2012-2015, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
- *		contrib/bdr/bdr_relcache.c
+ *		bdr_relcache.c
  *
  * -------------------------------------------------------------------------
  */

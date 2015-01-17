@@ -16,10 +16,10 @@
  * xlog records. But because extensions don't have access to xlog, UDR has
  * to store data in a table which is less efficient.
  *
- * Copyright (C) 2012-2013, PostgreSQL Global Development Group
+ * Copyright (C) 2012-2015, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
- *		contrib/bdr/bdr_replication_identifier.c
+ *		bdr_replication_identifier.c
  *
  * -------------------------------------------------------------------------
  */

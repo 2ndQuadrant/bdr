@@ -7,10 +7,10 @@
  * bdr node into a bdr group. Allows a new blank database to be
  * introduced into an existing, already-working bdr group.
  *
- * Copyright (C) 2012-2014, PostgreSQL Global Development Group
+ * Copyright (C) 2012-2015, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
- *		contrib/bdr/bdr_init_replica.c
+ *		bdr_init_replica.c
  *
  * -------------------------------------------------------------------------
  */

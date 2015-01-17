@@ -1,3 +1,15 @@
+/* -------------------------------------------------------------------------
+ *
+ * bdr_conflict_logging.c
+ *		Conflict logging support
+ *
+ * Copyright (C) 2012-2015, PostgreSQL Global Development Group
+ *
+ * IDENTIFICATION
+ *		bdr_conflict_logging.c
+ *
+ * -------------------------------------------------------------------------
+ */
 #include "postgres.h"
 
 #include "bdr.h"

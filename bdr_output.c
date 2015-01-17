@@ -3,10 +3,10 @@
  * bdr_output.c
  *		  BDR output plugin
  *
- * Copyright (c) 2012-2013, PostgreSQL Global Development Group
+ * Copyright (c) 2012-2015, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
- *		  contrib/bdr/bdr_output.c
+ *		  bdr_output.c
  *
  *-------------------------------------------------------------------------
  */

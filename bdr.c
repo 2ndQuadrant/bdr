@@ -5,10 +5,10 @@
  *
  * Replication???
  *
- * Copyright (C) 2012-2013, PostgreSQL Global Development Group
+ * Copyright (C) 2012-2015, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
- *		contrib/bdr/bdr.c
+ *		bdr.c
  *
  * -------------------------------------------------------------------------
  */

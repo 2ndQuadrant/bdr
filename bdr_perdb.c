@@ -1,3 +1,15 @@
+/* -------------------------------------------------------------------------
+ *
+ * bdr_perdb.c
+ *		Per database supervisor worker.
+ *
+ * Copyright (C) 2014-2015, PostgreSQL Global Development Group
+ *
+ * IDENTIFICATION
+ *		bdr_perdb.c
+ *
+ * -------------------------------------------------------------------------
+ */
 #include "postgres.h"
 
 #include "bdr.h"

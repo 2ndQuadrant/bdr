@@ -3,10 +3,10 @@
  * bdr_compat.c
  *		Checks for cross version/arch/settings compatibility
  *
- * Copyright (C) 2014, PostgreSQL Global Development Group
+ * Copyright (C) 2014-2015, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
- *		contrib/bdr/bdr_compat.c
+ *		bdr_compat.c
  *
  * -------------------------------------------------------------------------
  */

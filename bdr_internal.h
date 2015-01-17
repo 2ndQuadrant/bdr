@@ -1,11 +1,11 @@
 /*
- * bdr.h
+ * bdr_internal.h
  *
  * BiDirectionalReplication
  *
- * Copyright (c) 2012-2013, PostgreSQL Global Development Group
+ * Copyright (c) 2012-2015, PostgreSQL Global Development Group
  *
- * contrib/bdr/bdr.h
+ * bdr_internal.h
  */
 #ifndef BDR_INTERNAL_H
 #define BDR_INTERNAL_H

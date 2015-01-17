@@ -1,3 +1,16 @@
+/* -------------------------------------------------------------------------
+ *
+ * bdr_init_copy.c
+ *		Initialize a new bdr node from a physical base backup
+ *
+ * Copyright (C) 2012-2015, PostgreSQL Global Development Group
+ *
+ * IDENTIFICATION
+ *		bdr_conflict_logging.c
+ *
+ * -------------------------------------------------------------------------
+ */
+
 #include "postgres_fe.h"
 
 #include "port.h"

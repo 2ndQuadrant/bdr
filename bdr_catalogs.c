@@ -6,10 +6,10 @@
  * Functions usable by both the output plugin and the extension/workers for
  * accessing and manipulating BDR's catalogs, like bdr.bdr_nodes.
  *
- * Copyright (C) 2012-2014, PostgreSQL Global Development Group
+ * Copyright (C) 2012-2015, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
- *		contrib/bdr/bdr.c
+ *		bdr.c
  *
  * -------------------------------------------------------------------------
  */

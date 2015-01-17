@@ -3,9 +3,9 @@
  *
  * BiDirectionalReplication
  *
- * Copyright (c) 2014, PostgreSQL Global Development Group
+ * Copyright (c) 2014-2015, PostgreSQL Global Development Group
  *
- * contrib/bdr/bdr_locks.h
+ * bdr_locks.h
  */
 #ifndef BDR_LOCKS_H
 #define BDR_LOCKS_H

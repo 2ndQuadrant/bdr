@@ -4,10 +4,10 @@
  *		prevent execution of utility commands not yet or never supported
  *
  *
- * Copyright (C) 2012-2014, PostgreSQL Global Development Group
+ * Copyright (C) 2012-2015, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
- *		contrib/bdr/bdr_commandfilter.c
+ *		bdr_commandfilter.c
  *
  * -------------------------------------------------------------------------
  */
