@@ -412,7 +412,7 @@ extern void bdr_maintain_schema(void);
 extern BdrWorker* bdr_worker_shmem_alloc(BdrWorkerType worker_type,
 										 uint32 *ctl_idx);
 extern void bdr_worker_shmem_release(BdrWorker* worker, BackgroundWorkerHandle *handle);
-extern bool bdr_is_bdr_activated_db(void);
+extern bool bdr_is_bdr_activated_db(Oid dboid);
 
 /* forbid commands we do not support currently (or never will) */
 extern void init_bdr_commandfilter(void);
@@ -477,8 +477,7 @@ extern void bdr_heap_compute_replication_settings(
 extern void BDRRelcacheHashInvalidateCallback(Datum arg, Oid relid);
 
 extern void bdr_parse_relation_options(const char *label, BDRRelation *rel);
-extern void bdr_parse_database_options(const char *label);
-
+extern void bdr_parse_database_options(const char *label, bool *is_active);
 
 /* conflict handlers API */
 extern void bdr_conflict_handlers_init(void);

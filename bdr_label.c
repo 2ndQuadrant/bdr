@@ -18,10 +18,14 @@
 #include "bdr.h"
 #include "bdr_label.h"
 
+#include "catalog/pg_database.h"
+#include "commands/dbcommands.h"
 #include "commands/seclabel.h"
 #include "miscadmin.h"
+#include "utils/acl.h"
 #include "utils/inval.h"
 #include "utils/lsyscache.h"
+#include "utils/syscache.h"
 
 static void bdr_object_relabel(const ObjectAddress *object, const char *seclabel);
 
@@ -46,10 +50,21 @@ bdr_object_relabel(const ObjectAddress *object, const char *seclabel)
 				aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_CLASS,
 							   get_rel_name(object->objectId));
 
-			if (seclabel != NULL)
-				bdr_parse_relation_options(seclabel, NULL);
-
+			/* ensure bdr_relcache.c is coherent */
 			CacheInvalidateRelcacheByRelid(object->objectId);
+
+			bdr_parse_relation_options(seclabel, NULL);
+			break;
+		case DatabaseRelationId:
+
+			if (!pg_database_ownercheck(object->objectId, GetUserId()))
+						aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_DATABASE,
+											   get_database_name(object->objectId));
+
+			/* ensure bdr_dbcache.c is coherent */
+			CacheInvalidateCatalog(DATABASEOID);
+
+			bdr_parse_database_options(seclabel, NULL);
 			break;
 		default:
 			elog(ERROR, "unsupported object type: %s",

@@ -773,7 +773,7 @@ BdrExecutorStart(QueryDesc *queryDesc, int eflags)
 	bool		performs_writes = false;
 	ListCell   *l;
 
-	if (bdr_always_allow_writes || !bdr_is_bdr_activated_db())
+	if (bdr_always_allow_writes || !bdr_is_bdr_activated_db(MyDatabaseId))
 		goto done;
 
 	/* identify whether this is a modifying statement */

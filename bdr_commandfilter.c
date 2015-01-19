@@ -635,7 +635,7 @@ bdr_commandfilter(Node *parsetree,
 
 #ifdef BUILDING_UDR
 	if (!in_bdr_replicate_ddl_command &&
-		bdr_is_bdr_activated_db() &&
+		bdr_is_bdr_activated_db(MyDatabaseId) &&
 		!statement_affects_only_temp(parsetree))
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -692,7 +692,7 @@ bdr_commandfilter(Node *parsetree,
 	 * to be in a transaction and thus isn't admissible for transaction
 	 * control commands.
 	 */
-	if (!bdr_is_bdr_activated_db())
+	if (!bdr_is_bdr_activated_db(MyDatabaseId))
 		goto done;
 
 	/* all commands handled by ProcessUtilitySlow() */

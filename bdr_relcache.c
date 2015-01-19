@@ -85,7 +85,7 @@ BDRRelcacheHashInvalidateCallback(Datum arg, Oid relid)
 }
 
 static void
-bdr_initialize_cache()
+bdr_relcache_initialize()
 {
 	HASHCTL		ctl;
 
@@ -256,7 +256,7 @@ bdr_heap_open(Oid reloid, LOCKMODE lockmode)
 	rel = heap_open(reloid, lockmode);
 
 	if (BDRRelcacheHash == NULL)
-		bdr_initialize_cache();
+		bdr_relcache_initialize();
 
 	/*
 	 * HASH_ENTER returns the existing entry if present or creates a new one.
@@ -368,7 +368,7 @@ replset_lookup(Relation rel, const char *cname)
  * to be what we need for logical decoding. As there really isn't another need
  * for this functionality so far...
  * Another reason restricting this to backends in decoding is that we
- * currently can't invalidate the czache correctly otherwise.
+ * currently can't invalidate the cache correctly otherwise.
  */
 void
 bdr_heap_compute_replication_settings(BDRRelation *r,
