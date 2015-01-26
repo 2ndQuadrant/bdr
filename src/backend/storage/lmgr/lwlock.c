@@ -36,6 +36,7 @@
 #include "miscadmin.h"
 #include "pg_trace.h"
 #include "replication/slot.h"
+#include "storage/barrier.h"
 #include "storage/ipc.h"
 #include "storage/predicate.h"
 #include "storage/proc.h"
@@ -1106,6 +1107,8 @@ LWLockUpdateVar(LWLock *l, uint64 *valptr, uint64 val)
 		proc = head;
 		head = proc->lwWaitLink;
 		proc->lwWaitLink = NULL;
+		/* check comment in LWLockRelease() about this barrier */
+		pg_write_barrier();
 		proc->lwWaiting = false;
 		PGSemaphoreUnlock(&proc->sem);
 	}
@@ -1226,6 +1229,17 @@ LWLockRelease(LWLock *l)
 		proc = head;
 		head = proc->lwWaitLink;
 		proc->lwWaitLink = NULL;
+		/*
+		 * Guarantee that lwWaiting being unset only becomes visible once the
+		 * unlink from the link has completed. Otherwise the target backend
+		 * could be woken up for other reason and enqueue for a new lock - if
+		 * that happens before the list unlink happens, the list would end up
+		 * being corrupted.
+		 *
+		 * The barrier pairs with the SpinLockAcquire() when enqueing for
+		 * another lock.
+		 */
+		pg_write_barrier();
 		proc->lwWaiting = false;
 		PGSemaphoreUnlock(&proc->sem);
 	}

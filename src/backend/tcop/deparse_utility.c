@@ -2254,11 +2254,11 @@ deparse_CreateStmt(Oid objectId, Node *parsetree)
 	if (node->ofTypename)
 		fmtstr = "CREATE %{persistence}s TABLE %{if_not_exists}s %{identity}D "
 			"OF %{of_type}T %{table_elements}s "
-			"%{on_commit}s WITH (%{with:, }s) %{tablespace}s";
+			"WITH (%{with:, }s) %{on_commit}s %{tablespace}s";
 	else
 		fmtstr = "CREATE %{persistence}s TABLE %{if_not_exists}s %{identity}D "
 			"(%{table_elements:, }s) %{inherits}s "
-			"%{on_commit}s WITH (%{with:, }s) %{tablespace}s";
+			"WITH (%{with:, }s) %{on_commit}s %{tablespace}s";
 
 	createStmt =
 		new_objtree_VA(fmtstr, 1,
@@ -2627,7 +2627,7 @@ deparse_CreateDomain(Oid objectId, Node *parsetree)
 		elog(ERROR, "cache lookup failed for domain with OID %u", objectId);
 	typForm = (Form_pg_type) GETSTRUCT(typTup);
 
-	createDomain = new_objtree_VA("CREATE DOMAIN %{identity}D AS %{type}D %{not_null}s %{constraints}s %{collation}s",
+	createDomain = new_objtree_VA("CREATE DOMAIN %{identity}D AS %{type}T %{not_null}s %{constraints}s %{collation}s",
 								  0);
 
 	append_object_object(createDomain,
@@ -2636,8 +2636,7 @@ deparse_CreateDomain(Oid objectId, Node *parsetree)
 													 objectId));
 	append_object_object(createDomain,
 						 "type",
-						 new_objtree_for_qualname_id(TypeRelationId,
-													 typForm->typbasetype));
+						 new_objtree_for_type(objectId, typForm->typtypmod));
 
 	if (typForm->typnotnull)
 		append_string_object(createDomain, "not_null", "NOT NULL");
@@ -3103,14 +3102,25 @@ stringify_objtype(ObjectType objtype)
 	{
 		case OBJECT_AGGREGATE:
 			return "AGGREGATE";
+		case OBJECT_ATTRIBUTE:
+			return "ATTRIBUTE";
+		case OBJECT_CAST:
+			return "CAST";
+/*		case OBJECT_COMPOSITE: */
 		case OBJECT_COLUMN:
 			return "COLUMN";
-		case OBJECT_DOMAIN:
-			return "DOMAIN";
+		case OBJECT_CONSTRAINT:
+			return "CONSTRAINT";
 		case OBJECT_COLLATION:
 			return "COLLATION";
 		case OBJECT_CONVERSION:
 			return "CONVERSION";
+		case OBJECT_DATABASE:
+			return "DATABASE";
+		case OBJECT_DOMAIN:
+			return "DOMAIN";
+		case OBJECT_EVENT_TRIGGER:
+			return "EVENT TRIGGER";
 		case OBJECT_EXTENSION:
 			return "EXTENSION";
 		case OBJECT_FDW:
@@ -3129,18 +3139,26 @@ stringify_objtype(ObjectType objtype)
 			return "LARGE OBJECT";
 		case OBJECT_MATVIEW:
 			return "MATERIALIZED VIEW";
-		case OBJECT_OPERATOR:
-			return "OPERATOR";
 		case OBJECT_OPCLASS:
 			return "OPERATOR CLASS";
+		case OBJECT_OPERATOR:
+			return "OPERATOR";
 		case OBJECT_OPFAMILY:
 			return "OPERATOR FAMILY";
+		case OBJECT_ROLE:
+			return "ROLE";
+		case OBJECT_RULE:
+			return "RULE";
 		case OBJECT_SCHEMA:
 			return "SCHEMA";
 		case OBJECT_SEQUENCE:
 			return "SEQUENCE";
 		case OBJECT_TABLE:
 			return "TABLE";
+		case OBJECT_TABLESPACE:
+			return "TABLESPACE";
+		case OBJECT_TRIGGER:
+			return "TRIGGER";
 		case OBJECT_TSCONFIGURATION:
 			return "TEXT SEARCH CONFIGURATION";
 		case OBJECT_TSDICTIONARY:
@@ -3151,6 +3169,8 @@ stringify_objtype(ObjectType objtype)
 			return "TEXT SEARCH TEMPLATE";
 		case OBJECT_TYPE:
 			return "TYPE";
+		case OBJECT_USER_MAPPING:
+			return "USER MAPPING";
 		case OBJECT_VIEW:
 			return "VIEW";
 
@@ -4009,6 +4029,8 @@ deparse_SecLabelStmt(Oid objectId, Oid objectSubId, Node *parsetree)
 	char	   *fmt;
 	char	   *command;
 
+	Assert(node->provider);
+
 	if (node->label)
 	{
 		fmt = psprintf("SECURITY LABEL FOR %%{provider}s ON %s %%{identity}s IS %%{label}L",
@@ -4047,7 +4069,7 @@ deparse_CreateConversion(Oid objectId, Node *parsetree)
 	ObjTree	   *ccStmt;
 	char	   *command;
 
-	conTup = SearchSysCache1(CONDEFAULT, ObjectIdGetDatum(objectId));
+	conTup = SearchSysCache1(CONOID, ObjectIdGetDatum(objectId));
 	if (!HeapTupleIsValid(conTup))
 		elog(ERROR, "cache lookup failed for conversion with OID %u", objectId);
 	conForm = (Form_pg_conversion) GETSTRUCT(conTup);

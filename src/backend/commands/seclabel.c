@@ -61,6 +61,11 @@ ExecSecLabelStmt(SecLabelStmt *stmt)
 					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 					 errmsg("must specify provider when multiple security label providers have been loaded")));
 		provider = (LabelProvider *) linitial(label_provider_list);
+		/*
+		 * Set the provider in the statement so that DDL deparse can use
+		 * provider explicitly in generated statement.
+		 */
+		stmt->provider = (char *) provider->provider_name;
 	}
 	else
 	{
