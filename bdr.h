@@ -431,6 +431,10 @@ extern void bdr_worker_init(char* dbname);
 PGDLLEXPORT extern void bdr_apply_main(Datum main_arg);
 PGDLLEXPORT extern void bdr_perdb_worker_main(Datum main_arg);
 
+/* Information functions */
+extern int bdr_parse_version(const char * bdr_version_str, int *o_major,
+							 int *o_minor, int *o_rev, int *o_subrev);
+
 /* manipulation of bdr catalogs */
 extern char bdr_nodes_get_local_status(uint64 sysid, TimeLineID tli, Oid dboid);
 extern void bdr_nodes_set_local_status(char status);

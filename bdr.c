@@ -1685,3 +1685,38 @@ bdr_get_local_nodeid(PG_FUNCTION_ARGS)
 
 	PG_RETURN_DATUM(HeapTupleGetDatum(returnTuple));
 }
+
+/*
+ * You should prefer to use bdr_version_num but if you can't
+ * then this will be handy.
+ *
+ * ERRORs if the major/minor/rev can't be parsed.
+ *
+ * If subrev is absent or cannot be parsed returns -1 for subrev.
+ *
+ * The return value is the bdr version in BDR_VERSION_NUM form.
+ */
+int
+bdr_parse_version(const char * bdr_version_str,
+		int *o_major, int *o_minor, int *o_rev, int *o_subrev)
+{
+	int nparsed, major, minor, rev, subrev;
+
+	nparsed = sscanf(bdr_version_str, "%d.%d.%d.%d", &major, &minor, &rev, &subrev);
+
+	if (nparsed < 3)
+		elog(ERROR, "Unable to parse '%s' as a BDR version number", bdr_version_str);
+	else if (nparsed < 4)
+		subrev = -1;
+
+	if (o_major != NULL)
+		*o_major = major;
+	if (o_minor != NULL)
+		*o_minor = minor;
+	if (o_rev != NULL)
+		*o_rev = rev;
+	if (o_subrev != NULL)
+		*o_subrev = subrev;
+
+	return major * 10000 + minor * 100 + rev;
+}
