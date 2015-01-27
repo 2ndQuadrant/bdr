@@ -47,4 +47,7 @@ typedef struct BdrFlushPosition
 extern volatile sig_atomic_t got_SIGTERM;
 extern volatile sig_atomic_t got_SIGHUP;
 
+extern void bdr_error_nodeids_must_differ(uint64 sysid, TimeLineID timeline,
+										  Oid dboid);
+
 #endif   /* BDR_INTERNAL_H */

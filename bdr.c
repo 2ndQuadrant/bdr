@@ -446,6 +446,19 @@ bdr_worker_init(char *dbname)
 }
 
 /*
+ * Re-usable common error message
+ */
+void
+bdr_error_nodeids_must_differ(uint64 sysid, TimeLineID timeline, Oid dboid)
+{
+	ereport(ERROR,
+			(errcode(ERRCODE_INVALID_NAME),
+			 errmsg("The system identifier, timeline ID and/or database oid must differ between the nodes"),
+			 errdetail("Both keys are (sysid, timelineid, dboid) = ("UINT64_FORMAT",%u,%u)",
+				 sysid, timeline, dboid)));
+}
+
+/*
  *----------------------
  * Connect to the BDR remote end, IDENTIFY_SYSTEM, and CREATE_SLOT if necessary.
  * Generates slot name, replication identifier.
@@ -476,7 +489,17 @@ bdr_establish_connection_and_slot(BdrConnectionConfig *cfg,
 	PGconn	   *streamConn;
 	StringInfoData conninfo_repl;
 
-	initStringInfo(&conninfo_repl);
+	/*
+	 * Make sure the local and remote nodes aren't the same node.
+	 */
+	if (GetSystemIdentifier() == *out_sysid
+		&& ThisTimeLineID == *out_timeline
+		&& MyDatabaseId == *out_dboid)
+	{
+		bdr_error_nodeids_must_differ(*out_sysid, *out_timeline, *out_dboid);
+	}
+
+	initStringInfo (&conninfo_repl);
 
 	appendStringInfo(&conninfo_repl,
 					 "%s replication=database fallback_application_name='"BDR_LOCALID_FORMAT": %s'",
