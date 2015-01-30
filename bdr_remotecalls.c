@@ -47,10 +47,12 @@
 PGDLLEXPORT Datum bdr_get_remote_nodeinfo(PG_FUNCTION_ARGS);
 PGDLLEXPORT Datum bdr_test_replication_connection(PG_FUNCTION_ARGS);
 PGDLLEXPORT Datum bdr_test_remote_connectback(PG_FUNCTION_ARGS);
+PGDLLEXPORT Datum bdr_copytable_test(PG_FUNCTION_ARGS);
 
 PG_FUNCTION_INFO_V1(bdr_get_remote_nodeinfo);
 PG_FUNCTION_INFO_V1(bdr_test_replication_connection);
 PG_FUNCTION_INFO_V1(bdr_test_remote_connectback);
+PG_FUNCTION_INFO_V1(bdr_copytable_test);
 
 /*
  * Make standard postgres connection, ERROR on failure.
@@ -114,6 +116,110 @@ free_remote_node_info(remote_node_info *ri)
 	pfree(ri->sysid_str);
 	pfree(ri->variant);
 	pfree(ri->version);
+}
+
+/*
+ * Given two connections, execute a COPY ... TO stdout on one connection
+ * and feed the results to a COPY ... FROM stdin on the other connection
+ * for the purpose of copying a set of rows between two nodes.
+ *
+ * It copies bdr_connections entries from the remote table to the
+ * local table of the same name, optionally with a filtering query.
+ *
+ * "from" here is from the client perspective, i.e. to copy from
+ * the server we "COPY ... TO stdout", and to copy to the server we
+ * "COPY ... FROM stdin".
+ *
+ * On failure an ERROR will be raised.
+ *
+ * Note that query parameters are not supported for COPY, so values must be
+ * carefully interpolated into the SQL if you're using a query, not just a
+ * table name. Be careful of SQL injection opportunities.
+ */
+void
+bdr_copytable(PGconn *copyfrom_conn, PGconn *copyto_conn,
+		const char * copyfrom_query, const char *copyto_query)
+{
+	PGresult *copyfrom_result;
+	PGresult *copyto_result;
+	int	copyinresult, copyoutresult;
+	char * copybuf;
+
+	copyfrom_result = PQexec(copyfrom_conn, copyfrom_query);
+	if (PQresultStatus(copyfrom_result) != PGRES_COPY_OUT)
+	{
+		ereport(ERROR,
+				(errmsg("execution of COPY ... TO stdout failed"),
+				 errdetail("Query '%s': %s", copyfrom_query,
+					 PQerrorMessage(copyfrom_conn))));
+	}
+
+	copyto_result = PQexec(copyto_conn, copyto_query);
+	if (PQresultStatus(copyto_result) != PGRES_COPY_IN)
+	{
+		ereport(ERROR,
+				(errmsg("execution of COPY ... FROM stdout failed"),
+				 errdetail("Query '%s': %s", copyto_query,
+					 PQerrorMessage(copyto_conn))));
+	}
+
+	while ((copyoutresult = PQgetCopyData(copyfrom_conn, &copybuf, false)) > 0)
+	{
+		if ((copyinresult = PQputCopyData(copyto_conn, copybuf, copyoutresult)) != 1)
+		{
+			ereport(ERROR,
+					(errmsg("writing to destination table failed"),
+					 errdetail("destination connection reported: %s",
+						 PQerrorMessage(copyto_conn))));
+		}
+		PQfreemem(copybuf);
+	}
+
+	if (copyoutresult != -1)
+	{
+		ereport(ERROR,
+				(errmsg("reading from origin table/query failed"),
+				 errdetail("source connection returned %d: %s",
+					copyoutresult, PQerrorMessage(copyfrom_conn))));
+	}
+
+	// Send local finish
+	if (PQputCopyEnd(copyto_conn, NULL) != 1)
+	{
+		ereport(ERROR,
+				(errmsg("sending copy-completion to destination connection failed"),
+				 errdetail("destination connection reported: %s",
+					 PQerrorMessage(copyto_conn))));
+	}
+}
+
+/*
+ * Test function for bdr_copytable.
+ */
+Datum
+bdr_copytable_test(PG_FUNCTION_ARGS)
+{
+	const char * fromdsn = PG_GETARG_CSTRING(0);
+	const char * todsn = PG_GETARG_CSTRING(1);
+	const char * fromquery = PG_GETARG_CSTRING(2);
+	const char * toquery = PG_GETARG_CSTRING(3);
+
+	PGconn *fromconn, *toconn;
+
+	fromconn = PQconnectdb(fromdsn);
+	if (PQstatus(fromconn) != CONNECTION_OK)
+		elog(ERROR, "from conn failed");
+
+	toconn = PQconnectdb(todsn);
+	if (PQstatus(toconn) != CONNECTION_OK)
+		elog(ERROR, "to conn failed");
+
+	bdr_copytable(fromconn, toconn, fromquery, toquery);
+
+	PQfinish(fromconn);
+	PQfinish(toconn);
+
+	PG_RETURN_VOID();
 }
 
 /*

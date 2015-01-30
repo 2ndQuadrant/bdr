@@ -445,6 +445,9 @@ extern Oid GetSysCacheOidError(int cacheId, Datum key1, Datum key2, Datum key3,
 #define GetSysCacheOidError2(cacheId, key1, key2) \
 	GetSysCacheOidError(cacheId, key1, key2, 0, 0)
 
+extern void
+bdr_copytable(PGconn *copyfrom_conn, PGconn *copyto_conn,
+		const char * copyfrom_query, const char *copyto_query);
 
 
 /* helpers shared by multiple worker types */
