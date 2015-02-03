@@ -1653,11 +1653,15 @@ bdr_get_local_nodeid(PG_FUNCTION_ARGS)
 	bool		isnull[3] = {false, false, false};
 	TupleDesc	tupleDesc;
 	HeapTuple	returnTuple;
+	char		sysid_str[33];
 
 	if (get_call_result_type(fcinfo, NULL, &tupleDesc) != TYPEFUNC_COMPOSITE)
 		elog(ERROR, "return type must be a row type");
 
-	values[0] = ObjectIdGetDatum(GetSystemIdentifier());
+	snprintf(sysid_str, sizeof(sysid_str), UINT64_FORMAT, GetSystemIdentifier());
+	sysid_str[sizeof(sysid_str)-1] = '\0';
+
+	values[0] = CStringGetTextDatum(sysid_str);
 	values[1] = ObjectIdGetDatum(ThisTimeLineID);
 	values[2] = ObjectIdGetDatum(MyDatabaseId);
 

@@ -12,10 +12,12 @@ DATA = bdr--0.8.0.sql \
 	bdr--0.8.0.2--0.8.0.3.sql \
 	bdr--0.8.0.3--0.8.0.4.sql \
 	bdr--0.8.0.4--0.8.0.5.sql \
-	bdr--0.8.0.5--0.8.0.6.sql
+	bdr--0.8.0.5--0.8.0.6.sql \
+	bdr--0.8.0.6--0.8.0.7.sql
 
 DATA_built = bdr--0.8.0.1.sql bdr--0.8.0.2.sql  bdr--0.8.0.3.sql \
-	bdr--0.8.0.4.sql bdr--0.8.0.5.sql bdr--0.8.0.6.sql
+	bdr--0.8.0.4.sql bdr--0.8.0.5.sql bdr--0.8.0.6.sql \
+	bdr--0.8.0.7.sql
 
 DOCS = bdr.conf.sample README.bdr
 SCRIPTS = scripts/bdr_initial_load bdr_init_copy bdr_resetxlog bdr_dump
@@ -119,6 +121,12 @@ bdr--0.8.0.6.sql: bdr--0.8.0.sql bdr--0.8.0--0.8.0.1.sql \
 	bdr--0.8.0.1--0.8.0.2.sql bdr--0.8.0.2--0.8.0.3.sql \
 	bdr--0.8.0.3--0.8.0.4.sql bdr--0.8.0.4--0.8.0.5.sql \
 	bdr--0.8.0.5--0.8.0.6.sql
+	cat $^ > $@
+
+bdr--0.8.0.7.sql: bdr--0.8.0.sql bdr--0.8.0--0.8.0.1.sql \
+	bdr--0.8.0.1--0.8.0.2.sql bdr--0.8.0.2--0.8.0.3.sql \
+	bdr--0.8.0.3--0.8.0.4.sql bdr--0.8.0.4--0.8.0.5.sql \
+	bdr--0.8.0.5--0.8.0.6.sql bdr--0.8.0.6--0.8.0.7.sql
 	cat $^ > $@
 
 bdr_resetxlog: pg_resetxlog.o

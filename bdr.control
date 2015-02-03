@@ -1,6 +1,6 @@
 # bdr extension
-comment = 'bdr support functions'
-default_version = '0.8.0.6'
+comment = 'Bi-directional replication for PostgreSQL'
+default_version = '0.8.0.7'
 module_pathname = '$libdir/bdr'
 relocatable = false
 requires = btree_gist
