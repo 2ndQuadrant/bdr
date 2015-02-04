@@ -1,0 +1,21 @@
+# -*-makefile-*-
+# Makefile.global.in
+# @configure_input@
+
+# Can only be built using pgxs
+USE_PGXS=1
+
+bdr_abs_srcdir := @srcdir@
+PG_CONFIG :=@PG_CONFIG@
+PGXS := $(shell $(PG_CONFIG) --pgxs)
+
+VPATH = $(bdr_abs_srcdir)/$(bdr_subdir)
+USE_VPATH=$(VPATH)
+GIT_WORK_TREE=${bdr_abs_srcdir}
+GIT_DIR=${bdr_abs_srcdir}/.git
+export GIT_DIR
+export GIT_WORK_TREE
+
+include $(PGXS)
+
+-include ${bdr_abs_srcdir}/Makefile.custom

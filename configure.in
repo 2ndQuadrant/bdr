@@ -58,6 +58,7 @@ fi;
 
 
 AC_CONFIG_FILES([Makefile])
+AC_CONFIG_FILES([Makefile.global])
 AC_CONFIG_FILES([run_tests], [chmod +x run_tests])
 AC_CONFIG_HEADERS([bdr_config_generated.h])
 AH_TOP([/* Do not include directly, use bdr_config.h instead. */])
