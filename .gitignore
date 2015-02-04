@@ -48,4 +48,4 @@ lib*.pc
 /run_tests
 /config.log
 /config.status
-/bdr--0.8.0.?.sql
+/extsql/bdr--0.8.0.?.sql
