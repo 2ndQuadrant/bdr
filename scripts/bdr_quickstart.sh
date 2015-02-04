@@ -6,7 +6,7 @@
 set -e -u
 
 BDR_PG_REF="bdr-pg/REL9_4_STABLE"
-BDR_PLUGIN_REF="bdr-plugin/next"
+BDR_PLUGIN_REF="bdr-plugin/stable"
 
 # If you have an existing local BDR checkout you can put it here to speed the
 # clone or set it in the environment:
