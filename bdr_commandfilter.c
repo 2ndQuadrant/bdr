@@ -634,7 +634,9 @@ bdr_commandfilter(Node *parsetree,
 	}
 
 #ifdef BUILDING_UDR
-	if (!in_bdr_replicate_ddl_command && bdr_is_bdr_activated_db())
+	if (!in_bdr_replicate_ddl_command &&
+		bdr_is_bdr_activated_db() &&
+		!statement_affects_only_temp(parsetree))
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 				 errmsg("DDL commands are not allowed when UDR is active unless bdr.permit_unsafe_ddl_commands is true")));
