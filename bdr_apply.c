@@ -986,7 +986,6 @@ process_remote_delete(StringInfo s)
 		HeapTuple	remote_tuple,
 					user_tuple = NULL;
 		BdrApplyConflict *apply_conflict;
-		BdrConflictResolution resolution;
 
 		bdr_count_delete_conflict();
 
