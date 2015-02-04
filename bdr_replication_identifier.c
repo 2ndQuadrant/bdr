@@ -397,7 +397,6 @@ void
 SetupCachedReplicationIdentifier(RepNodeId node)
 {
 	Relation		rel;
-	Snapshot		snap;
 	SysScanDesc		scan;
 	ScanKeyData		key;
 	HeapTuple		tuple;
@@ -423,7 +422,7 @@ SetupCachedReplicationIdentifier(RepNodeId node)
 				ObjectIdGetDatum(node));
 
 	scan = systable_beginscan(rel, ReplicationPosLocalIdentIndex,
-							  true, snap, 1, &key);
+							  true, NULL, 1, &key);
 	tuple = systable_getnext(scan);
 
 	if (HeapTupleIsValid(tuple))
