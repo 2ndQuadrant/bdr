@@ -71,13 +71,12 @@ DUMPOBJS = pg_dump/pg_dump.o pg_dump/common.o pg_dump/pg_dump_sort.o \
 
 include Makefile.global
 
-# Ensure Makefiles are up2date
-Makefile: Makefile.in Makefile.global.in config.status
+# Ensure Makefiles are up2date (should we move this to Makefile.global?)
+Makefile: Makefile.in Makefile.global.in doc/Makefile.in config.status
 	./config.status $@
 
 DATE=$(shell date "+%Y-%m-%d")
 GITHASH=$(shell if [ -e .distgitrev ]; then cat .distgitrev; else GIT_DIR=${bdr_abs_srcdir}/.git git rev-parse --short HEAD; fi)
-BDR_VERSION=$(shell awk '/^\#define BDR_VERSION / { print $3; }' ${bdr_abs_srcdir}/bdr_version.h.in | cut -d '"' -f 2)
 
 bdr_version.h: bdr_version.h.in
 	sed '0,/BDR_VERSION_DATE/s,\(BDR_VERSION_DATE\).*,\1 "$(DATE)",;0,/BDR_VERSION_GITHASH/s,\(BDR_VERSION_GITHASH\).*,\1 "$(GITHASH)",' $< >$@
@@ -129,7 +128,12 @@ pg_dump_dir:
 bdr_dump: pg_dump_dir $(DUMPOBJS)
 	$(CC) $(CFLAGS) $(DUMPOBJS) $(libpq_pgport) $(LDFLAGS) $(LDFLAGS_EX) $(LIBS) -o $@$(X)
 
+doc:
+	$(MAKE) -C doc all
+
 all: all-lib bdr_init_copy bdr_resetxlog bdr_dump
+
+world: all doc
 
 clean: additional-clean
 
@@ -142,6 +146,9 @@ additional-clean:
 	rm -rf tmp_check
 	rm -rf scripts/bdr_initial_load
 	rm -f bdr_dump$(X) $(DUMPOBJS)
+	rm -f extsql/bdr--0.[89].0.[0-9].sql
+	rm -f bdr_resetxlog$(X) pg_resetxlog.o
+	$(MAKE) -C doc clean
 
 additional-maintainer-clean: clean
 	rm -f configure
@@ -150,6 +157,7 @@ additional-maintainer-clean: clean
 	rm -f run_tests
 	rm -f bdr--0.8.0.1.sql
 	@rm -rf autom4te.cache/
+	$(MAKE) -C doc maintainer-clean
 
 # Disabled because these tests require "wal_level=logical", which
 # typical installcheck users do not have (e.g. buildfarm clients).
@@ -243,4 +251,4 @@ PHONY: submake-regress
 
 # phony target...
 
-.PHONY: all check regresscheck isolationcheck
+.PHONY: all check regresscheck isolationcheck doc

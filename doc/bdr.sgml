@@ -1,0 +1,101 @@
+<!-- doc/src/sgml/postgres.sgml -->
+
+<!DOCTYPE book PUBLIC "-//OASIS//DTD DocBook V4.2//EN" [
+
+	  <!ENTITY % version SYSTEM "version.sgml">
+	  %version;
+
+	  <!ENTITY % filelist SYSTEM "filelist.sgml">
+	  %filelist;
+
+]>
+
+<book id="bdr">
+ <title>BDR Documentation</title>
+
+ <bookinfo>
+  <corpauthor>The PostgreSQL Global Development Group</corpauthor>
+  <productname>BDR</productname>
+  <productnumber>&bdrversion;</productnumber>
+  &legal;
+ </bookinfo>
+
+ <preface id="preface">
+  <title>Preface</title>
+
+  <para>
+   This book is the official documentation of
+   <productname>BDR</productname> &bdrversion; for use with
+   &pgmajorversion;. It has been written by the
+   <productname>PostgreSQL</productname>
+   and <productname>BDR</productname> developers and other volunteers
+   in parallel to the development of the
+   <productname>BDR</productname> software.  It describes all
+   the functionality that the current version of
+   <productname>BDR</productname> officially supports.
+  </para>
+ </preface>
+ <part id="quickstart">
+  <title>Quick Start</title>
+
+  <partintro>
+   <para>
+    This chapter gives a quick introduction into setting up
+    a <productname>BDR</productname> installation.
+   </para>
+   <para>
+    These instructions are not suitable for a production install, as
+    they neglect security considerations, proper system administration
+    procedure, etc. If you're trying to set up a production <productname>BDR</productname>
+    install, read the rest of the <productname>BDR</productname> manual.
+   </para>
+  </partintro>
+
+  <chapter id="quickstart-start">
+   <title>Getting Started</title>
+
+   <sect1 id="quickstart-overviev">
+    <title>Overview</title>
+    <para>
+To set up BDR you'll need to: ...
+    </para>
+   </sect1>
+
+   <sect1 id="quickstart-source">
+    <title>Installing from source</title>
+    <para>
+      Compiling PostgreSQL with BDR ...
+    </para>
+   </sect1>
+  </chapter>
+ </part>
+
+ <part id="manual">
+  <title>Main Manual</title>
+  <partintro>
+   <para>
+    This chapter documents <productname>BDR</productname>
+   </para>
+  </partintro>
+
+  <chapter id="overview">
+   <title>How does BDR work</title>
+   <para>sup</para>
+  </chapter>
+
+  <chapter id="settings">
+   <title>Settings for BDR</title>
+
+   <indexterm>
+    <primary>configuration</primary>
+    <secondary>of the server</secondary>
+   </indexterm>
+
+   <para>List of Settings</para>
+  </chapter>
+
+ </part>
+
+ <![%include-index;[&bookindex;]]>
+ <![%include-xslt-index;[<index id="bookindex"></index>]]>
+</book>
