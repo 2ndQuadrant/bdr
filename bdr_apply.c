@@ -2243,6 +2243,9 @@ bdr_apply_work(PGconn* streamConn)
 										   ALLOCSET_DEFAULT_INITSIZE,
 										   ALLOCSET_DEFAULT_MAXSIZE);
 
+	/* mark as idle, before starting to loop */
+	pgstat_report_activity(STATE_IDLE, NULL);
+
 	while (!got_SIGTERM)
 	{
 		/* int		 ret; */
