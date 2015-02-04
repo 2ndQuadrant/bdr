@@ -1,5 +1,40 @@
+###########
+# These are instructions for users who are comfortable compiling from source
+# and who know the command line. They're intended for development and testing.
+# New users should use the packages, or see the more detailed source install
+# instructions in the main documentation.
+#
+# This package contains both BDR for patched PostgreSQL 9.4 and the reduced
+# functionality UDR variant for unmodified PostgreSQL 9.4. UDR is currently
+# experimental. These instructions are for compiling full BDR, including the
+# patched PostgreSQL. For UDR you may instead put the bin directory of an
+# unmodified PostgreSQL 9.4 on the PATH and then invoke ./configure with the
+# --enable-udr flag.
+############
+
+# == get dependencies ==
+#
+# You'll need some extra packages before you can compile PostgreSQL and BDR.
+# See the main PostgreSQL documentation for a full list. If you just want to
+# try it out quickly for testing this should be sufficient:
+#
+# For Debian/Ubuntu:
+#
+#    apt-get install build-essential
+#    apt-get build-dep postgresql
+#
+# Or for Fedora/RHEL:
+#
+#    yum install yum-utils "Development Tools"
+#    yum-builddep postgresql
+#
+
+
 # == get source ==
-# go to directory where you want to place postgres' and bdr's source code
+#
+# go to directory where you want to place postgres' and bdr's source code, creating it
+# if needed.
+$ mkdir -p ~/src/
 $ cd ~/src/
 # checkout the sourcecode of postgres 9.4 with bdr patches added
 $ git clone -b bdr-pg/REL9_4_STABLE git://git.postgresql.org/git/2ndquadrant_bdr.git postgresql-bdr
@@ -8,24 +43,23 @@ $ git clone -b bdr-plugin/next git://git.postgresql.org/git/2ndquadrant_bdr.git 
 
 # ==  build postgres ==
 $ cd postgresql-bdr
-$ ./configure --enable-depend --enable-debug --enable-cassert --prefix ~/bin/
-$ make -j8 -s install-world
+$ ./configure --enable-depend --enable-debug --enable-cassert CFLAGS="-fno-omit-frame-pointer" --prefix ~/bin/
+$ make -j4 -s install-world
 
 # == build bdr plugin ==
 $ cd ../bdr-plugin
-$ export PATH=~/bin/bin:$PATH
 $ ./autogen.sh
-$ ./configure
-$ make -j8 -s install
+$ PATH=~/bin/bin:$PATH ./configure --enable-bdr
+$ make -j4 -s install
 
 
-# == update checkout ==
+# == to update later ==
 $ cd ../postgresql-bdr
 $ git pull
-$ make -j8 -s install-world
+$ make -j4 -s install-world
 
 $ cd ../bdr-plugin
 $ git pull
 $ ./autogen.sh
-$ ./configure
+$ PATH=~/bin/bin:$PATH ./configure --enable-bdr
 $ make -s install

@@ -1,2 +1,8 @@
 See https://wiki.postgresql.org/wiki/BDR_User_Guide for documentation on the
 installation and use of BDR.
+
+This source tree contains both BDR for patched PostgreSQL 9.4 and the
+reduced-functionality UDR variant for unpatched PostgreSQL 9.4. UDR is
+experimental at this time.
+
+See INSTALL.src for details.
