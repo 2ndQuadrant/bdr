@@ -405,7 +405,7 @@ bdr_launch_apply_workers(Oid dboid)
 		apply->remote_dboid = target_dboid;
 		apply->replay_stop_lsn = InvalidXLogRecPtr;
 		apply->forward_changesets = false;
-
+		apply->perdb = bdr_worker_slot;
 		LWLockRelease(BdrWorkerCtl->lock);
 
 		/*
@@ -483,33 +483,14 @@ bdr_perdb_worker_main(Datum main_arg)
 	BdrPerdbWorker		*perdb;
 	StringInfoData		si;
 	bool				wait;
-	uint32				worker_arg;
-	uint16				worker_generation;
-	uint16				perdb_worker_idx;
 	BDRNodeInfo		   *local_node;
 
 	initStringInfo(&si);
 
-	Assert(IsBackgroundWorker);
+	bdr_worker_init(DatumGetInt32(main_arg));
 
-	worker_arg = DatumGetInt32(main_arg);
-
-	worker_generation = (uint16)(worker_arg >> 16);
-	perdb_worker_idx = (uint16)(worker_arg & 0x0000FFFF);
-
-	if (worker_generation != BdrWorkerCtl->worker_generation)
-	{
-		elog(DEBUG1, "perdb worker from generation %d exiting after finding shmem generation is %d",
-			 worker_generation, BdrWorkerCtl->worker_generation);
-		proc_exit(0);
-	}
-
-	bdr_worker_slot = &BdrWorkerCtl->slots[perdb_worker_idx];
 	Assert(bdr_worker_slot->worker_type == BDR_WORKER_PERDB);
 	perdb = &bdr_worker_slot->data.perdb;
-	bdr_worker_type = BDR_WORKER_PERDB;
-
-	bdr_worker_init(NameStr(perdb->dbname));
 
 	perdb->nnodes = 0;
 

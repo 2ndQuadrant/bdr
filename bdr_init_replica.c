@@ -1111,7 +1111,7 @@ bdr_catchup_to_lsn_cleanup(int code, Datum offset)
 	 * There's no need to unregister the worker as it was registered with
 	 * BGW_NEVER_RESTART.
 	 */
-	bdr_worker_shmem_release(&BdrWorkerCtl->slots[worker_shmem_idx], NULL);
+	bdr_worker_shmem_free(&BdrWorkerCtl->slots[worker_shmem_idx], NULL);
 }
 
 /*
@@ -1138,6 +1138,7 @@ bdr_catchup_to_lsn(remote_node_info *ri, XLogRecPtr target_lsn)
 		 ri->sysid, ri->timeline, ri->dboid, EMPTY_REPLICATION_NAME,
 		 (uint32)(target_lsn>>32), (uint32)target_lsn);
 
+	Assert(bdr_worker_type == BDR_WORKER_PERDB);
 	/* Create the shmem entry for the catchup worker */
 	LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
 	worker = bdr_worker_shmem_alloc(BDR_WORKER_APPLY, &worker_shmem_idx);
@@ -1146,6 +1147,7 @@ bdr_catchup_to_lsn(remote_node_info *ri, XLogRecPtr target_lsn)
 	catchup_worker->remote_sysid = ri->sysid;
 	catchup_worker->remote_timeline = ri->timeline;
 	catchup_worker->remote_dboid = ri->dboid;
+	catchup_worker->perdb = bdr_worker_slot;
 	LWLockRelease(BdrWorkerCtl->lock);
 
 	/*

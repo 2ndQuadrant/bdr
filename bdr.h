@@ -156,7 +156,10 @@ typedef struct BDRTupleData
 typedef struct BdrApplyWorker
 {
 	/* oid of the database this worker is applying changes to */
-	Oid dboid;
+	Oid			dboid;
+
+	/* assigned perdb worker slot */
+	struct BdrWorker *perdb;
 
 	/*
 	 * Identification for the remote db we're connecting to; used to
@@ -185,18 +188,18 @@ typedef struct BdrApplyWorker
 typedef struct BdrPerdbWorker
 {
 	/* local database name to connect to */
-	NameData dbname;
+	NameData		dbname;
 
 	/* number of outgoing connections from this database */
-	Size nnodes;
+	Size			nnodes;
 
-	size_t seq_slot;
+	size_t			seq_slot;
 
 	/* The perdb worker's latch from the PROC array, for use from other backends */
-	Latch	   *proclatch;
+	Latch			*proclatch;
 
 	/* Oid of the database the worker is attached to - populated after start */
-	Oid	database_oid;
+	Oid				database_oid;
 } BdrPerdbWorker;
 
 /*
@@ -231,7 +234,13 @@ typedef enum {
 typedef struct BdrWorker
 {
 	/* Type of worker. Also used to determine if this shm slot is free. */
-	BdrWorkerType worker_type;
+	BdrWorkerType	worker_type;
+
+	/* pid worker if running, or 0 */
+	pid_t			worker_pid;
+
+	/* proc entry of worker if running, or NULL */
+	PGPROC		   *worker_proc;
 
 	union data {
 		BdrApplyWorker apply;
@@ -436,7 +445,10 @@ extern void bdr_init_replica(BDRNodeInfo *local_node);
 extern void bdr_maintain_schema(bool update_extensions);
 extern BdrWorker* bdr_worker_shmem_alloc(BdrWorkerType worker_type,
 										 uint32 *ctl_idx);
-extern void bdr_worker_shmem_release(BdrWorker* worker, BackgroundWorkerHandle *handle);
+extern void bdr_worker_shmem_free(BdrWorker* worker, BackgroundWorkerHandle *handle);
+
+extern BdrWorker* bdr_worker_shmem_acquire(uint32 *ctl_idx);
+
 extern bool bdr_is_bdr_activated_db(Oid dboid);
 
 /* forbid commands we do not support currently (or never will) */
@@ -456,7 +468,7 @@ PGDLLEXPORT extern void bdr_apply_main(Datum main_arg);
 PGDLLEXPORT extern void bdr_perdb_worker_main(Datum main_arg);
 PGDLLEXPORT extern void bdr_supervisor_worker_main(Datum main_arg);
 
-extern void bdr_worker_init(char* dbname);
+extern void bdr_worker_init(uint32 worker_arg);
 extern void bdr_supervisor_register(void);
 
 extern void bdr_sighup(SIGNAL_ARGS);

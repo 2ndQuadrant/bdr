@@ -2400,51 +2400,15 @@ bdr_apply_main(Datum main_arg)
 	RepNodeId	replication_identifier;
 	XLogRecPtr	start_from;
 	NameData	slot_name;
-	NameData	dbname;
-	BdrWorker  *perdb;
-	uint32		worker_arg;
-	uint16		apply_worker_idx,
-				worker_generation;
-	int			perdb_worker_idx;
 
 	Assert(IsBackgroundWorker);
 
-	worker_arg = DatumGetInt32(main_arg);
+	bdr_worker_init(DatumGetInt32(main_arg));
 
-	worker_generation = (uint16)(worker_arg >> 16);
-	apply_worker_idx = (uint16)(worker_arg & 0x0000FFFF);
-
-	if (worker_generation != BdrWorkerCtl->worker_generation)
-	{
-		elog(DEBUG1, "apply worker from generation %d exiting after finding shmem generation is %d",
-			 worker_generation, BdrWorkerCtl->worker_generation);
-		proc_exit(0);
-	}
-
-	initStringInfo(&query);
-
-	bdr_worker_slot = &BdrWorkerCtl->slots[ apply_worker_idx ];
 	Assert(bdr_worker_slot->worker_type == BDR_WORKER_APPLY);
 	bdr_apply_worker = &bdr_worker_slot->data.apply;
-	bdr_worker_type = BDR_WORKER_APPLY;
 
-	/*
-	 * Get the database name to connect to from the perdb worker for this db
-	 *
-	 * It'd be preferable to just connect by oid, but the bgworkers interface
-	 * doesn't permit us to do that, and we can't look up the syscache to find
-	 * the name by oid until we're connected.
-	 */
-	LWLockAcquire(BdrWorkerCtl->lock, LW_SHARED);
-	perdb_worker_idx = find_perdb_worker_slot(bdr_apply_worker->dboid, NULL);
-	Assert(perdb_worker_idx >= 0);
-	perdb = &BdrWorkerCtl->slots[perdb_worker_idx];
-	Assert(perdb->worker_type == BDR_WORKER_PERDB);
-	namecpy(&dbname, &perdb->data.perdb.dbname);
-	LWLockRelease(BdrWorkerCtl->lock);
-
-	/* Then unblock signals, connect to the db, etc */
-	bdr_worker_init(NameStr(dbname));
+	initStringInfo(&query);
 
 	Assert(MyDatabaseId == bdr_apply_worker->dboid);
 
@@ -2461,9 +2425,6 @@ bdr_apply_main(Datum main_arg)
 
 	CurrentResourceOwner = ResourceOwnerCreate(NULL, "bdr apply top-level resource owner");
 	bdr_saved_resowner = CurrentResourceOwner;
-
-	elog(DEBUG1, "%s initialized on %s",
-		 MyBgworkerEntry->bgw_name, NameStr(dbname));
 
 	/* Set our local application_name for our SPI connections */
 	resetStringInfo(&query);

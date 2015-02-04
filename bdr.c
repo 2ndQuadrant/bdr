@@ -413,6 +413,20 @@ bdr_create_slot(PGconn *streamConn, Name slot_name,
 	PQclear(res);
 }
 
+static void
+bdr_worker_exit(int code, Datum arg)
+{
+	if (bdr_worker_slot == NULL)
+		return;
+
+	LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
+	bdr_worker_slot->worker_pid = 0;
+	bdr_worker_slot->worker_proc = NULL;
+	LWLockRelease(BdrWorkerCtl->lock);
+
+	bdr_worker_type = BDR_WORKER_EMPTY_SLOT;
+}
+
 /*
  * Perform setup work common to all bdr worker types, such as:
  *
@@ -422,9 +436,48 @@ bdr_create_slot(PGconn *streamConn, Name slot_name,
  *
  */
 void
-bdr_worker_init(char *dbname)
+bdr_worker_init(uint32 worker_arg)
 {
+	uint16	worker_generation;
+	uint16	worker_idx;
+	char   *dbname;
+
+	worker_generation = (uint16)(worker_arg >> 16);
+	worker_idx = (uint16)(worker_arg & 0x0000FFFF);
+
+	if (worker_generation != BdrWorkerCtl->worker_generation)
+	{
+		elog(DEBUG1, "apply worker from generation %d exiting after finding shmem generation is %d",
+			 worker_generation, BdrWorkerCtl->worker_generation);
+		proc_exit(0);
+	}
+
 	Assert(IsBackgroundWorker);
+
+	/* first acquire worker slot */
+	bdr_worker_slot = &BdrWorkerCtl->slots[worker_idx];
+	bdr_worker_type = bdr_worker_slot->worker_type;
+
+	/* register release function */
+	before_shmem_exit(bdr_worker_exit, 0);
+
+	/* figure out database to connect to */
+	if (bdr_worker_type == BDR_WORKER_PERDB)
+		dbname = NameStr(bdr_worker_slot->data.perdb.dbname);
+	else if (bdr_worker_type == BDR_WORKER_APPLY)
+	{
+		BdrApplyWorker	*apply;
+		BdrPerdbWorker	*perdb;
+
+		apply = &bdr_worker_slot->data.apply;
+		Assert(apply->perdb != NULL);
+		perdb = &apply->perdb->data.perdb;
+
+		dbname = NameStr(perdb->dbname);
+	}
+	else
+		elog(FATAL, "don't know how to connect to this type of work: %u",
+			 bdr_worker_type);
 
 	/* Establish signal handlers before unblocking signals. */
 	pqsignal(SIGHUP, bdr_sighup);
@@ -436,7 +489,12 @@ bdr_worker_init(char *dbname)
 	/* Connect to our database */
 	BackgroundWorkerInitializeConnection(dbname, NULL);
 
-	/* make sure BDR extension exists */
+	LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
+	bdr_worker_slot->worker_pid = MyProcPid;
+	bdr_worker_slot->worker_proc = MyProc;
+	LWLockRelease(BdrWorkerCtl->lock);
+
+	/* make sure BDR extension is up2date */
 	bdr_executor_always_allow_writes(true);
 	StartTransactionCommand();
 	bdr_maintain_schema(true);
@@ -724,7 +782,7 @@ bdr_worker_shmem_alloc(BdrWorkerType worker_type, uint32 *ctl_idx)
  * is not still running before the slot is released.
  */
 void
-bdr_worker_shmem_release(BdrWorker* worker, BackgroundWorkerHandle *handle)
+bdr_worker_shmem_free(BdrWorker* worker, BackgroundWorkerHandle *handle)
 {
 	LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
 
