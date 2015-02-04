@@ -396,15 +396,59 @@ AdvanceReplicationIdentifier(RepNodeId node,
 void
 SetupCachedReplicationIdentifier(RepNodeId node)
 {
+	Relation		rel;
+	Snapshot		snap;
+	SysScanDesc		scan;
+	ScanKeyData		key;
+	HeapTuple		tuple;
+	bool			start_transaction = !IsTransactionState();
+	XLogRecPtr		remote_lsn = InvalidXLogRecPtr,
+					local_lsn = InvalidXLogRecPtr;
+
 	if (local_replication_state != NULL)
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("cannot setup replication origin when one is already setup")));
 
+	EnsureReplicationIdentifierRelationId();
+
+	if (start_transaction)
+		StartTransactionCommand();
+
+	rel = heap_open(ReplicationIdentifierPosRelationId, RowExclusiveLock);
+
+	ScanKeyInit(&key,
+				Anum_pg_replication_pos_riident,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(node));
+
+	scan = systable_beginscan(rel, ReplicationPosLocalIdentIndex,
+							  true, snap, 1, &key);
+	tuple = systable_getnext(scan);
+
+	if (HeapTupleIsValid(tuple))
+	{
+		Datum		values[Natts_pg_replication_identifier_pos];
+		bool		nulls[Natts_pg_replication_identifier_pos];
+
+		heap_deform_tuple(tuple, RelationGetDescr(rel),
+						  values, nulls);
+		if (!nulls[Anum_pg_replication_pos_riremote_lsn - 1])
+			remote_lsn = DatumGetLSN(values[Anum_pg_replication_pos_riremote_lsn - 1]);
+		if (!nulls[Anum_pg_replication_pos_rilocal_lsn - 1])
+			local_lsn = DatumGetLSN(values[Anum_pg_replication_pos_rilocal_lsn - 1]);
+	}
+
+	systable_endscan(scan);
+	heap_close(rel, RowExclusiveLock);
+
+	if (start_transaction)
+		CommitTransactionCommand();
+
 	local_replication_state = (ReplicationState *) palloc(sizeof(ReplicationState));
 	local_replication_state->local_identifier = node;
-	local_replication_state->remote_lsn = InvalidXLogRecPtr;
-	local_replication_state->local_lsn = InvalidXLogRecPtr;
+	local_replication_state->remote_lsn = remote_lsn;
+	local_replication_state->local_lsn = local_lsn;
 }
 
 void
