@@ -110,12 +110,16 @@ static void bdr_worker_shmem_create_workers(void);
 Datum bdr_apply_pause(PG_FUNCTION_ARGS);
 Datum bdr_apply_resume(PG_FUNCTION_ARGS);
 Datum bdr_version(PG_FUNCTION_ARGS);
+Datum bdr_version_num(PG_FUNCTION_ARGS);
+Datum bdr_min_remote_version_num(PG_FUNCTION_ARGS);
 Datum bdr_variant(PG_FUNCTION_ARGS);
 Datum bdr_get_local_nodeid(PG_FUNCTION_ARGS);
 
 PG_FUNCTION_INFO_V1(bdr_apply_pause);
 PG_FUNCTION_INFO_V1(bdr_apply_resume);
 PG_FUNCTION_INFO_V1(bdr_version);
+PG_FUNCTION_INFO_V1(bdr_version_num);
+PG_FUNCTION_INFO_V1(bdr_min_remote_version_num);
 PG_FUNCTION_INFO_V1(bdr_variant);
 PG_FUNCTION_INFO_V1(bdr_get_local_nodeid);
 
@@ -1637,6 +1641,18 @@ Datum
 bdr_version(PG_FUNCTION_ARGS)
 {
 	PG_RETURN_TEXT_P(cstring_to_text(BDR_VERSION_STR));
+}
+
+Datum
+bdr_version_num(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_INT32(BDR_VERSION_NUM);
+}
+
+Datum
+bdr_min_remote_version_num(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_INT32(BDR_MIN_REMOTE_VERSION_NUM);
 }
 
 Datum
