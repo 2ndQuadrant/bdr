@@ -1026,7 +1026,15 @@ setup_connection(Archive *AH, const char *dumpencoding,
 	ExecuteSqlStatement(AH, "BEGIN");
 	if (AH->remoteVersion >= 90100)
 	{
-		if (serializable_deferrable)
+		/*
+		 * To support the combination of serializable_deferrable with the jobs
+		 * option we use REPEATABLE READ for the worker connections that are
+		 * passed a snapshot.  As long as the snapshot is acquired in a
+		 * SERIALIZABLE, READ ONLY, DEFERRABLE transaction, its use within a
+		 * REPEATABLE READ transaction provides the appropriate integrity
+		 * guarantees.  This is a kluge, but safe for back-patching.
+		 */
+		if (serializable_deferrable && AH->sync_snapshot_id == NULL)
 			ExecuteSqlStatement(AH,
 								"SET TRANSACTION ISOLATION LEVEL "
 								"SERIALIZABLE, READ ONLY, DEFERRABLE");
@@ -2478,24 +2486,28 @@ dumpDatabase(Archive *fout)
 					dbCatId, 0, dbDumpId);
 	}
 
-	PQclear(res);
-
 	/* Dump shared security label. */
 	if (!no_security_labels && fout->remoteVersion >= 90200)
 	{
-		PQExpBuffer seclabelQry = createPQExpBuffer();
+		PGresult   *shres;
+		PQExpBuffer seclabelQry;
+
+		seclabelQry = createPQExpBuffer();
 
 		buildShSecLabelQuery(conn, "pg_database", dbCatId.oid, seclabelQry);
-		res = ExecuteSqlQuery(fout, seclabelQry->data, PGRES_TUPLES_OK);
+		shres = ExecuteSqlQuery(fout, seclabelQry->data, PGRES_TUPLES_OK);
 		resetPQExpBuffer(seclabelQry);
-		emitShSecLabels(conn, res, seclabelQry, "DATABASE", datname);
+		emitShSecLabels(conn, shres, seclabelQry, "DATABASE", datname);
 		if (strlen(seclabelQry->data))
 			ArchiveEntry(fout, dbCatId, createDumpId(), datname, NULL, NULL,
 						 dba, false, "SECURITY LABEL", SECTION_NONE,
 						 seclabelQry->data, "", NULL,
 						 &dbDumpId, 1, NULL, NULL);
 		destroyPQExpBuffer(seclabelQry);
+		PQclear(shres);
 	}
+
+	PQclear(res);
 
 	destroyPQExpBuffer(dbQry);
 	destroyPQExpBuffer(delQry);
