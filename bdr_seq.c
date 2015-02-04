@@ -1017,7 +1017,10 @@ bdr_sequencer_fill_sequences(void)
 /* check sequence.c */
 #define SEQ_LOG_VALS	32
 
+PGDLLEXPORT Datum bdr_sequence_alloc(PG_FUNCTION_ARGS);
+
 PG_FUNCTION_INFO_V1(bdr_sequence_alloc);
+
 Datum
 bdr_sequence_alloc(PG_FUNCTION_ARGS)
 {
@@ -1186,7 +1189,10 @@ bdr_sequence_alloc(PG_FUNCTION_ARGS)
 	PG_RETURN_VOID();
 }
 
+PGDLLEXPORT Datum bdr_sequence_setval(PG_FUNCTION_ARGS);
+
 PG_FUNCTION_INFO_V1(bdr_sequence_setval);
+
 Datum
 bdr_sequence_setval(PG_FUNCTION_ARGS)
 {
@@ -1227,7 +1233,10 @@ bdr_sequence_setval(PG_FUNCTION_ARGS)
 	PG_RETURN_VOID();
 }
 
+PGDLLEXPORT Datum bdr_sequence_options(PG_FUNCTION_ARGS);
+
 PG_FUNCTION_INFO_V1(bdr_sequence_options);
+
 Datum
 bdr_sequence_options(PG_FUNCTION_ARGS)
 {

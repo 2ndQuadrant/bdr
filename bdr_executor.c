@@ -62,10 +62,14 @@ static bool bdr_always_allow_writes = false;
 bool in_bdr_replicate_ddl_command = false;
 
 #ifdef BUILDING_BDR
+PGDLLEXPORT Datum bdr_queue_ddl_commands(PG_FUNCTION_ARGS);
 PG_FUNCTION_INFO_V1(bdr_queue_ddl_commands);
+PGDLLEXPORT Datum bdr_queue_dropped_objects(PG_FUNCTION_ARGS);
 PG_FUNCTION_INFO_V1(bdr_queue_dropped_objects);
 #endif
+PGDLLEXPORT Datum bdr_replicate_ddl_command(PG_FUNCTION_ARGS);
 PG_FUNCTION_INFO_V1(bdr_replicate_ddl_command);
+PGDLLEXPORT Datum bdr_(PG_FUNCTION_ARGS);
 PG_FUNCTION_INFO_V1(bdr_truncate_trigger_add);
 
 EState *

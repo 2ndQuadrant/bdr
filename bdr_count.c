@@ -101,7 +101,7 @@ static void bdr_count_unserialize(void);
 
 #define BDR_COUNT_STAT_COLS 12
 
-extern Datum pg_stat_get_bdr(PG_FUNCTION_ARGS);
+PGDLLEXPORT Datum pg_stat_get_bdr(PG_FUNCTION_ARGS);
 
 PG_FUNCTION_INFO_V1(pg_stat_get_bdr);
 

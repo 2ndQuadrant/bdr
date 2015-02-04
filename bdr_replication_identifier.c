@@ -98,6 +98,10 @@ typedef struct ReplicationState
  */
 static ReplicationState *local_replication_state = NULL;
 
+PGDLLEXPORT Datum bdr_replication_identifier_is_replaying(PG_FUNCTION_ARGS);
+PGDLLEXPORT Datum bdr_replication_identifier_advance(PG_FUNCTION_ARGS);
+PGDLLEXPORT Datum bdr_replication_identifier_drop(PG_FUNCTION_ARGS);
+
 PG_FUNCTION_INFO_V1(bdr_replication_identifier_is_replaying);
 PG_FUNCTION_INFO_V1(bdr_replication_identifier_advance);
 PG_FUNCTION_INFO_V1(bdr_replication_identifier_drop);

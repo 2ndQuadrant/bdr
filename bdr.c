@@ -107,13 +107,13 @@ void		_PG_init(void);
 static void bdr_worker_shmem_startup(void);
 static void bdr_worker_shmem_create_workers(void);
 
-Datum bdr_apply_pause(PG_FUNCTION_ARGS);
-Datum bdr_apply_resume(PG_FUNCTION_ARGS);
-Datum bdr_version(PG_FUNCTION_ARGS);
-Datum bdr_version_num(PG_FUNCTION_ARGS);
-Datum bdr_min_remote_version_num(PG_FUNCTION_ARGS);
-Datum bdr_variant(PG_FUNCTION_ARGS);
-Datum bdr_get_local_nodeid(PG_FUNCTION_ARGS);
+PGDLLEXPORT Datum bdr_apply_pause(PG_FUNCTION_ARGS);
+PGDLLEXPORT Datum bdr_apply_resume(PG_FUNCTION_ARGS);
+PGDLLEXPORT Datum bdr_version(PG_FUNCTION_ARGS);
+PGDLLEXPORT Datum bdr_version_num(PG_FUNCTION_ARGS);
+PGDLLEXPORT Datum bdr_min_remote_version_num(PG_FUNCTION_ARGS);
+PGDLLEXPORT Datum bdr_variant(PG_FUNCTION_ARGS);
+PGDLLEXPORT Datum bdr_get_local_nodeid(PG_FUNCTION_ARGS);
 
 PG_FUNCTION_INFO_V1(bdr_apply_pause);
 PG_FUNCTION_INFO_V1(bdr_apply_resume);
