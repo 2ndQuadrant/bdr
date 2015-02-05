@@ -59,6 +59,7 @@ OBJS = \
 	bdr_output.o \
 	bdr_relcache.o \
 	bdr_remotecalls.o \
+	bdr_shmem.o \
 	bdr_supervisor.o \
 	bdr_upgrade.o
 

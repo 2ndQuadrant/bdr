@@ -2401,11 +2401,8 @@ bdr_apply_main(Datum main_arg)
 	XLogRecPtr	start_from;
 	NameData	slot_name;
 
-	Assert(IsBackgroundWorker);
+	bdr_bgworker_init(DatumGetInt32(main_arg), BDR_WORKER_APPLY);
 
-	bdr_worker_init(DatumGetInt32(main_arg));
-
-	Assert(bdr_worker_slot->worker_type == BDR_WORKER_APPLY);
 	bdr_apply_worker = &bdr_worker_slot->data.apply;
 
 	initStringInfo(&query);

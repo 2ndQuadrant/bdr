@@ -483,13 +483,11 @@ bdr_perdb_worker_main(Datum main_arg)
 	BdrPerdbWorker		*perdb;
 	StringInfoData		si;
 	bool				wait;
-	BDRNodeInfo		   *local_node;
 
 	initStringInfo(&si);
 
-	bdr_worker_init(DatumGetInt32(main_arg));
+	bdr_bgworker_init(DatumGetInt32(main_arg), BDR_WORKER_PERDB);
 
-	Assert(bdr_worker_slot->worker_type == BDR_WORKER_PERDB);
 	perdb = &bdr_worker_slot->data.perdb;
 
 	perdb->nnodes = 0;
@@ -522,6 +520,7 @@ bdr_perdb_worker_main(Datum main_arg)
 	{
 		int				spi_ret;
 		MemoryContext	saved_ctx;
+		BDRNodeInfo	   *local_node;
 
 		/*
 		 * Check the local bdr.bdr_nodes table to see if there's an entry for
@@ -547,13 +546,15 @@ bdr_perdb_worker_main(Datum main_arg)
 
 		SPI_finish();
 		CommitTransactionCommand();
-	}
 
-	/*
-	 * Do we need to init the local DB from a remote node?
-	 */
-	if (local_node->status != 'r')
-		bdr_init_replica(local_node);
+		/*
+		 * Do we need to init the local DB from a remote node?
+		 */
+		if (local_node->status != 'r')
+			bdr_init_replica(local_node);
+
+		bdr_bdr_node_free(local_node);
+	}
 
 	elog(DEBUG1, "Starting bdr apply workers for "BDR_LOCALID_FORMAT" (%s)",
 		 BDR_LOCALID_FORMAT_ARGS, NameStr(perdb->dbname));

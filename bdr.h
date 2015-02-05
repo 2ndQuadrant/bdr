@@ -441,13 +441,17 @@ extern bool bdr_get_bigendian(void);
 /* initialize a new bdr member */
 extern void bdr_init_replica(BDRNodeInfo *local_node);
 
-/* shared memory management */
 extern void bdr_maintain_schema(bool update_extensions);
+
+/* shared memory management */
+extern void bdr_shmem_init(void);
+
 extern BdrWorker* bdr_worker_shmem_alloc(BdrWorkerType worker_type,
 										 uint32 *ctl_idx);
 extern void bdr_worker_shmem_free(BdrWorker* worker, BackgroundWorkerHandle *handle);
-
-extern BdrWorker* bdr_worker_shmem_acquire(uint32 *ctl_idx);
+extern void bdr_worker_shmem_acquire(BdrWorkerType worker_type,
+										   uint32 worker_idx);
+extern void bdr_worker_shmem_release(void);
 
 extern bool bdr_is_bdr_activated_db(Oid dboid);
 
@@ -468,7 +472,7 @@ PGDLLEXPORT extern void bdr_apply_main(Datum main_arg);
 PGDLLEXPORT extern void bdr_perdb_worker_main(Datum main_arg);
 PGDLLEXPORT extern void bdr_supervisor_worker_main(Datum main_arg);
 
-extern void bdr_worker_init(uint32 worker_arg);
+extern void bdr_bgworker_init(uint32 worker_arg, BdrWorkerType worker_type);
 extern void bdr_supervisor_register(void);
 
 extern void bdr_sighup(SIGNAL_ARGS);
