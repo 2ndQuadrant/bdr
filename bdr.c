@@ -416,7 +416,7 @@ bdr_bgworker_init(uint32 worker_arg, BdrWorkerType worker_type)
 	worker_generation = (uint16)(worker_arg >> 16);
 	worker_idx = (uint16)(worker_arg & 0x0000FFFF);
 
-	bdr_worker_shmem_acquire(worker_type, worker_idx);
+	bdr_worker_shmem_acquire(worker_type, worker_idx, false);
 
 	if (worker_generation != BdrWorkerCtl->worker_generation)
 	{

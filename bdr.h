@@ -203,6 +203,15 @@ typedef struct BdrPerdbWorker
 } BdrPerdbWorker;
 
 /*
+ * Walsender worker. These are only allocated while a output plugin is active.
+ */
+typedef struct BdrWalsenderWorker
+{
+	struct WalSnd *walsender;
+	struct ReplicationSlot *slot;
+} BdrWalsenderWorker;
+
+/*
  * Type of BDR worker in a BdrWorker struct
  *
  * Note that the supervisor worker doesn't appear here, it has its own
@@ -218,10 +227,7 @@ typedef enum {
 	BDR_WORKER_APPLY,
 	/* This is data for a per-database worker BdrPerdbWorker */
 	BDR_WORKER_PERDB,
-	/*
-	 * Data for a walsender output plugin. Never currently allocated but still
-	 * defined for use in the bdr_worker_type global.
-	 */
+	/* This is data for a walsenders currently streaming data out */
 	BDR_WORKER_WALSENDER
 } BdrWorkerType;
 
@@ -245,6 +251,7 @@ typedef struct BdrWorker
 	union data {
 		BdrApplyWorker apply;
 		BdrPerdbWorker perdb;
+		BdrWalsenderWorker walsnd;
 	} data;
 
 } BdrWorker;
@@ -450,7 +457,8 @@ extern BdrWorker* bdr_worker_shmem_alloc(BdrWorkerType worker_type,
 										 uint32 *ctl_idx);
 extern void bdr_worker_shmem_free(BdrWorker* worker, BackgroundWorkerHandle *handle);
 extern void bdr_worker_shmem_acquire(BdrWorkerType worker_type,
-										   uint32 worker_idx);
+									 uint32 worker_idx,
+									 bool free_at_rel);
 extern void bdr_worker_shmem_release(void);
 
 extern bool bdr_is_bdr_activated_db(Oid dboid);

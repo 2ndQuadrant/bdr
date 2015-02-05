@@ -40,6 +40,8 @@
 
 #include "replication/logical.h"
 #include "replication/output_plugin.h"
+#include "replication/slot.h"
+#include "replication/walsender_private.h"
 
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
@@ -90,6 +92,7 @@ typedef struct
 /* These must be available to pg_dlsym() */
 static void pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt,
 							  bool is_init);
+static void pg_decode_shutdown(LogicalDecodingContext * ctx);
 static void pg_decode_begin_txn(LogicalDecodingContext *ctx,
 					ReorderBufferTXN *txn);
 static void pg_decode_commit_txn(LogicalDecodingContext *ctx,
@@ -122,7 +125,7 @@ _PG_output_plugin_init(OutputPluginCallbacks *cb)
 #ifdef BUILDING_BDR
 	cb->message_cb = pg_decode_message;
 #endif
-	cb->shutdown_cb = NULL;
+	cb->shutdown_cb = pg_decode_shutdown;
 }
 
 /* Ensure a bdr_parse_... arg is non-null */
@@ -343,8 +346,6 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 	BdrOutputData *data;
 	Oid schema_oid;
 	bool tx_started = false;
-
-	bdr_worker_type = BDR_WORKER_WALSENDER;
 
 	data = palloc0(sizeof(BdrOutputData));
 	data->context = AllocSetContextCreate(TopMemoryContext,
@@ -621,6 +622,27 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 
 	if (tx_started)
 		CommitTransactionCommand();
+
+	/*
+	 * Everything looks ok. Acquire a shmem slot to represent us running.
+	 */
+	{
+		uint32 worker_idx;
+		LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
+		bdr_worker_shmem_alloc(BDR_WORKER_WALSENDER, &worker_idx);
+		bdr_worker_shmem_acquire(BDR_WORKER_WALSENDER, worker_idx, true);
+		/* can be null if sql interface is used */
+		bdr_worker_slot->data.walsnd.walsender = MyWalSnd;
+		bdr_worker_slot->data.walsnd.slot = MyReplicationSlot;
+		LWLockRelease(BdrWorkerCtl->lock);
+	}
+}
+
+static void
+pg_decode_shutdown(LogicalDecodingContext * ctx)
+{
+	/* release and free slot */
+	bdr_worker_shmem_release();
 }
 
 /*

@@ -34,6 +34,8 @@ BdrWorkerType bdr_worker_type = BDR_WORKER_EMPTY_SLOT;
 /* This worker's block within BdrWorkerCtl - only valid in bdr workers */
 BdrWorker  *bdr_worker_slot = NULL;
 
+static bool worker_slot_free_at_rel;
+
 /* Worker generation number; see bdr_worker_shmem_startup comments */
 static uint16 bdr_worker_generation;
 
@@ -281,7 +283,7 @@ bdr_worker_shmem_free(BdrWorker* worker, BackgroundWorkerHandle *handle)
  * bdr_worker_shmem_alloc().
  */
 void
-bdr_worker_shmem_acquire(BdrWorkerType worker_type, uint32 worker_idx)
+bdr_worker_shmem_acquire(BdrWorkerType worker_type, uint32 worker_idx, bool free_at_rel)
 {
 	BdrWorker *worker;
 
@@ -300,6 +302,8 @@ bdr_worker_shmem_acquire(BdrWorkerType worker_type, uint32 worker_idx)
 	bdr_worker_slot = worker;
 	bdr_worker_type = worker->worker_type;
 
+	worker_slot_free_at_rel = free_at_rel;
+
 	/* register release function */
 	before_shmem_exit(bdr_worker_exit, 0);
 }
@@ -310,10 +314,17 @@ bdr_worker_shmem_acquire(BdrWorkerType worker_type, uint32 worker_idx)
 void
 bdr_worker_shmem_release(void)
 {
+	Assert(bdr_worker_type != BDR_WORKER_EMPTY_SLOT);
+
 	LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
 	bdr_worker_slot->worker_pid = 0;
 	bdr_worker_slot->worker_proc = NULL;
 	LWLockRelease(BdrWorkerCtl->lock);
 
 	bdr_worker_type = BDR_WORKER_EMPTY_SLOT;
+
+	if (worker_slot_free_at_rel)
+		bdr_worker_shmem_free(bdr_worker_slot, NULL);
+
+	bdr_worker_slot = NULL;
 }
