@@ -71,9 +71,6 @@ Oid	BdrVotesRelid;		/* bdr_votes */
 static BdrSequencerControl *BdrSequencerCtl = NULL;
 
 /* how many nodes have we built shmem for */
-static size_t bdr_seq_nnodes = 0;
-
-/* how many nodes have we built shmem for */
 static size_t bdr_seq_nsequencers = 0;
 
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
@@ -442,12 +439,10 @@ bdr_sequencer_shmem_startup(void)
 }
 
 void
-bdr_sequencer_shmem_init(int nnodes, int sequencers)
+bdr_sequencer_shmem_init(int sequencers)
 {
 	Assert(process_shared_preload_libraries_in_progress);
-	Assert(nnodes >= sequencers);
 
-	bdr_seq_nnodes = nnodes;
 	bdr_seq_nsequencers = sequencers;
 
 	RequestAddinShmemSpace(bdr_sequencer_shmem_size());

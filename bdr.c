@@ -712,29 +712,6 @@ _PG_init(void)
 							 NULL, NULL, NULL);
 #endif
 
-	/*
-	 * Limit on worker count - number of slots to allocate in fixed shared
-	 * memory array.
-	 */
-	DefineCustomIntVariable("bdr.max_workers",
-							"max number of bdr connections + distinct databases.",
-							NULL,
-							&bdr_max_workers,
-							20, 2, 100,
-							PGC_POSTMASTER,
-							0,
-							NULL, NULL, NULL);
-
-	DefineCustomIntVariable("bdr.max_databases",
-							"max number of distinct databases on which BDR may be active",
-							NULL,
-							&bdr_max_databases,
-							-1, -1, 50,
-							PGC_POSTMASTER,
-							0,
-							NULL, NULL, NULL);
-
-
 	DefineCustomBoolVariable("bdr.permit_unsafe_ddl_commands",
 							 "Allow commands that might cause data or " \
 							 "replication problems under BDR to run",
@@ -798,31 +775,6 @@ _PG_init(void)
 	bdr_label_init();
 
 	bdr_supervisor_register();
-
-	/*
-	 * Sanity check max_worker_processes to make sure it's at least big enough
-	 * to hold all our BDR workers. There's no way to reserve them or guarantee
-	 * anyone else won't claim some, but this'll spot the most obvious
-	 * misconfiguration.
-	 */
-	if (max_worker_processes < bdr_max_workers)
-	{
-		ereport(WARNING,
-				(errcode(ERRCODE_CONFIGURATION_LIMIT_EXCEEDED),
-				 errmsg("bdr_max_workers is greater than max_worker_processes, may fail to start workers"),
-				 errhint("Set max_worker_processes to at least %d", bdr_max_workers)));
-	}
-
-	/*
-	 * If bdr.max_databases is not explicitly specified, assume the worst case
-	 * of many DBs with one connection per DB.
-	 */
-	if (bdr_max_databases == -1)
-	{
-		bdr_max_databases = bdr_max_workers / 2;
-		elog(DEBUG1, "Autoconfiguring bdr.max_databases to %d (bdr.max_workers/2)",
-			 bdr_max_databases);
-	}
 
 	/*
 	 * Reserve shared memory segment to store bgworker connection information

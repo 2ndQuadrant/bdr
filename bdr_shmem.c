@@ -17,6 +17,8 @@
 
 #include "miscadmin.h"
 
+#include "replication/walsender.h"
+
 #include "postmaster/bgworker.h"
 
 #include "storage/ipc.h"
@@ -44,6 +46,16 @@ static void bdr_worker_shmem_startup(void);
 void
 bdr_shmem_init(void)
 {
+	/* can never have more worker slots than processes to register them */
+	bdr_max_workers = max_worker_processes + max_wal_senders;
+
+	/*
+	 * For BDR there can be at most ceil(max_worker_processes / 2) databases,
+	 * because for every connection we need a perdb worker and a apply
+	 * process.
+	 */
+	bdr_max_databases = (max_worker_processes / 2) + 1;
+
 	/* Initialize segment to keep track of processes involved in bdr. */
 	bdr_worker_shmem_init();
 
@@ -51,7 +63,7 @@ bdr_shmem_init(void)
 	bdr_count_shmem_init(bdr_max_workers);
 
 #ifdef BUILDING_BDR
-	bdr_sequencer_shmem_init(bdr_max_workers, bdr_max_databases);
+	bdr_sequencer_shmem_init(bdr_max_databases);
 #endif
 	bdr_locks_shmem_init();
 }
