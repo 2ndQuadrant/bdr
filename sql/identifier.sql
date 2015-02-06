@@ -22,3 +22,17 @@ FROM bdr.bdr_get_remote_nodeinfo('dbname=postgres') r,
 SELECT
     r.dboid = (SELECT oid FROM pg_database WHERE datname = current_database())
 FROM bdr.bdr_get_remote_nodeinfo('dbname='||current_database()) r;
+
+-- Test probing for replication connection
+SELECT
+	r.sysid = l.sysid,
+	r.timeline = l.timeline,
+	r.dboid = (SELECT oid FROM pg_database WHERE datname = 'postgres')
+FROM bdr.bdr_test_replication_connection('dbname=postgres') r,
+     bdr.bdr_get_local_nodeid() l;
+
+-- Probing replication connection for the local dsn will work too
+-- even though the identifier is the same.
+SELECT
+	r.dboid = (SELECT oid FROM pg_database WHERE datname = current_database())
+FROM bdr.bdr_test_replication_connection('dbname='||current_database()) r;

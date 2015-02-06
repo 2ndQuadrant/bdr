@@ -45,8 +45,10 @@
 #include "utils/syscache.h"
 
 PGDLLEXPORT Datum bdr_get_remote_nodeinfo(PG_FUNCTION_ARGS);
+PGDLLEXPORT Datum bdr_test_replication_connection(PG_FUNCTION_ARGS);
 
 PG_FUNCTION_INFO_V1(bdr_get_remote_nodeinfo);
+PG_FUNCTION_INFO_V1(bdr_test_replication_connection);
 
 /*
  * Make standard postgres connection, ERROR on failure.
@@ -283,6 +285,53 @@ bdr_get_remote_nodeinfo(PG_FUNCTION_ARGS)
 	}
 	PG_END_ENSURE_ERROR_CLEANUP(bdr_cleanup_conn_close,
 							PointerGetDatum(&conn));
+
+	PQfinish(conn);
+
+	PG_RETURN_DATUM(HeapTupleGetDatum(returnTuple));
+}
+
+/*
+ * Test a given dsn as a replication connection, appending the replication
+ * parameter.
+ *
+ * If non-null, the node identity information arguments will be checked
+ * against the identity reported by the connection.
+ *
+ * This can be used safely against the local_dsn, as it does not enforce
+ * that the local node ID differ from the identity on the other end.
+ */
+Datum
+bdr_test_replication_connection(PG_FUNCTION_ARGS)
+{
+	const char	*conninfo = text_to_cstring(PG_GETARG_TEXT_P(0));
+	TupleDesc	tupleDesc;
+	HeapTuple	returnTuple;
+	PGconn		*conn;
+	NameData	appname;
+	uint64		remote_sysid;
+	TimeLineID	remote_tlid;
+	Oid			remote_dboid;
+	Datum		values[3];
+	bool		isnull[3] = {false, false, false};
+	char		sysid_str[33];
+
+	if (get_call_result_type(fcinfo, NULL, &tupleDesc) != TYPEFUNC_COMPOSITE)
+		elog(ERROR, "return type must be a row type");
+
+	strncpy(NameStr(appname), "BDR test connection", NAMEDATALEN);
+
+	conn = bdr_connect(conninfo, &appname, &remote_sysid, &remote_tlid,
+					   &remote_dboid);
+
+	snprintf(sysid_str, sizeof(sysid_str), UINT64_FORMAT, remote_sysid);
+	sysid_str[sizeof(sysid_str)-1] = '\0';
+
+	values[0] = CStringGetTextDatum(sysid_str);
+	values[1] = ObjectIdGetDatum(remote_tlid);
+	values[2] = ObjectIdGetDatum(remote_dboid);
+
+	returnTuple = heap_form_tuple(tupleDesc, values, isnull);
 
 	PQfinish(conn);
 

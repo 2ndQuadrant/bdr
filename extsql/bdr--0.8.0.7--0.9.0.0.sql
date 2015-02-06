@@ -13,6 +13,14 @@ REVOKE ALL ON FUNCTION bdr_get_remote_nodeinfo(text) FROM public;
 
 COMMENT ON FUNCTION bdr_get_remote_nodeinfo(text) IS 'Get node identity and BDR info from a remote server by dsn';
 
+CREATE FUNCTION bdr_test_replication_connection(dsn text, sysid OUT text, timeline OUT oid, dboid OUT oid)
+RETURNS record LANGUAGE c AS 'MODULE_PATHNAME';
+
+REVOKE ALL ON FUNCTION bdr_test_replication_connection(text) FROM public;
+
+COMMENT ON FUNCTION bdr_test_replication_connection(text)
+IS 'Make a replication-mode connection to the specified DSN and get its node identity.';
+
 RESET bdr.permit_unsafe_ddl_commands;
 RESET bdr.skip_ddl_replication;
 RESET search_path;
