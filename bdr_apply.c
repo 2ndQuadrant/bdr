@@ -2453,7 +2453,7 @@ bdr_apply_main(Datum main_arg)
 						 (uint32)bdr_apply_worker->replay_stop_lsn);
 
 	/* Make the replication connection to the remote end */
-	streamConn = bdr_establish_connection_and_slot(bdr_apply_config,
+	streamConn = bdr_establish_connection_and_slot(bdr_apply_config->dsn,
 		query.data, &slot_name, &origin_sysid, &origin_timeline,
 		&origin_dboid, &replication_identifier, NULL);
 

@@ -411,7 +411,6 @@ static void
 bdr_drop_slot_and_replication_identifier(BdrConnectionConfig *cfg)
 {
 
-	char		remote_ident[256];
 	PGconn	   *streamConn;
 	RepNodeId   replication_identifier;
 	NameData	slot_name;
@@ -421,26 +420,30 @@ bdr_drop_slot_and_replication_identifier(BdrConnectionConfig *cfg)
 	PGresult   *res;
 	StringInfoData query;
 	char	   *sqlstate;
+	NameData	appname;
+	char	   *remote_ident;
 
-	initStringInfo(&query);
 
 	elog(DEBUG1, "bdr %s: Dropping slot and local ident from connection %s",
 		 cfg->dbname, cfg->name);
 
-	appendStringInfo(&query,
-					 "%s replication=database fallback_application_name='"BDR_LOCALID_FORMAT": %s: drop slot'",
-					  cfg->dsn, BDR_LOCALID_FORMAT_ARGS, cfg->name);
+	snprintf(NameStr(appname), NAMEDATALEN, "slot drop");
+	(NameStr(appname))[NAMEDATALEN-1] = '\0';
 
 	/* Establish BDR conn and IDENTIFY_SYSTEM */
 	streamConn = bdr_connect(
-		query.data,
-		cfg->dsn,
-		remote_ident, sizeof(remote_ident),
-		&slot_name, &sysid, &timeline, &dboid
+		cfg->dsn, &appname,
+		&sysid, &timeline, &dboid
 		);
+
+	bdr_build_ident_and_slotname(sysid, timeline, dboid,
+			&remote_ident, &slot_name);
+
 
 	StartTransactionCommand();
 	replication_identifier = GetReplicationIdentifier(remote_ident, true);
+
+	pfree(remote_ident);
 
 	if (OidIsValid(replication_identifier))
 	{
@@ -465,7 +468,7 @@ bdr_drop_slot_and_replication_identifier(BdrConnectionConfig *cfg)
 	 * whether it exists or not silently over the replication protocol,
 	 * so we just try it and cope if it's missing.
 	 */
-	resetStringInfo(&query);
+	initStringInfo(&query);
 	appendStringInfo(&query, "DROP_REPLICATION_SLOT %s", NameStr(slot_name));
 	res = PQexec(streamConn, query.data);
 	if (PQresultStatus(res) == PGRES_COMMAND_OK)
@@ -992,7 +995,7 @@ bdr_init_replica(Name dbname)
 				 * are all discarded; they're not needed here, and will be obtained
 				 * again by the apply workers when they're launched after init.
 				 */
-				conn = bdr_establish_connection_and_slot(cfg, "create slot",
+				conn = bdr_establish_connection_and_slot(cfg->dsn, "slot",
 					&slot_name, &sysid, &timeline, &dboid, &replication_identifier,
 					&snapshot);
 

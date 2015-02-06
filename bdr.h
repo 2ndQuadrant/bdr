@@ -448,17 +448,12 @@ extern Oid GetSysCacheOidError(int cacheId, Datum key1, Datum key2, Datum key3,
 
 
 /* helpers shared by multiple worker types */
-extern struct pg_conn* bdr_connect(char *conninfo_repl,
-								   char *conninfo_db,
-								   char* remote_ident,
-								   size_t remote_ident_length,
-								   NameData* slot_name,
-								   uint64* remote_sysid_i,
-								   TimeLineID *remote_tlid_i,
+extern struct pg_conn* bdr_connect(const char *conninfo, Name appname,
+								   uint64* remote_sysid_i, TimeLineID *remote_tlid_i,
 								   Oid *out_dboid_i);
 
 extern struct pg_conn *
-bdr_establish_connection_and_slot(BdrConnectionConfig *cfg,
+bdr_establish_connection_and_slot(const char *dsn,
 								  const char *application_name_suffix,
 								  Name out_slot_name,
 								  uint64 *out_sysid,
@@ -466,6 +461,10 @@ bdr_establish_connection_and_slot(BdrConnectionConfig *cfg,
 								  Oid *out_dboid,
 								  RepNodeId *out_replication_identifier,
 								  char **out_snapshot);
+extern void
+bdr_build_ident_and_slotname(uint64 remote_sysid, TimeLineID remote_tlid,
+		Oid remote_dboid, char **out_replication_identifier,
+		Name out_slot_name);
 
 extern PGconn* bdr_connect_nonrepl(const char *connstring,
 		const char *appnamesuffix);
