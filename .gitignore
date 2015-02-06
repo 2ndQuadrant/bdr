@@ -48,4 +48,6 @@ lib*.pc
 /run_tests
 /config.log
 /config.status
-/extsql/bdr--0.8.0.?.sql
+/extsql/bdr--0.[89].0.?.sql
+/Makefile.global
+/doc/Makefile
