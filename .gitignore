@@ -49,3 +49,5 @@ lib*.pc
 /config.log
 /config.status
 /extsql/bdr--0.8.0.?.sql
+/Makefile.global
+/doc/Makefile
