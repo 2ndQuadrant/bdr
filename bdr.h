@@ -518,6 +518,9 @@ extern void free_remote_node_info(remote_node_info *ri);
 
 extern void bdr_ensure_ext_installed(PGconn *pgconn);
 
+extern void bdr_test_remote_connectback_internal(PGconn *conn,
+		struct remote_node_info *ri, const char *my_dsn);
+
 /*
  * Global to identify the type of BDR worker the current process is. Primarily
  * useful for assertions and debugging.
