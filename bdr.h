@@ -467,6 +467,12 @@ bdr_establish_connection_and_slot(BdrConnectionConfig *cfg,
 								  RepNodeId *out_replication_identifier,
 								  char **out_snapshot);
 
+extern PGconn* bdr_connect_nonrepl(const char *connstring,
+		const char *appnamesuffix);
+
+/* Helper for PG_ENSURE_ERROR_CLEANUP to close a PGconn */
+extern void bdr_cleanup_conn_close(int code, Datum offset);
+
 /* use instead of heap_open()/heap_close() */
 extern BDRRelation *bdr_heap_open(Oid reloid, LOCKMODE lockmode);
 extern void bdr_heap_close(BDRRelation * rel, LOCKMODE lockmode);
@@ -491,6 +497,27 @@ extern HeapTuple bdr_conflict_handlers_resolve(BDRRelation * rel,
 
 /* replication set stuff */
 void bdr_validate_replication_set_name(const char *name, bool allow_implicit);
+
+/* Helpers to probe remote nodes */
+
+typedef struct remote_node_info
+{
+	uint64 sysid;
+	char *sysid_str;
+	TimeLineID timeline;
+	Oid dboid;
+	char *variant;
+	char *version;
+	int version_num;
+	int min_remote_version_num;
+	bool is_superuser;
+} remote_node_info;
+
+extern void bdr_get_remote_nodeinfo_internal(PGconn *conn, remote_node_info *ri);
+
+extern void free_remote_node_info(remote_node_info *ri);
+
+extern void bdr_ensure_ext_installed(PGconn *pgconn);
 
 /*
  * Global to identify the type of BDR worker the current process is. Primarily

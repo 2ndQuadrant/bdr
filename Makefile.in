@@ -54,7 +54,8 @@ OBJS = \
 	bdr_label.o \
 	bdr_locks.o \
 	bdr_output.o \
-	bdr_relcache.o
+	bdr_relcache.o \
+	bdr_remotecalls.o
 
 ifeq "@BUILDING_BDR@" "1"
 OBJS += \

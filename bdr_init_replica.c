@@ -25,6 +25,7 @@
 #include "bdr.h"
 
 #include "fmgr.h"
+#include "funcapi.h"
 #include "libpq-fe.h"
 #include "miscadmin.h"
 
@@ -332,20 +333,18 @@ bdr_get_remote_lsn(PGconn *conn)
 	return lsn;
 }
 
-/*
- * Make sure the bdr extension is installed on the other end. If it's a known
- * extension but not present in the current DB error out and tell the user to
- * activate BDR then try again.
- */
 static void
-bdr_ensure_ext_installed(PGconn *pgconn, Name bdr_conn_name)
+bdr_get_remote_ext_version(PGconn *pgconn, char **default_version,
+						   char **installed_version)
 {
 	PGresult *res;
+
 	const char *q_bdr_installed =
 		"SELECT default_version, installed_version "
 		"FROM pg_catalog.pg_available_extensions WHERE name = 'bdr';";
 
 	res = PQexec(pgconn, q_bdr_installed);
+
 	if (PQresultStatus(res) != PGRES_TUPLES_OK)
 	{
 		elog(ERROR, "Unable to get remote bdr extension version; query %s failed with %s: %s\n",
@@ -354,38 +353,57 @@ bdr_ensure_ext_installed(PGconn *pgconn, Name bdr_conn_name)
 
 	if (PQntuples(res) == 1)
 	{
-		char *default_version PG_USED_FOR_ASSERTS_ONLY;
 		/*
 		 * bdr ext is known to Pg, check install state.
-		 *
-		 * Right now we don't check the installed version or try to install/upgrade.
 		 */
-		default_version = PQgetvalue(res, 0, 0);
-		Assert(default_version != NULL);
-		if (PQgetisnull(res, 0, 1))
-		{
-			ereport(ERROR,
-					(errcode(ERRCODE_CONFIG_FILE_ERROR),
-					 errmsg("Remote database for BDR connection %s does not have the bdr extension active",
-					 NameStr(*bdr_conn_name)),
-					 errdetail("no entry with name 'bdr' in pg_extensions"),
-					 errhint("add 'bdr' to shared_preload_libraries in postgresql.conf "
-							 "on the target server and restart it.")));
-		}
+		*default_version = pstrdup(PQgetvalue(res, 0, 0));
+		*installed_version = pstrdup(PQgetvalue(res, 0, 0));
 	}
 	else if (PQntuples(res) == 0)
 	{
 		/* bdr ext is not known to Pg at all */
-		ereport(ERROR,
-				(errcode(ERRCODE_CONFIG_FILE_ERROR),
-				 errmsg("Remote PostgreSQL install for bdr connection %s does not have bdr extension installed",
-				 NameStr(*bdr_conn_name)),
-				 errdetail("no entry with name 'bdr' in pg_available_extensions; did you install BDR?")));
 	}
 	else
 	{
 		Assert(false); /* Should not get >1 tuples */
 	}
+
+	PQclear(res);
+}
+
+/*
+ * Make sure the bdr extension is installed on the other end. If it's a known
+ * extension but not present in the current DB error out and tell the user to
+ * activate BDR then try again.
+ */
+void
+bdr_ensure_ext_installed(PGconn *pgconn)
+{
+	char *default_version = NULL;
+	char *installed_version = NULL;
+
+	bdr_get_remote_ext_version(pgconn, &default_version, &installed_version);
+
+	if (default_version == NULL || strcmp(default_version, "") == 0)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_CONFIG_FILE_ERROR),
+				 errmsg("Remote PostgreSQL install for bdr connection does not have bdr extension installed"),
+				 errdetail("no entry with name 'bdr' in pg_available_extensions."),
+				 errhint("You need to install the BDR extension on the remote end")));
+	}
+
+	if (installed_version == NULL || strcmp(installed_version, "") == 0)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_CONFIG_FILE_ERROR),
+				 errmsg("Remote database for BDR connection does not have the bdr extension active"),
+				 errdetail("installed_version for entry 'bdr' in pg_available_extensions is blank"),
+				 errhint("Run 'CREATE EXTENSION bdr;'")));
+	}
+
+	pfree(default_version);
+	pfree(installed_version);
 }
 
 
@@ -695,7 +713,6 @@ bdr_init_replica_conn_close(int code, Datum connptr)
 	PQfinish(conn);
 }
 
-
 /*
  * Determine whether we need to initialize the database from a remote
  * node and perform the required initialization if so.
@@ -827,7 +844,7 @@ bdr_init_replica(Name dbname)
 	PG_ENSURE_ERROR_CLEANUP(bdr_init_replica_conn_close,
 			PointerGetDatum(&nonrepl_init_conn));
 	{
-		bdr_ensure_ext_installed(nonrepl_init_conn, dbname);
+		bdr_ensure_ext_installed(nonrepl_init_conn);
 
 		/* Get the bdr.bdr_nodes status field for our node id from the remote */
 		status = bdr_get_remote_status(nonrepl_init_conn);
