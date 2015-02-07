@@ -862,7 +862,7 @@ bdr_worker_shmem_create_workers(void)
 		 * entries are assigned before any other shmem slots they will.
 		 */
 		Assert(ctl_idx == off);
-		perdb = &shmworker->worker_data.perdb_worker;
+		perdb = &shmworker->data.perdb;
 
 		strncpy(NameStr(perdb->dbname), bdr_distinct_dbnames[off], NAMEDATALEN);
 		NameStr(perdb->dbname)[NAMEDATALEN-1] = '\0';
@@ -900,7 +900,7 @@ bdr_worker_shmem_create_workers(void)
 
 		shmworker = (BdrWorker *) bdr_worker_shmem_alloc(BDR_WORKER_APPLY, NULL);
 		Assert(shmworker->worker_type == BDR_WORKER_APPLY);
-		worker = &shmworker->worker_data.apply_worker;
+		worker = &shmworker->data.apply;
 		worker->connection_config_idx = off;
 		worker->replay_stop_lsn = InvalidXLogRecPtr;
 		worker->forward_changesets = false;
@@ -916,7 +916,7 @@ bdr_worker_shmem_create_workers(void)
 			if (entry->worker_type != BDR_WORKER_PERDB)
 				continue;
 
-			perdb = &entry->worker_data.perdb_worker;
+			perdb = &entry->data.perdb;
 
 			if (strcmp(NameStr(perdb->dbname), cfg->dbname) != 0)
 				continue;
@@ -1070,7 +1070,7 @@ bdr_is_bdr_activated_db(void)
 		if (worker->worker_type != BDR_WORKER_PERDB)
 			continue;
 
-		workerdb = NameStr(worker->worker_data.perdb_worker.dbname);
+		workerdb = NameStr(worker->data.perdb.dbname);
 
 		if (strcmp(mydb, workerdb) == 0)
 		{

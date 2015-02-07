@@ -1,5 +1,5 @@
 ###########
-# These are instructions for users who are comfortable compiling from source
+# These instructions are for users who are comfortable compiling from source
 # and who know the command line. They're intended for development and testing.
 # New users should use the packages, or see the more detailed source install
 # instructions in the main documentation.

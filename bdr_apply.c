@@ -2413,7 +2413,7 @@ bdr_apply_main(Datum main_arg)
 
 	bdr_worker_slot = &BdrWorkerCtl->slots[ DatumGetInt32(main_arg) ];
 	Assert(bdr_worker_slot->worker_type == BDR_WORKER_APPLY);
-	bdr_apply_worker = &bdr_worker_slot->worker_data.apply_worker;
+	bdr_apply_worker = &bdr_worker_slot->data.apply;
 	bdr_worker_type = BDR_WORKER_APPLY;
 
 	bdr_apply_config = bdr_connection_configs[bdr_apply_worker->connection_config_idx];

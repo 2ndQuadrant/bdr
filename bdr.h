@@ -228,10 +228,10 @@ typedef struct BdrWorker
 	/* Type of worker. Also used to determine if this shm slot is free. */
 	BdrWorkerType worker_type;
 
-	union worker_data {
-		BdrApplyWorker apply_worker;
-		BdrPerdbWorker perdb_worker;
-	} worker_data;
+	union data {
+		BdrApplyWorker apply;
+		BdrPerdbWorker perdb;
+	} data;
 
 } BdrWorker;
 

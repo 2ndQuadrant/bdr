@@ -55,20 +55,20 @@ static List*
 bdr_launch_apply_workers(char *dbname)
 {
 	List             *apply_workers = NIL;
-	BackgroundWorker  apply_worker;
+	BackgroundWorker  apply;
 	int				  i;
 
 	Assert(IsBackgroundWorker);
 
 	/* Common apply worker values */
-	apply_worker.bgw_flags = BGWORKER_SHMEM_ACCESS |
+	apply.bgw_flags = BGWORKER_SHMEM_ACCESS |
 		BGWORKER_BACKEND_DATABASE_CONNECTION;
-	apply_worker.bgw_start_time = BgWorkerStart_RecoveryFinished;
-	apply_worker.bgw_main = NULL;
-	strncpy(apply_worker.bgw_library_name, BDR_LIBRARY_NAME, BGW_MAXLEN);
-	strncpy(apply_worker.bgw_function_name, "bdr_apply_main", BGW_MAXLEN);
-	apply_worker.bgw_restart_time = 5;
-	apply_worker.bgw_notify_pid = 0;
+	apply.bgw_start_time = BgWorkerStart_RecoveryFinished;
+	apply.bgw_main = NULL;
+	strncpy(apply.bgw_library_name, BDR_LIBRARY_NAME, BGW_MAXLEN);
+	strncpy(apply.bgw_function_name, "bdr_apply_main", BGW_MAXLEN);
+	apply.bgw_restart_time = 5;
+	apply.bgw_notify_pid = 0;
 
 	/* Launch apply workers */
 	LWLockAcquire(BdrWorkerCtl->lock, LW_SHARED);
@@ -80,7 +80,7 @@ bdr_launch_apply_workers(char *dbname)
 		{
 			case BDR_WORKER_APPLY:
 				{
-					BdrApplyWorker *con = &worker->worker_data.apply_worker;
+					BdrApplyWorker *con = &worker->data.apply;
 					BdrConnectionConfig *cfg =
 						bdr_connection_configs[con->connection_config_idx];
 					Assert(cfg != NULL);
@@ -97,12 +97,12 @@ bdr_launch_apply_workers(char *dbname)
 							 */
 							continue;
 
-						snprintf(apply_worker.bgw_name, BGW_MAXLEN,
+						snprintf(apply.bgw_name, BGW_MAXLEN,
 								 BDR_LOCALID_FORMAT": %s: apply",
 								 BDR_LOCALID_FORMAT_ARGS, cfg->name);
-						apply_worker.bgw_main_arg = Int32GetDatum(i);
+						apply.bgw_main_arg = Int32GetDatum(i);
 
-						if (!RegisterDynamicBackgroundWorker(&apply_worker,
+						if (!RegisterDynamicBackgroundWorker(&apply,
 															 &bgw_handle))
 						{
 							ereport(ERROR,
@@ -151,7 +151,7 @@ bdr_perdb_worker_main(Datum main_arg)
 	int				  rc = 0;
 	List			 *apply_workers;
 	ListCell		 *c;
-	BdrPerdbWorker   *bdr_perdb_worker;
+	BdrPerdbWorker   *perdb;
 	BdrWorker		 *bdr_worker_slot;
 	StringInfoData	  si;
 	bool			  wait;
@@ -162,10 +162,10 @@ bdr_perdb_worker_main(Datum main_arg)
 
 	bdr_worker_slot = &BdrWorkerCtl->slots[ DatumGetInt32(main_arg) ];
 	Assert(bdr_worker_slot->worker_type == BDR_WORKER_PERDB);
-	bdr_perdb_worker = &bdr_worker_slot->worker_data.perdb_worker;
+	perdb = &bdr_worker_slot->data.perdb;
 	bdr_worker_type = BDR_WORKER_PERDB;
 
-	bdr_worker_init(NameStr(bdr_perdb_worker->dbname));
+	bdr_worker_init(NameStr(perdb->dbname));
 
 	elog(DEBUG1, "per-db worker for node " BDR_LOCALID_FORMAT " starting", BDR_LOCALID_FORMAT_ARGS);
 
@@ -177,7 +177,7 @@ bdr_perdb_worker_main(Datum main_arg)
 
 	/* need to be able to perform writes ourselves */
 	bdr_executor_always_allow_writes(true);
-	bdr_locks_startup(bdr_perdb_worker->nnodes);
+	bdr_locks_startup(perdb->nnodes);
 
 	/*
 	 * Do we need to init the local DB from a remote node?
@@ -186,12 +186,12 @@ bdr_perdb_worker_main(Datum main_arg)
 	 * there's an init_replica connection, and ensures that
 	 * bdr.bdr_nodes.status=r for our entry before continuing.
 	 */
-	bdr_init_replica(&bdr_perdb_worker->dbname);
+	bdr_init_replica(&perdb->dbname);
 
-	elog(DEBUG1, "Starting bdr apply workers for db %s", NameStr(bdr_perdb_worker->dbname));
+	elog(DEBUG1, "Starting bdr apply workers for db %s", NameStr(perdb->dbname));
 
 	/* Launch the apply workers */
-	apply_workers = bdr_launch_apply_workers(NameStr(bdr_perdb_worker->dbname));
+	apply_workers = bdr_launch_apply_workers(NameStr(perdb->dbname));
 
 	/*
 	 * For now, just free the bgworker handles. Later we'll probably want them
@@ -205,10 +205,10 @@ bdr_perdb_worker_main(Datum main_arg)
 
 #ifdef BUILDING_BDR
 	elog(DEBUG1, "BDR starting sequencer on db \"%s\"",
-		 NameStr(bdr_perdb_worker->dbname));
+		 NameStr(perdb->dbname));
 
 	/* initialize sequencer */
-	bdr_sequencer_init(bdr_perdb_worker->seq_slot, bdr_perdb_worker->nnodes);
+	bdr_sequencer_init(perdb->seq_slot, perdb->nnodes);
 #endif
 
 	while (!got_SIGTERM)

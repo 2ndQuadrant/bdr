@@ -84,7 +84,7 @@ find_init_replica_worker(Name dbname)
 		if (BdrWorkerCtl->slots[off].worker_type != BDR_WORKER_APPLY)
 			continue;
 
-		aw = &BdrWorkerCtl->slots[off].worker_data.apply_worker;
+		aw = &BdrWorkerCtl->slots[off].data.apply;
 		cfg = bdr_connection_configs[aw->connection_config_idx];
 
 		if ((strcmp(cfg->dbname, NameStr(*dbname)) == 0)
@@ -800,7 +800,7 @@ bdr_init_replica(Name dbname)
 		return;
 
 	init_replica_config = bdr_connection_configs
-		[init_replica_worker->worker_data.apply_worker.connection_config_idx];
+		[init_replica_worker->data.apply.connection_config_idx];
 	elog(LOG, "bdr %s: bdr_init_replica init from connection %s",
 		 NameStr(*dbname), init_replica_config->name);
 
@@ -927,7 +927,7 @@ bdr_init_replica(Name dbname)
 				if (worker->worker_type == BDR_WORKER_APPLY)
 				{
 					BdrConnectionConfig * const cfg = bdr_connection_configs
-						[worker->worker_data.apply_worker.connection_config_idx];
+						[worker->data.apply.connection_config_idx];
 
 					if (strcmp(cfg->dbname, NameStr(*dbname)) == 0)
 						my_conn_idxs[n_conns++] = off;
@@ -964,7 +964,7 @@ bdr_init_replica(Name dbname)
 				TimeLineID timeline;
 
 				cfg = bdr_connection_configs
-					[w->worker_data.apply_worker.connection_config_idx];
+					[w->data.apply.connection_config_idx];
 
 				ereport(LOG,
 						(errmsg("bdr %s: checking/creating slot for %s at %s",
@@ -1040,7 +1040,7 @@ bdr_init_replica(Name dbname)
 		elog(DEBUG1, "bdr %s: launching catchup mode apply worker", NameStr(*dbname));
 		min_remote_lsn = bdr_get_remote_lsn(nonrepl_init_conn);
 		bdr_catchup_to_lsn(
-			init_replica_worker->worker_data.apply_worker.connection_config_idx,
+			init_replica_worker->data.apply.connection_config_idx,
 			min_remote_lsn);
 		status = bdr_set_remote_status(nonrepl_init_conn, 'r', status);
 
@@ -1126,7 +1126,7 @@ bdr_catchup_to_lsn(int cfg_index,
 		BackgroundWorkerHandle *bgw_handle;
 		pid_t bgw_pid;
 		pid_t prev_bgw_pid = 0;
-		BdrApplyWorker *catchup_worker = &worker->worker_data.apply_worker;
+		BdrApplyWorker *catchup_worker = &worker->data.apply;
 
 		/* Make sure the catchup worker can find its bdr.xxx_ GUCs */
 		catchup_worker->connection_config_idx = cfg_index;
