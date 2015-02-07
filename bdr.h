@@ -446,6 +446,17 @@ extern Oid GetSysCacheOidError(int cacheId, Datum key1, Datum key2, Datum key3,
 	GetSysCacheOidError(cacheId, key1, key2, 0, 0)
 
 extern void
+stringify_my_node_identity(char *sysid_str, Size sysid_str_size,
+						char *timeline_str, Size timeline_str_size,
+						char *dboid_str, Size dboid_str_size);
+
+extern void
+stringify_node_identity(char *sysid_str, Size sysid_str_size,
+						char *timeline_str, Size timeline_str_size,
+						char *dboid_str, Size dboid_str_size,
+						uint64 sysid, TimeLineID timeline, Oid dboid);
+
+extern void
 bdr_copytable(PGconn *copyfrom_conn, PGconn *copyto_conn,
 		const char * copyfrom_query, const char *copyto_query);
 

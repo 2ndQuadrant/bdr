@@ -217,3 +217,33 @@ bdr_fetch_node_id_via_sysid(uint64 sysid, TimeLineID tli, Oid dboid)
 			 "");
 	return GetReplicationIdentifier(ident, false);
 }
+
+/*
+ * Helper to format node identity info into buffers, which must already be
+ * allocated and big enough to hold a unit64 + terminator (33 bytes).
+ */
+void
+stringify_node_identity(char *sysid_str, Size sysid_str_size,
+						char *timeline_str, Size timeline_str_size,
+						char *dboid_str, Size dboid_str_size,
+						uint64 sysid, TimeLineID timeline, Oid dboid)
+{
+	snprintf(sysid_str, sysid_str_size, UINT64_FORMAT, sysid);
+	sysid_str[sysid_str_size-1] = '\0';
+
+	snprintf(timeline_str, timeline_str_size, "%u", timeline);
+	timeline_str[timeline_str_size-1] = '\0';
+
+	snprintf(dboid_str, dboid_str_size, "%u", dboid);
+	dboid_str[dboid_str_size-1] = '\0';
+}
+
+void
+stringify_my_node_identity(char *sysid_str, Size sysid_str_size,
+						char *timeline_str, Size timeline_str_size,
+						char *dboid_str, Size dboid_str_size)
+{
+	return stringify_node_identity(sysid_str, sysid_str_size, timeline_str,
+			timeline_str_size, dboid_str, dboid_str_size,
+			GetSystemIdentifier(), ThisTimeLineID, MyDatabaseId);
+}
