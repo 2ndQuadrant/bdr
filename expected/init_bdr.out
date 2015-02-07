@@ -1,0 +1,97 @@
+\c postgres
+SELECT bdr.bdr_group_create(
+	dsn := 'dbname=postgres',
+	replication_sets := ARRAY['default', 'important', 'for-node-1']
+	);
+ bdr_group_create 
+------------------
+ 
+(1 row)
+
+SELECT bdr.bdr_node_join_wait_for_ready();
+ bdr_node_join_wait_for_ready 
+------------------------------
+ 
+(1 row)
+
+\c regression
+SELECT bdr.bdr_group_join(
+	dsn := 'dbname=regression',
+	init_from_dsn := 'dbname=postgres',
+	local_dsn := 'dbname=regression',
+	replication_sets := ARRAY['default', 'important', 'for-node-2', 'for-node-2-insert', 'for-node-2-update', 'for-node-2-delete']
+	);
+ bdr_group_join 
+----------------
+ 
+(1 row)
+
+SELECT bdr.bdr_node_join_wait_for_ready();
+ bdr_node_join_wait_for_ready 
+------------------------------
+ 
+(1 row)
+
+-- Make sure we see two slots and two active connections
+SELECT plugin, slot_type, database, active FROM pg_replication_slots;
+ plugin | slot_type |  database  | active 
+--------+-----------+------------+--------
+ bdr    | logical   | postgres   | t
+ bdr    | logical   | regression | t
+(2 rows)
+
+SELECT count(*) FROM pg_stat_replication;
+ count 
+-------
+     2
+(1 row)
+
+\c postgres
+SELECT conn_dsn, conn_replication_sets FROM bdr.bdr_connections ORDER BY conn_dsn;
+     conn_dsn      |                                conn_replication_sets                                 
+-------------------+--------------------------------------------------------------------------------------
+ dbname=postgres   | {default,important,for-node-1}
+ dbname=regression | {default,important,for-node-2,for-node-2-insert,for-node-2-update,for-node-2-delete}
+(2 rows)
+
+SELECT node_status, node_local_dsn, node_init_from_dsn FROM bdr.bdr_nodes ORDER BY node_local_dsn;
+ node_status |  node_local_dsn   | node_init_from_dsn 
+-------------+-------------------+--------------------
+ r           | dbname=postgres   | 
+ r           | dbname=regression | dbname=postgres
+(2 rows)
+
+\c regression
+SELECT conn_dsn, conn_replication_sets FROM bdr.bdr_connections ORDER BY conn_dsn;
+     conn_dsn      |                                conn_replication_sets                                 
+-------------------+--------------------------------------------------------------------------------------
+ dbname=postgres   | {default,important,for-node-1}
+ dbname=regression | {default,important,for-node-2,for-node-2-insert,for-node-2-update,for-node-2-delete}
+(2 rows)
+
+SELECT node_status, node_local_dsn, node_init_from_dsn FROM bdr.bdr_nodes ORDER BY node_local_dsn;
+ node_status |  node_local_dsn   | node_init_from_dsn 
+-------------+-------------------+--------------------
+ r           | dbname=postgres   | 
+ r           | dbname=regression | dbname=postgres
+(2 rows)
+
+SELECT bdr.bdr_replicate_ddl_command($DDL$
+CREATE OR REPLACE FUNCTION public.bdr_regress_variables(
+    OUT readdb1 text,
+    OUT readdb2 text,
+    OUT writedb1 text,
+    OUT writedb2 text
+    ) RETURNS record LANGUAGE SQL AS $f$
+SELECT
+    current_setting('bdrtest.readdb1'),
+    current_setting('bdrtest.readdb2'),
+    current_setting('bdrtest.writedb1'),
+    current_setting('bdrtest.writedb2')
+$f$;
+$DDL$);
+ bdr_replicate_ddl_command 
+---------------------------
+ 
+(1 row)
+

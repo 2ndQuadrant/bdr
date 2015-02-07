@@ -14,27 +14,37 @@
 
 #include "lib/ilist.h"
 
+#define EMPTY_REPLICATION_NAME ""
 #define BDR_SLOT_NAME_FORMAT "bdr_%u_%s_%u_%u__%s"
 #define BDR_NODE_ID_FORMAT "bdr_"UINT64_FORMAT"_%u_%u_%u_%s"
 
-/* GUC storage for a configured BDR connection. */
+/* A configured BDR connection from bdr_connections */
 typedef struct BdrConnectionConfig
 {
-	char *dsn;
-	int   apply_delay;
-	bool  init_replica;
-	char *replica_local_dsn;
-	char *replication_sets;
+	uint64		sysid;
+	TimeLineID	timeline;
+	Oid			dboid;
 
 	/*
-	 * These aren't technically GUCs, but are per-connection config
-	 * information obtained from the GUCs.
+	 * If the origin_ id fields are set then they must refer to our node,
+	 * otherwise we wouldn't load the configuration entry. So if origin_is_set
+	 * is false the origin was zero, and if true the origin is the local node
+	 * id.
 	 */
-	char *name;
-	char *dbname;
+	bool origin_is_my_id;
 
-	/* Connection config might be broken (blank dsn, etc) */
-	bool is_valid;
+	/*
+	 * Is this connection unidirectional, or should we expect a reciprocal
+	 * inbound connection and slot?
+	 */
+	bool is_unidirectional;
+
+	char *dsn;
+
+	int   apply_delay;
+
+	/* Quoted identifier-list of replication sets */
+	char *replication_sets;
 } BdrConnectionConfig;
 
 typedef struct BdrFlushPosition
@@ -49,5 +59,15 @@ extern volatile sig_atomic_t got_SIGHUP;
 
 extern void bdr_error_nodeids_must_differ(uint64 sysid, TimeLineID timeline,
 										  Oid dboid);
+extern List* bdr_read_connection_configs(void);
+extern BdrConnectionConfig* bdr_get_connection_config(uint64 sysid,
+													  TimeLineID timeline,
+													  Oid dboid,
+													  bool missing_ok);
+
+extern void bdr_free_connection_config(BdrConnectionConfig *cfg);
+
+extern void bdr_slot_name(Name slot_name, uint64 sysid, TimeLineID tlid,
+						  Oid dboid, Oid local_dboid);
 
 #endif   /* BDR_INTERNAL_H */

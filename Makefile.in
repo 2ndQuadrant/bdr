@@ -20,7 +20,8 @@ DATA = \
 	extsql/bdr--0.8.0.4--0.8.0.5.sql \
 	extsql/bdr--0.8.0.5--0.8.0.6.sql \
 	extsql/bdr--0.8.0.6--0.8.0.7.sql \
-	extsql/bdr--0.8.0.7--0.9.0.0.sql
+	extsql/bdr--0.8.0.7--0.9.0.0.sql \
+	extsql/bdr--0.9.0.0--0.9.0.1.sql
 
 DATA_built = \
 	extsql/bdr--0.8.0.1.sql \
@@ -30,7 +31,8 @@ DATA_built = \
 	extsql/bdr--0.8.0.5.sql \
 	extsql/bdr--0.8.0.6.sql \
 	extsql/bdr--0.8.0.7.sql \
-	extsql/bdr--0.9.0.0.sql
+	extsql/bdr--0.9.0.0.sql \
+	extsql/bdr--0.9.0.1.sql
 
 DOCS = bdr.conf.sample README.bdr
 SCRIPTS = scripts/bdr_initial_load bdr_init_copy bdr_resetxlog bdr_dump
@@ -47,6 +49,7 @@ OBJS = \
 	bdr_conflict_handlers.o \
 	bdr_conflict_logging.o \
 	bdr_commandfilter.o \
+	bdr_common.o \
 	bdr_compat.o \
 	bdr_count.o \
 	bdr_executor.o \
@@ -55,7 +58,9 @@ OBJS = \
 	bdr_locks.o \
 	bdr_output.o \
 	bdr_relcache.o \
-	bdr_remotecalls.o
+	bdr_remotecalls.o \
+	bdr_supervisor.o \
+	bdr_upgrade.o
 
 ifeq "@BUILDING_BDR@" "1"
 OBJS += \
@@ -91,7 +96,6 @@ bdr_init_copy: bdr_init_copy.o
 	$(CC) $(CFLAGS) $^ $(LDFLAGS) $(LDFLAGS_EX) $(libpq_pgport) $(LIBS) -o $@$(X)
 
 scripts/bdr_initial_load: scripts/bdr_initial_load.in
-	mkdir -p scripts
 	sed -e "s/BDR_VERSION/$(BDR_VERSION)/" -e "s/PG_VERSION/$(VERSION)/" $< > $@
 
 extsql/bdr--0.8.0.1.sql: extsql/bdr--0.8.0.sql extsql/bdr--0.8.0--0.8.0.1.sql
@@ -124,6 +128,11 @@ extsql/bdr--0.8.0.7.sql: extsql/bdr--0.8.0.6.sql extsql/bdr--0.8.0.6--0.8.0.7.sq
 	cat $^ > $@
 
 extsql/bdr--0.9.0.0.sql: extsql/bdr--0.8.0.7.sql extsql/bdr--0.8.0.7--0.9.0.0.sql
+	mkdir -p extsql
+	cat $^ > $@
+
+extsql/bdr--0.9.0.1.sql: extsql/bdr--0.9.0.0.sql extsql/bdr--0.9.0.0--0.9.0.1.sql
+	mkdir -p extsql
 	cat $^ > $@
 
 bdr_resetxlog: pg_resetxlog.o
@@ -175,13 +184,17 @@ check: regresscheck isolationcheck
 DDLREGRESSCHECKS=ddl/create ddl/alter_table ddl/extension ddl/function \
 				 ddl/grant ddl/mixed ddl/namespace ddl/replication_set \
 				 ddl/sequence ddl/view
+REGRESSINIT=init_bdr
 else
 check: regresscheck
 DDLREGRESSCHECKS=
+REGRESSINIT=init_udr
 endif
+
 
 REGRESSCHECKS= \
 	init \
+	$(REGRESSINIT) \
 	upgrade \
 	identifier \
 	$(DDLREGRESSCHECKS) \
@@ -189,7 +202,7 @@ REGRESSCHECKS= \
 
 
 ISOLATIONCHECKS=\
-	isolation/waitforstart \
+	isolation/init \
 	isolation/ddlconflict \
 	isolation/dmlconflict_ii \
 	isolation/dmlconflict_uu \

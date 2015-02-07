@@ -36,7 +36,7 @@ void
 bdr_label_init(void)
 {
 	/* Security label provider hook */
-	register_label_provider("bdr", bdr_object_relabel);
+	register_label_provider(BDR_SECLABEL_PROVIDER, bdr_object_relabel);
 }
 
 static void

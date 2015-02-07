@@ -44,92 +44,423 @@
 #include "utils/memutils.h"
 #include "utils/snapmgr.h"
 
+PG_FUNCTION_INFO_V1(bdr_connections_changed);
+
+Datum
+bdr_connections_changed(PG_FUNCTION_ARGS);
+
+/* In the commit hook, should we attempt to start a per-db worker? */
+static bool xacthook_connection_added = false;
+
+/*
+ * Scan shmem looking for a perdb worker for the named DB and
+ * return its offset. If not found, return -1.
+ *
+ * Must hold the LWLock on the worker control segment in at
+ * least share mode.
+ *
+ * Note that there's no guarantee that the worker is actually
+ * started up.
+ */
+int
+find_perdb_worker_slot(Oid dboid, BdrWorker **worker_found)
+{
+	int i, found = -1;
+
+	Assert(LWLockHeldByMe(BdrWorkerCtl->lock));
+
+	for (i = 0; i < bdr_max_workers; i++)
+	{
+		BdrWorker *w = &BdrWorkerCtl->slots[i];
+		if (w->worker_type == BDR_WORKER_PERDB)
+		{
+			BdrPerdbWorker *pw = &w->data.perdb;
+			if (pw->database_oid == dboid)
+			{
+				found = i;
+				if (worker_found != NULL)
+					*worker_found = w;
+				break;
+			}
+		}
+	}
+
+	return found;
+}
+
+/*
+ * Scan shmem looking for an apply worker for the current perdb worker and
+ * specified target node identifier and return its offset. If not found, return
+ * -1.
+ *
+ * Must hold the LWLock on the worker control segment in at least share mode.
+ *
+ * Note that there's no guarantee that the worker is actually started up.
+ */
+static int
+find_apply_worker_slot(uint64 sysid, TimeLineID timeline, Oid dboid, BdrWorker **worker_found)
+{
+	int i, found = -1;
+
+	Assert(bdr_worker_type == BDR_WORKER_PERDB);
+	Assert(LWLockHeldByMe(BdrWorkerCtl->lock));
+
+	for (i = 0; i < bdr_max_workers; i++)
+	{
+		BdrWorker *w = &BdrWorkerCtl->slots[i];
+		if (w->worker_type == BDR_WORKER_APPLY)
+		{
+			BdrApplyWorker *aw = &w->data.apply;
+			if (aw->dboid == MyDatabaseId
+				&& aw->remote_sysid == sysid
+				&& aw->remote_timeline == timeline
+				&& aw->remote_dboid == dboid)
+			{
+				found = i;
+				if (worker_found != NULL)
+					*worker_found = w;
+				break;
+			}
+		}
+	}
+
+	return found;
+}
+
+static void
+bdr_perdb_xact_callback(XactEvent event, void *arg)
+{
+	switch (event)
+	{
+		case XACT_EVENT_COMMIT:
+			if (xacthook_connection_added)
+			{
+				int slotno;
+				BdrWorker *w;
+
+				xacthook_connection_added = false;
+
+				LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
+
+				/*
+				 * If a perdb worker already exists, wake it and tell it to
+				 * check for new connections.
+				 */
+				slotno = find_perdb_worker_slot(MyDatabaseId, &w);
+				if (slotno >= 0)
+				{
+					/*
+					 * The worker is registered, but might not be started yet
+					 * (or could be crashing and restarting). If it's not
+					 * started the latch will be zero. If it's started but
+					 * dead, the latch will be bogus, but it's safe to set a
+					 * proclatch to a dead process. At worst we'll set a latch
+					 * for the wrong process, and that's fine. If it's zero
+					 * then the worker is still starting and will see our new
+					 * changes anyway.
+					 */
+					if (w->data.perdb.proclatch != NULL)
+						SetLatch(w->data.perdb.proclatch);
+				}
+				else
+				{
+					/*
+					 * Per-db worker doesn't exist, ask the supervisor to check for
+					 * changes and register new per-db workers for labeled
+					 * databases.
+					 */
+					if (BdrWorkerCtl->supervisor_latch)
+						SetLatch(BdrWorkerCtl->supervisor_latch);
+				}
+
+				LWLockRelease(BdrWorkerCtl->lock);
+			}
+			break;
+		default:
+			/* We're not interested in other tx events */
+			break;
+	}
+}
+
+/*
+ * Prepare to launch a perdb worker for the current DB if it's not already
+ * running, and register a XACT_EVENT_COMMIT hook to perform the actual launch
+ * when the addition of the worker commits.
+ *
+ * If a perdb worker is already running, notify it to check for new connections.
+ */
+Datum
+bdr_connections_changed(PG_FUNCTION_ARGS)
+{
+	/* If there's already a per-db worker for our DB we have nothing to do */
+	if (!xacthook_connection_added)
+	{
+		RegisterXactCallback(bdr_perdb_xact_callback, NULL);
+		xacthook_connection_added = true;
+	}
+	PG_RETURN_VOID();
+}
+
+static int
+getattno(const char *colname)
+{
+	int attno;
+
+	attno = SPI_fnumber(SPI_tuptable->tupdesc, colname);
+	if (attno == SPI_ERROR_NOATTRIBUTE)
+		elog(ERROR, "SPI error while reading %s from bdr.bdr_connections", colname);
+
+	return attno;
+}
+
 /*
  * Launch a dynamic bgworker to run bdr_apply_main for each bdr connection on
  * the database identified by dbname.
  *
- * Scans the BdrWorkerCtl shmem segment for workers of type BDR_WORKER_APPLY
- * with a matching database name and launches them.
+ * Scans the bdr.bdr_connections table for workers and launch a worker for any
+ * connection that doesn't already have one.
  */
-static List*
-bdr_launch_apply_workers(char *dbname)
+void
+bdr_launch_apply_workers(Oid dboid)
 {
-	List             *apply_workers = NIL;
-	BackgroundWorker  apply;
-	int				  i;
+	BackgroundWorker	bgw;
+	int					i, ret;
+	Size				nnodes = 0;
+#define BDR_CON_Q_NARGS 3
+	Oid					argtypes[BDR_CON_Q_NARGS] = { TEXTOID, OIDOID, OIDOID };
+	Datum				values[BDR_CON_Q_NARGS];
+	char				sysid_str[33];
 
+	/* Should be called from the perdb worker */
 	Assert(IsBackgroundWorker);
+	Assert(bdr_worker_type == BDR_WORKER_PERDB);
+
+	snprintf(sysid_str, sizeof(sysid_str), UINT64_FORMAT, GetSystemIdentifier());
+	sysid_str[sizeof(sysid_str)-1] = '\0';
+
+	elog(DEBUG2, "launching apply workers");
+
+	/*
+	 * It's easy enough to make this tolerant of an open tx, but in general
+	 * rollback doesn't make sense here.
+	 */
+	Assert(!IsTransactionState());
 
 	/* Common apply worker values */
-	apply.bgw_flags = BGWORKER_SHMEM_ACCESS |
+	bgw.bgw_flags = BGWORKER_SHMEM_ACCESS |
 		BGWORKER_BACKEND_DATABASE_CONNECTION;
-	apply.bgw_start_time = BgWorkerStart_RecoveryFinished;
-	apply.bgw_main = NULL;
-	strncpy(apply.bgw_library_name, BDR_LIBRARY_NAME, BGW_MAXLEN);
-	strncpy(apply.bgw_function_name, "bdr_apply_main", BGW_MAXLEN);
-	apply.bgw_restart_time = 5;
-	apply.bgw_notify_pid = 0;
+	bgw.bgw_start_time = BgWorkerStart_RecoveryFinished;
+	bgw.bgw_main = NULL;
+	strncpy(bgw.bgw_library_name, BDR_LIBRARY_NAME, BGW_MAXLEN);
+	strncpy(bgw.bgw_function_name, "bdr_apply_main", BGW_MAXLEN);
+	bgw.bgw_restart_time = 5;
+	bgw.bgw_notify_pid = 0;
 
-	/* Launch apply workers */
-	LWLockAcquire(BdrWorkerCtl->lock, LW_SHARED);
-	for (i = 0; i < bdr_max_workers; i++)
+	StartTransactionCommand();
+
+	/*
+	 * Look up connection entries for all nodes other than our own.
+	 *
+	 * If an entry with our origin (sysid,tlid,dboid) exists, treat that as
+	 * overriding the generic one.
+	 */
+	values[0] = CStringGetTextDatum(sysid_str);
+	values[1] = ObjectIdGetDatum(ThisTimeLineID);
+	values[2] = ObjectIdGetDatum(MyDatabaseId);
+
+	SPI_connect();
+
+	ret = SPI_execute_with_args(
+			"SELECT DISTINCT ON (conn_sysid, conn_timeline, conn_dboid) "
+			"  conn_sysid, conn_timeline, conn_dboid, "
+			"  conn_is_unidirectional, "
+			"  conn_origin_dboid <> 0 AS origin_is_my_id "
+			"FROM bdr.bdr_connections "
+			"WHERE ( "
+			"         (conn_origin_sysid = '0' AND "
+			"          conn_origin_timeline = 0 AND "
+			"          conn_origin_dboid = 0) "
+			"         OR "
+			"         (conn_origin_sysid = $1 AND "
+			"          conn_origin_timeline = $2 AND "
+			"          conn_origin_dboid = $3) "
+			"      ) AND NOT ( "
+			"          conn_sysid = $1 AND "
+			"          conn_timeline = $2 AND "
+			"          conn_dboid = $3"
+			"      ) "
+			"ORDER BY conn_sysid, conn_timeline, conn_dboid, "
+			"         conn_origin_sysid ASC NULLS LAST, "
+			"         conn_timeline ASC NULLS LAST, "
+			"         conn_dboid ASC NULLS LAST ",
+		BDR_CON_Q_NARGS, argtypes, values, NULL,
+		false, 0);
+
+	if (ret != SPI_OK_SELECT)
+		elog(ERROR, "SPI error while querying bdr.bdr_connections");
+
+	nnodes = SPI_processed;
+
+	elog(DEBUG2, "found %u workers in bdr_connections", (uint32)nnodes);
+
+	for (i = 0; i < SPI_processed; i++)
 	{
-		BdrWorker *worker = &BdrWorkerCtl->slots[i];
+		BackgroundWorkerHandle *bgw_handle;
+		HeapTuple				tuple;
+		uint32					slot;
+		uint32					worker_arg;
+		BdrWorker			   *worker;
+		BdrApplyWorker		   *apply;
+		Datum					temp_datum;
+		bool					isnull;
+		uint64					target_sysid;
+		TimeLineID				target_timeline;
+		Oid						target_dboid;
+		char*					tmp_sysid;
+		bool					origin_is_my_id,
+								conn_is_unidirectional;
 
-		switch(worker->worker_type)
+		tuple = SPI_tuptable->vals[i];
+
+		tmp_sysid = SPI_getvalue(tuple, SPI_tuptable->tupdesc,
+								 getattno("conn_sysid"));
+
+		if (sscanf(tmp_sysid, UINT64_FORMAT, &target_sysid) != 1)
+			elog(ERROR, "Parsing sysid uint64 from %s failed", tmp_sysid);
+
+		temp_datum = SPI_getbinval(tuple, SPI_tuptable->tupdesc,
+								   getattno("conn_timeline"),
+								   &isnull);
+		Assert(!isnull);
+		target_timeline = DatumGetObjectId(temp_datum);
+
+		temp_datum = SPI_getbinval(tuple, SPI_tuptable->tupdesc,
+								   getattno("conn_dboid"),
+								   &isnull);
+		Assert(!isnull);
+		target_dboid = DatumGetObjectId(temp_datum);
+
+		temp_datum = SPI_getbinval(tuple, SPI_tuptable->tupdesc,
+								   getattno("conn_is_unidirectional"),
+								   &isnull);
+		Assert(!isnull);
+		conn_is_unidirectional = DatumGetBool(temp_datum);
+
+		temp_datum = SPI_getbinval(tuple, SPI_tuptable->tupdesc,
+								   getattno("origin_is_my_id"),
+								   &isnull);
+		Assert(!isnull);
+		origin_is_my_id = DatumGetBool(temp_datum);
+
+		elog(DEBUG2, "Found bdr_connections entry for "BDR_LOCALID_FORMAT" (origin specific: %d, unidirectional: %d)",
+			 target_sysid, target_timeline, target_dboid,
+			 EMPTY_REPLICATION_NAME, (int)origin_is_my_id, (int)conn_is_unidirectional);
+
+		Assert(!LWLockHeldByMe(BdrWorkerCtl->lock));
+		LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
+
+		/*
+		 * Is there already a worker registered for this connection?
+		 *
+		 * TODO DYNCONF Each apply worker should have its latch set and respond
+		 * by checking to see whether it needs to apply any new configuration.
+		 */
+		if (find_apply_worker_slot(target_sysid, target_timeline, target_dboid, NULL) != -1)
 		{
-			case BDR_WORKER_APPLY:
-				{
-					BdrApplyWorker *con = &worker->data.apply;
-					BdrConnectionConfig *cfg =
-						bdr_connection_configs[con->connection_config_idx];
-					Assert(cfg != NULL);
-					if ( strcmp(cfg->dbname, dbname) == 0 )
-					{
-						/* It's an apply worker for our DB; register it */
-						BackgroundWorkerHandle *bgw_handle;
+			elog(DEBUG2, "Skipping registration of worker for node "BDR_LOCALID_FORMAT" on db oid=%u: already registered",
+				 target_sysid, target_timeline, target_dboid,
+				 EMPTY_REPLICATION_NAME, dboid);
+			LWLockRelease(BdrWorkerCtl->lock);
+			continue;
+		}
 
-						if (con->bgw_is_registered)
-							/*
-							 * This worker was registered on a previous pass;
-							 * this is probably a restart of the per-db worker.
-							 * Don't register a duplicate.
-							 */
-							continue;
+		/* Set the display name in 'ps' etc */
+		snprintf(bgw.bgw_name, BGW_MAXLEN,
+				 BDR_LOCALID_FORMAT"->"BDR_LOCALID_FORMAT,
+				 BDR_LOCALID_FORMAT_ARGS,
+				 target_sysid, target_timeline, target_dboid,
+				 EMPTY_REPLICATION_NAME);
 
-						snprintf(apply.bgw_name, BGW_MAXLEN,
-								 BDR_LOCALID_FORMAT": %s: apply",
-								 BDR_LOCALID_FORMAT_ARGS, cfg->name);
-						apply.bgw_main_arg = Int32GetDatum(i);
+		/* Allocate a new shmem slot for this apply worker */
+		worker = bdr_worker_shmem_alloc(BDR_WORKER_APPLY, &slot);
 
-						if (!RegisterDynamicBackgroundWorker(&apply,
-															 &bgw_handle))
-						{
-							ereport(ERROR,
-									(errmsg("bdr: Failed to register background worker"
-											" %s, see previous log messages",
-											cfg->name)));
-						}
-						/* We've launched this one, don't do it again */
-						con->bgw_is_registered = true;
-						apply_workers = lcons(bgw_handle, apply_workers);
-					}
-				}
-				break;
-			case BDR_WORKER_EMPTY_SLOT:
-			case BDR_WORKER_PERDB:
-				/* Nothing to do; switch only so we get warnings for insane cases */
-				break;
-			default:
-				/* Bogus value */
-				elog(FATAL, "Unhandled BdrWorkerType case %i, memory corruption?",
-					 worker->worker_type);
-				break;
+		/* Tell the apply worker what its shmem slot is */
+		Assert(slot <= UINT16_MAX);
+		worker_arg = (((uint32)BdrWorkerCtl->worker_generation) << 16) | (uint32)slot;
+		bgw.bgw_main_arg = Int32GetDatum(worker_arg);
+
+		/*
+		 * Apply workers (other than in catchup mode, which are registered
+		 * elsewhere) should not be using the local node's connection entry.
+		 */
+		Assert(!(target_sysid == GetSystemIdentifier() &&
+				 target_timeline == ThisTimeLineID &&
+				 target_dboid == MyDatabaseId));
+
+		/* Now populate the apply worker state */
+		apply = &worker->data.apply;
+		apply->dboid = MyDatabaseId;
+		apply->remote_sysid = target_sysid;
+		apply->remote_timeline = target_timeline;
+		apply->remote_dboid = target_dboid;
+		apply->replay_stop_lsn = InvalidXLogRecPtr;
+		apply->forward_changesets = false;
+
+		LWLockRelease(BdrWorkerCtl->lock);
+
+		/*
+		 * Finally, register the worker for launch.
+		 */
+		if (!RegisterDynamicBackgroundWorker(&bgw,
+											 &bgw_handle))
+		{
+			/*
+			 * Already-registered workers will keep on running.  We need to
+			 * make sure the slot we just acquired but failed to launch a
+			 * worker for gets released again though.
+			 */
+			LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
+			apply->dboid = InvalidOid;
+			apply->remote_sysid = 0;
+			apply->remote_timeline = 0;
+			apply->remote_dboid = InvalidOid;
+			worker->worker_type = BDR_WORKER_EMPTY_SLOT;
+			LWLockRelease(BdrWorkerCtl->lock);
+
+			ereport(ERROR,
+					(errmsg("bdr: Failed to register background worker"
+							" for "BDR_LOCALID_FORMAT", see previous log messages",
+							BDR_LOCALID_FORMAT_ARGS)));
+		}
+		else
+		{
+			elog(DEBUG2, "registered apply worker for "BDR_LOCALID_FORMAT,
+				 target_sysid, target_timeline, target_dboid,
+				 EMPTY_REPLICATION_NAME);
 		}
 	}
-	LWLockRelease(BdrWorkerCtl->lock);
 
-	return apply_workers;
+	SPI_finish();
+
+	CommitTransactionCommand();
+
+	elog(DEBUG2, "done registering apply workers");
+
+	/*
+	 * Now we need to tell the lock manager and the sequence
+	 * manager about the changed node count.
+	 *
+	 * There's no truly safe way to do this without a proper
+	 * part/join protocol, so all we're going to do is update
+	 * the node count in shared memory.
+	 */
+	bdr_worker_slot->data.perdb.nnodes = nnodes;
+#ifdef BUILDING_BDR
+	bdr_locks_set_nnodes(nnodes);
+	bdr_sequencer_set_nnodes(nnodes);
+#endif
+
+	elog(DEBUG2, "updated worker counts");
 }
 
 /*
@@ -148,60 +479,106 @@ bdr_launch_apply_workers(char *dbname)
 void
 bdr_perdb_worker_main(Datum main_arg)
 {
-	int				  rc = 0;
-	List			 *apply_workers;
-	ListCell		 *c;
-	BdrPerdbWorker   *perdb;
-	BdrWorker		 *bdr_worker_slot;
-	StringInfoData	  si;
-	bool			  wait;
+	int					rc = 0;
+	BdrPerdbWorker		*perdb;
+	StringInfoData		si;
+	bool				wait;
+	uint32				worker_arg;
+	uint16				worker_generation;
+	uint16				perdb_worker_idx;
+	BDRNodeInfo		   *local_node;
 
 	initStringInfo(&si);
 
 	Assert(IsBackgroundWorker);
 
-	bdr_worker_slot = &BdrWorkerCtl->slots[ DatumGetInt32(main_arg) ];
+	worker_arg = DatumGetInt32(main_arg);
+
+	worker_generation = (uint16)(worker_arg >> 16);
+	perdb_worker_idx = (uint16)(worker_arg & 0x0000FFFF);
+
+	if (worker_generation != BdrWorkerCtl->worker_generation)
+	{
+		elog(DEBUG1, "perdb worker from generation %d exiting after finding shmem generation is %d",
+			 worker_generation, BdrWorkerCtl->worker_generation);
+		proc_exit(0);
+	}
+
+	bdr_worker_slot = &BdrWorkerCtl->slots[perdb_worker_idx];
 	Assert(bdr_worker_slot->worker_type == BDR_WORKER_PERDB);
 	perdb = &bdr_worker_slot->data.perdb;
 	bdr_worker_type = BDR_WORKER_PERDB;
 
 	bdr_worker_init(NameStr(perdb->dbname));
 
+	perdb->nnodes = 0;
+
 	elog(DEBUG1, "per-db worker for node " BDR_LOCALID_FORMAT " starting", BDR_LOCALID_FORMAT_ARGS);
 
-	appendStringInfo(&si, BDR_LOCALID_FORMAT": %s", BDR_LOCALID_FORMAT_ARGS, "perdb worker");
+	appendStringInfo(&si, BDR_LOCALID_FORMAT": %s", BDR_LOCALID_FORMAT_ARGS, "perdb");
 	SetConfigOption("application_name", si.data, PGC_USERSET, PGC_S_SESSION);
 
 	CurrentResourceOwner = ResourceOwnerCreate(NULL, "bdr seq top-level resource owner");
 	bdr_saved_resowner = CurrentResourceOwner;
 
+	/*
+	 * It's necessary to acquire a a lock here so that a concurrent
+	 * bdr_perdb_xact_callback can't try to set our latch at the same
+	 * time as we write to it.
+	 *
+	 * There's no per-worker lock, so we just take the lock on the
+	 * whole segment.
+	 */
+	LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
+	perdb->proclatch = &MyProc->procLatch;
+	perdb->database_oid = MyDatabaseId;
+	LWLockRelease(BdrWorkerCtl->lock);
+
 	/* need to be able to perform writes ourselves */
 	bdr_executor_always_allow_writes(true);
-	bdr_locks_startup(perdb->nnodes);
+	bdr_locks_startup();
+
+	{
+		int				spi_ret;
+		MemoryContext	saved_ctx;
+
+		/*
+		 * Check the local bdr.bdr_nodes table to see if there's an entry for
+		 * our node.
+		 *
+		 * Note that we don't have to explicitly SPI_finish(...) on error paths;
+		 * that's taken care of for us.
+		 */
+		StartTransactionCommand();
+		spi_ret = SPI_connect();
+		if (spi_ret != SPI_OK_CONNECT)
+			elog(ERROR, "SPI already connected; this shouldn't be possible");
+
+		saved_ctx = MemoryContextSwitchTo(TopMemoryContext);
+		local_node = bdr_nodes_get_local_info(GetSystemIdentifier(), ThisTimeLineID,
+										  MyDatabaseId);
+		MemoryContextSwitchTo(saved_ctx);
+
+		if (local_node == NULL)
+			ereport(ERROR,
+					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+					 errmsg("local node record not found")));
+
+		SPI_finish();
+		CommitTransactionCommand();
+	}
 
 	/*
 	 * Do we need to init the local DB from a remote node?
-	 *
-	 * Checks bdr.bdr_nodes.status, does any remote initialization required if
-	 * there's an init_replica connection, and ensures that
-	 * bdr.bdr_nodes.status=r for our entry before continuing.
 	 */
-	bdr_init_replica(&perdb->dbname);
+	if (local_node->status != 'r')
+		bdr_init_replica(local_node);
 
-	elog(DEBUG1, "Starting bdr apply workers for db %s", NameStr(perdb->dbname));
+	elog(DEBUG1, "Starting bdr apply workers for "BDR_LOCALID_FORMAT" (%s)",
+		 BDR_LOCALID_FORMAT_ARGS, NameStr(perdb->dbname));
 
 	/* Launch the apply workers */
-	apply_workers = bdr_launch_apply_workers(NameStr(perdb->dbname));
-
-	/*
-	 * For now, just free the bgworker handles. Later we'll probably want them
-	 * for adding/removing/reconfiguring bgworkers.
-	 */
-	foreach(c, apply_workers)
-	{
-		BackgroundWorkerHandle *h = (BackgroundWorkerHandle *) lfirst(c);
-		pfree(h);
-	}
+	bdr_launch_apply_workers(MyDatabaseId);
 
 #ifdef BUILDING_BDR
 	elog(DEBUG1, "BDR starting sequencer on db \"%s\"",
@@ -260,8 +637,18 @@ bdr_perdb_worker_main(Datum main_arg)
 			/* emergency bailout if postmaster has died */
 			if (rc & WL_POSTMASTER_DEATH)
 				proc_exit(1);
+
+			if (rc & WL_LATCH_SET)
+			{
+				/*
+				 * If the perdb worker's latch is set we're being asked
+				 * to rescan and launch new apply workers.
+				 */
+				bdr_launch_apply_workers(MyDatabaseId);
+			}
 		}
 	}
 
+	perdb->database_oid = InvalidOid;
 	proc_exit(0);
 }

@@ -31,7 +31,12 @@
 
 #include "utils/builtins.h"
 #include "utils/guc.h"
+#include "utils/memutils.h"
 #include "utils/syscache.h"
+
+static int getattno(const char *colname);
+static char* bdr_textarr_to_identliststr(ArrayType *textarray);
+
 
 /* GetSysCacheOid equivalent that errors out if nothing is found */
 Oid
@@ -70,7 +75,7 @@ bdr_nodes_get_local_status(uint64 sysid, TimeLineID tli, Oid dboid)
 	Oid			argtypes[] = { TEXTOID, OIDOID, OIDOID };
 	Datum		values[3];
 	bool		isnull;
-	char        status;
+	char		status;
 	char		sysid_str[33];
 	Oid			schema_oid;
 
@@ -118,17 +123,108 @@ bdr_nodes_get_local_status(uint64 sysid, TimeLineID tli, Oid dboid)
 }
 
 /*
- * Insert a row for the local node's (sysid,tlid,dboid) with the passed status
- * into bdr.bdr_nodes. No existing row for this key may exist.
+ * Get the bdr.bdr_nodes record for the specififed node from the local
+ * bdr.bdr_nodes table via SPI.
  *
- * Unlike bdr_set_remote_status, '\0' may not be passed to delete the row, and
- * no upsert is performed. This is a simple insert only.
+ * Returns the status value, or NULL if no such row exists.
  *
- * Unlike bdr_nodes_get_local_status, only the status of the local node may
- * be set.
+ * SPI must be initialized, and you must be in a running transaction.
+ */
+BDRNodeInfo *
+bdr_nodes_get_local_info(uint64 sysid, TimeLineID tli, Oid dboid)
+{
+	int			spi_ret;
+	Oid			argtypes[] = { TEXTOID, OIDOID, OIDOID };
+	Datum		values[3];
+	bool		isnull;
+	BDRNodeInfo *node;
+	char		sysid_str[33];
+	Oid			schema_oid;
+	MemoryContext caller_ctx;
+	MemoryContext saved_ctx PG_USED_FOR_ASSERTS_ONLY;
+
+	Assert(IsTransactionState());
+
+	/* Save the calling memory context, which we'll allocate results in */
+	caller_ctx = MemoryContextSwitchTo(CurTransactionContext);
+
+	Assert(MemoryContextIsValid(caller_ctx));
+
+	snprintf(sysid_str, sizeof(sysid_str), UINT64_FORMAT, sysid);
+	sysid_str[sizeof(sysid_str)-1] = '\0';
+
+	/*
+	 * Determine if BDR is present on this DB. The output plugin can
+	 * be started on a db that doesn't actually have BDR active, but
+	 * we don't want to allow that.
+	 *
+	 * Check for a bdr schema.
+	 */
+	schema_oid = GetSysCacheOid1(NAMESPACENAME, CStringGetDatum("bdr"));
+	if (schema_oid == InvalidOid)
+		ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				errmsg("No bdr schema is present in database %s, cannot create a bdr slot",
+					   get_database_name(MyDatabaseId)),
+				errhint("There is no bdr.connections entry for this database on the target node or bdr is not in shared_preload_libraries")));
+
+	values[0] = CStringGetTextDatum(sysid_str);
+	values[1] = ObjectIdGetDatum(tli);
+	values[2] = ObjectIdGetDatum(dboid);
+
+	spi_ret = SPI_execute_with_args(
+			"SELECT node_status, node_local_dsn, node_init_from_dsn"
+			"  FROM bdr.bdr_nodes"
+			" WHERE node_sysid = $1 AND node_timeline = $2 AND node_dboid = $3",
+			3, argtypes, values, NULL, false, 1);
+
+	if (spi_ret != SPI_OK_SELECT)
+		elog(ERROR, "Unable to query bdr.bdr_nodes, SPI error %d", spi_ret);
+
+	if (SPI_processed == 0)
+		return NULL;
+
+	/* Switch to calling memory context to copy results */
+	saved_ctx = MemoryContextSwitchTo(caller_ctx);
+	Assert(MemoryContextIsValid(saved_ctx));
+
+	node = palloc(sizeof(BDRNodeInfo));
+	node->sysid = sysid;
+	node->timeline = tli;
+	node->dboid = dboid;
+	node->status = DatumGetChar(SPI_getbinval(SPI_tuptable->vals[0],
+											  SPI_tuptable->tupdesc, 1,
+											  &isnull));
+	node->local_dsn = SPI_getvalue(SPI_tuptable->vals[0],
+								   SPI_tuptable->tupdesc, 2);
+	node->init_from_dsn = SPI_getvalue(SPI_tuptable->vals[0],
+									   SPI_tuptable->tupdesc, 3);
+
+	if (isnull)
+		elog(ERROR, "bdr.bdr_nodes.status NULL; shouldn't happen");
+
+	return node;
+}
+
+/* Free the BDRNodeInfo pointer including its properties. */
+void
+bdr_bdr_node_free(BDRNodeInfo *node)
+{
+	if (node == NULL)
+		return;
+
+	if (node->local_dsn)
+		pfree(node->local_dsn);
+	if (node->init_from_dsn)
+		pfree(node->init_from_dsn);
+	pfree(node);
+}
+
+/*
+ * Update the status field on the local node (as identified by current
+ * sysid,tlid,dboid) of bdr.bdr_nodes. The node record must already exist.
  *
- * SPI must be initialized, and you must be in a running transaction that is
- * not bound to any remote node replication state.
+ * Unlike bdr_nodes_get_local_status, this inteface does not accept
+ * sysid, tlid and dboid input but can only set the status of the local node.
  */
 void
 bdr_nodes_set_local_status(char status)
@@ -137,11 +233,20 @@ bdr_nodes_set_local_status(char status)
 	Oid			argtypes[] = { CHAROID, TEXTOID, OIDOID, OIDOID };
 	Datum		values[4];
 	char		sysid_str[33];
+	bool		tx_started = false;
+	bool		spi_pushed;
 
-	Assert(status != '\0'); /* Cannot pass \0 to delete */
-	Assert(IsTransactionState());
+	Assert(status != '\0'); /* Cannot pass \0 */
 	/* Cannot have replication apply state set in this tx */
 	Assert(replication_origin_id == InvalidRepNodeId);
+
+	if (!IsTransactionState())
+	{
+		tx_started = true;
+		StartTransactionCommand();
+	}
+	spi_pushed = SPI_push_conditional();
+	SPI_connect();
 
 	snprintf(sysid_str, sizeof(sysid_str), UINT64_FORMAT,
 			 GetSystemIdentifier());
@@ -153,17 +258,24 @@ bdr_nodes_set_local_status(char status)
 	values[3] = ObjectIdGetDatum(MyDatabaseId);
 
 	spi_ret = SPI_execute_with_args(
-							   "INSERT INTO bdr.bdr_nodes"
-							   " (node_status, node_sysid, node_timeline, node_dboid)"
-							   " VALUES ($1, $2, $3, $4);",
+							   "UPDATE bdr.bdr_nodes"
+							   "   SET node_status = $1"
+							   " WHERE node_sysid = $2"
+							   "   AND node_timeline = $3"
+							   "   AND node_dboid = $4;",
 							   4, argtypes, values, NULL, false, 0);
 
-	if (spi_ret != SPI_OK_INSERT)
-		elog(ERROR, "Unable to insert row (status=%c, node_sysid="
+	if (spi_ret != SPI_OK_UPDATE)
+		elog(ERROR, "Unable to set status=%c of row (node_sysid="
 					UINT64_FORMAT ", node_timeline=%u, node_dboid=%u) "
-					"into bdr.bdr_nodes: SPI error %d",
+					"in bdr.bdr_nodes: SPI error %d",
 					status, GetSystemIdentifier(), ThisTimeLineID,
 					MyDatabaseId, spi_ret);
+
+	SPI_finish();
+	SPI_pop_conditional(spi_pushed);
+	if (tx_started)
+		CommitTransactionCommand();
 }
 
 /*
@@ -216,6 +328,301 @@ bdr_fetch_node_id_via_sysid(uint64 sysid, TimeLineID tli, Oid dboid)
 			 sysid, tli, dboid, MyDatabaseId,
 			 "");
 	return GetReplicationIdentifier(ident, false);
+}
+
+/*
+ * Read connection configuration data from the DB and return zero or more
+ * matching palloc'd BdrConnectionConfig results in a list.
+ *
+ * A transaction must be open.
+ *
+ * The list and values are allocated in the calling memory context. By default
+ * this is the transaction memory context, but you can switch to contexts
+ * before calling.
+ *
+ * Each BdrConnectionConfig's char* fields are palloc'd values.
+ *
+ * Uses the SPI, so push/pop caller's SPI state if needed.
+ *
+ * May raise exceptions from queries, SPI errors, etc.
+ *
+ * If both an entry with conn_origin for this node and one with null
+ * conn_origin are found, only the one specific to this node is returned,
+ * as it takes precedence over any generic configuration entry.
+ */
+List*
+bdr_read_connection_configs()
+{
+	HeapTuple tuple;
+	StringInfoData query;
+	int			i;
+	int			ret;
+	List	   *configs = NIL;
+	MemoryContext caller_ctx, saved_ctx;
+	char		sysid_str[33];
+	Datum		values[3];
+	Oid			types[3] = { TEXTOID, OIDOID, OIDOID };
+
+	Assert(IsTransactionState());
+
+	/* Save the calling memory context, which we'll allocate results in */
+	caller_ctx = MemoryContextSwitchTo(CurTransactionContext);
+
+	initStringInfo(&query);
+
+	/*
+	 * Find a connections row specific to this origin node or if none
+	 * exists, the default connection data for that node.
+	 *
+	 * Configurations for all nodes, including the local node, are read.
+	 */
+	appendStringInfo(&query, "SELECT DISTINCT ON (conn_sysid, conn_timeline, conn_dboid) "
+							 "  conn_sysid, conn_timeline, conn_dboid, "
+							 "  conn_dsn, conn_apply_delay, "
+							 "  conn_replication_sets, "
+							 "  conn_is_unidirectional, "
+							 "  conn_origin_dboid <> 0 AS origin_is_my_id "
+							 "FROM bdr.bdr_connections "
+							 "WHERE (conn_origin_sysid = '0' "
+							 "  AND  conn_origin_timeline = 0 "
+							 "  AND  conn_origin_dboid = 0) "
+							 "   OR (conn_origin_sysid = $1 "
+							 "  AND  conn_origin_timeline = $2 "
+							 "  AND  conn_origin_dboid = $3) "
+							 "ORDER BY conn_sysid, conn_timeline, conn_dboid, "
+							 "         conn_origin_sysid ASC NULLS LAST, "
+							 "         conn_timeline ASC NULLS LAST, "
+							 "         conn_dboid ASC NULLS LAST "
+					 );
+
+	snprintf(sysid_str, sizeof(sysid_str), UINT64_FORMAT, GetSystemIdentifier());
+	sysid_str[sizeof(sysid_str)-1] = '\0';
+
+	values[0] = CStringGetTextDatum(&sysid_str[0]);
+	values[1] = ObjectIdGetDatum(ThisTimeLineID);
+	values[2] = ObjectIdGetDatum(MyDatabaseId);
+
+	SPI_connect();
+
+	ret = SPI_execute_with_args(query.data, 3, types, values, NULL, false, 0);
+
+	if (ret != SPI_OK_SELECT)
+		elog(ERROR, "SPI error while querying bdr.bdr_connections");
+
+	/* Switch to calling memory context to copy results */
+	saved_ctx = MemoryContextSwitchTo(caller_ctx);
+
+	for (i = 0; i < SPI_processed; i++)
+	{
+		Datum			tmp_datum;
+		bool			isnull;
+		ArrayType	   *conn_replication_sets;
+		char		   *tmp_sysid;
+
+		BdrConnectionConfig *cfg = palloc(sizeof(BdrConnectionConfig));
+
+		tuple = SPI_tuptable->vals[i];
+
+		/*
+		 * Fetch tuple attributes
+		 *
+		 * Note: SPI_getvalue calls the output function for the type, so the
+		 * string is allocated in our memory context and doesn't need copying.
+		 */
+		tmp_sysid = SPI_getvalue(tuple, SPI_tuptable->tupdesc,
+								 getattno("conn_sysid"));
+
+		if (sscanf(tmp_sysid, UINT64_FORMAT, &cfg->sysid) != 1)
+			elog(ERROR, "Parsing sysid uint64 from %s failed", tmp_sysid);
+
+		tmp_datum = SPI_getbinval(tuple, SPI_tuptable->tupdesc,
+								  getattno("conn_timeline"),
+								  &isnull);
+		Assert(!isnull);
+		cfg->timeline = DatumGetObjectId(tmp_datum);
+
+		tmp_datum = SPI_getbinval(tuple, SPI_tuptable->tupdesc,
+								  getattno("conn_dboid"),
+								  &isnull);
+		Assert(!isnull);
+		cfg->dboid = DatumGetObjectId(tmp_datum);
+
+		tmp_datum = SPI_getbinval(tuple, SPI_tuptable->tupdesc,
+								  getattno("conn_is_unidirectional"),
+								  &isnull);
+		Assert(!isnull);
+		cfg->is_unidirectional = DatumGetBool(tmp_datum);
+
+		tmp_datum = SPI_getbinval(tuple, SPI_tuptable->tupdesc,
+								  getattno("origin_is_my_id"),
+								  &isnull);
+		Assert(!isnull);
+		cfg->origin_is_my_id = DatumGetBool(tmp_datum);
+
+
+		cfg->dsn = SPI_getvalue(tuple,
+											 SPI_tuptable->tupdesc,
+											 getattno("conn_dsn"));
+
+		tmp_datum = SPI_getbinval(tuple, SPI_tuptable->tupdesc,
+								  getattno("conn_apply_delay"), &isnull);
+		if (isnull)
+			cfg->apply_delay = -1;
+		else
+			cfg->apply_delay = DatumGetInt32(tmp_datum);
+
+		/*
+		 * Replication sets are stored in the catalogs as a text[]
+		 * of identifiers, so we'll want to unpack that.
+		 */
+
+		conn_replication_sets = (ArrayType*)
+			SPI_getbinval(tuple, SPI_tuptable->tupdesc,
+						  getattno("conn_replication_sets"), &isnull);
+
+		if (isnull)
+			cfg->replication_sets = NULL;
+		else
+		{
+			cfg->replication_sets =
+				bdr_textarr_to_identliststr(DatumGetArrayTypeP(conn_replication_sets));
+		}
+
+		configs = lcons(cfg, configs);
+
+	}
+
+	MemoryContextSwitchTo(saved_ctx);
+
+	SPI_finish();
+
+	MemoryContextSwitchTo(caller_ctx);
+
+	return configs;
+}
+
+void
+bdr_free_connection_config(BdrConnectionConfig *cfg)
+{
+	if (cfg->dsn != NULL)
+		pfree(cfg->dsn);
+	if (cfg->replication_sets != NULL)
+		pfree(cfg->replication_sets);
+}
+
+/*
+ * Fetch the connection configuration for the local node, i.e. the entry
+ * with our (conn_sysid, conn_tlid, conn_dboid).
+ */
+BdrConnectionConfig*
+bdr_get_connection_config(uint64 sysid, TimeLineID timeline, Oid dboid,
+						  bool missing_ok)
+{
+	List *configs;
+	ListCell *lc;
+	MemoryContext saved_ctx;
+	BdrConnectionConfig *found_config = NULL;
+	bool tx_started = false;
+
+	Assert(MyDatabaseId != InvalidOid);
+
+	if (!IsTransactionState())
+	{
+		tx_started = true;
+		StartTransactionCommand();
+	}
+
+	saved_ctx = MemoryContextSwitchTo(TopMemoryContext);
+	configs = bdr_read_connection_configs();
+	MemoryContextSwitchTo(saved_ctx);
+
+	/*
+	 * TODO DYNCONF Instead of reading all configs and then discarding all but
+	 * the interesting one, we should really be doing a different query that
+	 * returns only the configuration of interest. As this runs only during apply
+	 * worker startup the impact is negligible.
+	 */
+	foreach(lc, configs)
+	{
+		BdrConnectionConfig *cfg = (BdrConnectionConfig*) lfirst(lc);
+
+		if (cfg->sysid == sysid
+			&& cfg->timeline == timeline
+			&& cfg->dboid == dboid)
+		{
+			found_config = cfg;
+			break;
+		}
+		else
+		{
+			bdr_free_connection_config(cfg);
+		}
+	}
+
+	if (found_config == NULL && !missing_ok)
+		elog(ERROR, "Failed to find expected bdr.connections row "
+					"(conn_sysid,conn_timeline,conn_dboid) = "
+					"("UINT64_FORMAT",%u,%u) "
+					"in bdr.bdr_connections",
+					sysid, timeline, dboid);
+
+	if (tx_started)
+		CommitTransactionCommand();
+
+	list_free(configs);
+
+	return found_config;
+}
+
+
+static int
+getattno(const char *colname)
+{
+	int attno;
+
+	attno = SPI_fnumber(SPI_tuptable->tupdesc, colname);
+	if (attno == SPI_ERROR_NOATTRIBUTE)
+		elog(ERROR, "SPI error while reading %s from bdr.bdr_connections", colname);
+
+	return attno;
+}
+
+/*
+ * Given a text[] Datum guaranteed to contain no nulls, return an
+ * identifier-quoted comma-separated string allocated in the current memory
+ * context.
+ */
+static char*
+bdr_textarr_to_identliststr(ArrayType *textarray)
+{
+	Datum		   *elems;
+	int				nelems, i;
+	StringInfoData	si;
+
+	deconstruct_array(textarray,
+					  TEXTOID, -1, false, 'i',
+					  &elems, NULL, &nelems);
+
+	if (nelems == 0)
+		return pstrdup("");
+
+	initStringInfo(&si);
+
+	appendStringInfoString(&si,
+		quote_identifier(TextDatumGetCString(elems[0])));
+	for (i = 1; i < nelems; i++)
+	{
+		appendStringInfoString(&si, ",");
+		appendStringInfoString(&si,
+			quote_identifier(TextDatumGetCString(elems[i])));
+	}
+
+	/*
+	 * The stringinfo is on the stack, but its data element is palloc'd
+	 * in the caller's context and can be returned safely.
+	 */
+	return si.data;
+
 }
 
 /*

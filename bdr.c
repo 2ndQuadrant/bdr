@@ -71,23 +71,18 @@ extern Oid			origin_dboid;
 /* end externs for bdr apply state */
 
 ResourceOwner bdr_saved_resowner;
-static bool bdr_is_restart = false;
 Oid   BdrNodesRelid;
 Oid   BdrConflictHistoryRelId;
 Oid   BdrLocksRelid;
 Oid   BdrLocksByOwnerRelid;
 Oid   BdrReplicationSetConfigRelid;
 
-BdrConnectionConfig  **bdr_connection_configs;
-/* All databases for which BDR is configured, valid after _PG_init */
-char **bdr_distinct_dbnames;
-uint32 bdr_distinct_dbnames_count = 0;
-
 /* GUC storage */
 static char *connections = NULL;
 static bool bdr_synchronous_commit;
 int bdr_default_apply_delay;
 int bdr_max_workers;
+int bdr_max_databases;
 static bool bdr_skip_ddl_replication;
 bool bdr_skip_ddl_locking;
 bool bdr_do_not_replicate;
@@ -101,11 +96,17 @@ BdrWorkerType bdr_worker_type = BDR_WORKER_EMPTY_SLOT;
 /* shortcut for finding the the worker shmem block */
 BdrWorkerControl *BdrWorkerCtl = NULL;
 
+/* This worker's block within BdrWorkerCtl - only valid in bdr workers */
+BdrWorker  *bdr_worker_slot = NULL;
+
+/* Worker generation number; see bdr_worker_shmem_startup comments */
+static uint16 bdr_worker_generation;
+
+
 PG_MODULE_MAGIC;
 
 void		_PG_init(void);
 static void bdr_worker_shmem_startup(void);
-static void bdr_worker_shmem_create_workers(void);
 
 PGDLLEXPORT Datum bdr_apply_pause(PG_FUNCTION_ARGS);
 PGDLLEXPORT Datum bdr_apply_resume(PG_FUNCTION_ARGS);
@@ -123,7 +124,7 @@ PG_FUNCTION_INFO_V1(bdr_min_remote_version_num);
 PG_FUNCTION_INFO_V1(bdr_variant);
 PG_FUNCTION_INFO_V1(bdr_get_local_nodeid);
 
-static void
+void
 bdr_sigterm(SIGNAL_ARGS)
 {
 	int			save_errno = errno;
@@ -144,7 +145,7 @@ bdr_sigterm(SIGNAL_ARGS)
 	errno = save_errno;
 }
 
-static void
+void
 bdr_sighup(SIGNAL_ARGS)
 {
 	int			save_errno = errno;
@@ -212,7 +213,7 @@ bdr_get_remote_dboid(const char *conninfo_db)
  *
  * The replication identifier is allocated in the current memory context.
  */
-void
+static void
 bdr_build_ident_and_slotname(uint64 remote_sysid, TimeLineID remote_tlid,
 		Oid remote_dboid, char **out_replication_identifier,
 		Name out_slot_name)
@@ -438,7 +439,7 @@ bdr_worker_init(char *dbname)
 	/* make sure BDR extension exists */
 	bdr_executor_always_allow_writes(true);
 	StartTransactionCommand();
-	bdr_maintain_schema();
+	bdr_maintain_schema(true);
 	CommitTransactionCommand();
 	bdr_executor_always_allow_writes(false);
 
@@ -570,215 +571,6 @@ bdr_establish_connection_and_slot(const char *dsn,
 	return streamConn;
 }
 
-/*
- * In postmaster, at shared_preload_libaries time, create the GUCs for a
- * connection. They'll be accessed by the apply worker that uses these GUCs
- * later.
- *
- * Returns false if the config wasn't created for some reason (missing
- * required options, etc); true if it's ok. Out parameters are not changed if
- * false is returned.
- *
- * Params:
- *
- *  name
- *  Name of this conn - bdr.<name>
- *
- *  used_databases
- *  Array of char*, names of distinct databases named in configured conns
- *
- *  num_used_databases
- *  Number of distinct databases named in conns
- *
- *	out_config
- *  Assigned a palloc'd pointer to GUC storage for this config'd connection
- *
- * out_config is set even if false is returned, as the GUCs have still been
- * created. Test out_config->is_valid to see whether the connection is usable.
- */
-static bool
-bdr_create_con_gucs(char  *name,
-					char **used_databases,
-					Size  *num_used_databases,
-					char **database_initcons,
-					BdrConnectionConfig **out_config)
-{
-	Size		off;
-	char	   *errormsg = NULL;
-	PQconninfoOption *options;
-	PQconninfoOption *cur_option;
-	BdrConnectionConfig *opts;
-
-	/* don't free, referenced by the guc machinery! */
-	char	   *optname_dsn = palloc(strlen(name) + 30);
-	char	   *optname_delay = palloc(strlen(name) + 30);
-	char	   *optname_replica = palloc(strlen(name) + 30);
-	char	   *optname_local_dsn = palloc(strlen(name) + 30);
-	char	   *optname_local_dbname = palloc(strlen(name) + 30);
-	char	   *optname_replication_sets = palloc(strlen(name) + 30);
-
-	Assert(process_shared_preload_libraries_in_progress);
-
-	/* Ensure the connection name is legal */
-	if (strchr(name, '_') != NULL)
-	{
-		ereport(ERROR,
-				(errmsg("bdr.connections entry '%s' contains the '_' character, which is not permitted", name)));
-	}
-
-	/* allocate storage for connection parameters */
-	opts = palloc0(sizeof(BdrConnectionConfig));
-	opts->is_valid = false;
-	*out_config = opts;
-
-	opts->name = pstrdup(name);
-
-	/* Define GUCs for this connection */
-	sprintf(optname_dsn, "bdr.%s_dsn", name);
-	DefineCustomStringVariable(optname_dsn,
-							   optname_dsn,
-							   NULL,
-							   &opts->dsn,
-							   NULL, PGC_POSTMASTER,
-							   GUC_NOT_IN_SAMPLE,
-							   NULL, NULL, NULL);
-
-	sprintf(optname_delay, "bdr.%s_apply_delay", name);
-	DefineCustomIntVariable(optname_delay,
-							optname_delay,
-							NULL,
-							&opts->apply_delay,
-							-1, -1, INT_MAX,
-							PGC_SIGHUP,
-							GUC_UNIT_MS,
-							NULL, NULL, NULL);
-
-	sprintf(optname_replica, "bdr.%s_init_replica", name);
-	DefineCustomBoolVariable(optname_replica,
-							 optname_replica,
-							 NULL,
-							 &opts->init_replica,
-							 false,
-							 PGC_SIGHUP,
-							 0,
-							 NULL, NULL, NULL);
-
-	sprintf(optname_local_dsn, "bdr.%s_replica_local_dsn", name);
-	DefineCustomStringVariable(optname_local_dsn,
-							   optname_local_dsn,
-							   NULL,
-							   &opts->replica_local_dsn,
-							   NULL, PGC_POSTMASTER,
-							   GUC_NOT_IN_SAMPLE,
-							   NULL, NULL, NULL);
-
-	sprintf(optname_local_dbname, "bdr.%s_local_dbname", name);
-	DefineCustomStringVariable(optname_local_dbname,
-							   optname_local_dbname,
-							   NULL,
-							   &opts->dbname,
-							   NULL, PGC_POSTMASTER,
-							   GUC_NOT_IN_SAMPLE,
-							   NULL, NULL, NULL);
-
-	sprintf(optname_replication_sets, "bdr.%s_replication_sets", name);
-	DefineCustomStringVariable(optname_replication_sets,
-							   optname_replication_sets,
-							   NULL,
-							   &opts->replication_sets,
-							   NULL, PGC_POSTMASTER,
-							   GUC_LIST_INPUT | GUC_LIST_QUOTE,
-							   NULL, NULL, NULL);
-
-
-	if (!opts->dsn)
-	{
-		elog(WARNING, "bdr %s: no connection information", name);
-		return false;
-	}
-
-	elog(DEBUG2, "bdr %s: dsn=%s", name, opts->dsn);
-
-	options = PQconninfoParse(opts->dsn, &errormsg);
-	if (errormsg != NULL)
-	{
-		char	   *str = pstrdup(errormsg);
-
-		PQfreemem(errormsg);
-		ereport(ERROR,
-				(errcode(ERRCODE_CONFIG_FILE_ERROR),
-				 errmsg("bdr %s: error in dsn: %s", name, str)));
-	}
-
-	if (opts->dbname == NULL)
-	{
-		cur_option = options;
-		while (cur_option->keyword != NULL)
-		{
-			if (strcmp(cur_option->keyword, "dbname") == 0)
-			{
-				if (cur_option->val == NULL)
-					ereport(ERROR,
-							(errcode(ERRCODE_CONFIG_FILE_ERROR),
-							 errmsg("bdr %s: no dbname set", name)));
-
-				opts->dbname = pstrdup(cur_option->val);
-				elog(DEBUG2, "bdr %s: dbname=%s", name, opts->dbname);
-			}
-
-			if (cur_option->val != NULL)
-			{
-				elog(DEBUG3, "bdr %s: opt %s, val: %s",
-					 name, cur_option->keyword, cur_option->val);
-			}
-			cur_option++;
-		}
-	}
-
-	/* cleanup */
-	PQconninfoFree(options);
-
-	/*
-	 * If this is a DB name we haven't seen yet, add it to our set of known
-	 * DBs.
-	 */
-	for (off = 0; off < *num_used_databases; off++)
-	{
-		if (strcmp(opts->dbname, used_databases[off]) == 0)
-			break;
-	}
-
-	if (off == *num_used_databases)
-	{
-		/* Didn't find a match, add new db name */
-		used_databases[(*num_used_databases)++] =
-			pstrdup(opts->dbname);
-		elog(DEBUG2, "bdr %s: Saw new database %s, now %i known dbs",
-			 name, opts->dbname, (int)(*num_used_databases));
-	}
-
-	/*
-	 * Make sure that at most one of the worker configs for each DB can be
-	 * configured to run initialization.
-	 */
-	if (opts->init_replica)
-	{
-		elog(DEBUG2, "bdr %s: has init_replica=t", name);
-		if (database_initcons[off] != NULL)
-			ereport(ERROR,
-					(errcode(ERRCODE_CONFIG_FILE_ERROR),
-					 errmsg("Connections %s and %s on database %s both have bdr_init_replica enabled, cannot continue",
-							name, database_initcons[off], used_databases[off])));
-		else
-			database_initcons[off] = name; /* no need to pstrdup, see _PG_init */
-	}
-
-	opts->is_valid = true;
-
-	/* optname vars intentionally leaked, see above */
-	return true;
-}
-
 static size_t
 bdr_worker_shmem_size()
 {
@@ -846,161 +638,41 @@ bdr_worker_shmem_startup(void)
 		/* Init shm segment header after postmaster start or restart */
 		memset(BdrWorkerCtl, 0, bdr_worker_shmem_size());
 		BdrWorkerCtl->lock = LWLockAssign();
+		/* Assigned on supervisor launch */
+		BdrWorkerCtl->supervisor_latch = NULL;
 
 		/*
-		 * Now that the shm segment is initialized, we can populate it with
-		 * BdrWorker entries for the connections we created GUCs for during
-		 * _PG_init.
+		 * The postmaster keeps track of a generation number for BDR workers
+		 * and increments it at each restart.
 		 *
-		 * We must do this whether it's initial launch or a postmaster restart,
-		 * as shmem gets cleared on postmaster restart.
+		 * Background workers aren't unregistered when the postmaster restarts
+		 * and clears shared memory, so after a restart the supervisor and
+		 * per-db workers have no idea what workers are/aren't running, nor any
+		 * way to control them. To make a clean BDR restart possible the
+		 * workers registered before the restart need to find out about the
+		 * restart and terminate.
+		 *
+		 * To make that possible we pass the generation number to the worker
+		 * in its main argument, and also set it in shared memory. The two
+		 * must match. If they don't, the worker will proc_exit(0), causing its
+		 * self to be unregistered.
+		 *
+		 * This should really be part of the bgworker API its self, handled via
+		 * a BGW_NO_RESTART_ON_CRASH flag or by providing a generation number
+		 * as a bgworker argument. However, for now we're stuck with this
+		 * workaround.
 		 */
-		bdr_worker_shmem_create_workers();
+		if (bdr_worker_generation == UINT16_MAX)
+			/* We could handle wrap-around, but really ... */
+			elog(FATAL, "Too many postmaster crash/restart cycles. Restart the PostgreSQL server.");
+
+		BdrWorkerCtl->worker_generation = ++bdr_worker_generation;
 	}
 	LWLockRelease(AddinShmemInitLock);
 
 	/*
 	 * We don't have anything to preserve on shutdown and don't support being
 	 * unloaded from a running Pg, so don't register any shutdown hook.
-	 */
-}
-
-/*
- * After _PG_init we've read the GUCs for the workers but haven't populated the
- * shared memory segment at BdrWorkerCtl with BDRWorker entries yet.
- *
- * The shm segment is initialized now, so do that.
- */
-static void
-bdr_worker_shmem_create_workers(void)
-{
-	uint32 off;
-
-	/*
-	 * Create a BdrPerdbWorker for each distinct database found during
-	 * _PG_init. The bgworker for each has already been registered and assigned
-	 * a slot position during _PG_init, but the slot doesn't have anything
-	 * useful in it yet. Because it was already registered we don't need
-	 * any protection against duplicate launches on restart here.
-	 *
-	 * Because these slots are pre-assigned before shmem is bought up they
-	 * MUST be reserved first, before any shmem entries are allocated, so
-	 * they get the first slots.
-	 *
-	 * When started, this worker will continue setup - doing any required
-	 * initialization of the database, then registering dynamic bgworkers for
-	 * the DB's individual BDR connections.
-	 *
-	 * If we ever want to support dynamically adding/removing DBs from BDR at
-	 * runtime, this'll need to move into a static bgworker because dynamic
-	 * bgworkers can't be launched directly from the postmaster. We'll need a
-	 * "bdr manager" static bgworker.
-	 */
-
-	for (off = 0; off < bdr_distinct_dbnames_count; off++)
-	{
-		BdrWorker	   *shmworker;
-		BdrPerdbWorker *perdb;
-		uint32		ctl_idx;
-
-		shmworker = (BdrWorker *) bdr_worker_shmem_alloc(BDR_WORKER_PERDB, &ctl_idx);
-		Assert(shmworker->worker_type == BDR_WORKER_PERDB);
-		/*
-		 * The workers have already been assigned shmem indexes during
-		 * _PG_init, so they MUST get the same index here. So long as these
-		 * entries are assigned before any other shmem slots they will.
-		 */
-		Assert(ctl_idx == off);
-		perdb = &shmworker->data.perdb;
-
-		strncpy(NameStr(perdb->dbname), bdr_distinct_dbnames[off], NAMEDATALEN);
-		NameStr(perdb->dbname)[NAMEDATALEN-1] = '\0';
-
-		perdb->nnodes = 0;
-		perdb->seq_slot = off;
-
-		elog(DEBUG1, "Assigning shmem bdr database worker for db %s",
-			 NameStr(perdb->dbname));
-	}
-
-	/*
-	 * Populate shmem with a BdrApplyWorker for each valid BdrConnectionConfig
-	 * found during _PG_init so that the per-db worker will register it for
-	 * startup after performing any BDR initialisation work.
-	 *
-	 * Use of shared memory for this is required for EXEC_BACKEND (windows)
-	 * where we can't share postmaster memory, and for when we're launching a
-	 * bgworker from another bgworker where the fork() from postmaster doesn't
-	 * provide access to the launching bgworker's memory.
-	 *
-	 * The workers aren't actually launched here, they get launched by
-	 * launch_apply_workers(), called by the database's per-db static worker.
-	 */
-	for (off = 0; off < bdr_max_workers; off++)
-	{
-		BdrConnectionConfig *cfg = bdr_connection_configs[off];
-		BdrWorker	   *shmworker;
-		BdrApplyWorker *worker;
-		int				i;
-		bool			found_perdb = false;
-
-		if (cfg == NULL || !cfg->is_valid)
-			continue;
-
-		shmworker = (BdrWorker *) bdr_worker_shmem_alloc(BDR_WORKER_APPLY, NULL);
-		Assert(shmworker->worker_type == BDR_WORKER_APPLY);
-		worker = &shmworker->data.apply;
-		worker->connection_config_idx = off;
-		worker->replay_stop_lsn = InvalidXLogRecPtr;
-		worker->forward_changesets = false;
-
-		/*
-		 * Now search for the perdb worker belonging to this slot.
-		 */
-		for (i = 0; i < bdr_max_workers; i++)
-		{
-			BdrPerdbWorker *perdb;
-			BdrWorker *entry = &BdrWorkerCtl->slots[i];
-
-			if (entry->worker_type != BDR_WORKER_PERDB)
-				continue;
-
-			perdb = &entry->data.perdb;
-
-			if (strcmp(NameStr(perdb->dbname), cfg->dbname) != 0)
-				continue;
-
-			/*
-			 * Remember how many connections there are for this node. This
-			 * will, e.g., be used to determine the quorum for ddl locks and
-			 * sequencer votes.
-			 */
-			perdb->nnodes++;
-			found_perdb = true;
-			worker->perdb_worker_off = i;
-			break;
-		}
-
-		if (!found_perdb)
-			elog(ERROR, "couldn't find perdb entry for apply worker");
-
-		/*
-		 * If this is a postmaster restart, don't register the worker a second
-		 * time when the per-db worker starts up.
-		 */
-		worker->bgw_is_registered = bdr_is_restart;
-	}
-
-	/*
-	 * Make sure that we don't register workers if the postmaster restarts and
-	 * clears shmem, by keeping a record that we've asked for registration once
-	 * already.
-	 */
-	bdr_is_restart = true;
-
-	/*
-	 * We might need to re-populate shared memory after a postmaster restart.
-	 * So we don't free the bdr_startup_context or its contents.
 	 */
 }
 
@@ -1014,12 +686,16 @@ bdr_worker_shmem_create_workers(void)
  * ctl_idx, if passed, is set to the index of the worker within BdrWorkerCtl.
  *
  * To release a block, use bdr_worker_shmem_release(...)
+ *
+ * You must hold BdrWorkerCtl->lock in LW_EXCLUSIVE mode for
+ * this call.
  */
 BdrWorker*
 bdr_worker_shmem_alloc(BdrWorkerType worker_type, uint32 *ctl_idx)
 {
 	int i;
-	LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
+
+	Assert(LWLockHeldByMe(BdrWorkerCtl->lock));
 	for (i = 0; i < bdr_max_workers; i++)
 	{
 		BdrWorker *new_entry = &BdrWorkerCtl->slots[i];
@@ -1027,13 +703,11 @@ bdr_worker_shmem_alloc(BdrWorkerType worker_type, uint32 *ctl_idx)
 		{
 			memset(new_entry, 0, sizeof(BdrWorker));
 			new_entry->worker_type = worker_type;
-			LWLockRelease(BdrWorkerCtl->lock);
 			if (ctl_idx)
 				*ctl_idx = i;
 			return new_entry;
 		}
 	}
-	LWLockRelease(BdrWorkerCtl->lock);
 	ereport(ERROR,
 			(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 			errmsg("No free bdr worker slots - bdr.max_workers is too low")));
@@ -1127,17 +801,7 @@ bdr_do_not_replicate_assign_hook(bool newvalue, void *extra)
 void
 _PG_init(void)
 {
-	List	   *connames;
-	ListCell   *c;
 	MemoryContext old_context;
-	char	   *connections_tmp;
-
-	char	  **used_databases;
-	char      **database_initcons;
-	Size		num_used_databases = 0;
-	int			connection_config_idx;
-	BackgroundWorker bgw;
-	uint32		off;
 
 	if (!process_shared_preload_libraries_in_progress)
 		ereport(ERROR,
@@ -1150,6 +814,15 @@ _PG_init(void)
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("bdr requires \"track_commit_timestamp\" to be enabled")));
 #endif
+
+	/*
+	 * _PG_init only runs on first load, not on postmaster restart, so
+	 * set the worker generation here. See bdr_worker_shmem_startup.
+	 *
+	 * It starts at 1 because the postmaster zeroes shmem on restart, so 0 can
+	 * mean "just restarted, hasn't run shmem setup callback yet".
+	 */
+	bdr_worker_generation = 1;
 
 	/*
 	 * Force btree_gist to be loaded - its absolutely not required at this
@@ -1213,10 +886,19 @@ _PG_init(void)
 	 * memory array.
 	 */
 	DefineCustomIntVariable("bdr.max_workers",
-							"max number of bdr connections + distinct databases. -1 auto-calculates.",
+							"max number of bdr connections + distinct databases.",
 							NULL,
 							&bdr_max_workers,
-							-1, -1, 100,
+							20, 2, 100,
+							PGC_POSTMASTER,
+							0,
+							NULL, NULL, NULL);
+
+	DefineCustomIntVariable("bdr.max_databases",
+							"max number of distinct databases on which BDR may be active",
+							NULL,
+							&bdr_max_databases,
+							-1, -1, 50,
 							PGC_POSTMASTER,
 							0,
 							NULL, NULL, NULL);
@@ -1271,15 +953,6 @@ _PG_init(void)
 							   0,
 							   NULL, NULL, NULL);
 
-	DefineCustomBoolVariable("bdr.init_from_basedump",
-							 "Internal. Set during local initialization from basebackup only",
-							 NULL,
-							 &bdr_init_from_basedump,
-							 false,
-							 PGC_BACKEND,
-							 0,
-							 NULL, NULL, NULL);
-
 	DefineCustomBoolVariable("bdr.do_not_replicate",
 							 "Internal. Set during local initialization from basebackup only",
 							 NULL,
@@ -1293,40 +966,7 @@ _PG_init(void)
 
 	bdr_label_init();
 
-	/* if nothing is configured, we're done */
-	if (connections == NULL)
-	{
-		/* If worker count autoconfigured, use zero */
-		if (bdr_max_workers == -1)
-			bdr_max_workers = 0;
-		goto out;
-	}
-
-	/* Copy 'connections' guc so SplitIdentifierString can modify it in-place */
-	connections_tmp = pstrdup(connections);
-
-	/* Get the list of BDR connection names to iterate over. */
-	if (!SplitIdentifierString(connections_tmp, ',', &connames))
-	{
-		/* syntax error in list */
-		ereport(FATAL,
-				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-				 errmsg("invalid list syntax for \"bdr.connections\"")));
-	}
-
-	/*
-	 * If bdr.max_connections is -1, the default, auto-set it with the
-	 * most workers we might need with the current number of connections
-	 * configured. Per-db workers are due to use shmem too, so we might
-	 * have up to one per-db worker for each configured connection if
-	 * each is on a different DB.
-	 */
-	if (bdr_max_workers == -1)
-	{
-		bdr_max_workers = list_length(connames) * 3;
-		elog(DEBUG1, "bdr: bdr_max_workers unset, configuring for %d workers",
-				bdr_max_workers);
-	}
+	bdr_supervisor_register();
 
 	/*
 	 * Sanity check max_worker_processes to make sure it's at least big enough
@@ -1343,6 +983,17 @@ _PG_init(void)
 	}
 
 	/*
+	 * If bdr.max_databases is not explicitly specified, assume the worst case
+	 * of many DBs with one connection per DB.
+	 */
+	if (bdr_max_databases == -1)
+	{
+		bdr_max_databases = bdr_max_workers / 2;
+		elog(DEBUG1, "Autoconfiguring bdr.max_databases to %d (bdr.max_workers/2)",
+			 bdr_max_databases);
+	}
+
+	/*
 	 * Allocate a shared memory segment to store the bgworker connection
 	 * information we must pass to each worker we launch.
 	 *
@@ -1352,110 +1003,19 @@ _PG_init(void)
 	 */
 	bdr_worker_alloc_shmem_segment();
 
-	/* Allocate space for BDR connection GUCs */
-	bdr_connection_configs = (BdrConnectionConfig**)
-		palloc0(bdr_max_workers * sizeof(BdrConnectionConfig*));
-
-	/* Names of all databases we're going to be doing BDR for */
-	used_databases = palloc0(sizeof(char *) * list_length(connames));
-	/*
-	 * For each db named in used_databases, the corresponding index is the name
-	 * of the conn with bdr_init_replica=t if any.
-	 */
-	database_initcons = palloc0(sizeof(char *) * list_length(connames));
-
-	/*
-	 * Read all connections, create/validate parameters for them and do sanity
-	 * checks as we go.
-	 */
-	connection_config_idx = 0;
-	foreach(c, connames)
-	{
-		char		   *name;
-		name = (char *) lfirst(c);
-
-		if (!bdr_create_con_gucs(name, used_databases, &num_used_databases,
-								 database_initcons,
-								 &bdr_connection_configs[connection_config_idx]))
-			continue;
-
-		Assert(bdr_connection_configs[connection_config_idx] != NULL);
-		connection_config_idx++;
-	}
-
-	/*
-	 * Free the connames list cells. The strings are just pointers into
-	 * 'connections' and must not be freed'd.
-	 */
-	list_free(connames);
-	connames = NIL;
-
-	/*
-	 * We've ensured there are no duplicate init connections, no need to
-	 * remember which conn is the bdr_init_replica conn anymore. The contents
-	 * are just pointers into connections_tmp so we don't want to free them.
-	 */
-	pfree(database_initcons);
-
-	/*
-	 * Copy the list of used databases into a global where we can
-	 * use it for registering the per-database workers during shmem init.
-	 */
-	bdr_distinct_dbnames = palloc(sizeof(char*)*num_used_databases);
-	memcpy(bdr_distinct_dbnames, used_databases,
-		   sizeof(char*)*num_used_databases);
-	bdr_distinct_dbnames_count = num_used_databases;
-	pfree(used_databases);
-	num_used_databases = 0;
-	used_databases = NULL;
-
-	/*
-	 * Register the per-db workers and assign them an index in shmem. The
-	 * memory doesn't actually exist yet, it'll be allocated in shmem init.
-	 *
-	 * No protection against multiple launches is requried because this
-	 * only runs once, in _PG_init.
-	 */
-	bgw.bgw_flags = BGWORKER_SHMEM_ACCESS |
-		BGWORKER_BACKEND_DATABASE_CONNECTION;
-	bgw.bgw_start_time = BgWorkerStart_RecoveryFinished;
-	bgw.bgw_main = NULL;
-	strncpy(bgw.bgw_library_name, BDR_LIBRARY_NAME, BGW_MAXLEN);
-	strncpy(bgw.bgw_function_name, "bdr_perdb_worker_main", BGW_MAXLEN);
-	bgw.bgw_restart_time = 5;
-	bgw.bgw_notify_pid = 0;
-	for (off = 0; off < bdr_distinct_dbnames_count; off++)
-	{
-		snprintf(bgw.bgw_name, BGW_MAXLEN,
-				 "bdr: %s", bdr_distinct_dbnames[off]);
-		/*
-		 * This index into BdrWorkerCtl shmem hasn't been populated yet. It'll
-		 * be set up in bdr_worker_shmem_create_workers .
-		 */
-		bgw.bgw_main_arg = Int32GetDatum(off);
-		RegisterBackgroundWorker(&bgw);
-	}
-
 	EmitWarningsOnPlaceholders("bdr");
-
-	pfree(connections_tmp);
-
-out:
 
 	/*
 	 * initialize other modules that need shared memory
-	 *
-	 * Do so even if we haven't any remote nodes setup, the shared memory might
-	 * still be needed for some sql callable functions or such.
 	 */
 
 	/* register a slot for every remote node */
 	bdr_count_shmem_init(bdr_max_workers);
 	bdr_executor_init();
 #ifdef BUILDING_BDR
-	bdr_sequencer_shmem_init(bdr_max_workers, bdr_distinct_dbnames_count);
+	bdr_sequencer_shmem_init(bdr_max_workers, bdr_max_databases);
 #endif
-	bdr_locks_shmem_init(bdr_distinct_dbnames_count);
+	bdr_locks_shmem_init();
 	/* Set up a ProcessUtility_hook to stop unsupported commands being run */
 	init_bdr_commandfilter();
 
@@ -1483,9 +1043,12 @@ bdr_lookup_relid(const char *relname, Oid schema_oid)
  * Concurrent executions will block, but not fail.
  *
  * Must be called inside transaction.
+ *
+ * If update_extensions is true, ALTER EXTENSION commands will be issued to
+ * ensure the required extension(s) are at the current version.
  */
 void
-bdr_maintain_schema(void)
+bdr_maintain_schema(bool update_extensions)
 {
 	Relation	extrel;
 	Oid			btree_gist_oid;
@@ -1504,17 +1067,13 @@ bdr_maintain_schema(void)
 	btree_gist_oid = get_extension_oid("btree_gist", true);
 	bdr_oid = get_extension_oid("bdr", true);
 
-	/* create required extension if they don't exists yet */
 	if (btree_gist_oid == InvalidOid)
-	{
-		CreateExtensionStmt create_stmt;
+		elog(ERROR, "btree_gist is required by BDR but not installed in the current database");
 
-		create_stmt.if_not_exists = false;
-		create_stmt.options = NIL;
-		create_stmt.extname = (char *)"btree_gist";
-		CreateExtension(&create_stmt);
-	}
-	else
+	if (bdr_oid == InvalidOid)
+		elog(ERROR, "bdr extension is not installed in the current database");
+
+	if (update_extensions)
 	{
 		AlterExtensionStmt alter_stmt;
 
@@ -1522,20 +1081,6 @@ bdr_maintain_schema(void)
 		alter_stmt.options = NIL;
 		alter_stmt.extname = (char *)"btree_gist";
 		ExecAlterExtensionStmt(&alter_stmt);
-	}
-
-	if (bdr_oid == InvalidOid)
-	{
-		CreateExtensionStmt create_stmt;
-
-		create_stmt.if_not_exists = false;
-		create_stmt.options = NIL;
-		create_stmt.extname = (char *)"bdr";
-		CreateExtension(&create_stmt);
-	}
-	else
-	{
-		AlterExtensionStmt alter_stmt;
 
 		/* TODO: only do this if necessary */
 		alter_stmt.options = NIL;

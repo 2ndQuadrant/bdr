@@ -13,6 +13,8 @@
 
 #include "postgres_fe.h"
 
+#include "getopt_long.h"
+
 #include "port.h"
 
 #include "libpq-fe.h"
@@ -45,74 +47,102 @@
 typedef struct RemoteInfo {
 	uint64		sysid;
 	TimeLineID	tlid;
-	Oid			dboid;
+	int			numdbs;
+	Oid		   *dboids;
+	char	  **dbnames;
 } RemoteInfo;
 
-static char			*argv0 = NULL;
-static const char	*progname;
-static uint64		 system_identifier;
-static NameData		 restore_point_name;
-static char			*data_dir = NULL;
-static char			*config_options = "";
-static char			 pid_file[MAXPGPATH];
-static time_t		 start_time;
+typedef struct NodeInfo {
+	uint64		remote_sysid;
+	TimeLineID	remote_tlid;
+	uint64		local_sysid;
+	TimeLineID	local_tlid;
+} NodeInfo;
+
+typedef enum {
+	VERBOSITY_NORMAL,
+	VERBOSITY_VERBOSE,
+	VERBOSITY_DEBUG
+} VerbosityLevelEnum;
+
+static char		   *argv0 = NULL;
+static const char  *progname;
+static char		   *data_dir = NULL;
+static char			pid_file[MAXPGPATH];
+static time_t		start_time;
+static VerbosityLevelEnum	verbosity = VERBOSITY_NORMAL;
 
 /* defined as static so that die() can close them */
 static PGconn		*local_conn = NULL;
 static PGconn		*remote_conn = NULL;
 
-BdrConnectionConfig	**bdr_connection_configs;
-size_t				 bdr_connection_config_count;
-
 static void signal_handler(int sig);
 static void usage(void);
 static void die(const char *fmt,...)
 __attribute__((format(PG_PRINTF_ATTRIBUTE, 1, 2)));
-static void print_msg(const char *fmt,...)
-__attribute__((format(PG_PRINTF_ATTRIBUTE, 1, 2)));
+static void print_msg(VerbosityLevelEnum level, const char *fmt,...)
+__attribute__((format(PG_PRINTF_ATTRIBUTE, 2, 3)));
 
-static int run_pg_ctl(const char *arg, const char *opts);
-static char *get_postgres_guc_value(char *guc, char *defval);
-static bool wait_postmaster_connection(void);
-static void wait_postgres_shutdown(void);
+static int run_pg_ctl(const char *arg);
+static void run_basebackup(const char *remote_connstr, const char *data_dir);
+static void wait_postmaster_connection(const char *connstr);
+static void wait_postmaster_shutdown(void);
 
-#ifdef BUILDING_UDR
-static void initialize_bdr(PGconn *conn);
-#endif
-static void remove_unwanted_state(void);
-static void initialize_replication_identifiers(char *remote_lsn);
-static void create_replication_identifier(PGconn *conn,
-				const char *remote_ident, char *remote_lsn);
-static char *create_restore_point(char *remote_connstr);
-static void initialize_replication_slots(bool init_replica);
-static void create_replication_slot(PGconn *conn, Name slot_name);
-static RemoteInfo *get_remote_info(PGconn *conn, char* aux_connstr);
-static Oid get_dboid_from_dbname(PGconn *conn, const char* dbname);
+static void validate_remote_node(PGconn *conn);
+static void initialize_node_entry(PGconn *conn, NodeInfo *ni, Oid dboid,
+								  char *remote_connstr);
+static void remove_unwanted_files(void);
+static void remove_unwanted_data(PGconn *conn, char *dbname);
+static void initialize_replication_identifier(PGconn *conn, NodeInfo *ni, Oid dboid, char *remote_lsn);
+static char *create_restore_point(PGconn *conn, char *restore_point_name);
+static void initialize_replication_slot(PGconn *conn, NodeInfo *ni, Oid dboid);
+static void bdr_node_start(PGconn *conn, char *remote_connstr, char *local_connstr);
+
+static RemoteInfo *get_remote_info(char* connstr);
+
+static void initialize_data_dir(char *data_dir, char *connstr,
+					char *postgresql_conf, char *pg_hba_conf);
 
 static uint64 GenerateSystemIdentifier(void);
-static int set_sysid(void);
+static int set_sysid(uint64 sysid);
 
-static void read_bdr_config(void);
 static void WriteRecoveryConf(PQExpBuffer contents);
+static void CopyConfFile(char *fromfile, char *tofile);
 
-static char *detect_local_conninfo(void);
-static char *detect_remote_conninfo(void);
-char *get_conninfo(char *dbname, char *dbhost, char *dbport, char *dbuser);
-static char *PQconninfoParams_to_conninfo(const char *const * keywords, const char *const * values);
-static char *escapeConninfoValue(const char *val);
+char *get_connstr(char *dbname, char *dbhost, char *dbport, char *dbuser);
+static char *PQconninfoParamsToConnstr(const char *const * keywords, const char *const * values);
+static void appendPQExpBufferConnstrValue(PQExpBuffer buf, const char *str);
 
-static bool parse_bool(const char *value, bool *result);
-static bool parse_bool_with_len(const char *value, size_t len, bool *result);
-static char *trimwhitespace(const char *str);
-static char	**split_list_guc(char *str, size_t *count);
-
-static bool is_pg_dir(char *path);
+static bool file_exists(const char *path);
+static bool is_pg_dir(const char *path);
+static void copy_file(char *fromfile, char *tofile);
 static char *find_other_exec_or_die(const char *argv0, const char *target, const char *versionstr);
 static bool postmaster_is_alive(pid_t pid);
 static long get_pgpid(void);
-static char **readfile(const char *path);
-static void free_readfile(char **optlines);
 
+static PGconn *
+connectdb(char *connstr, const char *dbname)
+{
+	PGconn *conn;
+	char   *connstring = connstr;
+
+	/* TODO: deparse and reconstruct the connection string properly. */
+	if (dbname)
+	{
+		PQExpBuffer	 connbuf = createPQExpBuffer();
+
+		printfPQExpBuffer(connbuf, "%s dbname=", connstr);
+		appendPQExpBufferConnstrValue(connbuf, dbname);
+		connstring = pg_strdup(connbuf->data);
+		destroyPQExpBuffer(connbuf);
+	}
+
+	conn = PQconnectdb(connstring);
+	if (PQstatus(conn) != CONNECTION_OK)
+		die(_("Connection to database failed: %s, connection string was: %s\n"), PQerrorMessage(conn), connstring);
+
+	return conn;
+}
 
 void signal_handler(int sig)
 {
@@ -129,13 +159,40 @@ main(int argc, char **argv)
 	int	i;
 	int	c;
 	PQExpBuffer recoveryconfcontents = createPQExpBuffer();
-	char *remote_lsn;
-	bool hot_standby;
+	RemoteInfo *remote_info;
+	NodeInfo	node_info;
+	char		restore_point_name[NAMEDATALEN];
+	char	   *remote_lsn;
+	bool		stop = false;
+	int			optindex;
 	char *local_connstr = NULL;
+	char *local_dbhost = NULL,
+		 *local_dbport = NULL,
+		 *local_dbuser = NULL;
 	char *remote_connstr = NULL;
-	char *dbhost = NULL,
-		 *dbport = NULL,
-		 *dbuser = NULL;
+	char *remote_dbhost = NULL,
+		 *remote_dbport = NULL,
+		 *remote_dbuser = NULL;
+	char *postgresql_conf = NULL,
+		 *pg_hba_conf = NULL,
+		 *recovery_conf = NULL;
+
+	static struct option long_options[] = {
+		{"pgdata", required_argument, NULL, 'D'},
+		{"remote-dbname", required_argument, NULL, 'd'},
+		{"remote-host", required_argument, NULL, 'h'},
+		{"remote-port", required_argument, NULL, 'p'},
+		{"remote-user", required_argument, NULL, 'U'},
+		{"local-dbname", required_argument, NULL, 2},
+		{"local-host", required_argument, NULL, 3},
+		{"local-port", required_argument, NULL, 4},
+		{"local-user", required_argument, NULL, 5},
+		{"postgresql-conf", required_argument, NULL, 6},
+		{"hba-conf", required_argument, NULL, 7},
+		{"recovery-conf", required_argument, NULL, 8},
+		{"stop", no_argument, NULL, 's'},
+		{NULL, 0, NULL, 0}
+	};
 
 	argv0 = argv[0];
 	progname = get_progname(argv[0]);
@@ -156,30 +213,66 @@ main(int argc, char **argv)
 	}
 
 	/* Option parsing and validation */
-	while ((c = getopt(argc, argv, "D:d:h:o:p:U:")) != -1)
+	while ((c = getopt_long(argc, argv, "D:d:h:p:s:U:v", long_options, &optindex)) != -1)
 	{
 		switch (c)
 		{
 			case 'D':
 				data_dir = pg_strdup(optarg);
 				break;
-			case 'o':
-				config_options = pg_strdup(optarg);
-				break;
 			case 'd':
 				remote_connstr = pg_strdup(optarg);
 				break;
 			case 'h':
-				dbhost = pg_strdup(optarg);
+				remote_dbhost = pg_strdup(optarg);
 				break;
 			case 'p':
-				dbport = pg_strdup(optarg);
+				remote_dbport = pg_strdup(optarg);
 				break;
 			case 'U':
-				dbuser = pg_strdup(optarg);
+				remote_dbuser = pg_strdup(optarg);
+				break;
+			case 'v':
+				verbosity++;
+				break;
+			case 2:
+				local_connstr = pg_strdup(optarg);
+				break;
+			case 3:
+				local_dbhost = pg_strdup(optarg);
+				break;
+			case 4:
+				local_dbport = pg_strdup(optarg);
+				break;
+			case 5:
+				local_dbuser = pg_strdup(optarg);
+				break;
+			case 6:
+				{
+					postgresql_conf = pg_strdup(optarg);
+					if (postgresql_conf != NULL && !file_exists(postgresql_conf))
+						die(_("The specified postgresql.conf file does not exist."));
+					break;
+				}
+			case 7:
+				{
+					pg_hba_conf = pg_strdup(optarg);
+					if (pg_hba_conf != NULL && !file_exists(pg_hba_conf))
+						die(_("The specified pg_hba.conf file does not exist."));
+					break;
+				}
+			case 8:
+				{
+					recovery_conf = pg_strdup(optarg);
+					if (recovery_conf != NULL && !file_exists(recovery_conf))
+						die(_("The specified recovery.conf file does not exist."));
+					break;
+				}
+			case 's':
+				stop = true;
 				break;
 			default:
-				fprintf(stderr, _("%s: unknown option\n"), progname);
+				fprintf(stderr, _("Unknown option\n"));
 				fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
 				exit(1);
 		}
@@ -187,110 +280,199 @@ main(int argc, char **argv)
 
 	if (data_dir == NULL)
 	{
-		fprintf(stderr, _("%s: no data directory specified\n"), progname);
+		fprintf(stderr, _("No data directory specified\n"));
 		fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
 		exit(1);
 	}
-	if (!is_pg_dir(data_dir))
-	{
-		die(_("%s: \"%s\" is not valid postgres data directory\n"), progname, data_dir);
-	}
-	snprintf(pid_file, MAXPGPATH, "%s/postmaster.pid", data_dir);
 
-	print_msg(_("%s: starting...\n"), progname);
-
-	/*
-	 * Initialization
-	 */
-	system_identifier = GenerateSystemIdentifier();
-	print_msg(_("Assigning new system identifier: "UINT64_FORMAT"...\n"), system_identifier);
-
-	read_bdr_config();
-
-	if (!remote_connstr && !dbhost && !dbport && !dbuser)
-		remote_connstr = detect_remote_conninfo();
-	else
-		remote_connstr = get_conninfo(remote_connstr, dbhost, dbport, dbuser);
+	remote_connstr = get_connstr(remote_connstr, remote_dbhost, remote_dbport, remote_dbuser);
+	local_connstr = get_connstr(local_connstr, local_dbhost, local_dbport, local_dbuser);
 
 	if (!remote_connstr || !strlen(remote_connstr))
-		die(_("Could not detect remote connection\n"));
+		die(_("Remote connection must be specified.\n"));
+	if (!local_connstr || !strlen(local_connstr))
+		die(_("Local connection must be specified.\n"));
 
-	local_connstr = detect_local_conninfo();
-	if (local_connstr == NULL)
-		die(_("Failed to detect local connection info. Please specify replica_local_dsn in the postgresql.conf.\n"));
-
-	/* Hot standby would start cluster in read only mode, we don't want that. */
-	if (!parse_bool(get_postgres_guc_value("hot_standby", NULL), &hot_standby))
-		die(_("Invalid boolean value for configuration parameter \"hot_standby\"\n"));
-	if (hot_standby)
-		die(_("Cluster cannot be configured with hot_standby = on when using bdr\n"));
-
-	remove_unwanted_state();
+	print_msg(VERBOSITY_NORMAL, _("%s: starting ...\n"), progname);
 
 	/*
-	 * Initialization done, create replication slots to init node
-	 * and restore point on remote side.
+	 * Generate new identifier for local node.
 	 */
-	print_msg(_("Creating primary replication slots...\n"));
-	initialize_replication_slots(true);
+	node_info.local_sysid = GenerateSystemIdentifier();
+	print_msg(VERBOSITY_VERBOSE,
+			  _("Generated new local system identifier: "UINT64_FORMAT"\n"),
+			  node_info.local_sysid);
 
-	print_msg(_("Creating restore point...\n"));
-	snprintf(NameStr(restore_point_name), NAMEDATALEN,
-			 "bdr_"UINT64_FORMAT, system_identifier);
-	remote_lsn = create_restore_point(remote_connstr);
+	/* Read the remote server indetification. */
+	print_msg(VERBOSITY_NORMAL,
+			  _("Getting remote server identification ...\n"));
+	remote_info = get_remote_info(remote_connstr);
+
+	/* If there are no BDR enabled dbs, just bail. */
+	if (remote_info->numdbs < 1)
+		die(_("Remote node does not have any BDR enabled databases.\n"));
+
+	print_msg(VERBOSITY_NORMAL,
+			  _("Detected %d BDR database(s) on remote server\n"),
+			  remote_info->numdbs);
+
+	node_info.remote_sysid = remote_info->sysid;
+	node_info.remote_tlid = remote_info->tlid;
+	/*
+	 * Once the physical replication reaches the restore point, it will
+	 * bump the timeline by one.
+	 */
+	node_info.local_tlid = remote_info->tlid + 1;
+
+	print_msg(VERBOSITY_NORMAL,
+			  _("Updating BDR configuration on the remote node:\n"));
+
+	/* Initialize remote node. */
+	for (i = 0; i < remote_info->numdbs; i++)
+	{
+		char *dbname = remote_info->dbnames[i];
+		remote_conn = connectdb(remote_connstr, dbname);
+
+		/*
+		 * Make sure that we can use the remote node as init node.
+		 */
+		print_msg(VERBOSITY_NORMAL,
+				  _(" %s: validating BDR configuration ...\n"), dbname);
+		validate_remote_node(remote_conn);
+
+		/*
+		 * Create replication slots on remote node.
+		 */
+		print_msg(VERBOSITY_NORMAL,
+				  _(" %s: creating replication slot ...\n"), dbname);
+		initialize_replication_slot(remote_conn, &node_info, remote_info->dboids[i]);
+
+		/*
+		 * Create node entry for future local node.
+		 */
+		print_msg(VERBOSITY_NORMAL,
+				  _(" %s: creating node entry for local node ...\n"), dbname);
+		initialize_node_entry(remote_conn, &node_info, remote_info->dboids[i],
+							  remote_connstr);
+
+		/* Don't hold connection since the next step might take long time. */
+		PQfinish(remote_conn);
+		local_conn = NULL;
+	}
+
+	/*
+	 * Create basebackup or use existing one
+	 */
+	initialize_data_dir(data_dir, remote_connstr, postgresql_conf, pg_hba_conf);
+	snprintf(pid_file, MAXPGPATH, "%s/postmaster.pid", data_dir);
+
+	/*
+	 * Create restore point to which we will catchup via physical replication.
+	 */
+	remote_conn = PQconnectdb(remote_connstr);
+	if (PQstatus(remote_conn) != CONNECTION_OK)
+		die(_("Connection to remote node failed: %s"), PQerrorMessage(remote_conn));
+
+	print_msg(VERBOSITY_NORMAL, _("Creating restore point on remote node ...\n"));
+
+	snprintf(restore_point_name, NAMEDATALEN,
+			 "bdr_"UINT64_FORMAT, node_info.local_sysid);
+	remote_lsn = create_restore_point(remote_conn, restore_point_name);
+
+	PQfinish(remote_conn);
 
 	/*
 	 * Get local db to consistent state (for lsn after slot creation).
 	 */
-	print_msg(_("Bringing cluster to the restore point...\n"));
-	appendPQExpBuffer(recoveryconfcontents, "standby_mode = 'on'\n");
-	appendPQExpBuffer(recoveryconfcontents, "recovery_target_name = '%s'\n", NameStr(restore_point_name));
+	print_msg(VERBOSITY_NORMAL,
+			  _("Bringing local node to the restore point ...\n"));
+	if (recovery_conf)
+	{
+		CopyConfFile(recovery_conf, "recovery.conf");
+	}
+	else
+	{
+		appendPQExpBuffer(recoveryconfcontents, "standby_mode = 'on'\n");
+		appendPQExpBuffer(recoveryconfcontents, "primary_conninfo = '%s'\n", remote_connstr);
+	}
+	appendPQExpBuffer(recoveryconfcontents, "recovery_target_name = '%s'\n", restore_point_name);
 	appendPQExpBuffer(recoveryconfcontents, "recovery_target_inclusive = true\n");
-	appendPQExpBuffer(recoveryconfcontents, "primary_conninfo = '%s'\n", remote_connstr);
 	WriteRecoveryConf(recoveryconfcontents);
 
-	run_pg_ctl("start -w -l \"bdr_init_copy_postgres.log\"",
-#ifdef BUILDING_BDR
-			   "-c shared_preload_libraries=''"
-#else
-			   ""
-#endif
-			   );
-	if (!wait_postmaster_connection())
-		die(_("Could not connect to local node"));
+	/*
+	 * Start local node with BDR disabled, and wait until it starts accepting
+	 * connections which means it has caught up to the restore point.
+	 */
+	run_pg_ctl("start -l \"bdr_init_copy_postgres.log\" -o \"-c shared_preload_libraries=''\"");
+	wait_postmaster_connection(local_connstr);
 
 	/*
-	 * Postgres should have reached restore point and is accepting connections,
-	 * create slots to other nodes and local replication identifiers.
+	 * Clean any per-node data that were copied by pg_basebackup.
 	 */
-	local_conn = PQconnectdb(local_connstr);
-	if (PQstatus(local_conn) != CONNECTION_OK)
-		die(_("Connection to database failed: %s"), PQerrorMessage(local_conn));
+	for (i = 0; i < remote_info->numdbs; i++)
+	{
+		local_conn = connectdb(local_connstr, remote_info->dbnames[i]);
 
-#ifdef BUILDING_UDR
-	print_msg(_("Ensuring bdr extension is installed...\n"));
-	initialize_bdr(remote_conn);
-	initialize_bdr(local_conn);
-#endif
+		remove_unwanted_data(local_conn, remote_info->dbnames[i]);
 
-	print_msg(_("Creating secondary replication slots...\n"));
-	initialize_replication_slots(false);
-	print_msg(_("Creating local replication identifier...\n"));
-	initialize_replication_identifiers(remote_lsn);
+		PQfinish(local_conn);
+		local_conn = NULL;
+	}
 
-	PQfinish(local_conn);
-	local_conn = NULL;
+	/* Stop Postgres so we can reset system id and start it with BDR loaded. */
+	run_pg_ctl("stop");
+	wait_postmaster_shutdown();
 
 	/*
-	 * Make this node functional as individual bdr node and start it.
+	 * Individualize the local node by changing the system identifier.
 	 */
-	run_pg_ctl("stop", "");
-	wait_postgres_shutdown();
+	set_sysid(node_info.local_sysid);
 
-	set_sysid();
+	/*
+	 * Start the node again, now with BDR active so that we can join the node
+	 * to the BDR cluster. This is final start, so don't log to to special log
+	 * file anymore.
+	 */
+	print_msg(VERBOSITY_NORMAL,
+			  _("Initializing BDR on the local node:\n"));
 
-	print_msg(_("Starting the cluster...\n"));
-	run_pg_ctl("start -w", "-c bdr.init_from_basedump=true");
+	run_pg_ctl("start -l \"bdr_init_copy_postgres.log\"");
+	wait_postmaster_connection(local_connstr);
+
+	for (i = 0; i < remote_info->numdbs; i++)
+	{
+		char *dbname = remote_info->dbnames[i];
+
+		local_conn = connectdb(local_connstr, dbname);
+
+		/*
+		 * Create the identifier which is setup with the position to which we already
+		 * caught up using physical replication.
+		 */
+		print_msg(VERBOSITY_VERBOSE,
+				  _(" %s: creating replication identifier ...\n"), dbname);
+		initialize_replication_identifier(local_conn, &node_info, remote_info->dboids[i], remote_lsn);
+
+		/*
+		 * And finally add the node to the cluster.
+		 */
+		print_msg(VERBOSITY_NORMAL,
+				  _(" %s: adding the database to BDR cluster ...\n"), dbname);
+		bdr_node_start(local_conn, remote_connstr, local_connstr);
+
+		PQfinish(local_conn);
+		local_conn = NULL;
+	}
+
+	/* If user does not want the node to be running at the end, stop it. */
+	if (stop)
+	{
+		print_msg(VERBOSITY_NORMAL, _("Stopping the local node ...\n"));
+		run_pg_ctl("stop");
+		wait_postmaster_shutdown();
+	}
+
+	print_msg(VERBOSITY_NORMAL, _("All done\n"));
 
 	return 0;
 }
@@ -302,19 +484,29 @@ main(int argc, char **argv)
 static void
 usage(void)
 {
-	printf(_("%s initializes bdr from PostgreSQL instance made using pg_basebackup.\n\n"), progname);
-	printf(_("pg_basebackup -X stream must be used to populate the data directory before\n"));
-	printf(_("running %s to initialize BDR on it.\n\n"), progname);
+	printf(_("%s initializes new BDR node from existing BDR instance.\n\n"), progname);
 	printf(_("Usage:\n"));
 	printf(_("  %s [OPTION]...\n"), progname);
 	printf(_("\nGeneral options:\n"));
-	printf(_("  -D, --pgdata=DIRECTORY base backup directory\n"));
-	printf(_("  -o                     configuration options passed to pg_ctl's -o\n"));
+	printf(_("  -D, --pgdata=DIRECTORY data directory to be used for new nodem,\n"));
+	printf(_("                         can be either empty/non-existing directory,\n"));
+	printf(_("                         or directory populated using pg_basebackup -X stream\n"));
+	printf(_("                         command\n"));
+	printf(_("  -s, --stop             stop the server once the initialization is done\n"));
+	printf(_("  --postgresql-conf      path to the new postgresql.conf\n"));
+	printf(_("  --hba-conf             path to the new pg_hba.conf\n"));
+	printf(_("  --recovery-conf        path to the template recovery.conf\n"));
 	printf(_("\nConnection options:\n"));
-	printf(_("  -d, --dbname=CONNSTR   connection string\n"));
-	printf(_("  -h, --host=HOSTNAME    database server host or socket directory\n"));
-	printf(_("  -p, --port=PORT        database server port number\n"));
-	printf(_("  -U, --username=NAME    connect as specified database user\n"));
+	printf(_("  -d, --remote-dbname=CONNSTR\n"));
+	printf(_("                         connection string for remote node\n"));
+	printf(_("  -h, --remote-host=HOSTNAME\n"));
+	printf(_("                         server host or socket directory for remote node\n"));
+	printf(_("  -p, --remote-port=PORT server port number for remote node\n"));
+	printf(_("  -U, --remote-user=NAME connect as specified database user to the remote node\n"));
+	printf(_("  --local-dbname=CONNSTR connection string for local node\n"));
+	printf(_("  --local-host=HOSTNAME  server host or socket directory for local node\n"));
+	printf(_("  --local-port=PORT      server port number for local node\n"));
+	printf(_("  --local-user=NAME      connect as specified database user to the local node\n"));
 }
 
 /*
@@ -328,11 +520,13 @@ die(const char *fmt,...)
 	vfprintf(stderr, fmt, argptr);
 	va_end(argptr);
 
-	PQfinish(local_conn);
-	PQfinish(remote_conn);
+	if (local_conn)
+		PQfinish(local_conn);
+	if (remote_conn)
+		PQfinish(remote_conn);
 
 	if (get_pgpid())
-		run_pg_ctl("stop -s", "");
+		run_pg_ctl("stop -s");
 
 	exit(1);
 }
@@ -341,13 +535,16 @@ die(const char *fmt,...)
  * Print message to stdout and flush
  */
 static void
-print_msg(const char *fmt,...)
+print_msg(VerbosityLevelEnum level, const char *fmt,...)
 {
-	va_list argptr;
-	va_start(argptr, fmt);
-	vfprintf(stdout, fmt, argptr);
-	va_end(argptr);
-	fflush(stdout);
+	if (verbosity >= level)
+	{
+		va_list argptr;
+		va_start(argptr, fmt);
+		vfprintf(stdout, fmt, argptr);
+		va_end(argptr);
+		fflush(stdout);
+	}
 }
 
 
@@ -355,15 +552,19 @@ print_msg(const char *fmt,...)
  * Start pg_ctl with given argument(s) - used to start/stop postgres
  */
 static int
-run_pg_ctl(const char *arg, const char *opts)
+run_pg_ctl(const char *arg)
 {
 	int			 ret;
 	PQExpBuffer  cmd = createPQExpBuffer();
 	char		*exec_path = find_other_exec_or_die(argv0, "pg_ctl", "pg_ctl (PostgreSQL) " PG_VERSION "\n");
 
-	appendPQExpBuffer(cmd, "%s %s -D \"%s\" -o \"%s %s\"", exec_path, arg, data_dir,
-					  opts, config_options);
+	appendPQExpBuffer(cmd, "%s %s -D \"%s\" -s", exec_path, arg, data_dir);
 
+	/* Run pg_ctl in silent mode unless we run in debug mode. */
+	if (verbosity < VERBOSITY_DEBUG)
+		appendPQExpBuffer(cmd, " -s");
+
+	print_msg(VERBOSITY_DEBUG, _("Running pg_ctl: %s.\n"), cmd->data);
 	ret = system(cmd->data);
 
 	destroyPQExpBuffer(cmd);
@@ -373,53 +574,43 @@ run_pg_ctl(const char *arg, const char *opts)
 
 
 /*
- * Ugly way to read postgresql.conf
+ * Run pg_basebackup to create the copy of the origin node.
  */
-static char *
-get_postgres_guc_value(char *guc, char *defval)
+static void
+run_basebackup(const char *remote_connstr, const char *data_dir)
 {
-	FILE		*fp;
-	int			 status;
+	int			 ret;
 	PQExpBuffer  cmd = createPQExpBuffer();
-	char		*exec_path = find_other_exec_or_die(argv0, "postgres", PG_BACKEND_VERSIONSTR);
-	PQExpBuffer	 retbuf = createPQExpBuffer();
-	char		 buf[8192];
-	char		*ret;
+	char		*exec_path = find_other_exec_or_die(argv0, "pg_basebackup", "pg_basebackup (PostgreSQL) " PG_VERSION "\n");
 
-	printfPQExpBuffer(cmd, "%s -D \"%s\" %s -C \"%s\" 2>\"%s\"",
-					  exec_path, data_dir, config_options, guc, DEVNULL);
+	appendPQExpBuffer(cmd, "%s -D \"%s\" -d \"%s\" -X s -P", exec_path, data_dir, remote_connstr);
 
-	fp = popen(cmd->data, "r");
-	while (fgets(buf, sizeof(buf), fp) != NULL)
-		appendPQExpBufferStr(retbuf, buf);
+	/* Run pg_basebackup in verbose mode if we are running in verbose mode. */
+	if (verbosity >= VERBOSITY_VERBOSE)
+		appendPQExpBuffer(cmd, " -v");
 
-	status = pclose(fp);
+	print_msg(VERBOSITY_DEBUG, _("Running pg_basebackup: %s.\n"), cmd->data);
+	ret = system(cmd->data);
+
 	destroyPQExpBuffer(cmd);
 
-	if (status != 0)
-	{
-		destroyPQExpBuffer(retbuf);
-		return defval;
-	}
-
-	ret = trimwhitespace(retbuf->data);
-	destroyPQExpBuffer(retbuf);
-
-	return ret;
+	if (ret != 0)
+		die(_("pg_basebackup failed, cannot continue.\n"));
 }
 
 /*
  * Set system identifier to system id we used for registering the slots.
  */
 static int
-set_sysid(void)
+set_sysid(uint64 sysid)
 {
 	int			 ret;
 	PQExpBuffer  cmd = createPQExpBuffer();
 	char		*exec_path = find_other_exec_or_die(argv0, "bdr_resetxlog", "bdr_resetxlog (PostgreSQL) " PG_VERSION "\n");
 
-	appendPQExpBuffer(cmd, "%s \"-s "UINT64_FORMAT"\" \"%s\"", exec_path, system_identifier, data_dir);
+	appendPQExpBuffer(cmd, "%s \"-s "UINT64_FORMAT"\" \"%s\"", exec_path, sysid, data_dir);
 
+	print_msg(VERBOSITY_DEBUG, _("Running bdr_resetxlog: %s.\n"), cmd->data);
 	ret = system(cmd->data);
 
 	destroyPQExpBuffer(cmd);
@@ -427,105 +618,11 @@ set_sysid(void)
 	return ret;
 }
 
-
-/*
- * Read bdr configuration
- *
- * This is somewhat ugly version of bdr_create_con_gucs and parts of _PG_init
- */
-static void
-read_bdr_config(void)
-{
-	char		*connections;
-	char		*errormsg = NULL;
-	int			connection_config_idx;
-	size_t		connection_count = 0;
-	char		**connames;
-	PQconninfoOption *options;
-	PQconninfoOption *cur_option;
-
-	connections = get_postgres_guc_value("bdr.connections", NULL);
-	if (!connections)
-		die(_("bdr.connections is empty\n"));
-
-	connames = split_list_guc(connections, &connection_count);
-	pg_free(connections);
-
-	bdr_connection_config_count = connection_count;
-	bdr_connection_configs = (BdrConnectionConfig**)
-		pg_malloc0(bdr_connection_config_count * sizeof(BdrConnectionConfig*));
-
-	for (connection_config_idx = 0; connection_config_idx < connection_count; connection_config_idx++)
-	{
-		char	*name = (char *) connames[connection_config_idx];
-		char	*optname_dsn = pg_malloc(strlen(name) + 30);
-		char	*optname_local_dsn = pg_malloc(strlen(name) + 30);
-		char	*optname_replica = pg_malloc(strlen(name) + 30);
-		char	*optname_local_dbname = pg_malloc(strlen(name) + 30);
-		BdrConnectionConfig *opts;
-
-		sprintf(optname_dsn, "bdr.%s_dsn", name);
-		sprintf(optname_local_dsn, "bdr.%s_replica_local_dsn", name);
-		sprintf(optname_replica, "bdr.%s_init_replica", name);
-		sprintf(optname_local_dbname, "bdr.%s_local_dbname", name);
-
-		opts = pg_malloc0(sizeof(BdrConnectionConfig));
-		opts->name = pg_strdup(name);
-		opts->is_valid = false;
-
-		bdr_connection_configs[connection_config_idx] = opts;
-
-		opts->dsn = get_postgres_guc_value(optname_dsn, NULL);
-		if (!opts->dsn)
-			continue;
-
-		opts->replica_local_dsn = get_postgres_guc_value(optname_local_dsn, NULL);
-
-		if (!parse_bool(get_postgres_guc_value(optname_replica, "false"), &opts->init_replica))
-			die(_("Invalid boolean value for configuration parameter \"%s\"\n"), optname_replica);
-
-		opts->dbname = get_postgres_guc_value(optname_local_dbname, NULL);
-
-		options = PQconninfoParse(opts->dsn, &errormsg);
-		if (errormsg != NULL)
-		{
-			char *str = pg_strdup(errormsg);
-
-			PQfreemem(errormsg);
-			die(_("bdr %s: error in dsn: %s\n"), name, str);
-		}
-
-		if (opts->dbname == NULL)
-		{
-			cur_option = options;
-			while (cur_option->keyword != NULL)
-			{
-				if (strcmp(cur_option->keyword, "dbname") == 0)
-				{
-					if (cur_option->val == NULL)
-						die(_("bdr %s: no dbname set\n"), name);
-
-					opts->dbname = pg_strdup(cur_option->val);
-				}
-				cur_option++;
-			}
-		}
-
-
-		opts->is_valid = true;
-
-		/* cleanup */
-		PQconninfoFree(options);
-	}
-}
-
-
-
 /*
  * Cleans everything that was replicated via basebackup but we don't want it.
  */
 static void
-remove_unwanted_state(void)
+remove_unwanted_files(void)
 {
 #ifdef BUILDING_BDR
 	DIR				*lldir;
@@ -534,6 +631,9 @@ remove_unwanted_state(void)
 	PQExpBuffer		 filename = createPQExpBuffer();
 
 	printfPQExpBuffer(llpath, "%s/%s", data_dir, LLOGCDIR);
+
+	print_msg(VERBOSITY_DEBUG, _("Removing data from \"%s\" directory.\n"),
+			  llpath->data);
 
 	/*
 	 * Remove stray logical replication checkpoints
@@ -577,6 +677,57 @@ remove_unwanted_state(void)
 #endif
 }
 
+/*
+ * Init the datadir
+ *
+ * This function can either ensure provided datadir is a postgres datadir,
+ * or create it using pg_basebackup.
+ *
+ * In any case, new postresql.conf and pg_hba.conf will be copied to the
+ * datadir if they are provided.
+ */
+static void
+initialize_data_dir(char *data_dir, char *connstr,
+					char *postgresql_conf, char *pg_hba_conf)
+{
+	/* Run basebackup as needed. */
+	switch (pg_check_dir(data_dir))
+	{
+		case 0:		/*Does not exist */
+		case 1:		/* Exists, empty */
+			{
+				if (connstr)
+				{
+					print_msg(VERBOSITY_NORMAL,
+							  _("Creating base backup of the remote node...\n"));
+					run_basebackup(connstr, data_dir);
+				}
+				else
+					die(_("Directory \"%s\" does not exist.\n"),
+						data_dir);
+				break;
+			}
+		case 2:
+		case 3:		/* Exists, not empty */
+		case 4:
+			{
+				if (!is_pg_dir(data_dir))
+					die(_("Directory \"%s\" exists but is not valid postgres data directory.\n"),
+						data_dir);
+				break;
+			}
+		case -1:	/* Access problem */
+			die(_("Could not access directory \"%s\": %s.\n"),
+				data_dir, strerror(errno));
+	}
+
+	remove_unwanted_files();
+
+	if (postgresql_conf)
+		CopyConfFile(postgresql_conf, "postgresql.conf");
+	if (pg_hba_conf)
+		CopyConfFile(pg_hba_conf, "pg_hba.conf");
+}
 
 /*
  * Initialize replication slots
@@ -585,113 +736,64 @@ remove_unwanted_state(void)
  * to register replication slots for future use.
  */
 static void
-initialize_replication_slots(bool init_replica)
+initialize_replication_slot(PGconn *conn, NodeInfo *ni, Oid dboid)
 {
-	int		 i;
-
-	for (i = 0; i < bdr_connection_config_count; i++)
-	{
-		NameData	 slot_name;
-		char		 remote_ident[256];
-		RemoteInfo	*ri;
-		TimeLineID	 tlid;
-		Oid			 dboid;
-		char		 system_identifier_s[32];
-		BdrConnectionConfig *cfg = bdr_connection_configs[i];
-		PQExpBuffer		 conninfo = createPQExpBuffer();
-
-		if (!cfg || !cfg->is_valid || cfg->init_replica != init_replica)
-			continue;
-
-		printfPQExpBuffer(conninfo, "%s replication=database", cfg->dsn);
-		remote_conn = PQconnectdb(conninfo->data);
-		destroyPQExpBuffer(conninfo);
-
-		if (PQstatus(remote_conn) != CONNECTION_OK)
-		{
-			die(_("Could not connect to the remote server: %s\n"),
-						PQerrorMessage(remote_conn));
-		}
-
-		ri = get_remote_info(remote_conn, cfg->dsn);
-		dboid = cfg->init_replica ? ri->dboid : get_dboid_from_dbname(local_conn, cfg->dbname);
-
-		/* XXX: this might break if timeline switch happens in meantime */
-		tlid = cfg->init_replica ? ri->tlid + 1 : ri->tlid;
-
-		snprintf(system_identifier_s, sizeof(system_identifier_s), UINT64_FORMAT, system_identifier);
-		snprintf(NameStr(slot_name), NAMEDATALEN, BDR_SLOT_NAME_FORMAT,
-				 ri->dboid, system_identifier_s, tlid,
-				 dboid, "");
-		NameStr(slot_name)[NAMEDATALEN - 1] = '\0';
-
-		create_replication_slot(remote_conn, &slot_name);
-
-		PQfinish(remote_conn);
-		remote_conn = NULL;
-
-		snprintf(remote_ident, sizeof(remote_ident),
-				BDR_NODE_ID_FORMAT,
-				ri->sysid, ri->tlid, ri->dboid, dboid,
-				"");
-	}
-}
-
-/*
- * Get database Oid of the remotedb.
- *
- * Can't use the bdr_get_remote_dboid because it needs elog :(
- */
-static Oid
-get_remote_dboid(char *conninfo_db)
-{
-	PGconn	   *dbConn;
+	char		slotname[NAMEDATALEN];
+	char		system_identifier_s[32];
+	PQExpBuffer	query = createPQExpBuffer();
 	PGresult   *res;
-	char	   *remote_dboid;
-	Oid			remote_dboid_i;
 
-	dbConn = PQconnectdb(conninfo_db);
-	if (PQstatus(dbConn) != CONNECTION_OK)
-	{
-		die(_("Could not connect to the primary server: %s"), PQerrorMessage(dbConn));
-	}
+	snprintf(system_identifier_s, sizeof(system_identifier_s), UINT64_FORMAT, ni->local_sysid);
+	snprintf(slotname, NAMEDATALEN, BDR_SLOT_NAME_FORMAT,
+			 dboid, system_identifier_s, ni->local_tlid, dboid, "");
+	appendPQExpBuffer(query, "SELECT pg_create_logical_replication_slot(%s, '%s');",
+					  PQescapeLiteral(conn, slotname, NAMEDATALEN), "bdr");
 
-	res = PQexec(dbConn, "SELECT oid FROM pg_database WHERE datname = current_database()");
+	res = PQexec(conn, query->data);
+
 	if (PQresultStatus(res) != PGRES_TUPLES_OK)
-		die(_("Could fetch database oid: %s"), PQerrorMessage(dbConn));
-
-	if (PQntuples(res) != 1 || PQnfields(res) != 1)
-		die(_("Could not identify system: got %d rows and %d fields, expected %d rows and %d fields\n"),
-			 PQntuples(res), PQnfields(res), 1, 1);
-
-	remote_dboid = PQgetvalue(res, 0, 0);
-	if (sscanf(remote_dboid, "%u", &remote_dboid_i) != 1)
-		die(_("could not parse remote database OID %s"), remote_dboid);
+	{
+		die(_("Could not create replication slot, status %s: %s\n"),
+			 PQresStatus(PQresultStatus(res)), PQresultErrorMessage(res));
+	}
 
 	PQclear(res);
-	PQfinish(dbConn);
-
-	return remote_dboid_i;
+	destroyPQExpBuffer(query);
 }
 
 /*
  * Read replication info about remote connection
  */
 static RemoteInfo *
-get_remote_info(PGconn *conn, char* aux_connstr)
+get_remote_info(char* remote_connstr)
 {
-	RemoteInfo	*ri = (RemoteInfo *)pg_malloc(sizeof(RemoteInfo));
+	RemoteInfo *ri = (RemoteInfo *)pg_malloc(sizeof(RemoteInfo));
 	char	   *remote_sysid;
 	char	   *remote_tlid;
-	char	   *remote_dboid;
+	int			i;
 	PGresult   *res;
+	PQExpBuffer	conninfo = createPQExpBuffer();
 
-	res = PQexec(conn, "IDENTIFY_SYSTEM");
+	/*
+	 * Fetch the system identification info (sysid, tlid) via replication
+	 * connection - there is no way to get this info via SQL.
+	 */
+	printfPQExpBuffer(conninfo, "%s replication=database", remote_connstr);
+	remote_conn = PQconnectdb(conninfo->data);
+	destroyPQExpBuffer(conninfo);
+
+	if (PQstatus(remote_conn) != CONNECTION_OK)
+	{
+		die(_("Could not connect to the remote server: %s\n"),
+					PQerrorMessage(remote_conn));
+	}
+
+	res = PQexec(remote_conn, "IDENTIFY_SYSTEM");
 	if (PQresultStatus(res) != PGRES_TUPLES_OK)
 	{
 		PQclear(res);
 		die(_("Could not send replication command \"%s\": %s\n"),
-			 "IDENTIFY_SYSTEM", PQerrorMessage(conn));
+			 "IDENTIFY_SYSTEM", PQerrorMessage(remote_conn));
 	}
 
 	if (PQntuples(res) != 1 || PQnfields(res) < 4 || PQnfields(res) > 5)
@@ -704,17 +806,6 @@ get_remote_info(PGconn *conn, char* aux_connstr)
 	remote_sysid = PQgetvalue(res, 0, 0);
 	remote_tlid = PQgetvalue(res, 0, 1);
 
-	if (PQnfields(res) == 5)
-	{
-		remote_dboid = PQgetvalue(res, 0, 4);
-		if (sscanf(remote_dboid, "%u", &ri->dboid) != 1)
-			die(_("could not parse remote database OID %s"), remote_dboid);
-	}
-	else
-	{
-		ri->dboid = get_remote_dboid(aux_connstr);
-	}
-
 #ifdef HAVE_STRTOULL
 	ri->sysid = strtoull(remote_sysid, NULL, 10);
 #else
@@ -725,73 +816,61 @@ get_remote_info(PGconn *conn, char* aux_connstr)
 		die(_("Could not parse remote tlid %s\n"), remote_tlid);
 
 	PQclear(res);
+	PQfinish(remote_conn);
+	remote_conn = NULL;
+
+	/*
+	 * Fetch list of BDR enabled databases via standard SQL connection.
+	 */
+	remote_conn = PQconnectdb(remote_connstr);
+	if (PQstatus(remote_conn) != CONNECTION_OK)
+	{
+		die(_("Could not connect to the remote server: %s"), PQerrorMessage(remote_conn));
+	}
+
+	res = PQexec(remote_conn, "SELECT d.oid, d.datname "
+				 "FROM pg_catalog.pg_database d, pg_catalog.pg_shseclabel l "
+				 "WHERE l.provider = 'bdr' "
+				 "  AND l.classoid = 'pg_database'::regclass "
+				 "  AND d.oid = l.objoid;");
+	if (PQresultStatus(res) != PGRES_TUPLES_OK)
+		die(_("Could fetch remote database list: %s"), PQerrorMessage(remote_conn));
+
+	ri->numdbs = PQntuples(res);
+	ri->dboids = (Oid *) pg_malloc(ri->numdbs * sizeof(Oid));
+	ri->dbnames = (char **) pg_malloc(ri->numdbs * sizeof(char *));
+
+	for (i = 0; i < ri->numdbs; i++)
+	{
+		char   *remote_dboid = PQgetvalue(res, i, 0);
+		char   *remote_dbname = PQgetvalue(res, i, 1);
+		Oid		remote_dboid_i;
+
+		if (sscanf(remote_dboid, "%u", &remote_dboid_i) != 1)
+			die(_("Could not parse database OID %s"), remote_dboid);
+
+		ri->dboids[i] = remote_dboid_i;
+		ri->dbnames[i] = pstrdup(remote_dbname);
+	}
+
+	PQclear(res);
+
+	PQfinish(remote_conn);
+	remote_conn = NULL;
 
 	return ri;
 }
 
-/*
- * Get dboid based on dbname
- */
-static Oid
-get_dboid_from_dbname(PGconn *conn, const char* dbname)
-{
-	char		*dboid_str;
-	Oid			 dboid;
-	PQExpBuffer	 query = createPQExpBuffer();
-	PGresult	*res;
-
-	appendPQExpBuffer(query, "SELECT oid FROM pg_catalog.pg_database WHERE datname = '%s'",
-					 dbname);
-
-	res = PQexec(conn, query->data);
-	if (PQresultStatus(res) != PGRES_TUPLES_OK || PQntuples(res) != 1)
-	{
-		PQclear(res);
-		die(_("Could not get database id for \"%s\": %s\n"),
-			 dbname, PQerrorMessage(conn));
-	}
-
-	dboid_str = PQgetvalue(res, 0, 0);
-	if (sscanf(dboid_str, "%u", &dboid) != 1)
-		die(_("Could not parse database OID %s\n"), dboid_str);
-
-	PQclear(res);
-	destroyPQExpBuffer(query);
-
-	return dboid;
-}
 
 /*
- * Create replication slot
+ * Check if extension exists.
  */
-static void
-create_replication_slot(PGconn *conn, Name slot_name)
-{
-	PQExpBuffer query = createPQExpBuffer();
-	PGresult   *res;
-
-	appendPQExpBuffer(query, "CREATE_REPLICATION_SLOT \"%s\" LOGICAL %s",
-					 NameStr(*slot_name), "bdr");
-
-	res = PQexec(conn, query->data);
-
-	if (PQresultStatus(res) != PGRES_TUPLES_OK)
-	{
-		die(_("Could not send replication command \"%s\": status %s: %s\n"),
-			 query->data,
-			 PQresStatus(PQresultStatus(res)), PQresultErrorMessage(res));
-	}
-
-	PQclear(res);
-	destroyPQExpBuffer(query);
-}
-
-#ifdef BUILDING_UDR
-static void
-install_extension_if_not_exists(PGconn *conn, const char *extname)
+static bool
+extension_exists(PGconn *conn, const char *extname)
 {
 	PQExpBuffer		query = createPQExpBuffer();
 	PGresult	   *res;
+	bool			ret;
 
 	printfPQExpBuffer(query, "SELECT 1 FROM pg_catalog.pg_extension WHERE extname = %s;",
 					  PQescapeLiteral(conn, extname, strlen(extname)));
@@ -803,19 +882,31 @@ install_extension_if_not_exists(PGconn *conn, const char *extname)
 		die(_("Could not read extension info: %s\n"), PQerrorMessage(conn));
 	}
 
-	if (PQntuples(res) != 1)
+	ret = PQntuples(res) == 1;
+
+	PQclear(res);
+	destroyPQExpBuffer(query);
+
+	return ret;
+}
+
+/*
+ * Create extension.
+ */
+static void
+install_extension(PGconn *conn, const char *extname)
+{
+	PQExpBuffer		query = createPQExpBuffer();
+	PGresult	   *res;
+
+	printfPQExpBuffer(query, "CREATE EXTENSION %s;",
+					  PQescapeIdentifier(conn, extname, strlen(extname)));
+	res = PQexec(conn, query->data);
+
+	if (PQresultStatus(res) != PGRES_COMMAND_OK)
 	{
 		PQclear(res);
-
-		printfPQExpBuffer(query, "CREATE EXTENSION %s;",
-						  PQescapeIdentifier(conn, extname, strlen(extname)));
-		res = PQexec(conn, query->data);
-
-		if (PQresultStatus(res) != PGRES_COMMAND_OK)
-		{
-			PQclear(res);
-			die(_("Could not install %s extension: %s\n"), extname, PQerrorMessage(conn));
-		}
+		die(_("Could not install %s extension: %s\n"), extname, PQerrorMessage(conn));
 	}
 
 	PQclear(res);
@@ -823,81 +914,104 @@ install_extension_if_not_exists(PGconn *conn, const char *extname)
 }
 
 /*
- * Initialize bdr extension (if not already initialized).
- *
- * Should have similar logic as bdr_maintain_schema in bdr.c.
+ * Validate that BDR extension is installed on remote node
+ * and that there is at least one BDR node entry present.
  */
 static void
-initialize_bdr(PGconn *conn)
+validate_remote_node(PGconn *conn)
 {
-	install_extension_if_not_exists(conn, "btree_gist");
-	install_extension_if_not_exists(conn,"bdr");
-}
-#endif
+	PGresult   *res;
+	PQExpBuffer query = createPQExpBuffer();
 
-/*
- * Initialize new remote identifiers to specific position.
- */
-static void
-initialize_replication_identifiers(char *remote_lsn)
-{
-	int				 i;
-	PGresult		*res;
+	if (!extension_exists(conn, "bdr"))
+		die(_("The BDR extension must be installed on remote node.\n"));
 
-	/* Remove replication identifiers */
-	res = PQexec(local_conn, "SELECT "RIINTERFACE_PREFIX"replication_identifier_drop(riname) FROM "RIINTERFACE_PREFIX"replication_identifier;");
+#ifdef BUILDING_BDR
+	res = PQexec(conn, "SELECT 1 FROM bdr.bdr_nodes;");
 	if (PQresultStatus(res) != PGRES_TUPLES_OK)
 	{
 		PQclear(res);
-		die(_("Could not remove replication identifier: %s\n"), PQerrorMessage(local_conn));
+		die(_("Could fetch BDR info: %s\n"), PQerrorMessage(conn));
 	}
 
-	/* Initialize new replication identifiers */
-	for (i = 0; i < bdr_connection_config_count; i++)
+	if (PQntuples(res) < 1)
+		die(_("The remote node is not configured as a BDR node.\n"));
+
+	PQclear(res);
+#endif
+
+	destroyPQExpBuffer(query);
+}
+
+
+/*
+ * Insert node entry for local node to the remote's bdr_nodes.
+ */
+void
+initialize_node_entry(PGconn *conn, NodeInfo *ni, Oid dboid,
+					  char *remote_connstr)
+{
+	PQExpBuffer		query = createPQExpBuffer();
+	PGresult	   *res;
+
+	printfPQExpBuffer(query, "INSERT INTO bdr.bdr_nodes"
+							 " (node_status, node_sysid, node_timeline,"
+							 "	node_dboid, node_init_from_dsn)"
+							 " VALUES ('c', '"UINT64_FORMAT"', %u, %u, %s);",
+					  ni->local_sysid, ni->local_tlid, dboid,
+					  PQescapeLiteral(conn, remote_connstr, strlen(remote_connstr)));
+	res = PQexec(conn, query->data);
+
+	if (PQresultStatus(res) != PGRES_COMMAND_OK)
 	{
-		char		remote_ident[256];
-		Oid			dboid;
-		RemoteInfo	*ri;
-		BdrConnectionConfig *cfg = bdr_connection_configs[i];
-		PQExpBuffer	conninfo = createPQExpBuffer();
-
-		if (!cfg || !cfg->is_valid)
-			continue;
-
-		printfPQExpBuffer(conninfo, "%s replication=database", cfg->dsn);
-		remote_conn = PQconnectdb(conninfo->data);
-		destroyPQExpBuffer(conninfo);
-
-		if (PQstatus(remote_conn) != CONNECTION_OK)
-		{
-			die(_("Could not connect to the remote server: %s\n"),
-						PQerrorMessage(remote_conn));
-		}
-
-		ri = get_remote_info(remote_conn, cfg->dsn);
-		dboid = cfg->init_replica ? ri->dboid : get_dboid_from_dbname(local_conn, cfg->dbname);
-
-		PQfinish(remote_conn);
-		remote_conn = NULL;
-
-		snprintf(remote_ident, sizeof(remote_ident),
-				BDR_NODE_ID_FORMAT,
-				ri->sysid, ri->tlid, ri->dboid, dboid,
-				"");
-
-		create_replication_identifier(local_conn, remote_ident,
-									  cfg->init_replica ? remote_lsn : NULL);
+		PQclear(res);
+		die(_("Failed to insert row into bdr.bdr_nodes: %s\n"), PQerrorMessage(conn));
 	}
+
+	PQclear(res);
+	destroyPQExpBuffer(query);
 }
 
 /*
- * Create local replication identifier
+ * Clean all the data that was copied from remote node but we don't
+ * want it here (currently shared security labels and replication identifiers).
  */
 static void
-create_replication_identifier(PGconn *conn, const char *remote_ident, char *remote_lsn)
+remove_unwanted_data(PGconn *conn, char *dbname)
 {
-	PQExpBuffer query = createPQExpBuffer();
+	PGresult	   *res;
+
+	/* Remove any BDR security labels. */
+	res = PQexec(conn, "DELETE FROM pg_catalog.pg_shseclabel WHERE provider = 'bdr';");
+
+	if (PQresultStatus(res) != PGRES_COMMAND_OK)
+	{
+		PQclear(res);
+		die(_("Could not update security label: %s\n"), PQerrorMessage(conn));
+	}
+
+	/* Remove replication identifiers. */
+	res = PQexec(conn, "SELECT "RIINTERFACE_PREFIX"replication_identifier_drop(riname) FROM "RIINTERFACE_PREFIX"replication_identifier;");
+	if (PQresultStatus(res) != PGRES_TUPLES_OK)
+	{
+		PQclear(res);
+		die(_("Could not remove existing replication identifiers: %s\n"), PQerrorMessage(conn));
+	}
+	PQclear(res);
+}
+
+/*
+ * Initialize new remote identifier to specific position.
+ */
+static void
+initialize_replication_identifier(PGconn *conn, NodeInfo *ni, Oid dboid, char *remote_lsn)
+{
 	PGresult   *res;
+	char		remote_ident[256];
+	PQExpBuffer query = createPQExpBuffer();
+
+	snprintf(remote_ident, sizeof(remote_ident), BDR_NODE_ID_FORMAT,
+				ni->remote_sysid, ni->remote_tlid, dboid, dboid, "");
 
 	printfPQExpBuffer(query, "SELECT "RIINTERFACE_PREFIX"replication_identifier_create('%s')",
 					 remote_ident);
@@ -937,76 +1051,70 @@ create_replication_identifier(PGconn *conn, const char *remote_ident, char *remo
  * state through physical replay.
  */
 static char *
-create_restore_point(char *remote_connstr)
+create_restore_point(PGconn *conn, char *restore_point_name)
 {
 	PQExpBuffer  query = createPQExpBuffer();
 	PGresult	*res;
 	char		*remote_lsn = NULL;
 
-	remote_conn = PQconnectdb(remote_connstr);
-	if (PQstatus(remote_conn) != CONNECTION_OK)
-	{
-		die(_("Could not connect to the remote server: %s\n"),
-					PQerrorMessage(remote_conn));
-	}
-
-	printfPQExpBuffer(query, "SELECT pg_create_restore_point('%s')", NameStr(restore_point_name));
-	res = PQexec(remote_conn, query->data);
+	printfPQExpBuffer(query, "SELECT pg_create_restore_point('%s')", restore_point_name);
+	res = PQexec(conn, query->data);
 	if (PQresultStatus(res) != PGRES_TUPLES_OK)
 	{
-		die(_("Could not create restore point \"%s\": status %s: %s\n"),
-			 query->data,
+		die(_("Could not create restore point, status %s: %s\n"),
 			 PQresStatus(PQresultStatus(res)), PQresultErrorMessage(res));
 	}
 	remote_lsn = pstrdup(PQgetvalue(res, 0, 0));
 
 	PQclear(res);
-	PQfinish(remote_conn);
-	remote_conn = NULL;
 	destroyPQExpBuffer(query);
 
 	return remote_lsn;
 }
 
-static char *
-detect_local_conninfo(void)
+
+static void
+bdr_node_start(PGconn *conn, char *remote_connstr, char *local_connstr)
 {
-	int i;
+	PQExpBuffer  query = createPQExpBuffer();
+	PGresult	*res;
 
-	for (i = 0; i < bdr_connection_config_count; i++)
+	/* Install required extensions if needed. */
+	if (!extension_exists(conn, "btree_gist"))
+		install_extension(conn, "btree_gist");
+	if (!extension_exists(conn, "bdr"))
+		install_extension(conn, "bdr");
+
+	/* Add the node to the cluster. */
+#ifdef BUILDING_BDR
+	printfPQExpBuffer(query, "SELECT bdr.bdr_group_join(%s, %s);",
+					  PQescapeLiteral(conn, local_connstr, strlen(local_connstr)),
+					  PQescapeLiteral(conn, remote_connstr, strlen(remote_connstr)));
+#else
+	printfPQExpBuffer(query, "SELECT bdr.bdr_subscribe(%s, %s);",
+					  PQescapeLiteral(conn, remote_connstr, strlen(remote_connstr)),
+					  PQescapeLiteral(conn, local_connstr, strlen(local_connstr)));
+#endif
+
+	res = PQexec(conn, query->data);
+	if (PQresultStatus(res) != PGRES_TUPLES_OK)
 	{
-		BdrConnectionConfig *cfg = bdr_connection_configs[i];
-
-		if (!cfg || !cfg->is_valid || !cfg->init_replica ||
-			!cfg->replica_local_dsn)
-			continue;
-
-		return pg_strdup(cfg->replica_local_dsn);
+		die(_("Could not add local node to cluster, status %s: %s\n"),
+			 PQresStatus(PQresultStatus(res)), PQresultErrorMessage(res));
 	}
 
-	return NULL;
+	PQclear(res);
+	destroyPQExpBuffer(query);
 }
 
-static char *
-detect_remote_conninfo(void)
-{
-	int i;
-
-	for (i = 0; i < bdr_connection_config_count; i++)
-	{
-		BdrConnectionConfig *cfg = bdr_connection_configs[i];
-
-		if (!cfg || !cfg->is_valid || !cfg->init_replica)
-			continue;
-
-		return pg_strdup(cfg->dsn);
-	}
-
-	return NULL;
-}
-
+/*
+ * Build connection string from individual parameter.
+ *
+ * This function also handles case where full connection string was
+ * specified instead of dbname.
+ */
 char *
-get_conninfo(char *dbname, char *dbhost, char *dbport, char *dbuser)
+get_connstr(char *dbname, char *dbhost, char *dbport, char *dbuser)
 {
 	char		*ret;
 	int			argcount = 4;	/* dbname, host, user, port */
@@ -1053,10 +1161,6 @@ get_conninfo(char *dbname, char *dbhost, char *dbport, char *dbuser)
 	{
 		keywords = pg_malloc0((argcount + 1) * sizeof(*keywords));
 		values = pg_malloc0((argcount + 1) * sizeof(*values));
-
-		keywords[i] = "dbname";
-		values[i] = dbname == NULL ? "postgres" : dbname;
-		i++;
 	}
 
 	if (dbhost)
@@ -1078,7 +1182,7 @@ get_conninfo(char *dbname, char *dbhost, char *dbport, char *dbuser)
 		i++;
 	}
 
-	ret = PQconninfoParams_to_conninfo(keywords, values);
+	ret = PQconninfoParamsToConnstr(keywords, values);
 
 	/* Connection ok! */
 	pg_free(values);
@@ -1138,21 +1242,37 @@ WriteRecoveryConf(PQExpBuffer contents)
 }
 
 /*
+ * Copy file to data
+ */
+static void
+CopyConfFile(char *fromfile, char *tofile)
+{
+	char		filename[MAXPGPATH];
+
+	sprintf(filename, "%s/%s", data_dir, tofile);
+
+	print_msg(VERBOSITY_DEBUG, _("Copying \"%s\" to \"%s\".\n"),
+			  fromfile, filename);
+	copy_file(fromfile, filename);
+}
+
+
+/*
  * Convert PQconninfoOption array into conninfo string
  */
 static char *
-PQconninfoParams_to_conninfo(const char *const * keywords, const char *const * values)
+PQconninfoParamsToConnstr(const char *const * keywords, const char *const * values)
 {
 	PQExpBuffer	 retbuf = createPQExpBuffer();
 	char		*ret;
 	int			 i = 0;
 
-	while (keywords[i])
+	for (i = 0; keywords[i] != NULL; i++)
 	{
-		char *tmpval = escapeConninfoValue(values[i]);
-		appendPQExpBuffer(retbuf, "%s = '%s' ", keywords[i], tmpval);
-		pg_free(tmpval);
-		i++;
+		if (i > 0)
+			appendPQExpBufferChar(retbuf, ' ');
+		appendPQExpBuffer(retbuf, "%s=", keywords[i]);
+		appendPQExpBufferConnstrValue(retbuf, values[i]);
 	}
 
 	ret = pg_strdup(retbuf->data);
@@ -1164,371 +1284,130 @@ PQconninfoParams_to_conninfo(const char *const * keywords, const char *const * v
 /*
  * Escape connection info value
  */
-static char *
-escapeConninfoValue(const char *val)
+static void
+appendPQExpBufferConnstrValue(PQExpBuffer buf, const char *str)
 {
-	int i, j;
-	char *ret = pg_malloc(strlen(val) * 2 + 1);
+	const char *s;
+	bool		needquotes;
 
-	j = 0;
-	for (i = 0; i < strlen(val); i++)
+	/*
+	 * If the string consists entirely of plain ASCII characters, no need to
+	 * quote it. This is quite conservative, but better safe than sorry.
+	 */
+	needquotes = false;
+	for (s = str; *s; s++)
 	{
-		switch (val[i])
+		if (!((*s >= 'a' && *s <= 'z') || (*s >= 'A' && *s <= 'Z') ||
+			  (*s >= '0' && *s <= '9') || *s == '_' || *s == '.'))
 		{
-			case '\\':
-			case '\'':
-				ret[j++] = '\\';
-			default:
-				break;
+			needquotes = true;
+			break;
 		}
-
-		ret[j++] = val[i];
 	}
 
-	ret[j] = '\0';
-
-	return ret;
-}
-
-
-/*
- * Taken from adt/bool.c
- *
- * Try to interpret value as boolean value.  Valid values are: true,
- * false, yes, no, on, off, 1, 0; as well as unique prefixes thereof.
- * If the string parses okay, return true, else false.
- * If okay and result is not NULL, return the value in *result.
- */
-static bool
-parse_bool(const char *value, bool *result)
-{
-	return parse_bool_with_len(value, strlen(value), result);
-}
-
-static bool
-parse_bool_with_len(const char *value, size_t len, bool *result)
-{
-	switch (*value)
+	if (needquotes)
 	{
-		case 't':
-		case 'T':
-			if (pg_strncasecmp(value, "true", len) == 0)
-			{
-				if (result)
-					*result = true;
-				return true;
-			}
-			break;
-		case 'f':
-		case 'F':
-			if (pg_strncasecmp(value, "false", len) == 0)
-			{
-				if (result)
-					*result = false;
-				return true;
-			}
-			break;
-		case 'y':
-		case 'Y':
-			if (pg_strncasecmp(value, "yes", len) == 0)
-			{
-				if (result)
-					*result = true;
-				return true;
-			}
-			break;
-		case 'n':
-		case 'N':
-			if (pg_strncasecmp(value, "no", len) == 0)
-			{
-				if (result)
-					*result = false;
-				return true;
-			}
-			break;
-		case 'o':
-		case 'O':
-			/* 'o' is not unique enough */
-			if (pg_strncasecmp(value, "on", (len > 2 ? len : 2)) == 0)
-			{
-				if (result)
-					*result = true;
-				return true;
-			}
-			else if (pg_strncasecmp(value, "off", (len > 2 ? len : 2)) == 0)
-			{
-				if (result)
-					*result = false;
-				return true;
-			}
-			break;
-		case '1':
-			if (len == 1)
-			{
-				if (result)
-					*result = true;
-				return true;
-			}
-			break;
-		case '0':
-			if (len == 1)
-			{
-				if (result)
-					*result = false;
-				return true;
-			}
-			break;
-		default:
-			break;
+		appendPQExpBufferChar(buf, '\'');
+		while (*str)
+		{
+			/* ' and \ must be escaped by to \' and \\ */
+			if (*str == '\'' || *str == '\\')
+				appendPQExpBufferChar(buf, '\\');
+
+			appendPQExpBufferChar(buf, *str);
+			str++;
+		}
+		appendPQExpBufferChar(buf, '\'');
 	}
-
-	if (result)
-		*result = false;		/* suppress compiler warning */
-	return false;
-}
-
-/*
- * Remove leading and trailing whitespace from the string,
- * does not change input
- */
-static char *
-trimwhitespace(const char *str)
-{
-	const char *end;
-	char *res;
-	size_t len;
-
-	while(isspace(*str))
-		str++;
-
-	if(*str == 0)
-		return NULL;
-
-	end = str + strlen(str) - 1;
-	while(end > str && isspace(*end))
-		end--;
-
-	len = end-str;
-	if (!len)
-		return NULL;
-
-	len++;
-	res = pg_malloc(len+1);
-	memcpy(res, str, len);
-	res[len] = '\0';
-
-	return res;
-}
-
-/*
- * Split guc list paramenter into array
- * Note that this is not 100% compatible with that is in core
- * but seems good enough for our purposes
- */
-static char	**
-split_list_guc(char *str, size_t *count)
-{
-	char	**ret = NULL;
-	char	 *t = strtok (str, ",");
-	size_t	  i = 0;
-
-	while (t) {
-		ret = realloc(ret, sizeof(char*)* ++i);
-
-		if (ret == NULL)
-			die(_("Out of memory\n"));
-
-		t = trimwhitespace(t);
-		if (!t)
-			die(_("Bad input for list: %s\n"), str);
-
-		ret[i-1] = t;
-
-		t = strtok(NULL, ",");
-	}
-
-	*count = i;
-	return ret;
+	else
+		appendPQExpBufferStr(buf, str);
 }
 
 
 /*
  * Find the pgport and try a connection
- *
- * Based on pg_ctl.c:test_postmaster_connection
  */
-static bool
-wait_postmaster_connection(void)
+static void
+wait_postmaster_connection(const char *connstr)
 {
 	PGPing		res;
-	long		pm_pid = 0;
-	char		connstr[MAXPGPATH * 2 + 256];
+	long		pmpid = 0;
 
-	connstr[0] = '\0';
+	print_msg(VERBOSITY_VERBOSE, "Waiting for PostgreSQL to accept connections ...");
 
+	/* First wait for Postmaster to come up. */
 	for (;;)
 	{
-		/* Do we need a connection string? */
-		if (connstr[0] == '\0')
-		{
-			/*----------
-			 * The number of lines in postmaster.pid tells us several things:
-			 *
-			 * # of lines
-			 *		0	lock file created but status not written
-			 *		2	pre-9.1 server, shared memory not created
-			 *		3	pre-9.1 server, shared memory created
-			 *		5	9.1+ server, ports not opened
-			 *		6	9.1+ server, shared memory not created
-			 *		7	9.1+ server, shared memory created
-			 *
-			 * If we see less than 6 lines in postmaster.pid, just keep
-			 * waiting.
-			 *----------
-			 */
-			char	  **optlines;
+		if ((pmpid = get_pgpid()) != 0 &&
+			postmaster_is_alive((pid_t) pmpid))
+			break;
 
-			/* Try to read the postmaster.pid file */
-			if ((optlines = readfile(pid_file)) != NULL &&
-				optlines[0] != NULL &&
-				optlines[1] != NULL &&
-				optlines[2] != NULL &&
-				optlines[3] != NULL &&
-				optlines[4] != NULL &&
-				optlines[5] != NULL)
-			{
-				/* File is complete enough for us, parse it */
-				long		pmpid;
-				time_t		pmstart;
-
-				/*
-				 * Make sanity checks.  If it's for a standalone backend
-				 * (negative PID), or the recorded start time is before
-				 * pg_ctl started, then either we are looking at the wrong
-				 * data directory, or this is a pre-existing pidfile that
-				 * hasn't (yet?) been overwritten by our child postmaster.
-				 * Allow 2 seconds slop for possible cross-process clock
-				 * skew.
-				 */
-				pmpid = atol(optlines[LOCK_FILE_LINE_PID - 1]);
-				pmstart = atol(optlines[LOCK_FILE_LINE_START_TIME - 1]);
-				if (pmpid > 0 || pmstart > start_time - 3)
-				{
-					/*
-					 * OK, seems to be a valid pidfile from our child.
-					 */
-					int			portnum;
-					char	   *sockdir;
-					char	   *hostaddr;
-					char		host_str[MAXPGPATH];
-
-					pm_pid = pmpid;
-
-					/*
-					 * Extract port number and host string to use. Prefer
-					 * using Unix socket if available.
-					 */
-					portnum = atoi(optlines[LOCK_FILE_LINE_PORT - 1]);
-					sockdir = optlines[LOCK_FILE_LINE_SOCKET_DIR - 1];
-					hostaddr = optlines[LOCK_FILE_LINE_LISTEN_ADDR - 1];
-
-					/*
-					 * While unix_socket_directories can accept relative
-					 * directories, libpq's host parameter must have a
-					 * leading slash to indicate a socket directory.  So,
-					 * ignore sockdir if it's relative, and try to use TCP
-					 * instead.
-					 */
-					if (sockdir[0] == '/')
-						strlcpy(host_str, sockdir, sizeof(host_str));
-					else
-						strlcpy(host_str, hostaddr, sizeof(host_str));
-
-					/* remove trailing newline */
-					if (strchr(host_str, '\n') != NULL)
-						*strchr(host_str, '\n') = '\0';
-
-					/* Fail if couldn't get either sockdir or host addr */
-					if (host_str[0] == '\0')
-					{
-						fprintf(stderr, _("Relative socket directory is not supported\n"));
-						return false;
-					}
-
-					/* If postmaster is listening on "*", use localhost */
-					if (strcmp(host_str, "*") == 0)
-						strcpy(host_str, "localhost");
-
-					/*
-					 * We need to set connect_timeout otherwise on Windows
-					 * the Service Control Manager (SCM) will probably
-					 * timeout first.
-					 */
-					snprintf(connstr, sizeof(connstr),
-					"dbname=postgres port=%d host='%s' connect_timeout=5",
-							 portnum, host_str);
-				}
-			}
-
-			/*
-			 * Free the results of readfile.
-			 *
-			 * This is safe to call even if optlines is NULL.
-			 */
-			free_readfile(optlines);
-		}
-
-		/* If we have a connection string, ping the server */
-		if (connstr[0] != '\0')
-		{
-			res = PQping(connstr);
-			if (res == PQPING_OK)
-			{
-				break;
-			}
-			else if (res == PQPING_NO_ATTEMPT)
-				return false;
-		}
-
-		/*
-		 * If we've been able to identify the child postmaster's PID, check
-		 * the process is still alive.  This covers cases where the postmaster
-		 * successfully created the pidfile but then crashed without removing
-		 * it.
-		 */
-		if (pm_pid > 0 && !postmaster_is_alive((pid_t) pm_pid))
-			return false;
-
-		/* No response, or startup still in process; wait */
 		pg_usleep(1000000);		/* 1 sec */
-		print_msg(".");
+		print_msg(VERBOSITY_VERBOSE, ".");
 	}
 
-	return true;
+	/* Now wait for Postmaster to either accept connections or die. */
+	for (;;)
+	{
+		res = PQping(connstr);
+		if (res == PQPING_OK)
+			break;
+		else if (res == PQPING_NO_ATTEMPT)
+			break;
+
+		/*
+		 * Check if the process is still alive. This covers cases where the
+		 * postmaster successfully created the pidfile but then crashed without
+		 * removing it.
+		 */
+		if (!postmaster_is_alive((pid_t) pmpid))
+			break;
+
+		/* No response; wait */
+		pg_usleep(1000000);		/* 1 sec */
+		print_msg(VERBOSITY_VERBOSE, ".");
+	}
+
+	print_msg(VERBOSITY_VERBOSE, "\n");
 }
 
 /*
  * Wait for postmaster to die
  */
 static void
-wait_postgres_shutdown(void)
+wait_postmaster_shutdown(void)
 {
 	long pid;
+
+	print_msg(VERBOSITY_VERBOSE, "Waiting for PostgreSQL to shutdown ...");
 
 	for (;;)
 	{
 		if ((pid = get_pgpid()) != 0)
 		{
 			pg_usleep(1000000);		/* 1 sec */
-			print_msg(".");
+			print_msg(VERBOSITY_NORMAL, ".");
 		}
 		else
 			break;
 	}
+
+	print_msg(VERBOSITY_VERBOSE, "\n");
 }
 
 static bool
-is_pg_dir(char *path)
+file_exists(const char *path)
+{
+	struct stat statbuf;
+
+	if (stat(path, &statbuf) != 0)
+		return false;
+
+	return true;
+}
+
+static bool
+is_pg_dir(const char *path)
 {
 	struct stat statbuf;
 	char		version_file[MAXPGPATH];
@@ -1543,6 +1422,63 @@ is_pg_dir(char *path)
 	}
 
 	return true;
+}
+
+/*
+ * copy one file
+ */
+static void
+copy_file(char *fromfile, char *tofile)
+{
+	char	   *buffer;
+	int			srcfd;
+	int			dstfd;
+	int			nbytes;
+	off_t		offset;
+
+#define COPY_BUF_SIZE (8 * BLCKSZ)
+
+	buffer = malloc(COPY_BUF_SIZE);
+
+	/*
+	 * Open the files
+	 */
+	srcfd = open(fromfile, O_RDONLY | PG_BINARY, 0);
+	if (srcfd < 0)
+		die(_("could not open file \"%s\""), fromfile);
+
+	dstfd = open(tofile, O_RDWR | PG_BINARY,
+							  S_IRUSR | S_IWUSR);
+	if (dstfd < 0)
+		die(_("could not create file \"%s\""), tofile);
+
+	/*
+	 * Do the data copying.
+	 */
+	for (offset = 0;; offset += nbytes)
+	{
+		nbytes = read(srcfd, buffer, COPY_BUF_SIZE);
+		if (nbytes < 0)
+			die(_("could not read file \"%s\""), fromfile);
+		if (nbytes == 0)
+			break;
+		errno = 0;
+		if ((int) write(dstfd, buffer, nbytes) != nbytes)
+		{
+			/* if write didn't set errno, assume problem is no disk space */
+			if (errno == 0)
+				errno = ENOSPC;
+			die(_("could not write to file \"%s\""), tofile);
+		}
+	}
+
+	if (close(dstfd))
+		die(_("could not close file \"%s\""), tofile);
+
+	/* we don't care about errors here */
+	close(srcfd);
+
+	free(buffer);
 }
 
 /*
@@ -1621,113 +1557,4 @@ get_pgpid(void)
 	}
 	fclose(pidf);
 	return pid;
-}
-
-/*
- * get the lines from a text file - return NULL if file can't be opened
- */
-static char **
-readfile(const char *path)
-{
-	int			fd;
-	int			nlines;
-	char	  **result;
-	char	   *buffer;
-	char	   *linebegin;
-	int			i;
-	int			n;
-	int			len;
-	struct stat statbuf;
-
-	/*
-	 * Slurp the file into memory.
-	 *
-	 * The file can change concurrently, so we read the whole file into memory
-	 * with a single read() call. That's not guaranteed to get an atomic
-	 * snapshot, but in practice, for a small file, it's close enough for the
-	 * current use.
-	 */
-	fd = open(path, O_RDONLY | PG_BINARY, 0);
-	if (fd < 0)
-		return NULL;
-	if (fstat(fd, &statbuf) < 0)
-	{
-		close(fd);
-		return NULL;
-	}
-	if (statbuf.st_size == 0)
-	{
-		/* empty file */
-		close(fd);
-		result = (char **) pg_malloc(sizeof(char *));
-		*result = NULL;
-		return result;
-	}
-	buffer = pg_malloc(statbuf.st_size + 1);
-
-	len = read(fd, buffer, statbuf.st_size + 1);
-	close(fd);
-	if (len != statbuf.st_size)
-	{
-		/* oops, the file size changed between fstat and read */
-		free(buffer);
-		return NULL;
-	}
-
-	/*
-	 * Count newlines. We expect there to be a newline after each full line,
-	 * including one at the end of file. If there isn't a newline at the end,
-	 * any characters after the last newline will be ignored.
-	 */
-	nlines = 0;
-	for (i = 0; i < len; i++)
-	{
-		if (buffer[i] == '\n')
-			nlines++;
-	}
-
-	/* set up the result buffer */
-	result = (char **) pg_malloc((nlines + 1) * sizeof(char *));
-
-	/* now split the buffer into lines */
-	linebegin = buffer;
-	n = 0;
-	for (i = 0; i < len; i++)
-	{
-		if (buffer[i] == '\n')
-		{
-			int			slen = &buffer[i] - linebegin + 1;
-			char	   *linebuf = pg_malloc(slen + 1);
-
-			memcpy(linebuf, linebegin, slen);
-			linebuf[slen] = '\0';
-			result[n++] = linebuf;
-			linebegin = &buffer[i + 1];
-		}
-	}
-	result[n] = NULL;
-
-	free(buffer);
-
-	return result;
-}
-
-/*
- * Free memory allocated for optlines through readfile()
- */
-void
-free_readfile(char **optlines)
-{
-	char	   *curr_line = NULL;
-	int			i = 0;
-
-	if (!optlines)
-		return;
-
-	while ((curr_line = optlines[i++]))
-		free(curr_line);
-
-	free(optlines);
-
-	return;
 }

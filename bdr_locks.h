@@ -21,7 +21,8 @@ typedef enum BdrMessageType
 	BDR_MESSAGE_REPLAY_CONFIRM = 6
 } BdrMessageType;
 
-void bdr_locks_startup(Size nnodes);
+void bdr_locks_startup(void);
+void bdr_locks_set_nnodes(Size nnodes);
 void bdr_acquire_ddl_lock(void);
 void bdr_process_acquire_ddl_lock(uint64 sysid, TimeLineID tli, Oid datid);
 void bdr_process_release_ddl_lock(uint64 sysid, TimeLineID tli, Oid datid,

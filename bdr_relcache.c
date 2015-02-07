@@ -16,12 +16,15 @@
 
 #include "bdr.h"
 
+#include "access/genam.h"
 #include "access/heapam.h"
 #include "access/xact.h"
 
 #include "commands/seclabel.h"
 
+#include "utils/builtins.h"
 #include "utils/catcache.h"
+#include "utils/fmgroids.h"
 #include "utils/inval.h"
 #include "utils/jsonapi.h"
 #include "utils/json.h"
@@ -323,10 +326,6 @@ relation_in_replication_set(BDRRelation *r, const char *setname)
 
 	return false;
 }
-
-#include "access/genam.h"
-#include "utils/builtins.h"
-#include "utils/fmgroids.h"
 
 static HeapTuple
 replset_lookup(Relation rel, const char *cname)

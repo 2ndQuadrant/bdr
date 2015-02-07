@@ -14,6 +14,7 @@
 #include "postmaster/bgworker.h"
 #include "replication/logical.h"
 #include "utils/resowner.h"
+#include "storage/latch.h"
 #include "storage/lock.h"
 
 #include "libpq-fe.h"
@@ -154,11 +155,16 @@ typedef struct BDRTupleData
  */
 typedef struct BdrApplyWorker
 {
+	/* oid of the database this worker is applying changes to */
+	Oid dboid;
+
 	/*
-	 * Index in bdr_connection_configs of this workers's GUCs
-	 * and config info (including dbname, name, etc).
+	 * Identification for the remote db we're connecting to; used to
+	 * find the appropriate bdr.connections row, etc.
 	 */
-	int connection_config_idx;
+	uint64		remote_sysid;
+	TimeLineID	remote_timeline;
+	Oid			remote_dboid;
 
 	/*
 	 * If not InvalidXLogRecPtr, stop replay at this point and exit.
@@ -170,15 +176,6 @@ typedef struct BdrApplyWorker
 
 	/* Request that the remote forward all changes from other nodes */
 	bool forward_changesets;
-
-	/*
-	 * Ensure this worker doesn't get registered a second time if there's a
-	 * perdb worker restart or postmaster restart. Ideally we'd store the
-	 * BackgroundWorkerHandle, but it's an opaque struct.
-	 */
-	bool bgw_is_registered;
-
-	size_t perdb_worker_off;
 } BdrApplyWorker;
 
 /*
@@ -187,18 +184,26 @@ typedef struct BdrApplyWorker
  */
 typedef struct BdrPerdbWorker
 {
-	/* local database name */
+	/* local database name to connect to */
 	NameData dbname;
 
 	/* number of outgoing connections from this database */
-	size_t nnodes;
+	Size nnodes;
 
 	size_t seq_slot;
 
+	/* The perdb worker's latch from the PROC array, for use from other backends */
+	Latch	   *proclatch;
+
+	/* Oid of the database the worker is attached to - populated after start */
+	Oid	database_oid;
 } BdrPerdbWorker;
 
 /*
  * Type of BDR worker in a BdrWorker struct
+ *
+ * Note that the supervisor worker doesn't appear here, it has its own
+ * dedicated entry in the shmem segment.
  */
 typedef enum {
 	/*
@@ -206,7 +211,7 @@ typedef enum {
 	 * it's set by memset(...) during shm segment init.
 	 */
 	BDR_WORKER_EMPTY_SLOT = 0,
-	/* This shm array slot contains data for a */
+	/* This shm array slot contains data for a BdrApplyWorker */
 	BDR_WORKER_APPLY,
 	/* This is data for a per-database worker BdrPerdbWorker */
 	BDR_WORKER_PERDB,
@@ -235,18 +240,11 @@ typedef struct BdrWorker
 
 } BdrWorker;
 
-/*
- * Params for every connection in bdr.connections.
- *
- * Contains n=bdr_max_workers elements, may have NULL entries.
- */
-extern BdrConnectionConfig	**bdr_connection_configs;
-
 /* GUCs */
 extern int	bdr_default_apply_delay;
 extern int bdr_max_workers;
+extern int bdr_max_databases;
 extern char *bdr_temp_dump_directory;
-extern bool bdr_init_from_basedump;
 extern bool bdr_log_conflicts_to_table;
 extern bool bdr_conflict_logging_include_tuples;
 extern bool bdr_permit_unsafe_commands;
@@ -263,13 +261,20 @@ typedef struct BdrWorkerControl
 {
 	/* Must hold this lock when writing to BdrWorkerControl members */
 	LWLockId     lock;
+	/* Worker generation number, incremented on postmaster restart */
+	uint16       worker_generation;
 	/* Set/unset by bdr_apply_pause()/_replay(). */
 	bool		 pause_apply;
+	/* Is this the first startup of the supervisor? */
+	bool		 is_supervisor_restart;
+	/* Latch for the supervisor worker */
+	Latch		*supervisor_latch;
 	/* Array members, of size bdr_max_workers */
 	BdrWorker    slots[FLEXIBLE_ARRAY_MEMBER];
 } BdrWorkerControl;
 
 extern BdrWorkerControl *BdrWorkerCtl;
+extern BdrWorker		*bdr_worker_slot;
 
 extern ResourceOwner bdr_saved_resowner;
 
@@ -294,7 +299,24 @@ extern Oid	BdrLocksByOwnerRelid;
 
 extern Oid  BdrReplicationSetConfigRelid;
 
+/* Structure representing bdr_nodes record */
+typedef struct BDRNodeInfo
+{
+	/* ID */
+	uint64		sysid;
+	TimeLineID	timeline;
+	Oid			dboid;
+
+	char		status;
+
+	char	   *local_dsn;
+	char	   *init_from_dsn;
+} BDRNodeInfo;
+
 extern Oid bdr_lookup_relid(const char *relname, Oid schema_oid);
+
+extern void bdr_sequencer_set_nnodes(Size nnodes);
+
 
 /* apply support */
 extern void bdr_fetch_sysid_via_node_id(RepNodeId node_id, uint64 *sysid,
@@ -385,8 +407,11 @@ PGDLLEXPORT extern Datum bdr_sequence_setval(PG_FUNCTION_ARGS);
 PGDLLEXPORT extern Datum bdr_sequence_options(PG_FUNCTION_ARGS);
 #endif
 
+extern int bdr_sequencer_get_next_free_slot(void); //XXX PERDB temp
+
+
 /* statistic functions */
-extern void bdr_count_shmem_init(size_t nnodes);
+extern void bdr_count_shmem_init(Size nnodes);
 extern void bdr_count_set_current_node(RepNodeId node_id);
 extern void bdr_count_commit(void);
 extern void bdr_count_rollback(void);
@@ -405,10 +430,10 @@ extern bool bdr_get_integer_timestamps(void);
 extern bool bdr_get_bigendian(void);
 
 /* initialize a new bdr member */
-extern void bdr_init_replica(Name dbname);
+extern void bdr_init_replica(BDRNodeInfo *local_node);
 
 /* shared memory management */
-extern void bdr_maintain_schema(void);
+extern void bdr_maintain_schema(bool update_extensions);
 extern BdrWorker* bdr_worker_shmem_alloc(BdrWorkerType worker_type,
 										 uint32 *ctl_idx);
 extern void bdr_worker_shmem_release(BdrWorker* worker, BackgroundWorkerHandle *handle);
@@ -423,20 +448,35 @@ extern void bdr_executor_always_allow_writes(bool always_allow);
 extern void bdr_queue_ddl_command(char *command_tag, char *command);
 extern void bdr_execute_ddl_command(char *cmdstr, char *perpetrator, bool tx_just_started);
 
-extern void bdr_locks_shmem_init(Size num_used_databases);
+extern void bdr_locks_shmem_init(void);
 extern void bdr_locks_check_query(void);
 
-/* background workers */
-extern void bdr_worker_init(char* dbname);
+/* background workers and supporting functions for them */
 PGDLLEXPORT extern void bdr_apply_main(Datum main_arg);
 PGDLLEXPORT extern void bdr_perdb_worker_main(Datum main_arg);
+PGDLLEXPORT extern void bdr_supervisor_worker_main(Datum main_arg);
+
+extern void bdr_worker_init(char* dbname);
+extern void bdr_supervisor_register(void);
+
+extern void bdr_sighup(SIGNAL_ARGS);
+extern void bdr_sigterm(SIGNAL_ARGS);
+
+extern int find_perdb_worker_slot(Oid dboid,
+									 BdrWorker **worker_found);
+
+extern void bdr_launch_apply_workers(Oid dboid);
 
 /* Information functions */
 extern int bdr_parse_version(const char * bdr_version_str, int *o_major,
 							 int *o_minor, int *o_rev, int *o_subrev);
 
 /* manipulation of bdr catalogs */
-extern char bdr_nodes_get_local_status(uint64 sysid, TimeLineID tli, Oid dboid);
+extern char bdr_nodes_get_local_status(uint64 sysid, TimeLineID tli,
+									   Oid dboid);
+extern BDRNodeInfo * bdr_nodes_get_local_info(uint64 sysid, TimeLineID tli,
+										  Oid dboid);
+extern void bdr_bdr_node_free(BDRNodeInfo *node);
 extern void bdr_nodes_set_local_status(char status);
 
 extern Oid GetSysCacheOidError(int cacheId, Datum key1, Datum key2, Datum key3,
@@ -463,7 +503,8 @@ bdr_copytable(PGconn *copyfrom_conn, PGconn *copyto_conn,
 
 /* helpers shared by multiple worker types */
 extern struct pg_conn* bdr_connect(const char *conninfo, Name appname,
-								   uint64* remote_sysid_i, TimeLineID *remote_tlid_i,
+								   uint64* remote_sysid_i,
+								   TimeLineID *remote_tlid_i,
 								   Oid *out_dboid_i);
 
 extern struct pg_conn *
@@ -474,11 +515,7 @@ bdr_establish_connection_and_slot(const char *dsn,
 								  TimeLineID *out_timeline,
 								  Oid *out_dboid,
 								  RepNodeId *out_replication_identifier,
-								  char **out_snapshot);
-extern void
-bdr_build_ident_and_slotname(uint64 remote_sysid, TimeLineID remote_tlid,
-		Oid remote_dboid, char **out_replication_identifier,
-		Name out_slot_name);
+	 							  char **out_snapshot);
 
 extern PGconn* bdr_connect_nonrepl(const char *connstring,
 		const char *appnamesuffix);

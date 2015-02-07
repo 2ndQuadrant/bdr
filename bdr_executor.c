@@ -773,7 +773,7 @@ BdrExecutorStart(QueryDesc *queryDesc, int eflags)
 	bool		performs_writes = false;
 	ListCell   *l;
 
-	if (bdr_always_allow_writes || !bdr_is_bdr_activated_db(MyDatabaseId))
+	if (bdr_always_allow_writes)
 		goto done;
 
 	/* identify whether this is a modifying statement */
@@ -784,6 +784,9 @@ BdrExecutorStart(QueryDesc *queryDesc, int eflags)
 		performs_writes = true;
 
 	if (!performs_writes)
+		goto done;
+
+	if (!bdr_is_bdr_activated_db(MyDatabaseId))
 		goto done;
 
 #ifdef BUILDING_BDR

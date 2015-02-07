@@ -74,6 +74,7 @@ typedef struct
 	bool client_float8_byval;
 	bool client_int_datetime;
 	char *client_db_encoding;
+	bool client_unidirectional;
 	Oid bdr_schema_oid;
 	Oid bdr_conflict_handlers_reloid;
 	Oid bdr_locks_reloid;
@@ -228,13 +229,18 @@ bdr_req_param(const char *param)
  * If this function returns it's safe to begin replay.
  */
 static void
-bdr_ensure_node_ready()
+bdr_ensure_node_ready(BdrOutputData *data)
 {
 	int spi_ret;
 	const uint64 sysid = GetSystemIdentifier();
 	char status;
+	BDRNodeInfo *node;
 	NameData dbname;
 	char *tmp_dbname;
+
+	/* Unidirectional connections don't require any checks atm. */
+	if (data->client_unidirectional)
+		return;
 
 	/* We need dbname valid outside this transaction, so copy it */
 	tmp_dbname = get_database_name(MyDatabaseId);
@@ -250,32 +256,18 @@ bdr_ensure_node_ready()
 	if (spi_ret != SPI_OK_CONNECT)
 		elog(ERROR, "Local SPI connect failed; shouldn't happen");
 
-	status = bdr_nodes_get_local_status(sysid, ThisTimeLineID, MyDatabaseId);
+	node = bdr_nodes_get_local_info(sysid, ThisTimeLineID, MyDatabaseId);
+	status = node == NULL ? '\0' : node->status;
+	bdr_bdr_node_free(node);
 
 	SPI_finish();
 
-/*
- * There is no local node status for UDR as we have only connection to this
- * node coming from a slave. The above is still useful to make sure the
- * extension is installed in the db.
- */
-#ifdef BUILDING_UDR
-	switch (status)
-	{
-		case 'r':
-		case '\0':
-		case 'c':
-		case 'i':
-			break;
-		default:
-			elog(ERROR, "Unhandled case status=%c", status);
-			break;
-	}
-#else
-
-	/* Complain if node isn't ready. */
+	/*
+	 * Complain if node isn't ready,
+	 * i.e. state is fully 'r'eady, or waiting for inbound sl'o't creation.
+	 */
 	/* TODO: Allow soft error so caller can sleep and recheck? */
-	if (status != 'r')
+	if (status != 'r' && status != 'o')
 	{
 		const char * const base_msg =
 			"bdr output plugin: slot creation rejected, bdr.bdr_nodes entry for local node (sysid=" UINT64_FORMAT
@@ -283,8 +275,10 @@ bdr_ensure_node_ready()
 		switch (status)
 		{
 			case 'r':
+			case 'o':
 				break; /* unreachable */
 			case '\0':
+			case 'b':
 				/*
 				 * Can't allow replay when BDR hasn't started yet, as
 				 * replica init might still need to run, causing a dump to
@@ -338,7 +332,6 @@ bdr_ensure_node_ready()
 				break;
 		}
 	}
-#endif
 }
 
 
@@ -411,6 +404,8 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 			data->client_db_encoding = pstrdup(strVal(elem->arg));
 		else if (strcmp(elem->defname, "forward_changesets") == 0)
 			bdr_parse_bool(elem, &data->forward_changesets);
+		else if (strcmp(elem->defname, "unidirectional") == 0)
+			bdr_parse_bool(elem, &data->client_unidirectional);
 		else if (strcmp(elem->defname, "replication_sets") == 0)
 		{
 			int i;
@@ -482,12 +477,7 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 		StartTransactionCommand();
 	}
 
-#ifdef BUILDING_BDR
-	/*
-	 * If running BDR, we expect the remote end (us) to have the BDR extension
-	 * installed before we permit slot creation. This prevents replication of
-	 * the CREATE EXTENSION bdr; command its self.
-	 */
+	/* BDR extension must be installed. */
 	if (get_namespace_oid("bdr", true) == InvalidOid)
 	{
 		ereport(ERROR,
@@ -496,7 +486,6 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 						BDR_LOCALID_FORMAT_ARGS),
 				 errdetail("Cannot create a BDR slot without the BDR extension installed")));
 	}
-#endif
 
 	/* no options are passed in during initialization, so don't complain there */
 	if (!is_init)
@@ -520,6 +509,15 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 		/* XXX: can't check for boolean values this way */
 		if (data->client_db_encoding == NULL)
 			bdr_req_param("db_encoding");
+
+#ifdef BUILDING_UDR
+		/* Can't do bidirectional connection on UDR. */
+		if (!data->is_unidirectional)
+			ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 errmsg("UDR only supports unidirectional connections")));
+
+#endif
 
 		/* check incompatibilities we cannot work around */
 		if (strcmp(data->client_db_encoding, GetDatabaseEncodingName()) != 0)
@@ -583,7 +581,7 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 		if (data->client_pg_version / 100 != PG_VERSION_NUM / 100)
 			data->allow_sendrecv_protocol = false;
 
-		bdr_maintain_schema();
+		bdr_maintain_schema(false);
 
 		data->bdr_schema_oid = get_namespace_oid("bdr", true);
 		schema_oid = data->bdr_schema_oid;
@@ -618,7 +616,7 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 		 * This'll ERROR out if we're not ready. Note that this does NOT
 		 * prevent slot creation, only START_REPLICATION from the slot.
 		 */
-		bdr_ensure_node_ready();
+		bdr_ensure_node_ready(data);
 	}
 
 	if (tx_started)

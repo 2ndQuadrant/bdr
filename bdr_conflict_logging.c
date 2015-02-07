@@ -45,12 +45,6 @@ static Oid BdrConflictTypeOid = InvalidOid;
 static Oid BdrConflictResolutionOid = InvalidOid;
 static Oid BdrConflictHistorySeqId = InvalidOid;
 
-/*
- * All this code runs only in the context of an apply worker, so
- * we can access the apply worker state global safely
- */
-extern BdrApplyWorker *bdr_apply_worker;
-
 #define BDR_CONFLICT_HISTORY_COLS 30
 #define SYSID_DIGITS 33
 
