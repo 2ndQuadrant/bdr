@@ -46,9 +46,6 @@
 
 PG_FUNCTION_INFO_V1(bdr_connections_changed);
 
-Datum
-bdr_connections_changed(PG_FUNCTION_ARGS);
-
 /* In the commit hook, should we attempt to start a per-db worker? */
 static bool xacthook_registered = false;
 static bool xacthook_connections_changed = false;

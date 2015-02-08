@@ -116,7 +116,7 @@ static void check_apply_update(BdrConflictType conflict_type,
 							   bool *perform_update, bool *log_update,
 							   BdrConflictResolution *resolution);
 
-static void check_sequencer_wakeup(BDRRelation *rel);
+static void check_bdr_wakeups(BDRRelation *rel);
 #ifdef BUILDING_BDR
 static HeapTuple process_queued_drop(HeapTuple cmdtup);
 #endif
@@ -587,7 +587,7 @@ process_remote_insert(StringInfo s)
 
 	ExecCloseIndices(estate->es_result_relation_info);
 
-	check_sequencer_wakeup(rel);
+	check_bdr_wakeups(rel);
 
 	/* execute DDL if insertion was into the ddl command queue */
 	if (RelationGetRelid(rel->rel) == QueuedDDLCommandsRelid ||
@@ -871,7 +871,7 @@ process_remote_update(StringInfo s)
 
 	PopActiveSnapshot();
 
-	check_sequencer_wakeup(rel);
+	check_bdr_wakeups(rel);
 
 	/* release locks upon commit */
 	index_close(idxrel, NoLock);
@@ -1017,7 +1017,7 @@ process_remote_delete(StringInfo s)
 
 	PopActiveSnapshot();
 
-	check_sequencer_wakeup(rel);
+	check_bdr_wakeups(rel);
 
 	index_close(idxrel, NoLock);
 	bdr_heap_close(rel, NoLock);
@@ -1839,11 +1839,19 @@ bdr_performing_work(void)
 }
 
 static void
-check_sequencer_wakeup(BDRRelation *rel)
+check_bdr_wakeups(BDRRelation *rel)
 {
-#ifdef BUILDING_BDR
+	Oid			schemaoid = RelationGetNamespace(rel->rel);
 	Oid			reloid = RelationGetRelid(rel->rel);
 
+	if (schemaoid != BdrSchemaOid)
+		return;
+
+	/* has the node/connection state been changed on another system? */
+	if (reloid == BdrNodesRelid)
+		bdr_connections_changed(NULL);
+
+#ifdef BUILDING_BDR
 	if (reloid == BdrSequenceValuesRelid ||
 		reloid == BdrSequenceElectionsRelid ||
 		reloid == BdrVotesRelid)

@@ -488,6 +488,8 @@ extern int find_perdb_worker_slot(Oid dboid,
 
 extern void bdr_launch_apply_workers(Oid dboid);
 
+extern Datum bdr_connections_changed(PG_FUNCTION_ARGS);
+
 /* Information functions */
 extern int bdr_parse_version(const char * bdr_version_str, int *o_major,
 							 int *o_minor, int *o_rev, int *o_subrev);
