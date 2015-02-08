@@ -82,8 +82,17 @@ DUMPOBJS = pg_dump/pg_dump.o pg_dump/common.o pg_dump/pg_dump_sort.o \
 include Makefile.global
 
 # Ensure Makefiles are up2date (should we move this to Makefile.global?)
-Makefile: Makefile.in Makefile.global.in doc/Makefile.in config.status
+Makefile: Makefile.in config.status configure
 	./config.status $@
+
+Makefile.global: Makefile.global.in config.status configure
+	./config.status $@
+
+run_tests: run_tests.in  config.status configure
+	./config.status $@
+
+configure: configure.in
+	cd ${bdr_abs_srcdir} && autoreconf
 
 DATE=$(shell date "+%Y-%m-%d")
 GITHASH=$(shell if [ -e .distgitrev ]; then cat .distgitrev; else GIT_DIR=${bdr_abs_srcdir}/.git git rev-parse --short HEAD; fi)

@@ -17,6 +17,9 @@ ALLSGML := $(wildcard $(srcdir)/*.sgml)
 ALMOSTALLSGML := $(filter-out %bookindex.sgml,$(ALLSGML))
 GENERATED_SGML = version.sgml bookindex.sgml
 
+Makefile: Makefile.in
+	cd $(bdr_top_builddir) && ./config.status doc/Makefile
+
 all: html
 
 html: html-stamp
