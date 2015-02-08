@@ -97,7 +97,9 @@ bdr_init_copy: bdr_init_copy.o
 	$(CC) $(CFLAGS) $^ $(LDFLAGS) $(LDFLAGS_EX) $(libpq_pgport) $(LIBS) -o $@$(X)
 
 scripts/bdr_initial_load: scripts/bdr_initial_load.in
+	@mkdir -p $(shell dirname $@)
 	sed -e "s/BDR_VERSION/$(BDR_VERSION)/" -e "s/PG_VERSION/$(VERSION)/" $< > $@
+	@chmod +x $@
 
 extsql/bdr--0.8.0.1.sql: extsql/bdr--0.8.0.sql extsql/bdr--0.8.0--0.8.0.1.sql
 	mkdir -p extsql
