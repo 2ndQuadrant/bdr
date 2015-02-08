@@ -50,7 +50,8 @@ Datum
 bdr_connections_changed(PG_FUNCTION_ARGS);
 
 /* In the commit hook, should we attempt to start a per-db worker? */
-static bool xacthook_connection_added = false;
+static bool xacthook_registered = false;
+static bool xacthook_connections_changed = false;
 
 /*
  * Scan shmem looking for a perdb worker for the named DB and
@@ -133,12 +134,12 @@ bdr_perdb_xact_callback(XactEvent event, void *arg)
 	switch (event)
 	{
 		case XACT_EVENT_COMMIT:
-			if (xacthook_connection_added)
+			if (xacthook_connections_changed)
 			{
 				int slotno;
 				BdrWorker *w;
 
-				xacthook_connection_added = false;
+				xacthook_connections_changed = false;
 
 				LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
 
@@ -187,17 +188,18 @@ bdr_perdb_xact_callback(XactEvent event, void *arg)
  * running, and register a XACT_EVENT_COMMIT hook to perform the actual launch
  * when the addition of the worker commits.
  *
- * If a perdb worker is already running, notify it to check for new connections.
+ * If a perdb worker is already running, notify it to check for new
+ * connections.
  */
 Datum
 bdr_connections_changed(PG_FUNCTION_ARGS)
 {
-	/* If there's already a per-db worker for our DB we have nothing to do */
-	if (!xacthook_connection_added)
+	if (!xacthook_registered)
 	{
 		RegisterXactCallback(bdr_perdb_xact_callback, NULL);
-		xacthook_connection_added = true;
+		xacthook_registered = true;
 	}
+	xacthook_connections_changed = true;
 	PG_RETURN_VOID();
 }
 
