@@ -71,6 +71,7 @@ extern Oid			origin_dboid;
 /* end externs for bdr apply state */
 
 ResourceOwner bdr_saved_resowner;
+Oid   BdrSchemaOid;
 Oid   BdrNodesRelid;
 Oid   BdrConflictHistoryRelId;
 Oid   BdrLocksRelid;
@@ -862,11 +863,15 @@ bdr_maintain_schema(bool update_extensions)
 
 	/* setup initial queued_cmds OID */
 	schema_oid = get_namespace_oid("bdr", false);
+	BdrSchemaOid = schema_oid;
+	BdrNodesRelid =
+		bdr_lookup_relid("bdr_nodes", schema_oid);
 	QueuedDDLCommandsRelid =
 		bdr_lookup_relid("bdr_queued_commands", schema_oid);
 	BdrConflictHistoryRelId =
 		bdr_lookup_relid("bdr_conflict_history", schema_oid);
-
+	BdrReplicationSetConfigRelid  =
+		bdr_lookup_relid("bdr_replication_set_config", schema_oid);
 #ifdef BUILDING_BDR
 	BdrSequenceValuesRelid =
 		bdr_lookup_relid("bdr_sequence_values", schema_oid);
@@ -874,8 +879,6 @@ bdr_maintain_schema(bool update_extensions)
 		bdr_lookup_relid("bdr_sequence_elections", schema_oid);
 	BdrVotesRelid =
 		bdr_lookup_relid("bdr_votes", schema_oid);
-	BdrNodesRelid =
-		bdr_lookup_relid("bdr_nodes", schema_oid);
 	QueuedDropsRelid =
 		bdr_lookup_relid("bdr_queued_drops", schema_oid);
 	BdrLocksRelid =
@@ -883,9 +886,6 @@ bdr_maintain_schema(bool update_extensions)
 	BdrLocksByOwnerRelid =
 		bdr_lookup_relid("bdr_global_locks_byowner", schema_oid);
 #endif
-
-	BdrReplicationSetConfigRelid  =
-		bdr_lookup_relid("bdr_replication_set_config", schema_oid);
 
 	bdr_conflict_handlers_init();
 

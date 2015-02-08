@@ -297,23 +297,20 @@ extern ResourceOwner bdr_saved_resowner;
 /* DDL executor/filtering support */
 extern bool in_bdr_replicate_ddl_command;
 
-/* bdr_nodes table oid */
+/* cached oids, setup by bdr_maintain_schema() */
+extern Oid	BdrSchemaOid;
 extern Oid	BdrNodesRelid;
-extern Oid  BdrConflictHistoryRelId;
-
-/* DDL replication support */
 extern Oid	QueuedDDLCommandsRelid;
+extern Oid  BdrConflictHistoryRelId;
+extern Oid  BdrReplicationSetConfigRelid;
+#ifdef BUILDING_BDR
+extern Oid	BdrLocksRelid;
+extern Oid	BdrLocksByOwnerRelid;
 extern Oid	QueuedDropsRelid;
-
-/* sequencer support */
 extern Oid	BdrSequenceValuesRelid;
 extern Oid	BdrSequenceElectionsRelid;
 extern Oid	BdrVotesRelid;
-
-extern Oid	BdrLocksRelid;
-extern Oid	BdrLocksByOwnerRelid;
-
-extern Oid  BdrReplicationSetConfigRelid;
+#endif
 
 /* Structure representing bdr_nodes record */
 typedef struct BDRNodeInfo
