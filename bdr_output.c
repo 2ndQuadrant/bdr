@@ -513,7 +513,7 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 
 #ifdef BUILDING_UDR
 		/* Can't do bidirectional connection on UDR. */
-		if (!data->is_unidirectional)
+		if (!data->client_unidirectional)
 			ereport(ERROR,
 					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 					 errmsg("UDR only supports unidirectional connections")));
