@@ -5,6 +5,7 @@ SET bdr.permit_unsafe_ddl_commands = true;
 SET bdr.skip_ddl_replication = true;
 
 ALTER TABLE bdr.bdr_nodes
+  ADD COLUMN node_name text,
   ADD COLUMN node_local_dsn text,
   ADD COLUMN node_init_from_dsn text;
 
@@ -214,7 +215,8 @@ END;
 $body$;
 
 -- Setup that's common to BDR and UDR joins
-CREATE FUNCTION bdr.internal_begin_join(caller text, local_dsn text, remote_dsn text,
+CREATE FUNCTION bdr.internal_begin_join(
+    caller text, local_node_name text, local_dsn text, remote_dsn text,
     remote_sysid OUT text, remote_timeline OUT oid, remote_dboid OUT oid
 )
 RETURNS record LANGUAGE plpgsql VOLATILE
@@ -334,9 +336,11 @@ BEGIN
 
     IF NOT FOUND THEN
         INSERT INTO bdr_nodes (
+            node_name,
             node_sysid, node_timeline, node_dboid,
             node_status, node_local_dsn, node_init_from_dsn
         ) VALUES (
+            local_node_name,
             localid.sysid, localid.timeline, localid.dboid,
             'b', local_dsn, remote_dsn
         );
@@ -351,6 +355,7 @@ $body$;
 -- unconnected node with a blank database to a BDR group.
 --
 CREATE FUNCTION bdr.bdr_group_join(
+    local_node_name text,
     dsn text,
     init_from_dsn text,
     local_dsn text DEFAULT NULL,
@@ -384,6 +389,7 @@ BEGIN
 
     PERFORM bdr.internal_begin_join(
         'bdr_group_join',
+        local_node_name,
         CASE WHEN local_dsn IS NULL THEN dsn ELSE local_dsn END,
         init_from_dsn);
 
@@ -445,10 +451,11 @@ BEGIN
 END;
 $body$;
 
-COMMENT ON FUNCTION bdr.bdr_group_join(text,text,text,integer,text[])
+COMMENT ON FUNCTION bdr.bdr_group_join(text, text, text, text, integer, text[])
 IS 'Join an existing BDR group by connecting to a member node and copying its contents';
 
 CREATE FUNCTION bdr.bdr_group_create(
+    local_node_name text,
     dsn text,
     local_dsn text DEFAULT NULL,
     apply_delay integer DEFAULT NULL,
@@ -462,19 +469,21 @@ SET bdr.skip_ddl_locking = on
 AS $body$
 BEGIN
     PERFORM bdr.bdr_group_join(
-        dsn, init_from_dsn := null, local_dsn := local_dsn,
+        local_node_name := local_node_name,
+        dsn := dsn, init_from_dsn := null, local_dsn := local_dsn,
         apply_delay := apply_delay,
         replication_sets := replication_sets);
 END;
 $body$;
 
-COMMENT ON FUNCTION bdr.bdr_group_create(text,text,integer,text[])
+COMMENT ON FUNCTION bdr.bdr_group_create(text, text, text, integer, text[])
 IS 'Create a BDR group, turning a stand-alone database into the first node in a BDR group';
 
 --
 -- The public interface for unidirectional replication setup.
 --
 CREATE FUNCTION bdr.bdr_subscribe(
+    local_node_name text,
     remote_dsn text,
     local_dsn text,
     apply_delay integer DEFAULT NULL,
@@ -504,7 +513,9 @@ BEGIN
 
     SELECT remote_sysid AS sysid, remote_timeline AS timeline,
            remote_dboid AS dboid INTO remoteid
-    FROM bdr.internal_begin_join('bdr_subscribe', local_dsn, remote_dsn);
+    FROM bdr.internal_begin_join('bdr_subscribe',
+         local_node_name,
+         local_dsn, remote_dsn);
 
     SELECT sysid, timeline, dboid INTO localid
     FROM bdr.bdr_get_local_nodeid();
@@ -544,7 +555,7 @@ BEGIN
 END;
 $body$;
 
-COMMENT ON FUNCTION bdr.bdr_subscribe(text,text,integer,text[])
+COMMENT ON FUNCTION bdr.bdr_subscribe(text, text, text, integer, text[])
 IS 'Subscribe to remote logical changes';
 
 CREATE FUNCTION bdr.bdr_node_join_wait_for_ready()

@@ -1,5 +1,6 @@
 \c postgres
 SELECT bdr.bdr_group_create(
+	local_node_name := 'node-pg',
 	dsn := 'dbname=postgres',
 	replication_sets := ARRAY['default', 'important', 'for-node-1']
 	);
@@ -16,6 +17,7 @@ SELECT bdr.bdr_node_join_wait_for_ready();
 
 \c regression
 SELECT bdr.bdr_group_join(
+	local_node_name := 'node-regression',
 	dsn := 'dbname=regression',
 	init_from_dsn := 'dbname=postgres',
 	local_dsn := 'dbname=regression',

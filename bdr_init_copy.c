@@ -96,7 +96,7 @@ static void remove_unwanted_data(PGconn *conn, char *dbname);
 static void initialize_replication_identifier(PGconn *conn, NodeInfo *ni, Oid dboid, char *remote_lsn);
 static char *create_restore_point(PGconn *conn, char *restore_point_name);
 static void initialize_replication_slot(PGconn *conn, NodeInfo *ni, Oid dboid);
-static void bdr_node_start(PGconn *conn, char *remote_connstr, char *local_connstr);
+static void bdr_node_start(PGconn *conn, char *node_name, char *remote_connstr, char *local_connstr);
 
 static RemoteInfo *get_remote_info(char* connstr);
 
@@ -165,6 +165,7 @@ main(int argc, char **argv)
 	char	   *remote_lsn;
 	bool		stop = false;
 	int			optindex;
+	char	   *node_name = NULL;
 	char *local_connstr = NULL;
 	char *local_dbhost = NULL,
 		 *local_dbport = NULL,
@@ -178,6 +179,7 @@ main(int argc, char **argv)
 		 *recovery_conf = NULL;
 
 	static struct option long_options[] = {
+		{"node-name", required_argument, NULL, 'n'},
 		{"pgdata", required_argument, NULL, 'D'},
 		{"remote-dbname", required_argument, NULL, 'd'},
 		{"remote-host", required_argument, NULL, 'h'},
@@ -213,7 +215,7 @@ main(int argc, char **argv)
 	}
 
 	/* Option parsing and validation */
-	while ((c = getopt_long(argc, argv, "D:d:h:p:s:U:v", long_options, &optindex)) != -1)
+	while ((c = getopt_long(argc, argv, "D:d:h:n:p:s:U:v", long_options, &optindex)) != -1)
 	{
 		switch (c)
 		{
@@ -225,6 +227,9 @@ main(int argc, char **argv)
 				break;
 			case 'h':
 				remote_dbhost = pg_strdup(optarg);
+				break;
+			case 'n':
+				node_name = pg_strdup(optarg);
 				break;
 			case 'p':
 				remote_dbport = pg_strdup(optarg);
@@ -281,6 +286,12 @@ main(int argc, char **argv)
 	if (data_dir == NULL)
 	{
 		fprintf(stderr, _("No data directory specified\n"));
+		fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
+		exit(1);
+	}
+	else if (node_name == NULL)
+	{
+		fprintf(stderr, _("No node name specified\n"));
 		fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
 		exit(1);
 	}
@@ -458,7 +469,7 @@ main(int argc, char **argv)
 		 */
 		print_msg(VERBOSITY_NORMAL,
 				  _(" %s: adding the database to BDR cluster ...\n"), dbname);
-		bdr_node_start(local_conn, remote_connstr, local_connstr);
+		bdr_node_start(local_conn, node_name, remote_connstr, local_connstr);
 
 		PQfinish(local_conn);
 		local_conn = NULL;
@@ -496,6 +507,7 @@ usage(void)
 	printf(_("  --postgresql-conf      path to the new postgresql.conf\n"));
 	printf(_("  --hba-conf             path to the new pg_hba.conf\n"));
 	printf(_("  --recovery-conf        path to the template recovery.conf\n"));
+	printf(_("  -n, --node-name=NAME   name of the newly created node\n"));
 	printf(_("\nConnection options:\n"));
 	printf(_("  -d, --remote-dbname=CONNSTR\n"));
 	printf(_("                         connection string for remote node\n"));
@@ -1074,7 +1086,7 @@ create_restore_point(PGconn *conn, char *restore_point_name)
 
 
 static void
-bdr_node_start(PGconn *conn, char *remote_connstr, char *local_connstr)
+bdr_node_start(PGconn *conn, char *node_name, char *remote_connstr, char *local_connstr)
 {
 	PQExpBuffer  query = createPQExpBuffer();
 	PGresult	*res;
@@ -1087,11 +1099,15 @@ bdr_node_start(PGconn *conn, char *remote_connstr, char *local_connstr)
 
 	/* Add the node to the cluster. */
 #ifdef BUILDING_BDR
-	printfPQExpBuffer(query, "SELECT bdr.bdr_group_join(%s, %s);",
+	/* FIXME */
+	printfPQExpBuffer(query, "SELECT bdr.bdr_group_join(%s, %s, %s);",
+					  PQescapeLiteral(conn, node_name, strlen(node_name)),
 					  PQescapeLiteral(conn, local_connstr, strlen(local_connstr)),
 					  PQescapeLiteral(conn, remote_connstr, strlen(remote_connstr)));
 #else
-	printfPQExpBuffer(query, "SELECT bdr.bdr_subscribe(%s, %s);",
+	/* FIXME */
+	printfPQExpBuffer(query, "SELECT bdr.bdr_subscribe(%s, %s, %s);",
+					  PQescapeLiteral(conn, node_name, strlen(node_name)),
 					  PQescapeLiteral(conn, remote_connstr, strlen(remote_connstr)),
 					  PQescapeLiteral(conn, local_connstr, strlen(local_connstr)));
 #endif

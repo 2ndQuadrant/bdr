@@ -26,6 +26,7 @@ step "setup1"
 step "join_root"
 {
 	SELECT bdr.bdr_group_create(
+	        local_node_name := 'node1',
 		dsn := 'dbname=node1'
 		);
 }
@@ -72,6 +73,7 @@ step "setup2"
 step "join_2"
 {
 	SELECT bdr.bdr_group_join(
+	        local_node_name := 'node2',
 		dsn := 'dbname=node2',
 		init_from_dsn := 'dbname=node1'
 		);
@@ -104,6 +106,7 @@ step "setup3"
 step "join_3"
 {
 	SELECT bdr.bdr_group_join(
+	        local_node_name := 'node3',
 		dsn := 'dbname=node3',
 		init_from_dsn := 'dbname=node1',
 		local_dsn := 'dbname=node3'
