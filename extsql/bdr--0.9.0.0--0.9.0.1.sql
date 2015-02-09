@@ -14,7 +14,7 @@ ALTER TABLE bdr.bdr_nodes
 
 ALTER TABLE bdr.bdr_nodes
   ADD CONSTRAINT bdr_nodes_node_status_check
-    CHECK (node_status in ('b', 'i', 'c', 'o', 'r'));
+    CHECK (node_status in ('b', 'i', 'c', 'o', 'r', 'k'));
 
 CREATE TABLE bdr_connections (
     conn_sysid text not null,
@@ -557,6 +557,29 @@ $body$;
 
 COMMENT ON FUNCTION bdr.bdr_subscribe(text, text, text, integer, text[])
 IS 'Subscribe to remote logical changes';
+
+CREATE OR REPLACE FUNCTION bdr.bdr_part_by_node_names(p_nodes text[])
+RETURNS void LANGUAGE plpgsql VOLATILE
+SET search_path = bdr, pg_catalog
+SET bdr.permit_unsafe_ddl_commands = on
+SET bdr.skip_ddl_replication = on
+SET bdr.skip_ddl_locking = on
+AS $body$
+BEGIN
+    -- concurrency
+    LOCK TABLE bdr.bdr_connections IN EXCLUSIVE MODE;
+    LOCK TABLE bdr.bdr_nodes IN EXCLUSIVE MODE;
+    LOCK TABLE pg_catalog.pg_shseclabel IN EXCLUSIVE MODE;
+
+    UPDATE bdr.bdr_nodes
+    SET node_status = 'k'
+    WHERE node_name = ANY(p_nodes);
+
+    -- Notify local perdb worker to kill nodes.
+    PERFORM bdr.bdr_connections_changed();
+
+END;
+$body$;
 
 CREATE FUNCTION bdr.bdr_node_join_wait_for_ready()
 RETURNS void LANGUAGE plpgsql VOLATILE AS $body$

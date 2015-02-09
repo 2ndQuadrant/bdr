@@ -229,10 +229,14 @@ bdr_maintain_db_workers(void)
 	Oid					argtypes[BDR_CON_Q_NARGS] = { TEXTOID, OIDOID, OIDOID };
 	Datum				values[BDR_CON_Q_NARGS];
 	char				sysid_str[33];
+	char				our_status;
 
 	/* Should be called from the perdb worker */
 	Assert(IsBackgroundWorker);
 	Assert(bdr_worker_type == BDR_WORKER_PERDB);
+
+	Assert(!LWLockHeldByMe(BdrWorkerCtl->lock));
+
 
 	snprintf(sysid_str, sizeof(sysid_str), UINT64_FORMAT, GetSystemIdentifier());
 	sysid_str[sizeof(sysid_str)-1] = '\0';
@@ -257,6 +261,144 @@ bdr_maintain_db_workers(void)
 
 	StartTransactionCommand();
 
+	SPI_connect();
+
+	PushActiveSnapshot(GetTransactionSnapshot());
+
+	our_status = bdr_nodes_get_local_status(
+		GetSystemIdentifier(), ThisTimeLineID, MyDatabaseId);
+
+	/*
+	 * First check whether any existing processes to/from this database need
+	 * to be killed of because of the node status.
+	 */
+	ret = SPI_execute(
+		"SELECT node_sysid, node_timeline, node_dboid\n"
+		"FROM bdr.bdr_nodes\n"
+		"WHERE bdr_nodes.node_status = 'k'",
+		false, 0);
+
+	if (ret != SPI_OK_SELECT)
+		elog(ERROR, "SPI error while querying bdr.bdr_nodes");
+
+	for (i = 0; i < SPI_processed; i++)
+	{
+		/*
+		 * If the connection is dead, iterate over all shem slots and kill
+		 * everything using that slot.
+		 */
+		HeapTuple	tuple;
+		int			slotoff;
+		bool		found_alive = false;
+		Oid			node_datoid;
+		uint64		node_sysid;
+		char	   *node_sysid_s;
+		TimeLineID	node_timeline;
+
+		bool		isnull;
+
+		tuple = SPI_tuptable->vals[i];
+
+		node_sysid_s = SPI_getvalue(tuple, SPI_tuptable->tupdesc, 1);
+
+		if (sscanf(node_sysid_s, UINT64_FORMAT, &node_sysid) != 1)
+			elog(ERROR, "Parsing sysid uint64 from %s failed", node_sysid_s);
+
+		node_timeline = DatumGetObjectId(
+			SPI_getbinval(tuple, SPI_tuptable->tupdesc, 2,
+						  &isnull));
+		Assert(!isnull);
+
+		node_datoid = DatumGetObjectId(
+			SPI_getbinval(tuple, SPI_tuptable->tupdesc, 3,
+						  &isnull));
+		Assert(!isnull);
+
+		LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
+
+		for (slotoff = 0; slotoff < bdr_max_workers; slotoff++)
+		{
+			BdrWorker  *w = &BdrWorkerCtl->slots[slotoff];
+			bool		kill_proc = false;
+
+			/* unused slot */
+			if (w->worker_type == BDR_WORKER_EMPTY_SLOT)
+				continue;
+
+			/* unconnected slot */
+			if (w->worker_proc == NULL)
+				continue;
+
+			if (w->worker_type == BDR_WORKER_APPLY)
+			{
+				BdrApplyWorker *apply = &w->data.apply;
+
+				/*
+				 * Kill apply workers either if they're running on the
+				 * to-be-killed node or connecting to it.
+				 */
+
+				if (our_status == 'k' && w->worker_proc->databaseId == node_datoid)
+				{
+					/*
+					 * NB: It's sufficient to check the database oid, the
+					 * others have to be the same
+					 */
+					kill_proc = true;
+				}
+				else if (apply->remote_sysid == node_sysid &&
+						 apply->remote_timeline == node_timeline &&
+						 apply->remote_dboid == node_datoid)
+				{
+					kill_proc = true;
+				}
+			}
+			else if (w->worker_type == BDR_WORKER_WALSENDER)
+			{
+				BdrWalsenderWorker *walsnd = &w->data.walsnd;
+
+				if (our_status == 'k' && w->worker_proc->databaseId == node_datoid)
+					kill_proc = true;
+				else if (walsnd->remote_sysid == node_sysid &&
+						 walsnd->remote_timeline == node_timeline &&
+						 walsnd->remote_dboid == node_datoid)
+				{
+					kill_proc = true;
+				}
+			}
+
+			if (kill_proc)
+			{
+				found_alive = true;
+
+				elog(LOG, "need to kill node: %u type: %u",
+					 w->worker_pid, w->worker_type);
+				kill(w->worker_pid, SIGTERM);
+			}
+		}
+
+		if (found_alive)
+		{
+			/* check again next time round, soon please */
+			SetLatch(&MyProc->procLatch);
+		}
+		else
+		{
+			/* Drop slots of dead node */
+			elog(LOG, "need to drop slots for remote (a,b,c)");
+		}
+
+		LWLockRelease(BdrWorkerCtl->lock);
+		continue;
+	}
+
+	/* If our own node is dead, don't start new connections to other nodes */
+	if (our_status == 'k')
+	{
+		elog(LOG, "FIXME: skipping");
+		goto out;
+	}
+
 	/*
 	 * Look up connection entries for all nodes other than our own.
 	 *
@@ -267,14 +409,18 @@ bdr_maintain_db_workers(void)
 	values[1] = ObjectIdGetDatum(ThisTimeLineID);
 	values[2] = ObjectIdGetDatum(MyDatabaseId);
 
-	SPI_connect();
-
 	ret = SPI_execute_with_args(
 			"SELECT DISTINCT ON (conn_sysid, conn_timeline, conn_dboid) "
 			"  conn_sysid, conn_timeline, conn_dboid, "
 			"  conn_is_unidirectional, "
-			"  conn_origin_dboid <> 0 AS origin_is_my_id "
+			"  conn_origin_dboid <> 0 AS origin_is_my_id, "
+			"  node_status "
 			"FROM bdr.bdr_connections "
+			"    JOIN bdr.bdr_nodes ON ("
+			"          conn_sysid = node_sysid AND "
+			"          conn_timeline = node_timeline AND "
+			"          conn_dboid = node_dboid "
+			"    )"
 			"WHERE ( "
 			"         (conn_origin_sysid = '0' AND "
 			"          conn_origin_timeline = 0 AND "
@@ -298,10 +444,6 @@ bdr_maintain_db_workers(void)
 	if (ret != SPI_OK_SELECT)
 		elog(ERROR, "SPI error while querying bdr.bdr_connections");
 
-	nnodes = SPI_processed;
-
-	elog(DEBUG2, "found %u workers in bdr_connections", (uint32)nnodes);
-
 	for (i = 0; i < SPI_processed; i++)
 	{
 		BackgroundWorkerHandle *bgw_handle;
@@ -318,6 +460,7 @@ bdr_maintain_db_workers(void)
 		char*					tmp_sysid;
 		bool					origin_is_my_id,
 								conn_is_unidirectional;
+		char					node_status;
 
 		tuple = SPI_tuptable->vals[i];
 
@@ -351,11 +494,25 @@ bdr_maintain_db_workers(void)
 		Assert(!isnull);
 		origin_is_my_id = DatumGetBool(temp_datum);
 
-		elog(DEBUG2, "Found bdr_connections entry for "BDR_LOCALID_FORMAT" (origin specific: %d, unidirectional: %d)",
-			 target_sysid, target_timeline, target_dboid,
-			 EMPTY_REPLICATION_NAME, (int)origin_is_my_id, (int)conn_is_unidirectional);
+		temp_datum = SPI_getbinval(tuple, SPI_tuptable->tupdesc,
+								   getattno("node_status"),
+								   &isnull);
+		Assert(!isnull);
+		node_status = DatumGetChar(temp_datum);
 
-		Assert(!LWLockHeldByMe(BdrWorkerCtl->lock));
+		elog(LOG, "Found bdr_connections entry for "BDR_LOCALID_FORMAT" (origin specific: %d, unidirectional: %d, status: %c)",
+			 target_sysid, target_timeline, target_dboid,
+			 EMPTY_REPLICATION_NAME,
+			 (int) origin_is_my_id, (int) conn_is_unidirectional, node_status);
+
+		if(node_status == 'k')
+		{
+			elog(LOG, "skip registration as killed");
+			continue;
+		}
+
+		nnodes++;
+
 		LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
 
 		/*
@@ -439,6 +596,8 @@ bdr_maintain_db_workers(void)
 		}
 	}
 
+out:
+	PopActiveSnapshot();
 	SPI_finish();
 
 	CommitTransactionCommand();
@@ -549,7 +708,8 @@ bdr_perdb_worker_main(Datum main_arg)
 		/*
 		 * Do we need to init the local DB from a remote node?
 		 */
-		if (local_node->status != 'r')
+		if (local_node->status != 'r' /* initialized */
+			&& local_node->status != 'k' /* kill */)
 			bdr_init_replica(local_node);
 
 		bdr_bdr_node_free(local_node);

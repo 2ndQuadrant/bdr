@@ -2407,6 +2407,7 @@ bdr_apply_main(Datum main_arg)
 	RepNodeId	replication_identifier;
 	XLogRecPtr	start_from;
 	NameData	slot_name;
+	char		status;
 
 	bdr_bgworker_init(DatumGetInt32(main_arg), BDR_WORKER_APPLY);
 
@@ -2415,6 +2416,23 @@ bdr_apply_main(Datum main_arg)
 	initStringInfo(&query);
 
 	Assert(MyDatabaseId == bdr_apply_worker->dboid);
+
+	/* Check if we decided to kill off this connection */
+	StartTransactionCommand();
+	SPI_connect();
+	status = bdr_nodes_get_local_status(
+		bdr_apply_worker->remote_sysid,
+		bdr_apply_worker->remote_timeline,
+		bdr_apply_worker->remote_dboid);
+	SPI_finish();
+	CommitTransactionCommand();
+	if (status == 'k')
+	{
+		elog(LOG, "unregistering worker, node has been killed");
+		bdr_worker_shmem_free(bdr_worker_slot, NULL);
+		bdr_worker_slot = NULL;
+		proc_exit(0); /* unregister */
+	}
 
 	/* Read our connection configuration from the database */
 	bdr_apply_config = bdr_get_connection_config(

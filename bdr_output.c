@@ -278,6 +278,13 @@ bdr_ensure_node_ready(BdrOutputData *data)
 
 	SPI_finish();
 
+	if (remote_status == 'k')
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("bdr output plugin: slot usage rejected, node killed")));
+	}
+
 	/*
 	 * Complain if node isn't ready,
 	 * i.e. state is fully 'r'eady, or waiting for inbound sl'o't creation.
@@ -343,6 +350,10 @@ bdr_ensure_node_ready(BdrOutputData *data)
 								"status='i', bdr still starting up: applying initial dump of remote node"),
 						 errhint("Monitor pg_stat_activity and the logs, wait until the node has caught up")));
 				break;
+			case 'k':
+				elog(ERROR, "node is exiting");
+				break;
+
 			default:
 				elog(ERROR, "Unhandled case status=%c", our_status);
 				break;
