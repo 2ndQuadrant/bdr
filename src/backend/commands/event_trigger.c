@@ -1548,7 +1548,7 @@ pg_event_trigger_table_rewrite_reason(PG_FUNCTION_ARGS)
  */
 void
 EventTriggerStashCommand(Oid objectId, uint32 objectSubId, ObjectType objtype,
-						 Node *parsetree)
+						 Oid secondaryOid, Node *parsetree)
 {
 	MemoryContext oldcxt;
 	StashedCommand *stashed;
@@ -1563,6 +1563,7 @@ EventTriggerStashCommand(Oid objectId, uint32 objectSubId, ObjectType objtype,
 	stashed->d.simple.objectId = objectId;
 	stashed->d.simple.objtype = objtype;
 	stashed->d.simple.objectSubId = objectSubId;
+	stashed->d.simple.secondaryOid = secondaryOid;
 	stashed->parsetree = copyObject(parsetree);
 
 	currentEventTriggerState->stash = lappend(currentEventTriggerState->stash,

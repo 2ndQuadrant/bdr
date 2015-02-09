@@ -136,7 +136,7 @@ CreateSchemaCommand(CreateSchemaStmt *stmt, const char *queryString)
 	 * objects created below are reported before the schema, which would be
 	 * wrong.
 	 */
-	EventTriggerStashCommand(namespaceId, 0, OBJECT_SCHEMA, (Node *) stmt);
+	EventTriggerStashCommand(namespaceId, 0, OBJECT_SCHEMA, InvalidOid, (Node *) stmt);
 
 	/*
 	 * Examine the list of commands embedded in the CREATE SCHEMA command, and

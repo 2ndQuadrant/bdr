@@ -55,6 +55,7 @@ typedef struct StashedCommand
 			Oid			objectId;
 			uint32		objectSubId;
 			ObjectType	objtype;
+			Oid			secondaryOid;
 		} simple;
 
 		struct AlterTableCommand
