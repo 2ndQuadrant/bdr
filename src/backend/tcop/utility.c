@@ -818,7 +818,7 @@ standard_ProcessUtility(Node *parsetree,
 									   context, params,
 									   dest, completionTag);
 				else
-					ExecAlterObjectSchemaStmt(stmt);
+					ExecAlterObjectSchemaStmt(stmt, NULL);
 			}
 			break;
 
@@ -1448,7 +1448,8 @@ ProcessUtilitySlow(Node *parsetree,
 				break;
 
 			case T_AlterObjectSchemaStmt:
-				objectId = ExecAlterObjectSchemaStmt((AlterObjectSchemaStmt *) parsetree);
+				objectId = ExecAlterObjectSchemaStmt((AlterObjectSchemaStmt *) parsetree,
+													 &secondaryOid);
 				objectType = ((AlterObjectSchemaStmt *) parsetree)->objectType;
 				break;
 

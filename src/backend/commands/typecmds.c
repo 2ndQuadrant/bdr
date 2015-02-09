@@ -3540,11 +3540,13 @@ AlterTypeOwnerInternal(Oid typeOid, Oid newOwnerId,
  * Execute ALTER TYPE SET SCHEMA
  */
 Oid
-AlterTypeNamespace(List *names, const char *newschema, ObjectType objecttype)
+AlterTypeNamespace(List *names, const char *newschema, ObjectType objecttype,
+				   Oid *oldschema)
 {
 	TypeName   *typename;
 	Oid			typeOid;
 	Oid			nspOid;
+	Oid			oldNspOid;
 	ObjectAddresses *objsMoved;
 
 	/* Make a TypeName so we can use standard type lookup machinery */
@@ -3562,8 +3564,11 @@ AlterTypeNamespace(List *names, const char *newschema, ObjectType objecttype)
 	nspOid = LookupCreationNamespace(newschema);
 
 	objsMoved = new_object_addresses();
-	AlterTypeNamespace_oid(typeOid, nspOid, objsMoved);
+	oldNspOid = AlterTypeNamespace_oid(typeOid, nspOid, objsMoved);
 	free_object_addresses(objsMoved);
+
+	if (oldschema)
+		*oldschema = oldNspOid;
 
 	return typeOid;
 }

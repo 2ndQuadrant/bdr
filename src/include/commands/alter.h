@@ -21,7 +21,8 @@
 
 extern ObjectAddress ExecRenameStmt(RenameStmt *stmt);
 
-extern Oid	ExecAlterObjectSchemaStmt(AlterObjectSchemaStmt *stmt);
+extern Oid	ExecAlterObjectSchemaStmt(AlterObjectSchemaStmt *stmt,
+						  Oid *oldschema);
 extern Oid AlterObjectNamespace_oid(Oid classId, Oid objid, Oid nspOid,
 						 ObjectAddresses *objsMoved);
 

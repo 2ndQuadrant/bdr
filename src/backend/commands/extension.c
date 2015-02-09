@@ -2400,7 +2400,7 @@ extension_config_remove(Oid extensionoid, Oid tableoid)
  * Execute ALTER EXTENSION SET SCHEMA
  */
 Oid
-AlterExtensionNamespace(List *names, const char *newschema)
+AlterExtensionNamespace(List *names, const char *newschema, Oid *oldschema)
 {
 	char	   *extensionName;
 	Oid			extensionOid;
@@ -2556,6 +2556,10 @@ AlterExtensionNamespace(List *names, const char *newschema)
 							   getObjectDescription(&dep),
 							   get_namespace_name(oldNspOid))));
 	}
+
+	/* report old schema, if caller wants it */
+	if (oldschema)
+		*oldschema = oldNspOid;
 
 	systable_endscan(depScan);
 
