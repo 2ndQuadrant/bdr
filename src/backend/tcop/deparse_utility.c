@@ -3591,12 +3591,13 @@ deparse_IndexStmt(Oid objectId, Node *parsetree)
 							 &tablespace, &whereClause);
 
 	indexStmt =
-		new_objtree_VA("CREATE %{unique}s INDEX %{concurrently}s %{name}I "
+		new_objtree_VA("CREATE %{unique}s INDEX %{concurrently}s %{if_not_exists}s %{name}I "
 					   "ON %{table}D USING %{index_am}s (%{definition}s) "
 					   "%{with}s %{tablespace}s %{where_clause}s",
-					   5,
+					   6,
 					   "unique", ObjTypeString, node->unique ? "UNIQUE" : "",
 					   "concurrently", ObjTypeString,
+					   "if_not_exists", ObjTypeString, node->if_not_exists ? "IF NOT EXISTS" : "",
 					   node->concurrent ? "CONCURRENTLY" : "",
 					   "name", ObjTypeString, RelationGetRelationName(idxrel),
 					   "definition", ObjTypeString, definition,
