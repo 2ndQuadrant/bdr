@@ -15,7 +15,7 @@ JADE.html.call = $(JADE) $(JADEFLAGS) $(SPFLAGS) $(SGMLINCLUDE) $(CATALOG) -d st
 ALLSGML := $(wildcard $(srcdir)/*.sgml)
 # to build bookindex
 ALMOSTALLSGML := $(filter-out %bookindex.sgml,$(ALLSGML))
-GENERATED_SGML = version.sgml bookindex.sgml html/website-docs.css
+GENERATED_SGML = version.sgml bookindex.sgml
 
 Makefile: Makefile.in
 	cd $(bdr_top_builddir) && ./config.status doc/Makefile
@@ -24,7 +24,7 @@ all: html
 
 html: html-stamp
 
-html-stamp: bdr.sgml $(ALLSGML) $(GENERATED_SGML) stylesheet.dsl
+html-stamp: bdr.sgml $(ALLSGML) $(GENERATED_SGML) stylesheet.dsl website-docs.css
 	$(MKDIR_P) html
 	$(JADE.html.call) -i include-index $<
 	cp $(srcdir)/stylesheet.css $(srcdir)/website-docs.css html/
