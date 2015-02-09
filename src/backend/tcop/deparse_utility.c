@@ -1699,6 +1699,27 @@ deparse_AlterDomainStmt(Oid objectId, Node *parsetree,
 }
 
 static ObjTree *
+deparse_AlterExtensionContentsStmt(Oid objectId, Node *parsetree,
+								   ObjectAddress objectAddress)
+{
+	AlterExtensionContentsStmt *node = (AlterExtensionContentsStmt *) parsetree;
+	ObjTree	   *stmt;
+	char	   *fmt;
+
+	Assert(node->action == +1 || node->action == -1);
+
+	fmt = psprintf("ALTER EXTENSION %%{extidentity}I %s %s %%{objidentity}s",
+				   node->action == +1 ? "ADD" : "DROP",
+				   stringify_objtype(node->objtype));
+
+	stmt = new_objtree_VA(fmt, 2, "extidentity", ObjTypeString, node->extname,
+						  "objidentity", ObjTypeString,
+						  getObjectIdentity(&objectAddress));
+
+	return stmt;
+}
+
+static ObjTree *
 deparse_AlterExtensionStmt(Oid objectId, Node *parsetree)
 {
 	AlterExtensionStmt *node = (AlterExtensionStmt *) parsetree;
@@ -5302,7 +5323,8 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_AlterExtensionContentsStmt:
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			command = deparse_AlterExtensionContentsStmt(objectId, parsetree,
+														 cmd->d.simple.secondaryObject);
 			break;
 
 		case T_CreateFdwStmt:
