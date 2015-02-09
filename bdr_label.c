@@ -62,7 +62,7 @@ bdr_object_relabel(const ObjectAddress *object, const char *seclabel)
 											   get_database_name(object->objectId));
 
 			/* ensure bdr_dbcache.c is coherent */
-			CacheInvalidateCatalog(DATABASEOID);
+			CacheInvalidateCatalog(DatabaseRelationId);
 
 			bdr_parse_database_options(seclabel, NULL);
 			break;
