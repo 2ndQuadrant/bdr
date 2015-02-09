@@ -79,7 +79,6 @@ Oid   BdrLocksByOwnerRelid;
 Oid   BdrReplicationSetConfigRelid;
 
 /* GUC storage */
-static char *connections = NULL;
 static bool bdr_synchronous_commit;
 int bdr_default_apply_delay;
 int bdr_max_workers;
@@ -660,14 +659,6 @@ _PG_init(void)
 
 	/* guc's et al need to survive outside the lifetime of the library init */
 	old_context = MemoryContextSwitchTo(TopMemoryContext);
-
-	DefineCustomStringVariable("bdr.connections",
-							   "List of connections",
-							   NULL,
-							   &connections,
-							   NULL, PGC_POSTMASTER,
-							   GUC_LIST_INPUT | GUC_LIST_QUOTE,
-							   NULL, NULL, NULL);
 
 	/* XXX: make it changeable at SIGHUP? */
 	DefineCustomBoolVariable("bdr.synchronous_commit",
