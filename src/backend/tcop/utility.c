@@ -1247,8 +1247,9 @@ ProcessUtilitySlow(Node *parsetree,
 				break;
 
 			case T_AlterExtensionContentsStmt:
-				objectId = ExecAlterExtensionContentsStmt((AlterExtensionContentsStmt *) parsetree);
-				EventTriggerStashCommand(objectId, 0, OBJECT_EXTENSION, InvalidOid, parsetree);
+				objectId = ExecAlterExtensionContentsStmt((AlterExtensionContentsStmt *) parsetree,
+														  &secondaryOid);
+				EventTriggerStashCommand(objectId, 0, OBJECT_EXTENSION, secondaryOid, parsetree);
 				break;
 
 			case T_CreateFdwStmt:

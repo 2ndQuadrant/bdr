@@ -38,7 +38,8 @@ extern Oid InsertExtensionTuple(const char *extName, Oid extOwner,
 
 extern Oid	ExecAlterExtensionStmt(AlterExtensionStmt *stmt);
 
-extern Oid	ExecAlterExtensionContentsStmt(AlterExtensionContentsStmt *stmt);
+extern Oid	ExecAlterExtensionContentsStmt(AlterExtensionContentsStmt *stmt,
+							   Oid *objectId);
 
 extern Oid	get_extension_oid(const char *extname, bool missing_ok);
 extern char *get_extension_name(Oid ext_oid);
