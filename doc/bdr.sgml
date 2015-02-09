@@ -2,11 +2,11 @@
 
 <!DOCTYPE book PUBLIC "-//OASIS//DTD DocBook V4.2//EN" [
 
-	  <!ENTITY % version SYSTEM "version.sgml">
-	  %version;
+          <!ENTITY % version SYSTEM "version.sgml">
+          %version;
 
-	  <!ENTITY % filelist SYSTEM "filelist.sgml">
-	  %filelist;
+          <!ENTITY % filelist SYSTEM "filelist.sgml">
+          %filelist;
 
 ]>
 
@@ -91,9 +91,149 @@ To set up BDR you'll need to: ...
     <secondary>of the server</secondary>
    </indexterm>
 
-   <para>List of Settings</para>
-  </chapter>
+   <sect1 id="settings-prerequisite">
+    <title>Prerequisite postgres parameters</title>
 
+    <para>
+     BDR and UDR require a couple of postgres settings to be set to
+     specific values.
+    </para>
+
+    <para>
+     <variablelist>
+
+      <varlistentry id="guc-max-worker-processes" xreflabel="max_worker_processes">
+       <term><varname>max_worker_processes</varname> (<type>integer</type>)
+        <indexterm>
+         <primary><varname>max_worker_processes</varname> configuration parameter</primary>
+        </indexterm>
+       </term>
+       <listitem>
+        <para>
+         For both <productname>BDR</productname>
+         and <productname>UDR</productname> this has to be set to a big
+         enough value to have one worker per configured database, and
+         one worker per connection.
+        </para>
+        <para>
+         For more detailed information about this parameter consult
+         the <productname>PostgreSQL</productname>
+         <ulink url='http://www.postgresql.org/docs/current/interactive/runtime-config-resource.html#GUC-MAX-WORKER-PROCESSES'>documentation</ulink>.
+        </para>
+       </listitem>
+      </varlistentry>
+
+      <varlistentry id="guc-max-replication-slots" xreflabel="max_replication_slots">
+       <term><varname>max_replication_slots</varname> (<type>integer</type>)
+       <indexterm>
+        <primary><varname>max_replication_slots</varname> configuration parameter</primary>
+       </indexterm>
+       </term>
+       <listitem>
+        <para>
+         For both <productname>BDR</productname>
+         and <productname>UDR</productname> this needs to be set big
+         enough so that every connection to this node has a free
+         replication slot.
+        </para>
+        <para>
+         For more detailed information about this parameter consult
+         the <productname>PostgreSQL</productname>
+         <ulink url='http://www.postgresql.org/docs/current/interactive/runtime-config-replication.html#GUC-MAX-REPLICATION-SLOTS'>documentation</ulink>.
+        </para>
+       </listitem>
+      </varlistentry>
+
+      <varlistentry id="guc-max-wal-senders" xreflabel="max_wal_senders">
+       <term><varname>max_wal_senders</varname> (<type>integer</type>)
+        <indexterm>
+         <primary><varname>max_wal_senders</varname> configuration parameter</primary>
+        </indexterm>
+       </term>
+       <listitem>
+        <para>
+         For both <productname>BDR</productname>
+         and <productname>UDR</productname> this needs to be set big
+         enough so that every connection to this node has a free wal
+         sender process.
+        </para>
+        <para>
+         If a node also does streaming base backups and/or base
+         backups using <application>pg_basebackup</application>, the
+         value needs to be big enough to accomodate both that
+         and <productname>BDR</productname>/<productname>UDR</productname>.
+        </para>
+
+        <para>
+         For more detailed information about this parameter consult
+         the <productname>PostgreSQL</productname>
+         <ulink url='http://www.postgresql.org/docs/current/interactive/runtime-config-replication.html#GUC-MAX-WAL-SENDERS'>documentation</ulink>.
+        </para>
+       </listitem>
+      </varlistentry>
+
+      <varlistentry id="guc-shared-preload-libraries" xreflabel="shared_preload_libraries">
+      <term><varname>shared_preload_libraries</varname> (<type>string</type>)
+      <indexterm>
+       <primary><varname>shared_preload_libraries</varname> configuration parameter</primary>
+      </indexterm>
+      </term>
+      <listitem>
+       <para>
+        For both <productname>BDR</productname>
+        and <productname>UDR</productname> this parameter has to to
+        include <literal>bdr</literal> as one of the comma separated
+        values. The parameter can only be changed at server start.
+       </para>
+       <para>
+         For more detailed information about this parameter consult
+         the <productname>PostgreSQL</productname>
+         <ulink url='http://www.postgresql.org/docs/current/interactive/runtime-config-client.html#GUC-SHARED-PRELOAD-LIBRARIES'>documentation</ulink>.
+       </para>
+      </listitem>
+      </varlistentry>
+
+      <varlistentry id="guc-track-commit-timestamp" xreflabel="track_commit_timestamp">
+       <term><varname>track_commit_timestamp</varname> (<type>bool</type>)
+        <indexterm>
+         <primary><varname>track_commit_timestamp</varname> configuration parameter</primary>
+        </indexterm>
+       </term>
+       <listitem>
+        <para>
+         To use <productname>BDR</productname> this parameter has to
+         be set to <literal>true</literal>, it can
+         be <literal>false</literal>
+         for <productname>UDR</productname>
+        </para>
+       </listitem>
+      </varlistentry>
+
+      <varlistentry id="guc-wal-level" xreflabel="wal_level">
+       <term><varname>wal_level</varname> (<type>enum</type>)
+        <indexterm>
+         <primary><varname>wal_level</varname> configuration parameter</primary>
+        </indexterm>
+       </term>
+       <listitem>
+        <para>
+         For both <productname>BDR</productname>
+         and <productname>UDR</productname> this parameter has to be
+         set to <literal>logical</literal>.
+        </para>
+
+        <para>
+         For more detailed information about this parameter consult
+         the <productname>PostgreSQL</productname>
+         <ulink url='http://www.postgresql.org/docs/current/interactive/runtime-config-wal.html#GUC-WAL-LEVEL'>documentation</ulink>.
+        </para>
+       </listitem>
+      </varlistentry>
+
+     </variablelist>
+    </para>
+   </sect1>
+  </chapter>
  </part>
 
  <![%include-index;[&bookindex;]]>
