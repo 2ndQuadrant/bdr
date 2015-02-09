@@ -13,6 +13,7 @@
 #include "postgres.h"
 
 #include "bdr.h"
+#include "bdr_internal.h"
 #include "miscadmin.h"
 
 #include "access/sysattr.h"
@@ -56,6 +57,10 @@ extern void		_PG_output_plugin_init(OutputPluginCallbacks *cb);
 typedef struct
 {
 	MemoryContext context;
+
+	uint64		remote_sysid;
+	TimeLineID	remote_timeline;
+	Oid			remote_dboid;
 
 	bool allow_binary_protocol;
 	bool allow_sendrecv_protocol;
@@ -236,8 +241,10 @@ bdr_ensure_node_ready(BdrOutputData *data)
 {
 	int spi_ret;
 	const uint64 sysid = GetSystemIdentifier();
-	char status;
-	BDRNodeInfo *node;
+	char our_status;
+	char remote_status;
+	BDRNodeInfo *our_node;
+	BDRNodeInfo *remote_node;
 	NameData dbname;
 	char *tmp_dbname;
 
@@ -259,9 +266,13 @@ bdr_ensure_node_ready(BdrOutputData *data)
 	if (spi_ret != SPI_OK_CONNECT)
 		elog(ERROR, "Local SPI connect failed; shouldn't happen");
 
-	node = bdr_nodes_get_local_info(sysid, ThisTimeLineID, MyDatabaseId);
-	status = node == NULL ? '\0' : node->status;
-	bdr_bdr_node_free(node);
+	our_node = bdr_nodes_get_local_info(sysid, ThisTimeLineID, MyDatabaseId);
+	remote_node = bdr_nodes_get_local_info(
+		data->remote_sysid, data->remote_timeline, data->remote_dboid);
+	our_status = our_node == NULL ? '\0' : our_node->status;
+	remote_status = remote_node == NULL ? '\0' : remote_node->status;
+	bdr_bdr_node_free(our_node);
+	bdr_bdr_node_free(remote_node);
 
 	SPI_finish();
 
@@ -270,12 +281,12 @@ bdr_ensure_node_ready(BdrOutputData *data)
 	 * i.e. state is fully 'r'eady, or waiting for inbound sl'o't creation.
 	 */
 	/* TODO: Allow soft error so caller can sleep and recheck? */
-	if (status != 'r' && status != 'o')
+	if (our_status != 'r' && our_status != 'o')
 	{
 		const char * const base_msg =
 			"bdr output plugin: slot creation rejected, bdr.bdr_nodes entry for local node (sysid=" UINT64_FORMAT
 			", timelineid=%u, dboid=%u): %s";
-		switch (status)
+		switch (our_status)
 		{
 			case 'r':
 			case 'o':
@@ -331,7 +342,7 @@ bdr_ensure_node_ready(BdrOutputData *data)
 						 errhint("Monitor pg_stat_activity and the logs, wait until the node has caught up")));
 				break;
 			default:
-				elog(ERROR, "Unhandled case status=%c", status);
+				elog(ERROR, "Unhandled case status=%c", our_status);
 				break;
 		}
 	}
@@ -342,10 +353,11 @@ bdr_ensure_node_ready(BdrOutputData *data)
 static void
 pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool is_init)
 {
-	ListCell   *option;
-	BdrOutputData *data;
-	Oid schema_oid;
-	bool tx_started = false;
+	ListCell	   *option;
+	BdrOutputData  *data;
+	Oid				schema_oid;
+	bool			tx_started = false;
+	Oid				local_dboid;
 
 	data = palloc0(sizeof(BdrOutputData));
 	data->context = AllocSetContextCreate(TopMemoryContext,
@@ -366,6 +378,13 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 #endif
 	data->bdr_schema_oid = InvalidOid;
 	data->num_replication_sets = -1;
+
+	/* parse where the connection has to be from */
+	bdr_parse_slot_name(NameStr(MyReplicationSlot->data.name),
+						&data->remote_sysid,
+						&data->remote_timeline,
+						&data->remote_dboid,
+						&local_dboid);
 
 	/* parse options passed in by the client */
 
@@ -634,6 +653,10 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 		/* can be null if sql interface is used */
 		bdr_worker_slot->data.walsnd.walsender = MyWalSnd;
 		bdr_worker_slot->data.walsnd.slot = MyReplicationSlot;
+		bdr_worker_slot->data.walsnd.remote_sysid = data->remote_sysid;
+		bdr_worker_slot->data.walsnd.remote_timeline = data->remote_timeline;
+		bdr_worker_slot->data.walsnd.remote_dboid = data->remote_dboid;
+
 		LWLockRelease(BdrWorkerCtl->lock);
 	}
 }

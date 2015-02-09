@@ -209,6 +209,12 @@ typedef struct BdrWalsenderWorker
 {
 	struct WalSnd *walsender;
 	struct ReplicationSlot *slot;
+
+	/* Identification for the remote the connection comes from. */
+	uint64		remote_sysid;
+	TimeLineID	remote_timeline;
+	Oid			remote_dboid;
+
 } BdrWalsenderWorker;
 
 /*
