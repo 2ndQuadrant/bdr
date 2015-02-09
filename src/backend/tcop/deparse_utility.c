@@ -1502,7 +1502,7 @@ deparse_CreateExtensionStmt(Oid objectId, Node *parsetree)
 }
 
 static ObjTree *
-deparse_AlterDomainStmt(Oid objectId, Node *parsetree, Oid objectSubId)
+deparse_AlterDomainStmt(Oid objectId, Node *parsetree, Oid secondaryOid)
 {
 	AlterDomainStmt *node = (AlterDomainStmt *) parsetree;
 	HeapTuple	domTup;
@@ -1565,10 +1565,10 @@ deparse_AlterDomainStmt(Oid objectId, Node *parsetree, Oid objectSubId)
 	if (node->subtype == 'C')
 	{
 		append_string_object(alterDom, "definition",
-							 pg_get_constraintdef_string(objectSubId, false));
-		/* can't rely on node->name here */
+							 pg_get_constraintdef_string(secondaryOid, false));
+		/* can't rely on node->name here; might not be defined */
 		append_string_object(alterDom, "constraint_name",
-							 get_constraint_name(objectSubId));
+							 get_constraint_name(secondaryOid));
 	}
 
 	/* ... as does adding a default. */
@@ -4668,7 +4668,8 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_AlterDomainStmt:
-			command = deparse_AlterDomainStmt(objectId, parsetree, cmd->d.simple.objectSubId);
+			command = deparse_AlterDomainStmt(objectId, parsetree,
+											  cmd->d.simple.secondaryOid);
 			break;
 
 			/* other local objects */

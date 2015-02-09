@@ -1073,7 +1073,8 @@ ProcessUtilitySlow(Node *parsetree,
 			case T_AlterDomainStmt:
 				{
 					AlterDomainStmt *stmt = (AlterDomainStmt *) parsetree;
-					Oid		constrOid = InvalidOid;
+
+					secondaryOid = InvalidOid;
 
 					/*
 					 * Some or all of these functions are recursive to cover
@@ -1105,7 +1106,7 @@ ProcessUtilitySlow(Node *parsetree,
 							objectId =
 								AlterDomainAddConstraint(stmt->typeName,
 														 stmt->def,
-														 &constrOid);
+														 &secondaryOid);
 							break;
 						case 'X':		/* DROP CONSTRAINT */
 							objectId =
