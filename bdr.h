@@ -486,7 +486,7 @@ extern void bdr_sigterm(SIGNAL_ARGS);
 extern int find_perdb_worker_slot(Oid dboid,
 									 BdrWorker **worker_found);
 
-extern void bdr_launch_apply_workers(Oid dboid);
+extern void bdr_maintain_db_workers(void);
 
 extern Datum bdr_connections_changed(PG_FUNCTION_ARGS);
 

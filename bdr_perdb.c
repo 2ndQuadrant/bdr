@@ -220,7 +220,7 @@ getattno(const char *colname)
  * connection that doesn't already have one.
  */
 void
-bdr_launch_apply_workers(Oid dboid)
+bdr_maintain_db_workers(void)
 {
 	BackgroundWorker	bgw;
 	int					i, ret;
@@ -368,7 +368,7 @@ bdr_launch_apply_workers(Oid dboid)
 		{
 			elog(DEBUG2, "Skipping registration of worker for node "BDR_LOCALID_FORMAT" on db oid=%u: already registered",
 				 target_sysid, target_timeline, target_dboid,
-				 EMPTY_REPLICATION_NAME, dboid);
+				 EMPTY_REPLICATION_NAME, MyDatabaseId);
 			LWLockRelease(BdrWorkerCtl->lock);
 			continue;
 		}
@@ -559,7 +559,7 @@ bdr_perdb_worker_main(Datum main_arg)
 		 BDR_LOCALID_FORMAT_ARGS, NameStr(perdb->dbname));
 
 	/* Launch the apply workers */
-	bdr_launch_apply_workers(MyDatabaseId);
+	bdr_maintain_db_workers();
 
 #ifdef BUILDING_BDR
 	elog(DEBUG1, "BDR starting sequencer on db \"%s\"",
@@ -625,7 +625,7 @@ bdr_perdb_worker_main(Datum main_arg)
 				 * If the perdb worker's latch is set we're being asked
 				 * to rescan and launch new apply workers.
 				 */
-				bdr_launch_apply_workers(MyDatabaseId);
+				bdr_maintain_db_workers();
 			}
 		}
 	}

@@ -1041,7 +1041,7 @@ bdr_init_replica(BDRNodeInfo *local_node)
 		 * from the target node and also makes sure we stay more up-to-date,
 		 * reducing slot lag on other nodes.
 		 */
-		bdr_launch_apply_workers(MyDatabaseId);
+		bdr_maintain_db_workers();
 
 		/*
 		 * Insert our connection info on the remote end. This will prompt
