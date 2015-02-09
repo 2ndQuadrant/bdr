@@ -15,7 +15,7 @@ JADE.html.call = $(JADE) $(JADEFLAGS) $(SPFLAGS) $(SGMLINCLUDE) $(CATALOG) -d st
 ALLSGML := $(wildcard $(srcdir)/*.sgml)
 # to build bookindex
 ALMOSTALLSGML := $(filter-out %bookindex.sgml,$(ALLSGML))
-GENERATED_SGML = version.sgml bookindex.sgml
+GENERATED_SGML = version.sgml bookindex.sgml html/website-docs.css
 
 Makefile: Makefile.in
 	cd $(bdr_top_builddir) && ./config.status doc/Makefile
@@ -27,7 +27,7 @@ html: html-stamp
 html-stamp: bdr.sgml $(ALLSGML) $(GENERATED_SGML) stylesheet.dsl
 	$(MKDIR_P) html
 	$(JADE.html.call) -i include-index $<
-	cp $(srcdir)/stylesheet.css html/
+	cp $(srcdir)/stylesheet.css $(srcdir)/website-docs.css html/
 	touch $@
 
 version.sgml: ${bdr_top_builddir}/bdr_config_generated.h
@@ -40,6 +40,10 @@ version.sgml: ${bdr_top_builddir}/bdr_config_generated.h
 HTML.index: bdr.sgml $(ALMOSTALLSGML) stylesheet.dsl
 	@$(MKDIR_P) html
 	$(JADE.html.call) -V html-index $<
+
+website-docs.css:
+	@$(MKDIR_P) html
+	curl http://www.postgresql.org/media/css/docs.css > ${srcdir}/website-docs.css
 
 bookindex.sgml: HTML.index
 ifdef COLLATEINDEX
