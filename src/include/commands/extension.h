@@ -43,7 +43,8 @@ extern Oid	ExecAlterExtensionContentsStmt(AlterExtensionContentsStmt *stmt);
 extern Oid	get_extension_oid(const char *extname, bool missing_ok);
 extern char *get_extension_name(Oid ext_oid);
 
-extern Oid	AlterExtensionNamespace(List *names, const char *newschema);
+extern Oid	AlterExtensionNamespace(List *names, const char *newschema,
+						Oid *oldschema);
 
 extern void AlterExtensionOwner_oid(Oid extensionOid, Oid newOwnerId);
 

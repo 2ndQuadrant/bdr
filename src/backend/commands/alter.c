@@ -398,24 +398,24 @@ ExecRenameStmt(RenameStmt *stmt, int *objsubid)
  * type, the function appropriate to that type is executed.
  */
 Oid
-ExecAlterObjectSchemaStmt(AlterObjectSchemaStmt *stmt)
+ExecAlterObjectSchemaStmt(AlterObjectSchemaStmt *stmt, Oid *oldschema)
 {
 	switch (stmt->objectType)
 	{
 		case OBJECT_EXTENSION:
-			return AlterExtensionNamespace(stmt->object, stmt->newschema);
+			return AlterExtensionNamespace(stmt->object, stmt->newschema, oldschema);
 
 		case OBJECT_FOREIGN_TABLE:
 		case OBJECT_SEQUENCE:
 		case OBJECT_TABLE:
 		case OBJECT_VIEW:
 		case OBJECT_MATVIEW:
-			return AlterTableNamespace(stmt);
+			return AlterTableNamespace(stmt, oldschema);
 
 		case OBJECT_DOMAIN:
 		case OBJECT_TYPE:
 			return AlterTypeNamespace(stmt->object, stmt->newschema,
-									  stmt->objectType);
+									  stmt->objectType, oldschema);
 
 			/* generic code path */
 		case OBJECT_AGGREGATE:
@@ -435,6 +435,7 @@ ExecAlterObjectSchemaStmt(AlterObjectSchemaStmt *stmt)
 				Oid			classId;
 				Oid			nspOid;
 				ObjectAddress address;
+				Oid			oldNspOid;
 
 				address = get_object_address(stmt->objectType,
 											 stmt->object,
@@ -447,9 +448,12 @@ ExecAlterObjectSchemaStmt(AlterObjectSchemaStmt *stmt)
 				catalog = heap_open(classId, RowExclusiveLock);
 				nspOid = LookupCreationNamespace(stmt->newschema);
 
-				AlterObjectNamespace_internal(catalog, address.objectId,
-											  nspOid);
+				oldNspOid = AlterObjectNamespace_internal(catalog, address.objectId,
+														  nspOid);
 				heap_close(catalog, RowExclusiveLock);
+
+				if (oldschema)
+					*oldschema = oldNspOid;
 
 				return address.objectId;
 			}

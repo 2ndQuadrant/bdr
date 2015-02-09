@@ -45,7 +45,8 @@ extern Oid	RenameType(RenameStmt *stmt);
 extern Oid	AlterTypeOwner(List *names, Oid newOwnerId, ObjectType objecttype);
 extern void AlterTypeOwnerInternal(Oid typeOid, Oid newOwnerId,
 					   bool hasDependEntry);
-extern Oid	AlterTypeNamespace(List *names, const char *newschema, ObjectType objecttype);
+extern Oid	AlterTypeNamespace(List *names, const char *newschema,
+				   ObjectType objecttype, Oid *oldschema);
 extern Oid	AlterTypeNamespace_oid(Oid typeOid, Oid nspOid, ObjectAddresses *objsMoved);
 extern Oid AlterTypeNamespaceInternal(Oid typeOid, Oid nspOid,
 						   bool isImplicitArray,
