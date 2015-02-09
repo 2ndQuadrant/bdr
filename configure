@@ -589,6 +589,7 @@ PACKAGE_URL='http://2ndquadrant.com/en/resources/bdr/'
 
 ac_subst_vars='LTLIBOBJS
 LIBOBJS
+vpath_build
 BUILDING_BDR
 BUILDING_UDR
 OBJEXT
@@ -2758,6 +2759,14 @@ $as_echo "#define BUILDING_BDR 1" >>confdefs.h
      as_fn_error $? "--enable-bdr=no specified, but compiling against BDR-patched PostgreSQL" "$LINENO" 5
    fi
 fi;
+
+
+# check whether we're building inside the source tree.
+if test "$srcdir" -ef '.' ; then
+  vpath_build=no
+else
+  vpath_build=yes
+fi
 
 
 ac_config_files="$ac_config_files Makefile"

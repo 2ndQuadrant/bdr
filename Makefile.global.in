@@ -9,8 +9,11 @@ bdr_abs_srcdir := @srcdir@
 PG_CONFIG :=@PG_CONFIG@
 PGXS := $(shell $(PG_CONFIG) --pgxs)
 
-VPATH := $(bdr_abs_srcdir)/$(bdr_subdir)
-USE_VPATH :=$(VPATH)
+vpath_build=@vpath_build@
+ifeq ($(vpath_build),yes)
+	VPATH := $(bdr_abs_srcdir)/$(bdr_subdir)
+	USE_VPATH :=$(VPATH)
+endif
 GIT_WORK_TREE=${bdr_abs_srcdir}
 GIT_DIR=${bdr_abs_srcdir}/.git
 export GIT_DIR

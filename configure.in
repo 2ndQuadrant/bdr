@@ -57,6 +57,14 @@ else
 fi;
 
 
+# check whether we're building inside the source tree.
+if test "$srcdir" -ef '.' ; then
+  vpath_build=no
+else
+  vpath_build=yes
+fi
+AC_SUBST(vpath_build)
+
 AC_CONFIG_FILES([Makefile])
 AC_CONFIG_FILES([Makefile.global])
 AC_CONFIG_FILES([doc/Makefile])
