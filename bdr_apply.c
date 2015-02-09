@@ -389,9 +389,8 @@ process_remote_commit(StringInfo s)
 		/* flush all writes so the latest position can be reported back to the sender */
 		XLogFlush(GetXLogWriteRecPtr());
 
-
-		/* Signal that we should stop */
-		got_SIGTERM = true;
+		/* Stop gracefully */
+		proc_exit(0);
 	}
 }
 
@@ -2542,5 +2541,9 @@ bdr_apply_main(Datum main_arg)
 	}
 	PG_END_TRY();
 
-	proc_exit(0);
+	/*
+	 * never exit gracefully (as that'd unregister the worker) unless
+	 * explicitly asked to do so.
+	 */
+	proc_exit(1);
 }
