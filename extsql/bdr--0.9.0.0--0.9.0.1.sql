@@ -514,7 +514,7 @@ BEGIN
     SELECT remote_sysid AS sysid, remote_timeline AS timeline,
            remote_dboid AS dboid INTO remoteid
     FROM bdr.internal_begin_join('bdr_subscribe',
-         local_node_name,
+         local_node_name || '-subscriber',
          local_dsn, remote_dsn);
 
     SELECT sysid, timeline, dboid INTO localid
@@ -533,6 +533,24 @@ BEGIN
         RAISE USING
             MESSAGE = 'This node is already connected to given remote node',
             ERRCODE = 'object_not_in_prerequisite_state';
+    END IF;
+
+    -- Insert node entry representing remote node
+    PERFORM 1 FROM bdr_nodes
+    WHERE node_sysid = remoteid.sysid
+      AND node_timeline = remoteid.timeline
+      AND node_dboid = remoteid.dboid;
+
+    IF NOT FOUND THEN
+        INSERT INTO bdr_nodes (
+            node_name,
+            node_sysid, node_timeline, node_dboid,
+            node_status
+        ) VALUES (
+            local_node_name,
+            remoteid.sysid, remoteid.timeline, remoteid.dboid,
+            'r'
+        );
     END IF;
 
     -- Null/empty checks are skipped, the underlying constraints on the table

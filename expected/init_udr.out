@@ -38,8 +38,9 @@ SELECT conn_dsn, conn_replication_sets FROM bdr.bdr_connections;
 SELECT node_status, node_local_dsn, node_init_from_dsn FROM bdr.bdr_nodes;
  node_status | node_local_dsn  | node_init_from_dsn 
 -------------+-----------------+--------------------
+ r           |                 | 
  r           | dbname=postgres | dbname=regression
-(1 row)
+(2 rows)
 
 \c regression
 SELECT conn_dsn, conn_replication_sets FROM bdr.bdr_connections;
