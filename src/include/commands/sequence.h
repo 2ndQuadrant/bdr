@@ -3,7 +3,7 @@
  * sequence.h
  *	  prototypes for sequence.c.
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/commands/sequence.h
@@ -13,8 +13,9 @@
 #ifndef SEQUENCE_H
 #define SEQUENCE_H
 
-#include "access/xlog.h"
+#include "access/xlogreader.h"
 #include "fmgr.h"
+#include "lib/stringinfo.h"
 #include "nodes/parsenodes.h"
 #include "storage/relfilenode.h"
 
@@ -77,8 +78,8 @@ extern Oid	AlterSequence(AlterSeqStmt *stmt);
 extern void ResetSequence(Oid seq_relid);
 extern void ResetSequenceCaches(void);
 
-extern void seq_redo(XLogRecPtr lsn, XLogRecord *rptr);
-extern void seq_desc(StringInfo buf, XLogRecord *rptr);
+extern void seq_redo(XLogReaderState *rptr);
+extern void seq_desc(StringInfo buf, XLogReaderState *rptr);
 extern const char *seq_identify(uint8 info);
 
 #endif   /* SEQUENCE_H */

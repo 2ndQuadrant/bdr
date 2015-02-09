@@ -6,7 +6,7 @@
  * for developers.  If you edit any of these, be sure to do a *full*
  * rebuild (and an initdb if noted).
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/pg_config_manual.h
@@ -188,22 +188,6 @@
 #define MAX_RANDOM_VALUE  (0x7FFFFFFF)
 
 /*
- * Set the format style used by gcc to check printf type functions. We really
- * want the "gnu_printf" style set, which includes what glibc uses, such
- * as %m for error strings and %lld for 64 bit long longs. But not all gcc
- * compilers are known to support it, so we just use "printf" which all
- * gcc versions alive are known to support, except on Windows where
- * using "gnu_printf" style makes a dramatic difference. Maybe someday
- * we'll have a configure test for this, if we ever discover use of more
- * variants to be necessary.
- */
-#ifdef WIN32
-#define PG_PRINTF_ATTRIBUTE gnu_printf
-#else
-#define PG_PRINTF_ATTRIBUTE printf
-#endif
-
-/*
  * On PPC machines, decide whether to use the mutex hint bit in LWARX
  * instructions.  Setting the hint bit will slightly improve spinlock
  * performance on POWER6 and later machines, but does nothing before that,
@@ -230,13 +214,13 @@
 #endif
 
 /*
- * Assumed cache line size. This doesn't affect correctness, but can be
- * used for low-level optimizations. Currently, this is only used to pad
- * some data structures in xlog.c, to ensure that highly-contended fields
- * are on different cache lines. Too small a value can hurt performance due
- * to false sharing, while the only downside of too large a value is a few
- * bytes of wasted memory. The default is 128, which should be large enough
- * for all supported platforms.
+ * Assumed cache line size. This doesn't affect correctness, but can be used
+ * for low-level optimizations. Currently, this is used to pad some data
+ * structures in xlog.c, to ensure that highly-contended fields are on
+ * different cache lines. Too small a value can hurt performance due to false
+ * sharing, while the only downside of too large a value is a few bytes of
+ * wasted memory. The default is 128, which should be large enough for all
+ * supported platforms.
  */
 #define PG_CACHE_LINE_SIZE		128
 
@@ -321,11 +305,3 @@
  */
 /* #define HEAPDEBUGALL */
 /* #define ACLDEBUG */
-/* #define RTDEBUG */
-
-/*
- * Automatic configuration file name for ALTER SYSTEM.
- * This file will be used to store values of configuration parameters
- * set by ALTER SYSTEM command.
- */
-#define PG_AUTOCONF_FILENAME		"postgresql.auto.conf"

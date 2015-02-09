@@ -3,7 +3,7 @@
  * xlogdesc.c
  *	  rmgr descriptor routines for access/transam/xlog.c
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -32,10 +32,10 @@ const struct config_enum_entry wal_level_options[] = {
 };
 
 void
-xlog_desc(StringInfo buf, XLogRecord *record)
+xlog_desc(StringInfo buf, XLogReaderState *record)
 {
 	char	   *rec = XLogRecGetData(record);
-	uint8		info = record->xl_info & ~XLR_INFO_MASK;
+	uint8		info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
 
 	if (info == XLOG_CHECKPOINT_SHUTDOWN ||
 		info == XLOG_CHECKPOINT_ONLINE)
@@ -45,6 +45,7 @@ xlog_desc(StringInfo buf, XLogRecord *record)
 		appendStringInfo(buf, "redo %X/%X; "
 						 "tli %u; prev tli %u; fpw %s; xid %u/%u; oid %u; multi %u; offset %u; "
 						 "oldest xid %u in DB %u; oldest multi %u in DB %u; "
+						 "oldest/newest commit timestamp xid: %u/%u; "
 						 "oldest running xid %u; %s",
 				(uint32) (checkpoint->redo >> 32), (uint32) checkpoint->redo,
 						 checkpoint->ThisTimeLineID,
@@ -58,6 +59,8 @@ xlog_desc(StringInfo buf, XLogRecord *record)
 						 checkpoint->oldestXidDB,
 						 checkpoint->oldestMulti,
 						 checkpoint->oldestMultiDB,
+						 checkpoint->oldestCommitTs,
+						 checkpoint->newestCommitTs,
 						 checkpoint->oldestActiveXid,
 				 (info == XLOG_CHECKPOINT_SHUTDOWN) ? "shutdown" : "online");
 	}
@@ -74,13 +77,9 @@ xlog_desc(StringInfo buf, XLogRecord *record)
 
 		appendStringInfo(buf, "%s", xlrec->rp_name);
 	}
-	else if (info == XLOG_FPI)
+	else if (info == XLOG_FPI || info == XLOG_FPI_FOR_HINT)
 	{
-		BkpBlock   *bkp = (BkpBlock *) rec;
-
-		appendStringInfo(buf, "%s block %u",
-						 relpathperm(bkp->node, bkp->fork),
-						 bkp->block);
+		/* no further information to print */
 	}
 	else if (info == XLOG_BACKUP_END)
 	{
@@ -109,12 +108,17 @@ xlog_desc(StringInfo buf, XLogRecord *record)
 			}
 		}
 
-		appendStringInfo(buf, "max_connections=%d max_worker_processes=%d max_prepared_xacts=%d max_locks_per_xact=%d wal_level=%s",
+		appendStringInfo(buf, "max_connections=%d max_worker_processes=%d "
+						 "max_prepared_xacts=%d max_locks_per_xact=%d "
+						 "wal_level=%s wal_log_hints=%s "
+						 "track_commit_timestamps=%s",
 						 xlrec.MaxConnections,
 						 xlrec.max_worker_processes,
 						 xlrec.max_prepared_xacts,
 						 xlrec.max_locks_per_xact,
-						 wal_level_str);
+						 wal_level_str,
+						 xlrec.wal_log_hints ? "on" : "off",
+						 xlrec.track_commit_timestamp ? "on" : "off");
 	}
 	else if (info == XLOG_FPW_CHANGE)
 	{
@@ -173,6 +177,9 @@ xlog_identify(uint8 info)
 			break;
 		case XLOG_FPI:
 			id = "FPI";
+			break;
+		case XLOG_FPI_FOR_HINT:
+			id = "FPI_FOR_HINT";
 			break;
 	}
 

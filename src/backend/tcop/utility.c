@@ -5,7 +5,7 @@
  *	  commands.  At one time acted as an interface between the Lisp and C
  *	  systems.
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -20,6 +20,7 @@
 #include "access/reloptions.h"
 #include "access/twophase.h"
 #include "access/xact.h"
+#include "access/xlog.h"
 #include "catalog/catalog.h"
 #include "catalog/namespace.h"
 #include "catalog/toasting.h"
@@ -735,14 +736,15 @@ standard_ProcessUtility(Node *parsetree,
 				PreventCommandDuringRecovery("REINDEX");
 				switch (stmt->kind)
 				{
-					case OBJECT_INDEX:
+					case REINDEX_OBJECT_INDEX:
 						ReindexIndex(stmt->relation);
 						break;
-					case OBJECT_TABLE:
-					case OBJECT_MATVIEW:
+					case REINDEX_OBJECT_TABLE:
 						ReindexTable(stmt->relation);
 						break;
-					case OBJECT_DATABASE:
+					case REINDEX_OBJECT_SCHEMA:
+					case REINDEX_OBJECT_SYSTEM:
+					case REINDEX_OBJECT_DATABASE:
 
 						/*
 						 * This cannot run inside a user transaction block; if
@@ -751,9 +753,9 @@ standard_ProcessUtility(Node *parsetree,
 						 * intended effect!
 						 */
 						PreventTransactionChain(isTopLevel,
-												"REINDEX DATABASE");
-						ReindexDatabase(stmt->name,
-										stmt->do_system, stmt->do_user);
+												(stmt->kind == REINDEX_OBJECT_SCHEMA) ?
+												"REINDEX SCHEMA" : "REINDEX DATABASE");
+						ReindexObject(stmt->name, stmt->kind);
 						break;
 					default:
 						elog(ERROR, "unrecognized object type: %d",
@@ -1745,9 +1747,6 @@ AlterObjectTypeCommandTag(ObjectType objtype)
 		case OBJECT_COLUMN:
 			tag = "ALTER TABLE";
 			break;
-		case OBJECT_CONSTRAINT:
-			tag = "ALTER TABLE";
-			break;
 		case OBJECT_CONVERSION:
 			tag = "ALTER CONVERSION";
 			break;
@@ -1755,6 +1754,7 @@ AlterObjectTypeCommandTag(ObjectType objtype)
 			tag = "ALTER DATABASE";
 			break;
 		case OBJECT_DOMAIN:
+		case OBJECT_DOMCONSTRAINT:
 			tag = "ALTER DOMAIN";
 			break;
 		case OBJECT_EXTENSION:
@@ -1806,6 +1806,7 @@ AlterObjectTypeCommandTag(ObjectType objtype)
 			tag = "ALTER SEQUENCE";
 			break;
 		case OBJECT_TABLE:
+		case OBJECT_TABCONSTRAINT:
 			tag = "ALTER TABLE";
 			break;
 		case OBJECT_TABLESPACE:
@@ -2642,9 +2643,6 @@ GetCommandLogLevel(Node *parsetree)
 {
 	LogStmtLevel lev;
 
-	if (parsetree == NULL)
-		return LOGSTMT_ALL;
-
 	switch (nodeTag(parsetree))
 	{
 			/* raw plannable queries */
@@ -2749,7 +2747,7 @@ GetCommandLogLevel(Node *parsetree)
 
 				/* Look through an EXECUTE to the referenced stmt */
 				ps = FetchPreparedStatement(stmt->name, false);
-				if (ps)
+				if (ps && ps->plansource->raw_parse_tree)
 					lev = GetCommandLogLevel(ps->plansource->raw_parse_tree);
 				else
 					lev = LOGSTMT_ALL;

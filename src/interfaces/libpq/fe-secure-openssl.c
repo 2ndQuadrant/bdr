@@ -4,7 +4,7 @@
  *	  OpenSSL support
  *
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -184,6 +184,15 @@ pgtls_open_client(PGconn *conn)
 
 	/* Begin or continue the actual handshake */
 	return open_client_SSL(conn);
+}
+
+/*
+ *  Is there unread data waiting in the SSL read buffer?
+ */
+bool
+pgtls_read_pending(PGconn *conn)
+{
+	return SSL_pending(conn->ssl);
 }
 
 /*
@@ -932,7 +941,7 @@ initialize_SSL(PGconn *conn)
 
 	/* Read the client certificate file */
 	if (conn->sslcert && strlen(conn->sslcert) > 0)
-		strncpy(fnbuf, conn->sslcert, sizeof(fnbuf));
+		strlcpy(fnbuf, conn->sslcert, sizeof(fnbuf));
 	else if (have_homedir)
 		snprintf(fnbuf, sizeof(fnbuf), "%s/%s", homedir, USER_CERT_FILE);
 	else
@@ -1123,7 +1132,7 @@ initialize_SSL(PGconn *conn)
 #endif   /* USE_SSL_ENGINE */
 		{
 			/* PGSSLKEY is not an engine, treat it as a filename */
-			strncpy(fnbuf, conn->sslkey, sizeof(fnbuf));
+			strlcpy(fnbuf, conn->sslkey, sizeof(fnbuf));
 		}
 	}
 	else if (have_homedir)
@@ -1186,7 +1195,7 @@ initialize_SSL(PGconn *conn)
 	 * verification after the connection has been completed.
 	 */
 	if (conn->sslrootcert && strlen(conn->sslrootcert) > 0)
-		strncpy(fnbuf, conn->sslrootcert, sizeof(fnbuf));
+		strlcpy(fnbuf, conn->sslrootcert, sizeof(fnbuf));
 	else if (have_homedir)
 		snprintf(fnbuf, sizeof(fnbuf), "%s/%s", homedir, ROOT_CERT_FILE);
 	else
@@ -1224,7 +1233,7 @@ initialize_SSL(PGconn *conn)
 		if ((cvstore = SSL_CTX_get_cert_store(SSL_context)) != NULL)
 		{
 			if (conn->sslcrl && strlen(conn->sslcrl) > 0)
-				strncpy(fnbuf, conn->sslcrl, sizeof(fnbuf));
+				strlcpy(fnbuf, conn->sslcrl, sizeof(fnbuf));
 			else if (have_homedir)
 				snprintf(fnbuf, sizeof(fnbuf), "%s/%s", homedir, ROOT_CRL_FILE);
 			else
@@ -1479,6 +1488,18 @@ SSLerrfree(char *buf)
 		free(buf);
 }
 
+/* ------------------------------------------------------------ */
+/*					SSL information functions					*/
+/* ------------------------------------------------------------ */
+
+int
+PQsslInUse(PGconn *conn)
+{
+	if (!conn)
+		return 0;
+	return conn->ssl_in_use;
+}
+
 /*
  *	Return pointer to OpenSSL object.
  */
@@ -1490,6 +1511,62 @@ PQgetssl(PGconn *conn)
 	return conn->ssl;
 }
 
+void *
+PQsslStruct(PGconn *conn, const char *struct_name)
+{
+	if (!conn)
+		return NULL;
+	if (strcmp(struct_name, "OpenSSL") == 0)
+		return conn->ssl;
+	return NULL;
+}
+
+const char **
+PQsslAttributes(PGconn *conn)
+{
+	static const char *result[] = {
+		"library",
+		"key_bits",
+		"cipher",
+		"compression",
+		"protocol",
+		NULL
+	};
+	return result;
+}
+
+const char *
+PQsslAttribute(PGconn *conn, const char *attribute_name)
+{
+	if (!conn)
+		return NULL;
+	if (conn->ssl == NULL)
+		return NULL;
+
+	if (strcmp(attribute_name, "library") == 0)
+		return "OpenSSL";
+
+	if (strcmp(attribute_name, "key_bits") == 0)
+	{
+		static char sslbits_str[10];
+		int		sslbits;
+
+		SSL_get_cipher_bits(conn->ssl, &sslbits);
+		snprintf(sslbits_str, sizeof(sslbits_str), "%d", sslbits);
+		return sslbits_str;
+	}
+
+	if (strcmp(attribute_name, "cipher") == 0)
+		return SSL_get_cipher(conn->ssl);
+
+	if (strcmp(attribute_name, "compression") == 0)
+		return SSL_get_current_compression(conn->ssl) ? "on" : "off";
+
+	if (strcmp(attribute_name, "protocol") == 0)
+		return SSL_get_version(conn->ssl);
+
+	return NULL;		/* unknown attribute */
+}
 
 /*
  * Private substitute BIO: this does the sending and receiving using send() and

@@ -1,14 +1,825 @@
 <!-- doc/src/sgml/release-9.4.sgml -->
 <!-- See header comment in release.sgml about typical markup -->
 
+ <sect1 id="release-9-4-1">
+  <title>Release 9.4.1</title>
+
+  <note>
+  <title>Release Date</title>
+  <simpara>2015-02-05</simpara>
+  </note>
+
+  <para>
+   This release contains a variety of fixes from 9.4.0.
+   For information about new features in the 9.4 major release, see
+   <xref linkend="release-9-4">.
+  </para>
+
+  <sect2>
+   <title>Migration to Version 9.4.1</title>
+
+   <para>
+    A dump/restore is not required for those running 9.4.X.
+   </para>
+
+   <para>
+    However, if you are a Windows user and are using the <quote>Norwegian
+    (Bokm&aring;l)</> locale, manual action is needed after the upgrade to
+    replace any <quote>Norwegian (Bokm&aring;l)_Norway</>
+    or <quote>norwegian-bokmal</> locale names stored
+    in <productname>PostgreSQL</> system catalogs with the plain-ASCII
+    alias <quote>Norwegian_Norway</>.  For details see
+    <ulink url="http://wiki.postgresql.org/wiki/Changes_To_Norwegian_Locale"></>
+   </para>
+  </sect2>
+
+  <sect2>
+   <title>Changes</title>
+
+   <itemizedlist>
+
+<!--
+Author: Bruce Momjian <bruce@momjian.us>
+Branch: master [0150ab567] 2015-02-02 10:00:44 -0500
+Branch: REL9_4_STABLE [1628a0bbf] 2015-02-02 10:00:49 -0500
+Branch: REL9_3_STABLE [b8b580147] 2015-02-02 10:00:50 -0500
+Branch: REL9_2_STABLE [5ae3bf1af] 2015-02-02 10:00:50 -0500
+Branch: REL9_1_STABLE [037529a11] 2015-02-02 10:00:51 -0500
+Branch: REL9_0_STABLE [611e110aa] 2015-02-02 10:00:52 -0500
+Author: Bruce Momjian <bruce@momjian.us>
+Branch: master [9241c84cb] 2015-02-02 10:00:45 -0500
+Branch: REL9_4_STABLE [56d2bee9d] 2015-02-02 10:00:49 -0500
+Branch: REL9_3_STABLE [fe2526990] 2015-02-02 10:00:50 -0500
+Branch: REL9_2_STABLE [e09651e9d] 2015-02-02 10:00:50 -0500
+Branch: REL9_1_STABLE [2ceb63deb] 2015-02-02 10:00:51 -0500
+Branch: REL9_0_STABLE [56b970f2e] 2015-02-02 10:00:52 -0500
+-->
+
+    <listitem>
+     <para>
+      Fix buffer overruns in <function>to_char()</>
+      (Bruce Momjian)
+     </para>
+
+     <para>
+      When <function>to_char()</> processes a numeric formatting template
+      calling for a large number of digits, <productname>PostgreSQL</>
+      would read past the end of a buffer.  When processing a crafted
+      timestamp formatting template, <productname>PostgreSQL</> would write
+      past the end of a buffer.  Either case could crash the server.
+      We have not ruled out the possibility of attacks that lead to
+      privilege escalation, though they seem unlikely.
+      (CVE-2015-0241)
+     </para>
+    </listitem>
+
+<!--
+Author: Bruce Momjian <bruce@momjian.us>
+Branch: master [29725b3db] 2015-02-02 10:00:45 -0500
+Branch: REL9_4_STABLE [2ac95c83c] 2015-02-02 10:00:49 -0500
+Branch: REL9_3_STABLE [bc4d5f2e5] 2015-02-02 10:00:50 -0500
+Branch: REL9_2_STABLE [c6c6aa288] 2015-02-02 10:00:51 -0500
+Branch: REL9_1_STABLE [98f2479d8] 2015-02-02 10:00:51 -0500
+Branch: REL9_0_STABLE [9e05c5063] 2015-02-02 10:00:52 -0500
+-->
+
+    <listitem>
+     <para>
+      Fix buffer overrun in replacement <function>*printf()</> functions
+      (Tom Lane)
+     </para>
+
+     <para>
+      <productname>PostgreSQL</> includes a replacement implementation
+      of <function>printf</> and related functions.  This code will overrun
+      a stack buffer when formatting a floating point number (conversion
+      specifiers <literal>e</>, <literal>E</>, <literal>f</>, <literal>F</>,
+      <literal>g</> or <literal>G</>) with requested precision greater than
+      about 500.  This will crash the server, and we have not ruled out the
+      possibility of attacks that lead to privilege escalation.
+      A database user can trigger such a buffer overrun through
+      the <function>to_char()</> SQL function.  While that is the only
+      affected core <productname>PostgreSQL</> functionality, extension
+      modules that use printf-family functions may be at risk as well.
+     </para>
+
+     <para>
+      This issue primarily affects <productname>PostgreSQL</> on Windows.
+      <productname>PostgreSQL</> uses the system implementation of these
+      functions where adequate, which it is on other modern platforms.
+      (CVE-2015-0242)
+     </para>
+    </listitem>
+
+<!--
+Author: Noah Misch <noah@leadboat.com>
+Branch: master [1dc755158] 2015-02-02 10:00:45 -0500
+Branch: REL9_4_STABLE [82806cf4e] 2015-02-02 10:00:49 -0500
+Branch: REL9_3_STABLE [6994f0790] 2015-02-02 10:00:50 -0500
+Branch: REL9_2_STABLE [d95ebe0ac] 2015-02-02 10:00:51 -0500
+Branch: REL9_1_STABLE [11f738a8a] 2015-02-02 10:00:51 -0500
+Branch: REL9_0_STABLE [ce6f261cd] 2015-02-02 10:00:52 -0500
+Author: Noah Misch <noah@leadboat.com>
+Branch: master [8b59672d8] 2015-02-02 10:00:45 -0500
+Branch: REL9_4_STABLE [258e294db] 2015-02-02 10:00:49 -0500
+Branch: REL9_3_STABLE [a558ad3a7] 2015-02-02 10:00:50 -0500
+Branch: REL9_2_STABLE [d1972da8c] 2015-02-02 10:00:51 -0500
+Branch: REL9_1_STABLE [8d412e02e] 2015-02-02 10:00:52 -0500
+Branch: REL9_0_STABLE [0a3ee8a5f] 2015-02-02 10:00:52 -0500
+-->
+
+    <listitem>
+     <para>
+      Fix buffer overruns in <filename>contrib/pgcrypto</>
+      (Marko Tiikkaja, Noah Misch)
+     </para>
+
+     <para>
+      Errors in memory size tracking within the <filename>pgcrypto</>
+      module permitted stack buffer overruns and improper dependence on the
+      contents of uninitialized memory.  The buffer overrun cases can
+      crash the server, and we have not ruled out the possibility of
+      attacks that lead to privilege escalation.
+      (CVE-2015-0243)
+     </para>
+    </listitem>
+
+<!--
+Author: Heikki Linnakangas <heikki.linnakangas@iki.fi>
+Branch: master [2b3a8b20c] 2015-02-02 17:09:53 +0200
+Branch: REL9_4_STABLE [57ec87c6b] 2015-02-02 17:09:46 +0200
+Branch: REL9_3_STABLE [cd19848bd] 2015-02-02 17:09:40 +0200
+Branch: REL9_2_STABLE [289592b23] 2015-02-02 17:09:35 +0200
+Branch: REL9_1_STABLE [af9c5c074] 2015-02-02 17:09:31 +0200
+Branch: REL9_0_STABLE [47ba0fbd7] 2015-02-02 17:09:25 +0200
+-->
+
+    <listitem>
+     <para>
+      Fix possible loss of frontend/backend protocol synchronization after
+      an error
+      (Heikki Linnakangas)
+     </para>
+
+     <para>
+      If any error occurred while the server was in the middle of reading a
+      protocol message from the client, it could lose synchronization and
+      incorrectly try to interpret part of the message's data as a new
+      protocol message.  An attacker able to submit crafted binary data
+      within a command parameter might succeed in injecting his own SQL
+      commands this way.  Statement timeout and query cancellation are the
+      most likely sources of errors triggering this scenario.  Particularly
+      vulnerable are applications that use a timeout and also submit
+      arbitrary user-crafted data as binary query parameters.  Disabling
+      statement timeout will reduce, but not eliminate, the risk of
+      exploit.  Our thanks to Emil Lenngren for reporting this issue.
+      (CVE-2015-0244)
+     </para>
+    </listitem>
+
+<!--
+Author: Stephen Frost <sfrost@snowman.net>
+Branch: master [804b6b6db] 2015-01-28 12:31:30 -0500
+Branch: REL9_4_STABLE [3cc74a3d6] 2015-01-28 12:32:06 -0500
+Branch: REL9_3_STABLE [4b9874216] 2015-01-28 12:32:39 -0500
+Branch: REL9_2_STABLE [d49f84b08] 2015-01-28 12:32:56 -0500
+Branch: REL9_1_STABLE [9406884af] 2015-01-28 12:33:15 -0500
+Branch: REL9_0_STABLE [3a2063369] 2015-01-28 12:33:29 -0500
+-->
+
+    <listitem>
+     <para>
+      Fix information leak via constraint-violation error messages
+      (Stephen Frost)
+     </para>
+
+     <para>
+      Some server error messages show the values of columns that violate
+      a constraint, such as a unique constraint.  If the user does not have
+      <literal>SELECT</> privilege on all columns of the table, this could
+      mean exposing values that the user should not be able to see.  Adjust
+      the code so that values are displayed only when they came from the SQL
+      command or could be selected by the user.
+      (CVE-2014-8161)
+     </para>
+    </listitem>
+
+<!--
+Author: Noah Misch <noah@leadboat.com>
+Branch: master [f6dc6dd5b] 2014-12-17 22:48:40 -0500
+Branch: REL9_4_STABLE [6b87d423d] 2014-12-17 22:48:45 -0500
+Branch: REL9_3_STABLE [442dc2c35] 2014-12-17 22:48:46 -0500
+Branch: REL9_2_STABLE [0046f651d] 2014-12-17 22:48:47 -0500
+Branch: REL9_1_STABLE [6aa98e957] 2014-12-17 22:48:47 -0500
+Branch: REL9_0_STABLE [6d45ee572] 2014-12-17 22:48:48 -0500
+-->
+
+    <listitem>
+     <para>
+      Lock down regression testing's temporary installations on Windows
+      (Noah Misch)
+     </para>
+
+     <para>
+      Use SSPI authentication to allow connections only from the OS user
+      who launched the test suite.  This closes on Windows the same
+      vulnerability previously closed on other platforms, namely that other
+      users might be able to connect to the test postmaster.
+      (CVE-2014-0067)
+     </para>
+    </listitem>
+
+<!--
+Author: Heikki Linnakangas <heikki.linnakangas@iki.fi>
+Branch: REL9_3_STABLE [8f80dcf3c] 2014-10-24 19:59:49 +0300
+Branch: REL9_2_STABLE [d440c4b55] 2014-10-24 19:59:52 +0300
+Author: Heikki Linnakangas <heikki.linnakangas@iki.fi>
+Branch: REL9_3_STABLE [2a1b34959] 2014-10-24 19:36:28 +0300
+Branch: REL9_2_STABLE [737ae3fc7] 2014-10-24 19:53:27 +0300
+Author: Heikki Linnakangas <heikki.linnakangas@iki.fi>
+Branch: master [aa1d2fc5e] 2015-01-16 13:28:19 +0200
+Branch: REL9_4_STABLE [2049a7d82] 2015-01-16 13:10:06 +0200
+Branch: REL9_3_STABLE [1619442a1] 2015-01-16 13:10:15 +0200
+Branch: REL9_2_STABLE [6bf343c6e] 2015-01-16 13:10:23 +0200
+-->
+
+    <listitem>
+     <para>
+      Cope with the Windows locale named <quote>Norwegian (Bokm&aring;l)</>
+      (Heikki Linnakangas)
+     </para>
+
+     <para>
+      Non-ASCII locale names are problematic since it's not clear what
+      encoding they should be represented in.  Map the troublesome locale
+      name to a plain-ASCII alias, <quote>Norwegian_Norway</>.
+     </para>
+
+     <para>
+      9.4.0 mapped the troublesome name to <quote>norwegian-bokmal</>,
+      but that turns out not to work on all Windows configurations.
+      <quote>Norwegian_Norway</> is now recommended instead.
+     </para>
+    </listitem>
+
+<!--
+Author: Tom Lane <tgl@sss.pgh.pa.us>
+Branch: master [c480cb9d2] 2015-01-15 18:52:58 -0500
+Branch: REL9_4_STABLE [b75d18bd4] 2015-01-15 18:53:05 -0500
+Branch: REL9_3_STABLE [34668c8ec] 2015-01-15 18:52:28 -0500
+Branch: REL9_2_STABLE [0acb32efb] 2015-01-15 18:52:31 -0500
+Branch: REL9_1_STABLE [450530fce] 2015-01-15 18:52:34 -0500
+Branch: REL9_0_STABLE [5308e085b] 2015-01-15 18:52:38 -0500
+-->
+
+    <listitem>
+     <para>
+      Fix use-of-already-freed-memory problem in EvalPlanQual processing
+      (Tom Lane)
+     </para>
+
+     <para>
+      In <literal>READ COMMITTED</> mode, queries that lock or update
+      recently-updated rows could crash as a result of this bug.
+     </para>
+    </listitem>
+
+<!--
+Author: Alvaro Herrera <alvherre@alvh.no-ip.org>
+Branch: master [0e5680f47] 2014-12-26 13:52:27 -0300
+Branch: REL9_4_STABLE [0e3a1f71d] 2014-12-26 13:52:27 -0300
+Branch: REL9_3_STABLE [048912386] 2014-12-26 13:52:27 -0300
+-->
+
+    <listitem>
+     <para>
+      Avoid possible deadlock while trying to acquire tuple locks
+      in EvalPlanQual processing (&Aacute;lvaro Herrera, Mark Kirkwood)
+     </para>
+    </listitem>
+
+<!--
+Author: Alvaro Herrera <alvherre@alvh.no-ip.org>
+Branch: master [d5e3d1e96] 2015-01-04 15:48:29 -0300
+Branch: REL9_4_STABLE [51742063b] 2015-01-04 15:48:29 -0300
+Branch: REL9_3_STABLE [54a8abc2b] 2015-01-04 15:48:29 -0300
+-->
+
+    <listitem>
+     <para>
+      Fix failure to wait when a transaction tries to acquire a <literal>FOR
+      NO KEY EXCLUSIVE</> tuple lock, while multiple other transactions
+      currently hold <literal>FOR SHARE</> locks (&Aacute;lvaro Herrera)
+     </para>
+    </listitem>
+
+<!--
+Author: Tom Lane <tgl@sss.pgh.pa.us>
+Branch: master [a5cd70dcb] 2015-01-15 13:18:12 -0500
+Branch: REL9_4_STABLE [d25192892] 2015-01-15 13:18:16 -0500
+Branch: REL9_3_STABLE [939f0fb67] 2015-01-15 13:18:19 -0500
+-->
+
+    <listitem>
+     <para>
+      Improve performance of <command>EXPLAIN</> with large range tables
+      (Tom Lane)
+     </para>
+    </listitem>
+
+<!--
+Author: Tom Lane <tgl@sss.pgh.pa.us>
+Branch: master [451d28081] 2015-01-30 14:44:56 -0500
+Branch: REL9_4_STABLE [4cbf390d5] 2015-01-30 14:44:49 -0500
+-->
+
+    <listitem>
+     <para>
+      Fix <type>jsonb</> Unicode escape processing, and in consequence
+      disallow <literal>\u0000</> (Tom Lane)
+     </para>
+
+     <para>
+      Previously, the JSON Unicode escape <literal>\u0000</> was accepted
+      and was stored as those six characters; but that is indistinguishable
+      from what is stored for the input <literal>\\u0000</>, resulting in
+      ambiguity.  Moreover, in cases where de-escaped textual output is
+      expected, such as the <literal>-&gt;&gt;</> operator, the sequence was
+      printed as <literal>\u0000</>, which does not meet the expectation
+      that JSON escaping would be removed.  (Consistent behavior would
+      require emitting a zero byte, but <productname>PostgreSQL</> does not
+      support zero bytes embedded in text strings.)  9.4.0 included an
+      ill-advised attempt to improve this situation by adjusting JSON output
+      conversion rules; but of course that could not fix the fundamental
+      ambiguity, and it turned out to break other usages of Unicode escape
+      sequences.  Revert that, and to avoid the core problem,
+      reject <literal>\u0000</> in <type>jsonb</> input.
+     </para>
+
+     <para>
+      If a <type>jsonb</> column contains a <literal>\u0000</> value stored
+      with 9.4.0, it will henceforth read out as though it
+      were <literal>\\u0000</>, which is the other valid interpretation of
+      the data stored by 9.4.0 for this case.
+     </para>
+
+     <para>
+      The <type>json</> type did not have the storage-ambiguity problem, but
+      it did have the problem of inconsistent de-escaped textual output.
+      Therefore <literal>\u0000</> will now also be rejected
+      in <type>json</> values when conversion to de-escaped form is
+      required.  This change does not break the ability to
+      store <literal>\u0000</> in <type>json</> columns so long as no
+      processing is done on the values.  This is exactly parallel to the
+      cases in which non-ASCII Unicode escapes are allowed when the database
+      encoding is not UTF8.
+     </para>
+    </listitem>
+
+<!--
+Author: Peter Eisentraut <peter_e@gmx.net>
+Branch: master [79af9a1d2] 2015-01-06 23:06:13 -0500
+Branch: REL9_4_STABLE [6bbf75192] 2015-01-17 22:11:20 -0500
+Branch: REL9_3_STABLE [e32cb8d0e] 2015-01-17 22:13:27 -0500
+Branch: REL9_2_STABLE [c8ef5b1ac] 2015-01-17 22:14:21 -0500
+Branch: REL9_1_STABLE [c975fa471] 2015-01-17 22:37:07 -0500
+Branch: REL9_0_STABLE [cebb3f032] 2015-01-17 22:37:32 -0500
+-->
+
+    <listitem>
+     <para>
+      Fix namespace handling in <function>xpath()</> (Ali Akbar)
+     </para>
+
+     <para>
+      Previously, the <type>xml</> value resulting from
+      an <function>xpath()</> call would not have namespace declarations if
+      the namespace declarations were attached to an ancestor element in the
+      input <type>xml</> value, rather than to the specific element being
+      returned.  Propagate the ancestral declaration so that the result is
+      correct when considered in isolation.
+     </para>
+    </listitem>
+
+<!--
+Author: Tom Lane <tgl@sss.pgh.pa.us>
+Branch: master [3d660d33a] 2015-01-30 12:30:59 -0500
+Branch: REL9_4_STABLE [b6a164e5c] 2015-01-30 12:31:08 -0500
+Branch: REL9_3_STABLE [527ff8baf] 2015-01-30 12:30:43 -0500
+-->
+
+    <listitem>
+     <para>
+      Fix assorted oversights in range-operator selectivity estimation
+      (Emre Hasegeli)
+     </para>
+
+     <para>
+      This patch fixes corner-case <quote>unexpected operator NNNN</> planner
+      errors, and improves the selectivity estimates for some other cases.
+     </para>
+    </listitem>
+
+<!--
+Author: Heikki Linnakangas <heikki.linnakangas@iki.fi>
+Branch: master [930fd6845] 2014-12-30 14:53:11 +0200
+Branch: REL9_4_STABLE [4e241f7cd] 2014-12-30 14:53:03 +0200
+-->
+
+    <listitem>
+     <para>
+      Revert unintended reduction in maximum size of a GIN index item
+      (Heikki Linnakangas)
+     </para>
+
+     <para>
+      9.4.0 could fail with <quote>index row size exceeds maximum</> errors
+      for data that previous versions would accept.
+     </para>
+    </listitem>
+
+<!--
+Author: Heikki Linnakangas <heikki.linnakangas@iki.fi>
+Branch: master [68fa75f31] 2015-01-30 17:58:23 +0100
+Branch: REL9_4_STABLE [dc40ca696] 2015-01-30 17:59:17 +0100
+-->
+
+    <listitem>
+     <para>
+      Fix query-duration memory leak during repeated GIN index rescans
+      (Heikki Linnakangas)
+     </para>
+    </listitem>
+
+<!--
+Author: Heikki Linnakangas <heikki.linnakangas@iki.fi>
+Branch: master [31ed42b9a] 2015-01-29 19:35:55 +0200
+Branch: REL9_4_STABLE [28a37deab] 2015-01-29 19:37:29 +0200
+Branch: REL9_3_STABLE [1c2774f37] 2015-01-29 19:37:27 +0200
+Branch: REL9_2_STABLE [61729e99d] 2015-01-29 19:37:25 +0200
+Branch: REL9_1_STABLE [37e0f13f2] 2015-01-29 19:37:22 +0200
+-->
+
+    <listitem>
+     <para>
+      Fix possible crash when using
+      nonzero <varname>gin_fuzzy_search_limit</> (Heikki Linnakangas)
+     </para>
+    </listitem>
+
+<!--
+Author: Andres Freund <andres@anarazel.de>
+Branch: master [3fabed070] 2015-01-07 00:19:37 +0100
+Branch: REL9_4_STABLE [7da102154] 2015-01-07 00:24:58 +0100
+Author: Andres Freund <andres@anarazel.de>
+Branch: master [31912d01d] 2015-01-07 00:18:00 +0100
+Branch: REL9_4_STABLE [84911ff51] 2015-01-07 00:24:47 +0100
+-->
+
+    <listitem>
+     <para>
+      Assorted fixes for logical decoding (Andres Freund)
+     </para>
+    </listitem>
+
+<!--
+Author: Heikki Linnakangas <heikki.linnakangas@iki.fi>
+Branch: master [49b04188f] 2015-01-15 20:52:41 +0200
+Branch: REL9_4_STABLE [b337d9657] 2015-01-15 20:52:18 +0200
+-->
+
+    <listitem>
+     <para>
+      Fix incorrect replay of WAL parameter change records that report
+      changes in the <varname>wal_log_hints</> setting (Petr Jalinek)
+     </para>
+    </listitem>
+
+<!--
+Author: Tom Lane <tgl@sss.pgh.pa.us>
+Branch: master [75b48e1ff] 2015-01-19 23:01:33 -0500
+Branch: REL9_4_STABLE [3387cbbcb] 2015-01-19 23:01:36 -0500
+Branch: REL9_3_STABLE [19794e997] 2015-01-19 23:01:39 -0500
+Branch: REL9_2_STABLE [33b723538] 2015-01-19 23:01:41 -0500
+Branch: REL9_1_STABLE [b87c1dcef] 2015-01-19 23:01:44 -0500
+Branch: REL9_0_STABLE [a1a8d0249] 2015-01-19 23:01:46 -0500
+-->
+
+    <listitem>
+     <para>
+      Change <quote>pgstat wait timeout</> warning message to be LOG level,
+      and rephrase it to be more understandable (Tom Lane)
+     </para>
+
+     <para>
+      This message was originally thought to be essentially a can't-happen
+      case, but it occurs often enough on our slower buildfarm members to be
+      a nuisance.  Reduce it to LOG level, and expend a bit more effort on
+      the wording: it now reads <quote>using stale statistics instead of
+      current ones because stats collector is not responding</>.
+     </para>
+    </listitem>
+
+<!--
+Author: Noah Misch <noah@leadboat.com>
+Branch: master [894459e59] 2015-01-07 22:35:44 -0500
+Branch: REL9_4_STABLE [83fb1ca5c] 2015-01-07 22:36:35 -0500
+Branch: REL9_3_STABLE [1a366d51e] 2015-01-07 22:40:40 -0500
+Branch: REL9_2_STABLE [5ca4e444c] 2015-01-07 22:41:49 -0500
+Branch: REL9_1_STABLE [8dc83104e] 2015-01-07 22:42:42 -0500
+Branch: REL9_0_STABLE [2e4946169] 2015-01-07 22:46:20 -0500
+-->
+
+    <listitem>
+     <para>
+      Warn if OS X's <function>setlocale()</> starts an unwanted extra
+      thread inside the postmaster (Noah Misch)
+     </para>
+    </listitem>
+
+<!--
+Author: Tom Lane <tgl@sss.pgh.pa.us>
+Branch: master [080eabe2e] 2015-01-11 12:35:44 -0500
+Branch: REL9_4_STABLE [733728ff3] 2015-01-11 12:35:47 -0500
+-->
+
+    <listitem>
+     <para>
+      Fix <application>libpq</>'s behavior when <filename>/etc/passwd</>
+      isn't readable (Tom Lane)
+     </para>
+
+     <para>
+      While doing <function>PQsetdbLogin()</>, <application>libpq</>
+      attempts to ascertain the user's operating system name, which on most
+      Unix platforms involves reading <filename>/etc/passwd</>.  As of 9.4,
+      failure to do that was treated as a hard error.  Restore the previous
+      behavior, which was to fail only if the application does not provide a
+      database role name to connect as.  This supports operation in chroot
+      environments that lack an <filename>/etc/passwd</> file.
+     </para>
+    </listitem>
+
+<!--
+Author: Tom Lane <tgl@sss.pgh.pa.us>
+Branch: master [28551797a] 2014-12-31 12:18:50 -0500
+Branch: REL9_4_STABLE [c35249939] 2014-12-31 12:16:57 -0500
+Branch: REL9_3_STABLE [7582cce56] 2014-12-31 12:17:00 -0500
+Branch: REL9_2_STABLE [64c506535] 2014-12-31 12:17:04 -0500
+Branch: REL9_1_STABLE [1773e0702] 2014-12-31 12:17:08 -0500
+Branch: REL9_0_STABLE [2600e4436] 2014-12-31 12:17:12 -0500
+-->
+
+    <listitem>
+     <para>
+      Improve consistency of parsing of <application>psql</>'s special
+      variables (Tom Lane)
+     </para>
+
+     <para>
+      Allow variant spellings of <literal>on</> and <literal>off</> (such
+      as <literal>1</>/<literal>0</>) for <literal>ECHO_HIDDEN</>
+      and <literal>ON_ERROR_ROLLBACK</>.  Report a warning for unrecognized
+      values for <literal>COMP_KEYWORD_CASE</>, <literal>ECHO</>,
+      <literal>ECHO_HIDDEN</>, <literal>HISTCONTROL</>,
+      <literal>ON_ERROR_ROLLBACK</>, and <literal>VERBOSITY</>.  Recognize
+      all values for all these variables case-insensitively; previously
+      there was a mishmash of case-sensitive and case-insensitive behaviors.
+     </para>
+    </listitem>
+
+<!--
+Author: Tom Lane <tgl@sss.pgh.pa.us>
+Branch: master [adfc157dd] 2015-01-05 19:27:04 -0500
+Branch: REL9_4_STABLE [c99e41f68] 2015-01-05 19:27:06 -0500
+Branch: REL9_3_STABLE [bb1e2426b] 2015-01-05 19:27:09 -0500
+-->
+
+    <listitem>
+     <para>
+      Fix <application>pg_dump</> to handle comments on event triggers
+      without failing (Tom Lane)
+     </para>
+    </listitem>
+
+<!--
+Author: Kevin Grittner <kgrittn@postgresql.org>
+Branch: master [cff1bd2a3] 2015-01-30 08:57:24 -0600
+Branch: REL9_4_STABLE [cb0168528] 2015-01-30 08:57:53 -0600
+Branch: REL9_3_STABLE [cc609c46f] 2015-01-30 09:01:36 -0600
+-->
+
+    <listitem>
+     <para>
+      Allow parallel <application>pg_dump</> to
+      use <option>--serializable-deferrable</> (Kevin Grittner)
+     </para>
+    </listitem>
+
+<!--
+Author: Andres Freund <andres@anarazel.de>
+Branch: master [2c0a48589] 2015-01-03 20:54:12 +0100
+Branch: REL9_4_STABLE [90e4a2bf9] 2015-01-03 20:54:13 +0100
+Branch: REL9_3_STABLE [f6cea4502] 2015-01-03 20:54:13 +0100
+Branch: REL9_2_STABLE [f961ad479] 2015-01-03 20:54:13 +0100
+Branch: REL9_1_STABLE [2a0bfa4d6] 2015-01-03 20:54:13 +0100
+-->
+
+    <listitem>
+     <para>
+      Prevent WAL files created by <literal>pg_basebackup -x/-X</> from
+      being archived again when the standby is promoted (Andres Freund)
+     </para>
+    </listitem>
+
+<!--
+Author: Tom Lane <tgl@sss.pgh.pa.us>
+Branch: master [37507962c] 2015-01-29 20:18:33 -0500
+Branch: REL9_4_STABLE [202621d04] 2015-01-29 20:18:37 -0500
+Branch: REL9_3_STABLE [53ae24692] 2015-01-29 20:18:40 -0500
+Branch: REL9_2_STABLE [66cc74680] 2015-01-29 20:18:42 -0500
+Branch: REL9_1_STABLE [290c2daad] 2015-01-29 20:18:44 -0500
+Branch: REL9_0_STABLE [dc9a506e6] 2015-01-29 20:18:46 -0500
+-->
+
+    <listitem>
+     <para>
+      Handle unexpected query results, especially NULLs, safely in
+      <filename>contrib/tablefunc</>'s <function>connectby()</>
+      (Michael Paquier)
+     </para>
+
+     <para>
+      <function>connectby()</> previously crashed if it encountered a NULL
+      key value.  It now prints that row but doesn't recurse further.
+     </para>
+    </listitem>
+
+<!--
+Author: Tom Lane <tgl@sss.pgh.pa.us>
+Branch: master [a59ee8819] 2015-01-30 13:05:30 -0500
+Branch: REL9_4_STABLE [70da7aeba] 2015-01-30 13:04:59 -0500
+Branch: REL9_3_STABLE [f08cf8ad9] 2015-01-30 13:05:01 -0500
+Branch: REL9_2_STABLE [a97dfdfd9] 2015-01-30 13:05:04 -0500
+Branch: REL9_1_STABLE [8f51c432c] 2015-01-30 13:05:07 -0500
+Branch: REL9_0_STABLE [7c41a32b3] 2015-01-30 13:05:09 -0500
+Author: Tom Lane <tgl@sss.pgh.pa.us>
+Branch: REL9_3_STABLE [8824bae87] 2014-11-18 13:28:13 -0500
+Author: Robert Haas <rhaas@postgresql.org>
+Branch: master [0b49642b9] 2015-01-15 09:26:03 -0500
+Branch: REL9_4_STABLE [7b65f194e] 2015-01-15 09:29:41 -0500
+Branch: REL9_3_STABLE [ebbef4f39] 2015-01-15 09:29:55 -0500
+Branch: REL9_2_STABLE [d452bfd1b] 2015-01-15 09:42:21 -0500
+Branch: REL9_1_STABLE [151fb75b0] 2015-01-15 09:42:33 -0500
+Branch: REL9_0_STABLE [0a67c0018] 2015-01-15 09:42:47 -0500
+Author: Heikki Linnakangas <heikki.linnakangas@iki.fi>
+Branch: master [e37d474f9] 2015-01-13 14:33:05 +0200
+Branch: REL9_4_STABLE [4ebb3494e] 2015-01-13 16:01:04 +0200
+Author: Andres Freund <andres@anarazel.de>
+Branch: master [8cadeb792] 2015-01-04 15:44:49 +0100
+Branch: REL9_4_STABLE [7ced1b6c5] 2015-01-04 15:52:52 +0100
+Branch: REL9_3_STABLE [a68b8aec7] 2015-01-04 15:53:08 +0100
+Branch: REL9_2_STABLE [6f9b84a40] 2015-01-04 15:55:00 +0100
+Author: Andres Freund <andres@anarazel.de>
+Branch: master [58bc4747b] 2015-01-04 15:35:46 +0100
+Branch: REL9_4_STABLE [2d8411a0a] 2015-01-04 15:35:46 +0100
+Branch: REL9_3_STABLE [d33f36f16] 2015-01-04 15:35:47 +0100
+Branch: REL9_2_STABLE [029e41afd] 2015-01-04 15:35:47 +0100
+Branch: REL9_1_STABLE [39cdf365a] 2015-01-04 15:35:47 +0100
+Branch: REL9_0_STABLE [17797e18d] 2015-01-04 15:35:48 +0100
+Author: Andres Freund <andres@anarazel.de>
+Branch: master [0398ece4c] 2015-01-04 14:36:21 +0100
+Branch: REL9_4_STABLE [ff7d46b85] 2015-01-04 14:36:21 +0100
+Branch: REL9_3_STABLE [ec14f1601] 2015-01-04 14:36:22 +0100
+Branch: REL9_2_STABLE [f4060db11] 2015-01-04 14:36:22 +0100
+Author: Tatsuo Ishii <ishii@postgresql.org>
+Branch: master [3b5a89c48] 2014-12-30 20:33:01 +0900
+Branch: REL9_4_STABLE [458e8bc65] 2014-12-30 20:27:26 +0900
+Branch: REL9_3_STABLE [ed0e03283] 2014-12-30 20:20:56 +0900
+Branch: REL9_2_STABLE [4db7eaae0] 2014-12-30 19:59:26 +0900
+Branch: REL9_1_STABLE [4c136b0b6] 2014-12-30 19:48:53 +0900
+Branch: REL9_0_STABLE [9b74f3574] 2014-12-30 19:37:55 +0900
+Author: Tom Lane <tgl@sss.pgh.pa.us>
+Branch: master [66709133c] 2014-12-16 15:35:33 -0500
+Branch: REL9_4_STABLE [383d224a0] 2014-12-16 15:35:36 -0500
+Branch: REL9_3_STABLE [53960e7eb] 2014-12-16 15:35:40 -0500
+Branch: REL9_2_STABLE [e92c67ddc] 2014-12-16 15:35:43 -0500
+Branch: REL9_1_STABLE [5c784d96a] 2014-12-16 15:35:46 -0500
+Branch: REL9_0_STABLE [a2969bd72] 2014-12-16 15:35:49 -0500
+Author: Tom Lane <tgl@sss.pgh.pa.us>
+Branch: master [d38e8d30c] 2014-12-16 13:31:42 -0500
+Branch: REL9_4_STABLE [6c75384ee] 2014-12-16 13:31:57 -0500
+Branch: REL9_3_STABLE [3b750ec15] 2014-12-16 13:32:02 -0500
+Branch: REL9_2_STABLE [5b2c8f04a] 2014-12-16 13:32:15 -0500
+Branch: REL9_1_STABLE [926da211a] 2014-12-16 13:32:25 -0500
+Branch: REL9_0_STABLE [961df1853] 2014-12-16 13:32:38 -0500
+Author: Tom Lane <tgl@sss.pgh.pa.us>
+Branch: master [586dd5d6a] 2015-01-24 13:05:42 -0500
+Branch: REL9_4_STABLE [d51d4ff31] 2015-01-24 13:05:45 -0500
+Branch: REL9_3_STABLE [7240f9200] 2015-01-24 13:05:49 -0500
+Branch: REL9_2_STABLE [502e5f9c3] 2015-01-24 13:05:53 -0500
+Branch: REL9_1_STABLE [b00a08859] 2015-01-24 13:05:56 -0500
+Branch: REL9_0_STABLE [3a3ee655c] 2015-01-24 13:05:58 -0500
+-->
+
+    <listitem>
+     <para>
+      Numerous cleanups of warnings from Coverity static code analyzer
+      (Andres Freund, Tatsuo Ishii, Marko Kreen, Tom Lane, Michael Paquier)
+     </para>
+
+     <para>
+      These changes are mostly cosmetic but in some cases fix corner-case
+      bugs, for example a crash rather than a proper error report after an
+      out-of-memory failure.  None are believed to represent security
+      issues.
+     </para>
+    </listitem>
+
+<!--
+Author: Tom Lane <tgl@sss.pgh.pa.us>
+Branch: master [85a2a8903] 2015-01-14 11:08:13 -0500
+Branch: REL9_4_STABLE [adb355106] 2015-01-14 11:08:17 -0500
+-->
+
+    <listitem>
+     <para>
+      Allow <varname>CFLAGS</> from <application>configure</>'s environment
+      to override automatically-supplied <varname>CFLAGS</> (Tom Lane)
+     </para>
+
+     <para>
+      Previously, <application>configure</> would add any switches that it
+      chose of its own accord to the end of the
+      user-specified <varname>CFLAGS</> string.  Since most compilers
+      process switches left-to-right, this meant that configure's choices
+      would override the user-specified flags in case of conflicts.  That
+      should work the other way around, so adjust the logic to put the
+      user's string at the end not the beginning.
+     </para>
+    </listitem>
+
+<!--
+Author: Tom Lane <tgl@sss.pgh.pa.us>
+Branch: master [aa719391d] 2015-01-19 23:44:19 -0500
+Branch: REL9_4_STABLE [3de9f22ac] 2015-01-19 23:44:22 -0500
+Branch: REL9_3_STABLE [1681e2f74] 2015-01-19 23:44:24 -0500
+Branch: REL9_2_STABLE [89b6a19e1] 2015-01-19 23:44:28 -0500
+Branch: REL9_1_STABLE [f4f522deb] 2015-01-19 23:44:30 -0500
+Branch: REL9_0_STABLE [338ff75fc] 2015-01-19 23:44:33 -0500
+-->
+
+    <listitem>
+     <para>
+      Make <application>pg_regress</> remove any temporary installation it
+      created upon successful exit (Tom Lane)
+     </para>
+
+     <para>
+      This results in a very substantial reduction in disk space usage
+      during <literal>make check-world</>, since that sequence involves
+      creation of numerous temporary installations.
+     </para>
+    </listitem>
+
+<!--
+Author: Tom Lane <tgl@sss.pgh.pa.us>
+Branch: master [5b89473d8] 2014-12-24 16:35:23 -0500
+Branch: REL9_4_STABLE [068024719] 2014-12-24 16:35:34 -0500
+-->
+
+    <listitem>
+     <para>
+      Add CST (China Standard Time) to our lists of timezone abbreviations
+      (Tom Lane)
+     </para>
+    </listitem>
+
+<!--
+Author: Tom Lane <tgl@sss.pgh.pa.us>
+Branch: master [08bd0c581] 2015-01-30 22:45:44 -0500
+Branch: REL9_4_STABLE [c2b06ab17] 2015-01-30 22:45:58 -0500
+-->
+
+    <listitem>
+     <para>
+      Update time zone data files to <application>tzdata</> release 2015a
+      for DST law changes in Chile and Mexico, plus historical changes in
+      Iceland.
+     </para>
+    </listitem>
+
+   </itemizedlist>
+
+  </sect2>
+ </sect1>
+
  <sect1 id="release-9-4">
   <title>Release 9.4</title>
 
   <note>
    <title>Release Date</title>
-   <simpara>2014-??-??</simpara>
-   <simpara>Current as of 2014-10-05</simpara>
-   <!-- Be sure to remove "delta from 9.4beta" items below before final! -->
+   <simpara>2014-12-18</simpara>
   </note>
 
   <sect2>
@@ -24,8 +835,29 @@
 
      <listitem>
       <para>
+       Add <link linkend="datatype-json"><type>jsonb</></link>, a more
+       capable and efficient data type for storing <acronym>JSON</> data
+      </para>
+     </listitem>
+
+     <listitem>
+      <para>
+       Add new <acronym>SQL</> command <xref linkend="SQL-ALTERSYSTEM">
+       for changing <filename>postgresql.conf</> configuration file entries
+      </para>
+     </listitem>
+
+     <listitem>
+      <para>
+       Reduce lock strength for some <xref linkend="SQL-ALTERTABLE">
+       commands
+      </para>
+     </listitem>
+
+     <listitem>
+      <para>
        Allow <link linkend="rules-materializedviews">materialized views</>
-       to be refreshed without blocking reads
+       to be refreshed without blocking concurrent reads
       </para>
      </listitem>
 
@@ -41,27 +873,6 @@
       <para>
         Allow <link linkend="bgworker">background worker processes</>
         to be dynamically registered, started and terminated
-      </para>
-     </listitem>
-
-     <listitem>
-      <para>
-       Add <link linkend="datatype-json"><type>jsonb</></link>, a more
-       capable and efficient data type for storing <acronym>JSON</> data
-      </para>
-     </listitem>
-
-     <listitem>
-      <para>
-       Add new <acronym>SQL</> command <xref linkend="SQL-ALTERSYSTEM">
-       for updating <filename>postgresql.conf</> configuration file entries
-      </para>
-     </listitem>
-
-     <listitem>
-      <para>
-       Reduce lock strength for some <xref linkend="SQL-ALTERTABLE">
-       commands
       </para>
      </listitem>
 
@@ -90,22 +901,6 @@
 
    <itemizedlist>
 
-    <!-- delta from 9.4beta2, be sure to remove before final: -->
-    <listitem>
-     <para>
-      Change on-disk format of <type>jsonb</> data
-      (Heikki Linnakangas and Tom Lane)
-     </para>
-
-     <para>
-      The on-disk representation was changed after 9.4beta2 to improve
-      efficiency.  <application>pg_upgrade</> will refuse to upgrade any
-      9.4beta1 or 9.4beta2 database containing <type>jsonb</> columns; you
-      will need to use <application>pg_dumpall</> instead to migrate such
-      databases.
-     </para>
-    </listitem>
-
     <listitem>
      <para>
       Tighten checks for multidimensional <link
@@ -114,24 +909,8 @@
 
      <para>
       Previously, an input array string that started with a single-element
-      array dimension could later contain multidimensional segments,
-      e.g. <literal>'{{1}, {2,3}}'::int[]</>.
-     </para>
-    </listitem>
-
-    <listitem>
-     <para>
-      Unicode escapes in <link linkend="datatype-json"><type>JSON</type></link>
-      text values are no longer rendered with the backslash escaped
-      (Andrew Dunstan)
-     </para>
-
-     <para>
-      Previously, all backslashes in text values being formed into JSON
-      were escaped. Now a backslash followed by <literal>u</> and four
-      hexadecimal digits is not escaped, as this is a legal sequence in a
-      JSON string value, and escaping the backslash led to some perverse
-      results.
+      sub-array could later contain multi-element sub-arrays,
+      e.g. <literal>'{{1}, {2,3}}'::int[]</> would be accepted.
      </para>
     </listitem>
 
@@ -156,7 +935,7 @@
     <listitem>
      <para>
       The <link linkend="functions-json-op-table"><type>json</type>
-      <literal>#&gt;</> <type>text[]</> path extraction operator</link> now
+      <literal>#&gt;</> <type>text[]</></link> path extraction operator now
       returns its lefthand input, not NULL, if the array is empty (Tom Lane)
      </para>
 
@@ -236,6 +1015,22 @@
 
     <listitem>
      <para>
+      Ensure that whole-row variables expose the expected column names
+      to functions that pay attention to column names within composite
+      arguments (Tom Lane)
+     </para>
+
+     <para>
+      Constructs like <literal>row_to_json(tab.*)</> now always emit column
+      names that match the column aliases visible for table <literal>tab</>
+      at the point of the call.  In previous releases the emitted column
+      names would sometimes be the table's actual column names regardless
+      of any aliases assigned in the query.
+     </para>
+    </listitem>
+
+    <listitem>
+     <para>
       <xref linkend="sql-discard"> now also discards sequence-related state
       (Fabr&iacute;zio de Royes Mello, Robert Haas)
      </para>
@@ -302,8 +1097,14 @@
 
     <listitem>
      <para>
-      Use the last specified <xref linkend="recovery-target"> if multiple
-      values are specified (Heikki Linnakangas)
+      Use the last specified <link linkend="recovery-target-settings">recovery
+      target parameter</link> if multiple target parameters are specified
+      (Heikki Linnakangas)
+     </para>
+
+     <para>
+      Previously, there was an undocumented precedence order among
+      the <literal>recovery_target_<replaceable>xxx</></literal> parameters.
      </para>
     </listitem>
 
@@ -410,27 +1211,6 @@
      </para>
     </listitem>
 
-    <!-- delta from 9.4beta2, be sure to remove before final: -->
-    <listitem>
-     <para>
-      Update time zone data files to tzdata release 2014h for DST law
-      changes in Russia and elsewhere
-     </para>
-
-     <para>
-      This change is more significant than most time zone updates because
-      many Russian zone abbreviations are changing meaning, including IRKT,
-      KRAT, MAGT, MSK, NOVT, OMST, SAKT, VLAT, YAKT, and YEKT.  Also, IANA
-      has formally recognized abbreviations of the form
-      A<replaceable>x</>ST/A<replaceable>x</>DT for Australian timezones,
-      so adopt those names as part of the <quote>Default</> abbreviation
-      set in <productname>PostgreSQL</>.  The <quote>Australia</>
-      abbreviation set now need be selected only if it's desired to use
-      historical abbreviations that conflict with abbreviations commonly
-      used elsewhere, such as EST or SAST.
-     </para>
-    </listitem>
-
    </itemizedlist>
 
   </sect2>
@@ -456,7 +1236,7 @@
        </para>
 
        <para>
-        The <filename>contrib/worker_spi</> module shows an example of use
+        The new <filename>worker_spi</> module shows an example of use
         of this feature.
        </para>
       </listitem>
@@ -468,7 +1248,8 @@
        </para>
 
        <para>
-        This feature is illustrated in <xref linkend="test-shm-mq">.
+        This feature is illustrated in the <filename>test_shm_mq</filename>
+        module.
        </para>
       </listitem>
 
@@ -520,7 +1301,7 @@
        <para>
         Indexes upgraded via <xref linkend="pgupgrade"> will work fine
         but will still be in the old, larger <acronym>GIN</> format.
-        Use <xref linkend="SQL-REINDEX"> to recreate such an index in the
+        Use <xref linkend="SQL-REINDEX"> to recreate old GIN indexes in the
         new format.
        </para>
       </listitem>
@@ -621,8 +1402,7 @@
 
       <listitem>
        <para>
-        Improve speed of <xref linkend="SQL-COPY">
-        with <literal>DEFAULT</> <link
+        Improve speed of <xref linkend="SQL-COPY"> with default <link
         linkend="functions-sequence-table"><function>nextval()</></link>
         columns (Simon Riggs)
        </para>
@@ -652,7 +1432,7 @@
 
       <listitem>
        <para>
-        Make the planner more aggressive in extracting restriction clauses
+        Make the planner more aggressive about extracting restriction clauses
         from mixed <literal>AND</>/<literal>OR</> clauses (Tom Lane)
        </para>
       </listitem>
@@ -795,7 +1575,7 @@
       <listitem>
        <para>
         Add new <acronym>SQL</> command <xref linkend="SQL-ALTERSYSTEM">
-        for updating <filename>postgresql.conf</> configuration file entries
+        for changing <filename>postgresql.conf</> configuration file entries
         (Amit Kapila)
        </para>
 
@@ -913,7 +1693,7 @@
 
        <para>
         The previous level was <literal>LOG</>, which was too verbose
-        for per-session libraries.
+        for libraries loaded per-session.
        </para>
       </listitem>
 
@@ -958,8 +1738,7 @@
 
       <listitem>
        <para>
-        Add <link linkend="recovery-config"><filename>recovery.conf</></link>
-        parameter <xref linkend="recovery-min-apply-delay">
+        Add recovery parameter <xref linkend="recovery-min-apply-delay">
         to delay replication (Robert Haas, Fabr&iacute;zio de Royes Mello,
         Simon Riggs)
        </para>
@@ -1110,8 +1889,8 @@
       <listitem>
        <para>
         Add <link linkend="queries-tablefunctions"><literal>WITH
-        ORDINALITY</></link> syntax to number rows returned from
-        set-returning functions in the <literal>FROM</> clause
+        ORDINALITY</></link> syntax to number the rows returned from a
+        set-returning function in the <literal>FROM</> clause
         (Andrew Gierth, David Fetter)
        </para>
 
@@ -1237,9 +2016,9 @@
 
       <listitem>
        <para>
-        Allow <link linkend="rules-materializedviews">materialized views</>
-        to be refreshed without blocking reads
-        (Kevin Grittner)
+        Allow a <link linkend="rules-materializedviews">materialized view</>
+        to be refreshed without blocking other sessions from reading the view
+        meanwhile (Kevin Grittner)
        </para>
 
        <para>
@@ -1400,8 +2179,9 @@
        <para>
         The line <emphasis>segment</> data type (<link
         linkend="datatype-lseg"><type>lseg</></link>) has always been
-        fully supported.  The previous <type>line</> data type (enabled
-        only via a compile-time option) is not binary or dump-compatible.
+        fully supported.  The previous <type>line</> data type (which was
+        enabled only via a compile-time option) is not binary or
+        dump-compatible with the new implementation.
        </para>
       </listitem>
 
@@ -1419,6 +2199,26 @@
         linkend="datatype-polygon"><type>polygon</></link>s to be converted
         to <link linkend="datatype-circle"><type>circle</></link>s
         (Bruce Momjian)
+       </para>
+      </listitem>
+
+      <listitem>
+       <para>
+        Support time zone abbreviations that change UTC offset from time to
+        time (Tom Lane)
+       </para>
+
+       <para>
+        Previously, <productname>PostgreSQL</> assumed that the UTC offset
+        associated with a time zone abbreviation (such as <literal>EST</>)
+        never changes in the usage of any particular locale.  However this
+        assumption fails in the real world, so introduce the ability for a
+        zone abbreviation to represent a UTC offset that sometimes changes.
+        Update the zone abbreviation definition files to make use of this
+        feature in timezone locales that have changed the UTC offset of their
+        abbreviations since 1970 (according to the IANA timezone database).
+        In such timezones, <productname>PostgreSQL</> will now associate the
+        correct UTC offset with the abbreviation depending on the given date.
        </para>
       </listitem>
 
@@ -1454,8 +2254,8 @@
         </para>
 
         <para>
-         This new type allows faster access to values in a JSON
-         document and faster and more useful indexing of JSON columns.
+         This new type allows faster access to values within a JSON
+         document, and faster and more useful indexing of JSON columns.
          Scalar values in <type>jsonb</> documents are stored as appropriate
          scalar SQL types, and the JSON document structure is pre-parsed
          rather than being stored as text as in the original <type>json</>
@@ -1663,7 +2463,7 @@
       <listitem>
        <para>
         Add control over which rows are passed
-        into aggregate functions using the <link
+        into aggregate functions via the <link
         linkend="syntax-aggregates"><literal>FILTER</></link> clause
         (David Fetter)
        </para>
@@ -1679,7 +2479,7 @@
 
       <listitem>
        <para>
-        Add aggregates <link
+        Add standard ordered-set aggregates <link
         linkend="functions-orderedset-table"><function>percentile_cont()</></link>,
         <function>percentile_disc()</>, <function>mode()</>, <link
         linkend="functions-hypothetical-table"><function>rank()</></link>,
@@ -1703,8 +2503,8 @@
         types (Tom Lane)
        </para>
        <para>
-        This allows proper declaration of aggregates like the built-in
-        aggregate <function>array_agg()</> in SQL.
+        This allows proper declaration in SQL of aggregates like the built-in
+        aggregate <function>array_agg()</>.
        </para>
       </listitem>
 
@@ -1748,9 +2548,9 @@
 
       <listitem>
        <para>
-        Add ability to store the PL/PgSQL
-        call stack into a variable using <link
-        linkend="plpgsql-get-diagnostics-context"><literal>PG_CONTEXT</></link>
+        Add ability to retrieve the current PL/PgSQL call stack
+        using <link linkend="plpgsql-get-diagnostics-context"><command>GET
+        DIAGNOSTICS</></link>
         (Pavel Stehule, Stephen Frost)
        </para>
       </listitem>
@@ -1758,10 +2558,9 @@
       <listitem>
        <para>
         Add option <link
-        linkend="plpgsql-statements-assignment"><option>print_strict_params</></link>
-        to output parameters passed to queries generating <link
-        linkend="plpgsql-statements-sql-onerow"><literal>STRICT</></link>
-        errors (Marko Tiikkaja)
+        linkend="plpgsql-statements-sql-onerow"><option>print_strict_params</></link>
+        to display the parameters passed to a query that violated a
+        <literal>STRICT</> constraint (Marko Tiikkaja)
        </para>
       </listitem>
 
@@ -1774,7 +2573,7 @@
        </para>
 
        <para>
-        Currently only shadowed variable errors/warnings are available.
+        Currently only warnings/errors about shadowed variables are available.
        </para>
       </listitem>
 
@@ -1787,14 +2586,6 @@
    <sect3>
     <title><link linkend="libpq"><application>libpq</></link></title>
      <itemizedlist>
-
-      <listitem>
-       <para>
-        Add libpq function <link
-        linkend="libpq-pqhostaddr"><function>PQhostaddr()</></link>
-        to return the server's <acronym>IP</> address (Fujii Masao)
-       </para>
-      </listitem>
 
       <listitem>
        <para>
@@ -1917,8 +2708,8 @@
 
       <listitem>
        <para>
-        Allow Control-C to abort <application>psql</> when hung at connection
-        startup (Peter Eisentraut)
+        Allow Control-C to abort <application>psql</> when it's hung at
+        connection startup (Peter Eisentraut)
        </para>
       </listitem>
 
@@ -1931,23 +2722,23 @@
 
        <listitem>
         <para>
-         Make <application>psql</> <command>\db+</> show tablespace options
+         Make <application>psql</>'s <command>\db+</> show tablespace options
          (Magnus Hagander)
         </para>
        </listitem>
 
        <listitem>
         <para>
-         Make <application>psql</> <command>\do+</> display the functions
-         which implement the operators (Marko Tiikkaja)
+         Make <command>\do+</> display the functions
+         that implement the operators (Marko Tiikkaja)
         </para>
        </listitem>
 
        <listitem>
         <para>
-         Make <application>psql</> <command>\d+</> output an
+         Make <command>\d+</> output an
          <literal>OID</> line only if an <literal>oid</literal> column
-         exists in a table (Bruce Momjian)
+         exists in the table (Bruce Momjian)
         </para>
 
         <para>
@@ -1970,23 +2761,22 @@
 
        <listitem>
         <para>
-         Fix <application>psql</> <command>\copy</> to no longer require
+         Fix <command>\copy</> to no longer require
          a space between <literal>stdin</> and a semicolon (Etsuro Fujita)
         </para>
        </listitem>
 
        <listitem>
         <para>
-         Output the row count at the end
-         of <application>psql</> <command>\copy</> just
-         like <xref linkend="SQL-COPY"> (Kumar Rajeev Rastogi)
+         Output the row count at the end of <command>\copy</>, just
+         like <command>COPY</> already did (Kumar Rajeev Rastogi)
         </para>
        </listitem>
 
        <listitem>
         <para>
-         Fix <application>psql</> <command>\conninfo</> to display the
-         server's <acronym>IP</> address for clients that connect using
+         Fix <command>\conninfo</> to display the
+         server's <acronym>IP</> address for connections using
          <literal>hostaddr</> (Fujii Masao)
         </para>
 
@@ -1998,29 +2788,29 @@
 
        <listitem>
         <para>
-         Mention the <acronym>SSL</> protocol version in
-         <application>psql</>'s <command>\conninfo</> (Marko Kreen)
+         Show the <acronym>SSL</> protocol version in
+         <command>\conninfo</> (Marko Kreen)
         </para>
        </listitem>
 
        <listitem>
         <para>
-         Add <application>psql</> tab completion for <command>\pset</>
+         Add tab completion for <command>\pset</>
          (Pavel Stehule)
         </para>
        </listitem>
 
        <listitem>
         <para>
-         Allow <application>psql</> <command>\pset</> with no arguments
+         Allow <command>\pset</> with no arguments
          to show all settings (Gilles Darold)
         </para>
        </listitem>
 
        <listitem>
         <para>
-         In <application>psql</>, display the history file name written by
-         <command>\s</> without converting it to an absolute path (Tom Lane)
+         Make <command>\s</> display the name of the history file it wrote
+         without converting it to an absolute path (Tom Lane)
         </para>
 
         <para>
@@ -2241,6 +3031,13 @@
         Add Test Anything Protocol (<acronym>TAP</>) tests for client
         programs (Peter Eisentraut)
        </para>
+
+       <para>
+        Currently, these tests are run by <literal>make check-world</>
+        only if the <option>--enable-tap-tests</> option was given
+        to <application>configure</>.
+        This might become the default behavior in some future release.
+       </para>
       </listitem>
 
       <listitem>
@@ -2264,7 +3061,7 @@
       <listitem>
        <para>
         Improve support for <envar>VPATH</> builds of <acronym>PGXS</>
-        modules  (C&eacute;dric Villemain, Andrew Dunstan)
+        modules  (C&eacute;dric Villemain, Andrew Dunstan, Peter Eisentraut)
        </para>
       </listitem>
 
@@ -2293,14 +3090,15 @@
 
       <listitem>
        <para>
-        Various minor security and sanity fixes reported by the
+        Fix various minor security and sanity issues reported by the
         <productname>Coverity</> scanner (Stephen Frost)
        </para>
       </listitem>
 
       <listitem>
        <para>
-        Improve <application>Valgrind</> detection of invalid memory usage
+        Improve detection of invalid memory usage when testing
+        <productname>PostgreSQL</> with <application>Valgrind</>
         (Noah Misch)
        </para>
       </listitem>
@@ -2321,10 +3119,12 @@
         Allow <application>pgindent</> to accept a command-line list
         of typedefs (Bruce Momjian)
        </para>
+      </listitem>
 
+      <listitem>
        <para>
-        <application>pgindent</> is also now smarter about blank lines
-        around preprocessor conditionals.
+        Make <application>pgindent</> smarter about blank lines
+        around preprocessor conditionals (Bruce Momjian)
        </para>
       </listitem>
 
@@ -2427,8 +3227,12 @@
       <listitem>
        <para>
         Improve <xref linkend="pgtrgm">'s choice of trigrams for indexed
-        regular expression searches by discouraging the selection of
-        trigrams containing whitespace (Alexander Korotkov)
+        regular expression searches (Alexander Korotkov)
+       </para>
+
+       <para>
+        This change discourages use of trigrams containing whitespace, which
+        are usually less selective.
        </para>
       </listitem>
 
@@ -2466,8 +3270,8 @@
 
       <listitem>
        <para>
-        Pass <xref linkend="pgupgrade"> user name (<option>-U</> option) to
-        analyze scripts (Bruce Momjian)
+        Pass <xref linkend="pgupgrade">'s user name (<option>-U</>) option to
+        generated analyze scripts (Bruce Momjian)
        </para>
       </listitem>
 

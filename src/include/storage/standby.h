@@ -4,7 +4,7 @@
  *	  Definitions for hot standby mode.
  *
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/storage/standby.h
@@ -14,7 +14,8 @@
 #ifndef STANDBY_H
 #define STANDBY_H
 
-#include "access/xlog.h"
+#include "access/xlogreader.h"
+#include "lib/stringinfo.h"
 #include "storage/lock.h"
 #include "storage/procsignal.h"
 #include "storage/relfilenode.h"
@@ -81,8 +82,8 @@ typedef struct xl_running_xacts
 
 
 /* Recovery handlers for the Standby Rmgr (RM_STANDBY_ID) */
-extern void standby_redo(XLogRecPtr lsn, XLogRecord *record);
-extern void standby_desc(StringInfo buf, XLogRecord *record);
+extern void standby_redo(XLogReaderState *record);
+extern void standby_desc(StringInfo buf, XLogReaderState *record);
 extern const char *standby_identify(uint8 info);
 
 /*

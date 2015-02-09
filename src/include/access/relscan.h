@@ -4,7 +4,7 @@
  *	  POSTGRES relation scan descriptor definitions.
  *
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/access/relscan.h
@@ -35,8 +35,10 @@ typedef struct HeapScanDescData
 	bool		rs_temp_snap;	/* unregister snapshot at scan end? */
 
 	/* state set up at initscan time */
-	BlockNumber rs_nblocks;		/* number of blocks to scan */
+	BlockNumber rs_nblocks;		/* total number of blocks in rel */
 	BlockNumber rs_startblock;	/* block # to start at */
+	BlockNumber	rs_initblock;	/* block # to consider initial of rel */
+	BlockNumber	rs_numblocks;	/* number of blocks to scan */
 	BufferAccessStrategy rs_strategy;	/* access strategy for reads */
 	bool		rs_syncscan;	/* report location to syncscan logic? */
 
@@ -46,11 +48,9 @@ typedef struct HeapScanDescData
 	BlockNumber rs_cblock;		/* current block # in scan, if any */
 	Buffer		rs_cbuf;		/* current buffer in scan, if any */
 	/* NB: if rs_cbuf is not InvalidBuffer, we hold a pin on that buffer */
-	ItemPointerData rs_mctid;	/* marked scan position, if any */
 
 	/* these fields only used in page-at-a-time mode and for bitmap scans */
 	int			rs_cindex;		/* current tuple's index in vistuples */
-	int			rs_mindex;		/* marked tuple's saved index */
 	int			rs_ntuples;		/* number of visible tuples on page */
 	OffsetNumber rs_vistuples[MaxHeapTuplesPerPage];	/* their offsets */
 }	HeapScanDescData;

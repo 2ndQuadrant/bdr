@@ -43,7 +43,7 @@
  * before switching to the other state or activating a different read pointer.
  *
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -53,6 +53,8 @@
  */
 
 #include "postgres.h"
+
+#include <limits.h>
 
 #include "access/htup_details.h"
 #include "commands/tablespace.h"

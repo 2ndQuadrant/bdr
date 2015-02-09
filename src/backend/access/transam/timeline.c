@@ -21,7 +21,7 @@
  * The fields are separated by tabs. Lines beginning with # are comments, and
  * are ignored. Empty lines are also ignored.
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/backend/access/transam/timeline.c
@@ -36,6 +36,7 @@
 #include <unistd.h>
 
 #include "access/timeline.h"
+#include "access/xlog.h"
 #include "access/xlog_internal.h"
 #include "access/xlogdefs.h"
 #include "storage/fd.h"
@@ -437,8 +438,11 @@ writeTimeLineHistory(TimeLineID newTLI, TimeLineID parentTLI,
 #endif
 
 	/* The history file can be archived immediately. */
-	TLHistoryFileName(histfname, newTLI);
-	XLogArchiveNotify(histfname);
+	if (XLogArchivingActive())
+	{
+		TLHistoryFileName(histfname, newTLI);
+		XLogArchiveNotify(histfname);
+	}
 }
 
 /*

@@ -3,7 +3,7 @@
  * jsonb.h
  *	  Declarations for jsonb data type support.
  *
- * Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Copyright (c) 1996-2015, PostgreSQL Global Development Group
  *
  * src/include/utils/jsonb.h
  *
@@ -349,6 +349,22 @@ extern Datum jsonb_out(PG_FUNCTION_ARGS);
 extern Datum jsonb_recv(PG_FUNCTION_ARGS);
 extern Datum jsonb_send(PG_FUNCTION_ARGS);
 extern Datum jsonb_typeof(PG_FUNCTION_ARGS);
+
+/* generator routines */
+extern Datum to_jsonb(PG_FUNCTION_ARGS);
+
+extern Datum jsonb_build_object(PG_FUNCTION_ARGS);
+extern Datum jsonb_build_object_noargs(PG_FUNCTION_ARGS);
+extern Datum jsonb_build_array(PG_FUNCTION_ARGS);
+extern Datum jsonb_build_array_noargs(PG_FUNCTION_ARGS);
+extern Datum jsonb_object(PG_FUNCTION_ARGS);
+extern Datum jsonb_object_two_arg(PG_FUNCTION_ARGS);
+
+/* jsonb_agg, json_object_agg functions */
+extern Datum jsonb_agg_transfn(PG_FUNCTION_ARGS);
+extern Datum jsonb_agg_finalfn(PG_FUNCTION_ARGS);
+extern Datum jsonb_object_agg_transfn(PG_FUNCTION_ARGS);
+extern Datum jsonb_object_agg_finalfn(PG_FUNCTION_ARGS);
 
 /* Indexing-related ops */
 extern Datum jsonb_exists(PG_FUNCTION_ARGS);

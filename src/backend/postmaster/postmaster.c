@@ -32,7 +32,7 @@
  *	  clients.
  *
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -85,6 +85,10 @@
 
 #ifdef USE_BONJOUR
 #include <dns_sd.h>
+#endif
+
+#ifdef HAVE_PTHREAD_IS_THREADED_NP
+#include <pthread.h>
 #endif
 
 #include "access/transam.h"
@@ -509,6 +513,7 @@ static void ShmemBackendArrayRemove(Backend *bn);
 /* Macros to check exit status of a child process */
 #define EXIT_STATUS_0(st)  ((st) == 0)
 #define EXIT_STATUS_1(st)  (WIFEXITED(st) && WEXITSTATUS(st) == 1)
+#define EXIT_STATUS_3(st)  (WIFEXITED(st) && WEXITSTATUS(st) == 3)
 
 #ifndef WIN32
 /*
@@ -1136,6 +1141,12 @@ PostmasterMain(int argc, char *argv[])
 	}
 
 	/*
+	 * Remove old temporary files.  At this point there can be no other
+	 * Postgres processes running in this directory, so this should be safe.
+	 */
+	RemovePgTempFiles();
+
+	/*
 	 * If enabled, start up syslogger collection subprocess
 	 */
 	SysLoggerPID = SysLogger_Start();
@@ -1192,12 +1203,23 @@ PostmasterMain(int argc, char *argv[])
 		 */
 	}
 
+#ifdef HAVE_PTHREAD_IS_THREADED_NP
 
 	/*
-	 * Remove old temporary files.  At this point there can be no other
-	 * Postgres processes running in this directory, so this should be safe.
+	 * On Darwin, libintl replaces setlocale() with a version that calls
+	 * CFLocaleCopyCurrent() when its second argument is "" and every relevant
+	 * environment variable is unset or empty.  CFLocaleCopyCurrent() makes
+	 * the process multithreaded.  The postmaster calls sigprocmask() and
+	 * calls fork() without an immediate exec(), both of which have undefined
+	 * behavior in a multithreaded program.  A multithreaded postmaster is the
+	 * normal case on Windows, which offers neither fork() nor sigprocmask().
 	 */
-	RemovePgTempFiles();
+	if (pthread_is_threaded_np() != 0)
+		ereport(FATAL,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("postmaster became multithreaded during startup"),
+		 errhint("Set the LC_ALL environment variable to a valid locale.")));
+#endif
 
 	/*
 	 * Remember postmaster startup time
@@ -1656,6 +1678,15 @@ ServerLoop(void)
 			last_touch_time = now;
 		}
 
+#ifdef HAVE_PTHREAD_IS_THREADED_NP
+
+		/*
+		 * With assertions enabled, check regularly for appearance of
+		 * additional threads.  All builds check at start and exit.
+		 */
+		Assert(pthread_is_threaded_np() == 0);
+#endif
+
 		/*
 		 * If we already sent SIGQUIT to children and they are slow to shut
 		 * down, it's time to send them SIGKILL.  This doesn't happen
@@ -1730,6 +1761,7 @@ ProcessStartupPacket(Port *port, bool SSLdone)
 	ProtocolVersion proto;
 	MemoryContext oldcontext;
 
+	pq_startmsgread();
 	if (pq_getbytes((char *) &len, 4) == EOF)
 	{
 		/*
@@ -1774,6 +1806,7 @@ ProcessStartupPacket(Port *port, bool SSLdone)
 				 errmsg("incomplete startup packet")));
 		return STATUS_ERROR;
 	}
+	pq_endmsgread();
 
 	/*
 	 * The first field is either a protocol version number or a special
@@ -2550,6 +2583,17 @@ reaper(SIGNAL_ARGS)
 			if (Shutdown > NoShutdown &&
 				(EXIT_STATUS_0(exitstatus) || EXIT_STATUS_1(exitstatus)))
 			{
+				pmState = PM_WAIT_BACKENDS;
+				/* PostmasterStateMachine logic does the rest */
+				continue;
+			}
+
+			if (EXIT_STATUS_3(exitstatus))
+			{
+				ereport(LOG,
+					(errmsg("shutdown at recovery target")));
+				Shutdown = SmartShutdown;
+				TerminateChildren(SIGTERM);
 				pmState = PM_WAIT_BACKENDS;
 				/* PostmasterStateMachine logic does the rest */
 				continue;
@@ -3769,19 +3813,8 @@ BackendStartup(Port *port)
 	{
 		free(bn);
 
-		/*
-		 * Let's clean up ourselves as the postmaster child, and close the
-		 * postmaster's listen sockets.  (In EXEC_BACKEND case this is all
-		 * done in SubPostmasterMain.)
-		 */
-		IsUnderPostmaster = true;		/* we are a postmaster subprocess now */
-
-		MyProcPid = getpid();	/* reset MyProcPid */
-
-		MyStartTime = time(NULL);
-
-		/* We don't want the postmaster's proc_exit() handlers */
-		on_exit_reset();
+		/* Detangle from postmaster */
+		InitPostmasterChild();
 
 		/* Close the postmaster's sockets */
 		ClosePostmasterPorts(false);
@@ -3910,16 +3943,6 @@ BackendInitialize(Port *port)
 	 */
 	pq_init();					/* initialize libpq to talk to client */
 	whereToSendOutput = DestRemote;		/* now safe to ereport to client */
-
-	/*
-	 * If possible, make this process a group leader, so that the postmaster
-	 * can signal any child processes too.  (We do this now on the off chance
-	 * that something might spawn a child process during authentication.)
-	 */
-#ifdef HAVE_SETSID
-	if (setsid() < 0)
-		elog(FATAL, "setsid() failed: %m");
-#endif
 
 	/*
 	 * We arrange for a simple exit(1) if we receive SIGTERM or SIGQUIT or
@@ -4473,29 +4496,12 @@ SubPostmasterMain(int argc, char *argv[])
 {
 	Port		port;
 
-	/* Do this sooner rather than later... */
-	IsUnderPostmaster = true;	/* we are a postmaster subprocess now */
-
-	MyProcPid = getpid();		/* reset MyProcPid */
-
-	MyStartTime = time(NULL);
-
-	/*
-	 * make sure stderr is in binary mode before anything can possibly be
-	 * written to it, in case it's actually the syslogger pipe, so the pipe
-	 * chunking protocol isn't disturbed. Non-logpipe data gets translated on
-	 * redirection (e.g. via pg_ctl -l) anyway.
-	 */
-#ifdef WIN32
-	_setmode(fileno(stderr), _O_BINARY);
-#endif
-
-	/* Lose the postmaster's on-exit routines (really a no-op) */
-	on_exit_reset();
-
 	/* In EXEC_BACKEND case we will not have inherited these settings */
 	IsPostmasterEnvironment = true;
 	whereToSendOutput = DestNone;
+
+	/* Setup as postmaster child */
+	InitPostmasterChild();
 
 	/* Setup essential subsystems (to ensure elog() behaves sanely) */
 	InitializeGUCOptions();
@@ -4676,6 +4682,8 @@ SubPostmasterMain(int argc, char *argv[])
 		/* do this as early as possible; in particular, before InitProcess() */
 		IsBackgroundWorker = true;
 
+		InitPostmasterChild();
+
 		/* Close the postmaster's sockets */
 		ClosePostmasterPorts(false);
 
@@ -4733,6 +4741,21 @@ SubPostmasterMain(int argc, char *argv[])
 static void
 ExitPostmaster(int status)
 {
+#ifdef HAVE_PTHREAD_IS_THREADED_NP
+
+	/*
+	 * There is no known cause for a postmaster to become multithreaded after
+	 * startup.  Recheck to account for the possibility of unknown causes.
+	 * This message uses LOG level, because an unclean shutdown at this point
+	 * would usually not look much different from a clean shutdown.
+	 */
+	if (pthread_is_threaded_np() != 0)
+		ereport(LOG,
+				(errcode(ERRCODE_INTERNAL_ERROR),
+				 errmsg_internal("postmaster became multithreaded"),
+		   errdetail("Please report this to <pgsql-bugs@postgresql.org>.")));
+#endif
+
 	/* should cleanup shared memory and kill all backends */
 
 	/*
@@ -5081,13 +5104,10 @@ StartChildProcess(AuxProcType type)
 
 	if (pid == 0)				/* child */
 	{
-		IsUnderPostmaster = true;		/* we are a postmaster subprocess now */
+		InitPostmasterChild();
 
 		/* Close the postmaster's sockets */
 		ClosePostmasterPorts(false);
-
-		/* Lose the postmaster's on-exit routines and port connections */
-		on_exit_reset();
 
 		/* Release postmaster's working memory context */
 		MemoryContextSwitchTo(TopMemoryContext);
@@ -5293,7 +5313,30 @@ BackgroundWorkerInitializeConnection(char *dbname, char *username)
 				(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
 				 errmsg("database connection requirement not indicated during registration")));
 
-	InitPostgres(dbname, InvalidOid, username, NULL);
+	InitPostgres(dbname, InvalidOid, username, InvalidOid, NULL);
+
+	/* it had better not gotten out of "init" mode yet */
+	if (!IsInitProcessingMode())
+		ereport(ERROR,
+				(errmsg("invalid processing mode in background worker")));
+	SetProcessingMode(NormalProcessing);
+}
+
+/*
+ * Connect background worker to a database using OIDs.
+ */
+void
+BackgroundWorkerInitializeConnectionByOid(Oid dboid, Oid useroid)
+{
+	BackgroundWorker *worker = MyBgworkerEntry;
+
+	/* XXX is this the right errcode? */
+	if (!(worker->bgw_flags & BGWORKER_BACKEND_DATABASE_CONNECTION))
+		ereport(FATAL,
+				(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+				 errmsg("database connection requirement not indicated during registration")));
+
+	InitPostgres(NULL, dboid, NULL, useroid, NULL);
 
 	/* it had better not gotten out of "init" mode yet */
 	if (!IsInitProcessingMode())
@@ -5367,11 +5410,10 @@ do_start_bgworker(RegisteredBgWorker *rw)
 #ifndef EXEC_BACKEND
 		case 0:
 			/* in postmaster child ... */
+			InitPostmasterChild();
+
 			/* Close the postmaster's sockets */
 			ClosePostmasterPorts(false);
-
-			/* Lose the postmaster's on-exit routines */
-			on_exit_reset();
 
 			/* Do NOT release postmaster's working memory context */
 
@@ -5811,7 +5853,7 @@ read_backend_variables(char *id, Port *port)
 	fp = AllocateFile(id, PG_BINARY_R);
 	if (!fp)
 	{
-		write_stderr("could not read from backend variables file \"%s\": %s\n",
+		write_stderr("could not open backend variables file \"%s\": %s\n",
 					 id, strerror(errno));
 		exit(1);
 	}

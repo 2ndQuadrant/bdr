@@ -4,7 +4,7 @@
  *	   Replication slot management.
  *
  *
- * Copyright (c) 2012-2014, PostgreSQL Global Development Group
+ * Copyright (c) 2012-2015, PostgreSQL Global Development Group
  *
  *
  * IDENTIFICATION
@@ -40,6 +40,7 @@
 #include <sys/stat.h>
 
 #include "access/transam.h"
+#include "common/string.h"
 #include "miscadmin.h"
 #include "replication/slot.h"
 #include "storage/fd.h"
@@ -61,18 +62,29 @@ typedef struct ReplicationSlotOnDisk
 	uint32		version;
 	uint32		length;
 
+	/*
+	 * The actual data in the slot that follows can differ based on the above
+	 * 'version'.
+	 */
+
 	ReplicationSlotPersistentData slotdata;
 } ReplicationSlotOnDisk;
 
-/* size of the part of the slot that is version independent */
+/* size of version independent data */
 #define ReplicationSlotOnDiskConstantSize \
 	offsetof(ReplicationSlotOnDisk, slotdata)
-/* size of the slots that is not version indepenent */
-#define ReplicationSlotOnDiskDynamicSize \
+/* size of the part of the slot not covered by the checksum */
+#define SnapBuildOnDiskNotChecksummedSize \
+	offsetof(ReplicationSlotOnDisk, version)
+/* size of the part covered by the checksum */
+#define SnapBuildOnDiskChecksummedSize \
+	sizeof(ReplicationSlotOnDisk) - SnapBuildOnDiskNotChecksummedSize
+/* size of the slot data that is version dependant */
+#define ReplicationSlotOnDiskV2Size \
 	sizeof(ReplicationSlotOnDisk) - ReplicationSlotOnDiskConstantSize
 
 #define SLOT_MAGIC		0x1051CA1		/* format identifier */
-#define SLOT_VERSION	1		/* version for new files */
+#define SLOT_VERSION	2				/* version for new files */
 
 /* Control array for replication slot management */
 ReplicationSlotCtlData *ReplicationSlotCtl = NULL;
@@ -254,8 +266,7 @@ ReplicationSlotCreate(const char *name, bool db_specific,
 	slot->data.persistency = persistency;
 	slot->data.xmin = InvalidTransactionId;
 	slot->effective_xmin = InvalidTransactionId;
-	strncpy(NameStr(slot->data.name), name, NAMEDATALEN);
-	NameStr(slot->data.name)[NAMEDATALEN - 1] = '\0';
+	StrNCpy(NameStr(slot->data.name), name, NAMEDATALEN);
 	slot->data.database = db_specific ? MyDatabaseId : InvalidOid;
 	slot->data.restart_lsn = InvalidXLogRecPtr;
 
@@ -769,24 +780,6 @@ CheckSlotRequirements(void)
 }
 
 /*
- * Returns whether the string `str' has the postfix `end'.
- */
-static bool
-string_endswith(const char *str, const char *end)
-{
-	size_t		slen = strlen(str);
-	size_t		elen = strlen(end);
-
-	/* can't be a postfix if longer */
-	if (elen > slen)
-		return false;
-
-	/* compare the end of the strings */
-	str += slen - elen;
-	return strcmp(str, end) == 0;
-}
-
-/*
  * Flush all replication slots to disk.
  *
  * This needn't actually be part of a checkpoint, but it's a convenient
@@ -797,8 +790,7 @@ CheckPointReplicationSlots(void)
 {
 	int			i;
 
-	ereport(DEBUG1,
-			(errmsg("performing replication slot checkpoint")));
+	elog(DEBUG1, "performing replication slot checkpoint");
 
 	/*
 	 * Prevent any slot from being created/dropped while we're active. As we
@@ -834,8 +826,7 @@ StartupReplicationSlots(void)
 	DIR		   *replication_dir;
 	struct dirent *replication_de;
 
-	ereport(DEBUG1,
-			(errmsg("starting up replication slots")));
+	elog(DEBUG1, "starting up replication slots");
 
 	/* restore all slots by iterating over all on-disk entries */
 	replication_dir = AllocateDir("pg_replslot");
@@ -855,7 +846,7 @@ StartupReplicationSlots(void)
 			continue;
 
 		/* we crashed while a slot was being setup or deleted, clean up */
-		if (string_endswith(replication_de->d_name, ".tmp"))
+		if (pg_str_endswith(replication_de->d_name, ".tmp"))
 		{
 			if (!rmtree(path, true))
 			{
@@ -993,9 +984,9 @@ SaveSlotToPath(ReplicationSlot *slot, const char *dir, int elevel)
 	}
 
 	cp.magic = SLOT_MAGIC;
-	INIT_CRC32(cp.checksum);
-	cp.version = 1;
-	cp.length = ReplicationSlotOnDiskDynamicSize;
+	INIT_CRC32C(cp.checksum);
+	cp.version = SLOT_VERSION;
+	cp.length = ReplicationSlotOnDiskV2Size;
 
 	SpinLockAcquire(&slot->mutex);
 
@@ -1003,9 +994,10 @@ SaveSlotToPath(ReplicationSlot *slot, const char *dir, int elevel)
 
 	SpinLockRelease(&slot->mutex);
 
-	COMP_CRC32(cp.checksum,
-			   (char *) (&cp) + ReplicationSlotOnDiskConstantSize,
-			   ReplicationSlotOnDiskDynamicSize);
+	COMP_CRC32C(cp.checksum,
+				(char *) (&cp) + SnapBuildOnDiskNotChecksummedSize,
+				SnapBuildOnDiskChecksummedSize);
+	FIN_CRC32C(cp.checksum);
 
 	if ((write(fd, &cp, sizeof(cp))) != sizeof(cp))
 	{
@@ -1157,7 +1149,7 @@ RestoreSlotFromDisk(const char *name)
 				   path, cp.version)));
 
 	/* boundary check on length */
-	if (cp.length != ReplicationSlotOnDiskDynamicSize)
+	if (cp.length != ReplicationSlotOnDiskV2Size)
 		ereport(PANIC,
 				(errcode_for_file_access(),
 			   errmsg("replication slot file \"%s\" has corrupted length %u",
@@ -1181,13 +1173,14 @@ RestoreSlotFromDisk(const char *name)
 
 	CloseTransientFile(fd);
 
-	/* now verify the CRC32 */
-	INIT_CRC32(checksum);
-	COMP_CRC32(checksum,
-			   (char *) &cp + ReplicationSlotOnDiskConstantSize,
-			   ReplicationSlotOnDiskDynamicSize);
+	/* now verify the CRC */
+	INIT_CRC32C(checksum);
+	COMP_CRC32C(checksum,
+				(char *) &cp + SnapBuildOnDiskNotChecksummedSize,
+				SnapBuildOnDiskChecksummedSize);
+	FIN_CRC32C(checksum);
 
-	if (!EQ_CRC32(checksum, cp.checksum))
+	if (!EQ_CRC32C(checksum, cp.checksum))
 		ereport(PANIC,
 				(errmsg("replication slot file %s: checksum mismatch, is %u, should be %u",
 						path, checksum, cp.checksum)));

@@ -8,7 +8,7 @@
  * higher-level API provided by parser.h.
  *
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/parser/scanner.h
@@ -76,6 +76,16 @@ typedef struct core_yy_extra_type
 	 */
 	const ScanKeyword *keywords;
 	int			num_keywords;
+
+	/*
+	 * Scanner settings to use.  These are initialized from the corresponding
+	 * GUC variables by scanner_init().  Callers can modify them after
+	 * scanner_init() if they don't want the scanner's behavior to follow the
+	 * prevailing GUC settings.
+	 */
+	int			backslash_quote;
+	bool		escape_string_warning;
+	bool		standard_conforming_strings;
 
 	/*
 	 * literalbuf is used to accumulate literal values when multiple rules are

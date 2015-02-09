@@ -3,7 +3,7 @@
  * generic-acc.h
  *	  Atomic operations support when using HPs acc on HPUX
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * NOTES:
@@ -40,6 +40,12 @@ typedef struct pg_atomic_uint32
 #define PG_HAVE_ATOMIC_U64_SUPPORT
 typedef struct pg_atomic_uint64
 {
+	/*
+	 * Alignment is guaranteed to be 64bit. Search for "Well-behaved
+	 * application restrictions" => "Data alignment and data sharing" on HP's
+	 * website. Unfortunately the URL doesn't seem to stable enough to
+	 * include.
+	 */
 	volatile uint64 value;
 } pg_atomic_uint64;
 

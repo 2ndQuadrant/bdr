@@ -1,7 +1,7 @@
 /*
  * psql - the PostgreSQL interactive terminal
  *
- * Copyright (c) 2000-2014, PostgreSQL Global Development Group
+ * Copyright (c) 2000-2015, PostgreSQL Global Development Group
  *
  * src/bin/psql/variables.h
  */
@@ -35,7 +35,7 @@ typedef struct _variable *VariableSpace;
 VariableSpace CreateVariableSpace(void);
 const char *GetVariable(VariableSpace space, const char *name);
 
-bool		ParseVariableBool(const char *val);
+bool		ParseVariableBool(const char *value, const char *name);
 int ParseVariableNum(const char *val,
 				 int defaultval,
 				 int faultval,

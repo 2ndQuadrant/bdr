@@ -3,7 +3,7 @@
  * walsender_private.h
  *	  Private definitions from replication/walsender.c.
  *
- * Portions Copyright (c) 2010-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2010-2015, PostgreSQL Global Development Group
  *
  * src/include/replication/walsender_private.h
  *
@@ -51,10 +51,10 @@ typedef struct WalSnd
 	slock_t		mutex;
 
 	/*
-	 * Latch used by backends to wake up this walsender when it has work to
-	 * do.
+	 * Pointer to the walsender's latch. Used by backends to wake up this
+	 * walsender when it has work to do. NULL if the walsender isn't active.
 	 */
-	Latch		latch;
+	Latch		*latch;
 
 	/*
 	 * The priority order of the standby managed by this WALSender, as listed

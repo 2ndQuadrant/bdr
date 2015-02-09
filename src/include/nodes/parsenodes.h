@@ -10,7 +10,7 @@
  * the location.
  *
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/nodes/parsenodes.h
@@ -121,7 +121,7 @@ typedef struct Query
 	bool		hasRecursive;	/* WITH RECURSIVE was specified */
 	bool		hasModifyingCTE;	/* has INSERT/UPDATE/DELETE in WITH */
 	bool		hasForUpdate;	/* FOR [KEY] UPDATE/SHARE was specified */
-	bool		hasRowSecurity;	/* Row-security policy is applied */
+	bool		hasRowSecurity;	/* row security applied? */
 
 	List	   *cteList;		/* WITH list (of CommonTableExpr's) */
 
@@ -1207,13 +1207,15 @@ typedef enum ObjectType
 	OBJECT_AGGREGATE,
 	OBJECT_ATTRIBUTE,			/* type's attribute, when distinct from column */
 	OBJECT_CAST,
+	OBJECT_COLLATION,
 	OBJECT_COLUMN,
 	OBJECT_COMPOSITE,
 	OBJECT_CONSTRAINT,
-	OBJECT_COLLATION,
 	OBJECT_CONVERSION,
 	OBJECT_DATABASE,
+	OBJECT_DEFAULT,
 	OBJECT_DOMAIN,
+	OBJECT_DOMCONSTRAINT,
 	OBJECT_EVENT_TRIGGER,
 	OBJECT_EXTENSION,
 	OBJECT_FDW,
@@ -1232,6 +1234,7 @@ typedef enum ObjectType
 	OBJECT_RULE,
 	OBJECT_SCHEMA,
 	OBJECT_SEQUENCE,
+	OBJECT_TABCONSTRAINT,
 	OBJECT_TABLE,
 	OBJECT_TABLESPACE,
 	OBJECT_TRIGGER,
@@ -2258,6 +2261,7 @@ typedef struct IndexStmt
 	bool		deferrable;		/* is the constraint DEFERRABLE? */
 	bool		initdeferred;	/* is the constraint INITIALLY DEFERRED? */
 	bool		concurrent;		/* should this be a concurrent index build? */
+	bool		if_not_exists;	/* just do nothing if index already exists? */
 } IndexStmt;
 
 /* ----------------------
@@ -2653,6 +2657,7 @@ typedef struct CreateTableAsStmt
 	IntoClause *into;			/* destination table */
 	ObjectType	relkind;		/* OBJECT_TABLE or OBJECT_MATVIEW */
 	bool		is_select_into; /* it was written as SELECT INTO */
+	bool		if_not_exists;	/* just do nothing if it already exists? */
 } CreateTableAsStmt;
 
 /* ----------------------
@@ -2722,14 +2727,21 @@ typedef struct ConstraintsSetStmt
  *		REINDEX Statement
  * ----------------------
  */
+typedef enum ReindexObjectType
+{
+	REINDEX_OBJECT_INDEX,	/* index */
+	REINDEX_OBJECT_TABLE,	/* table or materialized view */
+	REINDEX_OBJECT_SCHEMA,	/* schema */
+	REINDEX_OBJECT_SYSTEM,	/* system catalogs */
+	REINDEX_OBJECT_DATABASE	/* database */
+} ReindexObjectType;
+
 typedef struct ReindexStmt
 {
 	NodeTag		type;
-	ObjectType	kind;			/* OBJECT_INDEX, OBJECT_TABLE, etc. */
+	ReindexObjectType	kind;	/* REINDEX_OBJECT_INDEX, REINDEX_OBJECT_TABLE, etc. */
 	RangeVar   *relation;		/* Table or index to reindex */
 	const char *name;			/* name of database to reindex */
-	bool		do_system;		/* include system tables in database case */
-	bool		do_user;		/* include user tables in database case */
 } ReindexStmt;
 
 /* ----------------------

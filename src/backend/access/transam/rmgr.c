@@ -8,10 +8,12 @@
 #include "postgres.h"
 
 #include "access/clog.h"
+#include "access/commit_ts.h"
 #include "access/gin.h"
 #include "access/gist_private.h"
 #include "access/hash.h"
 #include "access/heapam_xlog.h"
+#include "access/brin_xlog.h"
 #include "access/multixact.h"
 #include "access/nbtree.h"
 #include "access/spgist.h"

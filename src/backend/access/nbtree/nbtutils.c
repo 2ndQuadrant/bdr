@@ -3,7 +3,7 @@
  * nbtutils.c
  *	  Utility code for Postgres btree implementation.
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -1428,6 +1428,13 @@ _bt_checkkeys(IndexScanDesc scan,
 		Datum		datum;
 		bool		isNull;
 		Datum		test;
+
+		/*
+		 * If the scan key has already matched we can skip this key, as
+		 * long as the index tuple does not contain NULL values.
+		 */
+		if (key->sk_flags & SK_BT_MATCHED && !IndexTupleHasNulls(tuple))
+			continue;
 
 		/* row-comparison keys need special processing */
 		if (key->sk_flags & SK_ROW_HEADER)

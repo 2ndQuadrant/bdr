@@ -32,7 +32,7 @@
  * happen, it would tie up KnownAssignedXids indefinitely, so we protect
  * ourselves by pruning the array when a valid list of running XIDs arrives.
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -48,8 +48,9 @@
 #include "access/clog.h"
 #include "access/subtrans.h"
 #include "access/transam.h"
-#include "access/xact.h"
 #include "access/twophase.h"
+#include "access/xact.h"
+#include "access/xlog.h"
 #include "catalog/catalog.h"
 #include "miscadmin.h"
 #include "storage/proc.h"
@@ -2465,6 +2466,8 @@ MinimumActiveBackends(int min)
 		 * free list and are recycled. Its contents are nonsense in that case,
 		 * but that's acceptable for this function.
 		 */
+		if (pgprocno == -1)
+			continue;			/* do not count deleted entries */
 		if (proc == MyProc)
 			continue;			/* do not count myself */
 		if (pgxact->xid == InvalidTransactionId)

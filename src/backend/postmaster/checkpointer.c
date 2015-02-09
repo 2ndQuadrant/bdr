@@ -26,7 +26,7 @@
  * restart needs to be forced.)
  *
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  *
  *
  * IDENTIFICATION
@@ -197,17 +197,6 @@ CheckpointerMain(void)
 	CheckpointerShmem->checkpointer_pid = MyProcPid;
 
 	/*
-	 * If possible, make this process a group leader, so that the postmaster
-	 * can signal any child processes too.  (checkpointer probably never has
-	 * any child processes, but for consistency we make all postmaster child
-	 * processes do this.)
-	 */
-#ifdef HAVE_SETSID
-	if (setsid() < 0)
-		elog(FATAL, "setsid() failed: %m");
-#endif
-
-	/*
 	 * Properly accept or ignore signals the postmaster might send us
 	 *
 	 * Note: we deliberately ignore SIGTERM, because during a standard Unix
@@ -371,7 +360,7 @@ CheckpointerMain(void)
 		int			rc;
 
 		/* Clear any already-pending wakeups */
-		ResetLatch(&MyProc->procLatch);
+		ResetLatch(MyLatch);
 
 		/*
 		 * Process any requests or signals received recently.
@@ -570,7 +559,7 @@ CheckpointerMain(void)
 			cur_timeout = Min(cur_timeout, XLogArchiveTimeout - elapsed_secs);
 		}
 
-		rc = WaitLatch(&MyProc->procLatch,
+		rc = WaitLatch(MyLatch,
 					   WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
 					   cur_timeout * 1000L /* convert to ms */ );
 
@@ -843,8 +832,7 @@ ChkptSigHupHandler(SIGNAL_ARGS)
 	int			save_errno = errno;
 
 	got_SIGHUP = true;
-	if (MyProc)
-		SetLatch(&MyProc->procLatch);
+	SetLatch(MyLatch);
 
 	errno = save_errno;
 }
@@ -856,8 +844,7 @@ ReqCheckpointHandler(SIGNAL_ARGS)
 	int			save_errno = errno;
 
 	checkpoint_requested = true;
-	if (MyProc)
-		SetLatch(&MyProc->procLatch);
+	SetLatch(MyLatch);
 
 	errno = save_errno;
 }
@@ -880,8 +867,7 @@ ReqShutdownHandler(SIGNAL_ARGS)
 	int			save_errno = errno;
 
 	shutdown_requested = true;
-	if (MyProc)
-		SetLatch(&MyProc->procLatch);
+	SetLatch(MyLatch);
 
 	errno = save_errno;
 }
@@ -1212,13 +1198,12 @@ CompactCheckpointerRequestQueue(void)
 	MemSet(&ctl, 0, sizeof(ctl));
 	ctl.keysize = sizeof(CheckpointerRequest);
 	ctl.entrysize = sizeof(struct CheckpointerSlotMapping);
-	ctl.hash = tag_hash;
 	ctl.hcxt = CurrentMemoryContext;
 
 	htab = hash_create("CompactCheckpointerRequestQueue",
 					   CheckpointerShmem->num_requests,
 					   &ctl,
-					   HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+					   HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
 
 	/*
 	 * The basic idea here is that a request can be skipped if it's followed

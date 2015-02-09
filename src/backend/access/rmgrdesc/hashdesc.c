@@ -3,7 +3,7 @@
  * hashdesc.c
  *	  rmgr descriptor routines for access/hash/hash.c
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -17,7 +17,7 @@
 #include "access/hash.h"
 
 void
-hash_desc(StringInfo buf, XLogRecord *record)
+hash_desc(StringInfo buf, XLogReaderState *record)
 {
 }
 

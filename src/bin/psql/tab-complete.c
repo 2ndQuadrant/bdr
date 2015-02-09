@@ -1,7 +1,7 @@
 /*
  * psql - the PostgreSQL interactive terminal
  *
- * Copyright (c) 2000-2014, PostgreSQL Global Development Group
+ * Copyright (c) 2000-2015, PostgreSQL Global Development Group
  *
  * src/bin/psql/tab-complete.c
  */
@@ -1172,7 +1172,7 @@ psql_completion(const char *text, int start, int end)
 			 pg_strcasecmp(prev_wd, "(") == 0)
 	{
 		static const char *const list_INDEXOPTIONS[] =
-		{"fillfactor", "fastupdate", NULL};
+		{"fillfactor", "fastupdate", "gin_pending_list_limit", NULL};
 
 		COMPLETE_WITH_LIST(list_INDEXOPTIONS);
 	}
@@ -1605,7 +1605,7 @@ psql_completion(const char *text, int start, int end)
 	else if (pg_strcasecmp(prev4_wd, "ALTER") == 0 &&
 			 pg_strcasecmp(prev3_wd, "TABLE") == 0 &&
 			 pg_strcasecmp(prev_wd, "ALTER") == 0)
-		COMPLETE_WITH_ATTR(prev2_wd, " UNION SELECT 'COLUMN'");
+		COMPLETE_WITH_ATTR(prev2_wd, " UNION SELECT 'COLUMN' UNION SELECT 'CONSTRAINT'");
 
 	/* ALTER TABLE xxx RENAME */
 	else if (pg_strcasecmp(prev4_wd, "ALTER") == 0 &&
@@ -1655,12 +1655,13 @@ psql_completion(const char *text, int start, int end)
 		COMPLETE_WITH_ATTR(prev3_wd, "");
 
 	/*
-	 * If we have ALTER TABLE <sth> DROP|RENAME|VALIDATE CONSTRAINT, provide
-	 * list of constraints
+	 * If we have ALTER TABLE <sth> ALTER|DROP|RENAME|VALIDATE CONSTRAINT,
+	 * provide list of constraints
 	 */
 	else if (pg_strcasecmp(prev5_wd, "ALTER") == 0 &&
 			 pg_strcasecmp(prev4_wd, "TABLE") == 0 &&
-			 (pg_strcasecmp(prev2_wd, "DROP") == 0 ||
+			 (pg_strcasecmp(prev2_wd, "ALTER") == 0 ||
+			  pg_strcasecmp(prev2_wd, "DROP") == 0 ||
 			  pg_strcasecmp(prev2_wd, "RENAME") == 0 ||
 			  pg_strcasecmp(prev2_wd, "VALIDATE") == 0) &&
 			 pg_strcasecmp(prev_wd, "CONSTRAINT") == 0)
@@ -2069,7 +2070,7 @@ psql_completion(const char *text, int start, int end)
 		static const char *const list_COMMENT[] =
 		{"CAST", "COLLATION", "CONVERSION", "DATABASE", "EVENT TRIGGER", "EXTENSION",
 			"FOREIGN DATA WRAPPER", "FOREIGN TABLE",
-			"SERVER", "INDEX", "LANGUAGE", "RULE", "SCHEMA", "SEQUENCE",
+			"SERVER", "INDEX", "LANGUAGE", "POLICY", "RULE", "SCHEMA", "SEQUENCE",
 			"TABLE", "TYPE", "VIEW", "MATERIALIZED VIEW", "COLUMN", "AGGREGATE", "FUNCTION",
 			"OPERATOR", "TRIGGER", "CONSTRAINT", "DOMAIN", "LARGE OBJECT",
 		"TABLESPACE", "TEXT SEARCH", "ROLE", NULL};
@@ -2129,12 +2130,13 @@ psql_completion(const char *text, int start, int end)
 	{
 		COMPLETE_WITH_QUERY(Query_for_list_of_event_triggers);
 	}
-	else if ((pg_strcasecmp(prev4_wd, "COMMENT") == 0 &&
-			  pg_strcasecmp(prev3_wd, "ON") == 0) ||
-			 (pg_strcasecmp(prev5_wd, "COMMENT") == 0 &&
-			  pg_strcasecmp(prev4_wd, "ON") == 0) ||
-			 (pg_strcasecmp(prev6_wd, "COMMENT") == 0 &&
-			  pg_strcasecmp(prev5_wd, "ON") == 0))
+	else if (((pg_strcasecmp(prev4_wd, "COMMENT") == 0 &&
+			   pg_strcasecmp(prev3_wd, "ON") == 0) ||
+			  (pg_strcasecmp(prev5_wd, "COMMENT") == 0 &&
+			   pg_strcasecmp(prev4_wd, "ON") == 0) ||
+			  (pg_strcasecmp(prev6_wd, "COMMENT") == 0 &&
+			   pg_strcasecmp(prev5_wd, "ON") == 0)) &&
+			   pg_strcasecmp(prev_wd, "IS") != 0)
 		COMPLETE_WITH_CONST("IS");
 
 /* COPY */
@@ -3330,7 +3332,7 @@ psql_completion(const char *text, int start, int end)
 	else if (pg_strcasecmp(prev_wd, "REINDEX") == 0)
 	{
 		static const char *const list_REINDEX[] =
-		{"TABLE", "INDEX", "SYSTEM", "DATABASE", NULL};
+			{"TABLE", "INDEX", "SYSTEM", "SCHEMA", "DATABASE", NULL};
 
 		COMPLETE_WITH_LIST(list_REINDEX);
 	}
@@ -3340,6 +3342,8 @@ psql_completion(const char *text, int start, int end)
 			COMPLETE_WITH_SCHEMA_QUERY(Query_for_list_of_tm, NULL);
 		else if (pg_strcasecmp(prev_wd, "INDEX") == 0)
 			COMPLETE_WITH_SCHEMA_QUERY(Query_for_list_of_indexes, NULL);
+		else if (pg_strcasecmp(prev_wd, "SCHEMA") == 0 )
+			COMPLETE_WITH_QUERY(Query_for_list_of_schemas);
 		else if (pg_strcasecmp(prev_wd, "SYSTEM") == 0 ||
 				 pg_strcasecmp(prev_wd, "DATABASE") == 0)
 			COMPLETE_WITH_QUERY(Query_for_list_of_databases);
@@ -3704,6 +3708,8 @@ psql_completion(const char *text, int start, int end)
 	}
 	else if (strcmp(prev_wd, "\\connect") == 0 || strcmp(prev_wd, "\\c") == 0)
 		COMPLETE_WITH_QUERY(Query_for_list_of_databases);
+	else if (strcmp(prev2_wd, "\\connect") == 0 || strcmp(prev2_wd, "\\c") == 0)
+		COMPLETE_WITH_QUERY(Query_for_list_of_roles);
 
 	else if (strncmp(prev_wd, "\\da", strlen("\\da")) == 0)
 		COMPLETE_WITH_SCHEMA_QUERY(Query_for_list_of_aggregates, NULL);
@@ -4329,13 +4335,8 @@ append_variable_names(char ***varnames, int *nvars,
 	if (*nvars >= *maxvars)
 	{
 		*maxvars *= 2;
-		*varnames = (char **) realloc(*varnames,
-									  ((*maxvars) + 1) * sizeof(char *));
-		if (!(*varnames))
-		{
-			psql_error("out of memory\n");
-			exit(EXIT_FAILURE);
-		}
+		*varnames = (char **) pg_realloc(*varnames,
+										 ((*maxvars) + 1) * sizeof(char *));
 	}
 
 	(*varnames)[(*nvars)++] = psprintf("%s%s%s", prefix, varname, suffix);
@@ -4452,7 +4453,7 @@ complete_from_files(const char *text, int state)
 
 /*
  * Make a pg_strdup copy of s and convert the case according to
- * COMP_KEYWORD_CASE variable, using ref as the text that was already entered.
+ * COMP_KEYWORD_CASE setting, using ref as the text that was already entered.
  */
 static char *
 pg_strdup_keyword_case(const char *s, const char *ref)
@@ -4460,38 +4461,22 @@ pg_strdup_keyword_case(const char *s, const char *ref)
 	char	   *ret,
 			   *p;
 	unsigned char first = ref[0];
-	int			tocase;
-	const char *varval;
-
-	varval = GetVariable(pset.vars, "COMP_KEYWORD_CASE");
-	if (!varval)
-		tocase = 0;
-	else if (strcmp(varval, "lower") == 0)
-		tocase = -2;
-	else if (strcmp(varval, "preserve-lower") == 0)
-		tocase = -1;
-	else if (strcmp(varval, "preserve-upper") == 0)
-		tocase = +1;
-	else if (strcmp(varval, "upper") == 0)
-		tocase = +2;
-	else
-		tocase = 0;
-
-	/* default */
-	if (tocase == 0)
-		tocase = +1;
 
 	ret = pg_strdup(s);
 
-	if (tocase == -2
-		|| ((tocase == -1 || tocase == +1) && islower(first))
-		|| (tocase == -1 && !isalpha(first))
-		)
+	if (pset.comp_case == PSQL_COMP_CASE_LOWER ||
+		((pset.comp_case == PSQL_COMP_CASE_PRESERVE_LOWER ||
+		  pset.comp_case == PSQL_COMP_CASE_PRESERVE_UPPER) && islower(first)) ||
+		(pset.comp_case == PSQL_COMP_CASE_PRESERVE_LOWER && !isalpha(first)))
+	{
 		for (p = ret; *p; p++)
 			*p = pg_tolower((unsigned char) *p);
+	}
 	else
+	{
 		for (p = ret; *p; p++)
 			*p = pg_toupper((unsigned char) *p);
+	}
 
 	return ret;
 }

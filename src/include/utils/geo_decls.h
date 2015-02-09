@@ -3,7 +3,7 @@
  * geo_decls.h - Declarations for various 2D constructs.
  *
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/utils/geo_decls.h
@@ -68,8 +68,6 @@ typedef struct
 typedef struct
 {
 	Point		p[2];
-
-	double		m;				/* precomputed to save time, not in tuple */
 } LSEG;
 
 
@@ -395,6 +393,7 @@ extern Datum circle_radius(PG_FUNCTION_ARGS);
 extern Datum circle_distance(PG_FUNCTION_ARGS);
 extern Datum dist_pc(PG_FUNCTION_ARGS);
 extern Datum dist_cpoly(PG_FUNCTION_ARGS);
+extern Datum dist_ppoly(PG_FUNCTION_ARGS);
 extern Datum circle_center(PG_FUNCTION_ARGS);
 extern Datum cr_circle(PG_FUNCTION_ARGS);
 extern Datum box_circle(PG_FUNCTION_ARGS);

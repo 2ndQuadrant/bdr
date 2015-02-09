@@ -4,7 +4,7 @@
  *	  functions for OpenSSL support in the backend.
  *
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -71,6 +71,8 @@
 #endif
 
 #include "libpq/libpq.h"
+#include "miscadmin.h"
+#include "storage/latch.h"
 #include "tcop/tcopprot.h"
 #include "utils/memutils.h"
 
@@ -338,6 +340,7 @@ be_tls_open_server(Port *port)
 {
 	int			r;
 	int			err;
+	int			waitfor;
 
 	Assert(!port->ssl);
 	Assert(!port->peer);
@@ -371,12 +374,20 @@ aloop:
 		{
 			case SSL_ERROR_WANT_READ:
 			case SSL_ERROR_WANT_WRITE:
-#ifdef WIN32
-				pgwin32_waitforsinglesocket(SSL_get_fd(port->ssl),
-											(err == SSL_ERROR_WANT_READ) ?
-						FD_READ | FD_CLOSE | FD_ACCEPT : FD_WRITE | FD_CLOSE,
-											INFINITE);
-#endif
+				/* not allowed during connection establishment */
+				Assert(!port->noblock);
+
+				/*
+				 * No need to care about timeouts/interrupts here. At this
+				 * point authentication_timeout still employs
+				 * StartupPacketTimeoutHandler() which directly exits.
+				 */
+				if (err == SSL_ERROR_WANT_READ)
+					waitfor = WL_SOCKET_READABLE;
+				else
+					waitfor = WL_SOCKET_WRITEABLE;
+
+				WaitLatchOrSocket(MyLatch, waitfor, port->sock, 0);
 				goto aloop;
 			case SSL_ERROR_SYSCALL:
 				if (r < 0)
@@ -504,6 +515,8 @@ be_tls_read(Port *port, void *ptr, size_t len)
 {
 	ssize_t		n;
 	int			err;
+	int			waitfor;
+	int			latchret;
 
 rloop:
 	errno = 0;
@@ -516,18 +529,37 @@ rloop:
 			break;
 		case SSL_ERROR_WANT_READ:
 		case SSL_ERROR_WANT_WRITE:
+			/* Don't retry if the socket is in nonblocking mode. */
 			if (port->noblock)
 			{
 				errno = EWOULDBLOCK;
 				n = -1;
 				break;
 			}
-#ifdef WIN32
-			pgwin32_waitforsinglesocket(SSL_get_fd(port->ssl),
-										(err == SSL_ERROR_WANT_READ) ?
-									FD_READ | FD_CLOSE : FD_WRITE | FD_CLOSE,
-										INFINITE);
-#endif
+
+			waitfor = WL_LATCH_SET;
+
+			if (err == SSL_ERROR_WANT_READ)
+				waitfor |= WL_SOCKET_READABLE;
+			else
+				waitfor |= WL_SOCKET_WRITEABLE;
+
+			latchret = WaitLatchOrSocket(MyLatch, waitfor, port->sock, 0);
+
+			/*
+			 * We'll, among other situations, get here if the low level
+			 * routine doing the actual recv() via the socket got interrupted
+			 * by a signal. That's so we can handle interrupts once outside
+			 * openssl, so we don't jump out from underneath its covers. We
+			 * can check this both, when reading and writing, because even
+			 * when writing that's just openssl's doing, not a 'proper' write
+			 * initiated by postgres.
+			 */
+			if (latchret & WL_LATCH_SET)
+			{
+				ResetLatch(MyLatch);
+				ProcessClientReadInterrupt(true);  /* preserves errno */
+			}
 			goto rloop;
 		case SSL_ERROR_SYSCALL:
 			/* leave it to caller to ereport the value of errno */
@@ -567,6 +599,8 @@ be_tls_write(Port *port, void *ptr, size_t len)
 {
 	ssize_t		n;
 	int			err;
+	int			waitfor;
+	int			latchret;
 
 	/*
 	 * If SSL renegotiations are enabled and we're getting close to the
@@ -630,12 +664,28 @@ wloop:
 			break;
 		case SSL_ERROR_WANT_READ:
 		case SSL_ERROR_WANT_WRITE:
-#ifdef WIN32
-			pgwin32_waitforsinglesocket(SSL_get_fd(port->ssl),
-										(err == SSL_ERROR_WANT_READ) ?
-									FD_READ | FD_CLOSE : FD_WRITE | FD_CLOSE,
-										INFINITE);
-#endif
+
+			waitfor = WL_LATCH_SET;
+
+			if (err == SSL_ERROR_WANT_READ)
+				waitfor |= WL_SOCKET_READABLE;
+			else
+				waitfor |= WL_SOCKET_WRITEABLE;
+
+			latchret = WaitLatchOrSocket(MyLatch, waitfor, port->sock, 0);
+
+			/*
+			 * Check for interrupts here, in addition to secure_write(),
+			 * because an interrupted write in secure_raw_write() will return
+			 * here, and we cannot return to secure_write() until we've
+			 * written something.
+			 */
+			if (latchret & WL_LATCH_SET)
+			{
+				ResetLatch(MyLatch);
+				ProcessClientWriteInterrupt(true); /* preserves errno */
+			}
+
 			goto wloop;
 		case SSL_ERROR_SYSCALL:
 			/* leave it to caller to ereport the value of errno */
@@ -722,7 +772,7 @@ my_sock_read(BIO *h, char *buf, int size)
 		if (res <= 0)
 		{
 			/* If we were interrupted, tell caller to retry */
-			if (errno == EINTR)
+			if (errno == EINTR || errno == EWOULDBLOCK || errno == EAGAIN)
 			{
 				BIO_set_retry_read(h);
 			}
@@ -741,7 +791,8 @@ my_sock_write(BIO *h, const char *buf, int size)
 	BIO_clear_retry_flags(h);
 	if (res <= 0)
 	{
-		if (errno == EINTR)
+		/* If we were interrupted, tell caller to retry */
+		if (errno == EINTR || errno == EWOULDBLOCK || errno == EAGAIN)
 		{
 			BIO_set_retry_write(h);
 		}

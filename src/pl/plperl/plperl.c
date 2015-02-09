@@ -268,7 +268,7 @@ static Datum plperl_sv_to_datum(SV *sv, Oid typid, int32 typmod,
 				   bool *isnull);
 static void _sv_to_datum_finfo(Oid typid, FmgrInfo *finfo, Oid *typioparam);
 static Datum plperl_array_to_datum(SV *src, Oid typid, int32 typmod);
-static ArrayBuildState *array_to_datum_internal(AV *av, ArrayBuildState *astate,
+static void array_to_datum_internal(AV *av, ArrayBuildState *astate,
 						int *ndims, int *dims, int cur_depth,
 						Oid arraytypid, Oid elemtypid, int32 typmod,
 						FmgrInfo *finfo, Oid typioparam);
@@ -456,20 +456,18 @@ _PG_init(void)
 	memset(&hash_ctl, 0, sizeof(hash_ctl));
 	hash_ctl.keysize = sizeof(Oid);
 	hash_ctl.entrysize = sizeof(plperl_interp_desc);
-	hash_ctl.hash = oid_hash;
 	plperl_interp_hash = hash_create("PL/Perl interpreters",
 									 8,
 									 &hash_ctl,
-									 HASH_ELEM | HASH_FUNCTION);
+									 HASH_ELEM | HASH_BLOBS);
 
 	memset(&hash_ctl, 0, sizeof(hash_ctl));
 	hash_ctl.keysize = sizeof(plperl_proc_key);
 	hash_ctl.entrysize = sizeof(plperl_proc_ptr);
-	hash_ctl.hash = tag_hash;
 	plperl_proc_hash = hash_create("PL/Perl procedures",
 								   32,
 								   &hash_ctl,
-								   HASH_ELEM | HASH_FUNCTION);
+								   HASH_ELEM | HASH_BLOBS);
 
 	/*
 	 * Save the default opmask.
@@ -1127,7 +1125,7 @@ get_perl_array_ref(SV *sv)
 /*
  * helper function for plperl_array_to_datum, recurses for multi-D arrays
  */
-static ArrayBuildState *
+static void
 array_to_datum_internal(AV *av, ArrayBuildState *astate,
 						int *ndims, int *dims, int cur_depth,
 						Oid arraytypid, Oid elemtypid, int32 typmod,
@@ -1168,10 +1166,10 @@ array_to_datum_internal(AV *av, ArrayBuildState *astate,
 						 errmsg("multidimensional arrays must have array expressions with matching dimensions")));
 
 			/* recurse to fetch elements of this sub-array */
-			astate = array_to_datum_internal(nav, astate,
-											 ndims, dims, cur_depth + 1,
-											 arraytypid, elemtypid, typmod,
-											 finfo, typioparam);
+			array_to_datum_internal(nav, astate,
+									ndims, dims, cur_depth + 1,
+									arraytypid, elemtypid, typmod,
+									finfo, typioparam);
 		}
 		else
 		{
@@ -1192,12 +1190,10 @@ array_to_datum_internal(AV *av, ArrayBuildState *astate,
 									 typioparam,
 									 &isnull);
 
-			astate = accumArrayResult(astate, dat, isnull,
-									  elemtypid, CurrentMemoryContext);
+			(void) accumArrayResult(astate, dat, isnull,
+									elemtypid, CurrentMemoryContext);
 		}
 	}
-
-	return astate;
 }
 
 /*
@@ -1222,18 +1218,21 @@ plperl_array_to_datum(SV *src, Oid typid, int32 typmod)
 				 errmsg("cannot convert Perl array to non-array type %s",
 						format_type_be(typid))));
 
+	astate = initArrayResult(elemtypid, CurrentMemoryContext);
+
 	_sv_to_datum_finfo(elemtypid, &finfo, &typioparam);
 
 	memset(dims, 0, sizeof(dims));
 	dims[0] = av_len((AV *) SvRV(src)) + 1;
 
-	astate = array_to_datum_internal((AV *) SvRV(src), NULL,
-									 &ndims, dims, 1,
-									 typid, elemtypid, typmod,
-									 &finfo, typioparam);
+	array_to_datum_internal((AV *) SvRV(src), astate,
+							&ndims, dims, 1,
+							typid, elemtypid, typmod,
+							&finfo, typioparam);
 
-	if (!astate)
-		return PointerGetDatum(construct_empty_array(elemtypid));
+	/* ensure we get zero-D array for no inputs, as per PG convention */
+	if (dims[0] <= 0)
+		ndims = 0;
 
 	for (i = 0; i < ndims; i++)
 		lbs[i] = 1;

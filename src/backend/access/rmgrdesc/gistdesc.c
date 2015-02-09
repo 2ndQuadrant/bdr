@@ -3,7 +3,7 @@
  * gistdesc.c
  *	  rmgr descriptor routines for access/gist/gistxlog.c
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -19,33 +19,22 @@
 #include "storage/relfilenode.h"
 
 static void
-out_target(StringInfo buf, RelFileNode node)
-{
-	appendStringInfo(buf, "rel %u/%u/%u",
-					 node.spcNode, node.dbNode, node.relNode);
-}
-
-static void
 out_gistxlogPageUpdate(StringInfo buf, gistxlogPageUpdate *xlrec)
 {
-	out_target(buf, xlrec->node);
-	appendStringInfo(buf, "; block number %u", xlrec->blkno);
 }
 
 static void
 out_gistxlogPageSplit(StringInfo buf, gistxlogPageSplit *xlrec)
 {
-	appendStringInfoString(buf, "page_split: ");
-	out_target(buf, xlrec->node);
-	appendStringInfo(buf, "; block number %u splits to %d pages",
-					 xlrec->origblkno, xlrec->npage);
+	appendStringInfo(buf, "page_split: splits to %d pages",
+					 xlrec->npage);
 }
 
 void
-gist_desc(StringInfo buf, XLogRecord *record)
+gist_desc(StringInfo buf, XLogReaderState *record)
 {
 	char	   *rec = XLogRecGetData(record);
-	uint8		info = record->xl_info & ~XLR_INFO_MASK;
+	uint8		info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
 
 	switch (info)
 	{
@@ -56,10 +45,6 @@ gist_desc(StringInfo buf, XLogRecord *record)
 			out_gistxlogPageSplit(buf, (gistxlogPageSplit *) rec);
 			break;
 		case XLOG_GIST_CREATE_INDEX:
-			appendStringInfo(buf, "rel %u/%u/%u",
-							 ((RelFileNode *) rec)->spcNode,
-							 ((RelFileNode *) rec)->dbNode,
-							 ((RelFileNode *) rec)->relNode);
 			break;
 	}
 }

@@ -3,7 +3,7 @@
  * rewriteHandler.c
  *		Primary module of query rewriter.
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -1715,7 +1715,7 @@ fireRIRrules(Query *parsetree, List *activeRIRs, bool forUpdatePushedDown)
 			}
 		}
 		/*
-		 * If the RTE has row-security quals, apply them and recurse into the
+		 * If the RTE has row security quals, apply them and recurse into the
 		 * securityQuals.
 		 */
 		if (prepend_row_security_policies(parsetree, rte, rt_index))
@@ -1727,7 +1727,7 @@ fireRIRrules(Query *parsetree, List *activeRIRs, bool forUpdatePushedDown)
 			if (list_member_oid(activeRIRs, RelationGetRelid(rel)))
 					ereport(ERROR,
 							(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-							 errmsg("infinite recursion detected in row-security policy for relation \"%s\"",
+							 errmsg("infinite recursion detected in policy for relation \"%s\"",
 									RelationGetRelationName(rel))));
 
 			/*
@@ -2456,11 +2456,10 @@ static Bitmapset *
 adjust_view_column_set(Bitmapset *cols, List *targetlist)
 {
 	Bitmapset  *result = NULL;
-	Bitmapset  *tmpcols;
-	AttrNumber	col;
+	int			col;
 
-	tmpcols = bms_copy(cols);
-	while ((col = bms_first_member(tmpcols)) >= 0)
+	col = -1;
+	while ((col = bms_next_member(cols, col)) >= 0)
 	{
 		/* bit numbers are offset by FirstLowInvalidHeapAttributeNumber */
 		AttrNumber	attno = col + FirstLowInvalidHeapAttributeNumber;
@@ -2510,7 +2509,6 @@ adjust_view_column_set(Bitmapset *cols, List *targetlist)
 					 attno);
 		}
 	}
-	bms_free(tmpcols);
 
 	return result;
 }

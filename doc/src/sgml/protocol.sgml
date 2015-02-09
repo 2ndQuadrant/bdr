@@ -272,7 +272,7 @@
         Kerberos specification) with the server.  If this is
         successful, the server responds with an AuthenticationOk,
         otherwise it responds with an ErrorResponse. This is no
-        longer supported. This is not supported any more.
+        longer supported.
        </para>
       </listitem>
      </varlistentry>
@@ -1371,7 +1371,7 @@ The commands accepted in walsender mode are:
       </term>
       <listitem>
       <para>
-       Current xlog write location. Useful to get a known location in the
+       Current xlog flush location. Useful to get a known location in the
        transaction log where streaming can start.
       </para>
       </listitem>
@@ -1484,6 +1484,14 @@ The commands accepted in walsender mode are:
      </para>
 
      <para>
+      If a slot's name is provided
+      via <replaceable class="parameter">slot_name</>, it will be updated
+      as replication progresses so that the server knows which WAL segments,
+      and if <varname>hot_standby_feedback</> is on which transactions,
+      are still needed by the standby.
+     </para>
+
+     <para>
       If the client requests a timeline that's not the latest, but is part of
       the history of the server, the server will stream all the WAL on that
       timeline starting from the requested startpoint, up to the point where
@@ -1512,14 +1520,6 @@ The commands accepted in walsender mode are:
       an ErrorResponse message if it encounters a failure after beginning
       to stream.)  The payload of each CopyData message from server to the
       client contains a message of one of the following formats:
-     </para>
-
-     <para>
-      If a slot's name is provided
-      via <replaceable class="parameter">slot_name</>, it will be updated
-      as replication progresses so that the server knows which WAL segments -
-      and if <varname>hot_standby_feedback</> is on which transactions -
-      are still needed by the standby.
      </para>
 
      <para>

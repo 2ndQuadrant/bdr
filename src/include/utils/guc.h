@@ -4,7 +4,7 @@
  * External declarations pertaining to backend/utils/misc/guc.c and
  * backend/utils/misc/guc-file.l
  *
- * Copyright (c) 2000-2014, PostgreSQL Global Development Group
+ * Copyright (c) 2000-2015, PostgreSQL Global Development Group
  * Written by Peter Eisentraut <peter_e@gmx.net>.
  *
  * src/include/utils/guc.h
@@ -17,6 +17,21 @@
 #include "tcop/dest.h"
 #include "utils/array.h"
 
+
+/* upper limit for GUC variables measured in kilobytes of memory */
+/* note that various places assume the byte size fits in a "long" variable */
+#if SIZEOF_SIZE_T > 4 && SIZEOF_LONG > 4
+#define MAX_KILOBYTES	INT_MAX
+#else
+#define MAX_KILOBYTES	(INT_MAX / 1024)
+#endif
+
+/*
+ * Automatic configuration file name for ALTER SYSTEM.
+ * This file will be used to store values of configuration parameters
+ * set by ALTER SYSTEM command.
+ */
+#define PG_AUTOCONF_FILENAME		"postgresql.auto.conf"
 
 /*
  * Certain options can only be set at certain times. The rules are
@@ -331,7 +346,8 @@ extern bool parse_int(const char *value, int *result, int flags,
 extern bool parse_real(const char *value, double *result);
 extern int set_config_option(const char *name, const char *value,
 				  GucContext context, GucSource source,
-				  GucAction action, bool changeVal, int elevel);
+				  GucAction action, bool changeVal, int elevel,
+				  bool is_reload);
 extern void AlterSystemSetConfigFile(AlterSystemStmt *setstmt);
 extern char *GetConfigOptionByName(const char *name, const char **varname);
 extern void GetConfigOptionByNum(int varnum, const char **values, bool *noshow);
@@ -354,6 +370,11 @@ extern ArrayType *GUCArrayReset(ArrayType *array);
 extern void write_nondefault_variables(GucContext context);
 extern void read_nondefault_variables(void);
 #endif
+
+/* GUC serialization */
+extern Size EstimateGUCStateSpace(void);
+extern void SerializeGUCState(Size maxsize, char *start_address);
+extern void RestoreGUCState(void *gucstate);
 
 /* Support for messages reported from GUC check hooks */
 

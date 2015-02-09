@@ -5,7 +5,7 @@
  *	  Routines for CREATE and DROP FUNCTION commands and CREATE and DROP
  *	  CAST commands.
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -904,9 +904,9 @@ CreateFunction(CreateFunctionStmt *stmt, const char *queryString)
 	ReleaseSysCache(languageTuple);
 
 	/*
-	 * Only superuser is allowed to create leakproof functions because it
-	 * possibly allows unprivileged users to reference invisible tuples to be
-	 * filtered out using views for row-level security.
+	 * Only superuser is allowed to create leakproof functions because leakproof
+	 * functions can see tuples which have not yet been filtered out by security
+	 * barrier views or row level security policies.
 	 */
 	if (isLeakProof && !superuser())
 		ereport(ERROR,

@@ -10,7 +10,7 @@
  *	  Over time, this has also become the preferred place for widely known
  *	  resource-limitation stuff, such as work_mem and check_stack_depth().
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/miscadmin.h
@@ -52,6 +52,10 @@
  * will be held off until CHECK_FOR_INTERRUPTS() is done outside any
  * HOLD_INTERRUPTS() ... RESUME_INTERRUPTS() section.
  *
+ * There is also a mechanism to prevent query cancel interrupts, while still
+ * allowing die interrupts: HOLD_CANCEL_INTERRUPTS() and
+ * RESUME_CANCEL_INTERRUPTS().
+ *
  * Special mechanisms are used to let an interrupt be accepted when we are
  * waiting for a lock or when we are waiting for command input (but, of
  * course, only if the interrupt holdoff counter is zero).  See the
@@ -80,8 +84,8 @@ extern PGDLLIMPORT volatile bool ProcDiePending;
 extern volatile bool ClientConnectionLost;
 
 /* these are marked volatile because they are examined by signal handlers: */
-extern PGDLLIMPORT volatile bool ImmediateInterruptOK;
 extern PGDLLIMPORT volatile uint32 InterruptHoldoffCount;
+extern PGDLLIMPORT volatile uint32 QueryCancelHoldoffCount;
 extern PGDLLIMPORT volatile uint32 CritSectionCount;
 
 /* in tcop/postgres.c */
@@ -112,6 +116,14 @@ do { \
 do { \
 	Assert(InterruptHoldoffCount > 0); \
 	InterruptHoldoffCount--; \
+} while(0)
+
+#define HOLD_CANCEL_INTERRUPTS()  (QueryCancelHoldoffCount++)
+
+#define RESUME_CANCEL_INTERRUPTS() \
+do { \
+	Assert(QueryCancelHoldoffCount > 0); \
+	QueryCancelHoldoffCount--; \
 } while(0)
 
 #define START_CRIT_SECTION()  (CritSectionCount++)
@@ -148,6 +160,7 @@ extern int	max_worker_processes;
 extern PGDLLIMPORT int MyProcPid;
 extern PGDLLIMPORT pg_time_t MyStartTime;
 extern PGDLLIMPORT struct Port *MyProcPort;
+extern PGDLLIMPORT struct Latch *MyLatch;
 extern long MyCancelKey;
 extern int	MyPMChildSlot;
 
@@ -277,19 +290,23 @@ extern int	trace_recovery(int trace_level);
 extern char *DatabasePath;
 
 /* now in utils/init/miscinit.c */
+extern void InitPostmasterChild(void);
+extern void InitStandaloneProcess(const char *argv0);
+
 extern void SetDatabasePath(const char *path);
 
 extern char *GetUserNameFromId(Oid roleid);
 extern Oid	GetUserId(void);
 extern Oid	GetOuterUserId(void);
 extern Oid	GetSessionUserId(void);
+extern Oid	GetAuthenticatedUserId(void);
 extern void GetUserIdAndSecContext(Oid *userid, int *sec_context);
 extern void SetUserIdAndSecContext(Oid userid, int sec_context);
 extern bool InLocalUserIdChange(void);
 extern bool InSecurityRestrictedOperation(void);
 extern void GetUserIdAndContext(Oid *userid, bool *sec_def_context);
 extern void SetUserIdAndContext(Oid userid, bool sec_def_context);
-extern void InitializeSessionUserId(const char *rolename);
+extern void InitializeSessionUserId(const char *rolename, Oid useroid);
 extern void InitializeSessionUserIdStandalone(void);
 extern void SetSessionAuthorization(Oid userid, bool is_superuser);
 extern Oid	GetCurrentRoleId(void);
@@ -297,6 +314,9 @@ extern void SetCurrentRoleId(Oid roleid, bool is_superuser);
 
 extern void SetDataDir(const char *dir);
 extern void ChangeToDataDir(void);
+
+extern void SwitchToSharedLatch(void);
+extern void SwitchBackToLocalLatch(void);
 
 /* in utils/misc/superuser.c */
 extern bool superuser(void);	/* current user is superuser */
@@ -390,7 +410,7 @@ extern AuxProcType MyAuxProcType;
 extern void pg_split_opts(char **argv, int *argcp, char *optstr);
 extern void InitializeMaxBackends(void);
 extern void InitPostgres(const char *in_dbname, Oid dboid, const char *username,
-			 char *out_dbname);
+			 Oid useroid, char *out_dbname);
 extern void BaseInit(void);
 
 /* in utils/init/miscinit.c */

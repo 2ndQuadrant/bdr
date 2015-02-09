@@ -41,6 +41,7 @@ CAST    34200    # Central Australia Standard Time (not in zic)
 # CONFLICT! CST is not unique
 # Other timezones:
 #  - CST: Central Standard Time (America)
+#  - CST: China Standard Time (Asia)
 #  - CST: Cuba Central Standard Time (America)
 CST     34200    # Central Standard Time (not in zic)
 CWST    31500    # Central Western Standard Time (not in zic)
@@ -52,7 +53,7 @@ EAST    36000    # East Australian Standard Time (not in zic)
 # Other timezones:
 #  - EST: Eastern Standard Time (America)
 EST     36000    # Eastern Standard Time (not in zic)
-LHDT    39600 D  # Lord Howe Daylight Time
+LHDT    Australia/Lord_Howe  # Lord Howe Daylight Time
                  #     (Australia/Lord_Howe)
 LHST    37800    # Lord Howe Standard Time
                  #     (Australia/Lord_Howe)

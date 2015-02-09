@@ -23,7 +23,7 @@ m4_if(m4_defn([m4_PACKAGE_VERSION]), [2.69], [], [m4_fatal([Autoconf version 2.6
 Untested combinations of 'autoconf' and PostgreSQL versions are not
 recommended.  You can remove the check from 'configure.in' but it is then
 your responsibility whether the result works or not.])])
-AC_COPYRIGHT([Copyright (c) 1996-2014, PostgreSQL Global Development Group])
+AC_COPYRIGHT([Copyright (c) 1996-2015, PostgreSQL Global Development Group])
 AC_CONFIG_SRCDIR([src/backend/access/common/heaptuple.c])
 AC_CONFIG_AUX_DIR(config)
 AC_PREFIX_DEFAULT(/usr/local/pgsql)
@@ -229,6 +229,13 @@ AC_SUBST(DTRACEFLAGS)])
 AC_SUBST(enable_dtrace)
 
 #
+# TAP tests
+#
+PGAC_ARG_BOOL(enable, tap-tests, no,
+              [enable TAP tests (requires Perl and IPC::Run)])
+AC_SUBST(enable_tap_tests)
+
+#
 # Block size
 #
 AC_MSG_CHECKING([for block size])
@@ -407,6 +414,10 @@ else
   fi
 fi
 
+# CFLAGS we determined above will be added back at the end
+user_CFLAGS=$CFLAGS
+CFLAGS=""
+
 # set CFLAGS_VECTOR from the environment, if available
 if test "$ac_env_CFLAGS_VECTOR_set" = set; then
   CFLAGS_VECTOR=$ac_env_CFLAGS_VECTOR_value
@@ -418,7 +429,7 @@ fi
 # but has its own.  Also check other compiler-specific flags here.
 
 if test "$GCC" = yes -a "$ICC" = no; then
-  CFLAGS="$CFLAGS -Wall -Wmissing-prototypes -Wpointer-arith"
+  CFLAGS="-Wall -Wmissing-prototypes -Wpointer-arith"
   # These work in some but not all gcc versions
   PGAC_PROG_CC_CFLAGS_OPT([-Wdeclaration-after-statement])
   PGAC_PROG_CC_CFLAGS_OPT([-Wendif-labels])
@@ -481,7 +492,12 @@ if test "$PORTNAME" = "win32"; then
   CPPFLAGS="$CPPFLAGS -I$srcdir/src/include/port/win32 -DEXEC_BACKEND"
 fi
 
-# Check if the compiler still works with the template settings
+# Now that we're done automatically adding stuff to CFLAGS, put back the
+# user-specified flags (if any) at the end.  This lets users override
+# the automatic additions.
+CFLAGS="$CFLAGS $user_CFLAGS"
+
+# Check if the compiler still works with the final flag settings
 AC_MSG_CHECKING([whether the C compiler still works])
 AC_TRY_LINK([], [return 0;],
   [AC_MSG_RESULT(yes)],
@@ -1016,7 +1032,7 @@ AC_SUBST(UUID_LIBS)
 ##
 
 dnl sys/socket.h is required by AC_FUNC_ACCEPT_ARGTYPES
-AC_CHECK_HEADERS([atomic.h crypt.h dld.h fp_class.h getopt.h ieeefp.h ifaddrs.h langinfo.h poll.h pwd.h sys/ioctl.h sys/ipc.h sys/poll.h sys/pstat.h sys/resource.h sys/select.h sys/sem.h sys/shm.h sys/socket.h sys/sockio.h sys/tas.h sys/time.h sys/un.h termios.h ucred.h utime.h wchar.h wctype.h])
+AC_CHECK_HEADERS([atomic.h crypt.h dld.h fp_class.h getopt.h ieeefp.h ifaddrs.h langinfo.h mbarrier.h poll.h pwd.h sys/ioctl.h sys/ipc.h sys/poll.h sys/pstat.h sys/resource.h sys/select.h sys/sem.h sys/shm.h sys/socket.h sys/sockio.h sys/tas.h sys/time.h sys/un.h termios.h ucred.h utime.h wchar.h wctype.h])
 
 # On BSD, test for net/if.h will fail unless sys/socket.h
 # is included first.
@@ -1163,6 +1179,7 @@ fi
 m4_defun([AC_PROG_CC_STDC], []) dnl We don't want that.
 AC_C_BIGENDIAN
 PGAC_C_INLINE
+PGAC_PRINTF_ARCHETYPE
 AC_C_FLEXIBLE_ARRAY_MEMBER
 PGAC_C_SIGNED
 PGAC_C_FUNCNAME_SUPPORT
@@ -1257,7 +1274,7 @@ PGAC_FUNC_GETTIMEOFDAY_1ARG
 LIBS_including_readline="$LIBS"
 LIBS=`echo "$LIBS" | sed -e 's/-ledit//g' -e 's/-lreadline//g'`
 
-AC_CHECK_FUNCS([cbrt dlopen fdatasync getifaddrs getpeerucred getrlimit mbstowcs_l memmove poll pstat readlink setproctitle setsid shm_open sigprocmask symlink sync_file_range towlower utime utimes wcstombs wcstombs_l])
+AC_CHECK_FUNCS([cbrt dlopen fdatasync getifaddrs getpeerucred getrlimit mbstowcs_l memmove poll pstat pthread_is_threaded_np readlink setproctitle setsid shm_open sigprocmask symlink sync_file_range towlower utime utimes wcstombs wcstombs_l])
 
 AC_REPLACE_FUNCS(fseeko)
 case $host_os in
@@ -1519,7 +1536,6 @@ fi
 AC_CHECK_FUNCS([strerror_r getpwuid_r gethostbyname_r])
 
 # Do test here with the proper thread flags
-PGAC_FUNC_GETPWUID_R_5ARG
 PGAC_FUNC_STRERROR_R_INT
 
 CFLAGS="$_CFLAGS"
@@ -1869,13 +1885,22 @@ PGAC_CHECK_DOCBOOK(4.2)
 PGAC_PATH_DOCBOOK_STYLESHEETS
 PGAC_PATH_COLLATEINDEX
 AC_CHECK_PROGS(DBTOEPUB, dbtoepub)
+AC_CHECK_PROGS(XMLLINT, xmllint)
 AC_CHECK_PROGS(XSLTPROC, xsltproc)
 AC_CHECK_PROGS(OSX, [osx sgml2xml sx])
 
 #
 # Check for test tools
 #
-AC_CHECK_PROGS(PROVE, prove)
+if test "$enable_tap_tests" = yes; then
+  AC_CHECK_PROGS(PROVE, prove)
+  if test -z "$PROVE"; then
+    AC_MSG_ERROR([prove not found])
+  fi
+  if test -z "$PERL"; then
+    AC_MSG_ERROR([Perl not found])
+  fi
+fi
 
 # Thread testing
 

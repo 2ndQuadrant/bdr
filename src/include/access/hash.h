@@ -4,7 +4,7 @@
  *	  header file for postgres hash access method implementation
  *
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/access/hash.h
@@ -20,8 +20,9 @@
 #include "access/genam.h"
 #include "access/itup.h"
 #include "access/sdir.h"
-#include "access/xlog.h"
+#include "access/xlogreader.h"
 #include "fmgr.h"
+#include "lib/stringinfo.h"
 #include "storage/bufmgr.h"
 #include "storage/lock.h"
 #include "utils/relcache.h"
@@ -355,8 +356,8 @@ extern OffsetNumber _hash_binsearch(Page page, uint32 hash_value);
 extern OffsetNumber _hash_binsearch_last(Page page, uint32 hash_value);
 
 /* hash.c */
-extern void hash_redo(XLogRecPtr lsn, XLogRecord *record);
-extern void hash_desc(StringInfo buf, XLogRecord *record);
+extern void hash_redo(XLogReaderState *record);
+extern void hash_desc(StringInfo buf, XLogReaderState *record);
 extern const char *hash_identify(uint8 info);
 
 #endif   /* HASH_H */

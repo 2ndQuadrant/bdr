@@ -19,7 +19,7 @@
  * routines.
  *
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -764,12 +764,8 @@ retry3:
 			/* ready for read */
 			break;
 		default:
-			printfPQExpBuffer(&conn->errorMessage,
-							  libpq_gettext(
-								"server closed the connection unexpectedly\n"
-				   "\tThis probably means the server terminated abnormally\n"
-							 "\tbefore or while processing the request.\n"));
-			goto definitelyFailed;
+			/* we override pqReadReady's message with something more useful */
+			goto definitelyEOF;
 	}
 
 	/*
@@ -808,9 +804,16 @@ retry4:
 
 	/*
 	 * OK, we are getting a zero read even though select() says ready. This
-	 * means the connection has been closed.  Cope.  Note that errorMessage
-	 * has been set already.
+	 * means the connection has been closed.  Cope.
 	 */
+definitelyEOF:
+	printfPQExpBuffer(&conn->errorMessage,
+					  libpq_gettext(
+								"server closed the connection unexpectedly\n"
+				   "\tThis probably means the server terminated abnormally\n"
+							 "\tbefore or while processing the request.\n"));
+
+	/* Come here if lower-level code already set a suitable errorMessage */
 definitelyFailed:
 	pqDropConnection(conn);
 	conn->status = CONNECTION_BAD;		/* No more connection to backend */
@@ -1051,9 +1054,9 @@ pqSocketCheck(PGconn *conn, int forRead, int forWrite, time_t end_time)
 		return -1;
 	}
 
-#ifdef USE_OPENSSL
+#ifdef USE_SSL
 	/* Check for SSL library buffering read bytes */
-	if (forRead && conn->ssl && SSL_pending(conn->ssl) > 0)
+	if (forRead && conn->ssl_in_use && pgtls_read_pending(conn) > 0)
 	{
 		/* short-circuit the select */
 		return 1;

@@ -37,7 +37,7 @@
  * be infrequent enough that more-detailed tracking is not worth the effort.
  *
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -60,13 +60,13 @@
 #include "optimizer/prep.h"
 #include "parser/analyze.h"
 #include "parser/parsetree.h"
-#include "rewrite/rowsecurity.h"
 #include "storage/lmgr.h"
 #include "tcop/pquery.h"
 #include "tcop/utility.h"
 #include "utils/inval.h"
 #include "utils/memutils.h"
 #include "utils/resowner_private.h"
+#include "utils/rls.h"
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
 
@@ -141,7 +141,7 @@ InitPlanCache(void)
  * Once constructed, the cached plan can be made longer-lived, if needed,
  * by calling SaveCachedPlan.
  *
- * raw_parse_tree: output of raw_parser()
+ * raw_parse_tree: output of raw_parser(), or NULL if empty query
  * query_string: original query text
  * commandTag: compile-time-constant tag for query, or NULL if empty query
  */
@@ -207,7 +207,7 @@ CreateCachedPlan(Node *raw_parse_tree,
 	plansource->generic_cost = -1;
 	plansource->total_custom_cost = 0;
 	plansource->num_custom_plans = 0;
-	plansource->has_rls = false;
+	plansource->hasRowSecurity = false;
 	plansource->rowSecurityDisabled
 		= (security_context & SECURITY_ROW_LEVEL_DISABLED) != 0;
 	plansource->row_security_env = row_security;
@@ -232,7 +232,7 @@ CreateCachedPlan(Node *raw_parse_tree,
  * invalidation, so plan use must be completed in the current transaction,
  * and DDL that might invalidate the querytree_list must be avoided as well.
  *
- * raw_parse_tree: output of raw_parser()
+ * raw_parse_tree: output of raw_parser(), or NULL if empty query
  * query_string: original query text
  * commandTag: compile-time-constant tag for query, or NULL if empty query
  */
@@ -383,7 +383,7 @@ CompleteCachedPlan(CachedPlanSource *plansource,
 		extract_query_dependencies((Node *) querytree_list,
 								   &plansource->relationOids,
 								   &plansource->invalItems,
-								   &plansource->has_rls);
+								   &plansource->hasRowSecurity);
 
 		/*
 		 * Also save the current search_path in the query_context.  (This
@@ -617,7 +617,7 @@ RevalidateCachedQuery(CachedPlanSource *plansource)
 	 */
 	if (plansource->is_valid
 		&& !plansource->rowSecurityDisabled
-		&& plansource->has_rls
+		&& plansource->hasRowSecurity
 		&& (plansource->planUserId != GetUserId()
 			|| plansource->row_security_env != row_security))
 		plansource->is_valid = false;
@@ -699,7 +699,9 @@ RevalidateCachedQuery(CachedPlanSource *plansource)
 	 * the cache.
 	 */
 	rawtree = copyObject(plansource->raw_parse_tree);
-	if (plansource->parserSetup != NULL)
+	if (rawtree == NULL)
+		tlist = NIL;
+	else if (plansource->parserSetup != NULL)
 		tlist = pg_analyze_and_rewrite_params(rawtree,
 											  plansource->query_string,
 											  plansource->parserSetup,
@@ -764,7 +766,7 @@ RevalidateCachedQuery(CachedPlanSource *plansource)
 	extract_query_dependencies((Node *) qlist,
 							   &plansource->relationOids,
 							   &plansource->invalItems,
-							   &plansource->has_rls);
+							   &plansource->hasRowSecurity);
 
 	/*
 	 * Also save the current search_path in the query_context.  (This should
@@ -928,6 +930,7 @@ BuildCachedPlan(CachedPlanSource *plansource, List *qlist,
 	 */
 	snapshot_set = false;
 	if (!ActiveSnapshotSet() &&
+		plansource->raw_parse_tree &&
 		analyze_requires_snapshot(plansource->raw_parse_tree))
 	{
 		PushActiveSnapshot(GetTransactionSnapshot());

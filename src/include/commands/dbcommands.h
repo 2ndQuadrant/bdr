@@ -4,7 +4,7 @@
  *		Database management commands (create/drop database).
  *
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/commands/dbcommands.h
@@ -14,7 +14,8 @@
 #ifndef DBCOMMANDS_H
 #define DBCOMMANDS_H
 
-#include "access/xlog.h"
+#include "access/xlogreader.h"
+#include "lib/stringinfo.h"
 #include "nodes/parsenodes.h"
 
 /* XLOG stuff */
@@ -62,8 +63,8 @@ extern Oid	AlterDatabaseOwner(const char *dbname, Oid newOwnerId);
 extern Oid	get_database_oid(const char *dbname, bool missingok);
 extern char *get_database_name(Oid dbid);
 
-extern void dbase_redo(XLogRecPtr lsn, XLogRecord *rptr);
-extern void dbase_desc(StringInfo buf, XLogRecord *rptr);
+extern void dbase_redo(XLogReaderState *rptr);
+extern void dbase_desc(StringInfo buf, XLogReaderState *rptr);
 extern const char *dbase_identify(uint8 info);
 
 extern void check_encoding_locale_matches(int encoding, const char *collate, const char *ctype);

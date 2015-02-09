@@ -4,7 +4,7 @@
  *		Tablespace management commands (create/drop tablespace).
  *
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/commands/tablespace.h
@@ -14,7 +14,8 @@
 #ifndef TABLESPACE_H
 #define TABLESPACE_H
 
-#include "access/xlog.h"
+#include "access/xlogreader.h"
+#include "lib/stringinfo.h"
 #include "nodes/parsenodes.h"
 
 /* XLOG stuff */
@@ -55,8 +56,8 @@ extern char *get_tablespace_name(Oid spc_oid);
 
 extern bool directory_is_empty(const char *path);
 
-extern void tblspc_redo(XLogRecPtr lsn, XLogRecord *rptr);
-extern void tblspc_desc(StringInfo buf, XLogRecord *rptr);
+extern void tblspc_redo(XLogReaderState *rptr);
+extern void tblspc_desc(StringInfo buf, XLogReaderState *rptr);
 extern const char *tblspc_identify(uint8 info);
 
 #endif   /* TABLESPACE_H */

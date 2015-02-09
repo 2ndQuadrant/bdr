@@ -4,7 +4,7 @@
  *	  Catalog-to-filenode mapping
  *
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/utils/relmapper.h
@@ -14,7 +14,8 @@
 #ifndef RELMAPPER_H
 #define RELMAPPER_H
 
-#include "access/xlog.h"
+#include "access/xlogreader.h"
+#include "lib/stringinfo.h"
 
 /* ----------------
  *		relmap-related XLOG entries
@@ -58,8 +59,8 @@ extern void RelationMapInitialize(void);
 extern void RelationMapInitializePhase2(void);
 extern void RelationMapInitializePhase3(void);
 
-extern void relmap_redo(XLogRecPtr lsn, XLogRecord *record);
-extern void relmap_desc(StringInfo buf, XLogRecord *record);
+extern void relmap_redo(XLogReaderState *record);
+extern void relmap_desc(StringInfo buf, XLogReaderState *record);
 extern const char *relmap_identify(uint8 info);
 
 #endif   /* RELMAPPER_H */

@@ -3,7 +3,7 @@
  * jsonb_util.c
  *	  converting between Jsonb and JsonbValues, and iterating.
  *
- * Copyright (c) 2014, PostgreSQL Global Development Group
+ * Copyright (c) 2014-2015, PostgreSQL Global Development Group
  *
  *
  * IDENTIFICATION
@@ -1377,7 +1377,7 @@ convertToJsonb(JsonbValue *val)
 	initStringInfo(&buffer);
 
 	/* Make room for the varlena header */
-	reserveFromBuffer(&buffer, sizeof(VARHDRSZ));
+	reserveFromBuffer(&buffer, VARHDRSZ);
 
 	convertJsonbValue(&buffer, &jentry, val, 0);
 
@@ -1427,7 +1427,7 @@ convertJsonbValue(StringInfo buffer, JEntry *header, JsonbValue *val, int level)
 	else if (val->type == jbvObject)
 		convertJsonbObject(buffer, header, val, level);
 	else
-		elog(ERROR, "unknown type of jsonb container");
+		elog(ERROR, "unknown type of jsonb container to convert");
 }
 
 static void

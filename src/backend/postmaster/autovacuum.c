@@ -50,7 +50,7 @@
  * there is a window (caused by pgstat delay) on which a worker may choose a
  * table that was already vacuumed; this is a bug in the current design.
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -64,7 +64,6 @@
 #include <signal.h>
 #include <sys/types.h>
 #include <sys/time.h>
-#include <time.h>
 #include <unistd.h>
 
 #include "access/heapam.h"
@@ -383,11 +382,10 @@ StartAutoVacLauncher(void)
 #ifndef EXEC_BACKEND
 		case 0:
 			/* in postmaster child ... */
+			InitPostmasterChild();
+
 			/* Close the postmaster's sockets */
 			ClosePostmasterPorts(false);
-
-			/* Lose the postmaster's on-exit routines */
-			on_exit_reset();
 
 			AutoVacLauncherMain(0, NULL);
 			break;
@@ -408,15 +406,7 @@ AutoVacLauncherMain(int argc, char *argv[])
 {
 	sigjmp_buf	local_sigjmp_buf;
 
-	/* we are a postmaster subprocess now */
-	IsUnderPostmaster = true;
 	am_autovacuum_launcher = true;
-
-	/* reset MyProcPid */
-	MyProcPid = getpid();
-
-	/* record Start Time for logging */
-	MyStartTime = time(NULL);
 
 	/* Identify myself via ps */
 	init_ps_display("autovacuum launcher process", "", "", "");
@@ -428,17 +418,6 @@ AutoVacLauncherMain(int argc, char *argv[])
 		pg_usleep(PostAuthDelay * 1000000L);
 
 	SetProcessingMode(InitProcessing);
-
-	/*
-	 * If possible, make this process a group leader, so that the postmaster
-	 * can signal any child processes too.  (autovacuum probably never has any
-	 * child processes, but for consistency we make all postmaster child
-	 * processes do this.)
-	 */
-#ifdef HAVE_SETSID
-	if (setsid() < 0)
-		elog(FATAL, "setsid() failed: %m");
-#endif
 
 	/*
 	 * Set up signal handlers.  We operate on databases much like a regular
@@ -471,7 +450,7 @@ AutoVacLauncherMain(int argc, char *argv[])
 	InitProcess();
 #endif
 
-	InitPostgres(NULL, InvalidOid, NULL, NULL);
+	InitPostgres(NULL, InvalidOid, NULL, InvalidOid, NULL);
 
 	SetProcessingMode(NormalProcessing);
 
@@ -603,20 +582,18 @@ AutoVacLauncherMain(int argc, char *argv[])
 		launcher_determine_sleep(!dlist_is_empty(&AutoVacuumShmem->av_freeWorkers),
 								 false, &nap);
 
-		/* Allow sinval catchup interrupts while sleeping */
-		EnableCatchupInterrupt();
-
 		/*
 		 * Wait until naptime expires or we get some type of signal (all the
 		 * signal handlers will wake us by calling SetLatch).
 		 */
-		rc = WaitLatch(&MyProc->procLatch,
+		rc = WaitLatch(MyLatch,
 					   WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
 					   (nap.tv_sec * 1000L) + (nap.tv_usec / 1000L));
 
-		ResetLatch(&MyProc->procLatch);
+		ResetLatch(MyLatch);
 
-		DisableCatchupInterrupt();
+		/* Process sinval catchup interrupts that happened while sleeping */
+		ProcessCatchupInterrupt();
 
 		/*
 		 * Emergency bailout if postmaster has died.  This is to avoid the
@@ -922,10 +899,9 @@ rebuild_database_list(Oid newdb)
 	 */
 	hctl.keysize = sizeof(Oid);
 	hctl.entrysize = sizeof(avl_dbase);
-	hctl.hash = oid_hash;
 	hctl.hcxt = tmpcxt;
 	dbhash = hash_create("db hash", 20, &hctl,	/* magic number here FIXME */
-						 HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+						 HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
 
 	/* start by inserting the new database */
 	score = 0;
@@ -1363,8 +1339,7 @@ avl_sighup_handler(SIGNAL_ARGS)
 	int			save_errno = errno;
 
 	got_SIGHUP = true;
-	if (MyProc)
-		SetLatch(&MyProc->procLatch);
+	SetLatch(MyLatch);
 
 	errno = save_errno;
 }
@@ -1376,8 +1351,7 @@ avl_sigusr2_handler(SIGNAL_ARGS)
 	int			save_errno = errno;
 
 	got_SIGUSR2 = true;
-	if (MyProc)
-		SetLatch(&MyProc->procLatch);
+	SetLatch(MyLatch);
 
 	errno = save_errno;
 }
@@ -1389,8 +1363,7 @@ avl_sigterm_handler(SIGNAL_ARGS)
 	int			save_errno = errno;
 
 	got_SIGTERM = true;
-	if (MyProc)
-		SetLatch(&MyProc->procLatch);
+	SetLatch(MyLatch);
 
 	errno = save_errno;
 }
@@ -1456,11 +1429,10 @@ StartAutoVacWorker(void)
 #ifndef EXEC_BACKEND
 		case 0:
 			/* in postmaster child ... */
+			InitPostmasterChild();
+
 			/* Close the postmaster's sockets */
 			ClosePostmasterPorts(false);
-
-			/* Lose the postmaster's on-exit routines */
-			on_exit_reset();
 
 			AutoVacWorkerMain(0, NULL);
 			break;
@@ -1482,31 +1454,12 @@ AutoVacWorkerMain(int argc, char *argv[])
 	sigjmp_buf	local_sigjmp_buf;
 	Oid			dbid;
 
-	/* we are a postmaster subprocess now */
-	IsUnderPostmaster = true;
 	am_autovacuum_worker = true;
-
-	/* reset MyProcPid */
-	MyProcPid = getpid();
-
-	/* record Start Time for logging */
-	MyStartTime = time(NULL);
 
 	/* Identify myself via ps */
 	init_ps_display("autovacuum worker process", "", "", "");
 
 	SetProcessingMode(InitProcessing);
-
-	/*
-	 * If possible, make this process a group leader, so that the postmaster
-	 * can signal any child processes too.  (autovacuum probably never has any
-	 * child processes, but for consistency we make all postmaster child
-	 * processes do this.)
-	 */
-#ifdef HAVE_SETSID
-	if (setsid() < 0)
-		elog(FATAL, "setsid() failed: %m");
-#endif
 
 	/*
 	 * Set up signal handlers.  We operate on databases much like a regular
@@ -1665,7 +1618,7 @@ AutoVacWorkerMain(int argc, char *argv[])
 		 * Note: if we have selected a just-deleted database (due to using
 		 * stale stats info), we'll fail and exit here.
 		 */
-		InitPostgres(NULL, dbid, NULL, dbname);
+		InitPostgres(NULL, dbid, NULL, InvalidOid, dbname);
 		SetProcessingMode(NormalProcessing);
 		set_ps_display(dbname, false);
 		ereport(DEBUG1,
@@ -1997,12 +1950,11 @@ do_autovacuum(void)
 	MemSet(&ctl, 0, sizeof(ctl));
 	ctl.keysize = sizeof(Oid);
 	ctl.entrysize = sizeof(av_relation);
-	ctl.hash = oid_hash;
 
 	table_toast_map = hash_create("TOAST to main relid map",
 								  100,
 								  &ctl,
-								  HASH_ELEM | HASH_FUNCTION);
+								  HASH_ELEM | HASH_BLOBS);
 
 	/*
 	 * Scan pg_class to determine which tables to vacuum.

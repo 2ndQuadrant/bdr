@@ -4,7 +4,7 @@
  *	  POSTGRES heap tuple header definitions.
  *
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/access/htup_details.h
@@ -498,6 +498,7 @@ do { \
  * you can, say, fit 2 tuples of size MaxHeapTupleSize/2 on the same page.
  */
 #define MaxHeapTupleSize  (BLCKSZ - MAXALIGN(SizeOfPageHeaderData + sizeof(ItemIdData)))
+#define MinHeapTupleSize  MAXALIGN(offsetof(HeapTupleHeaderData, t_bits))
 
 /*
  * MaxHeapTuplesPerPage is an upper bound on the number of tuples that can

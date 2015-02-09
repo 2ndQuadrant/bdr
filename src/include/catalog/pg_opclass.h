@@ -25,7 +25,7 @@
  * AMs support this.
  *
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/catalog/pg_opclass.h
@@ -235,5 +235,37 @@ DATA(insert (	403		jsonb_ops			PGNSP PGUID 4033  3802 t 0 ));
 DATA(insert (	405		jsonb_ops			PGNSP PGUID 4034  3802 t 0 ));
 DATA(insert (	2742	jsonb_ops			PGNSP PGUID 4036  3802 t 25 ));
 DATA(insert (	2742	jsonb_path_ops		PGNSP PGUID 4037  3802 f 23 ));
+
+/* BRIN operator classes */
+/* no brin opclass for bool */
+DATA(insert (	3580	bytea_minmax_ops		PGNSP PGUID 4064    17 t 0 ));
+DATA(insert (	3580	char_minmax_ops			PGNSP PGUID 4062    18 t 0 ));
+DATA(insert (	3580	name_minmax_ops			PGNSP PGUID 4065    19 t 0 ));
+DATA(insert (	3580	int8_minmax_ops			PGNSP PGUID 4054    20 t 0 ));
+DATA(insert (	3580	int2_minmax_ops			PGNSP PGUID 4054    21 t 0 ));
+DATA(insert (	3580	int4_minmax_ops			PGNSP PGUID 4054    23 t 0 ));
+DATA(insert (	3580	text_minmax_ops			PGNSP PGUID 4056    25 t 0 ));
+DATA(insert (	3580	oid_minmax_ops			PGNSP PGUID 4068    26 t 0 ));
+DATA(insert (	3580	tid_minmax_ops			PGNSP PGUID 4069    27 t 0 ));
+DATA(insert (	3580	float4_minmax_ops		PGNSP PGUID 4070   700 t 0 ));
+DATA(insert (	3580	float8_minmax_ops		PGNSP PGUID 4070   701 t 0 ));
+DATA(insert (	3580	abstime_minmax_ops		PGNSP PGUID 4072   702 t 0 ));
+DATA(insert (	3580	reltime_minmax_ops		PGNSP PGUID 4073   703 t 0 ));
+DATA(insert (	3580	macaddr_minmax_ops		PGNSP PGUID 4074   829 t 0 ));
+DATA(insert (	3580	inet_minmax_ops			PGNSP PGUID 4075   869 f 0 ));
+DATA(insert (	3580	bpchar_minmax_ops		PGNSP PGUID 4076  1042 t 0 ));
+DATA(insert (	3580	time_minmax_ops			PGNSP PGUID 4077  1083 t 0 ));
+DATA(insert (	3580	date_minmax_ops			PGNSP PGUID 4059  1082 t 0 ));
+DATA(insert (	3580	timestamp_minmax_ops	PGNSP PGUID 4059  1114 t 0 ));
+DATA(insert (	3580	timestamptz_minmax_ops	PGNSP PGUID 4059  1184 t 0 ));
+DATA(insert (	3580	interval_minmax_ops		PGNSP PGUID 4078  1186 t 0 ));
+DATA(insert (	3580	timetz_minmax_ops		PGNSP PGUID 4058  1266 t 0 ));
+DATA(insert (	3580	bit_minmax_ops			PGNSP PGUID 4079  1560 t 0 ));
+DATA(insert (	3580	varbit_minmax_ops		PGNSP PGUID 4080  1562 t 0 ));
+DATA(insert (	3580	numeric_minmax_ops		PGNSP PGUID 4055  1700 t 0 ));
+/* no brin opclass for record, anyarray */
+DATA(insert (	3580	uuid_minmax_ops			PGNSP PGUID 4081  2950 t 0 ));
+DATA(insert (	3580	pg_lsn_minmax_ops		PGNSP PGUID 4082  3220 t 0 ));
+/* no brin opclass for enum, tsvector, tsquery, jsonb, range */
 
 #endif   /* PG_OPCLASS_H */

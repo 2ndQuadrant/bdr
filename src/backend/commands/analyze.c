@@ -3,7 +3,7 @@
  * analyze.c
  *	  the Postgres statistics generator
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -87,7 +87,7 @@ static BufferAccessStrategy vac_strategy;
 
 static void do_analyze_rel(Relation onerel, VacuumStmt *vacstmt,
 			   AcquireSampleRowsFunc acquirefunc, BlockNumber relpages,
-			   bool inh, int elevel);
+			   bool inh, bool in_outer_xact, int elevel);
 static void BlockSampler_Init(BlockSampler bs, BlockNumber nblocks,
 				  int samplesize);
 static bool BlockSampler_HasMore(BlockSampler bs);
@@ -115,7 +115,8 @@ static Datum ind_fetch_func(VacAttrStatsP stats, int rownum, bool *isNull);
  *	analyze_rel() -- analyze one relation
  */
 void
-analyze_rel(Oid relid, VacuumStmt *vacstmt, BufferAccessStrategy bstrategy)
+analyze_rel(Oid relid, VacuumStmt *vacstmt,
+			bool in_outer_xact, BufferAccessStrategy bstrategy)
 {
 	Relation	onerel;
 	int			elevel;
@@ -265,13 +266,15 @@ analyze_rel(Oid relid, VacuumStmt *vacstmt, BufferAccessStrategy bstrategy)
 	/*
 	 * Do the normal non-recursive ANALYZE.
 	 */
-	do_analyze_rel(onerel, vacstmt, acquirefunc, relpages, false, elevel);
+	do_analyze_rel(onerel, vacstmt, acquirefunc, relpages,
+				   false, in_outer_xact, elevel);
 
 	/*
 	 * If there are child tables, do recursive ANALYZE.
 	 */
 	if (onerel->rd_rel->relhassubclass)
-		do_analyze_rel(onerel, vacstmt, acquirefunc, relpages, true, elevel);
+		do_analyze_rel(onerel, vacstmt, acquirefunc, relpages,
+					   true, in_outer_xact, elevel);
 
 	/*
 	 * Close source relation now, but keep lock so that no one deletes it
@@ -301,7 +304,7 @@ analyze_rel(Oid relid, VacuumStmt *vacstmt, BufferAccessStrategy bstrategy)
 static void
 do_analyze_rel(Relation onerel, VacuumStmt *vacstmt,
 			   AcquireSampleRowsFunc acquirefunc, BlockNumber relpages,
-			   bool inh, int elevel)
+			   bool inh, bool in_outer_xact, int elevel)
 {
 	int			attr_cnt,
 				tcnt,
@@ -584,7 +587,8 @@ do_analyze_rel(Relation onerel, VacuumStmt *vacstmt,
 							visibilitymap_count(onerel),
 							hasindex,
 							InvalidTransactionId,
-							InvalidMultiXactId);
+							InvalidMultiXactId,
+							in_outer_xact);
 
 	/*
 	 * Same for indexes. Vacuum always scans all indexes, so if we're part of
@@ -605,7 +609,8 @@ do_analyze_rel(Relation onerel, VacuumStmt *vacstmt,
 								0,
 								false,
 								InvalidTransactionId,
-								InvalidMultiXactId);
+								InvalidMultiXactId,
+								in_outer_xact);
 		}
 	}
 
@@ -1478,6 +1483,10 @@ acquire_inherited_sample_rows(Relation onerel, int elevel,
 		/* CCI because we already updated the pg_class row in this command */
 		CommandCounterIncrement();
 		SetRelationHasSubclass(RelationGetRelid(onerel), false);
+		ereport(elevel,
+				(errmsg("skipping analyze of \"%s.%s\" inheritance tree --- this inheritance tree contains no child tables",
+						get_namespace_name(RelationGetNamespace(onerel)),
+						RelationGetRelationName(onerel))));
 		return 0;
 	}
 
@@ -2292,6 +2301,12 @@ compute_scalar_stats(VacAttrStatsP stats,
 	/* We always use the default collation for statistics */
 	ssup.ssup_collation = DEFAULT_COLLATION_OID;
 	ssup.ssup_nulls_first = false;
+	/*
+	 * For now, don't perform abbreviated key conversion, because full values
+	 * are required for MCV slot generation.  Supporting that optimization
+	 * would necessitate teaching compare_scalars() to call a tie-breaker.
+	 */
+	ssup.abbreviate = false;
 
 	PrepareSortSupportFromOrderingOp(mystats->ltopr, &ssup);
 

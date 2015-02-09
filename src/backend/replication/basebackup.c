@@ -3,7 +3,7 @@
  * basebackup.c
  *	  code for taking a base backup and streaming it to a standby
  *
- * Portions Copyright (c) 2010-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2010-2015, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  src/backend/replication/basebackup.c
@@ -471,6 +471,7 @@ perform_base_backup(basebackup_options *opt, DIR *tblspcdir)
 					errmsg("unexpected WAL file size \"%s\"", walFiles[i])));
 			}
 
+			/* send the WAL file itself */
 			_tarWriteHeader(pathbuf, NULL, &statbuf);
 
 			while ((cnt = fread(buf, 1, Min(sizeof(buf), XLogSegSize - len), fp)) > 0)
@@ -497,7 +498,17 @@ perform_base_backup(basebackup_options *opt, DIR *tblspcdir)
 			}
 
 			/* XLogSegSize is a multiple of 512, so no need for padding */
+
 			FreeFile(fp);
+
+			/*
+			 * Mark file as archived, otherwise files can get archived again
+			 * after promotion of a new node. This is in line with
+			 * walreceiver.c always doing a XLogArchiveForceDone() after a
+			 * complete segment.
+			 */
+			StatusFilePath(pathbuf, walFiles[i], ".done");
+			sendFileWithContent(pathbuf, "");
 		}
 
 		/*
@@ -521,6 +532,10 @@ perform_base_backup(basebackup_options *opt, DIR *tblspcdir)
 						 errmsg("could not stat file \"%s\": %m", pathbuf)));
 
 			sendFile(pathbuf, pathbuf, &statbuf, false);
+
+			/* unconditionally mark file as archived */
+			StatusFilePath(pathbuf, fname, ".done");
+			sendFileWithContent(pathbuf, "");
 		}
 
 		/* Send CopyDone message for the last tar file */
@@ -1021,6 +1036,15 @@ sendDir(char *path, int basepathlen, bool sizeonly, List *tablespaces)
 				_tarWriteHeader(pathbuf + basepathlen + 1, NULL, &statbuf);
 			}
 			size += 512;		/* Size of the header just added */
+
+			/*
+			 * Also send archive_status directory (by hackishly reusing
+			 * statbuf from above ...).
+			 */
+			if (!sizeonly)
+				_tarWriteHeader("./pg_xlog/archive_status", NULL, &statbuf);
+			size += 512;		/* Size of the header just added */
+
 			continue;			/* don't recurse into pg_xlog */
 		}
 
@@ -1270,15 +1294,21 @@ throttle(size_t increment)
 	/* Only sleep if the transfer is faster than it should be. */
 	if (sleep > 0)
 	{
-		ResetLatch(&MyWalSnd->latch);
+		ResetLatch(MyLatch);
+
+		/* We're eating a potentially set latch, so check for interrupts */
+		CHECK_FOR_INTERRUPTS();
 
 		/*
 		 * (TAR_SEND_SIZE / throttling_sample * elapsed_min_unit) should be
 		 * the maximum time to sleep. Thus the cast to long is safe.
 		 */
-		wait_result = WaitLatch(&MyWalSnd->latch,
+		wait_result = WaitLatch(MyLatch,
 							 WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
 								(long) (sleep / 1000));
+
+		if (wait_result & WL_LATCH_SET)
+			CHECK_FOR_INTERRUPTS();
 	}
 	else
 	{

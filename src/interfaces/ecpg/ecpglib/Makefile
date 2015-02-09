@@ -2,7 +2,7 @@
 #
 # Makefile for ecpg library
 #
-# Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+# Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
 # Portions Copyright (c) 1994, Regents of the University of California
 #
 # src/interfaces/ecpg/ecpglib/Makefile
@@ -38,11 +38,6 @@ SHLIB_LINK = -L../pgtypeslib -lpgtypes $(libpq) $(filter -lintl -lm, $(LIBS)) $(
 SHLIB_PREREQS = submake-libpq submake-pgtypeslib
 
 SHLIB_EXPORTS = exports.txt
-
-ifeq ($(PORTNAME), win32)
-# Link to shfolder.dll instead of shell32.dll
-SHLIB_LINK += -lshfolder
-endif
 
 PKG_CONFIG_REQUIRES_PRIVATE = libpq libpgtypes
 

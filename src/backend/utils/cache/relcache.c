@@ -3,7 +3,7 @@
  * relcache.c
  *	  POSTGRES relation descriptor cache code
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -36,6 +36,7 @@
 #include "access/sysattr.h"
 #include "access/transam.h"
 #include "access/xact.h"
+#include "access/xlog.h"
 #include "catalog/catalog.h"
 #include "catalog/index.h"
 #include "catalog/indexing.h"
@@ -63,6 +64,7 @@
 #include "optimizer/prep.h"
 #include "optimizer/var.h"
 #include "rewrite/rewriteDefine.h"
+#include "rewrite/rowsecurity.h"
 #include "storage/lmgr.h"
 #include "storage/smgr.h"
 #include "utils/array.h"
@@ -864,9 +866,9 @@ equalPolicy(RowSecurityPolicy *policy1, RowSecurityPolicy *policy2)
 		if (policy2 == NULL)
 			return false;
 
-		if (policy1->rsecid != policy2->rsecid)
+		if (policy1->policy_id != policy2->policy_id)
 			return false;
-		if (policy1->cmd != policy2->cmd)
+		if (policy1->polcmd != policy2->polcmd)
 			return false;
 		if (policy1->hassublinks != policy2->hassublinks)
 			return false;
@@ -1051,7 +1053,7 @@ RelationBuildDesc(Oid targetRelId, bool insertIt)
 	if (relation->rd_rel->relrowsecurity)
 		RelationBuildRowSecurity(relation);
 	else
-		relation->rsdesc = NULL;
+		relation->rd_rsdesc = NULL;
 
 	/*
 	 * if it's an index, initialize index-related information
@@ -1407,9 +1409,8 @@ LookupOpclassInfo(Oid operatorClassOid,
 		MemSet(&ctl, 0, sizeof(ctl));
 		ctl.keysize = sizeof(Oid);
 		ctl.entrysize = sizeof(OpClassCacheEnt);
-		ctl.hash = oid_hash;
 		OpClassCache = hash_create("Operator class cache", 64,
-								   &ctl, HASH_ELEM | HASH_FUNCTION);
+								   &ctl, HASH_ELEM | HASH_BLOBS);
 
 		/* Also make sure CacheMemoryContext exists */
 		if (!CacheMemoryContext)
@@ -2023,8 +2024,8 @@ RelationDestroyRelation(Relation relation, bool remember_tupdesc)
 		MemoryContextDelete(relation->rd_indexcxt);
 	if (relation->rd_rulescxt)
 		MemoryContextDelete(relation->rd_rulescxt);
-	if (relation->rsdesc)
-		MemoryContextDelete(relation->rsdesc->rscxt);
+	if (relation->rd_rsdesc)
+		MemoryContextDelete(relation->rd_rsdesc->rscxt);
 	if (relation->rd_fdwroutine)
 		pfree(relation->rd_fdwroutine);
 	pfree(relation);
@@ -2191,15 +2192,31 @@ RelationClearRelation(Relation relation, bool rebuild)
 		newrel = RelationBuildDesc(save_relid, false);
 		if (newrel == NULL)
 		{
-			/* Should only get here if relation was deleted */
-			RelationCacheDelete(relation);
-			RelationDestroyRelation(relation, false);
+			/*
+			 * We can validly get here, if we're using a historic snapshot in
+			 * which a relation, accessed from outside logical decoding, is
+			 * still invisible. In that case it's fine to just mark the
+			 * relation as invalid and return - it'll fully get reloaded by
+			 * the cache reset at the end of logical decoding (or at the next
+			 * access).  During normal processing we don't want to ignore this
+			 * case as it shouldn't happen there, as explained below.
+			 */
+			if (HistoricSnapshotActive())
+				return;
+
+			/*
+			 * This shouldn't happen as dropping a relation is intended to be
+			 * impossible if still referenced (c.f. CheckTableNotInUse()). But
+			 * if we get here anyway, we can't just delete the relcache entry,
+			 * as it possibly could get accessed later (as e.g. the error
+			 * might get trapped and handled via a subtransaction rollback).
+			 */
 			elog(ERROR, "relation %u deleted while still in use", save_relid);
 		}
 
 		keep_tupdesc = equalTupleDescs(relation->rd_att, newrel->rd_att);
 		keep_rules = equalRuleLocks(relation->rd_rules, newrel->rd_rules);
-		keep_policies = equalRSDesc(relation->rsdesc, newrel->rsdesc);
+		keep_policies = equalRSDesc(relation->rd_rsdesc, newrel->rd_rsdesc);
 
 		/*
 		 * Perform swapping of the relcache entry contents.  Within this
@@ -2249,7 +2266,7 @@ RelationClearRelation(Relation relation, bool rebuild)
 			SWAPFIELD(MemoryContext, rd_rulescxt);
 		}
 		if (keep_policies)
-			SWAPFIELD(RowSecurityDesc *, rsdesc);
+			SWAPFIELD(RowSecurityDesc *, rd_rsdesc);
 		/* toast OID override must be preserved */
 		SWAPFIELD(Oid, rd_toastoid);
 		/* pgstat_info must be preserved */
@@ -3003,10 +3020,14 @@ RelationBuildLocalRelation(const char *relname,
  * The relation is marked with relfrozenxid = freezeXid (InvalidTransactionId
  * must be passed for indexes and sequences).  This should be a lower bound on
  * the XIDs that will be put into the new relation contents.
+ *
+ * The new filenode's persistence is set to the given value.  This is useful
+ * for the cases that are changing the relation's persistence; other callers
+ * need to pass the original relpersistence value.
  */
 void
-RelationSetNewRelfilenode(Relation relation, TransactionId freezeXid,
-						  MultiXactId minmulti)
+RelationSetNewRelfilenode(Relation relation, char persistence,
+						  TransactionId freezeXid, MultiXactId minmulti)
 {
 	Oid			newrelfilenode;
 	RelFileNodeBackend newrnode;
@@ -3023,7 +3044,7 @@ RelationSetNewRelfilenode(Relation relation, TransactionId freezeXid,
 
 	/* Allocate a new relfilenode */
 	newrelfilenode = GetNewRelFileNode(relation->rd_rel->reltablespace, NULL,
-									   relation->rd_rel->relpersistence);
+									   persistence);
 
 	/*
 	 * Get a writable copy of the pg_class tuple for the given relation.
@@ -3046,7 +3067,7 @@ RelationSetNewRelfilenode(Relation relation, TransactionId freezeXid,
 	newrnode.node = relation->rd_node;
 	newrnode.node.relNode = newrelfilenode;
 	newrnode.backend = relation->rd_backend;
-	RelationCreateStorage(newrnode.node, relation->rd_rel->relpersistence);
+	RelationCreateStorage(newrnode.node, persistence);
 	smgrclosenode(newrnode);
 
 	/*
@@ -3076,6 +3097,7 @@ RelationSetNewRelfilenode(Relation relation, TransactionId freezeXid,
 	}
 	classform->relfrozenxid = freezeXid;
 	classform->relminmxid = minmulti;
+	classform->relpersistence = persistence;
 
 	simple_heap_update(pg_class, &tuple->t_self, tuple);
 	CatalogUpdateIndexes(pg_class, tuple);
@@ -3133,9 +3155,8 @@ RelationCacheInitialize(void)
 	MemSet(&ctl, 0, sizeof(ctl));
 	ctl.keysize = sizeof(Oid);
 	ctl.entrysize = sizeof(RelIdCacheEnt);
-	ctl.hash = oid_hash;
 	RelationIdCache = hash_create("Relcache by OID", INITRELCACHESIZE,
-								  &ctl, HASH_ELEM | HASH_FUNCTION);
+								  &ctl, HASH_ELEM | HASH_BLOBS);
 
 	/*
 	 * relation mapper needs to be initialized too
@@ -3432,13 +3453,13 @@ RelationCacheInitializePhase3(void)
 		 * they are not preserved in the cache.  Note that we can never NOT
 		 * have a policy while relrowsecurity is true,
 		 * RelationBuildRowSecurity will create a single default-deny policy
-		 * if there is no policy defined in pg_rowsecurity.
+		 * if there is no policy defined in pg_policy.
 		 */
-		if (relation->rd_rel->relrowsecurity && relation->rsdesc == NULL)
+		if (relation->rd_rel->relrowsecurity && relation->rd_rsdesc == NULL)
 		{
 			RelationBuildRowSecurity(relation);
 
-			Assert (relation->rsdesc != NULL);
+			Assert (relation->rd_rsdesc != NULL);
 			restart = true;
 		}
 
@@ -4814,7 +4835,7 @@ load_relcache_init_file(bool shared)
 		rel->rd_rules = NULL;
 		rel->rd_rulescxt = NULL;
 		rel->trigdesc = NULL;
-		rel->rsdesc = NULL;
+		rel->rd_rsdesc = NULL;
 		rel->rd_indexprs = NIL;
 		rel->rd_indpred = NIL;
 		rel->rd_exclops = NULL;

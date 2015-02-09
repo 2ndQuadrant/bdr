@@ -7,7 +7,7 @@
  * support for xadd and cmpxchg. Given that the 386 isn't supported anywhere
  * anymore that's not much of restriction luckily.
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * NOTES:
@@ -73,6 +73,7 @@ typedef struct pg_atomic_uint32
 #define PG_HAVE_ATOMIC_U64_SUPPORT
 typedef struct pg_atomic_uint64
 {
+	/* alignment guaranteed due to being on a 64bit platform */
 	volatile uint64 value;
 } pg_atomic_uint64;
 #endif

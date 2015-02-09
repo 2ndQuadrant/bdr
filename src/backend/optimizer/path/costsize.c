@@ -57,7 +57,7 @@
  * values.
  *
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -2266,7 +2266,7 @@ final_cost_mergejoin(PlannerInfo *root, MergePath *path,
 	 * it off does not entitle us to deliver an invalid plan.
 	 */
 	else if (innersortkeys == NIL &&
-			 !ExecSupportsMarkRestore(inner_path->pathtype))
+			 !ExecSupportsMarkRestore(inner_path))
 		path->materialize_inner = true;
 
 	/*

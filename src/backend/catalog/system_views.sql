@@ -1,7 +1,7 @@
 /*
  * PostgreSQL System Views
  *
- * Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Copyright (c) 1996-2015, PostgreSQL Global Development Group
  *
  * src/backend/catalog/system_views.sql
  */
@@ -33,6 +33,7 @@ CREATE VIEW pg_shadow AS
         rolsuper AS usesuper,
         rolcatupdate AS usecatupd,
         rolreplication AS userepl,
+        rolbypassrls AS usebypassrls,
         rolpassword AS passwd,
         rolvaliduntil::abstime AS valuntil,
         setconfig AS useconfig
@@ -58,6 +59,7 @@ CREATE VIEW pg_user AS
         usesuper,
         usecatupd,
         userepl,
+        usebypassrls,
         '********'::text as passwd,
         valuntil,
         useconfig
@@ -67,30 +69,29 @@ CREATE VIEW pg_policies AS
     SELECT
         N.nspname AS schemaname,
         C.relname AS tablename,
-        rs.rsecpolname AS policyname,
+        pol.polname AS policyname,
         CASE
-            WHEN rs.rsecroles = '{0}' THEN
+            WHEN pol.polroles = '{0}' THEN
                 string_to_array('public', '')
             ELSE
                 ARRAY
                 (
                     SELECT rolname
                     FROM pg_catalog.pg_authid
-                    WHERE oid = ANY (rs.rsecroles) ORDER BY 1
+                    WHERE oid = ANY (pol.polroles) ORDER BY 1
                 )
         END AS roles,
-        CASE WHEN rs.rseccmd IS NULL THEN 'ALL' ELSE
-            CASE rs.rseccmd
-                WHEN 'r' THEN 'SELECT'
-                WHEN 'a' THEN 'INSERT'
-                WHEN 'u' THEN 'UPDATE'
-                WHEN 'd' THEN 'DELETE'
-            END
+        CASE pol.polcmd
+            WHEN 'r' THEN 'SELECT'
+            WHEN 'a' THEN 'INSERT'
+            WHEN 'w' THEN 'UPDATE'
+            WHEN 'd' THEN 'DELETE'
+            WHEN '*' THEN 'ALL'
         END AS cmd,
-        pg_catalog.pg_get_expr(rs.rsecqual, rs.rsecrelid) AS qual,
-        pg_catalog.pg_get_expr(rs.rsecwithcheck, rs.rsecrelid) AS with_check
-    FROM pg_catalog.pg_rowsecurity rs
-    JOIN pg_catalog.pg_class C ON (C.oid = rs.rsecrelid)
+        pg_catalog.pg_get_expr(pol.polqual, pol.polrelid) AS qual,
+        pg_catalog.pg_get_expr(pol.polwithcheck, pol.polrelid) AS with_check
+    FROM pg_catalog.pg_policy pol
+    JOIN pg_catalog.pg_class C ON (C.oid = pol.polrelid)
     LEFT JOIN pg_catalog.pg_namespace N ON (N.oid = C.relnamespace);
 
 CREATE VIEW pg_rules AS

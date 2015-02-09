@@ -3,7 +3,7 @@
  * jsonapi.h
  *	  Declarations for JSON API support.
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/utils/jsonapi.h
@@ -116,5 +116,12 @@ extern JsonLexContext *makeJsonLexContext(text *json, bool need_escapes);
 extern JsonLexContext *makeJsonLexContextCstringLen(char *json,
 							 int len,
 							 bool need_escapes);
+
+/*
+ * Utility function to check if a string is a valid JSON number.
+ *
+ * str agrument does not need to be nul-terminated.
+ */
+extern bool IsValidJsonNumber(const char * str, int len);
 
 #endif   /* JSONAPI_H */

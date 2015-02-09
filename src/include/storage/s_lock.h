@@ -86,7 +86,7 @@
  *	when using the SysV semaphore code.
  *
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *	  src/include/storage/s_lock.h
@@ -158,7 +158,7 @@ tas(volatile slock_t *lock)
 		"	xchgb	%0,%1	\n"
 		"1: \n"
 :		"+q"(_res), "+m"(*lock)
-:
+:		/* no inputs */
 :		"memory", "cc");
 	return (int) _res;
 }
@@ -225,7 +225,7 @@ tas(volatile slock_t *lock)
 		"	lock			\n"
 		"	xchgb	%0,%1	\n"
 :		"+q"(_res), "+m"(*lock)
-:
+:		/* no inputs */
 :		"memory", "cc");
 	return (int) _res;
 }
@@ -519,7 +519,7 @@ tas(volatile slock_t *lock)
 		"	tas		%1		\n"
 		"	sne		%0		\n"
 :		"=d"(rv), "+m"(*lock)
-:
+:		/* no inputs */
 :		"memory", "cc");
 	return rv;
 }
@@ -586,7 +586,7 @@ tas(volatile slock_t *lock)
 		"       sync                \n"
 		"       .set pop              "
 :		"=&r" (_res), "=&r" (_tmp), "+R" (*_l)
-:
+:		/* no inputs */
 :		"memory");
 	return _res;
 }
@@ -601,9 +601,10 @@ do \
 		"       .set noreorder      \n" \
 		"       .set nomacro        \n" \
 		"       sync                \n" \
-		"       .set pop              "
-:
-:		"memory");
+		"       .set pop              " \
+:		/* no outputs */ \
+:		/* no inputs */	\
+:		"memory"); \
 	*((volatile slock_t *) (lock)) = 0; \
 } while (0)
 
@@ -751,6 +752,15 @@ tas(volatile slock_t *lock)
 	return (lockval == 0);
 }
 
+/*
+ * The hppa implementation doesn't follow the rules of this files and provides
+ * a gcc specific implementation outside of the above defined(__GNUC__). It
+ * does so to avoid duplication between the HP compiler and gcc. So undefine
+ * the generic fallback S_UNLOCK from above.
+ */
+#ifdef S_UNLOCK
+#undef S_UNLOCK
+#endif
 #define S_UNLOCK(lock)	\
 	do { \
 		__asm__ __volatile__("" : : : "memory"); \

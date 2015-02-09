@@ -3,7 +3,7 @@
  * event_trigger.c
  *	  PostgreSQL EVENT TRIGGER support code.
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -46,11 +46,16 @@
 #include "utils/syscache.h"
 #include "tcop/utility.h"
 
-
 typedef struct EventTriggerQueryState
 {
+	/* sql_drop */
 	slist_head	SQLDropList;
 	bool		in_sql_drop;
+
+	/* table_rewrite */
+	Oid			table_rewrite_oid;	/* InvalidOid, or set for table_rewrite event */
+	int			table_rewrite_reason;	/* AT_REWRITE reason */
+
 	MemoryContext cxt;
 	StashedCommand *curcmd;
 	List	   *stash;		/* list of StashedCommand; see deparse_utility.h */
@@ -119,6 +124,10 @@ typedef struct SQLDropObject
 	const char *objname;
 	const char *objidentity;
 	const char *objecttype;
+	List	   *addrnames;
+	List	   *addrargs;
+	bool		original;
+	bool		normal;
 	slist_node	next;
 } SQLDropObject;
 
@@ -126,11 +135,14 @@ static void AlterEventTriggerOwner_internal(Relation rel,
 								HeapTuple tup,
 								Oid newOwnerId);
 static event_trigger_command_tag_check_result check_ddl_tag(const char *tag);
+static event_trigger_command_tag_check_result check_table_rewrite_ddl_tag(
+	const char *tag);
 static void error_duplicate_filter_variable(const char *defname);
 static Datum filter_list_to_array(List *filterlist);
 static Oid insert_event_trigger_tuple(char *trigname, char *eventname,
 						   Oid evtOwner, Oid funcoid, List *tags);
 static void validate_ddl_tags(const char *filtervar, List *taglist);
+static void validate_table_rewrite_tags(const char *filtervar, List *taglist);
 static void EventTriggerInvoke(List *fn_oid_list, EventTriggerData *trigdata);
 
 /*
@@ -161,7 +173,8 @@ CreateEventTrigger(CreateEventTrigStmt *stmt)
 	/* Validate event name. */
 	if (strcmp(stmt->eventname, "ddl_command_start") != 0 &&
 		strcmp(stmt->eventname, "ddl_command_end") != 0 &&
-		strcmp(stmt->eventname, "sql_drop") != 0)
+		strcmp(stmt->eventname, "sql_drop") != 0 &&
+		strcmp(stmt->eventname, "table_rewrite") != 0)
 		ereport(ERROR,
 				(errcode(ERRCODE_SYNTAX_ERROR),
 				 errmsg("unrecognized event name \"%s\"",
@@ -190,6 +203,9 @@ CreateEventTrigger(CreateEventTrigStmt *stmt)
 		 strcmp(stmt->eventname, "sql_drop") == 0)
 		&& tags != NULL)
 		validate_ddl_tags("tag", tags);
+	else if (strcmp(stmt->eventname, "table_rewrite") == 0
+			 && tags != NULL)
+		validate_table_rewrite_tags("tag", tags);
 
 	/*
 	 * Give user a nice error message if an event trigger of the same name
@@ -289,6 +305,38 @@ check_ddl_tag(const char *tag)
 	if (!etsd->supported)
 		return EVENT_TRIGGER_COMMAND_TAG_NOT_SUPPORTED;
 	return EVENT_TRIGGER_COMMAND_TAG_OK;
+}
+
+/*
+ * Validate DDL command tags for event table_rewrite.
+ */
+static void
+validate_table_rewrite_tags(const char *filtervar, List *taglist)
+{
+	ListCell   *lc;
+
+	foreach(lc, taglist)
+	{
+		const char *tag = strVal(lfirst(lc));
+		event_trigger_command_tag_check_result result;
+
+		result = check_table_rewrite_ddl_tag(tag);
+		if (result == EVENT_TRIGGER_COMMAND_TAG_NOT_SUPPORTED)
+			ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+			/* translator: %s represents an SQL statement name */
+					 errmsg("event triggers are not supported for %s",
+							tag)));
+	}
+}
+
+static event_trigger_command_tag_check_result
+check_table_rewrite_ddl_tag(const char *tag)
+{
+	if (pg_strcasecmp(tag, "ALTER TABLE") == 0)
+		return EVENT_TRIGGER_COMMAND_TAG_OK;
+
+	return EVENT_TRIGGER_COMMAND_TAG_NOT_SUPPORTED;
 }
 
 /*
@@ -652,8 +700,18 @@ EventTriggerCommonSetup(Node *parsetree,
 		const char *dbgtag;
 
 		dbgtag = CreateCommandTag(parsetree);
-		if (check_ddl_tag(dbgtag) != EVENT_TRIGGER_COMMAND_TAG_OK)
-			elog(ERROR, "unexpected command tag \"%s\"", dbgtag);
+		if (event == EVT_DDLCommandStart ||
+			event == EVT_DDLCommandEnd   ||
+			event == EVT_SQLDrop)
+		{
+			if (check_ddl_tag(dbgtag) != EVENT_TRIGGER_COMMAND_TAG_OK)
+				elog(ERROR, "unexpected command tag \"%s\"", dbgtag);
+		}
+		else if (event == EVT_TableRewrite)
+		{
+			if (check_table_rewrite_ddl_tag(dbgtag) != EVENT_TRIGGER_COMMAND_TAG_OK)
+				elog(ERROR, "unexpected command tag \"%s\"", dbgtag);
+		}
 	}
 #endif
 
@@ -849,6 +907,80 @@ EventTriggerSQLDrop(Node *parsetree)
 	list_free(runlist);
 }
 
+
+/*
+ * Fire table_rewrite triggers.
+ */
+void
+EventTriggerTableRewrite(Node *parsetree, Oid tableOid, int reason)
+{
+	List	   *runlist;
+	EventTriggerData trigdata;
+
+	elog(DEBUG1, "EventTriggerTableRewrite(%u)", tableOid);
+
+	/*
+	 * Event Triggers are completely disabled in standalone mode.  There are
+	 * (at least) two reasons for this:
+	 *
+	 * 1. A sufficiently broken event trigger might not only render the
+	 * database unusable, but prevent disabling itself to fix the situation.
+	 * In this scenario, restarting in standalone mode provides an escape
+	 * hatch.
+	 *
+	 * 2. BuildEventTriggerCache relies on systable_beginscan_ordered, and
+	 * therefore will malfunction if pg_event_trigger's indexes are damaged.
+	 * To allow recovery from a damaged index, we need some operating mode
+	 * wherein event triggers are disabled.  (Or we could implement
+	 * heapscan-and-sort logic for that case, but having disaster recovery
+	 * scenarios depend on code that's otherwise untested isn't appetizing.)
+	 */
+	if (!IsUnderPostmaster)
+		return;
+
+	runlist = EventTriggerCommonSetup(parsetree,
+									  EVT_TableRewrite,
+									  "table_rewrite",
+									  &trigdata);
+	if (runlist == NIL)
+		return;
+
+	/*
+	 * Make sure pg_event_trigger_table_rewrite_oid only works when running
+	 * these triggers. Use PG_TRY to ensure table_rewrite_oid is reset even
+	 * when one trigger fails. (This is perhaps not necessary, as the
+	 * currentState variable will be removed shortly by our caller, but it
+	 * seems better to play safe.)
+	 */
+	currentEventTriggerState->table_rewrite_oid = tableOid;
+	currentEventTriggerState->table_rewrite_reason = reason;
+
+	/* Run the triggers. */
+	PG_TRY();
+	{
+		EventTriggerInvoke(runlist, &trigdata);
+	}
+	PG_CATCH();
+	{
+		currentEventTriggerState->table_rewrite_oid = InvalidOid;
+		currentEventTriggerState->table_rewrite_reason = 0;
+		PG_RE_THROW();
+	}
+	PG_END_TRY();
+
+	currentEventTriggerState->table_rewrite_oid = InvalidOid;
+	currentEventTriggerState->table_rewrite_reason = 0;
+
+	/* Cleanup. */
+	list_free(runlist);
+
+	/*
+	 * Make sure anything the event triggers did will be visible to the main
+	 * command.
+	 */
+	CommandCounterIncrement();
+}
+
 /*
  * Invoke each event trigger in a list of event triggers.
  */
@@ -881,6 +1013,8 @@ EventTriggerInvoke(List *fn_oid_list, EventTriggerData *trigdata)
 		FmgrInfo	flinfo;
 		FunctionCallInfoData fcinfo;
 		PgStat_FunctionCallUsage fcusage;
+
+		elog(DEBUG1, "EventTriggerInvoke %u", fnoid);
 
 		/*
 		 * We want each event trigger to be able to see the results of the
@@ -931,12 +1065,14 @@ EventTriggerSupportsObjectType(ObjectType obtype)
 		case OBJECT_AGGREGATE:
 		case OBJECT_ATTRIBUTE:
 		case OBJECT_CAST:
+		case OBJECT_COLLATION:
 		case OBJECT_COLUMN:
 		case OBJECT_COMPOSITE:
 		case OBJECT_CONSTRAINT:
-		case OBJECT_COLLATION:
 		case OBJECT_CONVERSION:
+		case OBJECT_DEFAULT:
 		case OBJECT_DOMAIN:
+		case OBJECT_DOMCONSTRAINT:
 		case OBJECT_EXTENSION:
 		case OBJECT_FDW:
 		case OBJECT_FOREIGN_SERVER:
@@ -953,6 +1089,7 @@ EventTriggerSupportsObjectType(ObjectType obtype)
 		case OBJECT_RULE:
 		case OBJECT_SCHEMA:
 		case OBJECT_SEQUENCE:
+		case OBJECT_TABCONSTRAINT:
 		case OBJECT_TABLE:
 		case OBJECT_TRIGGER:
 		case OBJECT_TSCONFIGURATION:
@@ -1010,7 +1147,7 @@ EventTriggerSupportsObjectClass(ObjectClass objclass)
 		case OCLASS_USER_MAPPING:
 		case OCLASS_DEFACL:
 		case OCLASS_EXTENSION:
-		case OCLASS_ROWSECURITY:
+		case OCLASS_POLICY:
 			return true;
 
 		case MAX_OCLASS:
@@ -1075,6 +1212,7 @@ EventTriggerBeginCompleteQuery(void)
 	state->cxt = cxt;
 	slist_init(&(state->SQLDropList));
 	state->in_sql_drop = false;
+	state->table_rewrite_oid = InvalidOid;
 	state->curcmd = NULL;
 	state->stash = NIL;
 
@@ -1116,8 +1254,9 @@ EventTriggerEndCompleteQuery(void)
 bool
 trackDroppedObjectsNeeded(void)
 {
-	/* true if any sql_drop event trigger exists */
-	return list_length(EventCacheLookup(EVT_SQLDrop)) > 0;
+	/* true if any sql_drop or table_rewrite event trigger exists */
+	return list_length(EventCacheLookup(EVT_SQLDrop)) > 0 ||
+		list_length(EventCacheLookup(EVT_TableRewrite)) > 0;
 }
 
 /*
@@ -1141,7 +1280,7 @@ trackDroppedObjectsNeeded(void)
  * Register one object as being dropped by the current command.
  */
 void
-EventTriggerSQLDropAddObject(ObjectAddress *object)
+EventTriggerSQLDropAddObject(const ObjectAddress *object, bool original, bool normal)
 {
 	SQLDropObject *obj;
 	MemoryContext oldcxt;
@@ -1160,6 +1299,8 @@ EventTriggerSQLDropAddObject(ObjectAddress *object)
 
 	obj = palloc0(sizeof(SQLDropObject));
 	obj->address = *object;
+	obj->original = original;
+	obj->normal = normal;
 
 	/*
 	 * Obtain schema names from the object's catalog tuple, if one exists;
@@ -1221,10 +1362,11 @@ EventTriggerSQLDropAddObject(ObjectAddress *object)
 		heap_close(catalog, AccessShareLock);
 	}
 
-	/* object identity */
-	obj->objidentity = getObjectIdentity(&obj->address);
+	/* object identity, objname and objargs */
+	obj->objidentity =
+		getObjectIdentityParts(&obj->address, &obj->addrnames, &obj->addrargs);
 
-	/* and object type, too */
+	/* object type */
 	obj->objecttype = getObjectTypeDescription(&obj->address);
 
 	slist_push_head(&(currentEventTriggerState->SQLDropList), &obj->next);
@@ -1287,8 +1429,8 @@ pg_event_trigger_dropped_objects(PG_FUNCTION_ARGS)
 	{
 		SQLDropObject *obj;
 		int			i = 0;
-		Datum		values[7];
-		bool		nulls[7];
+		Datum		values[11];
+		bool		nulls[11];
 
 		obj = slist_container(SQLDropObject, next, iter.cur);
 
@@ -1303,6 +1445,12 @@ pg_event_trigger_dropped_objects(PG_FUNCTION_ARGS)
 
 		/* objsubid */
 		values[i++] = Int32GetDatum(obj->address.objectSubId);
+
+		/* original */
+		values[i++] = BoolGetDatum(obj->original);
+
+		/* normal */
+		values[i++] = BoolGetDatum(obj->normal);
 
 		/* object_type */
 		values[i++] = CStringGetTextDatum(obj->objecttype);
@@ -1325,6 +1473,22 @@ pg_event_trigger_dropped_objects(PG_FUNCTION_ARGS)
 		else
 			nulls[i++] = true;
 
+		/* address_names and address_args */
+		if (obj->addrnames)
+		{
+			values[i++] = PointerGetDatum(strlist_to_textarray(obj->addrnames));
+
+			if (obj->addrargs)
+				values[i++] = PointerGetDatum(strlist_to_textarray(obj->addrargs));
+			else
+				values[i++] = PointerGetDatum(construct_empty_array(TEXTOID));
+		}
+		else
+		{
+			nulls[i++] = true;
+			nulls[i++] = true;
+		}
+
 		tuplestore_putvalues(tupstore, tupdesc, values, nulls);
 	}
 
@@ -1335,6 +1499,50 @@ pg_event_trigger_dropped_objects(PG_FUNCTION_ARGS)
 }
 
 /*
+ * pg_event_trigger_table_rewrite_oid
+ *
+ * Make the Oid of the table going to be rewritten available to the user
+ * function run by the Event Trigger.
+ */
+Datum
+pg_event_trigger_table_rewrite_oid(PG_FUNCTION_ARGS)
+{
+	/*
+	 * Protect this function from being called out of context
+	 */
+	if (!currentEventTriggerState ||
+		currentEventTriggerState->table_rewrite_oid == InvalidOid)
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+		 errmsg("%s can only be called in a table_rewrite event trigger function",
+				"pg_event_trigger_table_rewrite_oid()")));
+
+	PG_RETURN_OID(currentEventTriggerState->table_rewrite_oid);
+}
+
+/*
+ * pg_event_trigger_table_rewrite_reason
+ *
+ * Make the rewrite reason available to the user.
+ */
+Datum
+pg_event_trigger_table_rewrite_reason(PG_FUNCTION_ARGS)
+{
+	/*
+	 * Protect this function from being called out of context
+	 */
+	if (!currentEventTriggerState ||
+		currentEventTriggerState->table_rewrite_reason == 0)
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+		 errmsg("%s can only be called in a table_rewrite event trigger function",
+				"pg_event_trigger_table_rewrite_reason()")));
+
+	PG_RETURN_INT32(currentEventTriggerState->table_rewrite_reason);
+}
+
+/*
+ *
  * EventTriggerStashCommand
  * 		Save data about a simple DDL command that was just executed
  */

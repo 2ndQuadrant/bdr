@@ -497,12 +497,6 @@ my_compress(PG_FUNCTION_ARGS)
        type you're converting to in order to compress your leaf nodes, of
        course.
       </para>
-
-      <para>
-        Depending on your needs, you could also need to care about
-        compressing <literal>NULL</> values in there, storing for example
-        <literal>(Datum) 0</> like <literal>gist_circle_compress</> does.
-      </para>
      </listitem>
     </varlistentry>
 
@@ -861,7 +855,7 @@ my_distance(PG_FUNCTION_ARGS)
   <para>
    By default, a GiST index build switches to the buffering method when the
    index size reaches <xref linkend="guc-effective-cache-size">. It can
-   be manually turned on or off by the <literal>BUFFERING</literal> parameter
+   be manually turned on or off by the <literal>buffering</literal> parameter
    to the CREATE INDEX command. The default behavior is good for most cases,
    but turning buffering off might speed up the build somewhat if the input
    data is ordered.

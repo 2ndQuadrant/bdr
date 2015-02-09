@@ -6,7 +6,7 @@
  * See src/backend/optimizer/README for discussion of EquivalenceClasses.
  *
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -867,9 +867,8 @@ generate_base_implied_equalities_no_const(PlannerInfo *root,
 		int			relid;
 
 		Assert(!cur_em->em_is_child);	/* no children yet */
-		if (bms_membership(cur_em->em_relids) != BMS_SINGLETON)
+		if (!bms_get_singleton_member(cur_em->em_relids, &relid))
 			continue;
-		relid = bms_singleton_member(cur_em->em_relids);
 		Assert(relid < root->simple_rel_array_size);
 
 		if (prev_ems[relid] != NULL)

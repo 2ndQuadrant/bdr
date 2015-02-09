@@ -3,7 +3,7 @@
  * snapshot.h
  *	  POSTGRES snapshot definition
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/utils/snapshot.h
@@ -14,6 +14,7 @@
 #define SNAPSHOT_H
 
 #include "access/htup.h"
+#include "lib/pairingheap.h"
 #include "storage/buf.h"
 
 
@@ -91,7 +92,9 @@ typedef struct SnapshotData
 	 */
 	CommandId	curcid;			/* in my xact, CID < curcid are visible */
 	uint32		active_count;	/* refcount on ActiveSnapshot stack */
-	uint32		regd_count;		/* refcount on RegisteredSnapshotList */
+	uint32		regd_count;		/* refcount on RegisteredSnapshots */
+
+	pairingheap_node ph_node;	/* link in the RegisteredSnapshots heap */
 } SnapshotData;
 
 /*

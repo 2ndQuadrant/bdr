@@ -3,7 +3,7 @@
  *
  *	main source file
  *
- *	Copyright (c) 2010-2014, PostgreSQL Global Development Group
+ *	Copyright (c) 2010-2015, PostgreSQL Global Development Group
  *	contrib/pg_upgrade/pg_upgrade.c
  */
 
@@ -429,6 +429,13 @@ copy_clog_xlog_xid(void)
 	exec_prog(UTILITY_LOG_FILE, NULL, true,
 			  "\"%s/pg_resetxlog\" -f -e %u \"%s\"",
 			  new_cluster.bindir, old_cluster.controldata.chkpnt_nxtepoch,
+			  new_cluster.pgdata);
+	/* must reset commit timestamp limits also */
+	exec_prog(UTILITY_LOG_FILE, NULL, true,
+			  "\"%s/pg_resetxlog\" -f -c %u,%u \"%s\"",
+			  new_cluster.bindir,
+			  old_cluster.controldata.chkpnt_nxtxid,
+			  old_cluster.controldata.chkpnt_nxtxid,
 			  new_cluster.pgdata);
 	check_ok();
 

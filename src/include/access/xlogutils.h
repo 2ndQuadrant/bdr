@@ -3,7 +3,7 @@
  *
  * Utilities for replaying WAL records.
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/access/xlogutils.h
@@ -11,7 +11,7 @@
 #ifndef XLOG_UTILS_H
 #define XLOG_UTILS_H
 
-#include "access/xlog.h"
+#include "access/xlogreader.h"
 #include "storage/bufmgr.h"
 
 
@@ -33,17 +33,14 @@ typedef enum
 						 * replayed) */
 } XLogRedoAction;
 
-extern XLogRedoAction XLogReadBufferForRedo(XLogRecPtr lsn, XLogRecord *record,
-					  int block_index, RelFileNode rnode, BlockNumber blkno,
-					  Buffer *buf);
-extern XLogRedoAction XLogReadBufferForRedoExtended(XLogRecPtr lsn,
-							  XLogRecord *record, int block_index,
-							  RelFileNode rnode, ForkNumber forkno,
-							  BlockNumber blkno,
+extern XLogRedoAction XLogReadBufferForRedo(XLogReaderState *record,
+					  uint8 buffer_id, Buffer *buf);
+extern Buffer XLogInitBufferForRedo(XLogReaderState *record, uint8 block_id);
+extern XLogRedoAction XLogReadBufferForRedoExtended(XLogReaderState *record,
+							  uint8 buffer_id,
 							  ReadBufferMode mode, bool get_cleanup_lock,
 							  Buffer *buf);
 
-extern Buffer XLogReadBuffer(RelFileNode rnode, BlockNumber blkno, bool init);
 extern Buffer XLogReadBufferExtended(RelFileNode rnode, ForkNumber forknum,
 					   BlockNumber blkno, ReadBufferMode mode);
 

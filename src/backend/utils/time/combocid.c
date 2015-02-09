@@ -30,7 +30,7 @@
  * destroyed at the end of each transaction.
  *
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -218,13 +218,12 @@ GetComboCommandId(CommandId cmin, CommandId cmax)
 		memset(&hash_ctl, 0, sizeof(hash_ctl));
 		hash_ctl.keysize = sizeof(ComboCidKeyData);
 		hash_ctl.entrysize = sizeof(ComboCidEntryData);
-		hash_ctl.hash = tag_hash;
 		hash_ctl.hcxt = TopTransactionContext;
 
 		comboHash = hash_create("Combo CIDs",
 								CCID_HASH_SIZE,
 								&hash_ctl,
-								HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+								HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
 
 		comboCids = (ComboCidKeyData *)
 			MemoryContextAlloc(TopTransactionContext,

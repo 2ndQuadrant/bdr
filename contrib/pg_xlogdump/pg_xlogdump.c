@@ -2,7 +2,7 @@
  *
  * pg_xlogdump.c - decode and display WAL
  *
- * Copyright (c) 2013-2014, PostgreSQL Global Development Group
+ * Copyright (c) 2013-2015, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *		  contrib/pg_xlogdump/pg_xlogdump.c
@@ -15,8 +15,9 @@
 #include <dirent.h>
 #include <unistd.h>
 
-#include "access/xlog.h"
 #include "access/xlogreader.h"
+#include "access/xlogrecord.h"
+#include "access/xlog_internal.h"
 #include "access/transam.h"
 #include "common/fe_memutils.h"
 #include "getopt_long.h"
@@ -170,7 +171,7 @@ fuzzy_open_file(const char *directory, const char *fname)
 		fd = open(fname, O_RDONLY | PG_BINARY, 0);
 		if (fd < 0 && errno != ENOENT)
 			return -1;
-		else if (fd > 0)
+		else if (fd >= 0)
 			return fd;
 
 		/* XLOGDIR / fname */
@@ -179,7 +180,7 @@ fuzzy_open_file(const char *directory, const char *fname)
 		fd = open(fpath, O_RDONLY | PG_BINARY, 0);
 		if (fd < 0 && errno != ENOENT)
 			return -1;
-		else if (fd > 0)
+		else if (fd >= 0)
 			return fd;
 
 		datadir = getenv("PGDATA");
@@ -191,7 +192,7 @@ fuzzy_open_file(const char *directory, const char *fname)
 			fd = open(fpath, O_RDONLY | PG_BINARY, 0);
 			if (fd < 0 && errno != ENOENT)
 				return -1;
-			else if (fd > 0)
+			else if (fd >= 0)
 				return fd;
 		}
 	}
@@ -203,7 +204,7 @@ fuzzy_open_file(const char *directory, const char *fname)
 		fd = open(fpath, O_RDONLY | PG_BINARY, 0);
 		if (fd < 0 && errno != ENOENT)
 			return -1;
-		else if (fd > 0)
+		else if (fd >= 0)
 			return fd;
 
 		/* directory / XLOGDIR / fname */
@@ -212,7 +213,7 @@ fuzzy_open_file(const char *directory, const char *fname)
 		fd = open(fpath, O_RDONLY | PG_BINARY, 0);
 		if (fd < 0 && errno != ENOENT)
 			return -1;
-		else if (fd > 0)
+		else if (fd >= 0)
 			return fd;
 	}
 	return -1;
@@ -343,90 +344,132 @@ XLogDumpReadPage(XLogReaderState *state, XLogRecPtr targetPagePtr, int reqLen,
  * Store per-rmgr and per-record statistics for a given record.
  */
 static void
-XLogDumpCountRecord(XLogDumpConfig *config, XLogDumpStats *stats, XLogRecPtr ReadRecPtr, XLogRecord *record)
+XLogDumpCountRecord(XLogDumpConfig *config, XLogDumpStats *stats,
+					XLogReaderState *record)
 {
 	RmgrId		rmid;
 	uint8		recid;
+	uint32		rec_len;
+	uint32		fpi_len;
+	int			block_id;
 
 	stats->count++;
 
+	rmid = XLogRecGetRmid(record);
+	rec_len = XLogRecGetDataLen(record) + SizeOfXLogRecord;
+
+	/*
+	 * Calculate the amount of FPI data in the record. Each backup block
+	 * takes up BLCKSZ bytes, minus the "hole" length.
+	 *
+	 * XXX: We peek into xlogreader's private decoded backup blocks for the
+	 * hole_length. It doesn't seem worth it to add an accessor macro for
+	 * this.
+	 */
+	fpi_len = 0;
+	for (block_id = 0; block_id <= record->max_block_id; block_id++)
+	{
+		if (XLogRecHasBlockImage(record, block_id))
+			fpi_len += BLCKSZ - record->blocks[block_id].hole_length;
+	}
+
 	/* Update per-rmgr statistics */
 
-	rmid = record->xl_rmid;
-
 	stats->rmgr_stats[rmid].count++;
-	stats->rmgr_stats[rmid].rec_len +=
-		record->xl_len + SizeOfXLogRecord;
-	stats->rmgr_stats[rmid].fpi_len +=
-		record->xl_tot_len - (record->xl_len + SizeOfXLogRecord);
+	stats->rmgr_stats[rmid].rec_len += rec_len;
+	stats->rmgr_stats[rmid].fpi_len += fpi_len;
 
 	/*
 	 * Update per-record statistics, where the record is identified by a
-	 * combination of the RmgrId and the four bits of the xl_info field
-	 * that are the rmgr's domain (resulting in sixteen possible entries
-	 * per RmgrId).
+	 * combination of the RmgrId and the four bits of the xl_info field that
+	 * are the rmgr's domain (resulting in sixteen possible entries per
+	 * RmgrId).
 	 */
 
-	recid = record->xl_info >> 4;
+	recid = XLogRecGetInfo(record) >> 4;
 
 	stats->record_stats[rmid][recid].count++;
-	stats->record_stats[rmid][recid].rec_len +=
-		record->xl_len + SizeOfXLogRecord;
-	stats->record_stats[rmid][recid].fpi_len +=
-		record->xl_tot_len - (record->xl_len + SizeOfXLogRecord);
+	stats->record_stats[rmid][recid].rec_len += rec_len;
+	stats->record_stats[rmid][recid].fpi_len += fpi_len;
 }
 
 /*
  * Print a record to stdout
  */
 static void
-XLogDumpDisplayRecord(XLogDumpConfig *config, XLogRecPtr ReadRecPtr, XLogRecord *record)
+XLogDumpDisplayRecord(XLogDumpConfig *config, XLogReaderState *record)
 {
-	const char	   *id;
-	const RmgrDescData *desc = &RmgrDescTable[record->xl_rmid];
+	const char *id;
+	const RmgrDescData *desc = &RmgrDescTable[XLogRecGetRmid(record)];
+	RelFileNode rnode;
+	ForkNumber	forknum;
+	BlockNumber blk;
+	int			block_id;
+	uint8		info = XLogRecGetInfo(record);
+	XLogRecPtr	xl_prev = XLogRecGetPrev(record);
 
-	id = desc->rm_identify(record->xl_info);
+	id = desc->rm_identify(info);
 	if (id == NULL)
-		id = psprintf("UNKNOWN (%x)", record->xl_info & ~XLR_INFO_MASK);
+		id = psprintf("UNKNOWN (%x)", info & ~XLR_INFO_MASK);
 
-	printf("rmgr: %-11s len (rec/tot): %6u/%6u, tx: %10u, lsn: %X/%08X, prev %X/%08X, bkp: %u%u%u%u, desc: %s ",
+	printf("rmgr: %-11s len (rec/tot): %6u/%6u, tx: %10u, lsn: %X/%08X, prev %X/%08X, ",
 		   desc->rm_name,
-		   record->xl_len, record->xl_tot_len,
-		   record->xl_xid,
-		   (uint32) (ReadRecPtr >> 32), (uint32) ReadRecPtr,
-		   (uint32) (record->xl_prev >> 32), (uint32) record->xl_prev,
-		   !!(XLR_BKP_BLOCK(0) & record->xl_info),
-		   !!(XLR_BKP_BLOCK(1) & record->xl_info),
-		   !!(XLR_BKP_BLOCK(2) & record->xl_info),
-		   !!(XLR_BKP_BLOCK(3) & record->xl_info),
-		   id);
+		   XLogRecGetDataLen(record), XLogRecGetTotalLen(record),
+		   XLogRecGetXid(record),
+		   (uint32) (record->ReadRecPtr >> 32), (uint32) record->ReadRecPtr,
+		   (uint32) (xl_prev >> 32), (uint32) xl_prev);
+	printf("desc: %s ", id);
 
 	/* the desc routine will printf the description directly to stdout */
 	desc->rm_desc(NULL, record);
 
-	putchar('\n');
-
-	if (config->bkp_details)
+	if (!config->bkp_details)
 	{
-		int			bkpnum;
-		char	   *blk = (char *) XLogRecGetData(record) + record->xl_len;
-
-		for (bkpnum = 0; bkpnum < XLR_MAX_BKP_BLOCKS; bkpnum++)
+		/* print block references (short format) */
+		for (block_id = 0; block_id <= record->max_block_id; block_id++)
 		{
-			BkpBlock	bkpb;
-
-			if (!(XLR_BKP_BLOCK(bkpnum) & record->xl_info))
+			if (!XLogRecHasBlockRef(record, block_id))
 				continue;
 
-			memcpy(&bkpb, blk, sizeof(BkpBlock));
-			blk += sizeof(BkpBlock);
-			blk += BLCKSZ - bkpb.hole_length;
+			XLogRecGetBlockTag(record, block_id, &rnode, &forknum, &blk);
+			if (forknum != MAIN_FORKNUM)
+				printf(", blkref #%u: rel %u/%u/%u fork %s blk %u",
+					   block_id,
+					   rnode.spcNode, rnode.dbNode, rnode.relNode,
+					   forkNames[forknum],
+					   blk);
+			else
+				printf(", blkref #%u: rel %u/%u/%u blk %u",
+					   block_id,
+					   rnode.spcNode, rnode.dbNode, rnode.relNode,
+					   blk);
+			if (XLogRecHasBlockImage(record, block_id))
+				printf(" FPW");
+		}
+		putchar('\n');
+	}
+	else
+	{
+		/* print block references (detailed format) */
+		putchar('\n');
+		for (block_id = 0; block_id <= record->max_block_id; block_id++)
+		{
+			if (!XLogRecHasBlockRef(record, block_id))
+				continue;
 
-			printf("\tbackup bkp #%u; rel %u/%u/%u; fork: %s; block: %u; hole: offset: %u, length: %u\n",
-				   bkpnum,
-				   bkpb.node.spcNode, bkpb.node.dbNode, bkpb.node.relNode,
-				   forkNames[bkpb.fork],
-				   bkpb.block, bkpb.hole_offset, bkpb.hole_length);
+			XLogRecGetBlockTag(record, block_id, &rnode, &forknum, &blk);
+			printf("\tblkref #%u: rel %u/%u/%u fork %s blk %u",
+				   block_id,
+				   rnode.spcNode, rnode.dbNode, rnode.relNode,
+				   forkNames[forknum],
+				   blk);
+			if (XLogRecHasBlockImage(record, block_id))
+			{
+				printf(" (FPW); hole: offset: %u, length: %u\n",
+					   record->blocks[block_id].hole_offset,
+					   record->blocks[block_id].hole_length);
+			}
+			putchar('\n');
 		}
 	}
 }
@@ -924,9 +967,9 @@ main(int argc, char **argv)
 
 		/* process the record */
 		if (config.stats == true)
-			XLogDumpCountRecord(&config, &stats, xlogreader_state->ReadRecPtr, record);
+			XLogDumpCountRecord(&config, &stats, xlogreader_state);
 		else
-			XLogDumpDisplayRecord(&config, xlogreader_state->ReadRecPtr, record);
+			XLogDumpDisplayRecord(&config, xlogreader_state);
 
 		/* check whether we printed enough */
 		config.already_displayed_records++;

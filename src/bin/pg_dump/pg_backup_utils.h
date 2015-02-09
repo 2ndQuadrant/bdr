@@ -4,7 +4,7 @@
  *	Utility routines shared by pg_dump and pg_restore.
  *
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/bin/pg_dump/pg_backup_utils.h
@@ -36,5 +36,9 @@ vwrite_msg(const char *modulename, const char *fmt, va_list ap)
 __attribute__((format(PG_PRINTF_ATTRIBUTE, 2, 0)));
 extern void on_exit_nicely(on_exit_nicely_callback function, void *arg);
 extern void exit_nicely(int code) __attribute__((noreturn));
+
+extern void
+exit_horribly(const char *modulename, const char *fmt,...)
+__attribute__((format(PG_PRINTF_ATTRIBUTE, 2, 3), noreturn));
 
 #endif   /* PG_BACKUP_UTILS_H */

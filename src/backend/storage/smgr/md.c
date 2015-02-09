@@ -10,7 +10,7 @@
  * It doesn't matter whether the bits are on spinning rust or some other
  * storage technology.
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -229,12 +229,11 @@ mdinit(void)
 		MemSet(&hash_ctl, 0, sizeof(hash_ctl));
 		hash_ctl.keysize = sizeof(RelFileNode);
 		hash_ctl.entrysize = sizeof(PendingOperationEntry);
-		hash_ctl.hash = tag_hash;
 		hash_ctl.hcxt = pendingOpsCxt;
 		pendingOpsTable = hash_create("Pending Ops Table",
 									  100L,
 									  &hash_ctl,
-								   HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+									  HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
 		pendingUnlinks = NIL;
 	}
 }

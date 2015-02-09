@@ -74,9 +74,6 @@
    reference if 'false' */
 #undef FLOAT8PASSBYVAL
 
-/* Define to 1 if getpwuid_r() takes a 5th argument. */
-#undef GETPWUID_R_5ARG
-
 /* Define to 1 if gettimeofday() takes only 1 argument. */
 #undef GETTIMEOFDAY_1ARG
 
@@ -340,6 +337,9 @@
 /* Define to 1 if `long long int' works and is 64 bits. */
 #undef HAVE_LONG_LONG_INT_64
 
+/* Define to 1 if you have the <mbarrier.h> header file. */
+#undef HAVE_MBARRIER_H
+
 /* Define to 1 if you have the `mbstowcs_l' function. */
 #undef HAVE_MBSTOWCS_L
 
@@ -390,6 +390,9 @@
 
 /* Define to 1 if the PS_STRINGS thing exists. */
 #undef HAVE_PS_STRINGS
+
+/* Define to 1 if you have the `pthread_is_threaded_np' function. */
+#undef HAVE_PTHREAD_IS_THREADED_NP
 
 /* Define to 1 if you have the <pwd.h> header file. */
 #undef HAVE_PWD_H
@@ -714,6 +717,9 @@
 
 /* PostgreSQL major version as a string */
 #undef PG_MAJORVERSION
+
+/* Define to gnu_printf if compiler supports it, else printf. */
+#undef PG_PRINTF_ATTRIBUTE
 
 /* Define to 1 if "static inline" works without unwanted warnings from
    compilations where static inline functions are defined but not called. */

@@ -3,7 +3,7 @@
  * postinit.c
  *	  postgres initialization utilities
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -23,6 +23,7 @@
 #include "access/htup_details.h"
 #include "access/sysattr.h"
 #include "access/xact.h"
+#include "access/xlog.h"
 #include "catalog/catalog.h"
 #include "catalog/indexing.h"
 #include "catalog/namespace.h"
@@ -522,6 +523,9 @@ BaseInit(void)
  * name can be returned to the caller in out_dbname.  If out_dbname isn't
  * NULL, it must point to a buffer of size NAMEDATALEN.
  *
+ * Similarly, the username can be passed by name, using the username parameter,
+ * or by OID using the useroid parameter.
+ *
  * In bootstrap mode no parameters are used.  The autovacuum launcher process
  * doesn't use any parameters either, because it only goes far enough to be
  * able to read pg_database; it doesn't connect to any particular database.
@@ -536,7 +540,7 @@ BaseInit(void)
  */
 void
 InitPostgres(const char *in_dbname, Oid dboid, const char *username,
-			 char *out_dbname)
+			 Oid useroid, char *out_dbname)
 {
 	bool		bootstrap = IsBootstrapProcessingMode();
 	bool		am_superuser;
@@ -574,7 +578,7 @@ InitPostgres(const char *in_dbname, Oid dboid, const char *username,
 	 */
 	if (!bootstrap)
 	{
-		RegisterTimeout(DEADLOCK_TIMEOUT, CheckDeadLock);
+		RegisterTimeout(DEADLOCK_TIMEOUT, CheckDeadLockAlert);
 		RegisterTimeout(STATEMENT_TIMEOUT, StatementTimeoutHandler);
 		RegisterTimeout(LOCK_TIMEOUT, LockTimeoutHandler);
 	}
@@ -691,18 +695,18 @@ InitPostgres(const char *in_dbname, Oid dboid, const char *username,
 					(errcode(ERRCODE_UNDEFINED_OBJECT),
 					 errmsg("no roles are defined in this database system"),
 					 errhint("You should immediately run CREATE USER \"%s\" SUPERUSER;.",
-							 username)));
+							 username != NULL ? username : "postgres")));
 	}
 	else if (IsBackgroundWorker)
 	{
-		if (username == NULL)
+		if (username == NULL && !OidIsValid(useroid))
 		{
 			InitializeSessionUserIdStandalone();
 			am_superuser = true;
 		}
 		else
 		{
-			InitializeSessionUserId(username);
+			InitializeSessionUserId(username, useroid);
 			am_superuser = superuser();
 		}
 	}
@@ -711,7 +715,7 @@ InitPostgres(const char *in_dbname, Oid dboid, const char *username,
 		/* normal multiuser case */
 		Assert(MyProcPort != NULL);
 		PerformAuthentication(MyProcPort);
-		InitializeSessionUserId(username);
+		InitializeSessionUserId(username, useroid);
 		am_superuser = superuser();
 	}
 
@@ -1095,18 +1099,24 @@ ShutdownPostgres(int code, Datum arg)
 static void
 StatementTimeoutHandler(void)
 {
+	int sig = SIGINT;
+
+	/*
+	 * During authentication the timeout is used to deal with
+	 * authentication_timeout - we want to quit in response to such timeouts.
+	 */
+	if (ClientAuthInProgress)
+		sig = SIGTERM;
+
 #ifdef HAVE_SETSID
 	/* try to signal whole process group */
-	kill(-MyProcPid, SIGINT);
+	kill(-MyProcPid, sig);
 #endif
-	kill(MyProcPid, SIGINT);
+	kill(MyProcPid, sig);
 }
 
 /*
  * LOCK_TIMEOUT handler: trigger a query-cancel interrupt.
- *
- * This is identical to StatementTimeoutHandler, but since it's so short,
- * we might as well keep the two functions separate for clarity.
  */
 static void
 LockTimeoutHandler(void)

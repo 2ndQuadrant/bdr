@@ -3,7 +3,7 @@
  * atomics.c
  *	   Non-Inline parts of the atomics implementation
  *
- * Portions Copyright (c) 2013-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2013-2015, PostgreSQL Global Development Group
  *
  *
  * IDENTIFICATION
@@ -29,6 +29,14 @@ pg_spinlock_barrier(void)
 {
 	S_LOCK(&dummy_spinlock);
 	S_UNLOCK(&dummy_spinlock);
+}
+#endif
+
+#ifdef PG_HAVE_COMPILER_BARRIER_EMULATION
+void
+pg_extern_compiler_barrier(void)
+{
+	/* do nothing */
 }
 #endif
 

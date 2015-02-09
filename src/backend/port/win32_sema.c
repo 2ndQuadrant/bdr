@@ -3,7 +3,7 @@
  * win32_sema.c
  *	  Microsoft Windows Win32 Semaphores Emulation
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  src/backend/port/win32_sema.c
@@ -116,12 +116,10 @@ PGSemaphoreReset(PGSemaphore sema)
  * Serve the interrupt if interruptOK is true.
  */
 void
-PGSemaphoreLock(PGSemaphore sema, bool interruptOK)
+PGSemaphoreLock(PGSemaphore sema)
 {
 	HANDLE		wh[2];
 	bool		done = false;
-
-	ImmediateInterruptOK = interruptOK;
 
 	/*
 	 * Note: pgwin32_signal_event should be first to ensure that it will be
@@ -173,8 +171,6 @@ PGSemaphoreLock(PGSemaphore sema, bool interruptOK)
 				break;
 		}
 	}
-
-	ImmediateInterruptOK = false;
 }
 
 /*

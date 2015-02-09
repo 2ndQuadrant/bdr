@@ -5,7 +5,7 @@
  *	  along with the relation's initial contents.
  *
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/catalog/pg_aggregate.h
@@ -275,6 +275,7 @@ DATA(insert ( 2901	n 0 xmlconcat2	-					-				-				-				f f 0	142		0	0		0	_null_ 
 
 /* array */
 DATA(insert ( 2335	n 0 array_agg_transfn	array_agg_finalfn	-				-				-				t f 0	2281	0	0		0	_null_ _null_ ));
+DATA(insert ( 4053	n 0 array_agg_array_transfn array_agg_array_finalfn -		-				-				t f 0	2281	0	0		0	_null_ _null_ ));
 
 /* text */
 DATA(insert ( 3538	n 0 string_agg_transfn	string_agg_finalfn	-				-				-				f f 0	2281	0	0		0	_null_ _null_ ));
@@ -285,6 +286,10 @@ DATA(insert ( 3545	n 0 bytea_string_agg_transfn	bytea_string_agg_finalfn	-				-	
 /* json */
 DATA(insert ( 3175	n 0 json_agg_transfn	json_agg_finalfn			-				-				-				f f 0	2281	0	0		0	_null_ _null_ ));
 DATA(insert ( 3197	n 0 json_object_agg_transfn json_object_agg_finalfn -				-				-				f f 0	2281	0	0		0	_null_ _null_ ));
+
+/* jsonb */
+DATA(insert ( 3267	n 0 jsonb_agg_transfn	jsonb_agg_finalfn			-				-				-				f f 0	2281	0	0		0	_null_ _null_ ));
+DATA(insert ( 3270	n 0 jsonb_object_agg_transfn jsonb_object_agg_finalfn -				-				-				f f 0	2281	0	0		0	_null_ _null_ ));
 
 /* ordered-set and hypothetical-set aggregates */
 DATA(insert ( 3972	o 1 ordered_set_transition			percentile_disc_final					-		-		-		t f 0	2281	0	0		0	_null_ _null_ ));

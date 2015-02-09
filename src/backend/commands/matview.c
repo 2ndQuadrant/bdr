@@ -3,7 +3,7 @@
  * matview.c
  *	  materialized view support
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -17,6 +17,7 @@
 #include "access/htup_details.h"
 #include "access/multixact.h"
 #include "access/xact.h"
+#include "access/xlog.h"
 #include "catalog/catalog.h"
 #include "catalog/indexing.h"
 #include "catalog/namespace.h"
@@ -66,7 +67,7 @@ static void mv_GenerateOper(StringInfo buf, Oid opoid);
 
 static void refresh_by_match_merge(Oid matviewOid, Oid tempOid, Oid relowner,
 						 int save_sec_context);
-static void refresh_by_heap_swap(Oid matviewOid, Oid OIDNewHeap);
+static void refresh_by_heap_swap(Oid matviewOid, Oid OIDNewHeap, char relpersistence);
 
 static void OpenMatViewIncrementalMaintenance(void);
 static void CloseMatViewIncrementalMaintenance(void);
@@ -302,7 +303,7 @@ ExecRefreshMatView(RefreshMatViewStmt *stmt, const char *queryString,
 		Assert(matview_maintenance_depth == old_depth);
 	}
 	else
-		refresh_by_heap_swap(matviewOid, OIDNewHeap);
+		refresh_by_heap_swap(matviewOid, OIDNewHeap, relpersistence);
 
 	/* Roll back any GUC changes */
 	AtEOXact_GUC(false, save_nestlevel);
@@ -473,7 +474,7 @@ transientrel_destroy(DestReceiver *self)
  * the given integer, to make a new table name based on the old one.
  *
  * This leaks memory through palloc(), which won't be cleaned up until the
- * current memory memory context is freed.
+ * current memory context is freed.
  */
 static char *
 make_temptable_name_n(char *tempname, int n)
@@ -595,6 +596,13 @@ refresh_by_match_merge(Oid matviewOid, Oid tempOid, Oid relowner,
 		elog(ERROR, "SPI_exec failed: %s", querybuf.data);
 	if (SPI_processed > 0)
 	{
+		/*
+		 * Note that this ereport() is returning data to the user.  Generally,
+		 * we would want to make sure that the user has been granted access to
+		 * this data.  However, REFRESH MAT VIEW is only able to be run by the
+		 * owner of the mat view (or a superuser) and therefore there is no
+		 * need to check for access to data in the mat view.
+		 */
 		ereport(ERROR,
 				(errcode(ERRCODE_CARDINALITY_VIOLATION),
 				 errmsg("new data for \"%s\" contains duplicate rows without any null columns",
@@ -758,10 +766,10 @@ refresh_by_match_merge(Oid matviewOid, Oid tempOid, Oid relowner,
  * swapping is handled by the called function, so it is not needed here.
  */
 static void
-refresh_by_heap_swap(Oid matviewOid, Oid OIDNewHeap)
+refresh_by_heap_swap(Oid matviewOid, Oid OIDNewHeap, char relpersistence)
 {
 	finish_heap_swap(matviewOid, OIDNewHeap, false, false, true, true,
-					 RecentXmin, ReadNextMultiXactId());
+					 RecentXmin, ReadNextMultiXactId(), relpersistence);
 }
 
 

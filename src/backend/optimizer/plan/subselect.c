@@ -3,7 +3,7 @@
  * subselect.c
  *	  Planning routines for subselects and parameters.
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -70,7 +70,7 @@ static Node *convert_testexpr_mutator(Node *node,
 static bool subplan_is_hashable(Plan *plan);
 static bool testexpr_is_hashable(Node *testexpr);
 static bool hash_ok_operator(OpExpr *expr);
-static bool simplify_EXISTS_query(Query *query);
+static bool simplify_EXISTS_query(PlannerInfo *root, Query *query);
 static Query *convert_EXISTS_to_ANY(PlannerInfo *root, Query *subselect,
 					  Node **testexpr, List **paramIds);
 static Node *replace_correlation_vars_mutator(Node *node, PlannerInfo *root);
@@ -452,7 +452,7 @@ make_subplan(PlannerInfo *root, Query *orig_subquery,
 	 * If it's an EXISTS subplan, we might be able to simplify it.
 	 */
 	if (subLinkType == EXISTS_SUBLINK)
-		simple_exists = simplify_EXISTS_query(subquery);
+		simple_exists = simplify_EXISTS_query(root, subquery);
 
 	/*
 	 * For an EXISTS subplan, tell lower-level planner to expect that only the
@@ -518,7 +518,7 @@ make_subplan(PlannerInfo *root, Query *orig_subquery,
 		/* Make a second copy of the original subquery */
 		subquery = (Query *) copyObject(orig_subquery);
 		/* and re-simplify */
-		simple_exists = simplify_EXISTS_query(subquery);
+		simple_exists = simplify_EXISTS_query(root, subquery);
 		Assert(simple_exists);
 		/* See if it can be converted to an ANY query */
 		subquery = convert_EXISTS_to_ANY(root, subquery,
@@ -668,7 +668,7 @@ build_subplan(PlannerInfo *root, Plan *plan, PlannerInfo *subroot,
 
 		Assert(!te->resjunk);
 		Assert(testexpr == NULL);
-		arraytype = get_array_type(exprType((Node *) te->expr));
+		arraytype = get_promoted_array_type(exprType((Node *) te->expr));
 		if (!OidIsValid(arraytype))
 			elog(ERROR, "could not find array type for datatype %s",
 				 format_type_be(exprType((Node *) te->expr)));
@@ -1359,7 +1359,7 @@ convert_EXISTS_sublink_to_join(PlannerInfo *root, SubLink *sublink,
 	 * targetlist, we have to fail, because the pullup operation leaves us
 	 * with noplace to evaluate the targetlist.
 	 */
-	if (!simplify_EXISTS_query(subselect))
+	if (!simplify_EXISTS_query(root, subselect))
 		return NULL;
 
 	/*
@@ -1486,13 +1486,14 @@ convert_EXISTS_sublink_to_join(PlannerInfo *root, SubLink *sublink,
  * Returns TRUE if was able to discard the targetlist, else FALSE.
  */
 static bool
-simplify_EXISTS_query(Query *query)
+simplify_EXISTS_query(PlannerInfo *root, Query *query)
 {
 	/*
 	 * We don't try to simplify at all if the query uses set operations,
-	 * aggregates, modifying CTEs, HAVING, LIMIT/OFFSET, or FOR UPDATE/SHARE;
-	 * none of these seem likely in normal usage and their possible effects
-	 * are complex.
+	 * aggregates, modifying CTEs, HAVING, OFFSET, or FOR UPDATE/SHARE; none
+	 * of these seem likely in normal usage and their possible effects are
+	 * complex.  (Note: we could ignore an "OFFSET 0" clause, but that
+	 * traditionally is used as an optimization fence, so we don't.)
 	 */
 	if (query->commandType != CMD_SELECT ||
 		query->setOperations ||
@@ -1501,9 +1502,42 @@ simplify_EXISTS_query(Query *query)
 		query->hasModifyingCTE ||
 		query->havingQual ||
 		query->limitOffset ||
-		query->limitCount ||
 		query->rowMarks)
 		return false;
+
+	/*
+	 * LIMIT with a constant positive (or NULL) value doesn't affect the
+	 * semantics of EXISTS, so let's ignore such clauses.  This is worth doing
+	 * because people accustomed to certain other DBMSes may be in the habit
+	 * of writing EXISTS(SELECT ... LIMIT 1) as an optimization.  If there's a
+	 * LIMIT with anything else as argument, though, we can't simplify.
+	 */
+	if (query->limitCount)
+	{
+		/*
+		 * The LIMIT clause has not yet been through eval_const_expressions,
+		 * so we have to apply that here.  It might seem like this is a waste
+		 * of cycles, since the only case plausibly worth worrying about is
+		 * "LIMIT 1" ... but what we'll actually see is "LIMIT int8(1::int4)",
+		 * so we have to fold constants or we're not going to recognize it.
+		 */
+		Node	   *node = eval_const_expressions(root, query->limitCount);
+		Const	   *limit;
+
+		/* Might as well update the query if we simplified the clause. */
+		query->limitCount = node;
+
+		if (!IsA(node, Const))
+			return false;
+
+		limit = (Const *) node;
+		Assert(limit->consttype == INT8OID);
+		if (!limit->constisnull && DatumGetInt64(limit->constvalue) <= 0)
+			return false;
+
+		/* Whether or not the targetlist is safe, we can drop the LIMIT. */
+		query->limitCount = NULL;
+	}
 
 	/*
 	 * Mustn't throw away the targetlist if it contains set-returning
@@ -2279,6 +2313,12 @@ finalize_plan(PlannerInfo *root, Plan *plan, Bitmapset *valid_params,
 
 		case T_ForeignScan:
 			finalize_primnode((Node *) ((ForeignScan *) plan)->fdw_exprs,
+							  &context);
+			context.paramids = bms_add_members(context.paramids, scan_params);
+			break;
+
+		case T_CustomScan:
+			finalize_primnode((Node *) ((CustomScan *) plan)->custom_exprs,
 							  &context);
 			context.paramids = bms_add_members(context.paramids, scan_params);
 			break;

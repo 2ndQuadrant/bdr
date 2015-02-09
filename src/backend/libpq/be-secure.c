@@ -6,7 +6,7 @@
  *	  message integrity and endpoint authentication.
  *
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -32,8 +32,10 @@
 #endif
 
 #include "libpq/libpq.h"
+#include "miscadmin.h"
 #include "tcop/tcopprot.h"
 #include "utils/memutils.h"
+#include "storage/proc.h"
 
 
 char	   *ssl_cert_file;
@@ -126,6 +128,7 @@ secure_read(Port *port, void *ptr, size_t len)
 {
 	ssize_t		n;
 
+retry:
 #ifdef USE_SSL
 	if (port->ssl_in_use)
 	{
@@ -137,6 +140,27 @@ secure_read(Port *port, void *ptr, size_t len)
 		n = secure_raw_read(port, ptr, len);
 	}
 
+	/* retry after processing interrupts */
+	if (n < 0 && errno == EINTR)
+	{
+		/*
+		 * We tried to read data, the socket was empty, and we were
+		 * interrupted while waiting for readability. We only process
+		 * interrupts if we got interrupted while reading and when in blocking
+		 * mode. In other cases it's better to allow the interrupts to be
+		 * handled at higher layers.
+		 */
+		ProcessClientReadInterrupt(!port->noblock); /* preserves errno */
+		goto retry;
+	}
+
+	/*
+	 * Process interrupts that happened while (or before) receiving. Note that
+	 * we signal that we're not blocking, which will prevent some types of
+	 * interrupts from being processed.
+	 */
+	ProcessClientReadInterrupt(false);
+
 	return n;
 }
 
@@ -145,11 +169,49 @@ secure_raw_read(Port *port, void *ptr, size_t len)
 {
 	ssize_t		n;
 
-	prepare_for_client_read();
-
+	/*
+	 * Try to read from the socket without blocking. If it succeeds we're
+	 * done, otherwise we'll wait for the socket using the latch mechanism.
+	 */
+rloop:
+#ifdef WIN32
+	pgwin32_noblock = true;
+#endif
 	n = recv(port->sock, ptr, len, 0);
+#ifdef WIN32
+	pgwin32_noblock = false;
+#endif
 
-	client_read_ended();
+	if (n < 0 && !port->noblock && (errno == EWOULDBLOCK || errno == EAGAIN))
+	{
+		int		w;
+		int		save_errno = errno;
+
+		w = WaitLatchOrSocket(MyLatch,
+							  WL_LATCH_SET | WL_SOCKET_READABLE,
+							  port->sock, 0);
+
+		if (w & WL_LATCH_SET)
+		{
+			ResetLatch(MyLatch);
+			/*
+			 * Force a return, so interrupts can be processed when not
+			 * (possibly) underneath a ssl library.
+			 */
+			errno = EINTR;
+			return -1;
+		}
+		else if (w & WL_SOCKET_READABLE)
+		{
+			goto rloop;
+		}
+
+		/*
+		 * Restore errno, clobbered by WaitLatchOrSocket, so the caller can
+		 * react properly.
+		 */
+		errno = save_errno;
+	}
 
 	return n;
 }
@@ -163,6 +225,7 @@ secure_write(Port *port, void *ptr, size_t len)
 {
 	ssize_t		n;
 
+retry:
 #ifdef USE_SSL
 	if (port->ssl_in_use)
 	{
@@ -170,7 +233,23 @@ secure_write(Port *port, void *ptr, size_t len)
 	}
 	else
 #endif
+	{
 		n = secure_raw_write(port, ptr, len);
+	}
+
+	/* retry after processing interrupts */
+	if (n < 0 && errno == EINTR)
+	{
+		/*
+		 * We tried to send data, the socket was full, and we were interrupted
+		 * while waiting for writability. We only process interrupts if we got
+		 * interrupted while writing and when in blocking mode. In other cases
+		 * it's better to allow the interrupts to be handled at higher layers.
+		 */
+		ProcessClientWriteInterrupt(!port->noblock);
+
+		goto retry;
+	}
 
 	return n;
 }
@@ -178,5 +257,48 @@ secure_write(Port *port, void *ptr, size_t len)
 ssize_t
 secure_raw_write(Port *port, const void *ptr, size_t len)
 {
-	return send(port->sock, ptr, len, 0);
+	ssize_t		n;
+
+wloop:
+
+#ifdef WIN32
+	pgwin32_noblock = true;
+#endif
+	n = send(port->sock, ptr, len, 0);
+#ifdef WIN32
+	pgwin32_noblock = false;
+#endif
+
+	if (n < 0 && !port->noblock && (errno == EWOULDBLOCK || errno == EAGAIN))
+	{
+		int		w;
+		int		save_errno = errno;
+
+		w = WaitLatchOrSocket(MyLatch,
+							  WL_LATCH_SET | WL_SOCKET_WRITEABLE,
+							  port->sock, 0);
+
+		if (w & WL_LATCH_SET)
+		{
+			ResetLatch(MyLatch);
+			/*
+			 * Force a return, so interrupts can be processed when not
+			 * (possibly) underneath a ssl library.
+			 */
+			errno = EINTR;
+			return -1;
+		}
+		else if (w & WL_SOCKET_WRITEABLE)
+		{
+			goto wloop;
+		}
+
+		/*
+		 * Restore errno, clobbered by WaitLatchOrSocket, so the caller can
+		 * react properly.
+		 */
+		errno = save_errno;
+	}
+
+	return n;
 }

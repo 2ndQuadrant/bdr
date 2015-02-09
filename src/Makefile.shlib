@@ -371,16 +371,22 @@ else
 
 $(stlib): $(shlib) ;
 
+# XXX A backend that loads a module linked with libgcc_s_dw2-1.dll will exit
+# uncleanly, hence -static-libgcc.  (Last verified with MinGW-w64 compilers
+# from i686-4.9.1-release-win32-dwarf-rt_v3-rev1.)  Shared libgcc has better
+# support for C++/Java exceptions; while core PostgreSQL does not use them, it
+# would be nice to support shared libgcc for the benefit of extensions.
+#
 # If SHLIB_EXPORTS is set, the rules below will build a .def file from that.
 # Else we just use --export-all-symbols.
 ifeq (,$(SHLIB_EXPORTS))
 $(shlib): $(OBJS) | $(SHLIB_PREREQS)
-	$(CC) $(CFLAGS)  -shared -o $@  $(OBJS) $(LDFLAGS) $(LDFLAGS_SL) $(SHLIB_LINK) $(LIBS) -Wl,--export-all-symbols -Wl,--out-implib=$(stlib)
+	$(CC) $(CFLAGS)  -shared -static-libgcc -o $@  $(OBJS) $(LDFLAGS) $(LDFLAGS_SL) $(SHLIB_LINK) $(LIBS) -Wl,--export-all-symbols -Wl,--out-implib=$(stlib)
 else
 DLL_DEFFILE = lib$(NAME)dll.def
 
 $(shlib): $(OBJS) $(DLL_DEFFILE) | $(SHLIB_PREREQS)
-	$(CC) $(CFLAGS)  -shared -o $@  $(OBJS) $(DLL_DEFFILE) $(LDFLAGS) $(LDFLAGS_SL) $(SHLIB_LINK) $(LIBS) -Wl,--out-implib=$(stlib)
+	$(CC) $(CFLAGS)  -shared -static-libgcc -o $@  $(OBJS) $(DLL_DEFFILE) $(LDFLAGS) $(LDFLAGS_SL) $(SHLIB_LINK) $(LIBS) -Wl,--out-implib=$(stlib)
 endif
 
 endif # PORTNAME == cgywin
@@ -416,19 +422,19 @@ distprep: lib$(NAME)dll.def lib$(NAME)ddll.def blib$(NAME)dll.def
 UC_NAME = $(shell echo $(NAME) | tr 'abcdefghijklmnopqrstuvwxyz' 'ABCDEFGHIJKLMNOPQRSTUVWXYZ')
 
 lib$(NAME)dll.def: $(SHLIB_EXPORTS)
-	echo '; DEF file for MS VC++' >$@
-	echo 'LIBRARY LIB$(UC_NAME)' >>$@
+	echo '; DEF file for win32.mak release build and for Makefile.shlib (MinGW)' >$@
+	echo 'LIBRARY LIB$(UC_NAME).dll' >>$@
 	echo 'EXPORTS' >>$@
 	sed -e '/^#/d' -e 's/^\(.*[ 	]\)\([0-9][0-9]*\)/    \1@ \2/' $< >>$@
 
 lib$(NAME)ddll.def: $(SHLIB_EXPORTS)
-	echo '; DEF file for MS VC++' >$@
-	echo 'LIBRARY LIB$(UC_NAME)D' >>$@
+	echo '; DEF file for win32.mak debug build' >$@
+	echo 'LIBRARY LIB$(UC_NAME)D.dll' >>$@
 	echo 'EXPORTS' >>$@
 	sed -e '/^#/d' -e 's/^\(.*[ 	]\)\([0-9][0-9]*\)/    \1@ \2/' $< >>$@
 
 blib$(NAME)dll.def: $(SHLIB_EXPORTS)
-	echo '; DEF file for Borland C++ Builder' >$@
+	echo '; DEF file for bcc32.mak (Borland C++ Builder)' >$@
 	echo 'LIBRARY BLIB$(UC_NAME)' >>$@
 	echo 'EXPORTS' >>$@
 	sed -e '/^#/d' -e 's/^\(.*[ 	]\)\([0-9][0-9]*\)/    _\1@ \2/' $< >>$@
@@ -480,6 +486,9 @@ endif
 endif # not win32
 endif # not cygwin
 endif # not aix
+ifneq (,$(findstring $(PORTNAME),win32 cygwin))
+	$(INSTALL_SHLIB) $< '$(DESTDIR)$(bindir)/$(shlib)'
+endif
 else # no soname
 	$(INSTALL_SHLIB) $< '$(DESTDIR)$(pkglibdir)/$(shlib)'
 endif
@@ -487,7 +496,7 @@ endif
 
 installdirs-lib:
 ifdef soname
-	$(MKDIR_P) '$(DESTDIR)$(libdir)' '$(DESTDIR)$(pkgconfigdir)'
+	$(MKDIR_P) '$(DESTDIR)$(libdir)' '$(DESTDIR)$(pkgconfigdir)' $(if $(findstring $(PORTNAME),win32 cygwin),'$(DESTDIR)$(bindir)')
 else
 	$(MKDIR_P) '$(DESTDIR)$(pkglibdir)'
 endif
@@ -503,7 +512,7 @@ ifdef soname
 	rm -f '$(DESTDIR)$(libdir)/$(stlib)'
 	rm -f '$(DESTDIR)$(libdir)/$(shlib_bare)' \
 	  '$(DESTDIR)$(libdir)/$(shlib_major)' \
-	  '$(DESTDIR)$(libdir)/$(shlib)' \
+	  '$(DESTDIR)$(libdir)/$(shlib)' $(if $(findstring $(PORTNAME),win32 cygwin),'$(DESTDIR)$(bindir)/$(shlib)') \
 	  '$(DESTDIR)$(pkgconfigdir)/lib$(NAME).pc'
 else # no soname
 	rm -f '$(DESTDIR)$(pkglibdir)/$(shlib)'

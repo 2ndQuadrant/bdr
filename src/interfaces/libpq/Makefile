@@ -2,7 +2,7 @@
 #
 # Makefile for src/interfaces/libpq library
 #
-# Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+# Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
 # Portions Copyright (c) 1994, Regents of the University of California
 #
 # src/interfaces/libpq/Makefile
@@ -74,7 +74,7 @@ else
 SHLIB_LINK += $(filter -lcrypt -ldes -lcom_err -lcrypto -lk5crypto -lkrb5 -lgssapi32 -lssl -lsocket -lnsl -lresolv -lintl $(PTHREAD_LIBS), $(LIBS)) $(LDAP_LIBS_FE)
 endif
 ifeq ($(PORTNAME), win32)
-SHLIB_LINK += -lshfolder -lws2_32 -lsecur32 $(filter -leay32 -lssleay32 -lcomerr32 -lkrb5_32, $(LIBS))
+SHLIB_LINK += -lshell32 -lws2_32 -lsecur32 $(filter -leay32 -lssleay32 -lcomerr32 -lkrb5_32, $(LIBS))
 endif
 
 SHLIB_EXPORTS = exports.txt
@@ -125,18 +125,12 @@ install: all installdirs install-lib
 	$(INSTALL_DATA) $(srcdir)/libpq-int.h '$(DESTDIR)$(includedir_internal)'
 	$(INSTALL_DATA) $(srcdir)/pqexpbuffer.h '$(DESTDIR)$(includedir_internal)'
 	$(INSTALL_DATA) $(srcdir)/pg_service.conf.sample '$(DESTDIR)$(datadir)/pg_service.conf.sample'
-ifneq (,$(findstring $(PORTNAME), win32 cygwin))
-	$(INSTALL_SHLIB) $(shlib) '$(DESTDIR)$(bindir)/$(shlib)'
-endif
 
 installcheck:
 	$(MAKE) -C test $@
 
 installdirs: installdirs-lib
 	$(MKDIR_P) '$(DESTDIR)$(includedir)' '$(DESTDIR)$(includedir_internal)' '$(DESTDIR)$(datadir)'
-ifneq (,$(findstring $(PORTNAME), win32 cygwin))
-	$(MKDIR_P) '$(DESTDIR)$(bindir)'
-endif
 
 uninstall: uninstall-lib
 	rm -f '$(DESTDIR)$(includedir)/libpq-fe.h'
@@ -144,9 +138,6 @@ uninstall: uninstall-lib
 	rm -f '$(DESTDIR)$(includedir_internal)/libpq-int.h'
 	rm -f '$(DESTDIR)$(includedir_internal)/pqexpbuffer.h'
 	rm -f '$(DESTDIR)$(datadir)/pg_service.conf.sample'
-ifneq (,$(findstring $(PORTNAME), win32 cygwin))
-	rm -f '$(DESTDIR)$(bindir)/$(shlib)'
-endif
 
 clean distclean: clean-lib
 	$(MAKE) -C test $@

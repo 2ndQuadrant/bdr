@@ -259,7 +259,10 @@ set_arg(PGP_Context *ctx, char *key, char *val,
 		res = pgp_set_convert_crlf(ctx, atoi(val));
 	else if (strcmp(key, "unicode-mode") == 0)
 		res = pgp_set_unicode_mode(ctx, atoi(val));
-	/* decrypt debug */
+	/*
+	 * The remaining options are for debugging/testing and are therefore not
+	 * documented in the user-facing docs.
+	 */
 	else if (ex != NULL && strcmp(key, "debug") == 0)
 		ex->debug = atoi(val);
 	else if (ex != NULL && strcmp(key, "expect-cipher-algo") == 0)
@@ -572,35 +575,25 @@ decrypt_internal(int is_pubenc, int need_text, text *data,
 		err = pgp_set_symkey(ctx, (uint8 *) VARDATA(key),
 							 VARSIZE(key) - VARHDRSZ);
 
-	/*
-	 * decrypt
-	 */
+	/* decrypt */
 	if (err >= 0)
+	{
 		err = pgp_decrypt(ctx, src, dst);
 
-	/*
-	 * failed?
-	 */
-	if (err < 0)
-		goto out;
+		if (ex.expect)
+			check_expect(ctx, &ex);
 
-	if (ex.expect)
-		check_expect(ctx, &ex);
+		/* remember the setting */
+		got_unicode = pgp_get_unicode_mode(ctx);
+	}
 
-	/* remember the setting */
-	got_unicode = pgp_get_unicode_mode(ctx);
-
-out:
-	if (src)
-		mbuf_free(src);
-	if (ctx)
-		pgp_free(ctx);
+	mbuf_free(src);
+	pgp_free(ctx);
 
 	if (err)
 	{
 		px_set_debug_handler(NULL);
-		if (dst)
-			mbuf_free(dst);
+		mbuf_free(dst);
 		ereport(ERROR,
 				(errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION),
 				 errmsg("%s", px_strerror(err))));

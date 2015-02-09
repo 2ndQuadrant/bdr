@@ -57,7 +57,7 @@
  * counter does not fall within the wraparound horizon considering the global
  * minimum value.
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/backend/access/transam/multixact.c
@@ -72,6 +72,8 @@
 #include "access/twophase.h"
 #include "access/twophase_rmgr.h"
 #include "access/xact.h"
+#include "access/xlog.h"
+#include "access/xloginsert.h"
 #include "catalog/pg_type.h"
 #include "commands/dbcommands.h"
 #include "funcapi.h"
@@ -718,7 +720,6 @@ MultiXactIdCreateFromMembers(int nmembers, MultiXactMember *members)
 {
 	MultiXactId multi;
 	MultiXactOffset offset;
-	XLogRecData rdata[2];
 	xl_multixact_create xlrec;
 
 	debug_elog3(DEBUG2, "Create: %s",
@@ -794,17 +795,11 @@ MultiXactIdCreateFromMembers(int nmembers, MultiXactMember *members)
 	 * the status flags in one XLogRecData, then all the xids in another one?
 	 * Not clear that it's worth the trouble though.
 	 */
-	rdata[0].data = (char *) (&xlrec);
-	rdata[0].len = SizeOfMultiXactCreate;
-	rdata[0].buffer = InvalidBuffer;
-	rdata[0].next = &(rdata[1]);
+	XLogBeginInsert();
+	XLogRegisterData((char *) (&xlrec), SizeOfMultiXactCreate);
+	XLogRegisterData((char *) members, nmembers * sizeof(MultiXactMember));
 
-	rdata[1].data = (char *) members;
-	rdata[1].len = nmembers * sizeof(MultiXactMember);
-	rdata[1].buffer = InvalidBuffer;
-	rdata[1].next = NULL;
-
-	(void) XLogInsert(RM_MULTIXACT_ID, XLOG_MULTIXACT_CREATE_ID, rdata);
+	(void) XLogInsert(RM_MULTIXACT_ID, XLOG_MULTIXACT_CREATE_ID);
 
 	/* Now enter the information into the OFFSETs and MEMBERs logs */
 	RecordNewMultiXact(multi, offset, nmembers, members);
@@ -1276,6 +1271,7 @@ retry:
 		{
 			/* Corner case 2: next multixact is still being filled in */
 			LWLockRelease(MultiXactOffsetControlLock);
+			CHECK_FOR_INTERRUPTS();
 			pg_usleep(1000L);
 			goto retry;
 		}
@@ -2702,25 +2698,21 @@ MultiXactOffsetPrecedes(MultiXactOffset offset1, MultiXactOffset offset2)
 static void
 WriteMZeroPageXlogRec(int pageno, uint8 info)
 {
-	XLogRecData rdata;
-
-	rdata.data = (char *) (&pageno);
-	rdata.len = sizeof(int);
-	rdata.buffer = InvalidBuffer;
-	rdata.next = NULL;
-	(void) XLogInsert(RM_MULTIXACT_ID, info, &rdata);
+	XLogBeginInsert();
+	XLogRegisterData((char *) (&pageno), sizeof(int));
+	(void) XLogInsert(RM_MULTIXACT_ID, info);
 }
 
 /*
  * MULTIXACT resource manager's routines
  */
 void
-multixact_redo(XLogRecPtr lsn, XLogRecord *record)
+multixact_redo(XLogReaderState *record)
 {
-	uint8		info = record->xl_info & ~XLR_INFO_MASK;
+	uint8		info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
 
 	/* Backup blocks are not used in multixact records */
-	Assert(!(record->xl_info & XLR_BKP_BLOCK_MASK));
+	Assert(!XLogRecHasAnyBlockRefs(record));
 
 	if (info == XLOG_MULTIXACT_ZERO_OFF_PAGE)
 	{
@@ -2772,7 +2764,7 @@ multixact_redo(XLogRecPtr lsn, XLogRecord *record)
 		 * should be unnecessary, since any XID found here ought to have other
 		 * evidence in the XLOG, but let's be safe.
 		 */
-		max_xid = record->xl_xid;
+		max_xid = XLogRecGetXid(record);
 		for (i = 0; i < xlrec->nmembers; i++)
 		{
 			if (TransactionIdPrecedes(max_xid, xlrec->members[i].xid))

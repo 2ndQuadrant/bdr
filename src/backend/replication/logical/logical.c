@@ -2,7 +2,7 @@
  * logical.c
  *	   PostgreSQL logical decoding coordination
  *
- * Copyright (c) 2012-2014, PostgreSQL Global Development Group
+ * Copyright (c) 2012-2015, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  src/backend/replication/logical/logical.c
@@ -34,6 +34,7 @@
 #include "miscadmin.h"
 
 #include "access/xact.h"
+#include "access/xlog_internal.h"
 
 #include "replication/decode.h"
 #include "replication/logical.h"
@@ -145,10 +146,19 @@ StartupDecodingContext(List *output_plugin_options,
 	 * logical decoding backend which doesn't need to be checked individually
 	 * when computing the xmin horizon because the xmin is enforced via
 	 * replication slots.
+	 *
+	 * We can only do so if we're outside of a transaction (i.e. the case when
+	 * streaming changes via walsender), otherwise a already setup
+	 * snapshot/xid would end up being ignored. That's not a particularly
+	 * bothersome restriction since the SQL interface can't be used for
+	 * streaming anyway.
 	 */
-	LWLockAcquire(ProcArrayLock, LW_EXCLUSIVE);
-	MyPgXact->vacuumFlags |= PROC_IN_LOGICAL_DECODING;
-	LWLockRelease(ProcArrayLock);
+	if (!IsTransactionOrTransactionBlock())
+	{
+		LWLockAcquire(ProcArrayLock, LW_EXCLUSIVE);
+		MyPgXact->vacuumFlags |= PROC_IN_LOGICAL_DECODING;
+		LWLockRelease(ProcArrayLock);
+	}
 
 	ctx->slot = slot;
 
@@ -218,7 +228,7 @@ CreateInitDecodingContext(char *plugin,
 	if (slot->data.database == InvalidOid)
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("cannot use physical replication slot created for logical decoding")));
+				 errmsg("cannot use physical replication slot for logical decoding")));
 
 	if (slot->data.database != MyDatabaseId)
 		ereport(ERROR,
@@ -234,9 +244,7 @@ CreateInitDecodingContext(char *plugin,
 
 	/* register output plugin name with slot */
 	SpinLockAcquire(&slot->mutex);
-	strncpy(NameStr(slot->data.plugin), plugin,
-			NAMEDATALEN);
-	NameStr(slot->data.plugin)[NAMEDATALEN - 1] = '\0';
+	StrNCpy(NameStr(slot->data.plugin), plugin, NAMEDATALEN);
 	SpinLockRelease(&slot->mutex);
 
 	/*
@@ -410,7 +418,7 @@ CreateDecodingContext(XLogRecPtr start_lsn,
 	MemoryContextSwitchTo(old_context);
 
 	ereport(LOG,
-			(errmsg("starting logical decoding for slot %s",
+			(errmsg("starting logical decoding for slot \"%s\"",
 					NameStr(slot->data.name)),
 			 errdetail("streaming transactions committing after %X/%X, reading WAL from %X/%X",
 					   (uint32) (slot->data.confirmed_flush >> 32),
@@ -455,12 +463,12 @@ DecodingContextFindStartpoint(LogicalDecodingContext *ctx)
 		record = XLogReadRecord(ctx->reader, startptr, &err);
 		if (err)
 			elog(ERROR, "%s", err);
-
-		Assert(record);
+		if (!record)
+			elog(ERROR, "no record found");		/* shouldn't happen */
 
 		startptr = InvalidXLogRecPtr;
 
-		LogicalDecodingProcessRecord(ctx, record);
+		LogicalDecodingProcessRecord(ctx, ctx->reader);
 
 		/* only continue till we found a consistent spot */
 		if (DecodingContextReady(ctx))

@@ -378,11 +378,10 @@ _PG_init(void)
 	memset(&hash_ctl, 0, sizeof(hash_ctl));
 	hash_ctl.keysize = sizeof(Oid);
 	hash_ctl.entrysize = sizeof(pltcl_interp_desc);
-	hash_ctl.hash = oid_hash;
 	pltcl_interp_htab = hash_create("PL/Tcl interpreters",
 									8,
 									&hash_ctl,
-									HASH_ELEM | HASH_FUNCTION);
+									HASH_ELEM | HASH_BLOBS);
 
 	/************************************************************
 	 * Create the hash table for function lookup
@@ -390,11 +389,10 @@ _PG_init(void)
 	memset(&hash_ctl, 0, sizeof(hash_ctl));
 	hash_ctl.keysize = sizeof(pltcl_proc_key);
 	hash_ctl.entrysize = sizeof(pltcl_proc_ptr);
-	hash_ctl.hash = tag_hash;
 	pltcl_proc_htab = hash_create("PL/Tcl functions",
 								  100,
 								  &hash_ctl,
-								  HASH_ELEM | HASH_FUNCTION);
+								  HASH_ELEM | HASH_BLOBS);
 
 	pltcl_pm_init_done = true;
 }
@@ -2235,9 +2233,9 @@ pltcl_SPI_execute_plan(ClientData cdata, Tcl_Interp *interp,
 	int			j;
 	Tcl_HashEntry *hashent;
 	pltcl_query_desc *qdesc;
-	const char *volatile nulls = NULL;
-	CONST84 char *volatile arrayname = NULL;
-	CONST84 char *volatile loop_body = NULL;
+	const char *nulls = NULL;
+	CONST84 char *arrayname = NULL;
+	CONST84 char *loop_body = NULL;
 	int			count = 0;
 	int			callnargs;
 	CONST84 char **callargs = NULL;
@@ -2367,6 +2365,8 @@ pltcl_SPI_execute_plan(ClientData cdata, Tcl_Interp *interp,
 	if (i != argc)
 	{
 		Tcl_SetResult(interp, usage, TCL_STATIC);
+		if (callargs)
+			ckfree((char *) callargs);
 		return TCL_ERROR;
 	}
 
@@ -2405,10 +2405,6 @@ pltcl_SPI_execute_plan(ClientData cdata, Tcl_Interp *interp,
 			}
 		}
 
-		if (callargs)
-			ckfree((char *) callargs);
-		callargs = NULL;
-
 		/************************************************************
 		 * Execute the plan
 		 ************************************************************/
@@ -2434,6 +2430,9 @@ pltcl_SPI_execute_plan(ClientData cdata, Tcl_Interp *interp,
 		return TCL_ERROR;
 	}
 	PG_END_TRY();
+
+	if (callargs)
+		ckfree((char *) callargs);
 
 	return my_rc;
 }

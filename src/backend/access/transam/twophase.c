@@ -3,7 +3,7 @@
  * twophase.c
  *		Two-phase commit support functions.
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -48,6 +48,7 @@
 #include "access/twophase_rmgr.h"
 #include "access/xact.h"
 #include "access/xlog.h"
+#include "access/xloginsert.h"
 #include "access/xlogutils.h"
 #include "catalog/pg_type.h"
 #include "catalog/storage.h"
@@ -389,7 +390,6 @@ MarkAsPreparing(TransactionId xid, const char *gid,
 	proc->roleId = owner;
 	proc->lwWaiting = false;
 	proc->lwWaitMode = 0;
-	proc->lwWaitLink = NULL;
 	proc->waitLock = NULL;
 	proc->waitProcLock = NULL;
 	for (i = 0; i < NUM_LOCK_PARTITIONS; i++)
@@ -847,9 +847,9 @@ TwoPhaseGetDummyProc(TransactionId xid)
  *	6. TwoPhaseRecordOnDisk
  *	7. ...
  *	8. TwoPhaseRecordOnDisk (end sentinel, rmid == TWOPHASE_RM_END_ID)
- *	9. CRC32
+ *	9. checksum (CRC-32C)
  *
- * Each segment except the final CRC32 is MAXALIGN'd.
+ * Each segment except the final checksum is MAXALIGN'd.
  */
 
 /*
@@ -888,14 +888,21 @@ typedef struct TwoPhaseRecordOnDisk
 
 /*
  * During prepare, the state file is assembled in memory before writing it
- * to WAL and the actual state file.  We use a chain of XLogRecData blocks
- * so that we will be able to pass the state file contents directly to
- * XLogInsert.
+ * to WAL and the actual state file.  We use a chain of StateFileChunk blocks
+ * for that.
  */
+typedef struct StateFileChunk
+{
+	char	   *data;
+	uint32		len;
+	struct StateFileChunk *next;
+} StateFileChunk;
+
 static struct xllist
 {
-	XLogRecData *head;			/* first data block in the chain */
-	XLogRecData *tail;			/* last block in chain */
+	StateFileChunk *head;		/* first data block in the chain */
+	StateFileChunk *tail;		/* last block in chain */
+	uint32		num_chunks;
 	uint32		bytes_free;		/* free bytes left in tail block */
 	uint32		total_len;		/* total data bytes in chain */
 }	records;
@@ -916,11 +923,11 @@ save_state_data(const void *data, uint32 len)
 
 	if (padlen > records.bytes_free)
 	{
-		records.tail->next = palloc0(sizeof(XLogRecData));
+		records.tail->next = palloc0(sizeof(StateFileChunk));
 		records.tail = records.tail->next;
-		records.tail->buffer = InvalidBuffer;
 		records.tail->len = 0;
 		records.tail->next = NULL;
+		records.num_chunks++;
 
 		records.bytes_free = Max(padlen, 512);
 		records.tail->data = palloc(records.bytes_free);
@@ -950,8 +957,7 @@ StartPrepare(GlobalTransaction gxact)
 	SharedInvalidationMessage *invalmsgs;
 
 	/* Initialize linked list */
-	records.head = palloc0(sizeof(XLogRecData));
-	records.head->buffer = InvalidBuffer;
+	records.head = palloc0(sizeof(StateFileChunk));
 	records.head->len = 0;
 	records.head->next = NULL;
 
@@ -959,6 +965,7 @@ StartPrepare(GlobalTransaction gxact)
 	records.head->data = palloc(records.bytes_free);
 
 	records.tail = records.head;
+	records.num_chunks = 1;
 
 	records.total_len = 0;
 
@@ -1018,7 +1025,7 @@ EndPrepare(GlobalTransaction gxact)
 	TransactionId xid = pgxact->xid;
 	TwoPhaseFileHeader *hdr;
 	char		path[MAXPGPATH];
-	XLogRecData *record;
+	StateFileChunk *record;
 	pg_crc32	statefile_crc;
 	pg_crc32	bogus_crc;
 	int			fd;
@@ -1056,11 +1063,11 @@ EndPrepare(GlobalTransaction gxact)
 						path)));
 
 	/* Write data to file, and calculate CRC as we pass over it */
-	INIT_CRC32(statefile_crc);
+	INIT_CRC32C(statefile_crc);
 
 	for (record = records.head; record != NULL; record = record->next)
 	{
-		COMP_CRC32(statefile_crc, record->data, record->len);
+		COMP_CRC32C(statefile_crc, record->data, record->len);
 		if ((write(fd, record->data, record->len)) != record->len)
 		{
 			CloseTransientFile(fd);
@@ -1070,7 +1077,7 @@ EndPrepare(GlobalTransaction gxact)
 		}
 	}
 
-	FIN_CRC32(statefile_crc);
+	FIN_CRC32C(statefile_crc);
 
 	/*
 	 * Write a deliberately bogus CRC to the state file; this is just paranoia
@@ -1116,12 +1123,16 @@ EndPrepare(GlobalTransaction gxact)
 	 * We save the PREPARE record's location in the gxact for later use by
 	 * CheckPointTwoPhase.
 	 */
+	XLogEnsureRecordSpace(0, records.num_chunks);
+
 	START_CRIT_SECTION();
 
 	MyPgXact->delayChkpt = true;
 
-	gxact->prepare_lsn = XLogInsert(RM_XACT_ID, XLOG_XACT_PREPARE,
-									records.head);
+	XLogBeginInsert();
+	for (record = records.head; record != NULL; record = record->next)
+		XLogRegisterData(record->data, record->len);
+	gxact->prepare_lsn = XLogInsert(RM_XACT_ID, XLOG_XACT_PREPARE);
 	XLogFlush(gxact->prepare_lsn);
 
 	/* If we crash now, we have prepared: WAL replay will fix things */
@@ -1179,6 +1190,7 @@ EndPrepare(GlobalTransaction gxact)
 	SyncRepWaitForLSN(gxact->prepare_lsn);
 
 	records.tail = records.head = NULL;
+	records.num_chunks = 0;
 }
 
 /*
@@ -1289,13 +1301,13 @@ ReadTwoPhaseFile(TransactionId xid, bool give_warnings)
 		return NULL;
 	}
 
-	INIT_CRC32(calc_crc);
-	COMP_CRC32(calc_crc, buf, crc_offset);
-	FIN_CRC32(calc_crc);
+	INIT_CRC32C(calc_crc);
+	COMP_CRC32C(calc_crc, buf, crc_offset);
+	FIN_CRC32C(calc_crc);
 
 	file_crc = *((pg_crc32 *) (buf + crc_offset));
 
-	if (!EQ_CRC32(calc_crc, file_crc))
+	if (!EQ_CRC32C(calc_crc, file_crc))
 	{
 		pfree(buf);
 		return NULL;
@@ -1540,9 +1552,9 @@ RecreateTwoPhaseFile(TransactionId xid, void *content, int len)
 	int			fd;
 
 	/* Recompute CRC */
-	INIT_CRC32(statefile_crc);
-	COMP_CRC32(statefile_crc, content, len);
-	FIN_CRC32(statefile_crc);
+	INIT_CRC32C(statefile_crc);
+	COMP_CRC32C(statefile_crc, content, len);
+	FIN_CRC32C(statefile_crc);
 
 	TwoPhaseFilePath(path, xid);
 
@@ -2070,8 +2082,6 @@ RecordTransactionCommitPrepared(TransactionId xid,
 								SharedInvalidationMessage *invalmsgs,
 								bool initfileinval)
 {
-	XLogRecData rdata[4];
-	int			lastrdata = 0;
 	xl_xact_commit_prepared xlrec;
 	XLogRecPtr	recptr;
 
@@ -2093,39 +2103,24 @@ RecordTransactionCommitPrepared(TransactionId xid,
 	xlrec.crec.nsubxacts = nchildren;
 	xlrec.crec.nmsgs = ninvalmsgs;
 
-	rdata[0].data = (char *) (&xlrec);
-	rdata[0].len = MinSizeOfXactCommitPrepared;
-	rdata[0].buffer = InvalidBuffer;
+	XLogBeginInsert();
+	XLogRegisterData((char *) (&xlrec), MinSizeOfXactCommitPrepared);
+
 	/* dump rels to delete */
 	if (nrels > 0)
-	{
-		rdata[0].next = &(rdata[1]);
-		rdata[1].data = (char *) rels;
-		rdata[1].len = nrels * sizeof(RelFileNode);
-		rdata[1].buffer = InvalidBuffer;
-		lastrdata = 1;
-	}
+		XLogRegisterData((char *) rels, nrels * sizeof(RelFileNode));
+
 	/* dump committed child Xids */
 	if (nchildren > 0)
-	{
-		rdata[lastrdata].next = &(rdata[2]);
-		rdata[2].data = (char *) children;
-		rdata[2].len = nchildren * sizeof(TransactionId);
-		rdata[2].buffer = InvalidBuffer;
-		lastrdata = 2;
-	}
+		XLogRegisterData((char *) children,
+						 nchildren * sizeof(TransactionId));
+
 	/* dump cache invalidation messages */
 	if (ninvalmsgs > 0)
-	{
-		rdata[lastrdata].next = &(rdata[3]);
-		rdata[3].data = (char *) invalmsgs;
-		rdata[3].len = ninvalmsgs * sizeof(SharedInvalidationMessage);
-		rdata[3].buffer = InvalidBuffer;
-		lastrdata = 3;
-	}
-	rdata[lastrdata].next = NULL;
+		XLogRegisterData((char *) invalmsgs,
+						 ninvalmsgs * sizeof(SharedInvalidationMessage));
 
-	recptr = XLogInsert(RM_XACT_ID, XLOG_XACT_COMMIT_PREPARED, rdata);
+	recptr = XLogInsert(RM_XACT_ID, XLOG_XACT_COMMIT_PREPARED);
 
 	/*
 	 * We don't currently try to sleep before flush here ... nor is there any
@@ -2168,8 +2163,6 @@ RecordTransactionAbortPrepared(TransactionId xid,
 							   int nrels,
 							   RelFileNode *rels)
 {
-	XLogRecData rdata[3];
-	int			lastrdata = 0;
 	xl_xact_abort_prepared xlrec;
 	XLogRecPtr	recptr;
 
@@ -2188,30 +2181,20 @@ RecordTransactionAbortPrepared(TransactionId xid,
 	xlrec.arec.xact_time = GetCurrentTimestamp();
 	xlrec.arec.nrels = nrels;
 	xlrec.arec.nsubxacts = nchildren;
-	rdata[0].data = (char *) (&xlrec);
-	rdata[0].len = MinSizeOfXactAbortPrepared;
-	rdata[0].buffer = InvalidBuffer;
+
+	XLogBeginInsert();
+	XLogRegisterData((char *) (&xlrec), MinSizeOfXactAbortPrepared);
+
 	/* dump rels to delete */
 	if (nrels > 0)
-	{
-		rdata[0].next = &(rdata[1]);
-		rdata[1].data = (char *) rels;
-		rdata[1].len = nrels * sizeof(RelFileNode);
-		rdata[1].buffer = InvalidBuffer;
-		lastrdata = 1;
-	}
+		XLogRegisterData((char *) rels, nrels * sizeof(RelFileNode));
+
 	/* dump committed child Xids */
 	if (nchildren > 0)
-	{
-		rdata[lastrdata].next = &(rdata[2]);
-		rdata[2].data = (char *) children;
-		rdata[2].len = nchildren * sizeof(TransactionId);
-		rdata[2].buffer = InvalidBuffer;
-		lastrdata = 2;
-	}
-	rdata[lastrdata].next = NULL;
+		XLogRegisterData((char *) children,
+						 nchildren * sizeof(TransactionId));
 
-	recptr = XLogInsert(RM_XACT_ID, XLOG_XACT_ABORT_PREPARED, rdata);
+	recptr = XLogInsert(RM_XACT_ID, XLOG_XACT_ABORT_PREPARED);
 
 	/* Always flush, since we're about to remove the 2PC state file */
 	XLogFlush(recptr);

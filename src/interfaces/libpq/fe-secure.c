@@ -6,7 +6,7 @@
  *	  message integrity and endpoint authentication.
  *
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -381,11 +381,39 @@ retry_masked:
 	return n;
 }
 
+/* Dummy versions of SSL info functions, when built without SSL support */
 #ifndef USE_SSL
+
+int
+PQsslInUse(PGconn *conn)
+{
+	return 0;
+}
+
 void *
 PQgetssl(PGconn *conn)
 {
 	return NULL;
+}
+
+void *
+PQsslStruct(PGconn *conn, const char *struct_name)
+{
+	return NULL;
+}
+
+const char *
+PQsslAttribute(PGconn *conn, const char *attribute_name)
+{
+	return NULL;
+}
+
+const char **
+PQsslAttributes(PGconn *conn)
+{
+	static const char *result[] = { NULL };
+
+	return result;
 }
 #endif   /* USE_SSL */
 

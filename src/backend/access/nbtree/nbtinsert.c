@@ -3,7 +3,7 @@
  * nbtinsert.c
  *	  Item insertion in Lehman and Yao btrees for Postgres.
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -18,6 +18,7 @@
 #include "access/heapam.h"
 #include "access/nbtree.h"
 #include "access/transam.h"
+#include "access/xloginsert.h"
 #include "miscadmin.h"
 #include "storage/lmgr.h"
 #include "storage/predicate.h"
@@ -388,16 +389,20 @@ _bt_check_unique(Relation rel, IndexTuple itup, Relation heapRel,
 					{
 						Datum		values[INDEX_MAX_KEYS];
 						bool		isnull[INDEX_MAX_KEYS];
+						char	   *key_desc;
 
 						index_deform_tuple(itup, RelationGetDescr(rel),
 										   values, isnull);
+
+						key_desc = BuildIndexValueDescription(rel, values,
+															  isnull);
+
 						ereport(ERROR,
 								(errcode(ERRCODE_UNIQUE_VIOLATION),
 								 errmsg("duplicate key value violates unique constraint \"%s\"",
 										RelationGetRelationName(rel)),
-								 errdetail("Key %s already exists.",
-										   BuildIndexValueDescription(rel,
-															values, isnull)),
+								 key_desc ? errdetail("Key %s already exists.",
+													  key_desc) : 0,
 								 errtableconstraint(heapRel,
 											 RelationGetRelationName(rel))));
 					}
@@ -836,37 +841,25 @@ _bt_insertonpg(Relation rel,
 		if (RelationNeedsWAL(rel))
 		{
 			xl_btree_insert xlrec;
-			BlockNumber xlleftchild;
 			xl_btree_metadata xlmeta;
 			uint8		xlinfo;
 			XLogRecPtr	recptr;
-			XLogRecData rdata[4];
-			XLogRecData *nextrdata;
 			IndexTupleData trunctuple;
 
-			xlrec.target.node = rel->rd_node;
-			ItemPointerSet(&(xlrec.target.tid), itup_blkno, itup_off);
+			xlrec.offnum = itup_off;
 
-			rdata[0].data = (char *) &xlrec;
-			rdata[0].len = SizeOfBtreeInsert;
-			rdata[0].buffer = InvalidBuffer;
-			rdata[0].next = nextrdata = &(rdata[1]);
+			XLogBeginInsert();
+			XLogRegisterData((char *) &xlrec, SizeOfBtreeInsert);
 
 			if (P_ISLEAF(lpageop))
 				xlinfo = XLOG_BTREE_INSERT_LEAF;
 			else
 			{
 				/*
-				 * Include the block number of the left child, whose
-				 * INCOMPLETE_SPLIT flag was cleared.
+				 * Register the left child whose INCOMPLETE_SPLIT flag was
+				 * cleared.
 				 */
-				xlleftchild = BufferGetBlockNumber(cbuf);
-				nextrdata->data = (char *) &xlleftchild;
-				nextrdata->len = sizeof(BlockNumber);
-				nextrdata->buffer = cbuf;
-				nextrdata->buffer_std = true;
-				nextrdata->next = nextrdata + 1;
-				nextrdata++;
+				XLogRegisterBuffer(1, cbuf, REGBUF_STANDARD);
 
 				xlinfo = XLOG_BTREE_INSERT_UPPER;
 			}
@@ -878,33 +871,25 @@ _bt_insertonpg(Relation rel,
 				xlmeta.fastroot = metad->btm_fastroot;
 				xlmeta.fastlevel = metad->btm_fastlevel;
 
-				nextrdata->data = (char *) &xlmeta;
-				nextrdata->len = sizeof(xl_btree_metadata);
-				nextrdata->buffer = InvalidBuffer;
-				nextrdata->next = nextrdata + 1;
-				nextrdata++;
+				XLogRegisterBuffer(2, metabuf, REGBUF_WILL_INIT);
+				XLogRegisterBufData(2, (char *) &xlmeta, sizeof(xl_btree_metadata));
 
 				xlinfo = XLOG_BTREE_INSERT_META;
 			}
 
 			/* Read comments in _bt_pgaddtup */
+			XLogRegisterBuffer(0, buf, REGBUF_STANDARD);
 			if (!P_ISLEAF(lpageop) && newitemoff == P_FIRSTDATAKEY(lpageop))
 			{
 				trunctuple = *itup;
 				trunctuple.t_info = sizeof(IndexTupleData);
-				nextrdata->data = (char *) &trunctuple;
-				nextrdata->len = sizeof(IndexTupleData);
+				XLogRegisterBufData(0, (char *) &trunctuple,
+									sizeof(IndexTupleData));
 			}
 			else
-			{
-				nextrdata->data = (char *) itup;
-				nextrdata->len = IndexTupleDSize(*itup);
-			}
-			nextrdata->buffer = buf;
-			nextrdata->buffer_std = true;
-			nextrdata->next = NULL;
+				XLogRegisterBufData(0, (char *) itup, IndexTupleDSize(*itup));
 
-			recptr = XLogInsert(RM_BTREE_ID, xlinfo, rdata);
+			recptr = XLogInsert(RM_BTREE_ID, xlinfo);
 
 			if (BufferIsValid(metabuf))
 			{
@@ -1259,56 +1244,37 @@ _bt_split(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber firstright,
 		xl_btree_split xlrec;
 		uint8		xlinfo;
 		XLogRecPtr	recptr;
-		XLogRecData rdata[7];
-		XLogRecData *lastrdata;
-		BlockNumber cblkno;
 
-		xlrec.node = rel->rd_node;
-		xlrec.leftsib = origpagenumber;
-		xlrec.rightsib = rightpagenumber;
-		xlrec.rnext = ropaque->btpo_next;
 		xlrec.level = ropaque->btpo.level;
 		xlrec.firstright = firstright;
+		xlrec.newitemoff = newitemoff;
 
-		rdata[0].data = (char *) &xlrec;
-		rdata[0].len = SizeOfBtreeSplit;
-		rdata[0].buffer = InvalidBuffer;
+		XLogBeginInsert();
+		XLogRegisterData((char *) &xlrec, SizeOfBtreeSplit);
 
-		lastrdata = &rdata[0];
+		XLogRegisterBuffer(0, buf, REGBUF_STANDARD);
+		XLogRegisterBuffer(1, rbuf, REGBUF_WILL_INIT);
+		/* Log the right sibling, because we've changed its prev-pointer. */
+		if (!P_RIGHTMOST(ropaque))
+			XLogRegisterBuffer(2, sbuf, REGBUF_STANDARD);
+		if (BufferIsValid(cbuf))
+			XLogRegisterBuffer(3, cbuf, REGBUF_STANDARD);
 
 		/*
-		 * Log the new item and its offset, if it was inserted on the left
-		 * page. (If it was put on the right page, we don't need to explicitly
-		 * WAL log it because it's included with all the other items on the
-		 * right page.) Show the new item as belonging to the left page
-		 * buffer, so that it is not stored if XLogInsert decides it needs a
-		 * full-page image of the left page.  We store the offset anyway,
-		 * though, to support archive compression of these records.
+		 * Log the new item, if it was inserted on the left page. (If it was
+		 * put on the right page, we don't need to explicitly WAL log it
+		 * because it's included with all the other items on the right page.)
+		 * Show the new item as belonging to the left page buffer, so that it
+		 * is not stored if XLogInsert decides it needs a full-page image of
+		 * the left page.  We store the offset anyway, though, to support
+		 * archive compression of these records.
 		 */
 		if (newitemonleft)
-		{
-			lastrdata->next = lastrdata + 1;
-			lastrdata++;
-
-			lastrdata->data = (char *) &newitemoff;
-			lastrdata->len = sizeof(OffsetNumber);
-			lastrdata->buffer = InvalidBuffer;
-
-			lastrdata->next = lastrdata + 1;
-			lastrdata++;
-
-			lastrdata->data = (char *) newitem;
-			lastrdata->len = MAXALIGN(newitemsz);
-			lastrdata->buffer = buf;	/* backup block 0 */
-			lastrdata->buffer_std = true;
-		}
+			XLogRegisterBufData(0, (char *) newitem, MAXALIGN(newitemsz));
 
 		/* Log left page */
 		if (!isleaf)
 		{
-			lastrdata->next = lastrdata + 1;
-			lastrdata++;
-
 			/*
 			 * We must also log the left page's high key, because the right
 			 * page's leftmost key is suppressed on non-leaf levels.  Show it
@@ -1318,43 +1284,7 @@ _bt_split(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber firstright,
 			 */
 			itemid = PageGetItemId(origpage, P_HIKEY);
 			item = (IndexTuple) PageGetItem(origpage, itemid);
-			lastrdata->data = (char *) item;
-			lastrdata->len = MAXALIGN(IndexTupleSize(item));
-			lastrdata->buffer = buf;	/* backup block 0 */
-			lastrdata->buffer_std = true;
-		}
-
-		if (isleaf && !newitemonleft)
-		{
-			lastrdata->next = lastrdata + 1;
-			lastrdata++;
-
-			/*
-			 * Although we don't need to WAL-log anything on the left page, we
-			 * still need XLogInsert to consider storing a full-page image of
-			 * the left page, so make an empty entry referencing that buffer.
-			 * This also ensures that the left page is always backup block 0.
-			 */
-			lastrdata->data = NULL;
-			lastrdata->len = 0;
-			lastrdata->buffer = buf;	/* backup block 0 */
-			lastrdata->buffer_std = true;
-		}
-
-		/*
-		 * Log block number of left child, whose INCOMPLETE_SPLIT flag this
-		 * insertion clears.
-		 */
-		if (!isleaf)
-		{
-			lastrdata->next = lastrdata + 1;
-			lastrdata++;
-
-			cblkno = BufferGetBlockNumber(cbuf);
-			lastrdata->data = (char *) &cblkno;
-			lastrdata->len = sizeof(BlockNumber);
-			lastrdata->buffer = cbuf;	/* backup block 1 */
-			lastrdata->buffer_std = true;
+			XLogRegisterBufData(0, (char *) item, MAXALIGN(IndexTupleSize(item)));
 		}
 
 		/*
@@ -1369,35 +1299,16 @@ _bt_split(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber firstright,
 		 * and so the item pointers can be reconstructed.  See comments for
 		 * _bt_restore_page().
 		 */
-		lastrdata->next = lastrdata + 1;
-		lastrdata++;
-
-		lastrdata->data = (char *) rightpage +
-			((PageHeader) rightpage)->pd_upper;
-		lastrdata->len = ((PageHeader) rightpage)->pd_special -
-			((PageHeader) rightpage)->pd_upper;
-		lastrdata->buffer = InvalidBuffer;
-
-		/* Log the right sibling, because we've changed its' prev-pointer. */
-		if (!P_RIGHTMOST(ropaque))
-		{
-			lastrdata->next = lastrdata + 1;
-			lastrdata++;
-
-			lastrdata->data = NULL;
-			lastrdata->len = 0;
-			lastrdata->buffer = sbuf;	/* bkp block 1 (leaf) or 2 (non-leaf) */
-			lastrdata->buffer_std = true;
-		}
-
-		lastrdata->next = NULL;
+		XLogRegisterBufData(1,
+					 (char *) rightpage + ((PageHeader) rightpage)->pd_upper,
+							((PageHeader) rightpage)->pd_special - ((PageHeader) rightpage)->pd_upper);
 
 		if (isroot)
 			xlinfo = newitemonleft ? XLOG_BTREE_SPLIT_L_ROOT : XLOG_BTREE_SPLIT_R_ROOT;
 		else
 			xlinfo = newitemonleft ? XLOG_BTREE_SPLIT_L : XLOG_BTREE_SPLIT_R;
 
-		recptr = XLogInsert(RM_BTREE_ID, xlinfo, rdata);
+		recptr = XLogInsert(RM_BTREE_ID, xlinfo);
 
 		PageSetLSN(origpage, recptr);
 		PageSetLSN(rightpage, recptr);
@@ -2089,34 +2000,35 @@ _bt_newroot(Relation rel, Buffer lbuf, Buffer rbuf)
 	{
 		xl_btree_newroot xlrec;
 		XLogRecPtr	recptr;
-		XLogRecData rdata[3];
+		xl_btree_metadata md;
 
-		xlrec.node = rel->rd_node;
 		xlrec.rootblk = rootblknum;
 		xlrec.level = metad->btm_level;
 
-		rdata[0].data = (char *) &xlrec;
-		rdata[0].len = SizeOfBtreeNewroot;
-		rdata[0].buffer = InvalidBuffer;
-		rdata[0].next = &(rdata[1]);
+		XLogBeginInsert();
+		XLogRegisterData((char *) &xlrec, SizeOfBtreeNewroot);
+
+		XLogRegisterBuffer(0, rootbuf, REGBUF_WILL_INIT);
+		XLogRegisterBuffer(1, lbuf, REGBUF_STANDARD);
+		XLogRegisterBuffer(2, metabuf, REGBUF_WILL_INIT);
+
+		md.root = rootblknum;
+		md.level = metad->btm_level;
+		md.fastroot = rootblknum;
+		md.fastlevel = metad->btm_level;
+
+		XLogRegisterBufData(2, (char *) &md, sizeof(xl_btree_metadata));
 
 		/*
 		 * Direct access to page is not good but faster - we should implement
 		 * some new func in page API.
 		 */
-		rdata[1].data = (char *) rootpage + ((PageHeader) rootpage)->pd_upper;
-		rdata[1].len = ((PageHeader) rootpage)->pd_special -
-			((PageHeader) rootpage)->pd_upper;
-		rdata[1].buffer = InvalidBuffer;
-		rdata[1].next = &(rdata[2]);
+		XLogRegisterBufData(0,
+					   (char *) rootpage + ((PageHeader) rootpage)->pd_upper,
+							((PageHeader) rootpage)->pd_special -
+							((PageHeader) rootpage)->pd_upper);
 
-		/* Make a full-page image of the left child if needed */
-		rdata[2].data = NULL;
-		rdata[2].len = 0;
-		rdata[2].buffer = lbuf;
-		rdata[2].next = NULL;
-
-		recptr = XLogInsert(RM_BTREE_ID, XLOG_BTREE_NEWROOT, rdata);
+		recptr = XLogInsert(RM_BTREE_ID, XLOG_BTREE_NEWROOT);
 
 		PageSetLSN(lpage, recptr);
 		PageSetLSN(rootpage, recptr);

@@ -237,6 +237,39 @@ SELECT * FROM ft1 t1 WHERE t1.c1 = 101 AND t1.c6 = '1' AND t1.c7 >= '1';
  101 |  1 | 00101 | Fri Jan 02 00:00:00 1970 PST | Fri Jan 02 00:00:00 1970 | 1  | 1          | foo
 (1 row)
 
+-- with FOR UPDATE/SHARE
+EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1 t1 WHERE c1 = 101 FOR UPDATE;
+                                                   QUERY PLAN                                                   
+----------------------------------------------------------------------------------------------------------------
+ LockRows
+   Output: c1, c2, c3, c4, c5, c6, c7, c8, t1.*
+   ->  Foreign Scan on public.ft1 t1
+         Output: c1, c2, c3, c4, c5, c6, c7, c8, t1.*
+         Remote SQL: SELECT "C 1", c2, c3, c4, c5, c6, c7, c8 FROM "S 1"."T 1" WHERE (("C 1" = 101)) FOR UPDATE
+(5 rows)
+
+SELECT * FROM ft1 t1 WHERE c1 = 101 FOR UPDATE;
+ c1  | c2 |  c3   |              c4              |            c5            | c6 |     c7     | c8  
+-----+----+-------+------------------------------+--------------------------+----+------------+-----
+ 101 |  1 | 00101 | Fri Jan 02 00:00:00 1970 PST | Fri Jan 02 00:00:00 1970 | 1  | 1          | foo
+(1 row)
+
+EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1 t1 WHERE c1 = 102 FOR SHARE;
+                                                  QUERY PLAN                                                   
+---------------------------------------------------------------------------------------------------------------
+ LockRows
+   Output: c1, c2, c3, c4, c5, c6, c7, c8, t1.*
+   ->  Foreign Scan on public.ft1 t1
+         Output: c1, c2, c3, c4, c5, c6, c7, c8, t1.*
+         Remote SQL: SELECT "C 1", c2, c3, c4, c5, c6, c7, c8 FROM "S 1"."T 1" WHERE (("C 1" = 102)) FOR SHARE
+(5 rows)
+
+SELECT * FROM ft1 t1 WHERE c1 = 102 FOR SHARE;
+ c1  | c2 |  c3   |              c4              |            c5            | c6 |     c7     | c8  
+-----+----+-------+------------------------------+--------------------------+----+------------+-----
+ 102 |  2 | 00102 | Sat Jan 03 00:00:00 1970 PST | Sat Jan 03 00:00:00 1970 | 2  | 2          | foo
+(1 row)
+
 -- aggregate
 SELECT COUNT(*) FROM ft1 t1;
  count 
@@ -832,6 +865,74 @@ DEALLOCATE st2;
 DEALLOCATE st3;
 DEALLOCATE st4;
 DEALLOCATE st5;
+-- System columns, except ctid, should not be sent to remote
+EXPLAIN (VERBOSE, COSTS false)
+SELECT * FROM ft1 t1 WHERE t1.tableoid = 'pg_class'::regclass LIMIT 1;
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ Limit
+   Output: c1, c2, c3, c4, c5, c6, c7, c8
+   ->  Foreign Scan on public.ft1 t1
+         Output: c1, c2, c3, c4, c5, c6, c7, c8
+         Filter: (t1.tableoid = 1259::oid)
+         Remote SQL: SELECT "C 1", c2, c3, c4, c5, c6, c7, c8 FROM "S 1"."T 1"
+(6 rows)
+
+SELECT * FROM ft1 t1 WHERE t1.tableoid = 'ft1'::regclass LIMIT 1;
+ c1 | c2 |  c3   |              c4              |            c5            | c6 |     c7     | c8  
+----+----+-------+------------------------------+--------------------------+----+------------+-----
+  1 |  1 | 00001 | Fri Jan 02 00:00:00 1970 PST | Fri Jan 02 00:00:00 1970 | 1  | 1          | foo
+(1 row)
+
+EXPLAIN (VERBOSE, COSTS false)
+SELECT tableoid::regclass, * FROM ft1 t1 LIMIT 1;
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ Limit
+   Output: ((tableoid)::regclass), c1, c2, c3, c4, c5, c6, c7, c8
+   ->  Foreign Scan on public.ft1 t1
+         Output: (tableoid)::regclass, c1, c2, c3, c4, c5, c6, c7, c8
+         Remote SQL: SELECT "C 1", c2, c3, c4, c5, c6, c7, c8 FROM "S 1"."T 1"
+(5 rows)
+
+SELECT tableoid::regclass, * FROM ft1 t1 LIMIT 1;
+ tableoid | c1 | c2 |  c3   |              c4              |            c5            | c6 |     c7     | c8  
+----------+----+----+-------+------------------------------+--------------------------+----+------------+-----
+ ft1      |  1 |  1 | 00001 | Fri Jan 02 00:00:00 1970 PST | Fri Jan 02 00:00:00 1970 | 1  | 1          | foo
+(1 row)
+
+EXPLAIN (VERBOSE, COSTS false)
+SELECT * FROM ft1 t1 WHERE t1.ctid = '(0,2)';
+                                              QUERY PLAN                                               
+-------------------------------------------------------------------------------------------------------
+ Foreign Scan on public.ft1 t1
+   Output: c1, c2, c3, c4, c5, c6, c7, c8
+   Remote SQL: SELECT "C 1", c2, c3, c4, c5, c6, c7, c8 FROM "S 1"."T 1" WHERE ((ctid = '(0,2)'::tid))
+(3 rows)
+
+SELECT * FROM ft1 t1 WHERE t1.ctid = '(0,2)';
+ c1 | c2 |  c3   |              c4              |            c5            | c6 |     c7     | c8  
+----+----+-------+------------------------------+--------------------------+----+------------+-----
+  2 |  2 | 00002 | Sat Jan 03 00:00:00 1970 PST | Sat Jan 03 00:00:00 1970 | 2  | 2          | foo
+(1 row)
+
+EXPLAIN (VERBOSE, COSTS false)
+SELECT ctid, * FROM ft1 t1 LIMIT 1;
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Limit
+   Output: ctid, c1, c2, c3, c4, c5, c6, c7, c8
+   ->  Foreign Scan on public.ft1 t1
+         Output: ctid, c1, c2, c3, c4, c5, c6, c7, c8
+         Remote SQL: SELECT "C 1", c2, c3, c4, c5, c6, c7, c8, ctid FROM "S 1"."T 1"
+(5 rows)
+
+SELECT ctid, * FROM ft1 t1 LIMIT 1;
+ ctid  | c1 | c2 |  c3   |              c4              |            c5            | c6 |     c7     | c8  
+-------+----+----+-------+------------------------------+--------------------------+----+------------+-----
+ (0,1) |  1 |  1 | 00001 | Fri Jan 02 00:00:00 1970 PST | Fri Jan 02 00:00:00 1970 | 1  | 1          | foo
+(1 row)
+
 -- ===================================================================
 -- used in pl/pgsql function
 -- ===================================================================
@@ -2487,6 +2588,91 @@ select c2, count(*) from "S 1"."T 1" where c2 < 500 group by 1 order by 1;
  407 |   100
 (13 rows)
 
+-- ===================================================================
+-- test check constraints
+-- ===================================================================
+-- Consistent check constraints provide consistent results
+ALTER FOREIGN TABLE ft1 ADD CONSTRAINT ft1_c2positive CHECK (c2 >= 0);
+EXPLAIN (VERBOSE, COSTS false) SELECT count(*) FROM ft1 WHERE c2 < 0;
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Aggregate
+   Output: count(*)
+   ->  Foreign Scan on public.ft1
+         Remote SQL: SELECT NULL FROM "S 1"."T 1" WHERE ((c2 < 0))
+(4 rows)
+
+SELECT count(*) FROM ft1 WHERE c2 < 0;
+ count 
+-------
+     0
+(1 row)
+
+SET constraint_exclusion = 'on';
+EXPLAIN (VERBOSE, COSTS false) SELECT count(*) FROM ft1 WHERE c2 < 0;
+           QUERY PLAN           
+--------------------------------
+ Aggregate
+   Output: count(*)
+   ->  Result
+         One-Time Filter: false
+(4 rows)
+
+SELECT count(*) FROM ft1 WHERE c2 < 0;
+ count 
+-------
+     0
+(1 row)
+
+RESET constraint_exclusion;
+-- check constraint is enforced on the remote side, not locally
+INSERT INTO ft1(c1, c2) VALUES(1111, -2);  -- c2positive
+ERROR:  new row for relation "T 1" violates check constraint "c2positive"
+DETAIL:  Failing row contains (1111, -2, null, null, null, null, ft1       , null).
+CONTEXT:  Remote SQL command: INSERT INTO "S 1"."T 1"("C 1", c2, c3, c4, c5, c6, c7, c8) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+UPDATE ft1 SET c2 = -c2 WHERE c1 = 1;  -- c2positive
+ERROR:  new row for relation "T 1" violates check constraint "c2positive"
+DETAIL:  Failing row contains (1, -1, 00001_trig_update, 1970-01-02 08:00:00+00, 1970-01-02 00:00:00, 1, 1         , foo).
+CONTEXT:  Remote SQL command: UPDATE "S 1"."T 1" SET c2 = $2 WHERE ctid = $1
+ALTER FOREIGN TABLE ft1 DROP CONSTRAINT ft1_c2positive;
+-- But inconsistent check constraints provide inconsistent results
+ALTER FOREIGN TABLE ft1 ADD CONSTRAINT ft1_c2negative CHECK (c2 < 0);
+EXPLAIN (VERBOSE, COSTS false) SELECT count(*) FROM ft1 WHERE c2 >= 0;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Aggregate
+   Output: count(*)
+   ->  Foreign Scan on public.ft1
+         Remote SQL: SELECT NULL FROM "S 1"."T 1" WHERE ((c2 >= 0))
+(4 rows)
+
+SELECT count(*) FROM ft1 WHERE c2 >= 0;
+ count 
+-------
+   821
+(1 row)
+
+SET constraint_exclusion = 'on';
+EXPLAIN (VERBOSE, COSTS false) SELECT count(*) FROM ft1 WHERE c2 >= 0;
+           QUERY PLAN           
+--------------------------------
+ Aggregate
+   Output: count(*)
+   ->  Result
+         One-Time Filter: false
+(4 rows)
+
+SELECT count(*) FROM ft1 WHERE c2 >= 0;
+ count 
+-------
+     0
+(1 row)
+
+RESET constraint_exclusion;
+-- local check constraint is not actually enforced
+INSERT INTO ft1(c1, c2) VALUES(1111, 2);
+UPDATE ft1 SET c2 = c2 + 1 WHERE c1 = 1;
+ALTER FOREIGN TABLE ft1 DROP CONSTRAINT ft1_c2negative;
 -- ===================================================================
 -- test serial columns (ie, sequence-based defaults)
 -- ===================================================================

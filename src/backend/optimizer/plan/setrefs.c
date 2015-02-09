@@ -4,7 +4,7 @@
  *	  Post-processing of a completed plan tree: fix references to subplan
  *	  vars, compute regproc values for operators, etc
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -576,6 +576,20 @@ set_plan_refs(PlannerInfo *root, Plan *plan, int rtoffset)
 					fix_scan_list(root, splan->scan.plan.qual, rtoffset);
 				splan->fdw_exprs =
 					fix_scan_list(root, splan->fdw_exprs, rtoffset);
+			}
+			break;
+
+		case T_CustomScan:
+			{
+				CustomScan *splan = (CustomScan *) plan;
+
+				splan->scan.scanrelid += rtoffset;
+				splan->scan.plan.targetlist =
+					fix_scan_list(root, splan->scan.plan.targetlist, rtoffset);
+				splan->scan.plan.qual =
+					fix_scan_list(root, splan->scan.plan.qual, rtoffset);
+				splan->custom_exprs =
+					fix_scan_list(root, splan->custom_exprs, rtoffset);
 			}
 			break;
 
@@ -2095,7 +2109,7 @@ extract_query_dependencies(Node *query,
 	glob.type = T_PlannerGlobal;
 	glob.relationOids = NIL;
 	glob.invalItems = NIL;
-	glob.has_rls = false;
+	glob.hasRowSecurity = false;
 
 	MemSet(&root, 0, sizeof(root));
 	root.type = T_PlannerInfo;
@@ -2105,7 +2119,7 @@ extract_query_dependencies(Node *query,
 
 	*relationOids = glob.relationOids;
 	*invalItems = glob.invalItems;
-	*hasRowSecurity = glob.has_rls;
+	*hasRowSecurity = glob.hasRowSecurity;
 }
 
 static bool
@@ -2121,8 +2135,8 @@ extract_query_dependencies_walker(Node *node, PlannerInfo *context)
 		Query	   *query = (Query *) node;
 		ListCell   *lc;
 
-		/* Collect row-security information */
-		context->glob->has_rls = query->hasRowSecurity;
+		/* Collect row security information */
+		context->glob->hasRowSecurity = query->hasRowSecurity;
 
 		if (query->commandType == CMD_UTILITY)
 		{

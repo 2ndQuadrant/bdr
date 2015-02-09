@@ -3,7 +3,7 @@
  * dsm_impl.h
  *	  low-level dynamic shared memory primitives
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/storage/dsm_impl.h
@@ -73,6 +73,6 @@ extern bool dsm_impl_op(dsm_op op, dsm_handle handle, Size request_size,
 extern bool dsm_impl_can_resize(void);
 
 /* Implementation-dependent actions required to keep segment until shudown. */
-extern void dsm_impl_keep_segment(dsm_handle handle, void *impl_private);
+extern void dsm_impl_pin_segment(dsm_handle handle, void *impl_private);
 
 #endif   /* DSM_IMPL_H */

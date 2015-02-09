@@ -4,7 +4,7 @@
  *	  XML data type support.
  *
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/backend/utils/adt/xml.c
@@ -141,9 +141,10 @@ static bool print_xml_decl(StringInfo buf, const xmlChar *version,
 			   pg_enc encoding, int standalone);
 static xmlDocPtr xml_parse(text *data, XmlOptionType xmloption_arg,
 		  bool preserve_whitespace, int encoding);
-static text *xml_xmlnodetoxmltype(xmlNodePtr cur);
+static text *xml_xmlnodetoxmltype(xmlNodePtr cur, PgXmlErrorContext *xmlerrcxt);
 static int xml_xpathobjtoxmlarray(xmlXPathObjectPtr xpathobj,
-					   ArrayBuildState **astate);
+					   ArrayBuildState *astate,
+					   PgXmlErrorContext *xmlerrcxt);
 #endif   /* USE_LIBXML */
 
 static StringInfo query_to_xml_internal(const char *query, char *tablename,
@@ -3599,26 +3600,41 @@ SPI_sql_row_to_xmlelement(int rownum, StringInfo result, char *tablename,
  * return value otherwise)
  */
 static text *
-xml_xmlnodetoxmltype(xmlNodePtr cur)
+xml_xmlnodetoxmltype(xmlNodePtr cur, PgXmlErrorContext *xmlerrcxt)
 {
 	xmltype    *result;
 
 	if (cur->type == XML_ELEMENT_NODE)
 	{
 		xmlBufferPtr buf;
+		xmlNodePtr	cur_copy;
 
 		buf = xmlBufferCreate();
+
+		/*
+		 * The result of xmlNodeDump() won't contain namespace definitions
+		 * from parent nodes, but xmlCopyNode() duplicates a node along with
+		 * its required namespace definitions.
+		 */
+		cur_copy = xmlCopyNode(cur, 1);
+
+		if (cur_copy == NULL)
+			xml_ereport(xmlerrcxt, ERROR, ERRCODE_OUT_OF_MEMORY,
+						"could not copy node");
+
 		PG_TRY();
 		{
-			xmlNodeDump(buf, NULL, cur, 0, 1);
+			xmlNodeDump(buf, NULL, cur_copy, 0, 1);
 			result = xmlBuffer_to_xmltype(buf);
 		}
 		PG_CATCH();
 		{
+			xmlFreeNode(cur_copy);
 			xmlBufferFree(buf);
 			PG_RE_THROW();
 		}
 		PG_END_TRY();
+		xmlFreeNode(cur_copy);
 		xmlBufferFree(buf);
 	}
 	else
@@ -3648,7 +3664,7 @@ xml_xmlnodetoxmltype(xmlNodePtr cur)
 
 /*
  * Convert an XML XPath object (the result of evaluating an XPath expression)
- * to an array of xml values, which is returned at *astate.  The function
+ * to an array of xml values, which are appended to astate.  The function
  * result value is the number of elements in the array.
  *
  * If "astate" is NULL then we don't generate the array value, but we still
@@ -3660,15 +3676,13 @@ xml_xmlnodetoxmltype(xmlNodePtr cur)
  */
 static int
 xml_xpathobjtoxmlarray(xmlXPathObjectPtr xpathobj,
-					   ArrayBuildState **astate)
+					   ArrayBuildState *astate,
+					   PgXmlErrorContext *xmlerrcxt)
 {
 	int			result = 0;
 	Datum		datum;
 	Oid			datumtype;
 	char	   *result_str;
-
-	if (astate != NULL)
-		*astate = NULL;
 
 	switch (xpathobj->type)
 	{
@@ -3682,10 +3696,10 @@ xml_xpathobjtoxmlarray(xmlXPathObjectPtr xpathobj,
 
 					for (i = 0; i < result; i++)
 					{
-						datum = PointerGetDatum(xml_xmlnodetoxmltype(xpathobj->nodesetval->nodeTab[i]));
-						*astate = accumArrayResult(*astate, datum,
-												   false, XMLOID,
-												   CurrentMemoryContext);
+						datum = PointerGetDatum(xml_xmlnodetoxmltype(xpathobj->nodesetval->nodeTab[i],
+																	 xmlerrcxt));
+						(void) accumArrayResult(astate, datum, false,
+												XMLOID, CurrentMemoryContext);
 					}
 				}
 			}
@@ -3721,9 +3735,8 @@ xml_xpathobjtoxmlarray(xmlXPathObjectPtr xpathobj,
 	/* Common code for scalar-value cases */
 	result_str = map_sql_value_to_xml_value(datum, datumtype, true);
 	datum = PointerGetDatum(cstring_to_xmltype(result_str));
-	*astate = accumArrayResult(*astate, datum,
-							   false, XMLOID,
-							   CurrentMemoryContext);
+	(void) accumArrayResult(astate, datum, false,
+							XMLOID, CurrentMemoryContext);
 	return 1;
 }
 
@@ -3741,7 +3754,7 @@ xml_xpathobjtoxmlarray(xmlXPathObjectPtr xpathobj,
  */
 static void
 xpath_internal(text *xpath_expr_text, xmltype *data, ArrayType *namespaces,
-			   int *res_nitems, ArrayBuildState **astate)
+			   int *res_nitems, ArrayBuildState *astate)
 {
 	PgXmlErrorContext *xmlerrcxt;
 	volatile xmlParserCtxtPtr ctxt = NULL;
@@ -3886,9 +3899,9 @@ xpath_internal(text *xpath_expr_text, xmltype *data, ArrayType *namespaces,
 		 * Extract the results as requested.
 		 */
 		if (res_nitems != NULL)
-			*res_nitems = xml_xpathobjtoxmlarray(xpathobj, astate);
+			*res_nitems = xml_xpathobjtoxmlarray(xpathobj, astate, xmlerrcxt);
 		else
-			(void) xml_xpathobjtoxmlarray(xpathobj, astate);
+			(void) xml_xpathobjtoxmlarray(xpathobj, astate, xmlerrcxt);
 	}
 	PG_CATCH();
 	{
@@ -3933,16 +3946,12 @@ xpath(PG_FUNCTION_ARGS)
 	text	   *xpath_expr_text = PG_GETARG_TEXT_P(0);
 	xmltype    *data = PG_GETARG_XML_P(1);
 	ArrayType  *namespaces = PG_GETARG_ARRAYTYPE_P(2);
-	int			res_nitems;
 	ArrayBuildState *astate;
 
+	astate = initArrayResult(XMLOID, CurrentMemoryContext);
 	xpath_internal(xpath_expr_text, data, namespaces,
-				   &res_nitems, &astate);
-
-	if (res_nitems == 0)
-		PG_RETURN_ARRAYTYPE_P(construct_empty_array(XMLOID));
-	else
-		PG_RETURN_ARRAYTYPE_P(makeArrayResult(astate, CurrentMemoryContext));
+				   NULL, astate);
+	PG_RETURN_ARRAYTYPE_P(makeArrayResult(astate, CurrentMemoryContext));
 #else
 	NO_XML_SUPPORT();
 	return 0;

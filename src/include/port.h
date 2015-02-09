@@ -3,7 +3,7 @@
  * port.h
  *	  Header for src/port/ compatibility functions.
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/port.h
@@ -328,6 +328,8 @@ extern FILE *pgwin32_popen(const char *command, const char *type);
 #ifndef HAVE_GETTIMEOFDAY
 /* Last parameter not used */
 extern int	gettimeofday(struct timeval * tp, struct timezone * tzp);
+/* On windows we need to call some backend start setup for accurate timing */
+extern void init_win32_gettimeofday(void);
 #endif
 #else							/* !WIN32 */
 
@@ -390,6 +392,10 @@ extern int	getpeereid(int sock, uid_t *uid, gid_t *gid);
 extern int	isinf(double x);
 #endif
 
+#ifndef HAVE_MKDTEMP
+extern char *mkdtemp(char *path);
+#endif
+
 #ifndef HAVE_RINT
 extern double rint(double x);
 #endif
@@ -427,7 +433,7 @@ extern void srandom(unsigned int seed);
 /* thread.h */
 extern char *pqStrerror(int errnum, char *strerrbuf, size_t buflen);
 
-#if !defined(WIN32) || defined(__CYGWIN__)
+#ifndef WIN32
 extern int pqGetpwuid(uid_t uid, struct passwd * resultbuf, char *buffer,
 		   size_t buflen, struct passwd ** result);
 #endif
@@ -465,9 +471,6 @@ extern int	pg_check_dir(const char *dir);
 
 /* port/pgmkdirp.c */
 extern int	pg_mkdir_p(char *path, int omode);
-
-/* port/mkdtemp.c */
-extern char *mkdtemp(char *path);
 
 /* port/pqsignal.c */
 typedef void (*pqsigfunc) (int signo);

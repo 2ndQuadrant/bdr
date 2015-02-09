@@ -4,7 +4,7 @@
  *	  POSTGRES relation descriptor (a/k/a relcache entry) definitions.
  *
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/utils/rel.h
@@ -21,7 +21,6 @@
 #include "fmgr.h"
 #include "nodes/bitmapset.h"
 #include "rewrite/prs2lock.h"
-#include "rewrite/rowsecurity.h"
 #include "storage/block.h"
 #include "storage/relfilenode.h"
 #include "utils/relcache.h"
@@ -106,7 +105,8 @@ typedef struct RelationData
 	RuleLock   *rd_rules;		/* rewrite rules */
 	MemoryContext rd_rulescxt;	/* private memory cxt for rd_rules, if any */
 	TriggerDesc *trigdesc;		/* Trigger info, or NULL if rel has none */
-	RowSecurityDesc *rsdesc;	/* Row-security policy, or NULL */
+	/* use "struct" here to avoid needing to include rowsecurity.h: */
+	struct RowSecurityDesc *rd_rsdesc;	/* row security policies, or NULL */
 
 	/* data managed by RelationGetIndexList: */
 	List	   *rd_indexlist;	/* list of OIDs of indexes on relation */

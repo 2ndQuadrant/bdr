@@ -3,7 +3,7 @@
  * ts_type.h
  *	  Definitions for the tsvector and tsquery types
  *
- * Copyright (c) 1998-2014, PostgreSQL Global Development Group
+ * Copyright (c) 1998-2015, PostgreSQL Global Development Group
  *
  * src/include/tsearch/ts_type.h
  *
@@ -14,7 +14,6 @@
 
 #include "fmgr.h"
 #include "utils/memutils.h"
-#include "utils/pg_crc.h"
 
 
 /*

@@ -187,6 +187,7 @@
 					#   open_sync
 #full_page_writes = on			# recover from partial page writes
 #wal_log_hints = off			# also do full page writes of non-critical updates
+					# (change requires restart)
 #wal_buffers = -1			# min 32kB, -1 sets based on shared_buffers
 					# (change requires restart)
 #wal_writer_delay = 200ms		# 1-10000 milliseconds
@@ -227,6 +228,8 @@
 #wal_sender_timeout = 60s	# in milliseconds; 0 disables
 
 #max_replication_slots = 0	# max number of replication slots
+				# (change requires restart)
+#track_commit_timestamp = off	# collect timestamp of transaction commit
 				# (change requires restart)
 
 # - Master Server -
@@ -519,6 +522,7 @@
 #bytea_output = 'hex'			# hex, escape
 #xmlbinary = 'base64'
 #xmloption = 'content'
+#gin_pending_list_limit = 4MB
 
 # - Locale and Formatting -
 

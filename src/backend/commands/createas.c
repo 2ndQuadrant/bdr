@@ -12,7 +12,7 @@
  * to assorted legacy behaviors that we still try to preserve, notably that
  * we must return a tuples-processed count in the completionTag.
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -27,6 +27,8 @@
 #include "access/htup_details.h"
 #include "access/sysattr.h"
 #include "access/xact.h"
+#include "access/xlog.h"
+#include "catalog/namespace.h"
 #include "catalog/toasting.h"
 #include "commands/createas.h"
 #include "commands/matview.h"
@@ -36,12 +38,12 @@
 #include "miscadmin.h"
 #include "parser/parse_clause.h"
 #include "rewrite/rewriteHandler.h"
-#include "rewrite/rowsecurity.h"
 #include "storage/smgr.h"
 #include "tcop/tcopprot.h"
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
 #include "utils/rel.h"
+#include "utils/rls.h"
 #include "utils/snapmgr.h"
 
 
@@ -84,6 +86,22 @@ ExecCreateTableAs(CreateTableAsStmt *stmt, const char *queryString,
 	PlannedStmt *plan;
 	QueryDesc  *queryDesc;
 	ScanDirection dir;
+
+	if (stmt->if_not_exists)
+	{
+		Oid	nspid;
+
+		nspid = RangeVarGetCreationNamespace(stmt->into->rel);
+
+		if (get_relname_relid(stmt->into->rel->relname, nspid))
+		{
+			ereport(NOTICE,
+					(errcode(ERRCODE_DUPLICATE_TABLE),
+					 errmsg("relation \"%s\" already exists, skipping",
+							stmt->into->rel->relname)));
+			return InvalidOid;
+		}
+	}
 
 	/*
 	 * Create the tuple receiver object and insert info it will need
@@ -428,7 +446,7 @@ intorel_startup(DestReceiver *self, int operation, TupleDesc typeinfo)
 	 * be enabled here.  We don't actually support that currently, so throw
 	 * our own ereport(ERROR) if that happens.
 	 */
-	if (check_enable_rls(intoRelationId, InvalidOid) == RLS_ENABLED)
+	if (check_enable_rls(intoRelationId, InvalidOid, false) == RLS_ENABLED)
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 				 (errmsg("policies not yet implemented for this command"))));

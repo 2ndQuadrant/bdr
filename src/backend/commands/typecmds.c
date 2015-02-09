@@ -3,7 +3,7 @@
  * typecmds.c
  *	  Routines for SQL commands that manipulate types (and domains).
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -547,6 +547,52 @@ DefineType(List *names, List *parameters)
 					   NameListToString(analyzeName));
 #endif
 
+	/*
+	 * Print warnings if any of the type's I/O functions are marked volatile.
+	 * There is a general assumption that I/O functions are stable or
+	 * immutable; this allows us for example to mark record_in/record_out
+	 * stable rather than volatile.  Ideally we would throw errors not just
+	 * warnings here; but since this check is new as of 9.5, and since the
+	 * volatility marking might be just an error-of-omission and not a true
+	 * indication of how the function behaves, we'll let it pass as a warning
+	 * for now.
+	 */
+	if (inputOid && func_volatile(inputOid) == PROVOLATILE_VOLATILE)
+		ereport(WARNING,
+				(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+				 errmsg("type input function %s should not be volatile",
+						NameListToString(inputName))));
+	if (outputOid && func_volatile(outputOid) == PROVOLATILE_VOLATILE)
+		ereport(WARNING,
+				(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+				 errmsg("type output function %s should not be volatile",
+						NameListToString(outputName))));
+	if (receiveOid && func_volatile(receiveOid) == PROVOLATILE_VOLATILE)
+		ereport(WARNING,
+				(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+				 errmsg("type receive function %s should not be volatile",
+						NameListToString(receiveName))));
+	if (sendOid && func_volatile(sendOid) == PROVOLATILE_VOLATILE)
+		ereport(WARNING,
+				(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+				 errmsg("type send function %s should not be volatile",
+						NameListToString(sendName))));
+	if (typmodinOid && func_volatile(typmodinOid) == PROVOLATILE_VOLATILE)
+		ereport(WARNING,
+				(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+				 errmsg("type modifier input function %s should not be volatile",
+						NameListToString(typmodinName))));
+	if (typmodoutOid && func_volatile(typmodoutOid) == PROVOLATILE_VOLATILE)
+		ereport(WARNING,
+				(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+				 errmsg("type modifier output function %s should not be volatile",
+						NameListToString(typmodoutName))));
+
+	/*
+	 * OK, we're done checking, time to make the type.  We must assign the
+	 * array type OID ahead of calling TypeCreate, since the base type and
+	 * array type each refer to the other.
+	 */
 	array_oid = AssignTypeArrayOid();
 
 	/*
@@ -3330,12 +3376,34 @@ AlterTypeOwner(List *names, Oid newOwnerId, ObjectType objecttype)
 			ATExecChangeOwner(typTup->typrelid, newOwnerId, true, AccessExclusiveLock);
 		else
 		{
-			/*
-			 * We can just apply the modification directly.
-			 *
-			 * okay to scribble on typTup because it's a copy
-			 */
-			typTup->typowner = newOwnerId;
+			Datum		repl_val[Natts_pg_type];
+			bool		repl_null[Natts_pg_type];
+			bool		repl_repl[Natts_pg_type];
+			Acl		   *newAcl;
+			Datum		aclDatum;
+			bool		isNull;
+
+			memset(repl_null, false, sizeof(repl_null));
+			memset(repl_repl, false, sizeof(repl_repl));
+
+			repl_repl[Anum_pg_type_typowner - 1] = true;
+			repl_val[Anum_pg_type_typowner - 1] = ObjectIdGetDatum(newOwnerId);
+
+			aclDatum = heap_getattr(tup,
+									Anum_pg_type_typacl,
+									RelationGetDescr(rel),
+									&isNull);
+			/* Null ACLs do not require changes */
+			if (!isNull)
+			{
+				newAcl = aclnewowner(DatumGetAclP(aclDatum),
+									 typTup->typowner, newOwnerId);
+				repl_repl[Anum_pg_type_typacl - 1] = true;
+				repl_val[Anum_pg_type_typacl - 1] = PointerGetDatum(newAcl);
+			}
+
+			tup = heap_modify_tuple(tup, RelationGetDescr(rel), repl_val, repl_null,
+									repl_repl);
 
 			simple_heap_update(rel, &tup->t_self, tup);
 
@@ -3378,6 +3446,12 @@ AlterTypeOwnerInternal(Oid typeOid, Oid newOwnerId,
 	Relation	rel;
 	HeapTuple	tup;
 	Form_pg_type typTup;
+	Datum		repl_val[Natts_pg_type];
+	bool		repl_null[Natts_pg_type];
+	bool		repl_repl[Natts_pg_type];
+	Acl		   *newAcl;
+	Datum		aclDatum;
+	bool		isNull;
 
 	rel = heap_open(TypeRelationId, RowExclusiveLock);
 
@@ -3386,10 +3460,27 @@ AlterTypeOwnerInternal(Oid typeOid, Oid newOwnerId,
 		elog(ERROR, "cache lookup failed for type %u", typeOid);
 	typTup = (Form_pg_type) GETSTRUCT(tup);
 
-	/*
-	 * Modify the owner --- okay to scribble on typTup because it's a copy
-	 */
-	typTup->typowner = newOwnerId;
+	memset(repl_null, false, sizeof(repl_null));
+	memset(repl_repl, false, sizeof(repl_repl));
+
+	repl_repl[Anum_pg_type_typowner - 1] = true;
+	repl_val[Anum_pg_type_typowner - 1] = ObjectIdGetDatum(newOwnerId);
+
+	aclDatum = heap_getattr(tup,
+							Anum_pg_type_typacl,
+							RelationGetDescr(rel),
+							&isNull);
+	/* Null ACLs do not require changes */
+	if (!isNull)
+	{
+		newAcl = aclnewowner(DatumGetAclP(aclDatum),
+							 typTup->typowner, newOwnerId);
+		repl_repl[Anum_pg_type_typacl - 1] = true;
+		repl_val[Anum_pg_type_typacl - 1] = PointerGetDatum(newAcl);
+	}
+
+	tup = heap_modify_tuple(tup, RelationGetDescr(rel), repl_val, repl_null,
+							repl_repl);
 
 	simple_heap_update(rel, &tup->t_self, tup);
 

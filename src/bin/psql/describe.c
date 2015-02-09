@@ -6,7 +6,7 @@
  * with servers of versions 7.4 and up.  It's okay to omit irrelevant
  * information for an old server, but not to fail outright.
  *
- * Copyright (c) 2000-2014, PostgreSQL Global Development Group
+ * Copyright (c) 2000-2015, PostgreSQL Global Development Group
  *
  * src/bin/psql/describe.c
  */
@@ -114,7 +114,7 @@ describeAggregates(const char *pattern, bool verbose, bool showSystem)
 
 	appendPQExpBufferStr(&buf, "ORDER BY 1, 2, 4;");
 
-	res = PSQLexec(buf.data, false);
+	res = PSQLexec(buf.data);
 	termPQExpBuffer(&buf);
 	if (!res)
 		return false;
@@ -195,7 +195,7 @@ describeTablespaces(const char *pattern, bool verbose)
 
 	appendPQExpBufferStr(&buf, "ORDER BY 1;");
 
-	res = PSQLexec(buf.data, false);
+	res = PSQLexec(buf.data);
 	termPQExpBuffer(&buf);
 	if (!res)
 		return false;
@@ -458,7 +458,7 @@ describeFunctions(const char *functypes, const char *pattern, bool verbose, bool
 
 	appendPQExpBufferStr(&buf, "ORDER BY 1, 2, 4;");
 
-	res = PSQLexec(buf.data, false);
+	res = PSQLexec(buf.data);
 	termPQExpBuffer(&buf);
 	if (!res)
 		return false;
@@ -570,7 +570,7 @@ describeTypes(const char *pattern, bool verbose, bool showSystem)
 
 	appendPQExpBufferStr(&buf, "ORDER BY 1, 2;");
 
-	res = PSQLexec(buf.data, false);
+	res = PSQLexec(buf.data);
 	termPQExpBuffer(&buf);
 	if (!res)
 		return false;
@@ -645,7 +645,7 @@ describeOperators(const char *pattern, bool verbose, bool showSystem)
 
 	appendPQExpBufferStr(&buf, "ORDER BY 1, 2, 3, 4;");
 
-	res = PSQLexec(buf.data, false);
+	res = PSQLexec(buf.data);
 	termPQExpBuffer(&buf);
 	if (!res)
 		return false;
@@ -716,7 +716,7 @@ listAllDbs(const char *pattern, bool verbose)
 							  NULL, "d.datname", NULL, NULL);
 
 	appendPQExpBufferStr(&buf, "ORDER BY 1;");
-	res = PSQLexec(buf.data, false);
+	res = PSQLexec(buf.data);
 	termPQExpBuffer(&buf);
 	if (!res)
 		return false;
@@ -783,31 +783,31 @@ permissionsList(const char *pattern)
 	if (pset.sversion >= 90500)
 		appendPQExpBuffer(&buf,
 						  ",\n  pg_catalog.array_to_string(ARRAY(\n"
-						  "    SELECT rsecpolname\n"
-						  "    || CASE WHEN rseccmd IS NOT NULL THEN\n"
-						  "           E' (' || rseccmd || E')'\n"
+						  "    SELECT polname\n"
+						  "    || CASE WHEN polcmd != '*' THEN\n"
+						  "           E' (' || polcmd || E'):'\n"
 						  "       ELSE E':' \n"
 						  "       END\n"
-						  "    || CASE WHEN rs.rsecqual IS NOT NULL THEN\n"
-						  "           E'\\n  (u): ' || pg_catalog.pg_get_expr(rsecqual, rsecrelid)\n"
+						  "    || CASE WHEN polqual IS NOT NULL THEN\n"
+						  "           E'\\n  (u): ' || pg_catalog.pg_get_expr(polqual, polrelid)\n"
 						  "       ELSE E''\n"
 						  "       END\n"
-						  "    || CASE WHEN rsecwithcheck IS NOT NULL THEN\n"
-						  "           E'\\n  (c): ' || pg_catalog.pg_get_expr(rsecwithcheck, rsecrelid)\n"
+						  "    || CASE WHEN polwithcheck IS NOT NULL THEN\n"
+						  "           E'\\n  (c): ' || pg_catalog.pg_get_expr(polwithcheck, polrelid)\n"
 						  "       ELSE E''\n"
 						  "       END"
-						  "    || CASE WHEN rs.rsecroles <> '{0}' THEN\n"
+						  "    || CASE WHEN polroles <> '{0}' THEN\n"
 						  "           E'\\n  to: ' || pg_catalog.array_to_string(\n"
 						  "               ARRAY(\n"
 						  "                   SELECT rolname\n"
 						  "                   FROM pg_catalog.pg_roles\n"
-						  "                   WHERE oid = ANY (rs.rsecroles)\n"
+						  "                   WHERE oid = ANY (polroles)\n"
 						  "                   ORDER BY 1\n"
 						  "               ), E', ')\n"
 						  "       ELSE E''\n"
 						  "       END\n"
-						  "    FROM pg_catalog.pg_rowsecurity rs\n"
-						  "    WHERE rsecrelid = c.oid), E'\\n')\n"
+						  "    FROM pg_catalog.pg_policy pol\n"
+						  "    WHERE polrelid = c.oid), E'\\n')\n"
 						  "    AS \"%s\"",
 						  gettext_noop("Policies"));
 
@@ -827,7 +827,7 @@ permissionsList(const char *pattern)
 
 	appendPQExpBufferStr(&buf, "ORDER BY 1, 2;");
 
-	res = PSQLexec(buf.data, false);
+	res = PSQLexec(buf.data);
 	if (!res)
 	{
 		termPQExpBuffer(&buf);
@@ -901,7 +901,7 @@ listDefaultACLs(const char *pattern)
 
 	appendPQExpBufferStr(&buf, "ORDER BY 1, 2, 3;");
 
-	res = PSQLexec(buf.data, false);
+	res = PSQLexec(buf.data);
 	if (!res)
 	{
 		termPQExpBuffer(&buf);
@@ -952,7 +952,7 @@ objectDescription(const char *pattern, bool showSystem)
 					  gettext_noop("Object"),
 					  gettext_noop("Description"));
 
-	/* Constraint descriptions */
+	/* Table constraint descriptions */
 	appendPQExpBuffer(&buf,
 					  "  SELECT pgc.oid as oid, pgc.tableoid AS tableoid,\n"
 					  "  n.nspname as nspname,\n"
@@ -963,7 +963,7 @@ objectDescription(const char *pattern, bool showSystem)
 					  "ON c.oid = pgc.conrelid\n"
 					  "    LEFT JOIN pg_catalog.pg_namespace n "
 					  "    ON n.oid = c.relnamespace\n",
-					  gettext_noop("constraint"));
+					  gettext_noop("table constraint"));
 
 	if (!showSystem && !pattern)
 		appendPQExpBufferStr(&buf, "WHERE n.nspname <> 'pg_catalog'\n"
@@ -972,6 +972,29 @@ objectDescription(const char *pattern, bool showSystem)
 	processSQLNamePattern(pset.db, &buf, pattern, !showSystem && !pattern,
 						  false, "n.nspname", "pgc.conname", NULL,
 						  "pg_catalog.pg_table_is_visible(c.oid)");
+
+	/* Domain constraint descriptions */
+	appendPQExpBuffer(&buf,
+					  "UNION ALL\n"
+					  "  SELECT pgc.oid as oid, pgc.tableoid AS tableoid,\n"
+					  "  n.nspname as nspname,\n"
+					  "  CAST(pgc.conname AS pg_catalog.text) as name,"
+					  "  CAST('%s' AS pg_catalog.text) as object\n"
+					  "  FROM pg_catalog.pg_constraint pgc\n"
+					  "    JOIN pg_catalog.pg_type t "
+					  "ON t.oid = pgc.contypid\n"
+					  "    LEFT JOIN pg_catalog.pg_namespace n "
+					  "    ON n.oid = t.typnamespace\n",
+					  gettext_noop("domain constraint"));
+
+	if (!showSystem && !pattern)
+		appendPQExpBufferStr(&buf, "WHERE n.nspname <> 'pg_catalog'\n"
+							 "      AND n.nspname <> 'information_schema'\n");
+
+	processSQLNamePattern(pset.db, &buf, pattern, !showSystem && !pattern,
+						  false, "n.nspname", "pgc.conname", NULL,
+						  "pg_catalog.pg_type_is_visible(t.oid)");
+
 
 	/*
 	 * pg_opclass.opcmethod only available in 8.3+
@@ -1077,7 +1100,7 @@ objectDescription(const char *pattern, bool showSystem)
 
 	appendPQExpBufferStr(&buf, "ORDER BY 1, 2, 3;");
 
-	res = PSQLexec(buf.data, false);
+	res = PSQLexec(buf.data);
 	termPQExpBuffer(&buf);
 	if (!res)
 		return false;
@@ -1129,7 +1152,7 @@ describeTableDetails(const char *pattern, bool verbose, bool showSystem)
 
 	appendPQExpBufferStr(&buf, "ORDER BY 2, 3;");
 
-	res = PSQLexec(buf.data, false);
+	res = PSQLexec(buf.data);
 	termPQExpBuffer(&buf);
 	if (!res)
 		return false;
@@ -1338,7 +1361,7 @@ describeOneTableDetails(const char *schemaname,
 						  oid);
 	}
 
-	res = PSQLexec(buf.data, false);
+	res = PSQLexec(buf.data);
 	if (!res)
 		goto error_return;
 
@@ -1381,7 +1404,7 @@ describeOneTableDetails(const char *schemaname,
 		/* must be separate because fmtId isn't reentrant */
 		appendPQExpBuffer(&buf, ".%s;", fmtId(relationname));
 
-		res = PSQLexec(buf.data, false);
+		res = PSQLexec(buf.data);
 		if (!res)
 			goto error_return;
 
@@ -1441,7 +1464,7 @@ describeOneTableDetails(const char *schemaname,
 	appendPQExpBuffer(&buf, "\nWHERE a.attrelid = '%s' AND a.attnum > 0 AND NOT a.attisdropped", oid);
 	appendPQExpBufferStr(&buf, "\nORDER BY a.attnum;");
 
-	res = PSQLexec(buf.data, false);
+	res = PSQLexec(buf.data);
 	if (!res)
 		goto error_return;
 	numrows = PQntuples(res);
@@ -1555,7 +1578,7 @@ describeOneTableDetails(const char *schemaname,
 		printfPQExpBuffer(&buf,
 			 "SELECT pg_catalog.pg_get_viewdef('%s'::pg_catalog.oid, true);",
 						  oid);
-		result = PSQLexec(buf.data, false);
+		result = PSQLexec(buf.data);
 		if (!result)
 			goto error_return;
 
@@ -1694,7 +1717,7 @@ describeOneTableDetails(const char *schemaname,
 						  "AND i.indrelid = c2.oid;",
 						  oid);
 
-		result = PSQLexec(buf.data, false);
+		result = PSQLexec(buf.data);
 		if (!result)
 			goto error_return;
 		else if (PQntuples(result) != 1)
@@ -1773,7 +1796,7 @@ describeOneTableDetails(const char *schemaname,
 						  "\n AND d.deptype='a'",
 						  oid);
 
-		result = PSQLexec(buf.data, false);
+		result = PSQLexec(buf.data);
 		if (!result)
 			goto error_return;
 		else if (PQntuples(result) == 1)
@@ -1830,7 +1853,7 @@ describeOneTableDetails(const char *schemaname,
 							  "WHERE c.oid = '%s' AND c.oid = i.indrelid AND i.indexrelid = c2.oid\n"
 			 "ORDER BY i.indisprimary DESC, i.indisunique DESC, c2.relname;",
 							  oid);
-			result = PSQLexec(buf.data, false);
+			result = PSQLexec(buf.data);
 			if (!result)
 				goto error_return;
 			else
@@ -1914,7 +1937,7 @@ describeOneTableDetails(const char *schemaname,
 							  "WHERE r.conrelid = '%s' AND r.contype = 'c'\n"
 							  "ORDER BY 1;",
 							  oid);
-			result = PSQLexec(buf.data, false);
+			result = PSQLexec(buf.data);
 			if (!result)
 				goto error_return;
 			else
@@ -1945,7 +1968,7 @@ describeOneTableDetails(const char *schemaname,
 							  "FROM pg_catalog.pg_constraint r\n"
 				   "WHERE r.conrelid = '%s' AND r.contype = 'f' ORDER BY 1;",
 							  oid);
-			result = PSQLexec(buf.data, false);
+			result = PSQLexec(buf.data);
 			if (!result)
 				goto error_return;
 			else
@@ -1976,7 +1999,7 @@ describeOneTableDetails(const char *schemaname,
 							  "FROM pg_catalog.pg_constraint c\n"
 				  "WHERE c.confrelid = '%s' AND c.contype = 'f' ORDER BY 1;",
 							  oid);
-			result = PSQLexec(buf.data, false);
+			result = PSQLexec(buf.data);
 			if (!result)
 				goto error_return;
 			else
@@ -2001,30 +2024,23 @@ describeOneTableDetails(const char *schemaname,
 		/* print any row-level policies */
 		if (pset.sversion >= 90500)
 		{
-			appendPQExpBuffer(&buf,
-				",\n pg_catalog.pg_get_expr(rs.rsecqual, c.oid) as \"%s\"",
-				gettext_noop("Row-security"));
-
-			if (verbose)
-				appendPQExpBuffer(&buf,
-					"\n     LEFT JOIN pg_rowsecurity rs ON rs.rsecrelid = c.oid");
-
 			printfPQExpBuffer(&buf,
-						   "SELECT rs.rsecpolname,\n"
-						   "CASE WHEN rs.rsecroles = '{0}' THEN NULL ELSE array_to_string(array(select rolname from pg_roles where oid = any (rs.rsecroles) order by 1),',') END,\n"
-						   "pg_catalog.pg_get_expr(rs.rsecqual, rs.rsecrelid),\n"
-						   "pg_catalog.pg_get_expr(rs.rsecwithcheck, rs.rsecrelid),\n"
-						   "CASE rs.rseccmd \n"
+						   "SELECT pol.polname,\n"
+						   "CASE WHEN pol.polroles = '{0}' THEN NULL ELSE array_to_string(array(select rolname from pg_roles where oid = any (pol.polroles) order by 1),',') END,\n"
+						   "pg_catalog.pg_get_expr(pol.polqual, pol.polrelid),\n"
+						   "pg_catalog.pg_get_expr(pol.polwithcheck, pol.polrelid),\n"
+						   "CASE pol.polcmd \n"
 						   "WHEN 'r' THEN 'SELECT'\n"
-						   "WHEN 'u' THEN 'UPDATE'\n"
 						   "WHEN 'a' THEN 'INSERT'\n"
+						   "WHEN 'w' THEN 'UPDATE'\n"
 						   "WHEN 'd' THEN 'DELETE'\n"
+						   "WHEN '*' THEN 'ALL'\n"
 						   "END AS cmd\n"
-							  "FROM pg_catalog.pg_rowsecurity rs\n"
-				  "WHERE rs.rsecrelid = '%s' ORDER BY 1;",
+							  "FROM pg_catalog.pg_policy pol\n"
+				  "WHERE pol.polrelid = '%s' ORDER BY 1;",
 							  oid);
 
-			result = PSQLexec(buf.data, false);
+			result = PSQLexec(buf.data);
 			if (!result)
 				goto error_return;
 			else
@@ -2095,7 +2111,7 @@ describeOneTableDetails(const char *schemaname,
 								  "WHERE r.ev_class = '%s' ORDER BY 1;",
 								  oid);
 			}
-			result = PSQLexec(buf.data, false);
+			result = PSQLexec(buf.data);
 			if (!result)
 				goto error_return;
 			else
@@ -2186,7 +2202,7 @@ describeOneTableDetails(const char *schemaname,
 							  "FROM pg_catalog.pg_rewrite r\n"
 			"WHERE r.ev_class = '%s' AND r.rulename != '_RETURN' ORDER BY 1;",
 							  oid);
-			result = PSQLexec(buf.data, false);
+			result = PSQLexec(buf.data);
 			if (!result)
 				goto error_return;
 
@@ -2243,7 +2259,7 @@ describeOneTableDetails(const char *schemaname,
 								 "   WHERE d.classid = t.tableoid AND d.objid = t.oid AND d.deptype = 'i' AND c.contype = 'f'))");
 		appendPQExpBufferStr(&buf, "\nORDER BY 1;");
 
-		result = PSQLexec(buf.data, false);
+		result = PSQLexec(buf.data);
 		if (!result)
 			goto error_return;
 		else
@@ -2372,7 +2388,7 @@ describeOneTableDetails(const char *schemaname,
 							  "     pg_catalog.pg_foreign_server s\n"
 							  "WHERE f.ftrelid = %s AND s.oid = f.ftserver;",
 							  oid);
-			result = PSQLexec(buf.data, false);
+			result = PSQLexec(buf.data);
 			if (!result)
 				goto error_return;
 			else if (PQntuples(result) != 1)
@@ -2399,7 +2415,7 @@ describeOneTableDetails(const char *schemaname,
 		/* print inherited tables */
 		printfPQExpBuffer(&buf, "SELECT c.oid::pg_catalog.regclass FROM pg_catalog.pg_class c, pg_catalog.pg_inherits i WHERE c.oid=i.inhparent AND i.inhrelid = '%s' ORDER BY inhseqno;", oid);
 
-		result = PSQLexec(buf.data, false);
+		result = PSQLexec(buf.data);
 		if (!result)
 			goto error_return;
 		else
@@ -2432,7 +2448,7 @@ describeOneTableDetails(const char *schemaname,
 		else
 			printfPQExpBuffer(&buf, "SELECT c.oid::pg_catalog.regclass FROM pg_catalog.pg_class c, pg_catalog.pg_inherits i WHERE c.oid=i.inhrelid AND i.inhparent = '%s' ORDER BY c.relname;", oid);
 
-		result = PSQLexec(buf.data, false);
+		result = PSQLexec(buf.data);
 		if (!result)
 			goto error_return;
 		else
@@ -2579,7 +2595,7 @@ add_tablespace_footer(printTableContent *const cont, char relkind,
 			printfPQExpBuffer(&buf,
 							  "SELECT spcname FROM pg_catalog.pg_tablespace\n"
 							  "WHERE oid = '%u';", tablespace);
-			result = PSQLexec(buf.data, false);
+			result = PSQLexec(buf.data);
 			if (!result)
 				return;
 			/* Should always be the case, but.... */
@@ -2683,7 +2699,7 @@ describeRoles(const char *pattern, bool verbose)
 
 	appendPQExpBufferStr(&buf, "ORDER BY 1;");
 
-	res = PSQLexec(buf.data, false);
+	res = PSQLexec(buf.data);
 	if (!res)
 		return false;
 
@@ -2818,7 +2834,7 @@ listDbRoleSettings(const char *pattern, const char *pattern2)
 		return false;
 	}
 
-	res = PSQLexec(buf.data, false);
+	res = PSQLexec(buf.data);
 	if (!res)
 		return false;
 
@@ -2979,7 +2995,7 @@ listTables(const char *tabtypes, const char *pattern, bool verbose, bool showSys
 
 	appendPQExpBufferStr(&buf, "ORDER BY 1,2;");
 
-	res = PSQLexec(buf.data, false);
+	res = PSQLexec(buf.data);
 	termPQExpBuffer(&buf);
 	if (!res)
 		return false;
@@ -3066,7 +3082,7 @@ listLanguages(const char *pattern, bool verbose, bool showSystem)
 
 	appendPQExpBufferStr(&buf, "ORDER BY 1;");
 
-	res = PSQLexec(buf.data, false);
+	res = PSQLexec(buf.data);
 	termPQExpBuffer(&buf);
 	if (!res)
 		return false;
@@ -3153,7 +3169,7 @@ listDomains(const char *pattern, bool verbose, bool showSystem)
 
 	appendPQExpBufferStr(&buf, "ORDER BY 1, 2;");
 
-	res = PSQLexec(buf.data, false);
+	res = PSQLexec(buf.data);
 	termPQExpBuffer(&buf);
 	if (!res)
 		return false;
@@ -3227,7 +3243,7 @@ listConversions(const char *pattern, bool verbose, bool showSystem)
 
 	appendPQExpBufferStr(&buf, "ORDER BY 1, 2;");
 
-	res = PSQLexec(buf.data, false);
+	res = PSQLexec(buf.data);
 	termPQExpBuffer(&buf);
 	if (!res)
 		return false;
@@ -3293,7 +3309,7 @@ listEventTriggers(const char *pattern, bool verbose)
 
 	appendPQExpBufferStr(&buf, "ORDER BY 1");
 
-	res = PSQLexec(buf.data, false);
+	res = PSQLexec(buf.data);
 	termPQExpBuffer(&buf);
 	if (!res)
 		return false;
@@ -3392,7 +3408,7 @@ listCasts(const char *pattern, bool verbose)
 
 	appendPQExpBufferStr(&buf, ") )\nORDER BY 1, 2;");
 
-	res = PSQLexec(buf.data, false);
+	res = PSQLexec(buf.data);
 	termPQExpBuffer(&buf);
 	if (!res)
 		return false;
@@ -3468,7 +3484,7 @@ listCollations(const char *pattern, bool verbose, bool showSystem)
 
 	appendPQExpBufferStr(&buf, "ORDER BY 1, 2;");
 
-	res = PSQLexec(buf.data, false);
+	res = PSQLexec(buf.data);
 	termPQExpBuffer(&buf);
 	if (!res)
 		return false;
@@ -3527,7 +3543,7 @@ listSchemas(const char *pattern, bool verbose, bool showSystem)
 
 	appendPQExpBufferStr(&buf, "ORDER BY 1;");
 
-	res = PSQLexec(buf.data, false);
+	res = PSQLexec(buf.data);
 	termPQExpBuffer(&buf);
 	if (!res)
 		return false;
@@ -3584,7 +3600,7 @@ listTSParsers(const char *pattern, bool verbose)
 
 	appendPQExpBufferStr(&buf, "ORDER BY 1, 2;");
 
-	res = PSQLexec(buf.data, false);
+	res = PSQLexec(buf.data);
 	termPQExpBuffer(&buf);
 	if (!res)
 		return false;
@@ -3625,7 +3641,7 @@ listTSParsersVerbose(const char *pattern)
 
 	appendPQExpBufferStr(&buf, "ORDER BY 1, 2;");
 
-	res = PSQLexec(buf.data, false);
+	res = PSQLexec(buf.data);
 	termPQExpBuffer(&buf);
 	if (!res)
 		return false;
@@ -3722,7 +3738,7 @@ describeOneTSParser(const char *oid, const char *nspname, const char *prsname)
 					  gettext_noop("Get token types"),
 					  oid);
 
-	res = PSQLexec(buf.data, false);
+	res = PSQLexec(buf.data);
 	termPQExpBuffer(&buf);
 	if (!res)
 		return false;
@@ -3754,7 +3770,7 @@ describeOneTSParser(const char *oid, const char *nspname, const char *prsname)
 					  gettext_noop("Description"),
 					  oid);
 
-	res = PSQLexec(buf.data, false);
+	res = PSQLexec(buf.data);
 	termPQExpBuffer(&buf);
 	if (!res)
 		return false;
@@ -3830,7 +3846,7 @@ listTSDictionaries(const char *pattern, bool verbose)
 
 	appendPQExpBufferStr(&buf, "ORDER BY 1, 2;");
 
-	res = PSQLexec(buf.data, false);
+	res = PSQLexec(buf.data);
 	termPQExpBuffer(&buf);
 	if (!res)
 		return false;
@@ -3898,7 +3914,7 @@ listTSTemplates(const char *pattern, bool verbose)
 
 	appendPQExpBufferStr(&buf, "ORDER BY 1, 2;");
 
-	res = PSQLexec(buf.data, false);
+	res = PSQLexec(buf.data);
 	termPQExpBuffer(&buf);
 	if (!res)
 		return false;
@@ -3955,7 +3971,7 @@ listTSConfigs(const char *pattern, bool verbose)
 
 	appendPQExpBufferStr(&buf, "ORDER BY 1, 2;");
 
-	res = PSQLexec(buf.data, false);
+	res = PSQLexec(buf.data);
 	termPQExpBuffer(&buf);
 	if (!res)
 		return false;
@@ -3997,7 +4013,7 @@ listTSConfigsVerbose(const char *pattern)
 
 	appendPQExpBufferStr(&buf, "ORDER BY 3, 2;");
 
-	res = PSQLexec(buf.data, false);
+	res = PSQLexec(buf.data);
 	termPQExpBuffer(&buf);
 	if (!res)
 		return false;
@@ -4075,7 +4091,7 @@ describeOneTSConfig(const char *oid, const char *nspname, const char *cfgname,
 					  gettext_noop("Dictionaries"),
 					  oid);
 
-	res = PSQLexec(buf.data, false);
+	res = PSQLexec(buf.data);
 	termPQExpBuffer(&buf);
 	if (!res)
 		return false;
@@ -4176,7 +4192,7 @@ listForeignDataWrappers(const char *pattern, bool verbose)
 
 	appendPQExpBufferStr(&buf, "ORDER BY 1;");
 
-	res = PSQLexec(buf.data, false);
+	res = PSQLexec(buf.data);
 	termPQExpBuffer(&buf);
 	if (!res)
 		return false;
@@ -4255,7 +4271,7 @@ listForeignServers(const char *pattern, bool verbose)
 
 	appendPQExpBufferStr(&buf, "ORDER BY 1;");
 
-	res = PSQLexec(buf.data, false);
+	res = PSQLexec(buf.data);
 	termPQExpBuffer(&buf);
 	if (!res)
 		return false;
@@ -4313,7 +4329,7 @@ listUserMappings(const char *pattern, bool verbose)
 
 	appendPQExpBufferStr(&buf, "ORDER BY 1, 2;");
 
-	res = PSQLexec(buf.data, false);
+	res = PSQLexec(buf.data);
 	termPQExpBuffer(&buf);
 	if (!res)
 		return false;
@@ -4387,7 +4403,7 @@ listForeignTables(const char *pattern, bool verbose)
 
 	appendPQExpBufferStr(&buf, "ORDER BY 1, 2;");
 
-	res = PSQLexec(buf.data, false);
+	res = PSQLexec(buf.data);
 	termPQExpBuffer(&buf);
 	if (!res)
 		return false;
@@ -4441,7 +4457,7 @@ listExtensions(const char *pattern)
 
 	appendPQExpBufferStr(&buf, "ORDER BY 1;");
 
-	res = PSQLexec(buf.data, false);
+	res = PSQLexec(buf.data);
 	termPQExpBuffer(&buf);
 	if (!res)
 		return false;
@@ -4487,7 +4503,7 @@ listExtensionContents(const char *pattern)
 
 	appendPQExpBufferStr(&buf, "ORDER BY 1;");
 
-	res = PSQLexec(buf.data, false);
+	res = PSQLexec(buf.data);
 	termPQExpBuffer(&buf);
 	if (!res)
 		return false;
@@ -4547,7 +4563,7 @@ listOneExtensionContents(const char *extname, const char *oid)
 					  gettext_noop("Object Description"),
 					  oid);
 
-	res = PSQLexec(buf.data, false);
+	res = PSQLexec(buf.data);
 	termPQExpBuffer(&buf);
 	if (!res)
 		return false;

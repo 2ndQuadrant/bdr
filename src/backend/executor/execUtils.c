@@ -3,7 +3,7 @@
  * execUtils.c
  *	  miscellaneous executor utility routines
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -1245,6 +1245,7 @@ retry:
 								ForwardScanDirection)) != NULL)
 	{
 		TransactionId xwait;
+		ItemPointerData ctid_wait;
 		Datum		existing_values[INDEX_MAX_KEYS];
 		bool		existing_isnull[INDEX_MAX_KEYS];
 		char	   *error_new;
@@ -1306,8 +1307,9 @@ retry:
 
 		if (TransactionIdIsValid(xwait))
 		{
+			ctid_wait = tup->t_data->t_ctid;
 			index_endscan(index_scan);
-			XactLockTableWait(xwait, heap, &tup->t_data->t_ctid,
+			XactLockTableWait(xwait, heap, &ctid_wait,
 							  XLTW_RecheckExclusionConstr);
 			goto retry;
 		}
@@ -1323,8 +1325,10 @@ retry:
 					(errcode(ERRCODE_EXCLUSION_VIOLATION),
 					 errmsg("could not create exclusion constraint \"%s\"",
 							RelationGetRelationName(index)),
-					 errdetail("Key %s conflicts with key %s.",
-							   error_new, error_existing),
+					 error_new && error_existing ?
+						errdetail("Key %s conflicts with key %s.",
+								  error_new, error_existing) :
+						errdetail("Key conflicts exist."),
 					 errtableconstraint(heap,
 										RelationGetRelationName(index))));
 		else
@@ -1332,8 +1336,10 @@ retry:
 					(errcode(ERRCODE_EXCLUSION_VIOLATION),
 					 errmsg("conflicting key value violates exclusion constraint \"%s\"",
 							RelationGetRelationName(index)),
-					 errdetail("Key %s conflicts with existing key %s.",
-							   error_new, error_existing),
+					 error_new && error_existing ?
+						errdetail("Key %s conflicts with existing key %s.",
+								  error_new, error_existing) :
+						errdetail("Key conflicts with existing key."),
 					 errtableconstraint(heap,
 										RelationGetRelationName(index))));
 	}

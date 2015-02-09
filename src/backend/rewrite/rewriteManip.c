@@ -2,7 +2,7 @@
  *
  * rewriteManip.c
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -454,13 +454,11 @@ static Relids
 offset_relid_set(Relids relids, int offset)
 {
 	Relids		result = NULL;
-	Relids		tmprelids;
 	int			rtindex;
 
-	tmprelids = bms_copy(relids);
-	while ((rtindex = bms_first_member(tmprelids)) >= 0)
+	rtindex = -1;
+	while ((rtindex = bms_next_member(relids, rtindex)) >= 0)
 		result = bms_add_member(result, rtindex + offset);
-	bms_free(tmprelids);
 	return result;
 }
 

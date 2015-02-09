@@ -3,7 +3,7 @@
  * json.c
  *		JSON data type support.
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -15,7 +15,6 @@
 
 #include "access/htup_details.h"
 #include "access/transam.h"
-#include "catalog/pg_cast.h"
 #include "catalog/pg_type.h"
 #include "executor/spi.h"
 #include "lib/stringinfo.h"
@@ -94,6 +93,7 @@ static void datum_to_json(Datum val, bool is_null, StringInfo result,
 			  bool key_scalar);
 static void add_json(Datum val, bool is_null, StringInfo result,
 		 Oid val_type, bool key_scalar);
+static text *catenate_stringinfo_string(StringInfo buffer, const char *addon);
 
 /* the null action object used for pure validation */
 static JsonSemAction nullSemAction =
@@ -172,6 +172,36 @@ lex_expect(JsonParseContext ctx, JsonLexContext *lex, JsonTokenType token)
 	 ((c) >= '0' && (c) <= '9') || \
 	 (c) == '_' || \
 	 IS_HIGHBIT_SET(c))
+
+/* utility function to check if a string is a valid JSON number */
+extern bool
+IsValidJsonNumber(const char *str, int len)
+{
+	bool		numeric_error;
+	JsonLexContext dummy_lex;
+
+
+	/*
+	 * json_lex_number expects a leading  '-' to have been eaten already.
+	 *
+	 * having to cast away the constness of str is ugly, but there's not much
+	 * easy alternative.
+	 */
+	if (*str == '-')
+	{
+		dummy_lex.input = (char *) str + 1;
+		dummy_lex.input_length = len - 1;
+	}
+	else
+	{
+		dummy_lex.input = (char *) str;
+		dummy_lex.input_length = len;
+	}
+
+	json_lex_number(&dummy_lex, dummy_lex.input, &numeric_error);
+
+	return !numeric_error;
+}
 
 /*
  * Input.
@@ -776,14 +806,17 @@ json_lex_string(JsonLexContext *lex)
 					 * For UTF8, replace the escape sequence by the actual
 					 * utf8 character in lex->strval. Do this also for other
 					 * encodings if the escape designates an ASCII character,
-					 * otherwise raise an error. We don't ever unescape a
-					 * \u0000, since that would result in an impermissible nul
-					 * byte.
+					 * otherwise raise an error.
 					 */
 
 					if (ch == 0)
 					{
-						appendStringInfoString(lex->strval, "\\u0000");
+						/* We can't allow this, since our TEXT type doesn't */
+						ereport(ERROR,
+								(errcode(ERRCODE_UNTRANSLATABLE_CHARACTER),
+							   errmsg("unsupported Unicode escape sequence"),
+						   errdetail("\\u0000 cannot be converted to text."),
+								 report_json_context(lex)));
 					}
 					else if (GetDatabaseEncoding() == PG_UTF8)
 					{
@@ -803,8 +836,8 @@ json_lex_string(JsonLexContext *lex)
 					else
 					{
 						ereport(ERROR,
-								(errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
-								 errmsg("invalid input syntax for type json"),
+								(errcode(ERRCODE_UNTRANSLATABLE_CHARACTER),
+							   errmsg("unsupported Unicode escape sequence"),
 								 errdetail("Unicode escape values cannot be used for code point values above 007F when the server encoding is not UTF8."),
 								 report_json_context(lex)));
 					}
@@ -1250,10 +1283,14 @@ json_categorize_type(Oid typoid,
 	/* Look through any domain */
 	typoid = getBaseType(typoid);
 
-	/* We'll usually need to return the type output function */
-	getTypeOutputInfo(typoid, outfuncoid, &typisvarlena);
+	*outfuncoid = InvalidOid;
 
-	/* Check for known types */
+	/*
+	 * We need to get the output function for everything except date and
+	 * timestamp types, array and composite types, booleans, and non-builtin
+	 * types where there's a cast to json.
+	 */
+
 	switch (typoid)
 	{
 		case BOOLOID:
@@ -1266,6 +1303,7 @@ json_categorize_type(Oid typoid,
 		case FLOAT4OID:
 		case FLOAT8OID:
 		case NUMERICOID:
+			getTypeOutputInfo(typoid, outfuncoid, &typisvarlena);
 			*tcategory = JSONTYPE_NUMERIC;
 			break;
 
@@ -1283,6 +1321,7 @@ json_categorize_type(Oid typoid,
 
 		case JSONOID:
 		case JSONBOID:
+			getTypeOutputInfo(typoid, outfuncoid, &typisvarlena);
 			*tcategory = JSONTYPE_JSON;
 			break;
 
@@ -1299,23 +1338,27 @@ json_categorize_type(Oid typoid,
 				/* but let's look for a cast to json, if it's not built-in */
 				if (typoid >= FirstNormalObjectId)
 				{
-					HeapTuple	tuple;
+					Oid			castfunc;
+					CoercionPathType ctype;
 
-					tuple = SearchSysCache2(CASTSOURCETARGET,
-											ObjectIdGetDatum(typoid),
-											ObjectIdGetDatum(JSONOID));
-					if (HeapTupleIsValid(tuple))
+					ctype = find_coercion_pathway(JSONOID, typoid,
+												  COERCION_EXPLICIT,
+												  &castfunc);
+					if (ctype == COERCION_PATH_FUNC && OidIsValid(castfunc))
 					{
-						Form_pg_cast castForm = (Form_pg_cast) GETSTRUCT(tuple);
-
-						if (castForm->castmethod == COERCION_METHOD_FUNCTION)
-						{
-							*tcategory = JSONTYPE_CAST;
-							*outfuncoid = castForm->castfunc;
-						}
-
-						ReleaseSysCache(tuple);
+						*tcategory = JSONTYPE_CAST;
+						*outfuncoid = castfunc;
 					}
+					else
+					{
+						/* non builtin type with no cast */
+						getTypeOutputInfo(typoid, outfuncoid, &typisvarlena);
+					}
+				}
+				else
+				{
+					/* any other builtin type */
+					getTypeOutputInfo(typoid, outfuncoid, &typisvarlena);
 				}
 			}
 			break;
@@ -1338,11 +1381,9 @@ datum_to_json(Datum val, bool is_null, StringInfo result,
 {
 	char	   *outputstr;
 	text	   *jsontext;
-	bool		numeric_error;
-	JsonLexContext dummy_lex;
 
 	/* callers are expected to ensure that null keys are not passed in */
-	Assert( ! (key_scalar && is_null));
+	Assert(!(key_scalar && is_null));
 
 	if (is_null)
 	{
@@ -1376,25 +1417,15 @@ datum_to_json(Datum val, bool is_null, StringInfo result,
 			break;
 		case JSONTYPE_NUMERIC:
 			outputstr = OidOutputFunctionCall(outfuncoid, val);
-			if (key_scalar)
-			{
-				/* always quote keys */
-				escape_json(result, outputstr);
-			}
+
+			/*
+			 * Don't call escape_json for a non-key if it's a valid JSON
+			 * number.
+			 */
+			if (!key_scalar && IsValidJsonNumber(outputstr, strlen(outputstr)))
+				appendStringInfoString(result, outputstr);
 			else
-			{
-				/*
-				 * Don't call escape_json for a non-key if it's a valid JSON
-				 * number.
-				 */
-				dummy_lex.input = *outputstr == '-' ? outputstr + 1 : outputstr;
-				dummy_lex.input_length = strlen(dummy_lex.input);
-				json_lex_number(&dummy_lex, dummy_lex.input, &numeric_error);
-				if (!numeric_error)
-					appendStringInfoString(result, outputstr);
-				else
-					escape_json(result, outputstr);
-			}
+				escape_json(result, outputstr);
 			pfree(outputstr);
 			break;
 		case JSONTYPE_DATE:
@@ -1781,6 +1812,8 @@ to_json(PG_FUNCTION_ARGS)
 
 /*
  * json_agg transition function
+ *
+ * aggregate input column as a json array value.
  */
 Datum
 json_agg_transfn(PG_FUNCTION_ARGS)
@@ -1867,18 +1900,18 @@ json_agg_finalfn(PG_FUNCTION_ARGS)
 
 	state = PG_ARGISNULL(0) ? NULL : (StringInfo) PG_GETARG_POINTER(0);
 
+	/* NULL result for no rows in, as is standard with aggregates */
 	if (state == NULL)
 		PG_RETURN_NULL();
 
-	appendStringInfoChar(state, ']');
-
-	PG_RETURN_TEXT_P(cstring_to_text_with_len(state->data, state->len));
+	/* Else return state with appropriate array terminator added */
+	PG_RETURN_TEXT_P(catenate_stringinfo_string(state, "]"));
 }
 
 /*
  * json_object_agg transition function.
  *
- * aggregate two input columns as a single json value.
+ * aggregate two input columns as a single json object value.
  */
 Datum
 json_object_agg_transfn(PG_FUNCTION_ARGS)
@@ -1892,7 +1925,7 @@ json_object_agg_transfn(PG_FUNCTION_ARGS)
 	if (!AggCheckCallContext(fcinfo, &aggcontext))
 	{
 		/* cannot be called directly because of internal-type argument */
-		elog(ERROR, "json_agg_transfn called in non-aggregate context");
+		elog(ERROR, "json_object_agg_transfn called in non-aggregate context");
 	}
 
 	if (PG_ARGISNULL(0))
@@ -1959,7 +1992,6 @@ json_object_agg_transfn(PG_FUNCTION_ARGS)
 
 /*
  * json_object_agg final function.
- *
  */
 Datum
 json_object_agg_finalfn(PG_FUNCTION_ARGS)
@@ -1971,12 +2003,32 @@ json_object_agg_finalfn(PG_FUNCTION_ARGS)
 
 	state = PG_ARGISNULL(0) ? NULL : (StringInfo) PG_GETARG_POINTER(0);
 
+	/* NULL result for no rows in, as is standard with aggregates */
 	if (state == NULL)
 		PG_RETURN_NULL();
 
-	appendStringInfoString(state, " }");
+	/* Else return state with appropriate object terminator added */
+	PG_RETURN_TEXT_P(catenate_stringinfo_string(state, " }"));
+}
 
-	PG_RETURN_TEXT_P(cstring_to_text_with_len(state->data, state->len));
+/*
+ * Helper function for aggregates: return given StringInfo's contents plus
+ * specified trailing string, as a text datum.  We need this because aggregate
+ * final functions are not allowed to modify the aggregate state.
+ */
+static text *
+catenate_stringinfo_string(StringInfo buffer, const char *addon)
+{
+	/* custom version of cstring_to_text_with_len */
+	int			buflen = buffer->len;
+	int			addlen = strlen(addon);
+	text	   *result = (text *) palloc(buflen + addlen + VARHDRSZ);
+
+	SET_VARSIZE(result, buflen + addlen + VARHDRSZ);
+	memcpy(VARDATA(result), buffer->data, buflen);
+	memcpy(VARDATA(result) + buflen, addon, addlen);
+
+	return result;
 }
 
 /*
@@ -2334,30 +2386,7 @@ escape_json(StringInfo buf, const char *str)
 				appendStringInfoString(buf, "\\\"");
 				break;
 			case '\\':
-
-				/*
-				 * Unicode escapes are passed through as is. There is no
-				 * requirement that they denote a valid character in the
-				 * server encoding - indeed that is a big part of their
-				 * usefulness.
-				 *
-				 * All we require is that they consist of \uXXXX where the Xs
-				 * are hexadecimal digits. It is the responsibility of the
-				 * caller of, say, to_json() to make sure that the unicode
-				 * escape is valid.
-				 *
-				 * In the case of a jsonb string value being escaped, the only
-				 * unicode escape that should be present is \u0000, all the
-				 * other unicode escapes will have been resolved.
-				 */
-				if (p[1] == 'u' &&
-					isxdigit((unsigned char) p[2]) &&
-					isxdigit((unsigned char) p[3]) &&
-					isxdigit((unsigned char) p[4]) &&
-					isxdigit((unsigned char) p[5]))
-					appendStringInfoCharMacro(buf, *p);
-				else
-					appendStringInfoString(buf, "\\\\");
+				appendStringInfoString(buf, "\\\\");
 				break;
 			default:
 				if ((unsigned char) *p < ' ')

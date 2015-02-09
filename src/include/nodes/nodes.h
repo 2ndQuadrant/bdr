@@ -4,7 +4,7 @@
  *	  Definitions for tagged nodes.
  *
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/nodes/nodes.h
@@ -62,6 +62,7 @@ typedef enum NodeTag
 	T_CteScan,
 	T_WorkTableScan,
 	T_ForeignScan,
+	T_CustomScan,
 	T_Join,
 	T_NestLoop,
 	T_MergeJoin,
@@ -107,6 +108,7 @@ typedef enum NodeTag
 	T_CteScanState,
 	T_WorkTableScanState,
 	T_ForeignScanState,
+	T_CustomScanState,
 	T_JoinState,
 	T_NestLoopState,
 	T_MergeJoinState,
@@ -224,6 +226,7 @@ typedef enum NodeTag
 	T_HashPath,
 	T_TidPath,
 	T_ForeignPath,
+	T_CustomPath,
 	T_AppendPath,
 	T_MergeAppendPath,
 	T_ResultPath,
