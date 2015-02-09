@@ -1072,6 +1072,7 @@ ProcessUtilitySlow(Node *parsetree,
 			case T_AlterDomainStmt:
 				{
 					AlterDomainStmt *stmt = (AlterDomainStmt *) parsetree;
+					Oid		constrOid = InvalidOid;
 
 					/*
 					 * Some or all of these functions are recursive to cover
@@ -1102,7 +1103,8 @@ ProcessUtilitySlow(Node *parsetree,
 						case 'C':		/* ADD CONSTRAINT */
 							objectId =
 								AlterDomainAddConstraint(stmt->typeName,
-														 stmt->def);
+														 stmt->def,
+														 &constrOid);
 							break;
 						case 'X':		/* DROP CONSTRAINT */
 							objectId =
@@ -1121,7 +1123,7 @@ ProcessUtilitySlow(Node *parsetree,
 								 (int) stmt->subtype);
 							break;
 					}
-					EventTriggerStashCommand(objectId, 0, OBJECT_DOMAIN,
+					EventTriggerStashCommand(objectId, constrOid, OBJECT_DOMAIN,
 											 parsetree);
 				}
 				break;

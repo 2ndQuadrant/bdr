@@ -9700,6 +9700,26 @@ RelationGetColumnDefault(Relation rel, AttrNumber attno, List *dpcontext)
 	return defstr;
 }
 
+char *
+DomainGetDefault(HeapTuple domTup)
+{
+	Datum	def;
+	Node   *defval;
+	char   *defstr;
+	bool	isnull;
+
+	def = SysCacheGetAttr(TYPEOID, domTup, Anum_pg_type_typdefaultbin,
+							 &isnull);
+	if (isnull)
+		elog(ERROR, "domain \"%s\" does not have a default value",
+			 NameStr(((Form_pg_type) GETSTRUCT(domTup))->typname));
+	defval = stringToNode(DatumGetCString(def));
+	defstr = deparse_expression_pretty(defval, NULL /* dpcontext? */,
+									   false, false, 0, 0);
+
+	return defstr;
+}
+
 /*
  * Return the defaults values of arguments to a function, as a list of
  * deparsed expressions.
