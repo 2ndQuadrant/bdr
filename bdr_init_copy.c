@@ -750,16 +750,14 @@ initialize_data_dir(char *data_dir, char *connstr,
 static void
 initialize_replication_slot(PGconn *conn, NodeInfo *ni, Oid dboid)
 {
-	char		slotname[NAMEDATALEN];
-	char		system_identifier_s[32];
+	NameData	slotname;
 	PQExpBuffer	query = createPQExpBuffer();
 	PGresult   *res;
 
-	snprintf(system_identifier_s, sizeof(system_identifier_s), UINT64_FORMAT, ni->local_sysid);
-	snprintf(slotname, NAMEDATALEN, BDR_SLOT_NAME_FORMAT,
-			 dboid, system_identifier_s, ni->local_tlid, dboid, "");
+	/* dboids are the same, because we just cloned... */
+	bdr_slot_name(&slotname, ni->local_sysid, ni->local_tlid, dboid, dboid);
 	appendPQExpBuffer(query, "SELECT pg_create_logical_replication_slot(%s, '%s');",
-					  PQescapeLiteral(conn, slotname, NAMEDATALEN), "bdr");
+					  PQescapeLiteral(conn, NameStr(slotname), NAMEDATALEN), "bdr");
 
 	res = PQexec(conn, query->data);
 

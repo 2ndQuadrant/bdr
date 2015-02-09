@@ -203,23 +203,17 @@ bdr_build_ident_and_slotname(uint64 remote_sysid, TimeLineID remote_tlid,
 		Name out_slot_name)
 {
 	StringInfoData	replication_identifier;
-	char			local_sysid[33];
 
 	initStringInfo(&replication_identifier);
 
 	Assert(MyDatabaseId != InvalidOid);
 	Assert(remote_dboid != InvalidOid);
 
-	snprintf(local_sysid, sizeof(local_sysid), UINT64_FORMAT,
-			 GetSystemIdentifier());
-
 	/*
 	 * Build slot name identifying the local node to the remote end.
 	 */
-	snprintf(NameStr(*out_slot_name), NAMEDATALEN, BDR_SLOT_NAME_FORMAT,
-			 remote_dboid, local_sysid, ThisTimeLineID,
-			 MyDatabaseId, EMPTY_REPLICATION_NAME);
-	NameStr(*out_slot_name)[NAMEDATALEN - 1] = '\0';
+	bdr_slot_name(out_slot_name, GetSystemIdentifier(), ThisTimeLineID, MyDatabaseId,
+				  remote_dboid);
 
 	/*
 	 * Build replication identifier.

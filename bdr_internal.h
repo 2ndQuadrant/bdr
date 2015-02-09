@@ -15,7 +15,7 @@
 #include "lib/ilist.h"
 
 #define EMPTY_REPLICATION_NAME ""
-#define BDR_SLOT_NAME_FORMAT "bdr_%u_%s_%u_%u__%s"
+#define BDR_SLOT_NAME_FORMAT "bdr_%u_"UINT64_FORMAT"_%u_%u__%s"
 #define BDR_NODE_ID_FORMAT "bdr_"UINT64_FORMAT"_%u_%u_%u_%s"
 
 /* A configured BDR connection from bdr_connections */
@@ -69,5 +69,8 @@ extern void bdr_free_connection_config(BdrConnectionConfig *cfg);
 
 extern void bdr_slot_name(Name slot_name, uint64 sysid, TimeLineID tlid,
 						  Oid dboid, Oid local_dboid);
+extern void bdr_parse_slot_name(const char *name, uint64 *remote_sysid,
+								Oid *remote_dboid, TimeLineID *remote_tli,
+								Oid *local_dboid);
 
 #endif   /* BDR_INTERNAL_H */

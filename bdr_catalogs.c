@@ -317,6 +317,17 @@ bdr_fetch_sysid_via_node_id(RepNodeId node_id, uint64 *sysid, TimeLineID *tli,
 	}
 }
 
+void
+bdr_parse_slot_name(const char *sname, uint64 *remote_sysid, TimeLineID *remote_tli,
+					Oid *remote_dboid, Oid *local_dboid)
+{
+	NameData	replication_name;
+
+	if (sscanf(sname, BDR_SLOT_NAME_FORMAT,
+			   local_dboid, remote_sysid, remote_tli, remote_dboid,
+			   NameStr(replication_name)) != 4)
+		elog(ERROR, "could not parse slot name: %s", sname);
+}
 
 RepNodeId
 bdr_fetch_node_id_via_sysid(uint64 sysid, TimeLineID tli, Oid dboid)
