@@ -1117,7 +1117,8 @@ ProcessUtilitySlow(Node *parsetree,
 						case 'C':		/* ADD CONSTRAINT */
 							address =
 								AlterDomainAddConstraint(stmt->typeName,
-														 stmt->def);
+														 stmt->def,
+														 &secondaryOid);
 							break;
 						case 'X':		/* DROP CONSTRAINT */
 							address =

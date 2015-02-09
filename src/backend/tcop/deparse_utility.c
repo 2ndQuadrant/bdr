@@ -1587,6 +1587,86 @@ deparse_CreateExtensionStmt(Oid objectId, Node *parsetree)
 }
 
 static ObjTree *
+deparse_AlterDomainStmt(Oid objectId, Node *parsetree, Oid secondaryOid)
+{
+	AlterDomainStmt *node = (AlterDomainStmt *) parsetree;
+	HeapTuple	domTup;
+	Form_pg_type domForm;
+	ObjTree	   *alterDom;
+	char	   *fmt;
+
+	/* ALTER DOMAIN DROP CONSTRAINT is handled by the DROP support code */
+	if (node->subtype == 'X')
+		return NULL;
+
+	domTup = SearchSysCache1(TYPEOID, objectId);
+	if (!HeapTupleIsValid(domTup))
+		elog(ERROR, "cache lookup failed for domain with OID %u",
+			 objectId);
+	domForm = (Form_pg_type) GETSTRUCT(domTup);
+
+	switch (node->subtype)
+	{
+		case 'T':
+			/* SET DEFAULT / DROP DEFAULT */
+			if (node->def == NULL)
+				fmt = "ALTER DOMAIN %{identity}D DROP DEFAULT";
+			else
+				fmt = "ALTER DOMAIN %{identity}D SET DEFAULT %{default}s";
+			break;
+		case 'N':
+			/* DROP NOT NULL */
+			fmt = "ALTER DOMAIN %{identity}D DROP NOT NULL";
+			break;
+		case 'O':
+			/* SET NOT NULL */
+			fmt = "ALTER DOMAIN %{identity}D SET NOT NULL";
+			break;
+		case 'C':
+			/* ADD CONSTRAINT.  Only CHECK constraints are supported by domains */
+			fmt = "ALTER DOMAIN %{identity}D ADD CONSTRAINT %{constraint_name}I %{definition}s";
+			break;
+		case 'V':
+			/* VALIDATE CONSTRAINT */
+			fmt = "ALTER DOMAIN %{identity}D VALIDATE CONSTRAINT %{constraint_name}I";
+			break;
+		default:
+			elog(ERROR, "invalid subtype %c", node->subtype);
+	}
+
+	alterDom = new_objtree_VA(fmt, 0);
+	append_object_object(alterDom, "identity",
+						 new_objtree_for_qualname(domForm->typnamespace,
+												  NameStr(domForm->typname)));
+
+	/*
+	 * Process subtype-specific options.  Validating a constraint
+	 * requires its name ...
+	 */
+	if (node->subtype == 'V')
+		append_string_object(alterDom, "constraint_name", node->name);
+
+	/* ... a new constraint has a name and definition ... */
+	if (node->subtype == 'C')
+	{
+		append_string_object(alterDom, "definition",
+							 pg_get_constraintdef_string(secondaryOid, false));
+		/* can't rely on node->name here; might not be defined */
+		append_string_object(alterDom, "constraint_name",
+							 get_constraint_name(secondaryOid));
+	}
+
+	/* ... and setting a default has a definition only. */
+	if (node->subtype == 'T' && node->def != NULL)
+		append_string_object(alterDom, "default", DomainGetDefault(domTup));
+
+	/* done */
+	ReleaseSysCache(domTup);
+
+	return alterDom;
+}
+
+static ObjTree *
 deparse_AlterExtensionStmt(Oid objectId, Node *parsetree)
 {
 	AlterExtensionStmt *node = (AlterExtensionStmt *) parsetree;
@@ -4975,7 +5055,8 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_AlterDomainStmt:
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			command = deparse_AlterDomainStmt(objectId, parsetree,
+											  cmd->d.simple.secondaryOid);
 			break;
 
 			/* other local objects */

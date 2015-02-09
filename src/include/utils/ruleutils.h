@@ -48,4 +48,6 @@ extern List *FunctionGetDefaults(text *proargdefaults);
 extern char *RelationGetColumnDefault(Relation rel, AttrNumber attno,
 						 List *dpcontext);
 
+extern char *DomainGetDefault(HeapTuple domTup);
+
 #endif	/* RULEUTILS_H */

@@ -32,7 +32,8 @@ extern Oid	AssignTypeArrayOid(void);
 
 extern ObjectAddress AlterDomainDefault(List *names, Node *defaultRaw);
 extern ObjectAddress AlterDomainNotNull(List *names, bool notNull);
-extern ObjectAddress AlterDomainAddConstraint(List *names, Node *constr);
+extern ObjectAddress AlterDomainAddConstraint(List *names, Node *constr,
+						 Oid *constrOid);
 extern ObjectAddress AlterDomainValidateConstraint(List *names, char *constrName);
 extern ObjectAddress AlterDomainDropConstraint(List *names, const char *constrName,
 						  DropBehavior behavior, bool missing_ok);
