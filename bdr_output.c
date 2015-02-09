@@ -44,6 +44,8 @@
 #include "replication/slot.h"
 #include "replication/walsender_private.h"
 
+#include "storage/proc.h"
+
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
@@ -650,6 +652,8 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 		LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
 		bdr_worker_shmem_alloc(BDR_WORKER_WALSENDER, &worker_idx);
 		bdr_worker_shmem_acquire(BDR_WORKER_WALSENDER, worker_idx, true);
+		bdr_worker_slot->worker_pid = MyProcPid;
+		bdr_worker_slot->worker_proc = MyProc;
 		/* can be null if sql interface is used */
 		bdr_worker_slot->data.walsnd.walsender = MyWalSnd;
 		bdr_worker_slot->data.walsnd.slot = MyReplicationSlot;
