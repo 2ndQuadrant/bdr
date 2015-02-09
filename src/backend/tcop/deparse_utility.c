@@ -130,6 +130,7 @@ static void append_object_object(ObjTree *tree, char *name, ObjTree *value);
 static void append_array_object(ObjTree *tree, char *name, List *array);
 static inline void append_premade_object(ObjTree *tree, ObjElem *elem);
 static JsonbValue *objtree_to_jsonb_rec(ObjTree *tree, JsonbParseState *state);
+static const char *stringify_objtype(ObjectType objtype);
 
 /*
  * Allocate a new object tree to store parameter values.
