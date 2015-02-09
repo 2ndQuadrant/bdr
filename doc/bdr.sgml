@@ -233,6 +233,202 @@ To set up BDR you'll need to: ...
      </variablelist>
     </para>
    </sect1>
+
+   <sect1>
+    <title><productname>BDR</productname>/<productname>BDR</productname> specific configuration variables</title>
+
+
+    <para>
+     <variablelist>
+
+      <varlistentry id="guc-bdr-conflict-logging-include-tuples" xreflabel="bdr.conflict_logging_include_tuples">
+       <term><varname>bdr.conflict_logging_include_tuples</varname> (<type>boolean</type>)
+        <indexterm>
+         <primary><varname>bdr.conflict_logging_include_tuples</varname> configuration parameter</primary>
+        </indexterm>
+       </term>
+       <listitem>
+        <para>
+         Log whole tuples when logging <productname>BDR</productname>
+         tuples.
+        </para>
+       </listitem>
+      </varlistentry>
+
+      <varlistentry id="guc-bdr-log-conflicts-to-table" xreflabel="bdr.log_conflicts_to_table">
+       <term><varname>bdr.log_conflicts_to_table</varname> (<type>boolean</type>)
+        <indexterm>
+         <primary><varname>bdr.log_conflicts_to_table</varname> configuration parameter</primary>
+        </indexterm>
+       </term>
+       <listitem>
+        <para>
+         This boolean option controls whether
+         detected <productname>BDR</productname> conflicts get logged
+         to the bdr.bdr_conflict_history table. See Conflict logging
+         for details. <!-- FIXME: Add link to not yet existing
+                           conflict logging chapter-->
+        </para>
+       </listitem>
+      </varlistentry>
+
+      <varlistentry id="guc-bdr-synchronous-commit" xreflabel="bdr.synchronous_commit">
+       <term><varname>bdr.synchronous_commit</varname> (<type>boolean</type>)
+        <indexterm>
+         <primary><varname>bdr.synchronous_commit</varname> configuration parameter</primary>
+        </indexterm>
+       </term>
+       <listitem>
+        <para>
+         This boolean option controls whether
+         the <varname>synchronous_commit</varname> setting
+         in <productname>BDR</productname>/<productname>UDR</productname>
+         apply workers is enabled. It defaults
+         to <literal>off</literal>.  If set to <literal>off</literal>,
+         <productname>BDR</productname> apply workers will perform
+         asynchronous commits,
+         allowing <productname>PostgreSQL</productname> to
+         considerably improve throughput.
+        </para>
+        <para>
+         It it always is safe to set in the sense that it'll never
+         cause transactions to not be replayed. If a minimal data loss
+         window is desirable it's adviseable to set it
+         to <literal>on</literal> and
+         configure <productname>PostgreSQL</productname>'s synchronous
+         replication.
+        </para>
+        <para>
+         Using synchronous replication in combination
+         with <varname>bdr.synchronous_commit</varname> disabled, is
+         not generally adviseable, as it will noticeably increase the
+         time until a transaction is confirmed to have been
+         replicated. That's because it can only be reported as having
+         safely committed once the <acronym>WAL</acronym> is flushed
+         on the receiving side.
+        </para>
+       </listitem>
+      </varlistentry>
+
+      <varlistentry id="guc-temp-dump-directory" xreflabel="bdr.temp_dump_directory">
+      <term><varname>bdr.temp_dump_directory</varname> (<type>string</type>)
+        <indexterm>
+         <primary><varname>bdr.temp_dump_directory</varname> configuration parameter</primary>
+        </indexterm>
+       </term>
+       <listitem>
+        <para>
+         Specifies the path to a temporary storage location, writable
+         by the postgres user, that needs to have enough storage space
+         to contain a complete dump of the a potentially cloned
+         database.
+        </para>
+        <para>
+          Only used during initial bringup.
+        </para>
+       </listitem>
+      </varlistentry>
+
+     </variablelist>
+
+    </para>
+
+    <sect2>
+     <title>Less common or internal configuration variables</title>
+     <para>
+      <variablelist>
+
+       <varlistentry id="guc-bdr-default-apply-delay" xreflabel="bdr.default_apply_delay">
+        <term><varname>bdr.default_apply_delay</varname> (<type>integer</type>)
+         <indexterm>
+          <primary><varname>bdr.default_apply_delay</varname> configuration parameter</primary>
+         </indexterm>
+        </term>
+        <listitem>
+         <para>
+          Sets a default apply delay for all configured connections
+          that don't have a explicitly configured apply delay.
+         </para>
+         <para>
+          This is primarily useful to simulate a high latency network
+          in a low latency testing environment.
+         </para>
+        </listitem>
+       </varlistentry>
+
+       <varlistentry id="guc-bdr-skip-ddl-locking" xreflabel="bdr.skip_ddl_locking">
+        <term><varname>bdr.skip_ddl_locking</varname> (<type>boolean</type>)
+         <indexterm>
+          <primary><varname>bdr.skip_ddl_locking</varname> configuration parameter</primary>
+         </indexterm>
+        </term>
+        <listitem>
+         <para>
+          For <productname>BDR</productname> don't acquire the global
+          schema lock when executing DDL statement. This primarily is
+          used internally, but can also be used in other cases.  This
+          option can be set at any time, but only by superusers.
+         </para>
+         <warning>
+          <para>
+           Inconsiderate usage of this option easily allows to break
+           replication setups.
+          </para>
+         </warning>
+        </listitem>
+       </varlistentry>
+
+       <varlistentry id="guc-bdr-permit-unsafe-ddl-commands" xreflabel="bdr.permit_unsafe_ddl_commands">
+        <term><varname>bdr.permit_unsafe_ddl_commands</varname> (<type>boolean</type>)
+         <indexterm>
+          <primary><varname>bdr.permit_unsafe_ddl_commands</varname> configuration parameter</primary>
+         </indexterm>
+        </term>
+        <listitem>
+         <para>
+          For <productname>BDR</productname> allow to execute schema
+          changes that cannot safely be replicated. This primarily is
+          used internally, but can also be used in other cases.  This
+          option can be set at any time, but only by superusers.
+         </para>
+         <warning>
+          <para>
+           Inconsiderate usage of this option easily allows to break
+           replication setups.
+          </para>
+         </warning>
+        </listitem>
+       </varlistentry>
+
+
+       <varlistentry id="guc-bdr-skip-ddl-replication" xreflabel="bdr.skip_ddl_replication">
+        <term><varname>bdr.skip_ddl_replication</varname> (<type>boolean</type>)
+         <indexterm>
+          <primary><varname>bdr.skip_ddl_replication</varname> configuration parameter</primary>
+         </indexterm>
+        </term>
+        <listitem>
+         <para>
+          For <productname>BDR</productname> don't replicate schema
+          changes to other systems. This is primarily useful
+          for <productname>BDR</productname> internal use, but also can
+          be used for some intentional schema changes like adding a
+          index only on some nodes. This option can be set at any time,
+          but only by superusers.
+         </para>
+         <warning>
+          <para>
+           Inconsiderate usage of this option easily allows to break
+           replication setups.
+          </para>
+         </warning>
+        </listitem>
+       </varlistentry>
+
+      </variablelist>
+     </para>
+    </sect2>
+   </sect1>
   </chapter>
  </part>
 
