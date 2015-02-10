@@ -37,6 +37,7 @@
    <para>
      The <literal>ddl_command_start</> event occurs just before the
      execution of a <literal>CREATE</>, <literal>ALTER</>, <literal>DROP</>,
+     <literal>SECURITY LABEL</>,
      <literal>COMMENT</>, <literal>GRANT</> or <literal>REVOKE</>
      command.  No check whether the affected object exists or doesn't exist is
      performed before the event trigger fires.
@@ -739,6 +740,13 @@
        </row>
        <row>
         <entry align="left"><literal>REVOKE</literal></entry>
+        <entry align="center"><literal>X</literal></entry>
+        <entry align="center"><literal>X</literal></entry>
+        <entry align="center"><literal>-</literal></entry>
+        <entry align="center"><literal>-</literal></entry>
+       </row>
+       <row>
+        <entry align="left"><literal>SECURITY LABEL</literal></entry>
         <entry align="center"><literal>X</literal></entry>
         <entry align="center"><literal>X</literal></entry>
         <entry align="center"><literal>-</literal></entry>

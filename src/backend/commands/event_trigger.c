@@ -271,7 +271,8 @@ check_ddl_tag(const char *tag)
 		pg_strcasecmp(tag, "GRANT") == 0 ||
 		pg_strcasecmp(tag, "REVOKE") == 0 ||
 		pg_strcasecmp(tag, "DROP OWNED") == 0 ||
-		pg_strcasecmp(tag, "IMPORT FOREIGN SCHEMA") == 0)
+		pg_strcasecmp(tag, "IMPORT FOREIGN SCHEMA") == 0 ||
+		pg_strcasecmp(tag, "SECURITY LABEL") == 0)
 		return EVENT_TRIGGER_COMMAND_TAG_OK;
 
 	/*
