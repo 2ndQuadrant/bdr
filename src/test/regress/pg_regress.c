@@ -82,6 +82,7 @@ const char *pretty_diff_opts = "-w -C3";
 
 /* options settable from command line */
 _stringlist *dblist = NULL;
+char	    deparse_test_db[NAMEDATALEN];
 bool		debug = false;
 char	   *inputdir = ".";
 char	   *outputdir = ".";
@@ -589,6 +590,7 @@ convert_sourcefiles_in(char *source_subdir, char *dest_dir, char *dest_subdir, c
 			replace_string(line, "@testtablespace@", testtablespace);
 			replace_string(line, "@libdir@", dlpath);
 			replace_string(line, "@DLSUFFIX@", DLSUFFIX);
+			replace_string(line, "@deparse_test_db@", deparse_test_db);
 			fputs(line, outfile);
 		}
 		fclose(infile);
@@ -2140,6 +2142,8 @@ help(void)
 	printf(_("  --config-auth=DATADIR     update authentication settings for DATADIR\n"));
 	printf(_("  --create-role=ROLE        create the specified role before testing\n"));
 	printf(_("  --dbname=DB               use database DB (default \"regression\")\n"));
+	printf(_("  --dbname-deparse=DB       use database DB for DDL deparse test (default\n"));
+	printf(_("                            \"regression_deparse\")\n"));
 	printf(_("  --debug                   turn on debug mode in programs that are run\n"));
 	printf(_("  --dlpath=DIR              look for dynamic libraries in DIR\n"));
 	printf(_("  --encoding=ENCODING       use ENCODING as the encoding\n"));
@@ -2205,6 +2209,7 @@ regression_main(int argc, char *argv[], init_function ifunc, test_function tfunc
 		{"load-extension", required_argument, NULL, 22},
 		{"extra-install", required_argument, NULL, 23},
 		{"config-auth", required_argument, NULL, 24},
+		{"dbname-deparse", required_argument, NULL, 25},
 		{NULL, 0, NULL, 0}
 	};
 
@@ -2252,6 +2257,14 @@ regression_main(int argc, char *argv[], init_function ifunc, test_function tfunc
 				 */
 				free_stringlist(&dblist);
 				split_to_stringlist(strdup(optarg), ", ", &dblist);
+
+				/*
+				 * We need to update the default deparse test db name
+				 * to be a suffix of the provided database name
+				 */
+				snprintf(deparse_test_db, sizeof(deparse_test_db),
+						 "%s_deparse",
+						 dblist->str);
 				break;
 			case 2:
 				debug = true;
@@ -2321,6 +2334,9 @@ regression_main(int argc, char *argv[], init_function ifunc, test_function tfunc
 				break;
 			case 24:
 				config_auth_datadir = pstrdup(optarg);
+				break;
+			case 25:
+				strncpy(deparse_test_db, optarg, sizeof(deparse_test_db));
 				break;
 			default:
 				/* getopt_long already emitted a complaint */
@@ -2629,6 +2645,7 @@ regression_main(int argc, char *argv[], init_function ifunc, test_function tfunc
 		{
 			for (sl = dblist; sl; sl = sl->next)
 				drop_database_if_exists(sl->str);
+			drop_database_if_exists(deparse_test_db);
 			for (sl = extraroles; sl; sl = sl->next)
 				drop_role_if_exists(sl->str);
 		}
@@ -2641,6 +2658,7 @@ regression_main(int argc, char *argv[], init_function ifunc, test_function tfunc
 	{
 		for (sl = dblist; sl; sl = sl->next)
 			create_database(sl->str);
+		create_database(deparse_test_db);
 		for (sl = extraroles; sl; sl = sl->next)
 			create_role(sl->str, dblist);
 	}
