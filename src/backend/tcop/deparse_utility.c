@@ -33,6 +33,7 @@
 #include "catalog/namespace.h"
 #include "catalog/pg_aggregate.h"
 #include "catalog/pg_authid.h"
+#include "catalog/pg_cast.h"
 #include "catalog/pg_class.h"
 #include "catalog/pg_collation.h"
 #include "catalog/pg_constraint.h"
@@ -4072,6 +4073,81 @@ deparse_CreateConversion(Oid objectId, Node *parsetree)
 }
 
 static ObjTree *
+deparse_CreateCastStmt(Oid objectId, Node *parsetree)
+{
+	CreateCastStmt *node = (CreateCastStmt *) parsetree;
+	Relation	castrel;
+	HeapTuple	castTup;
+	Form_pg_cast castForm;
+	ObjTree	   *createCast;
+	char	   *context;
+
+	castrel = heap_open(CastRelationId, AccessShareLock);
+	castTup = get_catalog_object_by_oid(castrel, objectId);
+	if (!HeapTupleIsValid(castTup))
+		elog(ERROR, "cache lookup failed for cast with OID %u", objectId);
+	castForm = (Form_pg_cast) GETSTRUCT(castTup);
+
+	createCast = new_objtree_VA("CREATE CAST (%{sourcetype}T AS %{targettype}T) %{mechanism}s %{context}s",
+								2, "sourcetype", ObjTypeObject,
+								new_objtree_for_type(castForm->castsource, -1),
+								"targettype", ObjTypeObject,
+								new_objtree_for_type(castForm->casttarget, -1));
+
+	if (node->inout)
+		append_string_object(createCast, "mechanism", "WITH INOUT");
+	else if (node->func == NULL)
+		append_string_object(createCast, "mechanism", "WITHOUT FUNCTION");
+	else
+	{
+		ObjTree	   *tmp;
+		StringInfoData func;
+		HeapTuple	funcTup;
+		Form_pg_proc funcForm;
+		int			i;
+
+		funcTup = SearchSysCache1(PROCOID, castForm->castfunc);
+		funcForm = (Form_pg_proc) GETSTRUCT(funcTup);
+
+		initStringInfo(&func);
+		appendStringInfo(&func, "%s(",
+						quote_qualified_identifier(get_namespace_name(funcForm->pronamespace),
+												   NameStr(funcForm->proname)));
+		for (i = 0; i < funcForm->pronargs; i++)
+			appendStringInfoString(&func,
+								   format_type_be_qualified(funcForm->proargtypes.values[i]));
+		appendStringInfoChar(&func, ')');
+
+		tmp = new_objtree_VA("WITH FUNCTION %{castfunction}s", 1,
+							 "castfunction", ObjTypeString, func.data);
+		append_object_object(createCast, "mechanism", tmp);
+
+		ReleaseSysCache(funcTup);
+	}
+
+	switch (node->context)
+	{
+		case COERCION_IMPLICIT:
+			context = "AS IMPLICIT";
+			break;
+		case COERCION_ASSIGNMENT:
+			context = "AS ASSIGNMENT";
+			break;
+		case COERCION_EXPLICIT:
+			context = "";
+			break;
+		default:
+			elog(ERROR, "invalid coercion code %c", node->context);
+			return NULL;	/* keep compiler quiet */
+	}
+	append_string_object(createCast, "context", context);
+
+	heap_close(castrel, AccessShareLock);
+
+	return createCast;
+}
+
+static ObjTree *
 deparse_CreateOpFamily(Oid objectId, Node *parsetree)
 {
 	HeapTuple   opfTup;
@@ -4860,7 +4936,7 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_CreateCastStmt:
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			command = deparse_CreateCastStmt(objectId, parsetree);
 			break;
 
 		case T_CreateOpClassStmt:
