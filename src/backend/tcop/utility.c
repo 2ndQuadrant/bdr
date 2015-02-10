@@ -1486,7 +1486,7 @@ ProcessUtilitySlow(Node *parsetree,
 					SecLabelStmt *stmt = (SecLabelStmt *) parsetree;
 
 					objectId = ExecSecLabelStmt(stmt);
-					EventTriggerStashCommand(objectId, 0, stmt->objtype, parsetree);
+					EventTriggerStashCommand(objectId, 0, stmt->objtype, InvalidOid, parsetree);
 				}
 				break;
 
