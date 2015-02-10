@@ -4912,6 +4912,7 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_CreateTableAsStmt:
+			/* XXX handle at least the matview case? */
 			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
 			break;
 
@@ -4982,11 +4983,6 @@ deparse_simple_command(StashedCommand *cmd)
 										  parsetree);
 			break;
 
-		case T_SecLabelStmt:
-			command = deparse_SecLabelStmt(objectId, cmd->d.simple.objectSubId,
-										   parsetree);
-			break;
-
 		case T_GrantStmt:
 			/* handled elsewhere */
 			elog(ERROR, "unexpected command type %s", CreateCommandTag(parsetree));
@@ -5007,6 +5003,11 @@ deparse_simple_command(StashedCommand *cmd)
 
 		case T_AlterPolicyStmt:		/* ALTER POLICY */
 			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			break;
+
+		case T_SecLabelStmt:
+			command = deparse_SecLabelStmt(objectId, cmd->d.simple.objectSubId,
+										   parsetree);
 			break;
 
 		default:
