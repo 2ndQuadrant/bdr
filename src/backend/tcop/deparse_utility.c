@@ -4155,6 +4155,32 @@ deparse_CommentStmt(ObjectAddress address, Node *parsetree)
 }
 
 static ObjTree *
+deparse_SecLabelStmt(ObjectAddress address, Node *parsetree)
+{
+	SecLabelStmt *node = (SecLabelStmt *) parsetree;
+	ObjTree	   *label;
+	char	   *fmt;
+
+	Assert(node->provider);
+
+	fmt = psprintf("SECURITY LABEL FOR %%{provider}s ON %s %%{identity}s IS %%{label}s",
+				   stringify_objtype(node->objtype));
+	label = new_objtree_VA(fmt, 0);
+
+	/* Add the label clause; can be either NULL or a quoted literal. */
+	append_literal_or_null(label, "label", node->label);
+
+	/* Add the security provider clause */
+	append_string_object(label, "provider", node->provider);
+
+	/* Add the object identity clause */
+	append_string_object(label, "identity",
+						 getObjectIdentity(&address));
+
+	return label;
+}
+
+static ObjTree *
 deparse_CreateConversion(Oid objectId, Node *parsetree)
 {
 	HeapTuple   conTup;
@@ -5149,7 +5175,7 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_SecLabelStmt:
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			command = deparse_SecLabelStmt(cmd->d.simple.address, parsetree);
 			break;
 
 		default:
