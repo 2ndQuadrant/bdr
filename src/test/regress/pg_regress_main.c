@@ -88,6 +88,7 @@ psql_init(int argc, char **argv)
 {
 	/* set default regression database name */
 	add_stringlist_item(&dblist, "regression");
+	strcpy(deparse_test_db, "regression_deparse");
 }
 
 int
