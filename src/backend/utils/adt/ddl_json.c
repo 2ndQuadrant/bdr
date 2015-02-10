@@ -36,10 +36,12 @@ typedef enum
 } trivalue;
 
 static void expand_one_jsonb_element(StringInfo out, char *param,
-						 JsonbValue *jsonval, convSpecifier specifier);
+						 JsonbValue *jsonval, convSpecifier specifier,
+						 const char *fmt);
 static void expand_jsonb_array(StringInfo out, char *param,
 				   JsonbValue *jsonarr, char *arraysep,
-				   convSpecifier specifier);
+				   convSpecifier specifier, const char *fmt);
+static void fmtstr_error_callback(void *arg);
 
 static trivalue
 find_bool_in_jsonbcontainer(JsonbContainer *container, char *keyname)
@@ -242,9 +244,9 @@ expand_fmt_recursive(JsonbContainer *container, StringInfo out)
 
 		/* And finally print out the data */
 		if (is_array)
-			expand_jsonb_array(out, param, value, arraysep, specifier);
+			expand_jsonb_array(out, param, value, arraysep, specifier, start_ptr);
 		else
-			expand_one_jsonb_element(out, param, value, specifier);
+			expand_one_jsonb_element(out, param, value, specifier, start_ptr);
 	}
 }
 
@@ -460,8 +462,24 @@ expand_jsonval_strlit(StringInfo buf, JsonbValue *jsonval)
  */
 static void
 expand_one_jsonb_element(StringInfo out, char *param, JsonbValue *jsonval,
-						 convSpecifier specifier)
+						 convSpecifier specifier, const char *fmt)
 {
+	ErrorContextCallback sqlerrcontext;
+
+	/* If we were given a format string, setup an ereport() context callback */
+	if (fmt)
+	{
+		sqlerrcontext.callback = fmtstr_error_callback;
+		sqlerrcontext.arg = (void *) fmt;
+		sqlerrcontext.previous = error_context_stack;
+		error_context_stack = &sqlerrcontext;
+	}
+
+	if (!jsonval)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("element \"%s\" not found", param)));
+
 	switch (specifier)
 	{
 		case SpecIdentifier:
@@ -519,6 +537,9 @@ expand_one_jsonb_element(StringInfo out, char *param, JsonbValue *jsonval,
 			expand_jsonval_operator(out, jsonval);
 			break;
 	}
+
+	if (fmt)
+		error_context_stack = sqlerrcontext.previous;
 }
 
 /*
@@ -528,13 +549,24 @@ expand_one_jsonb_element(StringInfo out, char *param, JsonbValue *jsonval,
  */
 static void
 expand_jsonb_array(StringInfo out, char *param,
-				   JsonbValue *jsonarr, char *arraysep, convSpecifier specifier)
+				   JsonbValue *jsonarr, char *arraysep, convSpecifier specifier,
+				   const char *fmt)
 {
+	ErrorContextCallback sqlerrcontext;
 	JsonbContainer *container;
 	JsonbIterator  *it;
 	JsonbValue	v;
 	int			type;
 	bool		first = true;
+
+	/* If we were given a format string, setup an ereport() context callback */
+	if (fmt)
+	{
+		sqlerrcontext.callback = fmtstr_error_callback;
+		sqlerrcontext.arg = (void *) fmt;
+		sqlerrcontext.previous = error_context_stack;
+		error_context_stack = &sqlerrcontext;
+	}
 
 	if (jsonarr->type != jbvBinary)
 		ereport(ERROR,
@@ -556,10 +588,13 @@ expand_jsonb_array(StringInfo out, char *param,
 				if (!first)
 					appendStringInfoString(out, arraysep);
 				first = false;
-				expand_one_jsonb_element(out, param, &v, specifier);
+				expand_one_jsonb_element(out, param, &v, specifier, NULL);
 				break;
 		}
 	}
+
+	if (fmt)
+		error_context_stack = sqlerrcontext.previous;
 }
 
 /*------
@@ -599,4 +634,16 @@ pg_event_trigger_expand_command(PG_FUNCTION_ARGS)
 	expand_fmt_recursive(&jsonb->root, &out);
 
 	PG_RETURN_TEXT_P(CStringGetTextDatum(out.data));
+}
+
+/*
+ * Error context callback for JSON format string expansion.
+ *
+ * Possible improvement: indicate which element we're expanding, if applicable
+ */
+static void
+fmtstr_error_callback(void *arg)
+{
+	errcontext("while expanding format string \"%s\"", (char *) arg);
+
 }
