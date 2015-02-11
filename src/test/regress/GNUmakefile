@@ -160,6 +160,10 @@ installcheck-tests: all tablespace-setup
 standbycheck: all
 	$(pg_regress_installcheck) $(REGRESS_OPTS) --schedule=$(srcdir)/standby_schedule --use-existing
 
+deparsetest: all  tablespace-setup
+	$(pg_regress_check) $(REGRESS_OPTS) --schedule=$(srcdir)/deparse_schedule $(TEMP_CONF) $(EXTRA_TESTS)
+
+
 # old interfaces follow...
 
 runcheck: check

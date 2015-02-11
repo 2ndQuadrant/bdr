@@ -16,6 +16,7 @@ BEGIN
 		FROM pg_event_trigger_get_creation_commands();
 END;
 $fn$;
+
 CREATE EVENT TRIGGER deparse_test_trg_ddl_command_end
   ON ddl_command_end
   EXECUTE PROCEDURE deparse.deparse_test_ddl_command_end();
