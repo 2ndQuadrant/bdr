@@ -90,7 +90,7 @@ COMMENT ON FUNCTION bdr_connections_changed() IS 'Internal BDR function, do not 
 --
 CREATE FUNCTION bdr.internal_node_join(
     sysid text, timeline oid, dboid oid,
-    dsn text,
+    node_external_dsn text,
     apply_delay integer,
     replication_sets text[]
     )
@@ -144,12 +144,12 @@ BEGIN
         VALUES
         (sysid, timeline, dboid,
          '0', 0, 0,
-         dsn,
+         node_external_dsn,
          CASE WHEN apply_delay = -1 THEN NULL ELSE apply_delay END,
          replication_sets, false);
     EXCEPTION WHEN unique_violation THEN
         UPDATE bdr.bdr_connections
-        SET conn_dsn = dsn,
+        SET conn_dsn = node_external_dsn,
             conn_apply_delay = CASE WHEN apply_delay = -1 THEN NULL ELSE apply_delay END,
             conn_replication_sets = replication_sets,
             conn_is_unidirectional = false
@@ -216,7 +216,7 @@ $body$;
 
 -- Setup that's common to BDR and UDR joins
 CREATE FUNCTION bdr.internal_begin_join(
-    caller text, local_node_name text, local_dsn text, remote_dsn text,
+    caller text, local_node_name text, node_local_dsn text, remote_dsn text,
     remote_sysid OUT text, remote_timeline OUT oid, remote_dboid OUT oid
 )
 RETURNS record LANGUAGE plpgsql VOLATILE
@@ -260,12 +260,12 @@ BEGIN
     -- Validate that the local connection is usable and matches
     -- the node identity of the node we're running on.
     --
-    -- For BDR this will NOT check the 'dsn' if 'local_dsn'
+    -- For BDR this will NOT check the 'dsn' if 'node_local_dsn'
     -- gets supplied. We don't know if 'dsn' is even valid
     -- for loopback connections and can't assume it is. That'll
     -- get checked later by BDR specific code.
     SELECT * INTO localid_from_dsn
-    FROM bdr_get_remote_nodeinfo(local_dsn);
+    FROM bdr_get_remote_nodeinfo(node_local_dsn);
 
     IF localid_from_dsn.sysid <> localid.sysid
         OR localid_from_dsn.timeline <> localid.timeline
@@ -274,16 +274,16 @@ BEGIN
         RAISE USING
             MESSAGE = 'node identity for local dsn does not match current node',
             DETAIL = format($$The dsn '%s' connects to a node with identity (%s,%s,%s) but the local node is (%s,%s,%s)$$,
-                local_dsn, localid_from_dsn.sysid, localid_from_dsn.timeline,
+                node_local_dsn, localid_from_dsn.sysid, localid_from_dsn.timeline,
                 localid_from_dsn.dboid, localid.sysid, localid.timeline, localid.dboid),
-            HINT = 'The local_dsn (or, for bdr, dsn if local_dsn is null) parameter must refer to the node you''re running this function from',
+            HINT = 'The node_local_dsn (or, for bdr, dsn if node_local_dsn is null) parameter must refer to the node you''re running this function from',
             ERRCODE = 'object_not_in_prerequisite_state';
     END IF;
 
     IF NOT localid_from_dsn.is_superuser THEN
         RAISE USING
             MESSAGE = 'local dsn does not have superuser rights',
-            DETAIL = format($$The dsn '%s' connects successfully but does not grant superuser rights$$, local_dsn),
+            DETAIL = format($$The dsn '%s' connects successfully but does not grant superuser rights$$, node_local_dsn),
             ERRCODE = 'object_not_in_prerequisite_state';
     END IF;
 
@@ -342,7 +342,7 @@ BEGIN
         ) VALUES (
             local_node_name,
             localid.sysid, localid.timeline, localid.dboid,
-            'b', local_dsn, remote_dsn
+            'b', node_local_dsn, remote_dsn
         );
     END IF;
 
@@ -356,9 +356,9 @@ $body$;
 --
 CREATE FUNCTION bdr.bdr_group_join(
     local_node_name text,
-    dsn text,
-    init_from_dsn text,
-    local_dsn text DEFAULT NULL,
+    node_external_dsn text,
+    join_using_dsn text,
+    node_local_dsn text DEFAULT NULL,
     apply_delay integer DEFAULT NULL,
     replication_sets text[] DEFAULT ARRAY['default']
     )
@@ -373,7 +373,7 @@ DECLARE
     connectback_nodeinfo record;
     remoteinfo record;
 BEGIN
-    IF dsn IS NULL THEN
+    IF node_external_dsn IS NULL THEN
         RAISE USING
             MESSAGE = 'dsn may not be null',
             ERRCODE = 'invalid_parameter_value';
@@ -390,8 +390,8 @@ BEGIN
     PERFORM bdr.internal_begin_join(
         'bdr_group_join',
         local_node_name,
-        CASE WHEN local_dsn IS NULL THEN dsn ELSE local_dsn END,
-        init_from_dsn);
+        CASE WHEN node_local_dsn IS NULL THEN node_external_dsn ELSE node_local_dsn END,
+        join_using_dsn);
 
     SELECT sysid, timeline, dboid INTO localid
     FROM bdr.bdr_get_local_nodeid();
@@ -403,16 +403,16 @@ BEGIN
     --
     -- This cannot be checked for the first node since there's no peer
     -- to ask for help.
-    IF init_from_dsn IS NOT NULL THEN
+    IF join_using_dsn IS NOT NULL THEN
 
         SELECT * INTO connectback_nodeinfo
-        FROM bdr.bdr_test_remote_connectback(init_from_dsn, dsn);
+        FROM bdr.bdr_test_remote_connectback(join_using_dsn, node_external_dsn);
 
         -- The connectback must actually match our local node identity
         -- and must provide a superuser connection.
         IF NOT connectback_nodeinfo.is_superuser THEN
             RAISE USING
-                MESSAGE = 'dsn does not have superuser rights when connecting via remote node',
+                MESSAGE = 'node_external_dsn does not have superuser rights when connecting via remote node',
                 DETAIL = format($$The dsn '%s' connects successfully but does not grant superuser rights$$, dsn),
                 ERRCODE = 'object_not_in_prerequisite_state';
         END IF;
@@ -422,11 +422,11 @@ BEGIN
            OR connectback_nodeinfo.dboid <> localid.dboid
         THEN
             RAISE USING
-                MESSAGE = 'node identity for dsn does not match current node when connecting back via remote',
+                MESSAGE = 'node identity for node_external_dsn does not match current node when connecting back via remote',
                 DETAIL = format($$The dsn '%s' connects to a node with identity (%s,%s,%s) but the local node is (%s,%s,%s)$$,
-                    local_dsn, connectback_nodeinfo.sysid, connectback_nodeinfo.timeline,
+                    node_local_dsn, connectback_nodeinfo.sysid, connectback_nodeinfo.timeline,
                     connectback_nodeinfo.dboid, localid.sysid, localid.timeline, localid.dboid),
-                HINT = 'The ''dsn'' parameter must refer to the node you''re running this function from, from the perspective of the node pointed to by init_from_dsn',
+                HINT = 'The ''node_external_dsn'' parameter must refer to the node you''re running this function from, from the perspective of the node pointed to by join_using_dsn',
                 ERRCODE = 'object_not_in_prerequisite_state';
         END IF;
     END IF;
@@ -441,7 +441,7 @@ BEGIN
     ) VALUES (
         localid.sysid, localid.timeline, localid.dboid,
         '0', 0, 0,
-        dsn, apply_delay, replication_sets, false
+        node_external_dsn, apply_delay, replication_sets, false
     );
 
     -- Now ensure the per-db worker is started if it's not already running.
@@ -456,8 +456,8 @@ IS 'Join an existing BDR group by connecting to a member node and copying its co
 
 CREATE FUNCTION bdr.bdr_group_create(
     local_node_name text,
-    dsn text,
-    local_dsn text DEFAULT NULL,
+    node_external_dsn text,
+    node_local_dsn text DEFAULT NULL,
     apply_delay integer DEFAULT NULL,
     replication_sets text[] DEFAULT ARRAY['default']
     )
@@ -470,7 +470,9 @@ AS $body$
 BEGIN
     PERFORM bdr.bdr_group_join(
         local_node_name := local_node_name,
-        dsn := dsn, init_from_dsn := null, local_dsn := local_dsn,
+        node_external_dsn := node_external_dsn,
+        join_using_dsn := null,
+        node_local_dsn := node_local_dsn,
         apply_delay := apply_delay,
         replication_sets := replication_sets);
 END;
@@ -484,8 +486,8 @@ IS 'Create a BDR group, turning a stand-alone database into the first node in a 
 --
 CREATE FUNCTION bdr.bdr_subscribe(
     local_node_name text,
-    remote_dsn text,
-    local_dsn text,
+    subscribe_to_dsn text,
+    node_local_dsn text,
     apply_delay integer DEFAULT NULL,
     replication_sets text[] DEFAULT ARRAY['default']
     )
@@ -499,13 +501,13 @@ DECLARE
     localid record;
     remoteid record;
 BEGIN
-    IF local_dsn IS NULL THEN
+    IF node_local_dsn IS NULL THEN
         RAISE USING
-            MESSAGE = 'local_dsn may not be null',
+            MESSAGE = 'node_local_dsn may not be null',
             ERRCODE = 'invalid_parameter_value';
     END IF;
 
-    IF remote_dsn IS NULL THEN
+    IF subscribe_to_dsn IS NULL THEN
         RAISE USING
             MESSAGE = 'remote may not be null',
             ERRCODE = 'invalid_parameter_value';
@@ -515,7 +517,7 @@ BEGIN
            remote_dboid AS dboid INTO remoteid
     FROM bdr.internal_begin_join('bdr_subscribe',
          local_node_name || '-subscriber',
-         local_dsn, remote_dsn);
+         node_local_dsn, subscribe_to_dsn);
 
     SELECT sysid, timeline, dboid INTO localid
     FROM bdr.bdr_get_local_nodeid();
@@ -563,7 +565,7 @@ BEGIN
     ) VALUES (
         remoteid.sysid, remoteid.timeline, remoteid.dboid,
         localid.sysid, localid.timeline, localid.dboid,
-        remote_dsn, apply_delay, replication_sets, true
+        subscribe_to_dsn, apply_delay, replication_sets, true
     );
 
     -- Now ensure the per-db worker is started if it's not already running.
