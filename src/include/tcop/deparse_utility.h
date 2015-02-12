@@ -68,6 +68,7 @@ typedef struct StashedCommand
 		struct GrantCommand
 		{
 			InternalGrant *istmt;
+			const char *type;
 		} grant;
 	} d;
 } StashedCommand;

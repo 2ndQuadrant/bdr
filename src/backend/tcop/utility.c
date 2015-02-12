@@ -781,6 +781,7 @@ standard_ProcessUtility(Node *parsetree,
 				else
 					ExecuteGrantStmt((GrantStmt *) parsetree);
 			}
+			break;
 
 		case T_DropStmt:
 			{
