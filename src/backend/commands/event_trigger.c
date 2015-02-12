@@ -1696,6 +1696,43 @@ EventTriggerComplexCmdEnd(void)
 	currentEventTriggerState->curcmd = NULL;
 }
 
+static const char *
+stringify_grantobjtype(GrantObjectType objtype)
+{
+	switch (objtype)
+	{
+		case ACL_OBJECT_COLUMN:
+			return "COLUMN";
+		case ACL_OBJECT_RELATION:
+			return "TABLE";
+		case ACL_OBJECT_SEQUENCE:
+			return "SEQUENCE";
+		case ACL_OBJECT_DATABASE:
+			return "DATABASE";
+		case ACL_OBJECT_DOMAIN:
+			return "DOMAIN";
+		case ACL_OBJECT_FDW:
+			return "FOREIGN DATA WRAPPER";
+		case ACL_OBJECT_FOREIGN_SERVER:
+			return "FOREIGN SERVER";
+		case ACL_OBJECT_FUNCTION:
+			return "FUNCTION";
+		case ACL_OBJECT_LANGUAGE:
+			return "LANGUAGE";
+		case ACL_OBJECT_LARGEOBJECT:
+			return "LARGE OBJECT";
+		case ACL_OBJECT_NAMESPACE:
+			return "SCHEMA";
+		case ACL_OBJECT_TABLESPACE:
+			return "TABLESPACE";
+		case ACL_OBJECT_TYPE:
+			return "TYPE";
+		default:
+			elog(ERROR, "unrecognized type %d", objtype);
+			return "???";	/* keep compiler quiet */
+	}
+}
+
 /*
  * EventTriggerStashGrant
  * 		Save data about a GRANT/REVOKE command being executed
@@ -1714,7 +1751,7 @@ EventTriggerStashGrant(InternalGrant *istmt)
 	oldcxt = MemoryContextSwitchTo(currentEventTriggerState->cxt);
 
 	/*
-	 * copying the node is moderately challenging ... XXX should we consider
+	 * copying the node is moderately challenging ... should we consider
 	 * changing InternalGrant into a full-fledged node instead?
 	 */
 	icopy = palloc(sizeof(InternalGrant));
@@ -1728,7 +1765,7 @@ EventTriggerStashGrant(InternalGrant *istmt)
 	stashed = palloc(sizeof(StashedCommand));
 	stashed->type = SCT_Grant;
 	stashed->in_extension = creating_extension;
-
+	stashed->d.grant.type = stringify_grantobjtype(istmt->objtype);
 	stashed->d.grant.istmt = icopy;
 	stashed->parsetree = NULL;
 
@@ -1917,9 +1954,10 @@ pg_event_trigger_get_creation_commands(PG_FUNCTION_ARGS)
 				/* objsubid */
 				nulls[i++] = true;
 				/* command tag */
-				values[i++] = CStringGetTextDatum("GRANT");	/* XXX maybe REVOKE or something else */
+				values[i++] = CStringGetTextDatum(cmd->d.grant.istmt->is_grant ?
+												  "GRANT" : "REVOKE");
 				/* object_type */
-				values[i++] = CStringGetTextDatum("TABLE"); /* XXX maybe something else */
+				values[i++] = CStringGetTextDatum(cmd->d.grant.type);
 				/* schema */
 				nulls[i++] = true;
 				/* identity */
