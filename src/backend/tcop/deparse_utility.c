@@ -4454,15 +4454,18 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 	Relation	rel;
 	List	   *subcmds = NIL;
 	ListCell   *cell;
+	char	   *fmtstr;
 
 	Assert(cmd->type == SCT_AlterTable);
 
-	rel = heap_open(cmd->d.alterTable.objectId, AccessShareLock);
+	rel = relation_open(cmd->d.alterTable.objectId, AccessShareLock);
 	dpcontext = deparse_context_for(RelationGetRelationName(rel),
 									cmd->d.alterTable.objectId);
 
-	alterTableStmt =
-		new_objtree_VA("ALTER TABLE %{identity}D %{subcmds:, }s", 0);
+	fmtstr = psprintf("ALTER %s %%{identity}D %%{subcmds:, }s",
+					  stringify_objtype(cmd->d.alterTable.objtype));
+	alterTableStmt = new_objtree_VA(fmtstr, 0);
+
 	tmp = new_objtree_for_qualname(rel->rd_rel->relnamespace,
 								   RelationGetRelationName(rel));
 	append_object_object(alterTableStmt, "identity", tmp);
@@ -4548,15 +4551,15 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 				break;
 
 			case AT_SetStatistics:
-				/* not yet */
+				elog(ERROR, "unimplemented deparse of ALTER TABLE SET STATISTICS");
 				break;
 
 			case AT_SetOptions:
-				/* not yet */
+				elog(ERROR, "unimplemented deparse of ALTER TABLE SET OPTIONS");
 				break;
 
 			case AT_ResetOptions:
-				/* not yet */
+				elog(ERROR, "unimplemented deparse of ALTER TABLE RESET OPTIONS");
 				break;
 
 			case AT_SetStorage:
@@ -4623,6 +4626,7 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 				break;
 
 			case AT_AlterConstraint:
+				elog(ERROR, "unimplemented deparse of ALTER TABLE ALTER CONSTRAINT");
 				break;
 
 			case AT_ValidateConstraint:
@@ -4650,6 +4654,7 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 				break;
 
 			case AT_AlterColumnGenericOptions:
+				elog(ERROR, "unimplemented deparse of ALTER TABLE ALTER COLUMN OPTIONS");
 				break;
 
 			case AT_ChangeOwner:
@@ -4672,6 +4677,11 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 				subcmds = lappend(subcmds, new_object_object(tmp));
 				break;
 
+			case AT_SetLogged:
+			case AT_SetUnLogged:
+				elog(ERROR, "unimplemented deparse of ALTER TABLE SET LOGGED/UNLOGGED");
+				break;
+
 			case AT_AddOids:
 				tmp = new_objtree_VA("SET WITH OIDS", 1,
 									 "type", ObjTypeString, "set with oids");
@@ -4692,15 +4702,13 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 				break;
 
 			case AT_SetRelOptions:
+				elog(ERROR, "unimplemented deparse of ALTER TABLE SET");
 				break;
 
 			case AT_ResetRelOptions:
+				elog(ERROR, "unimplemented deparse of ALTER TABLE RESET");
 				break;
 
-				/*
-				 * FIXME --- should we unify representation of all these
-				 * ENABLE/DISABLE TRIGGER commands??
-				 */
 			case AT_EnableTrig:
 				tmp = new_objtree_VA("ENABLE TRIGGER %{trigger}I", 2,
 									 "type", ObjTypeString, "enable trigger",
@@ -4754,18 +4762,23 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 				break;
 
 			case AT_EnableRule:
+				elog(ERROR, "unimplemented deparse of ALTER TABLE ENABLE RULE");
 				break;
 
 			case AT_EnableAlwaysRule:
+				elog(ERROR, "unimplemented deparse of ALTER TABLE ENABLE ALWAYS RULE");
 				break;
 
 			case AT_EnableReplicaRule:
+				elog(ERROR, "unimplemented deparse of ALTER TABLE ENABLE REPLICA RULE");
 				break;
 
 			case AT_DisableRule:
+				elog(ERROR, "unimplemented deparse of ALTER TABLE DISABLE RULE");
 				break;
 
 			case AT_AddInherit:
+				elog(ERROR, "unimplemented deparse of ALTER TABLE ADD INHERIT");
 				/*
 				 * XXX this case is interesting: we cannot rely on parse node
 				 * because parent name might be unqualified; but there's no way
@@ -4775,13 +4788,16 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 				break;
 
 			case AT_DropInherit:
+				elog(ERROR, "unimplemented deparse of ALTER TABLE DROP INHERIT");
 				/* XXX ditto ... */
 				break;
 
 			case AT_AddOf:
+				elog(ERROR, "unimplemented deparse of ALTER TABLE ADD OF");
 				break;
 
 			case AT_DropOf:
+				elog(ERROR, "unimplemented deparse of ALTER TABLE DROP OF");
 				break;
 
 			case AT_ReplicaIdentity:
@@ -4808,7 +4824,13 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 				subcmds = lappend(subcmds, new_object_object(tmp));
 				break;
 
+			case AT_EnableRowSecurity:
+			case AT_DisableRowSecurity:
+				elog(ERROR, "unimplemented deparse of ALTER TABLE ENABLE/DISABLE ROW SECURITY");
+				break;
+
 			case AT_GenericOptions:
+				elog(ERROR, "unimplemented deparse of ALTER TABLE OPTIONS (...)");
 				break;
 
 			default:
