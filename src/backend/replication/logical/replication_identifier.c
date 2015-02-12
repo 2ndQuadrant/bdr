@@ -280,7 +280,9 @@ GetReplicationInfoByIdentifier(RepNodeId riident, bool missing_ok, char **riname
 	Form_pg_replication_identifier ric;
 
 	Assert(OidIsValid((Oid) riident));
-	Assert(riident < UINT16_MAX);
+	Assert(riident != InvalidRepNodeId);
+	Assert(riident != DoNotReplicateRepNodeId);
+
 	tuple = SearchSysCache1(REPLIDIDENT,
 							ObjectIdGetDatum((Oid) riident));
 
@@ -940,6 +942,12 @@ AdvanceReplicationIdentifier(RepNodeId node,
 	int i;
 	int free_slot = -1;
 	ReplicationState *replication_state = NULL;
+
+	Assert(node != InvalidRepNodeId);
+
+	/* we don't track DoNotReplicateRepNodeId */
+	if (node == DoNotReplicateRepNodeId)
+		return;
 
 	/*
 	 * XXX: should we restore into a hashtable and dump into shmem only after

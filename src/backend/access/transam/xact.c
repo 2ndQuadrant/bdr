@@ -1140,10 +1140,8 @@ RecordTransactionCommit(void)
 				lastrdata = 3;
 			}
 			/* dump transaction origin information */
-			if (replication_origin_id != InvalidRepNodeId &&
-				replication_origin_lsn != InvalidXLogRecPtr)
+			if (replication_origin_id != InvalidRepNodeId)
 			{
-				Assert(replication_origin_lsn != InvalidXLogRecPtr);
 				xlrec.xinfo |= XACT_CONTAINS_ORIGIN;
 				origin.origin_node_id = replication_origin_id;
 				origin.origin_lsn = replication_origin_lsn;
@@ -1186,7 +1184,8 @@ RecordTransactionCommit(void)
 	}
 
 	/* record plain commit ts if not replaying remote actions */
-	if (replication_origin_id == InvalidRepNodeId)
+	if (replication_origin_id == InvalidRepNodeId ||
+		replication_origin_id == DoNotReplicateRepNodeId)
 		replication_origin_timestamp = xactStopTimestamp;
 	else
 		AdvanceCachedReplicationIdentifier(replication_origin_lsn, XactLastRecEnd);
