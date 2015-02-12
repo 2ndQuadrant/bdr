@@ -878,6 +878,9 @@ get_objtype_catalog_oid(ObjectType objtype)
 		case OBJECT_TABCONSTRAINT:
 			catalog_id = ConstraintRelationId;
 			break;
+		case OBJECT_POLICY:
+			catalog_id = PolicyRelationId;
+			break;
 		case OBJECT_DATABASE:
 			catalog_id = DatabaseRelationId;
 			break;
@@ -960,7 +963,6 @@ get_objtype_catalog_oid(ObjectType objtype)
 				catalog_id = InvalidOid;
 	}
 
-	/* Return the object address and the relation. */
 	return catalog_id;
 }
 
