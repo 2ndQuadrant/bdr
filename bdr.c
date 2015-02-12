@@ -616,11 +616,11 @@ bdr_do_not_replicate_check_hook(bool *newvalue, void **extra, GucSource source)
 static void
 bdr_do_not_replicate_assign_hook(bool newvalue, void *extra)
 {
+	/* Mark these transactions as not to be replicated to other nodes */
 	if (newvalue)
-	{
-		/* Mark these transactions as not to be replicated to other nodes */
-		SetupCachedReplicationIdentifier(DoNotReplicateRepNodeId);
-	}
+		replication_origin_id = DoNotReplicateRepNodeId;
+	else
+		replication_origin_id = InvalidRepNodeId;
 }
 
 

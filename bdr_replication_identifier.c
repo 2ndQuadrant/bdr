@@ -404,6 +404,9 @@ SetupCachedReplicationIdentifier(RepNodeId node)
 	XLogRecPtr		remote_lsn = InvalidXLogRecPtr,
 					local_lsn = InvalidXLogRecPtr;
 
+	Assert(node != DoNotReplicateRepNodeId);
+	Assert(node != InvalidRepNodeId);
+
 	if (local_replication_state != NULL)
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
