@@ -127,6 +127,12 @@ tablespace-setup:
 	rm -rf ./testtablespace
 	mkdir ./testtablespace
 
+# DDL-deparse setup
+
+.PHONY: generate-files
+generate-files:
+	$(top_builddir)/src/test/regress/pg_regress --generate-files-only --inputdir=$(srcdir)/input
+
 
 ##
 ## Run tests
