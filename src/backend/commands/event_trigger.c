@@ -1608,6 +1608,26 @@ EventTriggerComplexCmdStart(Node *parsetree, ObjectType objtype)
 void
 EventTriggerComplexCmdSetOid(Oid objectId)
 {
+	/*
+	 * When processing an ALTER TYPE command, the given objectId is the one
+	 * found on pg_class for the composite type; we translate it to the
+	 * corresponding pg_type OID so that it can be properly be considered the
+	 * object's canonical objectId.
+	 */
+	if (currentEventTriggerState->curcmd->d.alterTable.objtype == OBJECT_TYPE)
+	{
+		HeapTuple	relTup;
+		Form_pg_class relForm;
+
+		relTup = SearchSysCache1(RELOID, objectId);
+		if (!HeapTupleIsValid(relTup))
+			elog(ERROR, "cache lookup failed for relation %u", objectId);
+		relForm = (Form_pg_class) GETSTRUCT(relTup);
+		Assert(relForm->relkind == RELKIND_COMPOSITE_TYPE);
+		objectId = relForm->reltype;
+		ReleaseSysCache(relTup);
+	}
+
 	currentEventTriggerState->curcmd->d.alterTable.objectId = objectId;
 }
 
