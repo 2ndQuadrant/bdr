@@ -3337,6 +3337,39 @@ deparse_RenameStmt(Oid objectId, Node *parsetree)
 				relation_close(pg_trigger, AccessShareLock);
 			}
 			break;
+
+		case OBJECT_POLICY:
+			{
+				HeapTuple	polTup;
+				Form_pg_policy polForm;
+				Relation	pg_policy;
+				ScanKeyData	key;
+				SysScanDesc	scan;
+
+				pg_policy = relation_open(PolicyRelationId, AccessShareLock);
+				ScanKeyInit(&key, ObjectIdAttributeNumber,
+							BTEqualStrategyNumber, F_OIDEQ,
+							ObjectIdGetDatum(objectId));
+				scan = systable_beginscan(pg_policy, PolicyOidIndexId, true,
+										  NULL, 1, &key);
+				polTup = systable_getnext(scan);
+				if (!HeapTupleIsValid(polTup))
+					elog(ERROR, "cache lookup failed for policy %u", objectId);
+				polForm = (Form_pg_policy) GETSTRUCT(polTup);
+
+				renameStmt = new_objtree_VA("ALTER POLICY %{if_exists}s %{policyname}I on %{identity}D RENAME TO %{newname}I",
+											0);
+				append_string_object(renameStmt, "policyname", node->subname);
+				append_object_object(renameStmt, "identity",
+									 new_objtree_for_qualname_id(RelationRelationId,
+																 polForm->polrelid));
+				append_string_object(renameStmt, "if_exists",
+									 node->missing_ok ? "IF EXISTS" : "");
+				systable_endscan(scan);
+				relation_close(pg_policy, AccessShareLock);
+			}
+			break;
+
 		default:
 			elog(ERROR, "unsupported object type %d", node->renameType);
 	}
