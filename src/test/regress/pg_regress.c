@@ -107,6 +107,7 @@ static char *user = NULL;
 static _stringlist *extraroles = NULL;
 static _stringlist *extra_install = NULL;
 static char *config_auth_datadir = NULL;
+static bool generate_files_only = false;
 
 /* internal variables */
 static const char *progname;
@@ -2210,6 +2211,7 @@ regression_main(int argc, char *argv[], init_function ifunc, test_function tfunc
 		{"extra-install", required_argument, NULL, 23},
 		{"config-auth", required_argument, NULL, 24},
 		{"dbname-deparse", required_argument, NULL, 25},
+		{"generate-files-only", no_argument, NULL, 26},
 		{NULL, 0, NULL, 0}
 	};
 
@@ -2338,6 +2340,9 @@ regression_main(int argc, char *argv[], init_function ifunc, test_function tfunc
 			case 25:
 				strncpy(deparse_test_db, optarg, sizeof(deparse_test_db));
 				break;
+			case 26:
+				generate_files_only = true;
+				break;
 			default:
 				/* getopt_long already emitted a complaint */
 				fprintf(stderr, _("\nTry \"%s -h\" for more information.\n"),
@@ -2377,6 +2382,12 @@ regression_main(int argc, char *argv[], init_function ifunc, test_function tfunc
 	inputdir = make_absolute_path(inputdir);
 	outputdir = make_absolute_path(outputdir);
 	dlpath = make_absolute_path(dlpath);
+
+	if (generate_files_only)
+	{
+		convert_sourcefiles();
+		exit(0);
+	}
 
 	/*
 	 * Initialization
