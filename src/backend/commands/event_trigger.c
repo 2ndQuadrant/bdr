@@ -1597,7 +1597,6 @@ EventTriggerComplexCmdStart(Node *parsetree, ObjectType objtype)
 	stashed->d.alterTable.objectId = InvalidOid;
 	stashed->d.alterTable.objtype = objtype;
 	stashed->d.alterTable.subcmds = NIL;
-	/* XXX is it necessary to have the whole parsetree? probably not ... */
 	stashed->parsetree = copyObject(parsetree);
 
 	currentEventTriggerState->curcmd = stashed;
