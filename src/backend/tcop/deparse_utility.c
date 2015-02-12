@@ -3986,6 +3986,8 @@ deparse_CommentOnConstraintSmt(Oid objectId, Node *parsetree)
 		fmt = psprintf("COMMENT ON CONSTRAINT %%{identity}s ON %s %%{parentobj}s IS NULL",
 					   node->objtype == OBJECT_TABCONSTRAINT ? "TABLE" : "DOMAIN");
 	comment = new_objtree_VA(fmt, 0);
+	if (node->comment)
+		append_string_object(comment, "comment", node->comment);
 
 	constrTup = SearchSysCache1(CONSTROID, objectId);
 	if (!HeapTupleIsValid(constrTup))
@@ -4009,6 +4011,8 @@ deparse_CommentOnConstraintSmt(Oid objectId, Node *parsetree)
 
 	append_string_object(comment, "parentobj",
 						 getObjectIdentity(&addr));
+
+	ReleaseSysCache(constrTup);
 
 	return comment;
 }
