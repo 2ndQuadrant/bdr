@@ -88,74 +88,312 @@ To set up BDR you'll need to: ...
   <chapter id="concepts">
    <title>Concepts</title>
 
-    <sect1 id="ddl-replication">
-      <indexterm>
-        <primary>DDL replication</primary>
-      </indexterm>
-      <title>DDL Replication</title>
+   <sect1 id="ddl-replication">
+    <indexterm>
+     <primary>DDL replication</primary>
+    </indexterm>
+    <title>DDL Replication</title>
 
-      <para>
-        <productname>BDR</productname> supports replicating changes to
-        a database's schemas to other connected nodes. That allows to
-        quite easily make certain DDL changes without worrying about
-        having to deploy them on other nodes first (which is not
-        always possible).
-      </para>
+    <para>
+     <productname>BDR</productname> supports replicating changes to
+     a database's schemas to other connected nodes. That allows to
+     quite easily make certain DDL changes without worrying about
+     having to deploy them on other nodes first (which is not
+     always possible).
+    </para>
 
-      <para>
-        To safely manipulate the database schema in a asynchronous
-        multimaster setup, all pending changes have to be replicated
-        first. Otherwise it can e.g. happen that a column constains
-        data for a row that has been dropped, or no data for a row
-        that is marked NOT NULL. To handle that
-        problem, <productname>BDR</productname> acquires a so called
-        DDL lock the first time in a transaction schema changes are
-        moade.
-      </para>
+    <para>
+     To safely manipulate the database schema in a asynchronous
+     multimaster setup, all pending changes have to be replicated
+     first. Otherwise it can e.g. happen that a column constains
+     data for a row that has been dropped, or no data for a row
+     that is marked NOT NULL. To handle that
+     problem, <productname>BDR</productname> acquires a so called
+     DDL lock the first time in a transaction schema changes are
+     moade.
+    </para>
 
-      <para>
-        Acquiring such a DDL locks requires contacting all nodes in a
-        configiuration setup, asking them to replicate all pending
-        changes, and prevent further changes from being made. Once all
-        nodes are in that state, the originator of the DDL lock is
-        free to perform schema changes.
-      </para>
+    <para>
+     Acquiring such a DDL locks requires contacting all nodes in a
+     configiuration setup, asking them to replicate all pending
+     changes, and prevent further changes from being made. Once all
+     nodes are in that state, the originator of the DDL lock is
+     free to perform schema changes.
+    </para>
 
-      <para>
-        This means that schema changes, in contrary to data changes,
-        can only be performed while all configured nodes are
-        reachable. If DDL has to be performed while a node is down, it
-        has to be removed from the configuration (using
-        bdr.bdr_part_by_node_names <!-- FIXME: link once
-        documented-->) first.
-      </para>
-    </sect1>
+    <para>
+     This means that schema changes, in contrary to data changes,
+     can only be performed while all configured nodes are
+     reachable. If DDL has to be performed while a node is down, it
+     has to be removed from the configuration (using
+     bdr.bdr_part_by_node_names <!-- FIXME: link once
+                                     documented-->) first.
+    </para>
+
+    <sect2>
+     <title>Statement specific DDL replication concerns</title>
+
+     <para>
+      Not all commands can be replicated automatically. Some are
+      allowed regardless - generally ones that have affect on more
+      than one database -, others are disallowed.
+     </para>
+
+     <para>
+      The following DDL are not replicated:
+
+      <variablelist>
+
+       <varlistentry id="ddl-create-database">
+        <term><varname>CREATE DATABASE</varname>
+         <indexterm>
+          <primary><varname>CREATE DATABASE</varname></primary>
+         </indexterm>
+        </term>
+        <listitem>
+         <para>
+          <literal>CREATE DATABASE</literal> cannot be
+          replicated because <productname>BDR</productname>
+          works on a per database level.
+         </para>
+        </listitem>
+       </varlistentry>
+
+       <varlistentry id="ddl-create-role">
+        <term><varname>CREATE ROLE/USER/GROUP</varname>
+         <indexterm>
+          <primary><varname>CREATE ROLE</varname></primary>
+         </indexterm>
+         <indexterm>
+          <primary><varname>CREATE USER</varname></primary>
+         </indexterm>
+         <indexterm>
+          <primary><varname>CREATE GROUP</varname></primary>
+         </indexterm>
+        </term>
+        <listitem>
+         <para>
+          <literal>CREATE ROLE</literal> cannot be replicated
+          because <productname>BDR</productname> works on a
+          per database level. It is possible that a workaround
+          for this will be added.
+         </para>
+         <warning>
+          <para>
+           Not creating roles of the same name (not
+           necessarily with the same access details otherwise
+           though) on all systems can break replication when
+           statements like <literal>ALTER TABLE ...
+            OWNER TO</literal> are replicated.
+          </para>
+         </warning>
+        </listitem>
+       </varlistentry>
+
+       <varlistentry id="ddl-create-tablespace">
+        <term><varname>CREATE TABLESPACE</varname>
+         <indexterm>
+          <primary><varname>CREATE TABLESPACE</varname></primary>
+         </indexterm>
+        </term>
+        <listitem>
+         <para>
+          <literal>CREATE TABLESPACE</literal> cannot be
+          replicated because <productname>BDR</productname>
+          works on a per database level.
+         </para>
+         <warning>
+          <para>
+           Not creating tablespaces of the same name (not
+           necessarily with the same location though) on all
+           systems can break replication when statements
+           like <literal>ALTER TABLE ... SET
+            TABLESPACE</literal> are replicated.
+          </para>
+         </warning>
+        </listitem>
+       </varlistentry>
+
+       <varlistentry id="ddl-drop-database">
+        <term><varname>DROP DATABASE</varname>
+         <indexterm>
+          <primary><varname>DROP DATABASE</varname></primary>
+         </indexterm>
+        </term>
+        <listitem>
+         <para>
+          <literal>DROP DATABASE</literal> cannot be
+          replicated because <productname>BDR</productname>
+          works on a per database level.
+         </para>
+         <para>
+          Note that a database that is configured for BDR
+          cannot be dropped while that is the case.
+         </para>
+        </listitem>
+       </varlistentry>
+
+       <varlistentry id="ddl-drop-tablespace">
+        <term><varname>DROP TABLESPACE</varname>
+         <indexterm>
+          <primary><varname>DROP TABLESPACE</varname></primary>
+         </indexterm>
+        </term>
+        <listitem>
+         <para>
+          <literal>DROP TABLESPACE</literal> cannot be
+          replicated because <productname>BDR</productname>
+          works on a per database level.
+         </para>
+         <warning>
+          <para>
+           Dropping tablespaces only on some nodes can cause
+           problems when relations on other nodes are moved
+           into the tablespace that does not exist locally
+           anymore.
+          </para>
+         </warning>
+        </listitem>
+       </varlistentry>
+
+       <varlistentry id="ddl-drop-role">
+        <term><varname>DROP ROLE/USER/GROUP</varname>
+         <indexterm>
+          <primary><varname>DROP ROLE</varname></primary>
+         </indexterm>
+         <indexterm>
+          <primary><varname>DROP USER</varname></primary>
+         </indexterm>
+         <indexterm>
+          <primary><varname>DROP GROUP</varname></primary>
+         </indexterm>
+        </term>
+        <listitem>
+         <para>
+          <literal>DROP ROLE</literal> cannot be replicated
+          because <productname>BDR</productname> works on a
+          per database level. It is possible that a workaround
+          for this will be added.
+         </para>
+         <warning>
+          <para>
+           Dropping role only on some nodes can cause
+           problems when objects on other nodes are assigned
+           to roles that do not exist locally anymore.
+          </para>
+         </warning>
+        </listitem>
+       </varlistentry>
+
+       <varlistentry id="ddl-alter-role">
+        <term><varname>ALTER ROLE/USER/GROUP</varname>
+         <indexterm>
+          <primary><varname>ALTER ROLE</varname></primary>
+         </indexterm>
+         <indexterm>
+          <primary><varname>ALTER USER</varname></primary>
+         </indexterm>
+         <indexterm>
+          <primary><varname>ALTER GROUP</varname></primary>
+         </indexterm>
+        </term>
+        <listitem>
+         <para>
+          <literal>ALTER ROLE</literal> cannot be replicated
+          because <productname>BDR</productname> works on a
+          per database level. It is possible that a workaround
+          for this will be added.
+         </para>
+         <para>
+          Normally all commands but <literal>ALTER ROLE
+           ... RENAME TO ...</literal> should be safe to
+          execute in the sense that doing so won't cause
+          replication to break.
+         </para>
+         <warning>
+          <para>
+           Renaming a role only on some nodes can lead to
+           problems due to replicated DDL statmeents not
+           being able to execute anymore.
+          </para>
+         </warning>
+        </listitem>
+       </varlistentry>
+
+       <varlistentry id="ddl-alter-database">
+        <term><varname>ALTER DATABASE</varname>
+         <indexterm>
+          <primary><varname>ALTER DATABASE</varname></primary>
+         </indexterm>
+        </term>
+        <listitem>
+         <para>
+          <literal>ALTER DATABASE</literal> cannot be replicated
+          because <productname>BDR</productname> works on a
+          per database level.
+         </para>
+         <para>
+          In practice the primary problematic case is when trying to
+          change settings on a per database basis using <literal>ALTER
+          DATABASE ... SET ...</literal>, these have to be executed on
+          every database for now.
+         </para>
+         <warning>
+          <para>
+           Renaming a database can lead to the connection
+           information stored on some of the nodes not being
+           valid anymore.
+          </para>
+         </warning>
+        </listitem>
+       </varlistentry>
+
+       <varlistentry id="ddl-alter-tablespace">
+        <term><varname>ALTER TABLESPACE</varname>
+         <indexterm>
+          <primary><varname>ALTER TABLESPACE</varname></primary>
+         </indexterm>
+        </term>
+        <listitem>
+         <para>
+          <literal>ALTER TABLSPACE</literal> cannot be replicated
+          because <productname>BDR</productname> works on a per
+          database level. It is safe to execute on the individual
+          nodes though.
+         </para>
+        </listitem>
+       </varlistentry>
+
+      </variablelist>
+     </para>
+    </sect2>
+   </sect1>
 
 
-    <sect1 id="distributed-sequences">
-      <indexterm>
-        <primary>distributed sequences</primary>
-      </indexterm>
-      <title>distributed sequences</title>
-      <para>
-        In a asynchronous multimaster environment it can be hard to
-        have generated surrogate keys without a chance of
-        conflicts. Possible solutions includee using random
-        identifiers (like UUIDs) and assigning large ranges of values
-        to individual nodes.
-      </para>
+   <sect1 id="distributed-sequences">
+    <indexterm>
+     <primary>distributed sequences</primary>
+    </indexterm>
+    <title>distributed sequences</title>
+    <para>
+     In a asynchronous multimaster environment it can be hard to
+     have generated surrogate keys without a chance of
+     conflicts. Possible solutions includee using random
+     identifiers (like UUIDs) and assigning large ranges of values
+     to individual nodes.
+    </para>
 
-      <para>
-        <productname>BDR</productname> provides distributed sequences
-        as a solution for that problem, without preventing
-        implementation of other solutions. These assign small ranges
-        of values to individual nodes, which these than can hand out
-        during inserts. To make usage of these as simple as possible
-        all that has to be done to use these, in comparison to normal
-        sequences, is to specify the <literal>USING bdr</literal>
-        option when creating a sequence.
-      </para>
-    </sect1>
+    <para>
+     <productname>BDR</productname> provides distributed sequences
+     as a solution for that problem, without preventing
+     implementation of other solutions. These assign small ranges
+     of values to individual nodes, which these than can hand out
+     during inserts. To make usage of these as simple as possible
+     all that has to be done to use these, in comparison to normal
+     sequences, is to specify the <literal>USING bdr</literal>
+     option when creating a sequence.
+    </para>
+   </sect1>
   </chapter>
 
   <chapter id="settings">
