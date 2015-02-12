@@ -3293,7 +3293,7 @@ deparse_RenameStmt(Oid objectId, Node *parsetree)
 				}
 				renameStmt = new_objtree_VA(fmtstr, 2,
 											"conname", ObjTypeString, node->subname,
-											"identity", ObjTypeString, ident);
+											"identity", ObjTypeObject, ident);
 				ReleaseSysCache(conTup);
 			}
 			break;
