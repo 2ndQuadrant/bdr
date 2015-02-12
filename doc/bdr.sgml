@@ -57,14 +57,14 @@
    <sect1 id="quickstart-overviev">
     <title>Overview</title>
     <para>
-To set up BDR you'll need to: ...
+     To set up BDR you'll need to: ...
     </para>
    </sect1>
 
    <sect1 id="quickstart-source">
     <title>Installing from source</title>
     <para>
-      Compiling PostgreSQL with BDR ...
+     Compiling PostgreSQL with BDR ...
     </para>
    </sect1>
   </chapter>
@@ -438,9 +438,9 @@ To set up BDR you'll need to: ...
 
       <varlistentry id="guc-max-replication-slots" xreflabel="max_replication_slots">
        <term><varname>max_replication_slots</varname> (<type>integer</type>)
-       <indexterm>
-        <primary><varname>max_replication_slots</varname> configuration parameter</primary>
-       </indexterm>
+        <indexterm>
+         <primary><varname>max_replication_slots</varname> configuration parameter</primary>
+        </indexterm>
        </term>
        <listitem>
         <para>
@@ -486,24 +486,24 @@ To set up BDR you'll need to: ...
       </varlistentry>
 
       <varlistentry id="guc-shared-preload-libraries" xreflabel="shared_preload_libraries">
-      <term><varname>shared_preload_libraries</varname> (<type>string</type>)
-      <indexterm>
-       <primary><varname>shared_preload_libraries</varname> configuration parameter</primary>
-      </indexterm>
-      </term>
-      <listitem>
-       <para>
-        For both <productname>BDR</productname>
-        and <productname>UDR</productname> this parameter has to to
-        include <literal>bdr</literal> as one of the comma separated
-        values. The parameter can only be changed at server start.
-       </para>
-       <para>
+       <term><varname>shared_preload_libraries</varname> (<type>string</type>)
+        <indexterm>
+         <primary><varname>shared_preload_libraries</varname> configuration parameter</primary>
+        </indexterm>
+       </term>
+       <listitem>
+        <para>
+         For both <productname>BDR</productname>
+         and <productname>UDR</productname> this parameter has to to
+         include <literal>bdr</literal> as one of the comma separated
+         values. The parameter can only be changed at server start.
+        </para>
+        <para>
          For more detailed information about this parameter consult
          the <productname>PostgreSQL</productname>
          <ulink url='http://www.postgresql.org/docs/current/interactive/runtime-config-client.html#GUC-SHARED-PRELOAD-LIBRARIES'>documentation</ulink>.
-       </para>
-      </listitem>
+        </para>
+       </listitem>
       </varlistentry>
 
       <varlistentry id="guc-track-commit-timestamp" xreflabel="track_commit_timestamp">
@@ -624,7 +624,7 @@ To set up BDR you'll need to: ...
       </varlistentry>
 
       <varlistentry id="guc-temp-dump-directory" xreflabel="bdr.temp_dump_directory">
-      <term><varname>bdr.temp_dump_directory</varname> (<type>string</type>)
+       <term><varname>bdr.temp_dump_directory</varname> (<type>string</type>)
         <indexterm>
          <primary><varname>bdr.temp_dump_directory</varname> configuration parameter</primary>
         </indexterm>
@@ -637,7 +637,7 @@ To set up BDR you'll need to: ...
          database.
         </para>
         <para>
-          Only used during initial bringup.
+         Only used during initial bringup.
         </para>
        </listitem>
       </varlistentry>
