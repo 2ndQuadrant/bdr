@@ -338,7 +338,7 @@ filter_AlterTableStmt(Node *parsetree,
 				case AT_AddInherit:
 				case AT_DropInherit:
 					error_on_persistent_rv(astmt->relation,
-										   "ALTER TABLE ... ADD|DROP INHERIT",
+										   "ALTER TABLE ... [NO] INHERIT",
 										   AlterTableGetLockLevel(astmt->cmds),
 										   astmt->missing_ok);
 					break;
@@ -356,7 +356,7 @@ filter_AlterTableStmt(Node *parsetree,
 				case AT_SetOptions:
 				case AT_ResetOptions:
 					error_on_persistent_rv(astmt->relation,
-										   "ALTER TABLE ... ALTER COLUMN SET STATISTICS|(...)",
+										   "ALTER TABLE ... ALTER COLUMN ... SET STATISTICS|(...)",
 										   AlterTableGetLockLevel(astmt->cmds),
 										   astmt->missing_ok);
 					break;
