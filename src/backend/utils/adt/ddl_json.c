@@ -24,6 +24,7 @@ typedef enum
 	SpecOperatorname,
 	SpecDottedName,
 	SpecString,
+	SpecNumber,
 	SpecStringLiteral,
 	SpecIdentifier
 } convSpecifier;
@@ -224,6 +225,9 @@ expand_fmt_recursive(JsonbContainer *container, StringInfo out)
 				break;
 			case 'O':
 				specifier = SpecOperatorname;
+				break;
+			case 'd':
+				specifier = SpecNumber;
 				break;
 			default:
 				ereport(ERROR,
@@ -456,6 +460,16 @@ expand_jsonval_strlit(StringInfo buf, JsonbValue *jsonval)
 }
 
 /*
+ * Expand a json value as an integer quantity
+ */
+static void
+expand_jsonval_number(StringInfo buf, JsonbValue *jsonval)
+{
+	appendStringInfoString(buf, jsonval);
+}
+
+
+/*
  * Expand one json element into the output StringInfo according to the
  * conversion specifier.  The element type is validated, and an error is raised
  * if it doesn't match what we expect for the conversion specifier.
@@ -536,6 +550,15 @@ expand_one_jsonb_element(StringInfo out, char *param, JsonbValue *jsonval,
 								param, jsonval->type)));
 			expand_jsonval_operator(out, jsonval);
 			break;
+
+		case SpecNumber:
+			if (jsonval->type != jbvNumeric)
+				ereport(ERROR,
+						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						 errmsg("expected JSON numeric for %%d element \"%s\", got %d",
+								param, jsonval->type)));
+			expand_jsonval_number(out, jsonval);
+			break;
 	}
 
 	if (fmt)
@@ -612,6 +635,7 @@ expand_jsonb_array(StringInfo out, char *param,
  * O		expand as an operator name
  * L		expand as a string literal (quote using single quotes)
  * s		expand as a simple string (no quoting)
+ * d		expand as a simple number (no quoting)
  *
  * The element name may have an optional separator specification preceded
  * by a colon.	Its presence indicates that the element is expected to be

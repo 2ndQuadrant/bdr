@@ -96,6 +96,7 @@ typedef enum
 	ObjTypeBool,
 	ObjTypeString,
 	ObjTypeArray,
+	ObjTypeInteger,
 	ObjTypeObject
 } ObjType;
 
@@ -114,6 +115,7 @@ typedef struct ObjElem
 	{
 		bool		boolean;
 		char	   *string;
+		int64		integer;
 		ObjTree	   *object;
 		List	   *array;
 	} value;
@@ -125,6 +127,7 @@ static ObjElem *new_bool_object(bool value);
 static ObjElem *new_string_object(char *value);
 static ObjElem *new_object_object(ObjTree *value);
 static ObjElem *new_array_object(List *array);
+static ObjElem *new_integer_object(int64 value);
 static void append_null_object(ObjTree *tree, char *name);
 static void append_bool_object(ObjTree *tree, char *name, bool value);
 static void append_string_object(ObjTree *tree, char *name, char *value);
@@ -179,6 +182,7 @@ new_objtree_VA(char *fmt, int numobjs,...)
 		char	   *strval;
 		bool		boolval;
 		List	   *list;
+		int64		number;
 
 		name = va_arg(args, char *);
 		type = va_arg(args, ObjType);
@@ -211,6 +215,10 @@ new_objtree_VA(char *fmt, int numobjs,...)
 			case ObjTypeArray:
 				list = va_arg(args, List *);
 				elem = new_array_object(list);
+				break;
+			case ObjTypeInteger:
+				number = va_arg(args, int64);
+				elem = new_integer_object(number);
 				break;
 			default:
 				elog(ERROR, "invalid parameter type %d", type);
@@ -304,6 +312,34 @@ append_string_object(ObjTree *tree, char *name, char *value)
 	append_premade_object(tree, param);
 }
 
+static ObjElem *
+new_integer_object(int64 value)
+{
+	ObjElem	   *param;
+
+	param = palloc0(sizeof(ObjElem));
+	param->name = NULL;
+	param->objtype = ObjTypeInteger;
+	param->value.integer = value;
+
+	return param;
+}
+
+#ifdef UNUSED
+/*
+ * Append an int64 parameter to a tree.
+ */
+static void
+append_integer_object(ObjTree *tree, char *name, int64 value)
+{
+	ObjElem	   *param;
+
+	param = new_integer_object(value);
+	param->name = name;
+	append_premade_object(tree, param);
+}
+#endif
+
 /* Allocate a new object parameter */
 static ObjElem *
 new_object_object(ObjTree *value)
@@ -385,6 +421,15 @@ objtree_to_jsonb_element(JsonbParseState *state, ObjElem *object,
 			val.type = jbvString;
 			val.val.string.len = strlen(object->value.string);
 			val.val.string.val = object->value.string;
+			pushJsonbValue(&state, elem_token, &val);
+			break;
+
+		case ObjTypeInteger:
+			val.type = jbvNumeric;
+			val.val.numeric = (Numeric)
+				DatumGetNumeric(DirectFunctionCall1(int8_numeric,
+													object->value.integer));
+
 			pushJsonbValue(&state, elem_token, &val);
 			break;
 
