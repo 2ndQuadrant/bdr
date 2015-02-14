@@ -4391,11 +4391,11 @@ deparse_CommentOnConstraintSmt(Oid objectId, Node *parsetree)
 	Assert(node->objtype == OBJECT_TABCONSTRAINT || node->objtype == OBJECT_DOMCONSTRAINT);
 
 	if (node->comment)
-		fmt = psprintf("COMMENT ON CONSTRAINT %%{identity}s ON %s %%{parentobj}s IS %%{comment}L",
-					   node->objtype == OBJECT_TABCONSTRAINT ? "TABLE" : "DOMAIN");
+		fmt = psprintf("COMMENT ON CONSTRAINT %%{identity}s ON %s%%{parentobj}s IS %%{comment}L",
+					   node->objtype == OBJECT_TABCONSTRAINT ? "" : "DOMAIN ");
 	else
-		fmt = psprintf("COMMENT ON CONSTRAINT %%{identity}s ON %s %%{parentobj}s IS NULL",
-					   node->objtype == OBJECT_TABCONSTRAINT ? "TABLE" : "DOMAIN");
+		fmt = psprintf("COMMENT ON CONSTRAINT %%{identity}s ON %s%%{parentobj}s IS NULL",
+					   node->objtype == OBJECT_TABCONSTRAINT ? "" : "DOMAIN ");
 	comment = new_objtree_VA(fmt, 0);
 	if (node->comment)
 		append_string_object(comment, "comment", node->comment);
