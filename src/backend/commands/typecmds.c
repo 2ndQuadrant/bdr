@@ -229,7 +229,7 @@ DefineType(List *names, List *parameters)
 		 * creating the shell type was all we're supposed to do.
 		 */
 		if (parameters == NIL)
-			return InvalidOid;
+			return typoid;
 	}
 	else
 	{
