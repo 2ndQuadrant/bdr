@@ -1732,6 +1732,45 @@ deparse_AlterExtensionStmt(Oid objectId, Node *parsetree)
 	return stmt;
 }
 
+static ObjTree *
+deparse_CreateForeignServerStmt(Oid objectId, Node *parsetree)
+{
+	CreateForeignServerStmt *node = (CreateForeignServerStmt *) parsetree;
+	ObjTree	   *createServer;
+	ObjTree	   *tmp;
+
+	createServer = new_objtree_VA("CREATE SERVER %{identity}I %{type}s %{version}s "
+								  "FOREIGN DATA WRAPPER %{fdw}I %{options}s", 2,
+								  "identity", ObjTypeString, node->servername,
+								  "fdw",  ObjTypeString, node->fdwname);
+
+	/* add a TYPE clause, if any */
+	tmp = new_objtree_VA("TYPE %{type}L", 0);
+	if (node->servertype)
+		append_string_object(tmp, "type", node->servertype);
+	else
+		append_bool_object(tmp, "present", false);
+	append_object_object(createServer, "type", tmp);
+
+	/* add a VERSION clause, if any */
+	tmp = new_objtree_VA("VERSION %{version}L", 0);
+	if (node->version)
+		append_string_object(tmp, "version", node->version);
+	else
+		append_bool_object(tmp, "present", false);
+	append_object_object(createServer, "version", tmp);
+
+	/* add an OPTIONS clause, if any */
+	tmp = new_objtree_VA("OPTIONS (%{option:, }s)", 0);
+	if (node->options)
+		elog(ERROR, "unimplemented deparse of CREATE SERVER ... OPTIONS");
+	else
+		append_bool_object(tmp, "present", false);
+	append_object_object(createServer, "options", tmp);
+
+	return createServer;
+}
+
 /*
  * deparse_ViewStmt
  *		deparse a ViewStmt
@@ -5465,7 +5504,7 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_CreateForeignServerStmt:
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			command = deparse_CreateForeignServerStmt(objectId, parsetree);
 			break;
 
 		case T_AlterForeignServerStmt:
