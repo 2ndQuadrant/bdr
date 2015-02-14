@@ -739,23 +739,23 @@ deparse_DefineStmt_Aggregate(Oid objectId, DefineStmt *define)
 
 		for (i = 0; i < nargs; i++)
 		{
-			tmp = new_objtree_VA("%{order}s%{mode}s%{name}s%{type}T", 0);
+			tmp = new_objtree_VA("%{order}s %{mode}s %{name}s %{type}T", 0);
 
 			if (i == insertorderbyat)
-				append_string_object(tmp, "order", "ORDER BY ");
+				append_string_object(tmp, "order", "ORDER BY");
 			else
 				append_string_object(tmp, "order", "");
 
 			if (modes)
 				append_string_object(tmp, "mode",
-									 modes[i] == 'v' ? "VARIADIC " : "");
+									 modes[i] == 'v' ? "VARIADIC" : "");
 			else
 				append_string_object(tmp, "mode", "");
 
 			if (names)
 				append_string_object(tmp, "name", names[i]);
 			else
-				append_string_object(tmp, "name", " ");
+				append_string_object(tmp, "name", "");
 
 			append_object_object(tmp, "type",
 								 new_objtree_for_type(types[i], -1));
@@ -789,9 +789,9 @@ deparse_DefineStmt_Aggregate(Oid objectId, DefineStmt *define)
 
 	if (agg->aggtransspace != 0)
 	{
-		tmp = new_objtree_VA("SSPACE=%{space}s", 1,
-							 "space", ObjTypeString,
-							 psprintf("%d", agg->aggtransspace));
+		tmp = new_objtree_VA("SSPACE=%{space}n", 1,
+							 "space", ObjTypeInteger,
+							 agg->aggtransspace);
 		list = lappend(list, new_object_object(tmp));
 	}
 
@@ -840,9 +840,9 @@ deparse_DefineStmt_Aggregate(Oid objectId, DefineStmt *define)
 
 	if (agg->aggmtransspace != 0)
 	{
-		tmp = new_objtree_VA("SSPACE=%{space}s", 1,
-							 "space", ObjTypeString,
-							 psprintf("%d", agg->aggmtransspace));
+		tmp = new_objtree_VA("MSSPACE=%{space}n", 1,
+							 "space", ObjTypeInteger,
+							 agg->aggmtransspace);
 		list = lappend(list, new_object_object(tmp));
 	}
 
@@ -1373,12 +1373,15 @@ deparse_DefineStmt_Type(Oid objectId, DefineStmt *define)
 	}
 
 	/* INTERNALLENGTH */
-	tmp = new_objtree_VA("INTERNALLENGTH=%{typlen}s", 0);
 	if (typForm->typlen == -1)
-		append_string_object(tmp, "typlen", "VARIABLE");
+	{
+		tmp = new_objtree_VA("INTERNALLENGTH=VARIABLE", 0);
+	}
 	else
-		append_string_object(tmp, "typlen",
-							 psprintf("%d", typForm->typlen));
+	{
+		tmp = new_objtree_VA("INTERNALLENGTH=%{typlen}n", 1,
+							 "typlen", ObjTypeInteger, typForm->typlen);
+	}
 	list = lappend(list, new_object_object(tmp));
 
 	/* PASSEDBYVALUE */
