@@ -3095,16 +3095,15 @@ deparse_CreateFunction(Oid objectId, Node *parsetree)
 						 "SECURITY DEFINER" : "SECURITY INVOKER");
 
 	append_object_object(createFunc, "cost",
-						 new_objtree_VA("COST %{cost}s", 1,
-										"cost", ObjTypeString,
-										psprintf("%f", procForm->procost)));
+						 new_objtree_VA("COST %{cost}n", 1,
+										"cost", ObjTypeFloat,
+										procForm->procost));
 
-	tmp = new_objtree_VA("ROWS %{rows}s", 0);
+	tmp = new_objtree_VA("ROWS %{rows}n", 0);
 	if (procForm->prorows == 0)
 		append_bool_object(tmp, "present", false);
 	else
-		append_string_object(tmp, "rows",
-							 psprintf("%f", procForm->prorows));
+		append_float_object(tmp, "rows", procForm->prorows);
 	append_object_object(createFunc, "rows", tmp);
 
 	append_array_object(createFunc, "set_options", NIL);
