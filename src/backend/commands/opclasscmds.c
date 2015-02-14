@@ -36,6 +36,7 @@
 #include "catalog/pg_type.h"
 #include "commands/alter.h"
 #include "commands/defrem.h"
+#include "commands/event_trigger.h"
 #include "miscadmin.h"
 #include "parser/parse_func.h"
 #include "parser/parse_oper.h"
@@ -48,10 +49,12 @@
 #include "utils/tqual.h"
 
 
-static void AlterOpFamilyAdd(List *opfamilyname, Oid amoid, Oid opfamilyoid,
+static void AlterOpFamilyAdd(AlterOpFamilyStmt *stmt,
+				 List *opfamilyname, Oid amoid, Oid opfamilyoid,
 				 int maxOpNumber, int maxProcNumber,
 				 List *items);
-static void AlterOpFamilyDrop(List *opfamilyname, Oid amoid, Oid opfamilyoid,
+static void AlterOpFamilyDrop(AlterOpFamilyStmt *stmt,
+				  List *opfamilyname, Oid amoid, Oid opfamilyoid,
 				  int maxOpNumber, int maxProcNumber,
 				  List *items);
 static void processTypesSpec(List *args, Oid *lefttype, Oid *righttype);
@@ -809,11 +812,11 @@ AlterOpFamily(AlterOpFamilyStmt *stmt)
 	 * ADD and DROP cases need separate code from here on down.
 	 */
 	if (stmt->isDrop)
-		AlterOpFamilyDrop(stmt->opfamilyname, amoid, opfamilyoid,
+		AlterOpFamilyDrop(stmt, stmt->opfamilyname, amoid, opfamilyoid,
 						  maxOpNumber, maxProcNumber,
 						  stmt->items);
 	else
-		AlterOpFamilyAdd(stmt->opfamilyname, amoid, opfamilyoid,
+		AlterOpFamilyAdd(stmt, stmt->opfamilyname, amoid, opfamilyoid,
 						 maxOpNumber, maxProcNumber,
 						 stmt->items);
 
@@ -824,7 +827,8 @@ AlterOpFamily(AlterOpFamilyStmt *stmt)
  * ADD part of ALTER OP FAMILY
  */
 static void
-AlterOpFamilyAdd(List *opfamilyname, Oid amoid, Oid opfamilyoid,
+AlterOpFamilyAdd(AlterOpFamilyStmt *stmt,
+				 List *opfamilyname, Oid amoid, Oid opfamilyoid,
 				 int maxOpNumber, int maxProcNumber,
 				 List *items)
 {
@@ -949,13 +953,19 @@ AlterOpFamilyAdd(List *opfamilyname, Oid amoid, Oid opfamilyoid,
 				   InvalidOid, operators, true);
 	storeProcedures(opfamilyname, amoid, opfamilyoid,
 					InvalidOid, procedures, true);
+
+	/*
+	 * make information available to event triggers */
+	EventTriggerStashAlterOpFam(stmt, opfamilyoid,
+								operators, procedures);
 }
 
 /*
  * DROP part of ALTER OP FAMILY
  */
 static void
-AlterOpFamilyDrop(List *opfamilyname, Oid amoid, Oid opfamilyoid,
+AlterOpFamilyDrop(AlterOpFamilyStmt *stmt,
+				  List *opfamilyname, Oid amoid, Oid opfamilyoid,
 				  int maxOpNumber, int maxProcNumber,
 				  List *items)
 {
@@ -1022,6 +1032,9 @@ AlterOpFamilyDrop(List *opfamilyname, Oid amoid, Oid opfamilyoid,
 	 */
 	dropOperators(opfamilyname, amoid, opfamilyoid, operators);
 	dropProcedures(opfamilyname, amoid, opfamilyoid, procedures);
+
+	EventTriggerStashAlterOpFam(stmt, opfamilyoid,
+								operators, procedures);
 }
 
 
