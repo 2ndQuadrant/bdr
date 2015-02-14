@@ -4060,7 +4060,146 @@ deparse_RuleStmt(Oid objectId, Node *parsetree)
 	return ruleStmt;
 }
 
+static ObjTree *
+deparse_CreateTableAsStmt(Oid objectId, Node *parsetree)
+{
+	CreateTableAsStmt *node = (CreateTableAsStmt *) parsetree;
+	ObjTree	   *createStmt;
+	ObjTree	   *tmp;
+	char	   *fmt;
+	List	   *list;
 
+	/*
+	 * Reject unsupported case right away.
+	 */
+	if (((Query *) (node->query))->commandType == CMD_UTILITY)
+		elog(ERROR, "unimplemented deparse of CREATE TABLE AS EXECUTE");
+
+	/*
+	 * Note that INSERT INTO is deparsed as CREATE TABLE AS.  They are
+	 * functionally equivalent synonyms so there is no harm from this.
+	 */
+	if (node->relkind == OBJECT_MATVIEW)
+		fmt = "CREATE %{persistence}s MATERIALIZED VIEW %{if_not_exists}s "
+			"%{identity}D %{columns}s %{with}s %{tablespace}s "
+			"AS %{query}s %{with_no_data}s";
+	else
+		fmt = "CREATE %{persistence}s TABLE %{if_not_exists}s "
+			"%{identity}D %{columns}s %{with}s %{on_commit}s %{tablespace}s "
+			"AS %{query}s %{with_no_data}s";
+
+	createStmt =
+		new_objtree_VA(fmt, 2,
+					   "persistence", ObjTypeString,
+					   get_persistence_str(node->into->rel->relpersistence),
+					   "if_not_exists", ObjTypeString,
+					   node->if_not_exists ? "IF NOT EXISTS" : "");
+	append_object_object(createStmt, "identity",
+						 new_objtree_for_qualname_id(RelationRelationId,
+													 objectId));
+
+	/* Add an ON COMMIT clause.  CREATE MATERIALIZED VIEW doesn't have one */
+	if (node->relkind == OBJECT_TABLE)
+	{
+		tmp = new_objtree_VA("ON COMMIT %{on_commit_value}s", 0);
+		switch (node->into->onCommit)
+		{
+			case ONCOMMIT_DROP:
+				append_string_object(tmp, "on_commit_value", "DROP");
+				break;
+
+			case ONCOMMIT_DELETE_ROWS:
+				append_string_object(tmp, "on_commit_value", "DELETE ROWS");
+				break;
+
+			case ONCOMMIT_PRESERVE_ROWS:
+				append_string_object(tmp, "on_commit_value", "PRESERVE ROWS");
+				break;
+
+			case ONCOMMIT_NOOP:
+				append_null_object(tmp, "on_commit_value");
+				append_bool_object(tmp, "present", false);
+				break;
+		}
+		append_object_object(createStmt, "on_commit", tmp);
+	}
+
+	/* add a TABLESPACE clause */
+	tmp = new_objtree_VA("TABLESPACE %{tablespace}I", 0);
+	if (node->into->tableSpaceName)
+		append_string_object(tmp, "tablespace", node->into->tableSpaceName);
+	else
+	{
+		append_null_object(tmp, "tablespace");
+		append_bool_object(tmp, "present", false);
+	}
+	append_object_object(createStmt, "tablespace", tmp);
+
+	/* add a WITH NO DATA clause */
+	tmp = new_objtree_VA("WITH NO DATA", 1,
+						 "present", ObjTypeBool,
+						 node->into->skipData ? true : false);
+	append_object_object(createStmt, "with_no_data", tmp);
+
+	/* add the column list, if any */
+	if (node->into->colNames == NIL)
+		tmp = new_objtree_VA("", 1,
+							 "present", ObjTypeBool, false);
+	else
+	{
+		ListCell *cell;
+
+		list = NIL;
+		foreach (cell, node->into->colNames)
+			list = lappend(list, new_string_object(strVal(lfirst(cell))));
+
+		tmp = new_objtree_VA("(%{columns:, }I)", 1,
+							 "columns", ObjTypeArray, list);
+	}
+	append_object_object(createStmt, "columns", tmp);
+
+	/* add the query */
+	Assert(IsA(node->query, Query));
+	append_string_object(createStmt, "query",
+						 pg_get_createtableas_def((Query *) node->query));
+
+	/* add a WITH clause, but only if any options are set */
+	tmp = new_objtree_VA("WITH (%{with_options:, }s)", 0);
+	if (node->into->options == NIL)
+	{
+		append_null_object(tmp, "with_options");
+		append_bool_object(tmp, "present", false);
+	}
+	else
+	{
+		ListCell   *cell;
+
+		list = NIL;
+		foreach (cell, node->into->options)
+		{
+			DefElem *opt = (DefElem *) lfirst(cell);
+			char   *defname;
+			char   *value;
+			ObjTree *tmp2;
+
+			if (opt->defnamespace)
+				defname = psprintf("%s.%s", opt->defnamespace, opt->defname);
+			else
+				defname = opt->defname;
+
+			value = opt->arg ? defGetString(opt) :
+				defGetBoolean(opt) ? "TRUE" : "FALSE";
+			tmp2 = new_objtree_VA("%{option}s=%{value}s", 2,
+								  "option", ObjTypeString, defname,
+								  "value", ObjTypeString, value);
+			list = lappend(list, new_object_object(tmp2));
+		}
+		append_array_object(tmp, "with_options", list);
+	}
+	append_object_object(createStmt, "with", tmp);
+
+	return createStmt;
+}
 
 /*
  * deparse_CreateSchemaStmt
@@ -5297,8 +5436,7 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_CreateTableAsStmt:
-			/* XXX handle at least the CREATE MATVIEW case? */
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			command = deparse_CreateTableAsStmt(objectId, parsetree);
 			break;
 
 		case T_RefreshMatViewStmt:
