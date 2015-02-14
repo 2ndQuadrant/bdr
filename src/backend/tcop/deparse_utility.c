@@ -2574,7 +2574,7 @@ deparse_CreateStmt(Oid objectId, Node *parsetree)
 	foreach(cell, node->options)
 	{
 		DefElem	*opt = (DefElem *) lfirst(cell);
-		char   *fmt;
+		char   *defname;
 		char   *value;
 
 		/* already handled above */
@@ -2582,13 +2582,14 @@ deparse_CreateStmt(Oid objectId, Node *parsetree)
 			continue;
 
 		if (opt->defnamespace)
-			fmt = psprintf("%s.%s=%%{value}s", opt->defnamespace, opt->defname);
+			defname = psprintf("%s.%s", opt->defnamespace, opt->defname);
 		else
-			fmt = psprintf("%s=%%{value}s", opt->defname);
+			defname = opt->defname;
+
 		value = opt->arg ? defGetString(opt) :
 			defGetBoolean(opt) ? "TRUE" : "FALSE";
-		tmp = new_objtree_VA(fmt, 2,
-							 "option", ObjTypeString, opt->defname,
+		tmp = new_objtree_VA("%{option}s=%{value}s", 2,
+							 "option", ObjTypeString, defname,
 							 "value", ObjTypeString, value);
 		list = lappend(list, new_object_object(tmp));
 	}
