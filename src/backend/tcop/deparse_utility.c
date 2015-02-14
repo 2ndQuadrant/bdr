@@ -4874,7 +4874,7 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 			case AT_SetStatistics:
 				{
 					Assert(IsA(subcmd->def, Integer));
-					tmp = new_objtree_VA("ALTER COLUMN %{column}I SET STATISTICS %{statistics}d",
+					tmp = new_objtree_VA("ALTER COLUMN %{column}I SET STATISTICS %{statistics}n",
 										 3, "type", ObjTypeString, "set statistics",
 										 "column", ObjTypeString, subcmd->name,
 										 "statistics", ObjTypeInteger,
@@ -4973,13 +4973,53 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 				break;
 
 			case AT_AlterColumnType:
-				tmp = new_objtree_VA("ALTER COLUMN %{column}I SET DATA TYPE %{datatype}T collate_clause using_clause",
-									 2, "type", ObjTypeString, "alter column type",
-									 "column", ObjTypeString, subcmd->name);
-				/* FIXME figure out correct typid/typmod , collate clause, using_clause */
-				append_object_object(tmp, "datatype",
-									 new_objtree_for_type(INT4OID, -1));
-				subcmds = lappend(subcmds, new_object_object(tmp));
+				{
+					TupleDesc tupdesc = RelationGetDescr(rel);
+					Form_pg_attribute att = tupdesc->attrs[substashed->attnum - 1];
+					ColumnDef	   *def;
+
+					def = (ColumnDef *) subcmd->def;
+					Assert(IsA(def, ColumnDef));
+
+					tmp = new_objtree_VA("ALTER COLUMN %{column}I SET DATA TYPE %{datatype}T %{collation}s %{using}s",
+										 2, "type", ObjTypeString, "alter column type",
+										 "column", ObjTypeString, subcmd->name);
+					/* add the TYPE clause */
+					append_object_object(tmp, "datatype",
+										 new_objtree_for_type(att->atttypid,
+															  att->atttypmod));
+
+					/* add a COLLATE clause, if needed */
+					tmp2 = new_objtree_VA("COLLATE %{name}D", 0);
+					if (OidIsValid(att->attcollation))
+					{
+						ObjTree *collname;
+
+						collname = new_objtree_for_qualname_id(CollationRelationId,
+															   att->attcollation);
+						append_object_object(tmp2, "name", collname);
+					}
+					else
+						append_bool_object(tmp2, "present", false);
+					append_object_object(tmp, "collation", tmp2);
+
+					/*
+					 * Error out if the USING clause was used.  We cannot use
+					 * it directly here, because it needs to run through
+					 * transformExpr() before being usable for ruleutils.c, and
+					 * we're not in a position to transform it ourselves.  To
+					 * fix this problem, tablecmds.c needs to be modified to store
+					 * the transformed expression somewhere in the StashedATSubcmd.
+					 */
+					tmp2 = new_objtree_VA("USING %{expression}s", 0);
+					if (def->raw_default)
+						elog(ERROR, "unimplemented deparse of ALTER TABLE TYPE USING");
+					else
+						append_bool_object(tmp2, "present", false);
+					append_object_object(tmp, "using", tmp2);
+
+					subcmds = lappend(subcmds, new_object_object(tmp));
+				}
 				break;
 
 			case AT_AlterColumnGenericOptions:
