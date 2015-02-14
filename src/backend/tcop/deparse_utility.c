@@ -5218,6 +5218,81 @@ deparse_CreateOpFamily(Oid objectId, Node *parsetree)
 }
 
 static ObjTree *
+deparse_AlterOpFamilyStmt(Oid objectId, Node *parsetree)
+{
+#ifdef NOT_USED
+	AlterOpFamilyStmt *node = (AlterOpFamilyStmt *) parsetree;
+	ObjTree	   *alterStmt;
+	ObjTree	   *tmp;
+	char	   *fmt;
+	HeapTuple	opftup;
+	Oid			amoid;
+	Relation	opfrel;
+	List	   *list;
+	ListCell   *cell;
+
+	/*
+	 * XXX We can't support this case until we get more info from the command.
+	 * The issue is that from the parse node we don't have enough info about
+	 * the added/dropped operators and functions.  We need a new
+	 * StashedCommandType to implement this, so that we can return the OIDs of
+	 * the affected opfamily members and perhaps their strategy numbers.
+	 */
+	elog(ERROR, "unsupported deparse of ALTER OPERATOR FAMILY ADD/DROP");
+
+	opfrel = heap_open(OperatorFamilyRelationId, AccessShareLock);
+	opftup = get_catalog_object_by_oid(opfrel, objectId);
+	if (!HeapTupleIsValid(opftup))
+		elog(ERROR, "cache lookup failed for operator family %u", objectId);
+	amoid = ((Form_pg_opfamily) GETSTRUCT(opftup))->opfmethod;
+	amtup = SearchSysCache1(AMOID, ObjectIdGetDatum(amoid));
+	if (!HeapTupleIsValid(amtup))
+		elog(ERROR, "cache lookup failed for access method %u", amoid);
+
+	fmt = psprintf("ALTER OPERATOR FAMILY %%{identity}D USING %%{amname}I %s %%{items}s",
+				   node->isDrop ? "DROP" : "ADD");
+	alterStmt = new_objtree_VA(fmt, 1,
+							   "identity", ObjTypeObject,
+							   new_objtree_for_qualname_id(OperatorFamilyRelationId,
+														   objectId),
+							   "amname", ObjTypeString,
+							   pstrdup(NameStr(((Form_pg_am) GETSTRUCT(amtup))->amname)));
+
+	ReleaseSysCache(opftup);
+	heap_close(opfrel, AccessShareLock);
+
+	list = NIL;
+	foreach (cell, node->items)
+	{
+		CreateOpClassItem *item = lfirst(cell);
+
+		switch (item->itemtype)
+		{
+			case OPCLASS_ITEM_OPERATOR:
+				tmp = new_objtree_VA("OPERATOR %{num}n %{oper}s %{purpose}s", 0);
+				append_integer_object(tmp, "num", item->number);
+				append_object_object(tmp, "oper", "someoper");
+				append_string_object(tmp, "purpose",
+									 item->order_family ? "FOR ORDER BY xyz" : "FOR SEARCH");
+				break;
+			case OPCLASS_ITEM_FUNCTION:
+				tmp = new_objtree_VA("FUNCTION %{num}n %{function}s", 0);
+				append_integer_object(tmp, "num", item->number);
+				break;
+			case OPCLASS_ITEM_STORAGETYPE:
+				elog(ERROR, "ALTER OPERATOR FAMILY does not support STORAGE");
+				break;
+		}
+		list = lappend(list, new_object_object(tmp));
+	}
+	append_array_object(alterStmt, "items", list);
+
+	return alterStmt;
+#endif
+	return NULL;
+}
+
+static ObjTree *
 deparse_GrantStmt(StashedCommand *cmd)
 {
 	InternalGrant *istmt;
@@ -6128,7 +6203,7 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_AlterOpFamilyStmt:
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			command = deparse_AlterOpFamilyStmt(objectId, parsetree);
 			break;
 
 		case T_AlterTSDictionaryStmt:
