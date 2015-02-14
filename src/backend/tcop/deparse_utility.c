@@ -2064,6 +2064,31 @@ deparse_CreateTrigStmt(Oid objectId, Node *parsetree)
 	return trigger;
 }
 
+static ObjTree *
+deparse_RefreshMatViewStmt(Oid objectId, Node *parsetree)
+{
+	RefreshMatViewStmt *node = (RefreshMatViewStmt *) parsetree;
+	ObjTree	   *refreshStmt;
+	ObjTree	   *tmp;
+
+	refreshStmt = new_objtree_VA("REFRESH MATERIALIZED VIEW %{concurrently}s %{identity}D "
+								 "%{with_no_data}s", 0);
+	/* add a CONCURRENTLY clause */
+	append_string_object(refreshStmt, "concurrently",
+						 node->concurrent ? "CONCURRENTLY" : "");
+	/* add the matview name */
+	append_object_object(refreshStmt, "identity",
+						 new_objtree_for_qualname_id(RelationRelationId,
+													 objectId));
+	/* add a WITH NO DATA clause */
+	tmp = new_objtree_VA("WITH NO DATA", 1,
+						 "present", ObjTypeBool,
+						 node->skipData ? true : false);
+	append_object_object(refreshStmt, "with_no_data", tmp);
+
+	return refreshStmt;
+}
+
 /*
  * deparse_ColumnDef
  *		Subroutine for CREATE TABLE deparsing
@@ -5855,7 +5880,7 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_RefreshMatViewStmt:
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			command = deparse_RefreshMatViewStmt(objectId, parsetree);
 			break;
 
 		case T_CreateTrigStmt:
