@@ -4766,7 +4766,7 @@ deparse_GrantStmt(StashedCommand *cmd)
 			classId = ForeignDataWrapperRelationId;
 			break;
 		case ACL_OBJECT_FOREIGN_SERVER:
-			objtype = "SERVER";
+			objtype = "FOREIGN SERVER";
 			classId = ForeignServerRelationId;
 			break;
 		case ACL_OBJECT_FUNCTION:
