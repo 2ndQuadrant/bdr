@@ -4618,6 +4618,134 @@ deparse_CommentStmt(ObjectAddress address, Node *parsetree)
 	return comment;
 }
 
+/*
+ * Add common clauses to CreatePolicy or AlterPolicy deparse objects
+ */
+static void
+add_policy_clauses(ObjTree *policyStmt, Oid policyOid, List *roles,
+				   bool do_qual, bool do_with_check)
+{
+	Relation	polRel = heap_open(PolicyRelationId, AccessShareLock);
+	HeapTuple	polTup = get_catalog_object_by_oid(polRel, policyOid);
+	ObjTree	   *tmp;
+	Form_pg_policy polForm;
+
+	if (!HeapTupleIsValid(polTup))
+		elog(ERROR, "cache lookup failed for policy %u", policyOid);
+
+	polForm = (Form_pg_policy) GETSTRUCT(polTup);
+
+	/* add the "ON table" clause */
+	append_object_object(policyStmt, "table",
+						 new_objtree_for_qualname_id(RelationRelationId,
+													 polForm->polrelid));
+
+	/*
+	 * Add the "TO role" clause, if any.  In the CREATE case, it always
+	 * contains at least PUBLIC, but in the ALTER case it might be empty.
+	 */
+	tmp = new_objtree_VA("TO %{role:, }I", 0);
+	if (roles)
+	{
+		List   *list = NIL;
+		ListCell *cell;
+
+		foreach (cell, roles)
+		{
+			RoleSpec   *spec = (RoleSpec *) lfirst(cell);
+			char	   *role = spec->roletype == ROLESPEC_PUBLIC ? "PUBLIC" :
+				get_rolespec_name((Node *) spec);
+
+			list = lappend(list, new_string_object(role));
+		}
+		append_array_object(tmp, "role", list);
+	}
+	else
+	{
+		append_bool_object(tmp, "present", false);
+	}
+	append_object_object(policyStmt, "to_role", tmp);
+
+	/* add the USING clause, if any */
+	tmp = new_objtree_VA("USING (%{expression}s)", 0);
+	if (do_qual)
+	{
+		Datum	deparsed;
+		Datum	storedexpr;
+		bool	isnull;
+
+		storedexpr = heap_getattr(polTup, Anum_pg_policy_polqual,
+								  RelationGetDescr(polRel), &isnull);
+		if (isnull)
+			elog(ERROR, "invalid NULL polqual expression in policy %u", policyOid);
+		deparsed = DirectFunctionCall2(pg_get_expr, storedexpr, polForm->polrelid);
+		append_string_object(tmp, "expression",
+							 TextDatumGetCString(deparsed));
+	}
+	else
+		append_bool_object(tmp, "present", false);
+	append_object_object(policyStmt, "using", tmp);
+
+	/* add the WITH CHECK clause, if any */
+	tmp = new_objtree_VA("WITH CHECK (%{expression}s)", 0);
+	if (do_with_check)
+	{
+		Datum	deparsed;
+		Datum	storedexpr;
+		bool	isnull;
+
+		storedexpr = heap_getattr(polTup, Anum_pg_policy_polwithcheck,
+								  RelationGetDescr(polRel), &isnull);
+		if (isnull)
+			elog(ERROR, "invalid NULL polwithcheck expression in policy %u", policyOid);
+		deparsed = DirectFunctionCall2(pg_get_expr, storedexpr, polForm->polrelid);
+		append_string_object(tmp, "expression",
+							 TextDatumGetCString(deparsed));
+	}
+	else
+		append_bool_object(tmp, "present", false);
+	append_object_object(policyStmt, "with_check", tmp);
+
+	relation_close(polRel, AccessShareLock);
+}
+
+static ObjTree *
+deparse_CreatePolicyStmt(Oid objectId, Node *parsetree)
+{
+	CreatePolicyStmt *node = (CreatePolicyStmt *) parsetree;
+	ObjTree	   *policy;
+
+	policy = new_objtree_VA("CREATE POLICY %{identity}I ON %{table}D %{for_command}s "
+							"%{to_role}s %{using}s %{with_check}s", 2,
+							"identity", ObjTypeString, node->policy_name,
+							"for_command", ObjTypeObject,
+							new_objtree_VA("FOR %{command}s", 1,
+										   "command", ObjTypeString, node->cmd));
+
+	/* add the rest of the stuff */
+	add_policy_clauses(policy, objectId, node->roles, !!node->qual,
+					   !!node->with_check);
+
+	return policy;
+}
+
+static ObjTree *
+deparse_AlterPolicyStmt(Oid objectId, Node *parsetree)
+{
+	AlterPolicyStmt *node = (AlterPolicyStmt *) parsetree;
+	ObjTree	   *policy;
+
+	policy = new_objtree_VA("ALTER POLICY %{identity}I ON %{table}D "
+							"%{to_role}s %{using}s %{with_check}s", 1,
+							"identity", ObjTypeString, node->policy_name);
+
+	/* add the rest of the stuff */
+	add_policy_clauses(policy, objectId, node->roles, !!node->qual,
+					   !!node->with_check);
+
+	return policy;
+}
+
 static ObjTree *
 deparse_SecLabelStmt(ObjectAddress address, Node *parsetree)
 {
@@ -5749,11 +5877,11 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_CreatePolicyStmt:	/* CREATE POLICY */
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			command = deparse_CreatePolicyStmt(objectId, parsetree);
 			break;
 
 		case T_AlterPolicyStmt:		/* ALTER POLICY */
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			command = deparse_AlterPolicyStmt(objectId, parsetree);
 			break;
 
 		case T_SecLabelStmt:
