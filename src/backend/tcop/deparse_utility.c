@@ -5523,7 +5523,8 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_ImportForeignSchemaStmt:
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			/* generated commands are stashed individually */
+			elog(ERROR, "unexpected command %s", CreateCommandTag(parsetree));
 			break;
 
 		case T_CompositeTypeStmt:		/* CREATE TYPE (composite) */
