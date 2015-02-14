@@ -3403,35 +3403,141 @@ deparse_RenameStmt(Oid objectId, Node *parsetree)
 			}
 			break;
 
+		case OBJECT_SCHEMA:
+			{
+				renameStmt =
+					new_objtree_VA("ALTER SCHEMA %{identity}I RENAME TO %{newname}I",
+								   0);
+				append_string_object(renameStmt, "identity", node->subname);
+			}
+			break;
+
 		case OBJECT_FDW:
 		case OBJECT_LANGUAGE:
 		case OBJECT_FOREIGN_SERVER:
-		case OBJECT_AGGREGATE:
+			{
+				fmtstr = psprintf("ALTER %s %%{identity}s RENAME TO %%{newname}I",
+								  stringify_objtype(node->renameType));
+				renameStmt = new_objtree_VA(fmtstr, 0);
+				append_string_object(renameStmt, "identity",
+									 strVal(linitial(node->object)));
+			}
+			break;
+
 		case OBJECT_COLLATION:
 		case OBJECT_CONVERSION:
 		case OBJECT_DOMAIN:
-		case OBJECT_FUNCTION:
-		case OBJECT_OPCLASS:
-		case OBJECT_OPFAMILY:
-		case OBJECT_SCHEMA:
 		case OBJECT_TSDICTIONARY:
 		case OBJECT_TSPARSER:
 		case OBJECT_TSTEMPLATE:
 		case OBJECT_TSCONFIGURATION:
 		case OBJECT_TYPE:
 			{
-				char	   *ident;
+				char	   *identity;
+				HeapTuple	objTup;
+				Relation	catalog;
+				Datum		objnsp;
+				bool		isnull;
+				Oid			classId = get_objtype_catalog_oid(node->renameType);
+				AttrNumber	Anum_namespace = get_object_attnum_namespace(classId);
+
+				catalog = relation_open(classId, AccessShareLock);
+				objTup = get_catalog_object_by_oid(catalog, objectId);
+				objnsp = heap_getattr(objTup, Anum_namespace,
+									  RelationGetDescr(catalog), &isnull);
+				if (isnull)
+					elog(ERROR, "invalid NULL namespace");
+
+				identity = psprintf("%s.%s", get_namespace_name(DatumGetObjectId(objnsp)),
+									strVal(llast(node->object)));
+
+				fmtstr = psprintf("ALTER %s %%{identity}s RENAME TO %%{newname}I",
+								  stringify_objtype(node->renameType));
+				renameStmt = new_objtree_VA(fmtstr, 0);
+				append_string_object(renameStmt, "identity", identity);
+
+				relation_close(catalog, AccessShareLock);
+			}
+			break;
+
+		case OBJECT_OPCLASS:
+		case OBJECT_OPFAMILY:
+			{
+				char	   *identity;
+				HeapTuple	objTup;
+				HeapTuple	amTup;
+				Relation	catalog;
+				Datum		objnsp;
+				bool		isnull;
+				Oid			classId = get_objtype_catalog_oid(node->renameType);
+				AttrNumber	Anum_namespace = get_object_attnum_namespace(classId);
+				Oid			amoid;
+
+				catalog = relation_open(classId, AccessShareLock);
+				objTup = get_catalog_object_by_oid(catalog, objectId);
+				objnsp = heap_getattr(objTup, Anum_namespace,
+									  RelationGetDescr(catalog), &isnull);
+				if (isnull)
+					elog(ERROR, "invalid NULL namespace");
+
+				if (node->renameType == OBJECT_OPCLASS)
+					amoid = ((Form_pg_opclass) GETSTRUCT(objTup))->opcmethod;
+				else
+					amoid = ((Form_pg_opfamily) GETSTRUCT(objTup))->opfmethod;
+				amTup = SearchSysCache1(AMOID, ObjectIdGetDatum(amoid));
+				if (!HeapTupleIsValid(amTup))
+					elog(ERROR, "cache lookup failed for access method %u", amoid);
+
+				identity = psprintf("%s.%s", get_namespace_name(DatumGetObjectId(objnsp)),
+									strVal(llast(node->object)));
+
+				fmtstr = psprintf("ALTER %s %%{identity}s USING %%{amname}I RENAME TO %%{newname}I",
+								  stringify_objtype(node->renameType));
+				renameStmt = new_objtree_VA(fmtstr, 0);
+				append_string_object(renameStmt, "identity", identity);
+				append_string_object(renameStmt, "amname",
+									 pstrdup(NameStr(((Form_pg_am) GETSTRUCT(amTup))->amname)));
+
+				ReleaseSysCache(amTup);
+				relation_close(catalog, AccessShareLock);
+			}
+
+		case OBJECT_AGGREGATE:
+		case OBJECT_FUNCTION:
+			{
+				char	   *newident;
 				ObjectAddress objaddr;
+				const char	   *quoted_newname;
+				StringInfoData old_ident;
+				char	   *start;
+
+				/*
+				 * Generating a function/aggregate identity is altogether too
+				 * messy, so instead of doing it ourselves, we generate one for
+				 * the renamed object, then strip out the name and replace it
+				 * with the original name from the parse node.  This is so ugly
+				 * that we don't dare do it for any other object kind.
+				 */
 
 				objaddr.classId = get_objtype_catalog_oid(node->renameType);
 				objaddr.objectId = objectId;
 				objaddr.objectSubId = 0;
-				ident = getObjectIdentity(&objaddr);
+				newident = getObjectIdentity(&objaddr);
+
+				quoted_newname = quote_identifier(node->newname);
+				start = strstr(newident, quoted_newname);
+				if (!start)
+					elog(ERROR, "could not find %s in %s", start, newident);
+				initStringInfo(&old_ident);
+				appendBinaryStringInfo(&old_ident, newident, start - newident);
+				appendStringInfoString(&old_ident,
+									   quote_identifier(strVal(llast(node->object))));
+				appendStringInfoString(&old_ident, start + strlen(quoted_newname));
 
 				fmtstr = psprintf("ALTER %s %%{identity}s RENAME TO %%{newname}I",
 								  stringify_objtype(node->renameType));
 				renameStmt = new_objtree_VA(fmtstr, 1,
-											"identity", ObjTypeString, ident);
+											"identity", ObjTypeString, old_ident.data);
 			}
 			break;
 
