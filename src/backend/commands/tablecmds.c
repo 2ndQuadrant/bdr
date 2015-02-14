@@ -406,10 +406,10 @@ static void ATExecEnableDisableTrigger(Relation rel, char *trigname,
 static void ATExecEnableDisableRule(Relation rel, char *rulename,
 						char fires_when, LOCKMODE lockmode);
 static void ATPrepAddInherit(Relation child_rel);
-static void ATExecAddInherit(Relation child_rel, RangeVar *parent, LOCKMODE lockmode);
-static void ATExecDropInherit(Relation rel, RangeVar *parent, LOCKMODE lockmode);
+static Oid ATExecAddInherit(Relation child_rel, RangeVar *parent, LOCKMODE lockmode);
+static Oid ATExecDropInherit(Relation rel, RangeVar *parent, LOCKMODE lockmode);
 static void drop_parent_dependency(Oid relid, Oid refclassid, Oid refobjid);
-static void ATExecAddOf(Relation rel, const TypeName *ofTypename, LOCKMODE lockmode);
+static Oid ATExecAddOf(Relation rel, const TypeName *ofTypename, LOCKMODE lockmode);
 static void ATExecDropOf(Relation rel, LOCKMODE lockmode);
 static void ATExecReplicaIdentity(Relation rel, ReplicaIdentityStmt *stmt, LOCKMODE lockmode);
 static void ATExecGenericOptions(Relation rel, List *options);
@@ -3623,13 +3623,13 @@ ATExecCmd(List **wqueue, AlteredTableInfo *tab, Relation rel,
 			break;
 
 		case AT_AddInherit:
-			ATExecAddInherit(rel, (RangeVar *) cmd->def, lockmode);
+			newoid = ATExecAddInherit(rel, (RangeVar *) cmd->def, lockmode);
 			break;
 		case AT_DropInherit:
-			ATExecDropInherit(rel, (RangeVar *) cmd->def, lockmode);
+			newoid = ATExecDropInherit(rel, (RangeVar *) cmd->def, lockmode);
 			break;
 		case AT_AddOf:
-			ATExecAddOf(rel, (TypeName *) cmd->def, lockmode);
+			newoid = ATExecAddOf(rel, (TypeName *) cmd->def, lockmode);
 			break;
 		case AT_DropOf:
 			ATExecDropOf(rel, lockmode);
@@ -9758,11 +9758,12 @@ ATPrepAddInherit(Relation child_rel)
 				 errmsg("cannot change inheritance of typed table")));
 }
 
-static void
+static Oid
 ATExecAddInherit(Relation child_rel, RangeVar *parent, LOCKMODE lockmode)
 {
 	Relation	parent_rel,
 				catalogRelation;
+	Oid			parent_oid;
 	SysScanDesc scan;
 	ScanKeyData key;
 	HeapTuple	inheritsTuple;
@@ -9882,11 +9883,15 @@ ATExecAddInherit(Relation child_rel, RangeVar *parent, LOCKMODE lockmode)
 							 inhseqno + 1,
 							 catalogRelation);
 
+	parent_oid = RelationGetRelid(parent_rel);
+
 	/* Now we're done with pg_inherits */
 	heap_close(catalogRelation, RowExclusiveLock);
 
 	/* keep our lock on the parent relation until commit */
 	heap_close(parent_rel, NoLock);
+
+	return parent_oid;
 }
 
 /*
@@ -10155,10 +10160,11 @@ MergeConstraintsIntoExisting(Relation child_rel, Relation parent_rel)
  * coninhcount and conislocal for inherited constraints are adjusted in
  * exactly the same way.
  */
-static void
+static Oid
 ATExecDropInherit(Relation rel, RangeVar *parent, LOCKMODE lockmode)
 {
 	Relation	parent_rel;
+	Oid			parent_oid;
 	Relation	catalogRelation;
 	SysScanDesc scan;
 	ScanKeyData key[3];
@@ -10327,6 +10333,8 @@ ATExecDropInherit(Relation rel, RangeVar *parent, LOCKMODE lockmode)
 		}
 	}
 
+	parent_oid = RelationGetRelid(parent_rel);
+
 	systable_endscan(scan);
 	heap_close(catalogRelation, RowExclusiveLock);
 
@@ -10345,6 +10353,8 @@ ATExecDropInherit(Relation rel, RangeVar *parent, LOCKMODE lockmode)
 
 	/* keep our lock on the parent relation until commit */
 	heap_close(parent_rel, NoLock);
+
+	return parent_oid;
 }
 
 /*
@@ -10402,8 +10412,10 @@ drop_parent_dependency(Oid relid, Oid refclassid, Oid refobjid)
  * TABLE OF.  All attname, atttypid, atttypmod and attcollation must match.  The
  * subject table must not have inheritance parents.  These restrictions ensure
  * that you cannot create a configuration impossible with CREATE TABLE OF alone.
+ *
+ * The OID of the type is returned.
  */
-static void
+static Oid
 ATExecAddOf(Relation rel, const TypeName *ofTypename, LOCKMODE lockmode)
 {
 	Oid			relid = RelationGetRelid(rel);
@@ -10532,6 +10544,8 @@ ATExecAddOf(Relation rel, const TypeName *ofTypename, LOCKMODE lockmode)
 	heap_close(relationRelation, RowExclusiveLock);
 
 	ReleaseSysCache(typetuple);
+
+	return typeid;
 }
 
 /*

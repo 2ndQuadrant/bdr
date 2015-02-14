@@ -4731,8 +4731,15 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 				break;
 
 			case AT_SetLogged:
+				tmp = new_objtree_VA("SET LOGGED", 1,
+									 "type", ObjTypeString, "set logged");
+				subcmds = lappend(subcmds, new_object_object(tmp));
+				break;
+
 			case AT_SetUnLogged:
-				elog(ERROR, "unimplemented deparse of ALTER TABLE SET LOGGED/UNLOGGED");
+				tmp = new_objtree_VA("SET UNLOGGED", 1,
+									 "type", ObjTypeString, "set unlogged");
+				subcmds = lappend(subcmds, new_object_object(tmp));
 				break;
 
 			case AT_AddOids:
@@ -4815,42 +4822,63 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 				break;
 
 			case AT_EnableRule:
-				elog(ERROR, "unimplemented deparse of ALTER TABLE ENABLE RULE");
+				tmp = new_objtree_VA("ENABLE RULE %{rule}I", 2,
+									 "type", ObjTypeString, "enable rule",
+									 "rule", ObjTypeString, subcmd->name);
+				subcmds = lappend(subcmds, new_object_object(tmp));
 				break;
 
 			case AT_EnableAlwaysRule:
-				elog(ERROR, "unimplemented deparse of ALTER TABLE ENABLE ALWAYS RULE");
+				tmp = new_objtree_VA("ENABLE ALWAYS RULE %{rule}I", 2,
+									 "type", ObjTypeString, "enable always rule",
+									 "rule", ObjTypeString, subcmd->name);
+				subcmds = lappend(subcmds, new_object_object(tmp));
 				break;
 
 			case AT_EnableReplicaRule:
-				elog(ERROR, "unimplemented deparse of ALTER TABLE ENABLE REPLICA RULE");
+				tmp = new_objtree_VA("ENABLE REPLICA RULE %{rule}I", 2,
+									 "type", ObjTypeString, "enable replica rule",
+									 "rule", ObjTypeString, subcmd->name);
+				subcmds = lappend(subcmds, new_object_object(tmp));
 				break;
 
 			case AT_DisableRule:
-				elog(ERROR, "unimplemented deparse of ALTER TABLE DISABLE RULE");
+				tmp = new_objtree_VA("DISABLE RULE %{rule}I", 2,
+									 "type", ObjTypeString, "disable rule",
+									 "rule", ObjTypeString, subcmd->name);
+				subcmds = lappend(subcmds, new_object_object(tmp));
 				break;
 
 			case AT_AddInherit:
-				elog(ERROR, "unimplemented deparse of ALTER TABLE ADD INHERIT");
-				/*
-				 * XXX this case is interesting: we cannot rely on parse node
-				 * because parent name might be unqualified; but there's no way
-				 * to extract it from catalog either, since we don't know which
-				 * of the parents is the new one.
-				 */
+				tmp = new_objtree_VA("ADD INHERIT %{parent}D",
+									 2, "type", ObjTypeString, "add inherit",
+									 "parent", ObjTypeObject,
+									 new_objtree_for_qualname_id(RelationRelationId,
+																 substashed->oid));
+				subcmds = lappend(subcmds, new_object_object(tmp));
 				break;
 
 			case AT_DropInherit:
-				elog(ERROR, "unimplemented deparse of ALTER TABLE DROP INHERIT");
-				/* XXX ditto ... */
+				tmp = new_objtree_VA("NO INHERIT %{parent}D",
+									 2, "type", ObjTypeString, "drop inherit",
+									 "parent", ObjTypeObject,
+									 new_objtree_for_qualname_id(RelationRelationId,
+																 substashed->oid));
+				subcmds = lappend(subcmds, new_object_object(tmp));
 				break;
 
 			case AT_AddOf:
-				elog(ERROR, "unimplemented deparse of ALTER TABLE ADD OF");
+				tmp = new_objtree_VA("ADD OF %{type_of}T",
+									 2, "type", ObjTypeString, "add of",
+									 "type_of", ObjTypeObject,
+									 new_objtree_for_type(substashed->oid, -1));
+				subcmds = lappend(subcmds, new_object_object(tmp));
 				break;
 
 			case AT_DropOf:
-				elog(ERROR, "unimplemented deparse of ALTER TABLE DROP OF");
+				tmp = new_objtree_VA("NOT OF",
+									 1, "type", ObjTypeString, "not of");
+				subcmds = lappend(subcmds, new_object_object(tmp));
 				break;
 
 			case AT_ReplicaIdentity:
@@ -4878,8 +4906,15 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 				break;
 
 			case AT_EnableRowSecurity:
+				tmp = new_objtree_VA("ENABLE ROW LEVEL SECURITY", 1,
+									 "type", ObjTypeString, "enable row security");
+				subcmds = lappend(subcmds, new_object_object(tmp));
+				break;
+
 			case AT_DisableRowSecurity:
-				elog(ERROR, "unimplemented deparse of ALTER TABLE ENABLE/DISABLE ROW SECURITY");
+				tmp = new_objtree_VA("DISABLE ROW LEVEL SECURITY", 1,
+									 "type", ObjTypeString, "disable row security");
+				subcmds = lappend(subcmds, new_object_object(tmp));
 				break;
 
 			case AT_GenericOptions:
