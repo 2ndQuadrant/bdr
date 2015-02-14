@@ -97,6 +97,7 @@ typedef enum
 	ObjTypeString,
 	ObjTypeArray,
 	ObjTypeInteger,
+	ObjTypeFloat,
 	ObjTypeObject
 } ObjType;
 
@@ -116,6 +117,7 @@ typedef struct ObjElem
 		bool		boolean;
 		char	   *string;
 		int64		integer;
+		float8		flt;
 		ObjTree	   *object;
 		List	   *array;
 	} value;
@@ -128,11 +130,16 @@ static ObjElem *new_string_object(char *value);
 static ObjElem *new_object_object(ObjTree *value);
 static ObjElem *new_array_object(List *array);
 static ObjElem *new_integer_object(int64 value);
+static ObjElem *new_float_object(float8 value);
 static void append_null_object(ObjTree *tree, char *name);
 static void append_bool_object(ObjTree *tree, char *name, bool value);
 static void append_string_object(ObjTree *tree, char *name, char *value);
 static void append_object_object(ObjTree *tree, char *name, ObjTree *value);
 static void append_array_object(ObjTree *tree, char *name, List *array);
+#ifdef NOT_USED
+static void append_integer_object(ObjTree *tree, char *name, int64 value);
+#endif
+static void append_float_object(ObjTree *tree, char *name, float8 value);
 static inline void append_premade_object(ObjTree *tree, ObjElem *elem);
 static JsonbValue *objtree_to_jsonb_rec(ObjTree *tree, JsonbParseState *state);
 static const char *stringify_objtype(ObjectType objtype);
@@ -156,9 +163,16 @@ new_objtree(void)
  * Allocate a new object tree to store parameter values -- varargs version.
  *
  * The "fmt" argument is used to append as a "fmt" element in the output blob.
- * numobjs indicates the number of extra elements to append; for each one,
- * a name, type and value must be supplied.  Note we don't have the luxury of
- * sprintf-like compiler warnings for malformed argument lists.
+ * numobjs indicates the number of extra elements to append; for each one, a
+ * name (string), type (from the ObjType enum) and value must be supplied.  The
+ * value must match the type given; for instance, ObjTypeInteger requires an
+ * int64, ObjTypeString requires a char *, ObjTypeArray requires a list (of
+ * ObjElem), ObjTypeObject requires an ObjTree, and so on.  Each element type *
+ * must match the conversion specifier given in the format string, as described
+ * in pg_event_trigger_expand_command, q.v.
+ *
+ * Note we don't have the luxury of sprintf-like compiler warnings for
+ * malformed argument lists.
  */
 static ObjTree *
 new_objtree_VA(char *fmt, int numobjs,...)
@@ -183,6 +197,7 @@ new_objtree_VA(char *fmt, int numobjs,...)
 		bool		boolval;
 		List	   *list;
 		int64		number;
+		float8		fnumber;
 
 		name = va_arg(args, char *);
 		type = va_arg(args, ObjType);
@@ -219,6 +234,10 @@ new_objtree_VA(char *fmt, int numobjs,...)
 			case ObjTypeInteger:
 				number = va_arg(args, int64);
 				elem = new_integer_object(number);
+				break;
+			case ObjTypeFloat:
+				fnumber = va_arg(args, double);
+				elem = new_float_object(fnumber);
 				break;
 			default:
 				elog(ERROR, "invalid parameter type %d", type);
@@ -325,7 +344,20 @@ new_integer_object(int64 value)
 	return param;
 }
 
-#ifdef UNUSED
+static ObjElem *
+new_float_object(float8 value)
+{
+	ObjElem	   *param;
+
+	param = palloc0(sizeof(ObjElem));
+	param->name = NULL;
+	param->objtype = ObjTypeFloat;
+	param->value.flt = value;
+
+	return param;
+}
+
+#ifdef NOT_USED
 /*
  * Append an int64 parameter to a tree.
  */
@@ -339,6 +371,19 @@ append_integer_object(ObjTree *tree, char *name, int64 value)
 	append_premade_object(tree, param);
 }
 #endif
+
+/*
+ * Append a float8 parameter to a tree.
+ */
+static void
+append_float_object(ObjTree *tree, char *name, float8 value)
+{
+	ObjElem	   *param;
+
+	param = new_float_object(value);
+	param->name = name;
+	append_premade_object(tree, param);
+}
 
 /* Allocate a new object parameter */
 static ObjElem *
@@ -429,7 +474,14 @@ objtree_to_jsonb_element(JsonbParseState *state, ObjElem *object,
 			val.val.numeric = (Numeric)
 				DatumGetNumeric(DirectFunctionCall1(int8_numeric,
 													object->value.integer));
+			pushJsonbValue(&state, elem_token, &val);
+			break;
 
+		case ObjTypeFloat:
+			val.type = jbvNumeric;
+			val.val.numeric = (Numeric)
+				DatumGetNumeric(DirectFunctionCall1(float8_numeric,
+													object->value.integer));
 			pushJsonbValue(&state, elem_token, &val);
 			break;
 

@@ -226,7 +226,7 @@ expand_fmt_recursive(JsonbContainer *container, StringInfo out)
 			case 'O':
 				specifier = SpecOperatorname;
 				break;
-			case 'd':
+			case 'n':
 				specifier = SpecNumber;
 				break;
 			default:
@@ -465,9 +465,12 @@ expand_jsonval_strlit(StringInfo buf, JsonbValue *jsonval)
 static void
 expand_jsonval_number(StringInfo buf, JsonbValue *jsonval)
 {
-	appendStringInfoString(buf, jsonval);
-}
+	char *strdatum;
 
+	strdatum = DatumGetCString(DirectFunctionCall1(numeric_out,
+												   NumericGetDatum(jsonval->val.numeric)));
+	appendStringInfoString(buf, strdatum);
+}
 
 /*
  * Expand one json element into the output StringInfo according to the
@@ -555,7 +558,7 @@ expand_one_jsonb_element(StringInfo out, char *param, JsonbValue *jsonval,
 			if (jsonval->type != jbvNumeric)
 				ereport(ERROR,
 						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-						 errmsg("expected JSON numeric for %%d element \"%s\", got %d",
+						 errmsg("expected JSON numeric for %%n element \"%s\", got %d",
 								param, jsonval->type)));
 			expand_jsonval_number(out, jsonval);
 			break;
@@ -635,7 +638,7 @@ expand_jsonb_array(StringInfo out, char *param,
  * O		expand as an operator name
  * L		expand as a string literal (quote using single quotes)
  * s		expand as a simple string (no quoting)
- * d		expand as a simple number (no quoting)
+ * n		expand as a simple number (no quoting)
  *
  * The element name may have an optional separator specification preceded
  * by a colon.	Its presence indicates that the element is expected to be
