@@ -4333,6 +4333,135 @@ deparse_RuleStmt(Oid objectId, Node *parsetree)
 	return ruleStmt;
 }
 
+static ObjTree *
+deparse_CreateTableAsStmt(Oid objectId, Node *parsetree)
+{
+	CreateTableAsStmt *node = (CreateTableAsStmt *) parsetree;
+	Relation	relation = relation_open(objectId, AccessShareLock);
+	ObjTree	   *createStmt;
+	ObjTree	   *tmp;
+	ObjTree	   *tmp2;
+	char	   *fmt;
+	List	   *list;
+	ListCell   *cell;
+
+	/*
+	 * Reject unsupported case right away.
+	 */
+	if (((Query *) (node->query))->commandType == CMD_UTILITY)
+		elog(ERROR, "unimplemented deparse of CREATE TABLE AS EXECUTE");
+
+	/*
+	 * Note that INSERT INTO is deparsed as CREATE TABLE AS.  They are
+	 * functionally equivalent synonyms so there is no harm from this.
+	 */
+	if (node->relkind == OBJECT_MATVIEW)
+		fmt = "CREATE %{persistence}s MATERIALIZED VIEW %{if_not_exists}s "
+			"%{identity}D %{columns}s %{with_clause}s %{tablespace}s "
+			"AS %{query}s %{with_no_data}s";
+	else
+		fmt = "CREATE %{persistence}s TABLE %{if_not_exists}s "
+			"%{identity}D %{columns}s %{with_clause}s %{on_commit}s %{tablespace}s "
+			"AS %{query}s %{with_no_data}s";
+
+	createStmt =
+		new_objtree_VA(fmt, 2,
+					   "persistence", ObjTypeString,
+					   get_persistence_str(node->into->rel->relpersistence),
+					   "if_not_exists", ObjTypeString,
+					   node->if_not_exists ? "IF NOT EXISTS" : "");
+	append_object_object(createStmt, "identity",
+						 new_objtree_for_qualname_id(RelationRelationId,
+													 objectId));
+
+	/* Add an ON COMMIT clause.  CREATE MATERIALIZED VIEW doesn't have one */
+	if (node->relkind == OBJECT_TABLE)
+	{
+		append_object_object(createStmt, "on_commit",
+							 deparse_OnCommitClause(node->into->onCommit));
+	}
+
+	/* add a TABLESPACE clause */
+	tmp = new_objtree_VA("TABLESPACE %{tablespace}I", 0);
+	if (node->into->tableSpaceName)
+		append_string_object(tmp, "tablespace", node->into->tableSpaceName);
+	else
+	{
+		append_null_object(tmp, "tablespace");
+		append_bool_object(tmp, "present", false);
+	}
+	append_object_object(createStmt, "tablespace", tmp);
+
+	/* add a WITH NO DATA clause */
+	tmp = new_objtree_VA("WITH NO DATA", 1,
+						 "present", ObjTypeBool,
+						 node->into->skipData ? true : false);
+	append_object_object(createStmt, "with_no_data", tmp);
+
+	/* add the column list, if any */
+	if (node->into->colNames == NIL)
+		tmp = new_objtree_VA("", 1,
+							 "present", ObjTypeBool, false);
+	else
+	{
+		ListCell *cell;
+
+		list = NIL;
+		foreach (cell, node->into->colNames)
+			list = lappend(list, new_string_object(strVal(lfirst(cell))));
+
+		tmp = new_objtree_VA("(%{columns:, }I)", 1,
+							 "columns", ObjTypeArray, list);
+	}
+	append_object_object(createStmt, "columns", tmp);
+
+	/* add the query */
+	Assert(IsA(node->query, Query));
+	append_string_object(createStmt, "query",
+						 pg_get_createtableas_def((Query *) node->query));
+
+
+	/*
+	 * WITH clause.  In CREATE TABLE AS, like for CREATE TABLE, we always emit
+	 * one, containing at least the OIDS option; CREATE MATERIALIZED VIEW
+	 * doesn't support the oids option, so we have to make the clause reduce to
+	 * empty if no other options are specified.
+	 */
+	tmp = new_objtree_VA("WITH (%{with:, }s)", 0);
+	if (node->relkind == OBJECT_MATVIEW && node->into->options == NIL)
+		append_bool_object(tmp, "present", false);
+	else
+	{
+		if (node->relkind == OBJECT_TABLE)
+		{
+			tmp2 = new_objtree_VA("oids=%{value}s", 2,
+								  "option", ObjTypeString, "oids",
+								  "value", ObjTypeString,
+								  relation->rd_rel->relhasoids ? "ON" : "OFF");
+			list = list_make1(new_object_object(tmp2));
+		}
+		else
+			list = NIL;
+
+		foreach (cell, node->into->options)
+		{
+			DefElem	*opt = (DefElem *) lfirst(cell);
+
+			if (strcmp(opt->defname, "oids") == 0)
+				continue;
+
+			tmp2 = deparse_DefElem(opt, false);
+			list = lappend(list, new_object_object(tmp2));
+		}
+		append_array_object(tmp, "with", list);
+	}
+	append_object_object(createStmt, "with_clause", tmp);
+
+	relation_close(relation, AccessShareLock);
+
+	return createStmt;
+}
+
 /*
  * deparse_CreateSchemaStmt
  *		deparse a CreateSchemaStmt
@@ -5595,8 +5724,7 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_CreateTableAsStmt:
-			/* XXX handle at least the CREATE MATVIEW case? */
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			command = deparse_CreateTableAsStmt(objectId, parsetree);
 			break;
 
 		case T_RefreshMatViewStmt:

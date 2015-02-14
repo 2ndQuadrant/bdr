@@ -751,6 +751,21 @@ pg_get_viewdef_worker(Oid viewoid, int prettyFlags, int wrapColumn)
 	return buf.data;
 }
 
+/*
+ * get_createtableas_def	- Get the accompanying query for a CREATE TABLE AS
+ */
+char *
+pg_get_createtableas_def(Query *query)
+{
+	StringInfoData buf;
+
+	initStringInfo(&buf);
+
+	get_query_def(query, &buf, NIL, NULL, 0, 0, 0);
+
+	return buf.data;
+}
+
 /* ----------
  * get_triggerdef			- Get the definition of a trigger
  * ----------
