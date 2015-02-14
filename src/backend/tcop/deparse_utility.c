@@ -1831,6 +1831,347 @@ deparse_AlterDomainStmt(Oid objectId, Node *parsetree,
 }
 
 /*
+ * If a column name is specified, add an element for it; otherwise it's a
+ * table-level option.
+ */
+static ObjTree *
+deparse_FdwOptions(List *options, char *colname)
+{
+	ObjTree	   *tmp;
+
+	if (colname)
+		tmp = new_objtree_VA("ALTER COLUMN %{column}I OPTIONS (%{option:, }s)",
+							 1, "column", ObjTypeString, colname);
+	else
+		tmp = new_objtree_VA("OPTIONS (%{option:, }s)", 0);
+
+	if (options != NIL)
+	{
+		List	   *optout = NIL;
+		ListCell   *cell;
+
+		foreach(cell, options)
+		{
+			DefElem	   *elem;
+			ObjTree	   *opt;
+
+			elem = (DefElem *) lfirst(cell);
+
+			switch (elem->defaction)
+			{
+				case DEFELEM_UNSPEC:
+					opt = new_objtree_VA("%{label}I %{value}L", 0);
+					break;
+				case DEFELEM_SET:
+					opt = new_objtree_VA("SET %{label}I %{value}L", 0);
+					break;
+				case DEFELEM_ADD:
+					opt = new_objtree_VA("ADD %{label}I %{value}L", 0);
+					break;
+				case DEFELEM_DROP:
+					opt = new_objtree_VA("DROP %{label}I", 0);
+					break;
+				default:
+					elog(ERROR, "invalid def action %d", elem->defaction);
+					opt = NULL;
+			}
+
+			append_string_object(opt, "label", elem->defname);
+			append_string_object(opt, "value",
+								 elem->arg ? defGetString(elem) :
+								 defGetBoolean(elem) ? "TRUE" : "FALSE");
+
+			optout = lappend(optout, new_object_object(opt));
+		}
+
+		append_array_object(tmp, "option", optout);
+	}
+	else
+		append_bool_object(tmp, "present", false);
+
+	return tmp;
+}
+
+static ObjTree *
+deparse_CreateFdwStmt(Oid objectId, Node *parsetree)
+{
+	CreateFdwStmt *node = (CreateFdwStmt *) parsetree;
+	HeapTuple		fdwTup;
+	Form_pg_foreign_data_wrapper fdwForm;
+	Relation	rel;
+
+	ObjTree	   *createStmt;
+	ObjTree	   *tmp;
+
+	rel = heap_open(ForeignDataWrapperRelationId, RowExclusiveLock);
+
+	fdwTup = SearchSysCache1(FOREIGNDATAWRAPPEROID,
+							 ObjectIdGetDatum(objectId));
+	if (!HeapTupleIsValid(fdwTup))
+		elog(ERROR, "cache lookup failed for foreign-data wrapper %u", objectId);
+
+	fdwForm = (Form_pg_foreign_data_wrapper) GETSTRUCT(fdwTup);
+
+	createStmt = new_objtree_VA("CREATE FOREIGN DATA WRAPPER %{identity}I"
+								" %{handler}s %{validator}s %{generic_options}s", 1,
+								"identity", ObjTypeString, NameStr(fdwForm->fdwname));
+
+	/* add HANDLER clause */
+	if (fdwForm->fdwhandler == InvalidOid)
+		tmp = new_objtree_VA("NO HANDLER", 0);
+	else
+	{
+		tmp = new_objtree_VA("HANDLER %{procedure}D", 0);
+		append_object_object(tmp, "procedure",
+							 new_objtree_for_qualname_id(ProcedureRelationId,
+														 fdwForm->fdwhandler));
+	}
+	append_object_object(createStmt, "handler", tmp);
+
+	/* add VALIDATOR clause */
+	if (fdwForm->fdwvalidator == InvalidOid)
+		tmp = new_objtree_VA("NO VALIDATOR", 0);
+	else
+	{
+		tmp = new_objtree_VA("VALIDATOR %{procedure}D", 0);
+		append_object_object(tmp, "procedure",
+							 new_objtree_for_qualname_id(ProcedureRelationId,
+														 fdwForm->fdwvalidator));
+	}
+	append_object_object(createStmt, "validator", tmp);
+
+	/* add an OPTIONS clause, if any */
+	append_object_object(createStmt, "generic_options",
+						 deparse_FdwOptions(node->options, NULL));
+
+	ReleaseSysCache(fdwTup);
+	heap_close(rel, RowExclusiveLock);
+
+	return createStmt;
+}
+
+static ObjTree *
+deparse_AlterFdwStmt(Oid objectId, Node *parsetree)
+{
+	AlterFdwStmt *node = (AlterFdwStmt *) parsetree;
+	HeapTuple		fdwTup;
+	Form_pg_foreign_data_wrapper fdwForm;
+	Relation	rel;
+	ObjTree	   *alterStmt;
+	List	   *fdw_options = NIL;
+	ListCell   *cell;
+
+	rel = heap_open(ForeignDataWrapperRelationId, RowExclusiveLock);
+
+	fdwTup = SearchSysCache1(FOREIGNDATAWRAPPEROID,
+							 ObjectIdGetDatum(objectId));
+	if (!HeapTupleIsValid(fdwTup))
+		elog(ERROR, "cache lookup failed for foreign-data wrapper %u", objectId);
+
+	fdwForm = (Form_pg_foreign_data_wrapper) GETSTRUCT(fdwTup);
+
+	alterStmt = new_objtree_VA("ALTER FOREIGN DATA WRAPPER %{identity}I"
+							   " %{fdw_options: }s %{generic_options}s", 1,
+							   "identity", ObjTypeString, NameStr(fdwForm->fdwname));
+
+	/*
+	 * Iterate through options, to see what changed, but use catalog as basis
+	 * for new values.
+	 */
+	foreach(cell, node->func_options)
+	{
+		DefElem	   *elem;
+		ObjTree	   *tmp;
+
+		elem = lfirst(cell);
+
+		if (pg_strcasecmp(elem->defname, "handler") == 0)
+		{
+			/* add HANDLER clause */
+			if (fdwForm->fdwhandler == InvalidOid)
+				tmp = new_objtree_VA("NO HANDLER", 0);
+			else
+			{
+				tmp = new_objtree_VA("HANDLER %{procedure}D", 0);
+				append_object_object(tmp, "procedure",
+									 new_objtree_for_qualname_id(ProcedureRelationId,
+																 fdwForm->fdwhandler));
+			}
+			fdw_options = lappend(fdw_options, new_object_object(tmp));
+		}
+		else if (pg_strcasecmp(elem->defname, "validator") == 0)
+		{
+			/* add VALIDATOR clause */
+			if (fdwForm->fdwvalidator == InvalidOid)
+				tmp = new_objtree_VA("NO VALIDATOR", 0);
+			else
+			{
+				tmp = new_objtree_VA("VALIDATOR %{procedure}D", 0);
+				append_object_object(tmp, "procedure",
+									 new_objtree_for_qualname_id(ProcedureRelationId,
+																 fdwForm->fdwvalidator));
+			}
+			fdw_options = lappend(fdw_options, new_object_object(tmp));
+		}
+	}
+
+	/* Add HANDLER/VALIDATOR if specified */
+	append_array_object(alterStmt, "fdw_options", fdw_options);
+
+
+	/* add an OPTIONS clause, if any */
+	append_object_object(alterStmt, "generic_options",
+						 deparse_FdwOptions(node->options, NULL));
+
+	ReleaseSysCache(fdwTup);
+	heap_close(rel, RowExclusiveLock);
+
+	return alterStmt;
+}
+
+static ObjTree *
+deparse_CreateForeignServerStmt(Oid objectId, Node *parsetree)
+{
+	CreateForeignServerStmt *node = (CreateForeignServerStmt *) parsetree;
+	ObjTree	   *createServer;
+	ObjTree	   *tmp;
+
+	createServer = new_objtree_VA("CREATE SERVER %{identity}I %{type}s %{version}s "
+								  "FOREIGN DATA WRAPPER %{fdw}I %{generic_options}s", 2,
+								  "identity", ObjTypeString, node->servername,
+								  "fdw",  ObjTypeString, node->fdwname);
+
+	/* add a TYPE clause, if any */
+	tmp = new_objtree_VA("TYPE %{type}L", 0);
+	if (node->servertype)
+		append_string_object(tmp, "type", node->servertype);
+	else
+		append_bool_object(tmp, "present", false);
+	append_object_object(createServer, "type", tmp);
+
+	/* add a VERSION clause, if any */
+	tmp = new_objtree_VA("VERSION %{version}L", 0);
+	if (node->version)
+		append_string_object(tmp, "version", node->version);
+	else
+		append_bool_object(tmp, "present", false);
+	append_object_object(createServer, "version", tmp);
+
+	/* add an OPTIONS clause, if any */
+	append_object_object(createServer, "generic_options",
+						 deparse_FdwOptions(node->options, NULL));
+
+	return createServer;
+}
+
+static ObjTree *
+deparse_AlterForeignServerStmt(Oid objectId, Node *parsetree)
+{
+	AlterForeignServerStmt *node = (AlterForeignServerStmt *) parsetree;
+	ObjTree	   *alterServer;
+	ObjTree	   *tmp;
+
+	alterServer = new_objtree_VA("ALTER SERVER %{identity}I %{version}s "
+								  "%{generic_options}s", 1,
+								  "identity", ObjTypeString, node->servername);
+
+	/* add a VERSION clause, if any */
+	tmp = new_objtree_VA("VERSION %{version}s", 0);
+	if (node->has_version && node->version)
+		append_string_object(tmp, "version", quote_literal_cstr(node->version));
+	else if (node->has_version)
+		append_string_object(tmp, "version", "NULL");
+	else
+		append_bool_object(tmp, "present", false);
+	append_object_object(alterServer, "version", tmp);
+
+	/* add an OPTIONS clause, if any */
+	append_object_object(alterServer, "generic_options",
+						 deparse_FdwOptions(node->options, NULL));
+
+	return alterServer;
+}
+
+static ObjTree *
+deparse_CreateUserMappingStmt(Oid objectId, Node *parsetree)
+{
+	CreateUserMappingStmt *node = (CreateUserMappingStmt *) parsetree;
+	ObjTree	   *createStmt;
+	Relation	rel;
+	HeapTuple	tp;
+	Form_pg_user_mapping form;
+	ForeignServer *server;
+
+	rel = heap_open(UserMappingRelationId, RowExclusiveLock);
+
+	/*
+	 * Lookup up object in the catalog, so we don't have to deal with
+	 * current_user and such.
+	 */
+	tp = SearchSysCache1(USERMAPPINGOID, ObjectIdGetDatum(objectId));
+	if (!HeapTupleIsValid(tp))
+		elog(ERROR, "cache lookup failed for user mapping %u", objectId);
+
+	form = (Form_pg_user_mapping) GETSTRUCT(tp);
+
+	server = GetForeignServer(form->umserver);
+
+	createStmt = new_objtree_VA("CREATE USER MAPPING FOR %{role}R SERVER %{server}I "
+								"%{generic_options}s", 1,
+								"server", ObjTypeString, server->servername);
+
+	append_object_object(createStmt, "role", new_objtree_for_role_id(form->umuser));
+
+	/* add an OPTIONS clause, if any */
+	append_object_object(createStmt, "generic_options",
+						 deparse_FdwOptions(node->options, NULL));
+
+	ReleaseSysCache(tp);
+	heap_close(rel, RowExclusiveLock);
+	return createStmt;
+}
+
+static ObjTree *
+deparse_AlterUserMappingStmt(Oid objectId, Node *parsetree)
+{
+	AlterUserMappingStmt *node = (AlterUserMappingStmt *) parsetree;
+	ObjTree	   *alterStmt;
+	Relation	rel;
+	HeapTuple	tp;
+	Form_pg_user_mapping form;
+	ForeignServer *server;
+
+	rel = heap_open(UserMappingRelationId, RowExclusiveLock);
+
+	/*
+	 * Lookup up object in the catalog, so we don't have to deal with
+	 * current_user and such.
+	 */
+
+	tp = SearchSysCache1(USERMAPPINGOID, ObjectIdGetDatum(objectId));
+	if (!HeapTupleIsValid(tp))
+		elog(ERROR, "cache lookup failed for user mapping %u", objectId);
+
+	form = (Form_pg_user_mapping) GETSTRUCT(tp);
+
+	server = GetForeignServer(form->umserver);
+
+	alterStmt = new_objtree_VA("ALTER USER MAPPING FOR %{role}R SERVER %{server}I "
+								"%{generic_options}s", 1,
+								"server", ObjTypeString, server->servername);
+
+	append_object_object(alterStmt, "role", new_objtree_for_role_id(form->umuser));
+
+	/* add an OPTIONS clause, if any */
+	append_object_object(alterStmt, "generic_options",
+						 deparse_FdwOptions(node->options, NULL));
+
+	ReleaseSysCache(tp);
+	heap_close(rel, RowExclusiveLock);
+	return alterStmt;
+}
+
+/*
  * deparse_ViewStmt
  *		deparse a ViewStmt
  *
@@ -2746,6 +3087,49 @@ deparse_CreateStmt(Oid objectId, Node *parsetree)
 
 	return createStmt;
 }
+
+static ObjTree *
+deparse_CreateForeignTableStmt(Oid objectId, Node *parsetree)
+{
+	CreateForeignTableStmt *stmt = (CreateForeignTableStmt *) parsetree;
+	Relation	relation = relation_open(objectId, AccessShareLock);
+	List	   *dpcontext;
+	ObjTree    *createStmt;
+	ObjTree    *tmp;
+	List	   *tableelts = NIL;
+
+	createStmt = new_objtree_VA(
+			"CREATE FOREIGN TABLE %{if_not_exists}s %{identity}D "
+			"(%{table_elements:, }s) SERVER %{server}I "
+			"%{generic_options}s", 0);
+
+	tmp = new_objtree_for_qualname(relation->rd_rel->relnamespace,
+								   RelationGetRelationName(relation));
+	append_object_object(createStmt, "identity", tmp);
+
+	append_string_object(createStmt, "if_not_exists",
+						 stmt->base.if_not_exists ? "IF NOT EXISTS" : "");
+
+	append_string_object(createStmt, "server", stmt->servername);
+
+	dpcontext = deparse_context_for(RelationGetRelationName(relation),
+									objectId);
+
+	tableelts = deparseTableElements(relation, stmt->base.tableElts, dpcontext,
+									 false,		/* not typed table */
+									 false);	/* not composite */
+	tableelts = obtainConstraints(tableelts, objectId, InvalidOid);
+
+	append_array_object(createStmt, "table_elements", tableelts);
+
+	/* add an OPTIONS clause, if any */
+	append_object_object(createStmt, "generic_options",
+						 deparse_FdwOptions(stmt->options, NULL));
+
+	relation_close(relation, AccessShareLock);
+	return createStmt;
+}
+
 
 /*
  * deparse_CompositeTypeStmt
@@ -5504,7 +5888,9 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 				break;
 
 			case AT_AlterColumnGenericOptions:
-				elog(ERROR, "unimplemented deparse of ALTER TABLE ALTER COLUMN OPTIONS");
+				tmp = deparse_FdwOptions((List *) subcmd->def,
+										 subcmd->name);
+				subcmds = lappend(subcmds, new_object_object(tmp));
 				break;
 
 			case AT_ChangeOwner:
@@ -5715,7 +6101,8 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 				break;
 
 			case AT_GenericOptions:
-				elog(ERROR, "unimplemented deparse of ALTER TABLE OPTIONS (...)");
+				tmp = deparse_FdwOptions((List *) subcmd->def, NULL);
+				subcmds = lappend(subcmds, new_object_object(tmp));
 				break;
 
 			default:
@@ -5764,7 +6151,7 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_CreateForeignTableStmt:
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			command = deparse_CreateForeignTableStmt(objectId, parsetree);
 			break;
 
 		case T_AlterTableStmt:
@@ -5802,27 +6189,27 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_CreateFdwStmt:
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			command = deparse_CreateFdwStmt(objectId, parsetree);
 			break;
 
 		case T_AlterFdwStmt:
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			command = deparse_AlterFdwStmt(objectId, parsetree);
 			break;
 
 		case T_CreateForeignServerStmt:
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			command = deparse_CreateForeignServerStmt(objectId, parsetree);
 			break;
 
 		case T_AlterForeignServerStmt:
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			command = deparse_AlterForeignServerStmt(objectId, parsetree);
 			break;
 
 		case T_CreateUserMappingStmt:
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			command = deparse_CreateUserMappingStmt(objectId, parsetree);
 			break;
 
 		case T_AlterUserMappingStmt:
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			command = deparse_AlterUserMappingStmt(objectId, parsetree);
 			break;
 
 		case T_DropUserMappingStmt:
