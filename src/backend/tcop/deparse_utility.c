@@ -3206,22 +3206,23 @@ deparse_AlterFunction(Oid objectId, Node *parsetree)
 		}
 		else if (strcmp(defel->defname, "cost") == 0)
 		{
-			tmp = new_objtree_VA("COST %{cost}s", 1,
-								 "cost", ObjTypeString,
-								 psprintf("%f", defGetNumeric(defel)));
+			tmp = new_objtree_VA("COST %{cost}n", 1,
+								 "cost", ObjTypeFloat,
+								 defGetNumeric(defel));
 		}
 		else if (strcmp(defel->defname, "rows") == 0)
 		{
-			tmp = new_objtree_VA("ROWS %{rows}s", 0);
+			tmp = new_objtree_VA("ROWS %{rows}n", 0);
 			if (defGetNumeric(defel) == 0)
 				append_bool_object(tmp, "present", false);
 			else
-				append_string_object(tmp, "rows",
-									 psprintf("%f", defGetNumeric(defel)));
+				append_float_object(tmp, "rows",
+									 defGetNumeric(defel));
 		}
+		else if (strcmp(defel->defname, "set") == 0)
+			elog(ERROR, "unimplemented deparse of ALTER FUNCTION SET");
 
-		if (tmp)
-			elems = lappend(elems, new_object_object(tmp));
+		elems = lappend(elems, new_object_object(tmp));
 	}
 
 	append_array_object(alterFunc, "definition", elems);
