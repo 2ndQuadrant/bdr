@@ -35,6 +35,133 @@
    supports.
   </para>
  </preface>
+
+ <part id="installation">
+  <title>Installation</title>
+
+  <partintro>
+   <para>
+    There's several options for installing both &bdr; and &udr;.
+   </para>
+  </partintro>
+
+  <chapter id="installation-source">
+   <title>Installing &bdr;/&udr; from source</title>
+
+   <sect1>
+    <title>Prerequisites</title>
+    <para>
+     To install either &bdr; or &udr; &postgres;'s prerequisites for
+     compiling have to be installed. These are documented in
+     &postgres;'s documentation
+     about <ulink url='http://www.postgresql.org/docs/current/install-requirements.html'>general
+      prerequisites</ulink>
+     and <ulink url='http://www.postgresql.org/docs/current/docguide-toolsets.html'>prerequisites
+      for documentation</ulink>.
+    </para>
+
+    <para>
+     On several systems the prerequisites for compiling &postgres; and
+     &bdr;/&udr; can be installed using simple commands.
+
+     <itemizedlist spacing="compact" mark="bullet">
+      <listitem>
+       <para>
+        <literal>Debian</literal> - all prerequisites should be
+        installed after the command
+        <programlisting>
+         apt-get build-dep postgresql-9.4
+        </programlisting>
+        has been executed. This requires
+        that <literal>sources.list</literal> is configured to provide
+        sources.
+       </para>
+      </listitem>
+      <listitem>
+       <para>
+        <literal>RHEL 6.x</literal> - all prerequisites should be
+        installed after the commands
+        <!--FIXME: really no stable URL? -->
+        <programlisting>
+         yum install http://yum.postgresql.org/9.4/redhat/rhel-6-x86_64/pgdg-centos94-9.4-1.noarch.rpm
+         yum groupinstall "Development Tools"
+         yum-builddep postgresql94
+        </programlisting>
+        have been executed. This requires
+        that <literal>sources.list</literal> is configured to provide
+        sources.
+       </para>
+      </listitem>
+
+      <listitem>
+       <para>
+        <literal>RHEL 7.x</literal> - all prerequisites should be
+        installed after the commands
+        <!--FIXME: really no stable URL? -->
+        <programlisting>
+         yum groupinstall "Development Tools"
+         yum-builddep postgresql
+        </programlisting>
+        have been executed. This requires
+        that <literal>sources.list</literal> is configured to provide
+        sources.
+       </para>
+      </listitem>
+
+     </itemizedlist>
+    </para>
+   </sect1>
+
+   <sect1 id="installation-bdr-source">
+    <title>Installation of &bdr; from source</title>
+    <para>
+     Installing &bdr; from source consists out of two steps: First
+     compile and install &postgres; with the &bdr; additions; secondly
+     compile and install the &bdr; plugin.
+    </para>
+
+    <para>
+     Postgres can be compiled using the normal documented
+     procedures. That will usually be something like:
+     <programlisting>
+      cd /path/to/bdr-pg-source/
+      ./configure --prefix=/path/to/install --enable-debug --enable-openssl
+      make -j16 -s install-world
+     </programlisting>
+    </para>
+    <para>
+     To then install &udr; execute its configure script with the
+     earlier installed <application>pg_config</application> in the path.
+     <programlisting>
+      cd /path/to/bdr-plugin-source/
+      PATH=/path/to/install:"$PATH" ./configure
+      make -j16 -s all
+     </programlisting>
+    </para>
+   </sect1>
+
+   <sect1 id="installation-udr-source">
+    <title>Installation of &udr; from source</title>
+    <para>
+     Installing &udr; is simpler than installing &bdr;. It compilers
+     against a stocket &postgres; 9.4 if the relevant headers are
+     installed.
+    </para>
+
+    <para>
+     To compile &udr; execute its configure script with &postgres;'s
+     <application>pg_config</application> in the path.
+     <programlisting>
+      cd /path/to/bdr-plugin-source/
+      PATH=/path/to/pg/install:"$PATH" ./configure
+      make -j16 -s all
+     </programlisting>
+    </para>
+   </sect1>
+
+  </chapter>
+ </part>
+
  <part id="quickstart">
   <title>Quick Start</title>
 
@@ -57,14 +184,14 @@
    <sect1 id="quickstart-overviev">
     <title>Overview</title>
     <para>
-     To set up BDR you'll need to: ...
+     To set up &bdr; you'll need to: ...
     </para>
    </sect1>
 
    <sect1 id="quickstart-source">
     <title>Installing from source</title>
     <para>
-     Compiling PostgreSQL with BDR ...
+     Compiling PostgreSQL with &bdr; ...
     </para>
    </sect1>
   </chapter>
@@ -131,17 +258,17 @@
   </chapter>
 
   <chapter id="node-management">
+   <title>Node Management</title>
    <indexterm>
     <primary>Node Management</primary>
    </indexterm>
-   <title>Node Management</title>
    <para>
     How to control and setup replication differs between &bdr; and
     &udr; as the former has to establish replication in two
     directions.
    </para>
    <sect1>
-    <title>Node Management for UDR</title>
+    <title>Node Management for &udr;</title>
     <para>
      The <function>bdr.bdr_subscribe()</function> is used to receive
      changes from the database specified in the function parameters
@@ -168,7 +295,7 @@
    </sect1>
 
    <sect1>
-    <title>Node Management for BDR</title>
+    <title>Node Management for &bdr;</title>
     <para>
      For &bdr; every node has to have a connection to every other
      node. To make conifguration easy, every node addition
@@ -203,10 +330,10 @@
   </chapter>
 
   <chapter id="ddl-replication">
+   <title>DDL Replication</title>
    <indexterm>
     <primary>DDL Replication</primary>
    </indexterm>
-   <title>DDL Replication</title>
 
    <para>
     &bdr; supports replicating changes to
@@ -344,8 +471,8 @@
           works on a per database level.
          </para>
          <para>
-          Note that a database that is configured for BDR
-          cannot be dropped while that is the case.
+          Note that a database that is configured for &bdr; cannot be
+          dropped while that is the case.
          </para>
         </listitem>
        </varlistentry>
@@ -753,7 +880,7 @@
           <literal>CREATE LANGUAGE</literal> currently is
           prohibited. Note that nearly all procedual languages are
           available as an extension and <literal>CREATE
-          EXTENSION</literal> is supported.
+           EXTENSION</literal> is supported.
          </para>
         </listitem>
        </varlistentry>
@@ -863,7 +990,7 @@
         <listitem>
          <para>
           Except for some &bdr; internal use <literal>SECURITY
-          LABEL</literal> is prohibited.
+           LABEL</literal> is prohibited.
          </para>
         </listitem>
        </varlistentry>
@@ -946,7 +1073,7 @@
              If preexisiting rows do not need the default value, the
              UPDATE can obviously be avoided. In that case doing
              separate <literal>ADD COLUMN</literal> and <literal>ALTER
-             COLUMN ... SET DEFAULT</literal> commands are
+              COLUMN ... SET DEFAULT</literal> commands are
              advantageous anyway as they don't rewrite the whole
              table.
             </para>
@@ -1073,13 +1200,25 @@
    </sect1>
   </chapter>
 
+  <chapter id="replication-sets">
+   <title>Replication Sets</title>
+   <indexterm>
+    <primary>Replication Sets</primary>
+   </indexterm>
+   <para>
+    Sometimes it is not desirable to replicate all changes that happen
+    in a database. E.g. it might not be convenient and efficient to
+    replicate a table containing session data.
+   </para>
+  </chapter>
+
 
 
   <chapter id="distributed-sequences">
+   <title>Distributed Sequences</title>
    <indexterm>
     <primary>Distributed Sequences</primary>
    </indexterm>
-   <title>Distributed Sequences</title>
    <para>
     In a asynchronous multimaster environment it can be hard to
     have generated surrogate keys without a chance of
@@ -1122,7 +1261,7 @@
     <title>Prerequisite postgres parameters</title>
 
     <para>
-     BDR and UDR require a couple of postgres settings to be set to
+     &bdr; and &udr; require a couple of postgres settings to be set to
      specific values.
     </para>
 
