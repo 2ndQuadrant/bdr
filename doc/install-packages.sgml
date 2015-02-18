@@ -1,0 +1,195 @@
+<chapter id="installation-packages">
+ <title>Installing &bdr; or &udr; from packages</title>
+
+ <para>
+  Installation from packages is a good choice if you want the stable
+  release, as it's easier to install and to keep track of your
+  installation.
+ </para>
+ 
+ <para>
+  If you want the very latest BDR or if packages are not
+  yet available for your operating system you may instead want to
+  <link linkend="installation-source"> install from source
+  code</link>.
+ </para>
+
+ <note>
+  <para>
+   These instructions are part of the &bdr; source code so they will be
+   outdated if you are looking at documentation for an old &bdr; version.
+   Installation from packages will typically install the latest stable
+   &bdr; version.
+  </para>
+ </note>
+
+
+ <sect1>
+  <title>RHEL, Fedora and CentOS</title>
+
+  <para>
+   Packages for BDR are available for Red Hat derived distros -
+   Fedora, RHEL, and CentOS.
+  </para>
+
+  <sect2>
+   <title>Install the repository RPMs</title>
+
+   <para>
+    To install &bdr; or &udr; from RPMs you should first download and
+    install the repository RPM for your distro. This RPM will configure
+    the download location for the &bdr;/&udr; packages and load the
+    signing key into your RPM database so that the package digital
+    signatures may be verified.
+   </para>
+
+   <note>
+    <title>Verifying the digital signature on the repository RPM</title>
+    <para>
+     If you wish to verify the repository RPM's digital signature
+     using <literal>rpm -V</literal>, the signing key ID is the
+     2ndQuadrant packaging key <literal>0x2B11E054</literal>, which
+     can be <ulink
+     url="https://pgp.mit.edu/pks/lookup?search=0x2B11E054&amp;op=index&amp;exact=on">
+     found in the GPG keyservers</ulink>. You can <ulink
+     url="http://2ndquadrant.com/signing-keys"> verify the fingerprint
+     on the 2ndQuadrant website.</ulink> then import the key with
+     <literal>rpmkeys</literal>.
+    </para>
+   </note>
+
+   <para>
+    RHEL and CentOS users should download and install <ulink url="http://packages.2ndquadrant.com/postgresql-bdr94-2ndquadrant/yum-repo-rpms/postgresql-bdr94-2ndquadrant-redhat-1.0-2.noarch.rpm">the RHEL RPM for versions 5, 6, and 7</ulink>, or run:
+
+    <programlisting>
+     # RHEL/CentOS users only:
+     sudo yum install http://packages.2ndquadrant.com/postgresql-bdr94-2ndquadrant/yum-repo-rpms/postgresql-bdr94-2ndquadrant-redhat-1.0-2.noarch.rpm
+    </programlisting>
+
+    Fedora users should download and install the Fedora RPM for Fedora 19 and 20, or run:
+
+    <programlisting>
+     # Fedora users only
+     sudo yum install http://packages.2ndquadrant.com/postgresql-bdr94-2ndquadrant/yum-repo-rpms/postgresql-bdr94-2ndquadrant-fedora-1.0-2.noarch.rpm
+    </programlisting>
+   </para>
+
+   <para>
+    It is strongly recommended that you also enable the
+    corresponding repository from
+    <ulink url="http://yum.postgresql.org/">yum.postgresql.org</ulink>,
+    as the BDR repositories only contain the BDR extension and the
+    PostgreSQL server, client, PLs, and the rest of the core
+    PostgreSQL release. They do not contain PostGIS, PgBarman, or
+    any of the other components already included in
+    yum.postgresql.org releases. BDR is fully compatible with these
+    components.
+   </para>
+
+   <para>
+    Red Hat / CentOS users should also
+    <ulink url="https://fedoraproject.org/wiki/EPEL">enable EPEL</ulink>.
+   </para>
+
+  </sect2>
+
+  <sect2>
+   <title>Installing PostgreSQL &pgmajorversion; and &bdr; from packages for RHEL, Fedora or CentOS</title>
+
+   <sect3>
+    <title>Remove the <literal>postgresql94</literal> packages, if installed</title>
+
+    <note>
+     <para>If you don't already have PostgreSQL &pgmajorversion; installed, simply skip this step.</para>
+    </note>
+
+    <para>
+     &bdr; requires a patched version of PostgreSQL &pgmajorversion;
+     that conflicts with the official packages from
+     yum.postgresql.org. If you already have PostgreSQL
+     &pgmajorversion;installed from yum.postgresql.org, you will need
+     to make a dump of all your databases, then uninstall the PGDG
+     PostgreSQL &pgmajorversion; packages before you can install &bdr;
+    </para>
+
+    <para>
+     The BDR RPMs cannot co-exist with stock PostgreSQL
+     &pgmajorversion;, and BDR does not share the same data directory
+     as stock &pgmajorversion;, so it will not be able to read your
+     existing databases. (They will not be deleted, and uninstalling
+     BDR then reinstalling stock PGDG &pgmajorversion; will get you
+     access to them again, but it is strongly recommended that you
+     dump them before installing BDR). 
+    </para>
+
+    <para>
+     Once you have fully backed up all your databases:
+     <programlisting>
+      yum remove postgresql94\*
+     </programlisting>
+     Check the list of packages to be removed carefully,
+     approve the removal if appropriate, and proceed with the removal.
+    </para>
+
+    <para>
+     Your data directory for PostgreSQL &pgmajorversion; will still
+     exist in <filename>/var/lib/pgsql/&pgmajorversion;</filename> but
+     will not be used while BDR is installed.
+    </para>
+
+   </sect3>
+
+   <sect3>
+    <title>Install the &bdr; packages</title>
+
+    <para>
+     To install the &bdr;-enabled PostgreSQL server, &bdr; extension, and the client programs, simply:
+     <programlisting>
+      yum check-update
+      yum install postgresql-bdr94-bdr
+     </programlisting>
+    </para>
+
+    <note>
+     <para>
+      If you attempt to to install this package when you already have
+      postgresql94 installed from yum.postgresql.org, yum will report
+      a conflict refuse to install it.
+     </para>
+    </note>
+
+    <para>
+     Once &bdr; is installed you will need to initdb a new database,
+     make any required changes to <filename>postgresql.conf</filename>
+     and <filename>pg_hba.conf</filename>, etc, as per any new
+     PostgreSQl install. See
+     <filename>/usr/share/doc/postgresql-bdr94/README.rpm-dist</filename>
+     for details.
+    </para>
+
+    <para>
+     You can then proceed with BDR-specific configuration per
+     <xref linkend="settings"> and <xref linkend="quickstart">.
+    </para>
+
+   </sect3>
+
+  </sect2>
+
+  <sect2>
+   <title>Installing &udr; from packages for RHEL, Fedora or CentOS</title>
+
+   <para>
+    To install &udr; install PostgreSQL &pgmajorversion; from <ulink
+    url="http://yum.postgresql.org/">yum.postgresql.org</ulink> as
+    normal. Then install the repository RPMs as outlined above.
+    Finally, install the UDR package:
+    <programlisting>
+     yum install postgresql94-udr
+    </programlisting>
+   </para>
+
+  </sect2>
+
+ </sect1>
+</chapter>

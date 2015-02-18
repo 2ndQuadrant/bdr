@@ -25,3 +25,8 @@
  Create empty index element for processing by XSLT stylesheet.
  -->
 <!ENTITY % include-xslt-index "IGNORE">
+
+<!--
+ Include external documentation sections
+ -->
+<!ENTITY install-packages      SYSTEM "install-packages.sgml">
