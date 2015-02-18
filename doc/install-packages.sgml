@@ -44,17 +44,9 @@
    </para>
 
    <note>
-    <title>Verifying the digital signature on the repository RPM</title>
     <para>
-     If you wish to verify the repository RPM's digital signature
-     using <literal>rpm -V</literal>, the signing key ID is the
-     2ndQuadrant packaging key <literal>0x2B11E054</literal>, which
-     can be <ulink
-     url="https://pgp.mit.edu/pks/lookup?search=0x2B11E054&amp;op=index&amp;exact=on">
-     found in the GPG keyservers</ulink>. You can <ulink
-     url="http://2ndquadrant.com/signing-keys"> verify the fingerprint
-     on the 2ndQuadrant website.</ulink> then import the key with
-     <literal>rpmkeys</literal>.
+     The repository RPM is signed with 2ndQuadrant's master packaging/releases
+     signing key. See <xref linkend="appendix-signatures">.
     </para>
    </note>
 

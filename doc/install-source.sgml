@@ -7,8 +7,8 @@
    To install either &bdr; or &udr; the prerequisites for compiling
    &postgres; must be installed. These are described in &postgres;'s
    documentation
-   on <ulink url='http://www.postgresql.org/docs/current/install-requirements.html'>build requirements</ulink>
-   and <ulink url='http://www.postgresql.org/docs/current/docguide-toolsets.html'>build requirements for documentation</ulink>.
+   on <ulink url="http://www.postgresql.org/docs/current/install-requirements.html">build requirements</ulink>
+   and <ulink url="http://www.postgresql.org/docs/current/docguide-toolsets.html">build requirements for documentation</ulink>.
   </para>
 
   <para>
@@ -47,6 +47,96 @@
 
    </itemizedlist>
   </para>
+ </sect1>
+
+ <sect1 id="installation-get-source">
+  <title>Getting &bdr; source code</title>
+
+  <para>
+   There are two ways to get the &bdr; source code: with git, or by downloading tarballs of released versions.
+  </para>
+
+  <sect2>
+   <title>Using <application>git</application> to get the &bdr; sources</title>
+
+   <para>
+    Use <application><ulink url="http://git-scm.org">git</ulink></application> if you expect
+    to update often, you want to keep track of development or if you want to contribute
+    changes to &bdr;. There is no reason <emphasis>not</emphasis> to use <application>git</application>
+    if you're familiar with it.
+   </para>
+
+   <para>
+    The source for &bdr; is maintained at
+    <ulink url="http://git.postgresql.org/gitweb/?p=2ndquadrant_bdr.git;a=tree;h=refs/heads/bdr-plugin/stable;hb=bdr-plugin/stable">
+    git.postgresql.org in the 2ndquadrant_bdr repository</ulink>. There are
+    actually two independent source trees in this repository - one tree for
+    the &bdr; plugin, and one for the modified version of PostgreSQL
+    &pgmajorversion; that it requires to run. At the time of writing the
+    main branches are:
+    <itemizedlist>
+     <listitem><para><filename>bdr-plugin/stable</filename>:
+        the current stable release of the &bdr; plugin</para></listitem>
+     <listitem><para><filename>bdr-plugin/next</filename>:
+        the in-progress development version of the &bdr; plugin</para></listitem>
+     <listitem><para><filename>bdr-pg/REL9_4_STABLE</filename>:
+        the current stable release of the modified PostgreSQL that &bdr; requires.</para></listitem>
+    </itemizedlist>
+   </para>
+
+   <para>
+    There are also tags for each &bdr; release, e.g. <filename>bdr-plugin/0.8.0</filename>.
+   </para>
+
+   <para>
+    To clone the source code using <application>git</application> you will
+    need to run two clones, one for the &bdr; plugin sources and one for the
+    patched PostgreSQL sources, e.g.:
+    <programlisting>
+     git clone -b bdr-pg/REL9_4_STABLE git://git.postgresql.org/git/2ndquadrant_bdr.git postgresql-bdr
+     git clone -b bdr-plugin/stable git://git.postgresql.org/git/2ndquadrant_bdr.git bdr-plugin
+    </programlisting>
+   </para>
+
+   <para>
+    For more information on using <application>git</application> see
+    <ulink url="http://git-scm.org/">git-scm.org</ulink>.
+   </para>
+
+  </sect2>
+
+  <sect2>
+   <title>Downloading release source tarballs</title>
+
+   <para>
+    Official BDR release source code is uploaded as tarballs to the
+    &bdr; website along with a tarball checksum and a matching GnuPG
+    signature. See
+    <ulink url="http://2ndquadrant.com/bdr">http://2ndquadrant.com/bdr</ulink>
+    for the download information. See <xref linkend="appendix-signatures">
+    for information on verifying digital signatures.
+   </para>
+
+   <para>
+    You will need to download <emphasis>both</emphasis> the patched
+    PostgreSQL source (<filename>postgresql-bdr-[...].tar.gz</filename>) and
+    the associated BDR release (<filename>bdr-[...].tar.gz</filename>).
+   </para>
+
+   <para>
+    You may optionally verify the package checksums from the
+    <literal>.md5</literal> files and/or verify the GnuPG signatures
+    per <xref linkend="appendix-signatures">.
+   </para>
+
+   <para>
+    After you unpack the source code archives using <literal>tar xf</literal>
+    the installation process is the same as if you were installing from a git
+    clone.
+   </para>
+
+  </sect2>
+
  </sect1>
 
  <sect1 id="installation-bdr-source">

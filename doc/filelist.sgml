@@ -40,3 +40,4 @@
 <!ENTITY manual-monitoring      SYSTEM "manual-monitoring.sgml">
 <!ENTITY manual-settings      SYSTEM "manual-settings.sgml">
 <!ENTITY manual-functions      SYSTEM "manual-functions.sgml">
+<!ENTITY appendix-signatures      SYSTEM "appendix-signatures.sgml">
