@@ -1,0 +1,11 @@
+<chapter id="replication-sets">
+ <title>Replication Sets</title>
+ <indexterm>
+  <primary>Replication Sets</primary>
+ </indexterm>
+ <para>
+  Sometimes it is not desirable to replicate all changes that happen
+  in a database. E.g. it might not be convenient and efficient to
+  replicate a table containing session data.
+ </para>
+</chapter>

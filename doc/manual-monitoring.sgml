@@ -1,0 +1,9 @@
+<chapter id="monitoring">
+ <title>Monitoring</title>
+ <indexterm>
+  <primary>Monitoring</primary>
+ </indexterm>
+ <para>
+  Monitoring replication setups is important.
+ </para>
+</chapter>

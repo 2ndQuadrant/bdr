@@ -1,0 +1,28 @@
+<part id="quickstart">
+ <title>&bdr; Quick Start</title>
+
+ <partintro>
+  <para>
+   This chapter gives a quick introduction into setting up a &bdr;
+   installation.
+  </para>
+  <para>
+   These instructions are not suitable for a production install, as
+   they neglect security considerations, proper system administration
+   procedure, etc. If you're trying to set up a production &bdr;
+   install, read the rest of the &bdr; manual.
+  </para>
+ </partintro>
+
+ <chapter id="quickstart-start">
+  <title>Getting Started</title>
+
+  <sect1 id="quickstart-overviev">
+   <title>Overview</title>
+   <para>
+    To set up &bdr; you'll need to: ...
+   </para>
+  </sect1>
+
+ </chapter>
+</part>

@@ -30,3 +30,13 @@
  Include external documentation sections
  -->
 <!ENTITY install-packages      SYSTEM "install-packages.sgml">
+<!ENTITY install-source      SYSTEM "install-source.sgml">
+<!ENTITY quickstart      SYSTEM "quickstart.sgml">
+<!ENTITY manual-overview      SYSTEM "manual-overview.sgml">
+<!ENTITY manual-node-management      SYSTEM "manual-node-management.sgml">
+<!ENTITY manual-ddl-replication      SYSTEM "manual-ddl-replication.sgml">
+<!ENTITY manual-replication-sets      SYSTEM "manual-replication-sets.sgml">
+<!ENTITY manual-distributed-sequences      SYSTEM "manual-distributed-sequences.sgml">
+<!ENTITY manual-monitoring      SYSTEM "manual-monitoring.sgml">
+<!ENTITY manual-settings      SYSTEM "manual-settings.sgml">
+<!ENTITY manual-functions      SYSTEM "manual-functions.sgml">

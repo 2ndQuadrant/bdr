@@ -1,0 +1,51 @@
+<chapter id="overview">
+ <title>How do &bdr; and &udr; work</title>
+
+ <para>
+  &bdr;/&udr; use &postgres;'s logical decoding feature to implement
+  a low overhead logical replication solution. This design choice
+  means that individually configured replication connections will
+  only ever replicate data on a database, or smaller, level. it is
+  not possible to configure replication of all databases on a server.
+ </para>
+ <para>
+  Both &bdr; and &udr; always allow temporary tables to be created
+  on all nodes. There's no prohibition against doing so like it
+  exists for &postgres;' builtin streaming replication feature.
+ </para>
+
+ <sect1>
+  <title>Differences between &bdr; and &udr;</title>
+
+  <para>
+   The most important difference between &bdr; and &udr; is that
+   with &bdr; changes can be made on both nodes; and that methods
+   for resolving conflicts arising due to that exist.
+
+  </para>
+
+  <sect2>
+   <title>Primary Usecases for &udr;</title>
+   <para>
+    If changes are only ever made on one node and the others are
+    just used for read scalability (including temporary tables on
+    standbys), seamless major version upgrades or combining data
+    from different nodes &udr; is sufficient. These scenarios cover
+    a large number of replication scenarios.
+   </para>
+   <para>
+    Using &udr; can noticeably reduce the likelihood of application
+    incompatibilities, because they only one database will be
+    written to, which prevents conflicts and such. On the other
+    hand, a &bdr; setup can make failover much easier, because there
+    is no need to change the setup.
+   </para>
+  </sect2>
+
+  <sect2>
+   <title>Primary Usecases for &udr;</title>
+   <para>
+   </para>
+  </sect2>
+ </sect1>
+</chapter>

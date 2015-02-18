@@ -1,0 +1,347 @@
+<chapter id="settings">
+ <title>Configuration Settings</title>
+
+ <indexterm>
+  <primary>Configuration Settings</primary>
+  <secondary>of the server</secondary>
+ </indexterm>
+
+ <sect1 id="settings-prerequisite">
+  <title>Prerequisite postgres parameters</title>
+
+  <para>
+   &bdr; and &udr; require a couple of postgres settings to be set to
+   specific values.
+  </para>
+
+  <para>
+   <variablelist>
+
+    <varlistentry id="guc-max-worker-processes" xreflabel="max_worker_processes">
+     <term><varname>max_worker_processes</varname> (<type>integer</type>)
+      <indexterm>
+       <primary><varname>max_worker_processes</varname> configuration parameter</primary>
+      </indexterm>
+     </term>
+     <listitem>
+      <para>
+       For both &bdr;
+       and &udr; this has to be set to a big
+       enough value to have one worker per configured database, and
+       one worker per connection.
+      </para>
+      <para>
+       For more detailed information about this parameter consult
+       the &postgres;
+       <ulink url='http://www.postgresql.org/docs/current/interactive/runtime-config-resource.html#GUC-MAX-WORKER-PROCESSES'>documentation</ulink>.
+      </para>
+     </listitem>
+    </varlistentry>
+
+    <varlistentry id="guc-max-replication-slots" xreflabel="max_replication_slots">
+     <term><varname>max_replication_slots</varname> (<type>integer</type>)
+      <indexterm>
+       <primary><varname>max_replication_slots</varname> configuration parameter</primary>
+      </indexterm>
+     </term>
+     <listitem>
+      <para>
+       For both &bdr;
+       and &udr; this needs to be set big
+       enough so that every connection to this node has a free
+       replication slot.
+      </para>
+      <para>
+       For more detailed information about this parameter consult
+       the &postgres;
+       <ulink url='http://www.postgresql.org/docs/current/interactive/runtime-config-replication.html#GUC-MAX-REPLICATION-SLOTS'>documentation</ulink>.
+      </para>
+     </listitem>
+    </varlistentry>
+
+    <varlistentry id="guc-max-wal-senders" xreflabel="max_wal_senders">
+     <term><varname>max_wal_senders</varname> (<type>integer</type>)
+      <indexterm>
+       <primary><varname>max_wal_senders</varname> configuration parameter</primary>
+      </indexterm>
+     </term>
+     <listitem>
+      <para>
+       For both &bdr;
+       and &udr; this needs to be set big
+       enough so that every connection to this node has a free wal
+       sender process.
+      </para>
+      <para>
+       If a node also does streaming base backups and/or base
+       backups using <application>pg_basebackup</application>, the
+       value needs to be big enough to accomodate both that
+       and &bdr;/&udr;.
+      </para>
+
+      <para>
+       For more detailed information about this parameter consult
+       the &postgres;
+       <ulink url='http://www.postgresql.org/docs/current/interactive/runtime-config-replication.html#GUC-MAX-WAL-SENDERS'>documentation</ulink>.
+      </para>
+     </listitem>
+    </varlistentry>
+
+    <varlistentry id="guc-shared-preload-libraries" xreflabel="shared_preload_libraries">
+     <term><varname>shared_preload_libraries</varname> (<type>string</type>)
+      <indexterm>
+       <primary><varname>shared_preload_libraries</varname> configuration parameter</primary>
+      </indexterm>
+     </term>
+     <listitem>
+      <para>
+       For both &bdr;
+       and &udr; this parameter has to to
+       include <literal>bdr</literal> as one of the comma separated
+       values. The parameter can only be changed at server start.
+      </para>
+      <para>
+       For more detailed information about this parameter consult
+       the &postgres;
+       <ulink url='http://www.postgresql.org/docs/current/interactive/runtime-config-client.html#GUC-SHARED-PRELOAD-LIBRARIES'>documentation</ulink>.
+      </para>
+     </listitem>
+    </varlistentry>
+
+    <varlistentry id="guc-track-commit-timestamp" xreflabel="track_commit_timestamp">
+     <term><varname>track_commit_timestamp</varname> (<type>bool</type>)
+      <indexterm>
+       <primary><varname>track_commit_timestamp</varname> configuration parameter</primary>
+      </indexterm>
+     </term>
+     <listitem>
+      <para>
+       To use &bdr; this parameter has to
+       be set to <literal>true</literal>, it can
+       be <literal>false</literal>
+       for &udr;
+      </para>
+     </listitem>
+    </varlistentry>
+
+    <varlistentry id="guc-wal-level" xreflabel="wal_level">
+     <term><varname>wal_level</varname> (<type>enum</type>)
+      <indexterm>
+       <primary><varname>wal_level</varname> configuration parameter</primary>
+      </indexterm>
+     </term>
+     <listitem>
+      <para>
+       For both &bdr;
+       and &udr; this parameter has to be
+       set to <literal>logical</literal>.
+      </para>
+
+      <para>
+       For more detailed information about this parameter consult
+       the &postgres;
+       <ulink url='http://www.postgresql.org/docs/current/interactive/runtime-config-wal.html#GUC-WAL-LEVEL'>documentation</ulink>.
+      </para>
+     </listitem>
+    </varlistentry>
+
+   </variablelist>
+  </para>
+ </sect1>
+
+ <sect1>
+  <title>&bdr;/&bdr; specific configuration variables</title>
+
+
+  <para>
+   <variablelist>
+
+    <varlistentry id="guc-bdr-conflict-logging-include-tuples" xreflabel="bdr.conflict_logging_include_tuples">
+     <term><varname>bdr.conflict_logging_include_tuples</varname> (<type>boolean</type>)
+      <indexterm>
+       <primary><varname>bdr.conflict_logging_include_tuples</varname> configuration parameter</primary>
+      </indexterm>
+     </term>
+     <listitem>
+      <para>
+       Log whole tuples when logging &bdr;
+       tuples.
+      </para>
+     </listitem>
+    </varlistentry>
+
+    <varlistentry id="guc-bdr-log-conflicts-to-table" xreflabel="bdr.log_conflicts_to_table">
+     <term><varname>bdr.log_conflicts_to_table</varname> (<type>boolean</type>)
+      <indexterm>
+       <primary><varname>bdr.log_conflicts_to_table</varname> configuration parameter</primary>
+      </indexterm>
+     </term>
+     <listitem>
+      <para>
+       This boolean option controls whether
+       detected &bdr; conflicts get logged
+       to the bdr.bdr_conflict_history table. See Conflict logging
+       for details. <!-- FIXME: Add link to not yet existing
+                         conflict logging chapter-->
+      </para>
+     </listitem>
+    </varlistentry>
+
+    <varlistentry id="guc-bdr-synchronous-commit" xreflabel="bdr.synchronous_commit">
+     <term><varname>bdr.synchronous_commit</varname> (<type>boolean</type>)
+      <indexterm>
+       <primary><varname>bdr.synchronous_commit</varname> configuration parameter</primary>
+      </indexterm>
+     </term>
+     <listitem>
+      <para>
+       This boolean option controls whether
+       the <varname>synchronous_commit</varname> setting
+       in &bdr;/&udr;
+       apply workers is enabled. It defaults
+       to <literal>off</literal>.  If set to <literal>off</literal>,
+       &bdr; apply workers will perform
+       asynchronous commits,
+       allowing &postgres; to
+       considerably improve throughput.
+      </para>
+      <para>
+       It it always is safe to set in the sense that it'll never
+       cause transactions to not be replayed. If a minimal data loss
+       window is desirable it's adviseable to set it
+       to <literal>on</literal> and
+       configure &postgres;'s synchronous
+       replication.
+      </para>
+      <para>
+       Using synchronous replication in combination
+       with <varname>bdr.synchronous_commit</varname> disabled, is
+       not generally adviseable, as it will noticeably increase the
+       time until a transaction is confirmed to have been
+       replicated. That's because it can only be reported as having
+       safely committed once the <acronym>WAL</acronym> is flushed
+       on the receiving side.
+      </para>
+     </listitem>
+    </varlistentry>
+
+    <varlistentry id="guc-temp-dump-directory" xreflabel="bdr.temp_dump_directory">
+     <term><varname>bdr.temp_dump_directory</varname> (<type>string</type>)
+      <indexterm>
+       <primary><varname>bdr.temp_dump_directory</varname> configuration parameter</primary>
+      </indexterm>
+     </term>
+     <listitem>
+      <para>
+       Specifies the path to a temporary storage location, writable
+       by the postgres user, that needs to have enough storage space
+       to contain a complete dump of the a potentially cloned
+       database.
+      </para>
+      <para>
+       Only used during initial bringup.
+      </para>
+     </listitem>
+    </varlistentry>
+
+   </variablelist>
+
+  </para>
+
+  <sect2>
+   <title>Less common or internal configuration variables</title>
+   <para>
+    <variablelist>
+
+     <varlistentry id="guc-bdr-default-apply-delay" xreflabel="bdr.default_apply_delay">
+      <term><varname>bdr.default_apply_delay</varname> (<type>integer</type>)
+       <indexterm>
+        <primary><varname>bdr.default_apply_delay</varname> configuration parameter</primary>
+       </indexterm>
+      </term>
+      <listitem>
+       <para>
+        Sets a default apply delay for all configured connections
+        that don't have a explicitly configured apply delay.
+       </para>
+       <para>
+        This is primarily useful to simulate a high latency network
+        in a low latency testing environment.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry id="guc-bdr-skip-ddl-locking" xreflabel="bdr.skip_ddl_locking">
+      <term><varname>bdr.skip_ddl_locking</varname> (<type>boolean</type>)
+       <indexterm>
+        <primary><varname>bdr.skip_ddl_locking</varname> configuration parameter</primary>
+       </indexterm>
+      </term>
+      <listitem>
+       <para>
+        For &bdr; don't acquire the global
+        schema lock when executing DDL statement. This primarily is
+        used internally, but can also be used in other cases.  This
+        option can be set at any time, but only by superusers.
+       </para>
+       <warning>
+        <para>
+         Inconsiderate usage of this option easily allows to break
+         replication setups.
+        </para>
+       </warning>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry id="guc-bdr-permit-unsafe-ddl-commands" xreflabel="bdr.permit_unsafe_ddl_commands">
+      <term><varname>bdr.permit_unsafe_ddl_commands</varname> (<type>boolean</type>)
+       <indexterm>
+        <primary><varname>bdr.permit_unsafe_ddl_commands</varname> configuration parameter</primary>
+       </indexterm>
+      </term>
+      <listitem>
+       <para>
+        For &bdr; allow to execute schema
+        changes that cannot safely be replicated. This primarily is
+        used internally, but can also be used in other cases.  This
+        option can be set at any time, but only by superusers.
+       </para>
+       <warning>
+        <para>
+         Inconsiderate usage of this option easily allows to break
+         replication setups.
+        </para>
+       </warning>
+      </listitem>
+     </varlistentry>
+
+
+     <varlistentry id="guc-bdr-skip-ddl-replication" xreflabel="bdr.skip_ddl_replication">
+      <term><varname>bdr.skip_ddl_replication</varname> (<type>boolean</type>)
+       <indexterm>
+        <primary><varname>bdr.skip_ddl_replication</varname> configuration parameter</primary>
+       </indexterm>
+      </term>
+      <listitem>
+       <para>
+        For &bdr; don't replicate schema
+        changes to other systems. This is primarily useful
+        for &bdr; internal use, but also can
+        be used for some intentional schema changes like adding a
+        index only on some nodes. This option can be set at any time,
+        but only by superusers.
+       </para>
+       <warning>
+        <para>
+         Inconsiderate usage of this option easily allows to break
+         replication setups.
+        </para>
+       </warning>
+      </listitem>
+     </varlistentry>
+
+    </variablelist>
+   </para>
+  </sect2>
+ </sect1>
+</chapter>
