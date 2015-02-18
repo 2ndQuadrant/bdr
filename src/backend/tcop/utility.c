@@ -1190,7 +1190,8 @@ ProcessUtilitySlow(Node *parsetree,
 				break;
 
 			case T_AlterExtensionContentsStmt:
-				ExecAlterExtensionContentsStmt((AlterExtensionContentsStmt *) parsetree);
+				ExecAlterExtensionContentsStmt((AlterExtensionContentsStmt *) parsetree,
+											   NULL);
 				break;
 
 			case T_CreateFdwStmt:

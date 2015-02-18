@@ -2881,7 +2881,7 @@ ApplyExtensionUpdates(Oid extensionOid,
  * Execute ALTER EXTENSION ADD/DROP
  */
 Oid
-ExecAlterExtensionContentsStmt(AlterExtensionContentsStmt *stmt)
+ExecAlterExtensionContentsStmt(AlterExtensionContentsStmt *stmt, Oid *objectId)
 {
 	ObjectAddress extension;
 	ObjectAddress object;
@@ -2905,6 +2905,10 @@ ExecAlterExtensionContentsStmt(AlterExtensionContentsStmt *stmt)
 	 */
 	object = get_object_address(stmt->objtype, stmt->objname, stmt->objargs,
 								&relation, ShareUpdateExclusiveLock, false);
+
+	Assert(object.objectSubId == 0);
+	if (objectId)
+		*objectId = object.objectId;
 
 	/* Permission check: must own target object, too */
 	check_object_ownership(GetUserId(), stmt->objtype, object,
