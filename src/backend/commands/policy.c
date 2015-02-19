@@ -460,7 +460,7 @@ RemovePolicyById(Oid policy_id)
  *
  * stmt - the CreatePolicyStmt that describes the policy to create.
  */
-Oid
+ObjectAddress
 CreatePolicy(CreatePolicyStmt *stmt)
 {
 	Relation		pg_policy_rel;
@@ -626,7 +626,7 @@ CreatePolicy(CreatePolicyStmt *stmt)
 	relation_close(target_table, NoLock);
 	heap_close(pg_policy_rel, RowExclusiveLock);
 
-	return policy_id;
+	return myself;
 }
 
 /*
@@ -635,7 +635,7 @@ CreatePolicy(CreatePolicyStmt *stmt)
  *
  * stmt - the AlterPolicyStmt that describes the policy and how to alter it.
  */
-Oid
+ObjectAddress
 AlterPolicy(AlterPolicyStmt *stmt)
 {
 	Relation		pg_policy_rel;
@@ -830,7 +830,7 @@ AlterPolicy(AlterPolicyStmt *stmt)
 	relation_close(target_table, NoLock);
 	heap_close(pg_policy_rel, RowExclusiveLock);
 
-	return policy_id;
+	return myself;
 }
 
 /*

@@ -394,7 +394,7 @@ ExecRenameStmt(RenameStmt *stmt)
  * Executes an ALTER OBJECT / SET SCHEMA statement.  Based on the object
  * type, the function appropriate to that type is executed.
  */
-Oid
+ObjectAddress
 ExecAlterObjectSchemaStmt(AlterObjectSchemaStmt *stmt)
 {
 	switch (stmt->objectType)
@@ -448,14 +448,14 @@ ExecAlterObjectSchemaStmt(AlterObjectSchemaStmt *stmt)
 											  nspOid);
 				heap_close(catalog, RowExclusiveLock);
 
-				return address.objectId;
+				return address;
 			}
 			break;
 
 		default:
 			elog(ERROR, "unrecognized AlterObjectSchemaStmt type: %d",
 				 (int) stmt->objectType);
-			return InvalidOid;	/* keep compiler happy */
+			return InvalidObjectAddress;	/* keep compiler happy */
 	}
 }
 
@@ -678,7 +678,7 @@ AlterObjectNamespace_internal(Relation rel, Oid objid, Oid nspOid)
  * Executes an ALTER OBJECT / OWNER TO statement.  Based on the object
  * type, the function appropriate to that type is executed.
  */
-Oid
+ObjectAddress
 ExecAlterOwnerStmt(AlterOwnerStmt *stmt)
 {
 	Oid			newowner = get_role_oid(stmt->newowner, false);
@@ -749,15 +749,14 @@ ExecAlterOwnerStmt(AlterOwnerStmt *stmt)
 				AlterObjectOwner_internal(catalog, address.objectId, newowner);
 				heap_close(catalog, RowExclusiveLock);
 
-				return address.objectId;
+				return address;
 			}
 			break;
 
 		default:
 			elog(ERROR, "unrecognized AlterOwnerStmt type: %d",
 				 (int) stmt->objectType);
-
-			return InvalidOid;	/* keep compiler happy */
+			return InvalidObjectAddress;	/* keep compiler happy */
 	}
 }
 

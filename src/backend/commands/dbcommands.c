@@ -1563,7 +1563,7 @@ AlterDatabaseSet(AlterDatabaseSetStmt *stmt)
 /*
  * ALTER DATABASE name OWNER TO newowner
  */
-Oid
+ObjectAddress
 AlterDatabaseOwner(const char *dbname, Oid newOwnerId)
 {
 	Oid			db_id;
@@ -1572,6 +1572,7 @@ AlterDatabaseOwner(const char *dbname, Oid newOwnerId)
 	ScanKeyData scankey;
 	SysScanDesc scan;
 	Form_pg_database datForm;
+	ObjectAddress address;
 
 	/*
 	 * Get the old tuple.  We don't need a lock on the database per se,
@@ -1666,12 +1667,14 @@ AlterDatabaseOwner(const char *dbname, Oid newOwnerId)
 
 	InvokeObjectPostAlterHook(DatabaseRelationId, HeapTupleGetOid(tuple), 0);
 
+	ObjectAddressSet(address, DatabaseRelationId, db_id);
+
 	systable_endscan(scan);
 
 	/* Close pg_database, but keep lock till commit */
 	heap_close(rel, NoLock);
 
-	return db_id;
+	return address;
 }
 
 

@@ -435,17 +435,19 @@ static void RangeVarCallbackForAlterRelation(const RangeVar *rv, Oid relid,
  * The other arguments are used to extend the behavior for other cases:
  * relkind: relkind to assign to the new relation
  * ownerId: if not InvalidOid, use this as the new relation's owner.
+ * typaddress: if not null, it's set to the pg_type entry's address.
  *
  * Note that permissions checks are done against current user regardless of
  * ownerId.  A nonzero ownerId is used when someone is creating a relation
  * "on behalf of" someone else, so we still want to see that the current user
  * has permissions to do it.
  *
- * If successful, returns the OID of the new relation.
+ * If successful, returns the address of the new relation.
  * ----------------------------------------------------------------
  */
-Oid
-DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId)
+ObjectAddress
+DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId,
+			   ObjectAddress *typaddress)
 {
 	char		relname[NAMEDATALEN];
 	Oid			namespaceId;
@@ -465,6 +467,7 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId)
 	AttrNumber	attnum;
 	static char *validnsps[] = HEAP_RELOPT_NAMESPACES;
 	Oid			ofTypeId;
+	ObjectAddress address;
 
 	/*
 	 * Truncate relname to appropriate length (probably a waste of time, as
@@ -658,7 +661,8 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId)
 										  reloptions,
 										  true,
 										  allowSystemTableMods,
-										  false);
+										  false,
+										  typaddress);
 
 	/* Store inheritance information for new rel. */
 	StoreCatalogInheritance(relationId, inheritOids);
@@ -690,13 +694,17 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId)
 		AddRelationNewConstraints(rel, rawDefaults, stmt->constraints,
 								  true, true, false);
 
+	address.classId = RelationRelationId;
+	address.objectId = relationId;
+	address.objectSubId = 0;
+
 	/*
 	 * Clean up.  We keep lock on new relation (although it shouldn't be
 	 * visible to anyone else anyway, until commit).
 	 */
 	relation_close(rel, NoLock);
 
-	return relationId;
+	return address;
 }
 
 /*
@@ -5763,7 +5771,7 @@ ATExecAddIndex(AlteredTableInfo *tab, Relation rel,
 	bool		check_rights;
 	bool		skip_build;
 	bool		quiet;
-	Oid			new_index;
+	ObjectAddress address;
 
 	Assert(IsA(stmt, IndexStmt));
 	Assert(!stmt->concurrent);
@@ -5778,13 +5786,13 @@ ATExecAddIndex(AlteredTableInfo *tab, Relation rel,
 	/* suppress notices when rebuilding existing index */
 	quiet = is_rebuild;
 
-	new_index = DefineIndex(RelationGetRelid(rel),
-							stmt,
-							InvalidOid, /* no predefined OID */
-							true,		/* is_alter_table */
-							check_rights,
-							skip_build,
-							quiet);
+	address = DefineIndex(RelationGetRelid(rel),
+						  stmt,
+						  InvalidOid, /* no predefined OID */
+						  true,		/* is_alter_table */
+						  check_rights,
+						  skip_build,
+						  quiet);
 
 	/*
 	 * If TryReuseIndex() stashed a relfilenode for us, we used it for the new
@@ -5794,13 +5802,13 @@ ATExecAddIndex(AlteredTableInfo *tab, Relation rel,
 	 */
 	if (OidIsValid(stmt->oldNode))
 	{
-		Relation	irel = index_open(new_index, NoLock);
+		Relation	irel = index_open(address.objectId, NoLock);
 
 		RelationPreserveStorage(irel->rd_node, true);
 		index_close(irel, NoLock);
 	}
 
-	return new_index;
+	return address.objectId;
 }
 
 /*
@@ -11037,7 +11045,7 @@ ATPrepChangePersistence(Relation rel, bool toLogged)
 /*
  * Execute ALTER TABLE SET SCHEMA
  */
-Oid
+ObjectAddress
 AlterTableNamespace(AlterObjectSchemaStmt *stmt)
 {
 	Relation	rel;
@@ -11046,6 +11054,7 @@ AlterTableNamespace(AlterObjectSchemaStmt *stmt)
 	Oid			nspOid;
 	RangeVar   *newrv;
 	ObjectAddresses *objsMoved;
+	ObjectAddress myself;
 
 	relid = RangeVarGetRelidExtended(stmt->relation, AccessExclusiveLock,
 									 stmt->missing_ok, false,
@@ -11057,7 +11066,7 @@ AlterTableNamespace(AlterObjectSchemaStmt *stmt)
 		ereport(NOTICE,
 				(errmsg("relation \"%s\" does not exist, skipping",
 						stmt->relation->relname)));
-		return InvalidOid;
+		return InvalidObjectAddress;
 	}
 
 	rel = relation_open(relid, NoLock);
@@ -11090,10 +11099,12 @@ AlterTableNamespace(AlterObjectSchemaStmt *stmt)
 	AlterTableNamespaceInternal(rel, oldNspOid, nspOid, objsMoved);
 	free_object_addresses(objsMoved);
 
+	ObjectAddressSet(myself, RelationRelationId, relid);
+
 	/* close rel, but keep lock until commit */
 	relation_close(rel, NoLock);
 
-	return relid;
+	return myself;
 }
 
 /*
