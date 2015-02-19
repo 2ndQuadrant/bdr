@@ -288,7 +288,7 @@ intorel_startup(DestReceiver *self, int operation, TupleDesc typeinfo)
 	bool		is_matview;
 	char		relkind;
 	CreateStmt *create;
-	Oid			intoRelationId;
+	ObjectAddress intoRelationAddr;
 	Relation	intoRelationDesc;
 	RangeTblEntry *rte;
 	Datum		toast_options;
@@ -385,7 +385,7 @@ intorel_startup(DestReceiver *self, int operation, TupleDesc typeinfo)
 	/*
 	 * Actually create the target table
 	 */
-	intoRelationId = DefineRelation(create, relkind, InvalidOid);
+	intoRelationAddr = DefineRelation(create, relkind, InvalidOid);
 
 	/*
 	 * If necessary, create a TOAST table for the target table.  Note that
@@ -403,7 +403,7 @@ intorel_startup(DestReceiver *self, int operation, TupleDesc typeinfo)
 
 	(void) heap_reloptions(RELKIND_TOASTVALUE, toast_options, true);
 
-	NewRelationCreateToastTable(intoRelationId, toast_options);
+	NewRelationCreateToastTable(intoRelationAddr.objectId, toast_options);
 
 	/* Create the "view" part of a materialized view. */
 	if (is_matview)
@@ -411,14 +411,14 @@ intorel_startup(DestReceiver *self, int operation, TupleDesc typeinfo)
 		/* StoreViewQuery scribbles on tree, so make a copy */
 		Query	   *query = (Query *) copyObject(into->viewQuery);
 
-		StoreViewQuery(intoRelationId, query, false);
+		StoreViewQuery(intoRelationAddr.objectId, query, false);
 		CommandCounterIncrement();
 	}
 
 	/*
 	 * Finally we can open the target table
 	 */
-	intoRelationDesc = heap_open(intoRelationId, AccessExclusiveLock);
+	intoRelationDesc = heap_open(intoRelationAddr.objectId, AccessExclusiveLock);
 
 	/*
 	 * Check INSERT permission on the constructed table.
@@ -428,7 +428,7 @@ intorel_startup(DestReceiver *self, int operation, TupleDesc typeinfo)
 	 */
 	rte = makeNode(RangeTblEntry);
 	rte->rtekind = RTE_RELATION;
-	rte->relid = intoRelationId;
+	rte->relid = intoRelationAddr.objectId;
 	rte->relkind = relkind;
 	rte->requiredPerms = ACL_INSERT;
 
@@ -446,7 +446,7 @@ intorel_startup(DestReceiver *self, int operation, TupleDesc typeinfo)
 	 * be enabled here.  We don't actually support that currently, so throw
 	 * our own ereport(ERROR) if that happens.
 	 */
-	if (check_enable_rls(intoRelationId, InvalidOid, false) == RLS_ENABLED)
+	if (check_enable_rls(intoRelationAddr.objectId, InvalidOid, false) == RLS_ENABLED)
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 				 (errmsg("policies not yet implemented for this command"))));

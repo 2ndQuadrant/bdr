@@ -441,10 +441,10 @@ static void RangeVarCallbackForAlterRelation(const RangeVar *rv, Oid relid,
  * "on behalf of" someone else, so we still want to see that the current user
  * has permissions to do it.
  *
- * If successful, returns the OID of the new relation.
+ * If successful, returns the address of the new relation.
  * ----------------------------------------------------------------
  */
-Oid
+ObjectAddress
 DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId)
 {
 	char		relname[NAMEDATALEN];
@@ -465,6 +465,7 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId)
 	AttrNumber	attnum;
 	static char *validnsps[] = HEAP_RELOPT_NAMESPACES;
 	Oid			ofTypeId;
+	ObjectAddress address;
 
 	/*
 	 * Truncate relname to appropriate length (probably a waste of time, as
@@ -690,13 +691,17 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId)
 		AddRelationNewConstraints(rel, rawDefaults, stmt->constraints,
 								  true, true, false);
 
+	address.classId = RelationRelationId;
+	address.objectId = relationId;
+	address.objectSubId = 0;
+
 	/*
 	 * Clean up.  We keep lock on new relation (although it shouldn't be
 	 * visible to anyone else anyway, until commit).
 	 */
 	relation_close(rel, NoLock);
 
-	return relationId;
+	return address;
 }
 
 /*
@@ -5763,7 +5768,7 @@ ATExecAddIndex(AlteredTableInfo *tab, Relation rel,
 	bool		check_rights;
 	bool		skip_build;
 	bool		quiet;
-	Oid			new_index;
+	ObjectAddress address;
 
 	Assert(IsA(stmt, IndexStmt));
 	Assert(!stmt->concurrent);
@@ -5778,13 +5783,13 @@ ATExecAddIndex(AlteredTableInfo *tab, Relation rel,
 	/* suppress notices when rebuilding existing index */
 	quiet = is_rebuild;
 
-	new_index = DefineIndex(RelationGetRelid(rel),
-							stmt,
-							InvalidOid, /* no predefined OID */
-							true,		/* is_alter_table */
-							check_rights,
-							skip_build,
-							quiet);
+	address = DefineIndex(RelationGetRelid(rel),
+						  stmt,
+						  InvalidOid, /* no predefined OID */
+						  true,		/* is_alter_table */
+						  check_rights,
+						  skip_build,
+						  quiet);
 
 	/*
 	 * If TryReuseIndex() stashed a relfilenode for us, we used it for the new
@@ -5794,13 +5799,13 @@ ATExecAddIndex(AlteredTableInfo *tab, Relation rel,
 	 */
 	if (OidIsValid(stmt->oldNode))
 	{
-		Relation	irel = index_open(new_index, NoLock);
+		Relation	irel = index_open(address.objectId, NoLock);
 
 		RelationPreserveStorage(irel->rd_node, true);
 		index_close(irel, NoLock);
 	}
 
-	return new_index;
+	return address.objectId;
 }
 
 /*

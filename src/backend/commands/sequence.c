@@ -103,13 +103,14 @@ static void process_owned_by(Relation seqrel, List *owned_by);
  * DefineSequence
  *				Creates a new sequence relation
  */
-Oid
+ObjectAddress
 DefineSequence(CreateSeqStmt *seq)
 {
 	FormData_pg_sequence new;
 	List	   *owned_by;
 	CreateStmt *stmt = makeNode(CreateStmt);
 	Oid			seqoid;
+	ObjectAddress address;
 	Relation	rel;
 	HeapTuple	tuple;
 	TupleDesc	tupDesc;
@@ -138,7 +139,7 @@ DefineSequence(CreateSeqStmt *seq)
 					(errcode(ERRCODE_DUPLICATE_TABLE),
 					 errmsg("relation \"%s\" already exists, skipping",
 							seq->sequence->relname)));
-			return InvalidOid;
+			return InvalidObjectAddress;
 		}
 	}
 
@@ -232,7 +233,8 @@ DefineSequence(CreateSeqStmt *seq)
 	stmt->tablespacename = NULL;
 	stmt->if_not_exists = seq->if_not_exists;
 
-	seqoid = DefineRelation(stmt, RELKIND_SEQUENCE, seq->ownerId);
+	address = DefineRelation(stmt, RELKIND_SEQUENCE, seq->ownerId);
+	seqoid = address.objectId;
 	Assert(seqoid != InvalidOid);
 
 	rel = heap_open(seqoid, AccessExclusiveLock);
@@ -248,7 +250,7 @@ DefineSequence(CreateSeqStmt *seq)
 
 	heap_close(rel, NoLock);
 
-	return seqoid;
+	return address;
 }
 
 /*

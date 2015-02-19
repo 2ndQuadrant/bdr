@@ -22,7 +22,7 @@
 #include "utils/relcache.h"
 
 
-extern Oid	DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId);
+extern ObjectAddress DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId);
 
 extern void RemoveRelations(DropStmt *drop);
 

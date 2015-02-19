@@ -1366,7 +1366,6 @@ renametrig(RenameStmt *stmt)
 	return address;
 }
 
-
 /*
  * EnableDisableTrigger()
  *

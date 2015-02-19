@@ -2076,7 +2076,7 @@ DefineCompositeType(RangeVar *typevar, List *coldeflist)
 	CreateStmt *createStmt = makeNode(CreateStmt);
 	Oid			old_type_oid;
 	Oid			typeNamespace;
-	Oid			relid;
+	ObjectAddress address;
 
 	/*
 	 * now set the parameters for keys/inheritance etc. All of these are
@@ -2115,17 +2115,19 @@ DefineCompositeType(RangeVar *typevar, List *coldeflist)
 	/*
 	 * Finally create the relation.  This also creates the type.
 	 */
-	relid = DefineRelation(createStmt, RELKIND_COMPOSITE_TYPE, InvalidOid);
-	Assert(relid != InvalidOid);
-	return relid;
+	address = DefineRelation(createStmt, RELKIND_COMPOSITE_TYPE, InvalidOid);
+	Assert(address.objectId != InvalidOid);
+	return address.objectId;
 }
 
 /*
  * AlterDomainDefault
  *
  * Routine implementing ALTER DOMAIN SET/DROP DEFAULT statements.
+ *
+ * Returns ObjectAddress of the modified domain.
  */
-Oid
+ObjectAddress
 AlterDomainDefault(List *names, Node *defaultRaw)
 {
 	TypeName   *typename;
@@ -2140,6 +2142,7 @@ AlterDomainDefault(List *names, Node *defaultRaw)
 	bool		new_record_repl[Natts_pg_type];
 	HeapTuple	newtuple;
 	Form_pg_type typTup;
+	ObjectAddress address;
 
 	/* Make a TypeName so we can use standard type lookup machinery */
 	typename = makeTypeNameFromNameList(names);
@@ -2249,19 +2252,25 @@ AlterDomainDefault(List *names, Node *defaultRaw)
 
 	InvokeObjectPostAlterHook(TypeRelationId, domainoid, 0);
 
+	address.classId = TypeRelationId;
+	address.objectId = domainoid;
+	address.objectSubId = 0;
+
 	/* Clean up */
 	heap_close(rel, NoLock);
 	heap_freetuple(newtuple);
 
-	return domainoid;
+	return address;
 }
 
 /*
  * AlterDomainNotNull
  *
  * Routine implementing ALTER DOMAIN SET/DROP NOT NULL statements.
+ *
+ * Returns ObjectAddress of the modified domain.
  */
-Oid
+ObjectAddress
 AlterDomainNotNull(List *names, bool notNull)
 {
 	TypeName   *typename;
@@ -2269,6 +2278,7 @@ AlterDomainNotNull(List *names, bool notNull)
 	Relation	typrel;
 	HeapTuple	tup;
 	Form_pg_type typTup;
+	ObjectAddress address = InvalidObjectAddress;
 
 	/* Make a TypeName so we can use standard type lookup machinery */
 	typename = makeTypeNameFromNameList(names);
@@ -2289,7 +2299,7 @@ AlterDomainNotNull(List *names, bool notNull)
 	if (typTup->typnotnull == notNull)
 	{
 		heap_close(typrel, RowExclusiveLock);
-		return InvalidOid;
+		return address;
 	}
 
 	/* Adding a NOT NULL constraint requires checking existing columns */
@@ -2363,11 +2373,15 @@ AlterDomainNotNull(List *names, bool notNull)
 
 	InvokeObjectPostAlterHook(TypeRelationId, domainoid, 0);
 
+	address.classId = TypeRelationId;
+	address.objectId = domainoid;
+	address.objectSubId = 0;
+
 	/* Clean up */
 	heap_freetuple(tup);
 	heap_close(typrel, RowExclusiveLock);
 
-	return domainoid;
+	return address;
 }
 
 /*
@@ -2375,7 +2389,7 @@ AlterDomainNotNull(List *names, bool notNull)
  *
  * Implements the ALTER DOMAIN DROP CONSTRAINT statement
  */
-Oid
+ObjectAddress
 AlterDomainDropConstraint(List *names, const char *constrName,
 						  DropBehavior behavior, bool missing_ok)
 {
@@ -2388,6 +2402,7 @@ AlterDomainDropConstraint(List *names, const char *constrName,
 	ScanKeyData key[1];
 	HeapTuple	contup;
 	bool		found = false;
+	ObjectAddress address = InvalidObjectAddress;
 
 	/* Make a TypeName so we can use standard type lookup machinery */
 	typename = makeTypeNameFromNameList(names);
@@ -2434,6 +2449,11 @@ AlterDomainDropConstraint(List *names, const char *constrName,
 			found = true;
 		}
 	}
+
+	address.classId = TypeRelationId;
+	address.objectId = domainoid;
+	address.objectSubId = 0;
+
 	/* Clean up after the scan */
 	systable_endscan(conscan);
 	heap_close(conrel, RowExclusiveLock);
@@ -2453,7 +2473,7 @@ AlterDomainDropConstraint(List *names, const char *constrName,
 							constrName, TypeNameToString(typename))));
 	}
 
-	return domainoid;
+	return address;
 }
 
 /*
@@ -2461,7 +2481,7 @@ AlterDomainDropConstraint(List *names, const char *constrName,
  *
  * Implements the ALTER DOMAIN .. ADD CONSTRAINT statement.
  */
-Oid
+ObjectAddress
 AlterDomainAddConstraint(List *names, Node *newConstraint)
 {
 	TypeName   *typename;
@@ -2471,6 +2491,7 @@ AlterDomainAddConstraint(List *names, Node *newConstraint)
 	Form_pg_type typTup;
 	Constraint *constr;
 	char	   *ccbin;
+	ObjectAddress address;
 
 	/* Make a TypeName so we can use standard type lookup machinery */
 	typename = makeTypeNameFromNameList(names);
@@ -2555,10 +2576,14 @@ AlterDomainAddConstraint(List *names, Node *newConstraint)
 	if (!constr->skip_validation)
 		validateDomainConstraint(domainoid, ccbin);
 
+	address.classId = TypeRelationId;
+	address.objectId = domainoid;
+	address.objectSubId = 0;
+
 	/* Clean up */
 	heap_close(typrel, RowExclusiveLock);
 
-	return domainoid;
+	return address;
 }
 
 /*
@@ -2566,7 +2591,7 @@ AlterDomainAddConstraint(List *names, Node *newConstraint)
  *
  * Implements the ALTER DOMAIN .. VALIDATE CONSTRAINT statement.
  */
-Oid
+ObjectAddress
 AlterDomainValidateConstraint(List *names, char *constrName)
 {
 	TypeName   *typename;
@@ -2584,6 +2609,7 @@ AlterDomainValidateConstraint(List *names, char *constrName)
 	HeapTuple	tuple;
 	HeapTuple	copyTuple;
 	ScanKeyData key;
+	ObjectAddress address;
 
 	/* Make a TypeName so we can use standard type lookup machinery */
 	typename = makeTypeNameFromNameList(names);
@@ -2654,6 +2680,10 @@ AlterDomainValidateConstraint(List *names, char *constrName)
 	InvokeObjectPostAlterHook(ConstraintRelationId,
 							  HeapTupleGetOid(copyTuple), 0);
 
+	address.classId = TypeRelationId;
+	address.objectId = domainoid;
+	address.objectSubId = 0;
+
 	heap_freetuple(copyTuple);
 
 	systable_endscan(scan);
@@ -2663,7 +2693,7 @@ AlterDomainValidateConstraint(List *names, char *constrName)
 
 	ReleaseSysCache(tup);
 
-	return domainoid;
+	return address;
 }
 
 static void

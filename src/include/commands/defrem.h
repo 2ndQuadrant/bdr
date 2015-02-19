@@ -14,6 +14,7 @@
 #ifndef DEFREM_H
 #define DEFREM_H
 
+#include "catalog/objectaddress.h"
 #include "nodes/parsenodes.h"
 #include "utils/array.h"
 
@@ -21,7 +22,7 @@
 extern void RemoveObjects(DropStmt *stmt);
 
 /* commands/indexcmds.c */
-extern Oid DefineIndex(Oid relationId,
+extern ObjectAddress DefineIndex(Oid relationId,
 			IndexStmt *stmt,
 			Oid indexRelationId,
 			bool is_alter_table,
