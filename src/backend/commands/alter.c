@@ -299,8 +299,10 @@ AlterObjectRename_internal(Relation rel, Oid objectId, const char *new_name)
 /*
  * Executes an ALTER OBJECT / RENAME TO statement.  Based on the object
  * type, the function appropriate to that type is executed.
+ *
+ * Return value is the address of the renamed object.
  */
-Oid
+ObjectAddress
 ExecRenameStmt(RenameStmt *stmt)
 {
 	switch (stmt->renameType)
@@ -378,13 +380,13 @@ ExecRenameStmt(RenameStmt *stmt)
 										   stmt->newname);
 				heap_close(catalog, RowExclusiveLock);
 
-				return address.objectId;
+				return address;
 			}
 
 		default:
 			elog(ERROR, "unrecognized rename stmt type: %d",
 				 (int) stmt->renameType);
-			return InvalidOid;	/* keep compiler happy */
+			return InvalidObjectAddress;	/* keep compiler happy */
 	}
 }
 

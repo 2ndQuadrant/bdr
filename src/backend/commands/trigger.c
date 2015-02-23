@@ -1249,7 +1249,7 @@ RangeVarCallbackForRenameTrigger(const RangeVar *rv, Oid relid, Oid oldrelid,
  *		modify tgname in trigger tuple
  *		update row in catalog
  */
-Oid
+ObjectAddress
 renametrig(RenameStmt *stmt)
 {
 	Oid			tgoid;
@@ -1259,6 +1259,7 @@ renametrig(RenameStmt *stmt)
 	SysScanDesc tgscan;
 	ScanKeyData key[2];
 	Oid			relid;
+	ObjectAddress address;
 
 	/*
 	 * Look up name, check permissions, and acquire lock (which we will NOT
@@ -1351,6 +1352,8 @@ renametrig(RenameStmt *stmt)
 						stmt->subname, RelationGetRelationName(targetrel))));
 	}
 
+	ObjectAddressSet(address, TriggerRelationId, tgoid);
+
 	systable_endscan(tgscan);
 
 	heap_close(tgrel, RowExclusiveLock);
@@ -1360,7 +1363,7 @@ renametrig(RenameStmt *stmt)
 	 */
 	relation_close(targetrel, NoLock);
 
-	return tgoid;
+	return address;
 }
 
 

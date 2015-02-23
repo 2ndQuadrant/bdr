@@ -2158,8 +2158,10 @@ renameatt_check(Oid myrelid, Form_pg_class classform, bool recursing)
 
 /*
  *		renameatt_internal		- workhorse for renameatt
+ *
+ * Return value is the attribute number in the 'myrelid' relation.
  */
-static void
+static AttrNumber
 renameatt_internal(Oid myrelid,
 				   const char *oldattname,
 				   const char *newattname,
@@ -2172,7 +2174,7 @@ renameatt_internal(Oid myrelid,
 	Relation	attrelation;
 	HeapTuple	atttup;
 	Form_pg_attribute attform;
-	int			attnum;
+	AttrNumber	attnum;
 
 	/*
 	 * Grab an exclusive lock on the target table, which we will NOT release
@@ -2300,6 +2302,8 @@ renameatt_internal(Oid myrelid,
 	heap_close(attrelation, RowExclusiveLock);
 
 	relation_close(targetrelation, NoLock);		/* close rel but keep lock */
+
+	return attnum;
 }
 
 /*
@@ -2322,11 +2326,15 @@ RangeVarCallbackForRenameAttribute(const RangeVar *rv, Oid relid, Oid oldrelid,
 
 /*
  *		renameatt		- changes the name of a attribute in a relation
+ *
+ * The returned ObjectAddress is that of the pg_class address of the column.
  */
-Oid
+ObjectAddress
 renameatt(RenameStmt *stmt)
 {
 	Oid			relid;
+	AttrNumber	attnum;
+	ObjectAddress address;
 
 	/* lock level taken here should match renameatt_internal */
 	relid = RangeVarGetRelidExtended(stmt->relation, AccessExclusiveLock,
@@ -2339,26 +2347,27 @@ renameatt(RenameStmt *stmt)
 		ereport(NOTICE,
 				(errmsg("relation \"%s\" does not exist, skipping",
 						stmt->relation->relname)));
-		return InvalidOid;
+		return InvalidObjectAddress;
 	}
 
-	renameatt_internal(relid,
-					   stmt->subname,	/* old att name */
-					   stmt->newname,	/* new att name */
-					   interpretInhOption(stmt->relation->inhOpt),		/* recursive? */
-					   false,	/* recursing? */
-					   0,		/* expected inhcount */
-					   stmt->behavior);
+	attnum =
+		renameatt_internal(relid,
+						   stmt->subname,	/* old att name */
+						   stmt->newname,	/* new att name */
+						   interpretInhOption(stmt->relation->inhOpt), /* recursive? */
+						   false,	/* recursing? */
+						   0,		/* expected inhcount */
+						   stmt->behavior);
 
-	/* This is an ALTER TABLE command so it's about the relid */
-	return relid;
+	ObjectAddressSubSet(address, RelationRelationId, relid, attnum);
+
+	return address;
 }
-
 
 /*
  * same logic as renameatt_internal
  */
-static Oid
+static ObjectAddress
 rename_constraint_internal(Oid myrelid,
 						   Oid mytypid,
 						   const char *oldconname,
@@ -2371,6 +2380,7 @@ rename_constraint_internal(Oid myrelid,
 	Oid			constraintOid;
 	HeapTuple	tuple;
 	Form_pg_constraint con;
+	ObjectAddress	address;
 
 	AssertArg(!myrelid || !mytypid);
 
@@ -2446,15 +2456,17 @@ rename_constraint_internal(Oid myrelid,
 	else
 		RenameConstraintById(constraintOid, newconname);
 
+	ObjectAddressSet(address, ConstraintRelationId, constraintOid);
+
 	ReleaseSysCache(tuple);
 
 	if (targetrelation)
 		relation_close(targetrelation, NoLock); /* close rel but keep lock */
 
-	return constraintOid;
+	return address;
 }
 
-Oid
+ObjectAddress
 RenameConstraint(RenameStmt *stmt)
 {
 	Oid			relid = InvalidOid;
@@ -2497,10 +2509,11 @@ RenameConstraint(RenameStmt *stmt)
  * Execute ALTER TABLE/INDEX/SEQUENCE/VIEW/MATERIALIZED VIEW/FOREIGN TABLE
  * RENAME
  */
-Oid
+ObjectAddress
 RenameRelation(RenameStmt *stmt)
 {
 	Oid			relid;
+	ObjectAddress address;
 
 	/*
 	 * Grab an exclusive lock on the target table, index, sequence, view,
@@ -2520,13 +2533,15 @@ RenameRelation(RenameStmt *stmt)
 		ereport(NOTICE,
 				(errmsg("relation \"%s\" does not exist, skipping",
 						stmt->relation->relname)));
-		return InvalidOid;
+		return InvalidObjectAddress;
 	}
 
 	/* Do the work */
 	RenameRelationInternal(relid, stmt->newname, false);
 
-	return relid;
+	ObjectAddressSet(address, RelationRelationId, relid);
+
+	return address;
 }
 
 /*

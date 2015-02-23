@@ -14,6 +14,7 @@
 #ifndef REWRITEDEFINE_H
 #define REWRITEDEFINE_H
 
+#include "catalog/objectaddress.h"
 #include "nodes/parsenodes.h"
 #include "utils/relcache.h"
 
@@ -32,7 +33,7 @@ extern Oid DefineQueryRewrite(char *rulename,
 				   bool replace,
 				   List *action);
 
-extern Oid RenameRewriteRule(RangeVar *relation, const char *oldName,
+extern ObjectAddress RenameRewriteRule(RangeVar *relation, const char *oldName,
 				  const char *newName);
 
 extern void setRuleCheckAsUser(Node *node, Oid userid);

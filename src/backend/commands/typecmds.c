@@ -3205,7 +3205,7 @@ GetDomainConstraints(Oid typeOid)
 /*
  * Execute ALTER TYPE RENAME
  */
-Oid
+ObjectAddress
 RenameType(RenameStmt *stmt)
 {
 	List	   *names = stmt->object;
@@ -3215,6 +3215,7 @@ RenameType(RenameStmt *stmt)
 	Relation	rel;
 	HeapTuple	tup;
 	Form_pg_type typTup;
+	ObjectAddress address;
 
 	/* Make a TypeName so we can use standard type lookup machinery */
 	typename = makeTypeNameFromNameList(names);
@@ -3272,10 +3273,11 @@ RenameType(RenameStmt *stmt)
 		RenameTypeInternal(typeOid, newTypeName,
 						   typTup->typnamespace);
 
+	ObjectAddressSet(address, TypeRelationId, typeOid);
 	/* Clean up */
 	heap_close(rel, RowExclusiveLock);
 
-	return typeOid;
+	return address;
 }
 
 /*

@@ -15,10 +15,11 @@
 #define ALTER_H
 
 #include "catalog/dependency.h"
+#include "catalog/objectaddress.h"
 #include "nodes/parsenodes.h"
 #include "utils/relcache.h"
 
-extern Oid	ExecRenameStmt(RenameStmt *stmt);
+extern ObjectAddress ExecRenameStmt(RenameStmt *stmt);
 
 extern Oid	ExecAlterObjectSchemaStmt(AlterObjectSchemaStmt *stmt);
 extern Oid AlterObjectNamespace_oid(Oid classId, Oid objid, Oid nspOid,

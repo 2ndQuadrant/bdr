@@ -837,7 +837,7 @@ AlterPolicy(AlterPolicyStmt *stmt)
  * rename_policy -
  *   change the name of a policy on a relation
  */
-Oid
+ObjectAddress
 rename_policy(RenameStmt *stmt)
 {
 	Relation		pg_policy_rel;
@@ -847,6 +847,7 @@ rename_policy(RenameStmt *stmt)
 	ScanKeyData		skey[2];
 	SysScanDesc		sscan;
 	HeapTuple		policy_tuple;
+	ObjectAddress	address;
 
 	/* Get id of table.  Also handles permissions checks. */
 	table_id = RangeVarGetRelidExtended(stmt->relation, AccessExclusiveLock,
@@ -925,6 +926,8 @@ rename_policy(RenameStmt *stmt)
 	InvokeObjectPostAlterHook(PolicyRelationId,
 							  HeapTupleGetOid(policy_tuple), 0);
 
+	ObjectAddressSet(address, PolicyRelationId, opoloid);
+
 	/*
 	 * Invalidate relation's relcache entry so that other backends (and
 	 * this one too!) are sent SI message to make them rebuild relcache
@@ -937,7 +940,7 @@ rename_policy(RenameStmt *stmt)
 	heap_close(pg_policy_rel, RowExclusiveLock);
 	relation_close(target_table, NoLock);
 
-	return opoloid;
+	return address;
 }
 
 /*
