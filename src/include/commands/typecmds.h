@@ -41,7 +41,7 @@ extern void checkDomainOwner(HeapTuple tup);
 
 extern List *GetDomainConstraints(Oid typeOid);
 
-extern Oid	RenameType(RenameStmt *stmt);
+extern ObjectAddress RenameType(RenameStmt *stmt);
 extern Oid	AlterTypeOwner(List *names, Oid newOwnerId, ObjectType objecttype);
 extern void AlterTypeOwnerInternal(Oid typeOid, Oid newOwnerId,
 					   bool hasDependEntry);

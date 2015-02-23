@@ -195,13 +195,14 @@ RemoveSchemaById(Oid schemaOid)
 /*
  * Rename schema
  */
-Oid
+ObjectAddress
 RenameSchema(const char *oldname, const char *newname)
 {
 	Oid			nspOid;
 	HeapTuple	tup;
 	Relation	rel;
 	AclResult	aclresult;
+	ObjectAddress address;
 
 	rel = heap_open(NamespaceRelationId, RowExclusiveLock);
 
@@ -243,10 +244,12 @@ RenameSchema(const char *oldname, const char *newname)
 
 	InvokeObjectPostAlterHook(NamespaceRelationId, HeapTupleGetOid(tup), 0);
 
+	ObjectAddressSet(address, NamespaceRelationId, nspOid);
+
 	heap_close(rel, NoLock);
 	heap_freetuple(tup);
 
-	return nspOid;
+	return address;
 }
 
 void

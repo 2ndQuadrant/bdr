@@ -15,6 +15,7 @@
 #ifndef POLICY_H
 #define POLICY_H
 
+#include "catalog/objectaddress.h"
 #include "nodes/parsenodes.h"
 #include "utils/relcache.h"
 
@@ -28,7 +29,7 @@ extern Oid AlterPolicy(AlterPolicyStmt *stmt);
 extern Oid get_relation_policy_oid(Oid relid, const char *policy_name,
 						bool missing_ok);
 
-extern Oid rename_policy(RenameStmt *stmt);
+extern ObjectAddress rename_policy(RenameStmt *stmt);
 
 
 #endif   /* POLICY_H */

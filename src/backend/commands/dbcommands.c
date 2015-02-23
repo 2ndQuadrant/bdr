@@ -938,7 +938,7 @@ dropdb(const char *dbname, bool missing_ok)
 /*
  * Rename database
  */
-Oid
+ObjectAddress
 RenameDatabase(const char *oldname, const char *newname)
 {
 	Oid			db_id;
@@ -946,6 +946,7 @@ RenameDatabase(const char *oldname, const char *newname)
 	Relation	rel;
 	int			notherbackends;
 	int			npreparedxacts;
+	ObjectAddress address;
 
 	/*
 	 * Look up the target database's OID, and get exclusive lock on it. We
@@ -1013,12 +1014,14 @@ RenameDatabase(const char *oldname, const char *newname)
 
 	InvokeObjectPostAlterHook(DatabaseRelationId, db_id, 0);
 
+	ObjectAddressSet(address, DatabaseRelationId, db_id);
+
 	/*
 	 * Close pg_database, but keep lock till commit.
 	 */
 	heap_close(rel, NoLock);
 
-	return db_id;
+	return address;
 }
 
 

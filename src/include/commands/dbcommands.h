@@ -15,6 +15,7 @@
 #define DBCOMMANDS_H
 
 #include "access/xlogreader.h"
+#include "catalog/objectaddress.h"
 #include "lib/stringinfo.h"
 #include "nodes/parsenodes.h"
 
@@ -40,7 +41,7 @@ typedef struct xl_dbase_drop_rec
 
 extern Oid	createdb(const CreatedbStmt *stmt);
 extern void dropdb(const char *dbname, bool missing_ok);
-extern Oid	RenameDatabase(const char *oldname, const char *newname);
+extern ObjectAddress RenameDatabase(const char *oldname, const char *newname);
 extern Oid	AlterDatabase(AlterDatabaseStmt *stmt, bool isTopLevel);
 extern Oid	AlterDatabaseSet(AlterDatabaseSetStmt *stmt);
 extern Oid	AlterDatabaseOwner(const char *dbname, Oid newOwnerId);
