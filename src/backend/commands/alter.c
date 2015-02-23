@@ -330,7 +330,6 @@ ExecRenameStmt(RenameStmt *stmt)
 			return RenameRelation(stmt);
 
 		case OBJECT_COLUMN:
-		case OBJECT_ATTRIBUTE:
 			return renameatt(stmt);
 
 		case OBJECT_RULE:

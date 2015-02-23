@@ -1615,9 +1615,6 @@ AlterObjectTypeCommandTag(ObjectType objtype)
 		case OBJECT_AGGREGATE:
 			tag = "ALTER AGGREGATE";
 			break;
-		case OBJECT_ATTRIBUTE:
-			tag = "ALTER TYPE";
-			break;
 		case OBJECT_CAST:
 			tag = "ALTER CAST";
 			break;

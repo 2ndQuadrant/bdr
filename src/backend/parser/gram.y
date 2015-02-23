@@ -7848,7 +7848,7 @@ RenameStmt: ALTER AGGREGATE func_name aggr_args RENAME TO name
 			| ALTER TYPE_P any_name RENAME ATTRIBUTE name TO name opt_drop_behavior
 				{
 					RenameStmt *n = makeNode(RenameStmt);
-					n->renameType = OBJECT_ATTRIBUTE;
+					n->renameType = OBJECT_COLUMN;
 					n->relationType = OBJECT_TYPE;
 					n->relation = makeRangeVarFromAnyName($3, @3, yyscanner);
 					n->subname = $6;
