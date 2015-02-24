@@ -549,10 +549,10 @@ new_objtree_for_type(Oid typeId, int32 typmod)
 	char	   *typnsp;
 	char	   *typename;
 	char	   *typmodstr;
-	bool		is_array;
+	bool		typarray;
 
 	format_type_detailed(typeId, typmod,
-						 &typnspid, &typename, &typmodstr, &is_array);
+						 &typnspid, &typename, &typmodstr, &typarray);
 
 	if (!OidIsValid(typnspid))
 		typnsp = pstrdup("");
@@ -566,7 +566,7 @@ new_objtree_for_type(Oid typeId, int32 typmod)
 	append_string_object(typeParam, "schemaname", typnsp);
 	append_string_object(typeParam, "typename", typename);
 	append_string_object(typeParam, "typmod", typmodstr);
-	append_bool_object(typeParam, "is_array", is_array);
+	append_bool_object(typeParam, "typarray", typarray);
 
 	return typeParam;
 }

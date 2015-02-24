@@ -335,14 +335,14 @@ expand_jsonval_typename(StringInfo buf, JsonbValue *jsonval)
 	typmodstr = find_string_in_jsonbcontainer(jsonval->val.binary.data,
 											  "typmod", true, NULL);
 	is_array = find_bool_in_jsonbcontainer(jsonval->val.binary.data,
-										   "is_array");
+										   "typarray");
 	switch (is_array)
 	{
 		default:
 		case tv_absent:
 			ereport(ERROR,
 					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-					 errmsg("missing is_array element")));
+					 errmsg("missing typarray element")));
 			break;
 		case tv_true:
 			array_decor = "[]";

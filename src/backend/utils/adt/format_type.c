@@ -332,25 +332,21 @@ format_type_internal(Oid type_oid, int32 typemod,
  *
  * - nspid is the schema OID.  For certain SQL-standard types which have weird
  *   typmod rules, we return InvalidOid; caller is expected to not schema-
- *   qualify the name nor add quotes to the type name.
+ *   qualify the name nor add quotes to the type name in this case.
  *
  * - typename is set to the type name, without quotes
  *
  * - typmod is set to the typemod, if any, as a string with parens
  *
- * - is_array indicates whether []s must be added
+ * - typarray indicates whether []s must be added
  *
- * Also, we don't try to decode type names to their standard-mandated names,
- * except in the cases of unusual typmod rules, as specified above.
- *
- * XXX there is a lot of code duplication between this routine and
- * format_type_internal.  (One thing that doesn't quite match is the whole
- * allow_invalid business.)
+ * We don't try to decode type names to their standard-mandated names, except
+ * in the cases of types with unusual typmod rules.
  */
 void
 format_type_detailed(Oid type_oid, int32 typemod,
 					 Oid *nspid, char **typname, char **typemodstr,
-					 bool *is_array)
+					 bool *typarray)
 {
 	HeapTuple	tuple;
 	Form_pg_type typeform;
@@ -369,14 +365,22 @@ format_type_detailed(Oid type_oid, int32 typemod,
 		type_oid == TIMESTAMPOID ||
 		type_oid == TIMESTAMPTZOID)
 	{
+		*typarray = false;
+
+peculiar_typmod:
 		switch (type_oid)
 		{
 			case INTERVALOID:
 				*typname = pstrdup("INTERVAL");
 				break;
-			case TIMESTAMPOID:
 			case TIMESTAMPTZOID:
-				/* the TZ part is added by typmod */
+				if (typemod < 0)
+				{
+					*typname = pstrdup("TIMESTAMP WITH TIME ZONE");
+					break;
+				}
+				/* otherwise, WITH TZ is added by typmod, so fall through */
+			case TIMESTAMPOID:
 				*typname = pstrdup("TIMESTAMP");
 				break;
 		}
@@ -386,8 +390,6 @@ format_type_detailed(Oid type_oid, int32 typemod,
 			*typemodstr = printTypmod(NULL, typemod, typeform->typmodout);
 		else
 			*typemodstr = pstrdup("");
-
-		*is_array = false;
 
 		ReleaseSysCache(tuple);
 		return;
@@ -410,10 +412,20 @@ format_type_detailed(Oid type_oid, int32 typemod,
 
 		typeform = (Form_pg_type) GETSTRUCT(tuple);
 		type_oid = array_base_type;
-		*is_array = true;
+		*typarray = true;
+
+		/*
+		 * If it's an array of one of the types with special typmod rules,
+		 * have the element type be processed as above, but now with typarray
+		 * set to true.
+		 */
+		if (type_oid == INTERVALOID ||
+			type_oid == TIMESTAMPTZOID ||
+			type_oid == TIMESTAMPOID)
+			goto peculiar_typmod;
 	}
 	else
-		*is_array = false;
+		*typarray = false;
 
 	*nspid = typeform->typnamespace;
 	*typname = pstrdup(NameStr(typeform->typname));
