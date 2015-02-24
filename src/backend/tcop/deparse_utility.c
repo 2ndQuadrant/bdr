@@ -4742,7 +4742,7 @@ deparse_CreateOpFamily(Oid objectId, Node *parsetree)
 			 opfForm->opfmethod);
 	amForm = (Form_pg_am) GETSTRUCT(amTup);
 
-	copfStmt = new_objtree_VA("CREATE OPERATOR FAMILY %{identity}D USING %{amname}s",
+	copfStmt = new_objtree_VA("CREATE OPERATOR FAMILY %{identity}D USING %{amname}I",
 							  0);
 
 	tmp = new_objtree_for_qualname(opfForm->opfnamespace,
