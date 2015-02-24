@@ -3531,39 +3531,28 @@ deparse_RenameStmt(Oid objectId, Node *parsetree)
 		case OBJECT_AGGREGATE:
 		case OBJECT_FUNCTION:
 			{
-				char	   *newident;
-				ObjectAddress objaddr;
-				const char	   *quoted_newname;
-				StringInfoData old_ident;
-				char	   *start;
+				char	*ident;
+				HeapTuple proctup;
+				Form_pg_proc procform;
 
-				/*
-				 * Generating a function/aggregate identity is altogether too
-				 * messy, so instead of doing it ourselves, we generate one for
-				 * the renamed object, then strip out the name and replace it
-				 * with the original name from the parse node.  This is so ugly
-				 * that we don't dare do it for any other object kind.
-				 */
+				proctup = SearchSysCache1(PROCOID, ObjectIdGetDatum(objectId));
+				if (!HeapTupleIsValid(proctup))
+					elog(ERROR, "cache lookup failed for procedure %u",
+						 objectId);
+				procform = (Form_pg_proc) GETSTRUCT(proctup);
 
-				objaddr.classId = get_objtype_catalog_oid(node->renameType);
-				objaddr.objectId = objectId;
-				objaddr.objectSubId = 0;
-				newident = getObjectIdentity(&objaddr);
-
-				quoted_newname = quote_identifier(node->newname);
-				start = strstr(newident, quoted_newname);
-				if (!start)
-					elog(ERROR, "could not find %s in %s", start, newident);
-				initStringInfo(&old_ident);
-				appendBinaryStringInfo(&old_ident, newident, start - newident);
-				appendStringInfoString(&old_ident,
-									   quote_identifier(strVal(llast(node->object))));
-				appendStringInfoString(&old_ident, start + strlen(quoted_newname));
+				/* XXX does this work for ordered-set aggregates? */
+				ident = psprintf("%s%s",
+								 quote_qualified_identifier(get_namespace_name(procform->pronamespace),
+															NameStr(procform->proname)),
+								 format_procedure_args(objectId, true));
 
 				fmtstr = psprintf("ALTER %s %%{identity}s RENAME TO %%{newname}I",
 								  stringify_objtype(node->renameType));
 				renameStmt = new_objtree_VA(fmtstr, 1,
-											"identity", ObjTypeString, old_ident.data);
+											"identity", ObjTypeString, ident);
+
+				ReleaseSysCache(proctup);
 			}
 			break;
 
