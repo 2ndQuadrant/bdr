@@ -4402,6 +4402,31 @@ deparse_AlterOwnerStmt(Oid objectId, Node *parsetree)
 }
 
 /*
+ * Append a NULL-or-quoted-literal clause.  Useful for COMMENT and SECURITY
+ * LABEL.
+ */
+static void
+append_literal_or_null(ObjTree *mainobj, char *elemname, char *value)
+{
+	ObjTree	*top;
+	ObjTree *part;
+
+	top = new_objtree_VA("%{null}s%{literal}s", 0);
+	part = new_objtree_VA("NULL", 1,
+						  "present", ObjTypeBool,
+						  !value);
+	append_object_object(top, "null", part);
+	part = new_objtree_VA("%{value}L", 1,
+						  "present", ObjTypeBool,
+						  !!value);
+	if (value)
+		append_string_object(part, "value", value);
+
+	append_object_object(mainobj, elemname, top);
+}
+
+
+/*
  * Deparse a CommentStmt when it pertains to a constraint.
  */
 static ObjTree *
@@ -4416,35 +4441,24 @@ deparse_CommentOnConstraintSmt(Oid objectId, Node *parsetree)
 
 	Assert(node->objtype == OBJECT_TABCONSTRAINT || node->objtype == OBJECT_DOMCONSTRAINT);
 
-	if (node->comment)
-		fmt = psprintf("COMMENT ON CONSTRAINT %%{identity}s ON %s%%{parentobj}s IS %%{comment}L",
-					   node->objtype == OBJECT_TABCONSTRAINT ? "" : "DOMAIN ");
-	else
-		fmt = psprintf("COMMENT ON CONSTRAINT %%{identity}s ON %s%%{parentobj}s IS NULL",
-					   node->objtype == OBJECT_TABCONSTRAINT ? "" : "DOMAIN ");
-	comment = new_objtree_VA(fmt, 0);
-	if (node->comment)
-		append_string_object(comment, "comment", node->comment);
-
 	constrTup = SearchSysCache1(CONSTROID, objectId);
 	if (!HeapTupleIsValid(constrTup))
 		elog(ERROR, "cache lookup failed for constraint %u", objectId);
 	constrForm = (Form_pg_constraint) GETSTRUCT(constrTup);
 
-	append_string_object(comment, "identity", pstrdup(NameStr(constrForm->conname)));
-
 	if (OidIsValid(constrForm->conrelid))
-	{
-		addr.classId = RelationRelationId;
-		addr.objectId = constrForm->conrelid;
-		addr.objectSubId = 0;
-	}
+		ObjectAddressSet(addr, RelationRelationId, constrForm->conrelid);
 	else
-	{
-		addr.classId = TypeRelationId;
-		addr.objectId = constrForm->contypid;
-		addr.objectSubId = 0;
-	}
+		ObjectAddressSet(addr, TypeRelationId, constrForm->contypid);
+
+	fmt = psprintf("COMMENT ON CONSTRAINT %%{identity}s ON %s%%{parentobj}s IS %%{comment}s",
+				   node->objtype == OBJECT_TABCONSTRAINT ? "" : "DOMAIN ");
+	comment = new_objtree_VA(fmt, 0);
+
+	/* Add the comment clause */
+	append_literal_or_null(comment, "comment", node->comment);
+
+	append_string_object(comment, "identity", pstrdup(NameStr(constrForm->conname)));
 
 	append_string_object(comment, "parentobj",
 						 getObjectIdentity(&addr));
@@ -4472,17 +4486,14 @@ deparse_CommentStmt(ObjectAddress address, Node *parsetree)
 		return deparse_CommentOnConstraintSmt(address.objectId, parsetree);
 	}
 
-	if (node->comment)
-		fmt = psprintf("COMMENT ON %s %%{identity}s IS %%{comment}L",
-					   stringify_objtype(node->objtype));
-	else
-		fmt = psprintf("COMMENT ON %s %%{identity}s IS NULL",
-					   stringify_objtype(node->objtype));
-
+	fmt = psprintf("COMMENT ON %s %%{identity}s IS %%{comment}s",
+				   stringify_objtype(node->objtype));
 	comment = new_objtree_VA(fmt, 0);
-	if (node->comment)
-		append_string_object(comment, "comment", node->comment);
 
+	/* Add the comment clause; can be either NULL or a quoted literal.  */
+	append_literal_or_null(comment, "comment", node->comment);
+
+	/* Add the object identity clause */
 	append_string_object(comment, "identity",
 						 getObjectIdentity(&address));
 
