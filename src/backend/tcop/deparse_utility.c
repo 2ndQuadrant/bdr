@@ -4594,23 +4594,17 @@ deparse_SecLabelStmt(ObjectAddress address, Node *parsetree)
 
 	Assert(node->provider);
 
-	if (node->label)
-	{
-		fmt = psprintf("SECURITY LABEL FOR %%{provider}s ON %s %%{identity}s IS %%{label}L",
+	fmt = psprintf("SECURITY LABEL FOR %%{provider}s ON %s %%{identity}s IS %%{label}s",
 				   stringify_objtype(node->objtype));
-		label = new_objtree_VA(fmt, 0);
+	label = new_objtree_VA(fmt, 0);
 
-		append_string_object(label, "label", node->label);
-	}
-	else
-	{
-		fmt = psprintf("SECURITY LABEL FOR %%{provider}s ON %s %%{identity}s IS NULL",
-				   stringify_objtype(node->objtype));
-		label = new_objtree_VA(fmt, 0);
-	}
+	/* Add the label clause; can be either NULL or a quoted literal. */
+	append_literal_or_null(label, "label", node->label);
 
+	/* Add the security provider clause */
 	append_string_object(label, "provider", node->provider);
 
+	/* Add the object identity clause */
 	append_string_object(label, "identity",
 						 getObjectIdentity(&address));
 
