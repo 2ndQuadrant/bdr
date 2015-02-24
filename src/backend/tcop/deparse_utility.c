@@ -4386,10 +4386,10 @@ deparse_AlterOwnerStmt(Oid objectId, Node *parsetree)
 	ObjectAddress addr;
 	char	   *fmt;
 
-	fmt = psprintf("ALTER %s %%{identity}s OWNER TO %%{newname}I",
+	fmt = psprintf("ALTER %s %%{identity}s OWNER TO %%{newowner}I",
 				   stringify_objtype(node->objectType));
 	ownerStmt = new_objtree_VA(fmt, 0);
-	append_string_object(ownerStmt, "newname", node->newowner);
+	append_string_object(ownerStmt, "newowner", node->newowner);
 
 	addr.classId = get_objtype_catalog_oid(node->objectType);
 	addr.objectId = objectId;
