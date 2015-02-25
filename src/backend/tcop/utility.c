@@ -889,8 +889,6 @@ ProcessUtilitySlow(Node *parsetree,
 	bool		isCompleteQuery = (context <= PROCESS_UTILITY_QUERY);
 	bool		needCleanup;
 	bool		commandStashed = false;
-	ObjectType	objectType;
-	Oid			objectId = InvalidOid;
 	ObjectAddress address;
 	Oid			secondaryOid = InvalidOid;
 
@@ -942,7 +940,7 @@ ProcessUtilitySlow(Node *parsetree,
 							/* Create the table itself */
 							address = DefineRelation((CreateStmt *) stmt,
 													  RELKIND_RELATION,
-													  InvalidOid);
+													  InvalidOid, NULL);
 							EventTriggerStashCommand(address, InvalidOid,
 													 stmt);
 
@@ -974,7 +972,7 @@ ProcessUtilitySlow(Node *parsetree,
 							/* Create the table itself */
 							address = DefineRelation((CreateStmt *) stmt,
 													 RELKIND_FOREIGN_TABLE,
-													 InvalidOid);
+													 InvalidOid, NULL);
 							CreateForeignTable((CreateForeignTableStmt *) stmt,
 											   address.objectId);
 							EventTriggerStashCommand(address, InvalidOid, stmt);
@@ -1147,48 +1145,47 @@ ProcessUtilitySlow(Node *parsetree,
 				{
 					DefineStmt *stmt = (DefineStmt *) parsetree;
 
-					objectType = stmt->kind;
 					switch (stmt->kind)
 					{
 						case OBJECT_AGGREGATE:
-							objectId =
+							address =
 								DefineAggregate(stmt->defnames, stmt->args,
 												stmt->oldstyle,
 												stmt->definition, queryString);
 							break;
 						case OBJECT_OPERATOR:
 							Assert(stmt->args == NIL);
-							objectId = DefineOperator(stmt->defnames,
+							address = DefineOperator(stmt->defnames,
 													  stmt->definition);
 							break;
 						case OBJECT_TYPE:
 							Assert(stmt->args == NIL);
-							objectId = DefineType(stmt->defnames,
+							address = DefineType(stmt->defnames,
 												  stmt->definition);
 							break;
 						case OBJECT_TSPARSER:
 							Assert(stmt->args == NIL);
-							objectId = DefineTSParser(stmt->defnames,
+							address = DefineTSParser(stmt->defnames,
 													  stmt->definition);
 							break;
 						case OBJECT_TSDICTIONARY:
 							Assert(stmt->args == NIL);
-							objectId = DefineTSDictionary(stmt->defnames,
+							address = DefineTSDictionary(stmt->defnames,
 														  stmt->definition);
 							break;
 						case OBJECT_TSTEMPLATE:
 							Assert(stmt->args == NIL);
-							objectId = DefineTSTemplate(stmt->defnames,
+							address = DefineTSTemplate(stmt->defnames,
 														stmt->definition);
 							break;
 						case OBJECT_TSCONFIGURATION:
 							Assert(stmt->args == NIL);
-							objectId = DefineTSConfiguration(stmt->defnames,
+							address = DefineTSConfiguration(stmt->defnames,
 															 stmt->definition);
 							break;
 						case OBJECT_COLLATION:
 							Assert(stmt->args == NIL);
-							objectId = DefineCollation(stmt->defnames,
+							address = DefineCollation(stmt->defnames,
 													   stmt->definition);
 							break;
 						default:
@@ -1252,49 +1249,40 @@ ProcessUtilitySlow(Node *parsetree,
 				break;
 
 			case T_CreateExtensionStmt:
-				objectId = CreateExtension((CreateExtensionStmt *) parsetree);
-				objectType = OBJECT_EXTENSION;
+				address = CreateExtension((CreateExtensionStmt *) parsetree);
 				break;
 
 			case T_AlterExtensionStmt:
-				objectId = ExecAlterExtensionStmt((AlterExtensionStmt *) parsetree);
-				objectType = OBJECT_EXTENSION;
+				address = ExecAlterExtensionStmt((AlterExtensionStmt *) parsetree);
 				break;
 
 			case T_AlterExtensionContentsStmt:
-				objectId = ExecAlterExtensionContentsStmt((AlterExtensionContentsStmt *) parsetree,
+				address = ExecAlterExtensionContentsStmt((AlterExtensionContentsStmt *) parsetree,
 														  &secondaryOid);
-				objectType = OBJECT_EXTENSION;
 				break;
 
 			case T_CreateFdwStmt:
-				objectId = CreateForeignDataWrapper((CreateFdwStmt *) parsetree);
-				objectType = OBJECT_FDW;
+				address = CreateForeignDataWrapper((CreateFdwStmt *) parsetree);
 				break;
 
 			case T_AlterFdwStmt:
-				objectId = AlterForeignDataWrapper((AlterFdwStmt *) parsetree);
-				objectType = OBJECT_FDW;
+				address = AlterForeignDataWrapper((AlterFdwStmt *) parsetree);
 				break;
 
 			case T_CreateForeignServerStmt:
-				objectId = CreateForeignServer((CreateForeignServerStmt *) parsetree);
-				objectType = OBJECT_FOREIGN_SERVER;
+				address = CreateForeignServer((CreateForeignServerStmt *) parsetree);
 				break;
 
 			case T_AlterForeignServerStmt:
-				objectId = AlterForeignServer((AlterForeignServerStmt *) parsetree);
-				objectType = OBJECT_FOREIGN_SERVER;
+				address = AlterForeignServer((AlterForeignServerStmt *) parsetree);
 				break;
 
 			case T_CreateUserMappingStmt:
-				objectId = CreateUserMapping((CreateUserMappingStmt *) parsetree);
-				objectType = OBJECT_USER_MAPPING;
+				address = CreateUserMapping((CreateUserMappingStmt *) parsetree);
 				break;
 
 			case T_AlterUserMappingStmt:
-				objectId = AlterUserMapping((AlterUserMappingStmt *) parsetree);
-				objectType = OBJECT_USER_MAPPING;
+				address = AlterUserMapping((AlterUserMappingStmt *) parsetree);
 				break;
 
 			case T_DropUserMappingStmt:
@@ -1313,25 +1301,21 @@ ProcessUtilitySlow(Node *parsetree,
 				{
 					CompositeTypeStmt *stmt = (CompositeTypeStmt *) parsetree;
 
-					objectId = DefineCompositeType(stmt->typevar,
-												   stmt->coldeflist);
-					objectType = OBJECT_COMPOSITE;
+					address = DefineCompositeType(stmt->typevar,
+												  stmt->coldeflist);
 				}
 				break;
 
 			case T_CreateEnumStmt:		/* CREATE TYPE AS ENUM */
-				objectId = DefineEnum((CreateEnumStmt *) parsetree);
-				objectType = OBJECT_TYPE;
+				address = DefineEnum((CreateEnumStmt *) parsetree);
 				break;
 
 			case T_CreateRangeStmt:		/* CREATE TYPE AS RANGE */
-				objectId = DefineRange((CreateRangeStmt *) parsetree);
-				objectType = OBJECT_TYPE;
+				address = DefineRange((CreateRangeStmt *) parsetree);
 				break;
 
 			case T_AlterEnumStmt:		/* ALTER TYPE (enum) */
-				objectId = AlterEnum((AlterEnumStmt *) parsetree, isTopLevel);
-				objectType = OBJECT_TYPE;
+				address = AlterEnum((AlterEnumStmt *) parsetree, isTopLevel);
 				break;
 
 			case T_ViewStmt:	/* CREATE VIEW */
@@ -1344,18 +1328,15 @@ ProcessUtilitySlow(Node *parsetree,
 				break;
 
 			case T_CreateFunctionStmt:	/* CREATE FUNCTION */
-				objectId = CreateFunction((CreateFunctionStmt *) parsetree, queryString);
-				objectType = OBJECT_FUNCTION;
+				address = CreateFunction((CreateFunctionStmt *) parsetree, queryString);
 				break;
 
 			case T_AlterFunctionStmt:	/* ALTER FUNCTION */
-				objectId = AlterFunction((AlterFunctionStmt *) parsetree);
-				objectType = OBJECT_FUNCTION;
+				address = AlterFunction((AlterFunctionStmt *) parsetree);
 				break;
 
 			case T_RuleStmt:	/* CREATE RULE */
-				objectId = DefineRule((RuleStmt *) parsetree, queryString);
-				objectType = OBJECT_RULE;
+				address = DefineRule((RuleStmt *) parsetree, queryString);
 				break;
 
 			case T_CreateSeqStmt:
@@ -1363,72 +1344,61 @@ ProcessUtilitySlow(Node *parsetree,
 				break;
 
 			case T_AlterSeqStmt:
-				objectId = AlterSequence((AlterSeqStmt *) parsetree);
-				objectType = OBJECT_SEQUENCE;
+				address = AlterSequence((AlterSeqStmt *) parsetree);
 				break;
 
 			case T_CreateTableAsStmt:
-				objectId = ExecCreateTableAs((CreateTableAsStmt *) parsetree,
+				address = ExecCreateTableAs((CreateTableAsStmt *) parsetree,
 								  queryString, params, completionTag);
-				objectType = OBJECT_TABLE;
 				break;
 
 			case T_RefreshMatViewStmt:
-				objectId = ExecRefreshMatView((RefreshMatViewStmt *) parsetree,
+				address = ExecRefreshMatView((RefreshMatViewStmt *) parsetree,
 								   queryString, params, completionTag);
-				objectType = OBJECT_MATVIEW;
 				break;
 
 			case T_CreateTrigStmt:
-				objectId = CreateTrigger((CreateTrigStmt *) parsetree,
+				address = CreateTrigger((CreateTrigStmt *) parsetree,
 										 queryString, InvalidOid, InvalidOid,
 										 InvalidOid, InvalidOid, false);
-				objectType = OBJECT_TRIGGER;
 				break;
 
 			case T_CreatePLangStmt:
-				objectId = CreateProceduralLanguage((CreatePLangStmt *) parsetree);
-				objectType = OBJECT_LANGUAGE;
+				address = CreateProceduralLanguage((CreatePLangStmt *) parsetree);
 				break;
 
 			case T_CreateDomainStmt:
-				objectId = DefineDomain((CreateDomainStmt *) parsetree);
-				objectType = OBJECT_DOMAIN;
+				address = DefineDomain((CreateDomainStmt *) parsetree);
 				break;
 
 			case T_CreateConversionStmt:
-				objectId = CreateConversionCommand((CreateConversionStmt *) parsetree);
-				objectType = OBJECT_CONVERSION;
+				address = CreateConversionCommand((CreateConversionStmt *) parsetree);
 				break;
 
 			case T_CreateCastStmt:
-				objectId = CreateCast((CreateCastStmt *) parsetree);
-				objectType = OBJECT_CAST;
+				address = CreateCast((CreateCastStmt *) parsetree);
 				break;
 
 			case T_CreateOpClassStmt:
-				objectId = DefineOpClass((CreateOpClassStmt *) parsetree);
-				objectType = OBJECT_OPCLASS;
+				address = DefineOpClass((CreateOpClassStmt *) parsetree);
 				break;
 
 			case T_CreateOpFamilyStmt:
-				objectId = DefineOpFamily((CreateOpFamilyStmt *) parsetree);
-				objectType = OBJECT_OPFAMILY;
+				address = DefineOpFamily((CreateOpFamilyStmt *) parsetree);
 				break;
 
 			case T_AlterOpFamilyStmt:
-				objectId = AlterOpFamily((AlterOpFamilyStmt *) parsetree);
-				objectType = OBJECT_OPFAMILY;
+				AlterOpFamily((AlterOpFamilyStmt *) parsetree);
+				/* commands are stashed in AlterOpFamily */ /* FIXME a lie actually */
+				commandStashed = true;
 				break;
 
 			case T_AlterTSDictionaryStmt:
-				objectId = AlterTSDictionary((AlterTSDictionaryStmt *) parsetree);
-				objectType = OBJECT_TSDICTIONARY;
+				address = AlterTSDictionary((AlterTSDictionaryStmt *) parsetree);
 				break;
 
 			case T_AlterTSConfigurationStmt:
-				objectId = AlterTSConfiguration((AlterTSConfigurationStmt *) parsetree);
-				objectType = OBJECT_TSCONFIGURATION;
+				address = AlterTSConfiguration((AlterTSConfigurationStmt *) parsetree);
 				break;
 
 			case T_AlterTableMoveAllStmt:
@@ -1448,14 +1418,12 @@ ProcessUtilitySlow(Node *parsetree,
 				break;
 
 			case T_AlterObjectSchemaStmt:
-				objectId = ExecAlterObjectSchemaStmt((AlterObjectSchemaStmt *) parsetree,
+				address = ExecAlterObjectSchemaStmt((AlterObjectSchemaStmt *) parsetree,
 													 &secondaryOid);
-				objectType = ((AlterObjectSchemaStmt *) parsetree)->objectType;
 				break;
 
 			case T_AlterOwnerStmt:
-				objectId = ExecAlterOwnerStmt((AlterOwnerStmt *) parsetree);
-				objectType = ((AlterOwnerStmt *) parsetree)->objectType;
+				address = ExecAlterOwnerStmt((AlterOwnerStmt *) parsetree);
 				break;
 
 			case T_CommentStmt:
@@ -1480,18 +1448,15 @@ ProcessUtilitySlow(Node *parsetree,
 				break;
 
 			case T_CreatePolicyStmt:	/* CREATE POLICY */
-				objectId = CreatePolicy((CreatePolicyStmt *) parsetree);
-				objectType = OBJECT_POLICY;
+				address = CreatePolicy((CreatePolicyStmt *) parsetree);
 				break;
 
 			case T_AlterPolicyStmt:		/* ALTER POLICY */
-				objectId = AlterPolicy((AlterPolicyStmt *) parsetree);
-				objectType = OBJECT_POLICY;
+				address = AlterPolicy((AlterPolicyStmt *) parsetree);
 				break;
 
 			case T_SecLabelStmt:
-				objectId = ExecSecLabelStmt((SecLabelStmt *) parsetree);
-				objectType = ((SecLabelStmt *) parsetree)->objtype;
+				address = ExecSecLabelStmt((SecLabelStmt *) parsetree);
 				break;
 
 			default:
@@ -1505,16 +1470,7 @@ ProcessUtilitySlow(Node *parsetree,
 		 * access to it.
 		 */
 		if (!commandStashed)
-		{
-			if (objectId != InvalidOid)
-			{
-				address.classId = get_objtype_catalog_oid(objectType);
-				address.objectId = objectId;
-				address.objectSubId = 0;
-			}
-
 			EventTriggerStashCommand(address, secondaryOid, parsetree);
-		}
 
 		if (isCompleteQuery)
 		{
