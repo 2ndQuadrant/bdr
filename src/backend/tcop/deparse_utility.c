@@ -4376,11 +4376,10 @@ deparse_AlterObjectSchemaStmt(ObjectAddress address, Node *parsetree, Oid oldsch
 }
 
 static ObjTree *
-deparse_AlterOwnerStmt(Oid objectId, Node *parsetree)
+deparse_AlterOwnerStmt(ObjectAddress address, Node *parsetree)
 {
 	AlterOwnerStmt *node = (AlterOwnerStmt *) parsetree;
 	ObjTree	   *ownerStmt;
-	ObjectAddress addr;
 	char	   *fmt;
 
 	fmt = psprintf("ALTER %s %%{identity}s OWNER TO %%{newowner}I",
@@ -4388,12 +4387,8 @@ deparse_AlterOwnerStmt(Oid objectId, Node *parsetree)
 	ownerStmt = new_objtree_VA(fmt, 0);
 	append_string_object(ownerStmt, "newowner", node->newowner);
 
-	addr.classId = get_objtype_catalog_oid(node->objectType);
-	addr.objectId = objectId;
-	addr.objectSubId = 0;
-
 	append_string_object(ownerStmt, "identity",
-						 getObjectIdentity(&addr));
+						 getObjectIdentity(&address));
 
 	return ownerStmt;
 }
@@ -5727,7 +5722,7 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_AlterOwnerStmt:
-			command = deparse_AlterOwnerStmt(objectId, parsetree);
+			command = deparse_AlterOwnerStmt(cmd->d.simple.address, parsetree);
 			break;
 
 		case T_CommentStmt:
