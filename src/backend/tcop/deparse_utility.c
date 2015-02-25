@@ -1588,7 +1588,8 @@ deparse_CreateExtensionStmt(Oid objectId, Node *parsetree)
 }
 
 static ObjTree *
-deparse_AlterDomainStmt(Oid objectId, Node *parsetree, Oid secondaryOid)
+deparse_AlterDomainStmt(Oid objectId, Node *parsetree,
+						ObjectAddress constraintAddr)
 {
 	AlterDomainStmt *node = (AlterDomainStmt *) parsetree;
 	HeapTuple	domTup;
@@ -1651,10 +1652,11 @@ deparse_AlterDomainStmt(Oid objectId, Node *parsetree, Oid secondaryOid)
 	if (node->subtype == 'C')
 	{
 		append_string_object(alterDom, "definition",
-							 pg_get_constraintdef_string(secondaryOid, false));
+							 pg_get_constraintdef_string(constraintAddr.objectId,
+														 false));
 		/* can't rely on node->name here; might not be defined */
 		append_string_object(alterDom, "constraint_name",
-							 get_constraint_name(secondaryOid));
+							 get_constraint_name(constraintAddr.objectId));
 	}
 
 	/* ... and setting a default has a definition only. */
@@ -1668,25 +1670,22 @@ deparse_AlterDomainStmt(Oid objectId, Node *parsetree, Oid secondaryOid)
 }
 
 static ObjTree *
-deparse_AlterExtensionContentsStmt(Oid objectId, Node *parsetree, Oid secondaryOid)
+deparse_AlterExtensionContentsStmt(Oid objectId, Node *parsetree,
+								   ObjectAddress objectAddress)
 {
 	AlterExtensionContentsStmt *node = (AlterExtensionContentsStmt *) parsetree;
 	ObjTree	   *stmt;
 	char	   *fmt;
-	ObjectAddress addr;
 
 	Assert(node->action == +1 || node->action == -1);
 
 	fmt = psprintf("ALTER EXTENSION %%{extidentity}I %s %s %%{objidentity}s",
 				   node->action == +1 ? "ADD" : "DROP",
 				   stringify_objtype(node->objtype));
-	addr.classId = get_objtype_catalog_oid(node->objtype);
-	addr.objectId = secondaryOid;
-	addr.objectSubId = 0;
 
 	stmt = new_objtree_VA(fmt, 2, "extidentity", ObjTypeString, node->extname,
 						  "objidentity", ObjTypeString,
-						  getObjectIdentity(&addr));
+						  getObjectIdentity(&objectAddress));
 
 	return stmt;
 }
@@ -4337,7 +4336,8 @@ deparse_AlterEnumStmt(Oid objectId, Node *parsetree)
 }
 
 static ObjTree *
-deparse_AlterObjectSchemaStmt(ObjectAddress address, Node *parsetree, Oid oldschema)
+deparse_AlterObjectSchemaStmt(ObjectAddress address, Node *parsetree,
+							  ObjectAddress oldschema)
 {
 	AlterObjectSchemaStmt *node = (AlterObjectSchemaStmt *) parsetree;
 	ObjTree	   *alterStmt;
@@ -4364,9 +4364,9 @@ deparse_AlterObjectSchemaStmt(ObjectAddress address, Node *parsetree, Oid oldsch
 	 * XXX This is pretty clunky. Can we do better?
 	 */
 	identity = getObjectIdentity(&address);
-	oldschname = get_namespace_name(oldschema);
+	oldschname = get_namespace_name(oldschema.objectId);
 	if (!oldschname)
-		elog(ERROR, "cache lookup failed for schema with OID %u", oldschema);
+		elog(ERROR, "cache lookup failed for schema with OID %u", oldschema.objectId);
 	ident = psprintf("%s%s",
 					 quote_identifier(oldschname),
 					 identity + strlen(quote_identifier(newschema)));
@@ -5559,7 +5559,7 @@ deparse_simple_command(StashedCommand *cmd)
 
 		case T_AlterDomainStmt:
 			command = deparse_AlterDomainStmt(objectId, parsetree,
-											  cmd->d.simple.secondaryOid);
+											  cmd->d.simple.secondaryObject);
 			break;
 
 			/* other local objects */
@@ -5581,7 +5581,7 @@ deparse_simple_command(StashedCommand *cmd)
 
 		case T_AlterExtensionContentsStmt:
 			command = deparse_AlterExtensionContentsStmt(objectId, parsetree,
-														 cmd->d.simple.secondaryOid);
+														 cmd->d.simple.secondaryObject);
 			break;
 
 		case T_CreateFdwStmt:
@@ -5718,7 +5718,7 @@ deparse_simple_command(StashedCommand *cmd)
 		case T_AlterObjectSchemaStmt:
 			command = deparse_AlterObjectSchemaStmt(cmd->d.simple.address,
 													parsetree,
-													cmd->d.simple.secondaryOid);
+													cmd->d.simple.secondaryObject);
 			break;
 
 		case T_AlterOwnerStmt:

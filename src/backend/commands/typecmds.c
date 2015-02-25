@@ -108,7 +108,7 @@ static void checkEnumOwner(HeapTuple tup);
 static char *domainAddConstraint(Oid domainOid, Oid domainNamespace,
 					Oid baseTypeOid,
 					int typMod, Constraint *constr,
-					char *domainName, Oid *constrOid);
+					char *domainName, ObjectAddress *constrAddr);
 
 
 /*
@@ -2483,7 +2483,8 @@ AlterDomainDropConstraint(List *names, const char *constrName,
  * Implements the ALTER DOMAIN .. ADD CONSTRAINT statement.
  */
 ObjectAddress
-AlterDomainAddConstraint(List *names, Node *newConstraint, Oid *constrOid)
+AlterDomainAddConstraint(List *names, Node *newConstraint,
+						 ObjectAddress *constrAddr)
 {
 	TypeName   *typename;
 	Oid			domainoid;
@@ -2568,7 +2569,7 @@ AlterDomainAddConstraint(List *names, Node *newConstraint, Oid *constrOid)
 
 	ccbin = domainAddConstraint(domainoid, typTup->typnamespace,
 								typTup->typbasetype, typTup->typtypmod,
-								constr, NameStr(typTup->typname), constrOid);
+								constr, NameStr(typTup->typname), constrAddr);
 
 	/*
 	 * If requested to validate the constraint, test all values stored in the
@@ -2991,7 +2992,7 @@ checkDomainOwner(HeapTuple tup)
 static char *
 domainAddConstraint(Oid domainOid, Oid domainNamespace, Oid baseTypeOid,
 					int typMod, Constraint *constr,
-					char *domainName, Oid *constrOid)
+					char *domainName, ObjectAddress *constrAddr)
 {
 	Node	   *expr;
 	char	   *ccsrc;
@@ -3106,8 +3107,8 @@ domainAddConstraint(Oid domainOid, Oid domainNamespace, Oid baseTypeOid,
 							  0,	/* inhcount */
 							  false,	/* connoinherit */
 							  false);		/* is_internal */
-	if (constrOid)
-		*constrOid = ccoid;
+	if (constrAddr)
+		ObjectAddressSet(*constrAddr, ConstraintRelationId, ccoid);
 
 	/*
 	 * Return the compiled constraint expression so the calling routine can

@@ -2891,9 +2891,13 @@ ApplyExtensionUpdates(Oid extensionOid,
 
 /*
  * Execute ALTER EXTENSION ADD/DROP
+ *
+ * Return value is the address of the altered extension; objAddr, if not NULL,
+ * is set to the address of the added/dropped object.
  */
 ObjectAddress
-ExecAlterExtensionContentsStmt(AlterExtensionContentsStmt *stmt, Oid *objectId)
+ExecAlterExtensionContentsStmt(AlterExtensionContentsStmt *stmt,
+							   ObjectAddress *objAddr)
 {
 	ObjectAddress extension;
 	ObjectAddress object;
@@ -2919,8 +2923,8 @@ ExecAlterExtensionContentsStmt(AlterExtensionContentsStmt *stmt, Oid *objectId)
 								&relation, ShareUpdateExclusiveLock, false);
 
 	Assert(object.objectSubId == 0);
-	if (objectId)
-		*objectId = object.objectId;
+	if (objAddr)
+		*objAddr = object;
 
 	/* Permission check: must own target object, too */
 	check_object_ownership(GetUserId(), stmt->objtype, object,

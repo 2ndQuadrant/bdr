@@ -40,7 +40,7 @@ extern ObjectAddress InsertExtensionTuple(const char *extName, Oid extOwner,
 extern ObjectAddress ExecAlterExtensionStmt(AlterExtensionStmt *stmt);
 
 extern ObjectAddress ExecAlterExtensionContentsStmt(AlterExtensionContentsStmt *stmt,
-							   Oid *objectId);
+							   ObjectAddress *objAddress);
 
 extern Oid	get_extension_oid(const char *extname, bool missing_ok);
 extern char *get_extension_name(Oid ext_oid);

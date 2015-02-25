@@ -890,7 +890,7 @@ ProcessUtilitySlow(Node *parsetree,
 	bool		needCleanup;
 	bool		commandStashed = false;
 	ObjectAddress address;
-	Oid			secondaryOid = InvalidOid;
+	ObjectAddress secondaryObject = InvalidObjectAddress;
 
 	/* All event trigger calls are done only when isCompleteQuery is true */
 	needCleanup = isCompleteQuery && EventTriggerBeginCompleteQuery();
@@ -941,8 +941,7 @@ ProcessUtilitySlow(Node *parsetree,
 							address = DefineRelation((CreateStmt *) stmt,
 													  RELKIND_RELATION,
 													  InvalidOid, NULL);
-							EventTriggerStashCommand(address, InvalidOid,
-													 stmt);
+							EventTriggerStashCommand(address, NULL, stmt);
 
 							/*
 							 * Let NewRelationCreateToastTable decide if this
@@ -975,7 +974,7 @@ ProcessUtilitySlow(Node *parsetree,
 													 InvalidOid, NULL);
 							CreateForeignTable((CreateForeignTableStmt *) stmt,
 											   address.objectId);
-							EventTriggerStashCommand(address, InvalidOid, stmt);
+							EventTriggerStashCommand(address, NULL, stmt);
 						}
 						else
 						{
@@ -1116,7 +1115,7 @@ ProcessUtilitySlow(Node *parsetree,
 							address =
 								AlterDomainAddConstraint(stmt->typeName,
 														 stmt->def,
-														 &secondaryOid);
+														 &secondaryObject);
 							break;
 						case 'X':		/* DROP CONSTRAINT */
 							address =
@@ -1241,8 +1240,7 @@ ProcessUtilitySlow(Node *parsetree,
 					 * there were any commands stashed in the ALTER TABLE code,
 					 * we need them to appear after this one.
 					 */
-					EventTriggerStashCommand(address,
-											 InvalidOid, parsetree);
+					EventTriggerStashCommand(address, NULL, parsetree);
 					commandStashed = true;
 					EventTriggerComplexCmdEnd();
 				}
@@ -1258,7 +1256,7 @@ ProcessUtilitySlow(Node *parsetree,
 
 			case T_AlterExtensionContentsStmt:
 				address = ExecAlterExtensionContentsStmt((AlterExtensionContentsStmt *) parsetree,
-														  &secondaryOid);
+														  &secondaryObject);
 				break;
 
 			case T_CreateFdwStmt:
@@ -1321,7 +1319,7 @@ ProcessUtilitySlow(Node *parsetree,
 			case T_ViewStmt:	/* CREATE VIEW */
 				EventTriggerComplexCmdStart(parsetree, OBJECT_VIEW);	/* XXX relkind? */
 				address = DefineView((ViewStmt *) parsetree, queryString);
-				EventTriggerStashCommand(address, InvalidOid, parsetree);
+				EventTriggerStashCommand(address, NULL, parsetree);
 				/* stashed internally */
 				commandStashed = true;
 				EventTriggerComplexCmdEnd();
@@ -1419,7 +1417,7 @@ ProcessUtilitySlow(Node *parsetree,
 
 			case T_AlterObjectSchemaStmt:
 				address = ExecAlterObjectSchemaStmt((AlterObjectSchemaStmt *) parsetree,
-													 &secondaryOid);
+													 &secondaryObject);
 				break;
 
 			case T_AlterOwnerStmt:
@@ -1470,7 +1468,7 @@ ProcessUtilitySlow(Node *parsetree,
 		 * access to it.
 		 */
 		if (!commandStashed)
-			EventTriggerStashCommand(address, secondaryOid, parsetree);
+			EventTriggerStashCommand(address, &secondaryObject, parsetree);
 
 		if (isCompleteQuery)
 		{
