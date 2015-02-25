@@ -2596,17 +2596,26 @@ deparse_CompositeTypeStmt(Oid objectId, Node *parsetree)
 {
 	CompositeTypeStmt *node = (CompositeTypeStmt *) parsetree;
 	ObjTree	   *composite;
-	Relation	typerel = relation_open(objectId, AccessShareLock);
+	HeapTuple	typtup;
+	Form_pg_type typform;
+	Relation	typerel;
 	List	   *dpcontext;
 	List	   *tableelts = NIL;
 
+	/* Find the pg_type entry and open the corresponding relation */
+	typtup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(objectId));
+	if (!HeapTupleIsValid(typtup))
+		elog(ERROR, "cache lookup failed for type %u", objectId);
+	typform = (Form_pg_type) GETSTRUCT(typtup);
+	typerel = relation_open(typform->typrelid, AccessShareLock);
+
 	dpcontext = deparse_context_for(RelationGetRelationName(typerel),
-									objectId);
+									RelationGetRelid(typerel));
 
 	composite = new_objtree_VA("CREATE TYPE %{identity}D AS (%{columns:, }s)",
 							   0);
 	append_object_object(composite, "identity",
-						 new_objtree_for_qualname_id(RelationRelationId,
+						 new_objtree_for_qualname_id(TypeRelationId,
 													 objectId));
 
 	tableelts = deparseTableElements(typerel, node->coldeflist, dpcontext,
@@ -2616,6 +2625,7 @@ deparse_CompositeTypeStmt(Oid objectId, Node *parsetree)
 	append_array_object(composite, "columns", tableelts);
 
 	heap_close(typerel, AccessShareLock);
+	ReleaseSysCache(typtup);
 
 	return composite;
 }
