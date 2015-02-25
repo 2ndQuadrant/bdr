@@ -1868,37 +1868,28 @@ pg_event_trigger_get_creation_commands(PG_FUNCTION_ARGS)
 			if (cmd->type == SCT_Simple ||
 				cmd->type == SCT_AlterTable)
 			{
-				Oid			classId;
-				Oid			objId;
-				uint32		objSubId;
 				const char *tag;
 				char	   *identity;
 				char	   *type;
 				char	   *schema = NULL;
 
 				if (cmd->type == SCT_Simple)
-				{
-					classId = cmd->d.simple.address.classId;
-					objId = cmd->d.simple.address.objectId;
-					objSubId = cmd->d.simple.address.objectSubId;
-				}
+					addr = cmd->d.simple.address;
 				else if (cmd->type == SCT_AlterTable)
-				{
-					classId = get_objtype_catalog_oid(cmd->d.alterTable.objtype);
-					objId = cmd->d.alterTable.objectId;
-					objSubId = 0;
-				}
+					ObjectAddressSet(addr,
+									 get_objtype_catalog_oid(cmd->d.alterTable.objtype),
+									 cmd->d.alterTable.objectId);
 
 				tag = CreateCommandTag(cmd->parsetree);
-				addr.classId = classId;
-				addr.objectId = objId;
-				addr.objectSubId = objSubId;
 
 				type = getObjectTypeDescription(&addr);
 				identity = getObjectIdentity(&addr);
 
 				/*
-				 * Obtain schema name, if any ("pg_temp" if a temp object)
+				 * Obtain schema name, if any ("pg_temp" if a temp object).  If
+				 * the object class is not in the supported list here, we
+				 * assume it's a schema-less object type, and thus "schema"
+				 * remains set to NULL.
 				 */
 				if (is_objectclass_supported(addr.classId))
 				{
