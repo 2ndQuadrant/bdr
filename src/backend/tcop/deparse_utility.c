@@ -4337,11 +4337,10 @@ deparse_AlterEnumStmt(Oid objectId, Node *parsetree)
 }
 
 static ObjTree *
-deparse_AlterObjectSchemaStmt(Oid objectId, Node *parsetree, Oid oldschema)
+deparse_AlterObjectSchemaStmt(ObjectAddress address, Node *parsetree, Oid oldschema)
 {
 	AlterObjectSchemaStmt *node = (AlterObjectSchemaStmt *) parsetree;
 	ObjTree	   *alterStmt;
-	ObjectAddress addr;
 	char	   *fmt;
 	char	   *identity;
 	char	   *newschema;
@@ -4361,11 +4360,10 @@ deparse_AlterObjectSchemaStmt(Oid objectId, Node *parsetree, Oid oldschema)
 	 * changed schema.  The output of our deparsing must return the original
 	 * schema name however, so we chop the schema name off the identity string
 	 * and then prepend the quoted schema name.
+	 *
+	 * XXX This is pretty clunky. Can we do better?
 	 */
-	addr.classId = get_objtype_catalog_oid(node->objectType);
-	addr.objectId = objectId;
-	addr.objectSubId = 0;
-	identity = getObjectIdentity(&addr);
+	identity = getObjectIdentity(&address);
 	oldschname = get_namespace_name(oldschema);
 	if (!oldschname)
 		elog(ERROR, "cache lookup failed for schema with OID %u", oldschema);
@@ -5723,7 +5721,8 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_AlterObjectSchemaStmt:
-			command = deparse_AlterObjectSchemaStmt(objectId, parsetree,
+			command = deparse_AlterObjectSchemaStmt(cmd->d.simple.address,
+													parsetree,
 													cmd->d.simple.secondaryOid);
 			break;
 
