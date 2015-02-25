@@ -21,13 +21,13 @@
 
 #define DEFAULT_TYPDELIM		','
 
-extern Oid	DefineType(List *names, List *parameters);
+extern ObjectAddress DefineType(List *names, List *parameters);
 extern void RemoveTypeById(Oid typeOid);
-extern Oid	DefineDomain(CreateDomainStmt *stmt);
-extern Oid	DefineEnum(CreateEnumStmt *stmt);
-extern Oid	DefineRange(CreateRangeStmt *stmt);
-extern Oid	AlterEnum(AlterEnumStmt *stmt, bool isTopLevel);
-extern Oid	DefineCompositeType(RangeVar *typevar, List *coldeflist);
+extern ObjectAddress DefineDomain(CreateDomainStmt *stmt);
+extern ObjectAddress DefineEnum(CreateEnumStmt *stmt);
+extern ObjectAddress DefineRange(CreateRangeStmt *stmt);
+extern ObjectAddress AlterEnum(AlterEnumStmt *stmt, bool isTopLevel);
+extern ObjectAddress DefineCompositeType(RangeVar *typevar, List *coldeflist);
 extern Oid	AssignTypeArrayOid(void);
 
 extern ObjectAddress AlterDomainDefault(List *names, Node *defaultRaw);
@@ -43,10 +43,10 @@ extern void checkDomainOwner(HeapTuple tup);
 extern List *GetDomainConstraints(Oid typeOid);
 
 extern ObjectAddress RenameType(RenameStmt *stmt);
-extern Oid	AlterTypeOwner(List *names, Oid newOwnerId, ObjectType objecttype);
+extern ObjectAddress AlterTypeOwner(List *names, Oid newOwnerId, ObjectType objecttype);
 extern void AlterTypeOwnerInternal(Oid typeOid, Oid newOwnerId,
 					   bool hasDependEntry);
-extern Oid	AlterTypeNamespace(List *names, const char *newschema,
+extern ObjectAddress AlterTypeNamespace(List *names, const char *newschema,
 				   ObjectType objecttype, Oid *oldschema);
 extern Oid	AlterTypeNamespace_oid(Oid typeOid, Oid nspOid, ObjectAddresses *objsMoved);
 extern Oid AlterTypeNamespaceInternal(Oid typeOid, Oid nspOid,

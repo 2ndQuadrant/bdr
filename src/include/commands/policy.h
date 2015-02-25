@@ -23,8 +23,8 @@ extern void RelationBuildRowSecurity(Relation relation);
 
 extern void RemovePolicyById(Oid policy_id);
 
-extern Oid CreatePolicy(CreatePolicyStmt *stmt);
-extern Oid AlterPolicy(AlterPolicyStmt *stmt);
+extern ObjectAddress CreatePolicy(CreatePolicyStmt *stmt);
+extern ObjectAddress AlterPolicy(AlterPolicyStmt *stmt);
 
 extern Oid get_relation_policy_oid(Oid relid, const char *policy_name,
 						bool missing_ok);

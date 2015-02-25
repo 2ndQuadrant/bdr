@@ -75,7 +75,7 @@ extern Datum pg_sequence_parameters(PG_FUNCTION_ARGS);
 extern Form_pg_sequence get_sequence_values(Oid sequenceId);
 
 extern ObjectAddress DefineSequence(CreateSeqStmt *stmt);
-extern Oid	AlterSequence(AlterSeqStmt *stmt);
+extern ObjectAddress AlterSequence(AlterSeqStmt *stmt);
 extern void ResetSequence(Oid seq_relid);
 extern void ResetSequenceCaches(void);
 

@@ -435,6 +435,7 @@ static void RangeVarCallbackForAlterRelation(const RangeVar *rv, Oid relid,
  * The other arguments are used to extend the behavior for other cases:
  * relkind: relkind to assign to the new relation
  * ownerId: if not InvalidOid, use this as the new relation's owner.
+ * typaddress: if not null, it's set to the pg_type entry's address.
  *
  * Note that permissions checks are done against current user regardless of
  * ownerId.  A nonzero ownerId is used when someone is creating a relation
@@ -445,7 +446,8 @@ static void RangeVarCallbackForAlterRelation(const RangeVar *rv, Oid relid,
  * ----------------------------------------------------------------
  */
 ObjectAddress
-DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId)
+DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId,
+			   ObjectAddress *typaddress)
 {
 	char		relname[NAMEDATALEN];
 	Oid			namespaceId;
@@ -659,7 +661,8 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId)
 										  reloptions,
 										  true,
 										  allowSystemTableMods,
-										  false);
+										  false,
+										  typaddress);
 
 	/* Store inheritance information for new rel. */
 	StoreCatalogInheritance(relationId, inheritOids);
@@ -11051,7 +11054,7 @@ ATPrepChangePersistence(Relation rel, bool toLogged)
 /*
  * Execute ALTER TABLE SET SCHEMA
  */
-Oid
+ObjectAddress
 AlterTableNamespace(AlterObjectSchemaStmt *stmt, Oid *oldschema)
 {
 	Relation	rel;
@@ -11060,6 +11063,7 @@ AlterTableNamespace(AlterObjectSchemaStmt *stmt, Oid *oldschema)
 	Oid			nspOid;
 	RangeVar   *newrv;
 	ObjectAddresses *objsMoved;
+	ObjectAddress myself;
 
 	relid = RangeVarGetRelidExtended(stmt->relation, AccessExclusiveLock,
 									 stmt->missing_ok, false,
@@ -11071,7 +11075,7 @@ AlterTableNamespace(AlterObjectSchemaStmt *stmt, Oid *oldschema)
 		ereport(NOTICE,
 				(errmsg("relation \"%s\" does not exist, skipping",
 						stmt->relation->relname)));
-		return InvalidOid;
+		return InvalidObjectAddress;
 	}
 
 	rel = relation_open(relid, NoLock);
@@ -11107,10 +11111,12 @@ AlterTableNamespace(AlterObjectSchemaStmt *stmt, Oid *oldschema)
 	if (oldschema)
 		*oldschema = oldNspOid;
 
+	ObjectAddressSet(myself, RelationRelationId, relid);
+
 	/* close rel, but keep lock until commit */
 	relation_close(rel, NoLock);
 
-	return relid;
+	return myself;
 }
 
 /*

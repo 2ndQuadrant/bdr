@@ -21,12 +21,12 @@
 
 extern ObjectAddress ExecRenameStmt(RenameStmt *stmt);
 
-extern Oid	ExecAlterObjectSchemaStmt(AlterObjectSchemaStmt *stmt,
+extern ObjectAddress ExecAlterObjectSchemaStmt(AlterObjectSchemaStmt *stmt,
 						  Oid *oldschema);
 extern Oid AlterObjectNamespace_oid(Oid classId, Oid objid, Oid nspOid,
 						 ObjectAddresses *objsMoved);
 
-extern Oid	ExecAlterOwnerStmt(AlterOwnerStmt *stmt);
+extern ObjectAddress ExecAlterOwnerStmt(AlterOwnerStmt *stmt);
 extern void AlterObjectOwner_internal(Relation catalog, Oid objectId,
 						  Oid new_ownerId);
 

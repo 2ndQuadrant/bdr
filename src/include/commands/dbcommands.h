@@ -44,7 +44,7 @@ extern void dropdb(const char *dbname, bool missing_ok);
 extern ObjectAddress RenameDatabase(const char *oldname, const char *newname);
 extern Oid	AlterDatabase(AlterDatabaseStmt *stmt, bool isTopLevel);
 extern Oid	AlterDatabaseSet(AlterDatabaseSetStmt *stmt);
-extern Oid	AlterDatabaseOwner(const char *dbname, Oid newOwnerId);
+extern ObjectAddress AlterDatabaseOwner(const char *dbname, Oid newOwnerId);
 
 extern Oid	get_database_oid(const char *dbname, bool missingok);
 extern char *get_database_name(Oid dbid);

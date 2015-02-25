@@ -58,8 +58,8 @@ typedef struct
 	BulkInsertState bistate;	/* bulk insert state */
 } DR_intorel;
 
-/* the OID of the created table, for ExecCreateTableAs consumption */
-static Oid	CreateAsRelid = InvalidOid;
+/* the address of the created table, for ExecCreateTableAs consumption */
+static ObjectAddress CreateAsReladdr = {InvalidOid, InvalidOid, 0};
 
 static void intorel_startup(DestReceiver *self, int operation, TupleDesc typeinfo);
 static void intorel_receive(TupleTableSlot *slot, DestReceiver *self);
@@ -70,7 +70,7 @@ static void intorel_destroy(DestReceiver *self);
 /*
  * ExecCreateTableAs -- execute a CREATE TABLE AS command
  */
-Oid
+ObjectAddress
 ExecCreateTableAs(CreateTableAsStmt *stmt, const char *queryString,
 				  ParamListInfo params, char *completionTag)
 {
@@ -81,7 +81,7 @@ ExecCreateTableAs(CreateTableAsStmt *stmt, const char *queryString,
 	Oid			save_userid = InvalidOid;
 	int			save_sec_context = 0;
 	int			save_nestlevel = 0;
-	Oid			relOid;
+	ObjectAddress address;
 	List	   *rewritten;
 	PlannedStmt *plan;
 	QueryDesc  *queryDesc;
@@ -99,7 +99,7 @@ ExecCreateTableAs(CreateTableAsStmt *stmt, const char *queryString,
 					(errcode(ERRCODE_DUPLICATE_TABLE),
 					 errmsg("relation \"%s\" already exists, skipping",
 							stmt->into->rel->relname)));
-			return InvalidOid;
+			return InvalidObjectAddress;
 		}
 	}
 
@@ -121,9 +121,9 @@ ExecCreateTableAs(CreateTableAsStmt *stmt, const char *queryString,
 		Assert(!is_matview);	/* excluded by syntax */
 		ExecuteQuery(estmt, into, queryString, params, dest, completionTag);
 
-		relOid = CreateAsRelid;
-		CreateAsRelid = InvalidOid;
-		return relOid;
+		address = CreateAsReladdr;
+		CreateAsReladdr = InvalidObjectAddress;
+		return address;
 	}
 	Assert(query->commandType == CMD_SELECT);
 
@@ -216,10 +216,10 @@ ExecCreateTableAs(CreateTableAsStmt *stmt, const char *queryString,
 		SetUserIdAndSecContext(save_userid, save_sec_context);
 	}
 
-	relOid = CreateAsRelid;
-	CreateAsRelid = InvalidOid;
+	address = CreateAsReladdr;
+	CreateAsReladdr = InvalidObjectAddress;
 
-	return relOid;
+	return address;
 }
 
 /*
@@ -385,7 +385,7 @@ intorel_startup(DestReceiver *self, int operation, TupleDesc typeinfo)
 	/*
 	 * Actually create the target table
 	 */
-	intoRelationAddr = DefineRelation(create, relkind, InvalidOid);
+	intoRelationAddr = DefineRelation(create, relkind, InvalidOid, NULL);
 
 	/*
 	 * If necessary, create a TOAST table for the target table.  Note that
@@ -464,8 +464,8 @@ intorel_startup(DestReceiver *self, int operation, TupleDesc typeinfo)
 	myState->rel = intoRelationDesc;
 	myState->output_cid = GetCurrentCommandId(true);
 
-	/* and remember the new relation's OID for ExecCreateTableAs */
-	CreateAsRelid = RelationGetRelid(myState->rel);
+	/* and remember the new relation's address for ExecCreateTableAs */
+	CreateAsReladdr = intoRelationAddr;
 
 	/*
 	 * We can skip WAL-logging the insertions, unless PITR or streaming

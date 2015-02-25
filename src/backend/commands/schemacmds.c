@@ -289,12 +289,13 @@ AlterSchemaOwner_oid(Oid oid, Oid newOwnerId)
 /*
  * Change schema owner
  */
-Oid
+ObjectAddress
 AlterSchemaOwner(const char *name, Oid newOwnerId)
 {
 	Oid			nspOid;
 	HeapTuple	tup;
 	Relation	rel;
+	ObjectAddress address;
 
 	rel = heap_open(NamespaceRelationId, RowExclusiveLock);
 
@@ -308,11 +309,13 @@ AlterSchemaOwner(const char *name, Oid newOwnerId)
 
 	AlterSchemaOwner_internal(tup, rel, newOwnerId);
 
+	ObjectAddressSet(address, NamespaceRelationId, nspOid);
+
 	ReleaseSysCache(tup);
 
 	heap_close(rel, RowExclusiveLock);
 
-	return nspOid;
+	return address;
 }
 
 static void

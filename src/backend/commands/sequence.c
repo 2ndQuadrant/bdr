@@ -233,7 +233,7 @@ DefineSequence(CreateSeqStmt *seq)
 	stmt->tablespacename = NULL;
 	stmt->if_not_exists = seq->if_not_exists;
 
-	address = DefineRelation(stmt, RELKIND_SEQUENCE, seq->ownerId);
+	address = DefineRelation(stmt, RELKIND_SEQUENCE, seq->ownerId, NULL);
 	seqoid = address.objectId;
 	Assert(seqoid != InvalidOid);
 
@@ -398,7 +398,7 @@ fill_seq_with_data(Relation rel, HeapTuple tuple)
  *
  * Modify the definition of a sequence relation
  */
-Oid
+ObjectAddress
 AlterSequence(AlterSeqStmt *stmt)
 {
 	Oid			relid;
@@ -409,6 +409,7 @@ AlterSequence(AlterSeqStmt *stmt)
 	Form_pg_sequence seq;
 	FormData_pg_sequence new;
 	List	   *owned_by;
+	ObjectAddress address;
 
 	/* Open and lock sequence. */
 	relid = RangeVarGetRelid(stmt->sequence, AccessShareLock, stmt->missing_ok);
@@ -417,7 +418,7 @@ AlterSequence(AlterSeqStmt *stmt)
 		ereport(NOTICE,
 				(errmsg("relation \"%s\" does not exist, skipping",
 						stmt->sequence->relname)));
-		return InvalidOid;
+		return InvalidObjectAddress;
 	}
 
 	init_sequence(relid, &elm, &seqrel);
@@ -477,9 +478,11 @@ AlterSequence(AlterSeqStmt *stmt)
 
 	InvokeObjectPostAlterHook(RelationRelationId, relid, 0);
 
+	ObjectAddressSet(address, RelationRelationId, relid);
+
 	relation_close(seqrel, NoLock);
 
-	return relid;
+	return address;
 }
 
 

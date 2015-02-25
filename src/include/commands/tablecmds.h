@@ -22,7 +22,8 @@
 #include "utils/relcache.h"
 
 
-extern ObjectAddress DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId);
+extern ObjectAddress DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId,
+			   ObjectAddress *typaddress);
 
 extern void RemoveRelations(DropStmt *drop);
 
@@ -38,7 +39,7 @@ extern void AlterTableInternal(Oid relid, List *cmds, bool recurse);
 
 extern Oid	AlterTableMoveAll(AlterTableMoveAllStmt *stmt);
 
-extern Oid	AlterTableNamespace(AlterObjectSchemaStmt *stmt, Oid *oldschema);
+extern ObjectAddress AlterTableNamespace(AlterObjectSchemaStmt *stmt, Oid *oldschema);
 
 extern void AlterTableNamespaceInternal(Relation rel, Oid oldNspOid,
 							Oid nspOid, ObjectAddresses *objsMoved);

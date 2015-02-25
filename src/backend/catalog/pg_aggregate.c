@@ -43,7 +43,7 @@ static Oid lookup_agg_function(List *fnName, int nargs, Oid *input_types,
 /*
  * AggregateCreate
  */
-Oid
+ObjectAddress
 AggregateCreate(const char *aggName,
 				Oid aggNamespace,
 				char aggKind,
@@ -522,7 +522,7 @@ AggregateCreate(const char *aggName,
 	 * aggregate.  (This could fail if there's already a conflicting entry.)
 	 */
 
-	procOid = ProcedureCreate(aggName,
+	myself = ProcedureCreate(aggName,
 							  aggNamespace,
 							  false,	/* no replacement */
 							  false,	/* doesn't return a set */
@@ -548,6 +548,7 @@ AggregateCreate(const char *aggName,
 							  PointerGetDatum(NULL),	/* proconfig */
 							  1,	/* procost */
 							  0);		/* prorows */
+	procOid = myself.objectId;
 
 	/*
 	 * Okay to create the pg_aggregate entry.
@@ -599,9 +600,6 @@ AggregateCreate(const char *aggName,
 	 * on aggTransType since we depend on it indirectly through transfn.
 	 * Likewise for aggmTransType if any.
 	 */
-	myself.classId = ProcedureRelationId;
-	myself.objectId = procOid;
-	myself.objectSubId = 0;
 
 	/* Depends on transition function */
 	referenced.classId = ProcedureRelationId;
@@ -654,7 +652,7 @@ AggregateCreate(const char *aggName,
 		recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
 	}
 
-	return procOid;
+	return myself;
 }
 
 /*
