@@ -1542,9 +1542,9 @@ pg_event_trigger_table_rewrite_reason(PG_FUNCTION_ARGS)
  * EventTriggerStashCommand
  * 		Save data about a simple DDL command that was just executed
  *
- * address identifies the object being operated on.  secondaryOid is the OID of
- * an object that was related in some way to the executed command; its meaning
- * is command-specific.
+ * address identifies the object being operated on.  secondaryObject is an
+ * object address that was related in some way to the executed command; its
+ * meaning is command-specific.
  *
  * For instance, for an ALTER obj SET SCHEMA command, objtype is the type of
  * object being moved, objectId is its OID, and secondaryOid is the OID of the
@@ -1552,7 +1552,7 @@ pg_event_trigger_table_rewrite_reason(PG_FUNCTION_ARGS)
  * of the object.)
  */
 void
-EventTriggerStashCommand(ObjectAddress address, Oid secondaryOid,
+EventTriggerStashCommand(ObjectAddress address, ObjectAddress *secondaryObject,
 						 Node *parsetree)
 {
 	MemoryContext oldcxt;
@@ -1566,7 +1566,8 @@ EventTriggerStashCommand(ObjectAddress address, Oid secondaryOid,
 	stashed->in_extension = creating_extension;
 
 	stashed->d.simple.address = address;
-	stashed->d.simple.secondaryOid = secondaryOid;
+	stashed->d.simple.secondaryObject =
+		secondaryObject ? *secondaryObject : InvalidObjectAddress;
 	stashed->parsetree = copyObject(parsetree);
 
 	currentEventTriggerState->stash = lappend(currentEventTriggerState->stash,

@@ -61,8 +61,8 @@ extern bool trackDroppedObjectsNeeded(void);
 extern void EventTriggerSQLDropAddObject(const ObjectAddress *object,
 							 bool original, bool normal);
 
-extern void EventTriggerStashCommand(ObjectAddress address, Oid secondaryOid,
-						 Node *parsetree);
+extern void EventTriggerStashCommand(ObjectAddress address,
+						 ObjectAddress *secondaryObject, Node *parsetree);
 extern void EventTriggerStashGrant(InternalGrant *istmt);
 extern void EventTriggerComplexCmdStart(Node *parsetree, ObjectType objtype);
 extern void EventTriggerComplexCmdSetOid(Oid objectId);

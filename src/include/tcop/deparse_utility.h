@@ -53,7 +53,7 @@ typedef struct StashedCommand
 		struct SimpleCommand
 		{
 			ObjectAddress address;
-			Oid			secondaryOid;
+			ObjectAddress secondaryObject;
 		} simple;
 
 		struct AlterTableCommand
