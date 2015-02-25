@@ -392,26 +392,39 @@ ExecRenameStmt(RenameStmt *stmt)
 /*
  * Executes an ALTER OBJECT / SET SCHEMA statement.  Based on the object
  * type, the function appropriate to that type is executed.
+ *
+ * Return value is that of the altered object.  oldSchemaAddr, if not NULL, is
+ * set to the object address of the original schema.
  */
 ObjectAddress
-ExecAlterObjectSchemaStmt(AlterObjectSchemaStmt *stmt, Oid *oldschema)
+ExecAlterObjectSchemaStmt(AlterObjectSchemaStmt *stmt,
+						  ObjectAddress *oldSchemaAddr)
 {
+	ObjectAddress	address;
+	Oid			oldNspOid;
+
 	switch (stmt->objectType)
 	{
 		case OBJECT_EXTENSION:
-			return AlterExtensionNamespace(stmt->object, stmt->newschema, oldschema);
+			address = AlterExtensionNamespace(stmt->object, stmt->newschema,
+											  oldSchemaAddr ? &oldNspOid : NULL);
+			break;
 
 		case OBJECT_FOREIGN_TABLE:
 		case OBJECT_SEQUENCE:
 		case OBJECT_TABLE:
 		case OBJECT_VIEW:
 		case OBJECT_MATVIEW:
-			return AlterTableNamespace(stmt, oldschema);
+			address = AlterTableNamespace(stmt,
+										  oldSchemaAddr ? &oldNspOid : NULL);
+			break;
 
 		case OBJECT_DOMAIN:
 		case OBJECT_TYPE:
-			return AlterTypeNamespace(stmt->object, stmt->newschema,
-									  stmt->objectType, oldschema);
+			address = AlterTypeNamespace(stmt->object, stmt->newschema,
+										 stmt->objectType,
+										 oldSchemaAddr ? &oldNspOid : NULL);
+			break;
 
 			/* generic code path */
 		case OBJECT_AGGREGATE:
@@ -431,7 +444,6 @@ ExecAlterObjectSchemaStmt(AlterObjectSchemaStmt *stmt, Oid *oldschema)
 				Oid			classId;
 				Oid			nspOid;
 				ObjectAddress address;
-				Oid			oldNspOid;
 
 				address = get_object_address(stmt->objectType,
 											 stmt->object,
@@ -447,11 +459,6 @@ ExecAlterObjectSchemaStmt(AlterObjectSchemaStmt *stmt, Oid *oldschema)
 				oldNspOid = AlterObjectNamespace_internal(catalog, address.objectId,
 														  nspOid);
 				heap_close(catalog, RowExclusiveLock);
-
-				if (oldschema)
-					*oldschema = oldNspOid;
-
-				return address;
 			}
 			break;
 
@@ -460,6 +467,11 @@ ExecAlterObjectSchemaStmt(AlterObjectSchemaStmt *stmt, Oid *oldschema)
 				 (int) stmt->objectType);
 			return InvalidObjectAddress;	/* keep compiler happy */
 	}
+
+	if (oldSchemaAddr)
+		ObjectAddressSet(*oldSchemaAddr, NamespaceRelationId, oldNspOid);
+
+	return address;
 }
 
 /*

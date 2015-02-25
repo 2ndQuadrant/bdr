@@ -22,7 +22,7 @@
 extern ObjectAddress ExecRenameStmt(RenameStmt *stmt);
 
 extern ObjectAddress ExecAlterObjectSchemaStmt(AlterObjectSchemaStmt *stmt,
-						  Oid *oldschema);
+						  ObjectAddress *oldSchemaAddr);
 extern Oid AlterObjectNamespace_oid(Oid classId, Oid objid, Oid nspOid,
 						 ObjectAddresses *objsMoved);
 
