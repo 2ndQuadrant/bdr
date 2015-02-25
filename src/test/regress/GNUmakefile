@@ -135,7 +135,7 @@ generate-files:
 
 ddl_deparse_schedule: serial_schedule
 	echo "test: deparse_init" > $@
-	cat $(srcdir)/serial_schedule >> $@
+	grep -v tablespace $(srcdir)/serial_schedule >> $@
 	echo "test: deparse_test" >> $@
 
 ##

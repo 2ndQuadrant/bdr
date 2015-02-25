@@ -2,19 +2,20 @@
 -- DEPARSE_INIT
 --
 CREATE SCHEMA deparse;
-CREATE TABLE deparse.deparse_test_commands (
+UPDATE pg_namespace SET nspname = 'pg_deparse' WHERE nspname = 'deparse';
+CREATE TABLE pg_deparse.deparse_test_commands (
   lsn pg_lsn,
   ord integer,
   command TEXT
 );
-CREATE OR REPLACE FUNCTION deparse.deparse_test_ddl_command_end()
+CREATE OR REPLACE FUNCTION pg_deparse.deparse_test_ddl_command_end()
   RETURNS event_trigger
   SECURITY DEFINER
   LANGUAGE plpgsql
 AS $fn$
 BEGIN
 	BEGIN
-		INSERT INTO deparse.deparse_test_commands (command, ord, lsn)
+		INSERT INTO pg_deparse.deparse_test_commands (command, ord, lsn)
 		SELECT pg_event_trigger_expand_command(command), ordinality, lsn
 		FROM pg_event_trigger_get_creation_commands() WITH ORDINALITY,
 		pg_current_xlog_insert_location() lsn;
@@ -24,7 +25,7 @@ BEGIN
 END;
 $fn$;
 
-CREATE OR REPLACE FUNCTION deparse.deparse_test_sql_drop()
+CREATE OR REPLACE FUNCTION pg_deparse.deparse_test_sql_drop()
   RETURNS event_trigger
   SECURITY DEFINER
   LANGUAGE plpgsql
@@ -71,7 +72,7 @@ BEGIN
 				obj.object_type, obj.object_identity);
 		END IF;
 
-		INSERT INTO deparse.deparse_test_commands (lsn, ord, command)
+		INSERT INTO pg_deparse.deparse_test_commands (lsn, ord, command)
 		     VALUES (pg_current_xlog_insert_location(), i, fmt);
 		i := i + 1;
 	END LOOP;
@@ -80,8 +81,8 @@ $fn$;
 
 CREATE EVENT TRIGGER deparse_test_trg_sql_drop
   ON sql_drop
-  EXECUTE PROCEDURE deparse.deparse_test_sql_drop();
+  EXECUTE PROCEDURE pg_deparse.deparse_test_sql_drop();
 
 CREATE EVENT TRIGGER deparse_test_trg_ddl_command_end
   ON ddl_command_end
-  EXECUTE PROCEDURE deparse.deparse_test_ddl_command_end();
+  EXECUTE PROCEDURE pg_deparse.deparse_test_ddl_command_end();

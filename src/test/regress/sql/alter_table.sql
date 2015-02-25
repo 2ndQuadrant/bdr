@@ -1288,9 +1288,8 @@ where virtualtransaction = (
         from pg_locks
         where transactionid = txid_current()::integer)
 and locktype = 'relation'
-and relnamespace != (select oid from pg_namespace where nspname = 'pg_catalog')
+and relnamespace NOT IN (select oid from pg_namespace where nspname LIKE 'pg\_%')
 and c.relname != 'my_locks'
-and c.relname NOT LIKE '%deparse%'
 group by c.relname;
 
 create table alterlock (f1 int primary key, f2 text);
