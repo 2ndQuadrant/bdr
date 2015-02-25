@@ -3006,8 +3006,7 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 	dpcontext = deparse_context_for(RelationGetRelationName(rel),
 									cmd->d.alterTable.objectId);
 
-	fmtstr = psprintf("ALTER %s %%{identity}D %%{subcmds:, }s",
-					  stringify_objtype(cmd->d.alterTable.objtype));
+	fmtstr = psprintf("ALTER TABLE %%{identity}D %%{subcmds:, }s");
 	alterTableStmt = new_objtree_VA(fmtstr, 0);
 
 	tmp = new_objtree_for_qualname(rel->rd_rel->relnamespace,

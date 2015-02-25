@@ -9626,7 +9626,7 @@ AlterTableMoveAll(AlterTableMoveAllStmt *stmt)
 
 		cmds = lappend(cmds, cmd);
 
-		EventTriggerComplexCmdStart((Node *) stmt, OBJECT_TABLE);
+		EventTriggerComplexCmdStart((Node *) stmt);
 		/* OID is set by AlterTableInternal */
 		AlterTableInternal(lfirst_oid(l), cmds, false);
 		EventTriggerComplexCmdEnd();
