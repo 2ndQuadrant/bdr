@@ -3352,7 +3352,7 @@ stringify_objtype(ObjectType objtype)
 }
 
 static ObjTree *
-deparse_RenameStmt(Oid objectId, Node *parsetree)
+deparse_RenameStmt(ObjectAddress address, Node *parsetree)
 {
 	RenameStmt *node = (RenameStmt *) parsetree;
 	ObjTree	   *renameStmt;
@@ -3387,7 +3387,7 @@ deparse_RenameStmt(Oid objectId, Node *parsetree)
 		case OBJECT_FOREIGN_TABLE:
 			fmtstr = psprintf("ALTER %s %%{if_exists}s %%{identity}D RENAME TO %%{newname}I",
 							  stringify_objtype(node->renameType));
-			relation = relation_open(objectId, AccessShareLock);
+			relation = relation_open(address.objectId, AccessShareLock);
 			schemaId = RelationGetNamespace(relation);
 			renameStmt = new_objtree_VA(fmtstr, 0);
 			append_object_object(renameStmt, "identity",
@@ -3399,7 +3399,7 @@ deparse_RenameStmt(Oid objectId, Node *parsetree)
 			break;
 
 		case OBJECT_COLUMN:
-			relation = relation_open(objectId, AccessShareLock);
+			relation = relation_open(address.objectId, AccessShareLock);
 			schemaId = RelationGetNamespace(relation);
 
 			if (node->relationType == OBJECT_TYPE)
@@ -3442,7 +3442,7 @@ deparse_RenameStmt(Oid objectId, Node *parsetree)
 		case OBJECT_LANGUAGE:
 		case OBJECT_FOREIGN_SERVER:
 			{
-				fmtstr = psprintf("ALTER %s %%{identity}s RENAME TO %%{newname}I",
+				fmtstr = psprintf("ALTER %s %%{identity}I RENAME TO %%{newname}I",
 								  stringify_objtype(node->renameType));
 				renameStmt = new_objtree_VA(fmtstr, 0);
 				append_string_object(renameStmt, "identity",
@@ -3459,28 +3459,30 @@ deparse_RenameStmt(Oid objectId, Node *parsetree)
 		case OBJECT_TSCONFIGURATION:
 		case OBJECT_TYPE:
 			{
-				char	   *identity;
 				HeapTuple	objTup;
 				Relation	catalog;
 				Datum		objnsp;
 				bool		isnull;
-				Oid			classId = get_objtype_catalog_oid(node->renameType);
-				AttrNumber	Anum_namespace = get_object_attnum_namespace(classId);
+				AttrNumber	Anum_namespace;
+				ObjTree	   *ident;
 
-				catalog = relation_open(classId, AccessShareLock);
-				objTup = get_catalog_object_by_oid(catalog, objectId);
+				/* obtain object tuple */
+				catalog = relation_open(address.classId, AccessShareLock);
+				objTup = get_catalog_object_by_oid(catalog, address.objectId);
+
+				/* obtain namespace */
+				Anum_namespace = get_object_attnum_namespace(address.classId);
 				objnsp = heap_getattr(objTup, Anum_namespace,
 									  RelationGetDescr(catalog), &isnull);
 				if (isnull)
 					elog(ERROR, "invalid NULL namespace");
 
-				identity = psprintf("%s.%s", get_namespace_name(DatumGetObjectId(objnsp)),
-									strVal(llast(node->object)));
-
-				fmtstr = psprintf("ALTER %s %%{identity}s RENAME TO %%{newname}I",
+				fmtstr = psprintf("ALTER %s %%{identity}D RENAME TO %%{newname}I",
 								  stringify_objtype(node->renameType));
 				renameStmt = new_objtree_VA(fmtstr, 0);
-				append_string_object(renameStmt, "identity", identity);
+				ident = new_objtree_for_qualname(DatumGetObjectId(objnsp),
+												 strVal(llast(node->object)));
+				append_object_object(renameStmt, "identity", ident);
 
 				relation_close(catalog, AccessShareLock);
 			}
@@ -3489,23 +3491,27 @@ deparse_RenameStmt(Oid objectId, Node *parsetree)
 		case OBJECT_OPCLASS:
 		case OBJECT_OPFAMILY:
 			{
-				char	   *identity;
 				HeapTuple	objTup;
 				HeapTuple	amTup;
 				Relation	catalog;
 				Datum		objnsp;
 				bool		isnull;
-				Oid			classId = get_objtype_catalog_oid(node->renameType);
-				AttrNumber	Anum_namespace = get_object_attnum_namespace(classId);
+				AttrNumber	Anum_namespace;
 				Oid			amoid;
+				ObjTree	   *ident;
 
-				catalog = relation_open(classId, AccessShareLock);
-				objTup = get_catalog_object_by_oid(catalog, objectId);
+				/* obtain object tuple */
+				catalog = relation_open(address.classId, AccessShareLock);
+				objTup = get_catalog_object_by_oid(catalog, address.objectId);
+
+				/* obtain namespace */
+				Anum_namespace = get_object_attnum_namespace(address.classId);
 				objnsp = heap_getattr(objTup, Anum_namespace,
 									  RelationGetDescr(catalog), &isnull);
 				if (isnull)
 					elog(ERROR, "invalid NULL namespace");
 
+				/* obtain AM tuple */
 				if (node->renameType == OBJECT_OPCLASS)
 					amoid = ((Form_pg_opclass) GETSTRUCT(objTup))->opcmethod;
 				else
@@ -3514,19 +3520,22 @@ deparse_RenameStmt(Oid objectId, Node *parsetree)
 				if (!HeapTupleIsValid(amTup))
 					elog(ERROR, "cache lookup failed for access method %u", amoid);
 
-				identity = psprintf("%s.%s", get_namespace_name(DatumGetObjectId(objnsp)),
-									strVal(llast(node->object)));
 
-				fmtstr = psprintf("ALTER %s %%{identity}s USING %%{amname}I RENAME TO %%{newname}I",
+				fmtstr = psprintf("ALTER %s %%{identity}D USING %%{amname}I RENAME TO %%{newname}I",
 								  stringify_objtype(node->renameType));
 				renameStmt = new_objtree_VA(fmtstr, 0);
-				append_string_object(renameStmt, "identity", identity);
+
+				/* add the identity clauses */
+				ident = new_objtree_for_qualname(DatumGetObjectId(objnsp),
+												 strVal(llast(node->object)));
+				append_object_object(renameStmt, "identity", ident);
 				append_string_object(renameStmt, "amname",
 									 pstrdup(NameStr(((Form_pg_am) GETSTRUCT(amTup))->amname)));
 
 				ReleaseSysCache(amTup);
 				relation_close(catalog, AccessShareLock);
 			}
+			break;
 
 		case OBJECT_AGGREGATE:
 		case OBJECT_FUNCTION:
@@ -3535,17 +3544,18 @@ deparse_RenameStmt(Oid objectId, Node *parsetree)
 				HeapTuple proctup;
 				Form_pg_proc procform;
 
-				proctup = SearchSysCache1(PROCOID, ObjectIdGetDatum(objectId));
+				proctup = SearchSysCache1(PROCOID,
+										  ObjectIdGetDatum(address.objectId));
 				if (!HeapTupleIsValid(proctup))
 					elog(ERROR, "cache lookup failed for procedure %u",
-						 objectId);
+						 address.objectId);
 				procform = (Form_pg_proc) GETSTRUCT(proctup);
 
 				/* XXX does this work for ordered-set aggregates? */
 				ident = psprintf("%s%s",
 								 quote_qualified_identifier(get_namespace_name(procform->pronamespace),
-															NameStr(procform->proname)),
-								 format_procedure_args(objectId, true));
+															strVal(llast(node->object))),
+								 format_procedure_args(address.objectId, true));
 
 				fmtstr = psprintf("ALTER %s %%{identity}s RENAME TO %%{newname}I",
 								  stringify_objtype(node->renameType));
@@ -3563,7 +3573,7 @@ deparse_RenameStmt(Oid objectId, Node *parsetree)
 				Form_pg_constraint	constrForm;
 				ObjTree		   *ident;
 
-				conTup = SearchSysCache1(CONSTROID, objectId);
+				conTup = SearchSysCache1(CONSTROID, address.objectId);
 				constrForm = (Form_pg_constraint) GETSTRUCT(conTup);
 
 				if (node->renameType == OBJECT_TABCONSTRAINT)
@@ -3592,7 +3602,7 @@ deparse_RenameStmt(Oid objectId, Node *parsetree)
 				Relation	pg_rewrite;
 
 				pg_rewrite = relation_open(RewriteRelationId, AccessShareLock);
-				rewrTup = get_catalog_object_by_oid(pg_rewrite, objectId);
+				rewrTup = get_catalog_object_by_oid(pg_rewrite, address.objectId);
 				rewrForm = (Form_pg_rewrite) GETSTRUCT(rewrTup);
 
 				renameStmt = new_objtree_VA("ALTER RULE %{rulename}I ON %{identity}D RENAME TO %{newname}I",
@@ -3612,7 +3622,7 @@ deparse_RenameStmt(Oid objectId, Node *parsetree)
 				Relation	pg_trigger;
 
 				pg_trigger = relation_open(TriggerRelationId, AccessShareLock);
-				trigTup = get_catalog_object_by_oid(pg_trigger, objectId);
+				trigTup = get_catalog_object_by_oid(pg_trigger, address.objectId);
 				trigForm = (Form_pg_trigger) GETSTRUCT(trigTup);
 
 				renameStmt = new_objtree_VA("ALTER TRIGGER %{triggername}I ON %{identity}D RENAME TO %{newname}I",
@@ -3636,12 +3646,12 @@ deparse_RenameStmt(Oid objectId, Node *parsetree)
 				pg_policy = relation_open(PolicyRelationId, AccessShareLock);
 				ScanKeyInit(&key, ObjectIdAttributeNumber,
 							BTEqualStrategyNumber, F_OIDEQ,
-							ObjectIdGetDatum(objectId));
+							ObjectIdGetDatum(address.objectId));
 				scan = systable_beginscan(pg_policy, PolicyOidIndexId, true,
 										  NULL, 1, &key);
 				polTup = systable_getnext(scan);
 				if (!HeapTupleIsValid(polTup))
-					elog(ERROR, "cache lookup failed for policy %u", objectId);
+					elog(ERROR, "cache lookup failed for policy %u", address.objectId);
 				polForm = (Form_pg_policy) GETSTRUCT(polTup);
 
 				renameStmt = new_objtree_VA("ALTER POLICY %{if_exists}s %{policyname}I on %{identity}D RENAME TO %{newname}I",
@@ -5709,7 +5719,7 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_RenameStmt:
-			command = deparse_RenameStmt(objectId, parsetree);
+			command = deparse_RenameStmt(cmd->d.simple.address, parsetree);
 			break;
 
 		case T_AlterObjectSchemaStmt:
