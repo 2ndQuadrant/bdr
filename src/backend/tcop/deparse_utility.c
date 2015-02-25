@@ -5815,7 +5815,7 @@ deparse_utility_command(StashedCommand *cmd)
 	overridePath = GetOverrideSearchPath(CurrentMemoryContext);
 	overridePath->schemas = NIL;
 	overridePath->addCatalog = false;
-	overridePath->addTemp = false;
+	overridePath->addTemp = true;
 	PushOverrideSearchPath(overridePath);
 
 	switch (cmd->type)
