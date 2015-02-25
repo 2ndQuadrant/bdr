@@ -1593,7 +1593,7 @@ EventTriggerStashCommand(ObjectAddress address, ObjectAddress *secondaryObject,
  * raise an error.
  */
 void
-EventTriggerComplexCmdStart(Node *parsetree, ObjectType objtype)
+EventTriggerComplexCmdStart(Node *parsetree)
 {
 	MemoryContext	oldcxt;
 	StashedCommand *stashed;
@@ -1605,8 +1605,8 @@ EventTriggerComplexCmdStart(Node *parsetree, ObjectType objtype)
 	stashed->type = SCT_AlterTable;
 	stashed->in_extension = creating_extension;
 
+	stashed->d.alterTable.classId = RelationRelationId;
 	stashed->d.alterTable.objectId = InvalidOid;
-	stashed->d.alterTable.objtype = objtype;
 	stashed->d.alterTable.subcmds = NIL;
 	stashed->parsetree = copyObject(parsetree);
 
@@ -1629,6 +1629,7 @@ EventTriggerComplexCmdSetOid(Oid objectId)
 	 * corresponding pg_type OID so that it can be properly be considered the
 	 * object's canonical objectId.
 	 */
+#if 0
 	if (currentEventTriggerState->curcmd->d.alterTable.objtype == OBJECT_TYPE)
 	{
 		HeapTuple	relTup;
@@ -1642,6 +1643,7 @@ EventTriggerComplexCmdSetOid(Oid objectId)
 		objectId = relForm->reltype;
 		ReleaseSysCache(relTup);
 	}
+#endif
 
 	currentEventTriggerState->curcmd->d.alterTable.objectId = objectId;
 }
@@ -1881,7 +1883,7 @@ pg_event_trigger_get_creation_commands(PG_FUNCTION_ARGS)
 					addr = cmd->d.simple.address;
 				else if (cmd->type == SCT_AlterTable)
 					ObjectAddressSet(addr,
-									 get_objtype_catalog_oid(cmd->d.alterTable.objtype),
+									 cmd->d.alterTable.classId,
 									 cmd->d.alterTable.objectId);
 
 				tag = CreateCommandTag(cmd->parsetree);

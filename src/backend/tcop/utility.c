@@ -1028,7 +1028,7 @@ ProcessUtilitySlow(Node *parsetree,
 														queryString);
 
 						/* ... ensure we have an event trigger context ... */
-						EventTriggerComplexCmdStart(parsetree, atstmt->relkind);
+						EventTriggerComplexCmdStart(parsetree);
 						EventTriggerComplexCmdSetOid(relid);
 
 						/* ... and do it */
@@ -1059,7 +1059,7 @@ ProcessUtilitySlow(Node *parsetree,
 											   params,
 											   None_Receiver,
 											   NULL);
-								EventTriggerComplexCmdStart(parsetree, atstmt->relkind);
+								EventTriggerComplexCmdStart(parsetree);
 								EventTriggerComplexCmdSetOid(relid);
 							}
 
@@ -1226,7 +1226,7 @@ ProcessUtilitySlow(Node *parsetree,
 					stmt = transformIndexStmt(relid, stmt, queryString);
 
 					/* ... and do it */
-					EventTriggerComplexCmdStart(parsetree, OBJECT_INDEX);	/* relkind? */
+					EventTriggerComplexCmdStart(parsetree);
 					address =
 						DefineIndex(relid,	/* OID of heap relation */
 									stmt,
@@ -1317,7 +1317,7 @@ ProcessUtilitySlow(Node *parsetree,
 				break;
 
 			case T_ViewStmt:	/* CREATE VIEW */
-				EventTriggerComplexCmdStart(parsetree, OBJECT_VIEW);	/* XXX relkind? */
+				EventTriggerComplexCmdStart(parsetree);
 				address = DefineView((ViewStmt *) parsetree, queryString);
 				EventTriggerStashCommand(address, NULL, parsetree);
 				/* stashed internally */

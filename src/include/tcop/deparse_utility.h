@@ -59,7 +59,7 @@ typedef struct StashedCommand
 		struct AlterTableCommand
 		{
 			Oid		objectId;
-			ObjectType objtype;
+			Oid		classId;
 			List   *subcmds;
 		} alterTable;
 
