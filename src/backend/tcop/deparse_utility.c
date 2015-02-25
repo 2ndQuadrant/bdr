@@ -4413,6 +4413,7 @@ append_literal_or_null(ObjTree *mainobj, char *elemname, char *value)
 						  !!value);
 	if (value)
 		append_string_object(part, "value", value);
+	append_object_object(top, "literal", part);
 
 	append_object_object(mainobj, elemname, top);
 }
