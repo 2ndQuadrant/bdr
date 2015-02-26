@@ -5457,7 +5457,7 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 				break;
 
 			case AT_AddOf:
-				tmp = new_objtree_VA("ADD OF %{type_of}T",
+				tmp = new_objtree_VA("OF %{type_of}T",
 									 2, "type", ObjTypeString, "add of",
 									 "type_of", ObjTypeObject,
 									 new_objtree_for_type(substashed->oid, -1));
