@@ -4118,6 +4118,49 @@ deparse_AlterEnumStmt(Oid objectId, Node *parsetree)
 	return alterEnum;
 }
 
+/*
+ * deparse an ALTER ... SET SCHEMA command.
+ */
+static ObjTree *
+deparse_AlterObjectSchemaStmt(ObjectAddress address, Node *parsetree,
+							  ObjectAddress oldschema)
+{
+	AlterObjectSchemaStmt *node = (AlterObjectSchemaStmt *) parsetree;
+	ObjTree	   *alterStmt;
+	char	   *fmt;
+	char	   *identity;
+	char	   *newschema;
+	char	   *oldschname;
+	char	   *ident;
+
+	newschema = node->newschema;
+
+	fmt = psprintf("ALTER %s %%{identity}s SET SCHEMA %%{newschema}I",
+				   stringify_objtype(node->objectType));
+	alterStmt = new_objtree_VA(fmt, 0);
+	append_string_object(alterStmt, "newschema", newschema);
+
+	/*
+	 * Since the command has already taken place from the point of view of
+	 * catalogs, getObjectIdentity returns the object name with the already
+	 * changed schema.  The output of our deparsing must return the original
+	 * schema name however, so we chop the schema name off the identity string
+	 * and then prepend the quoted schema name.
+	 *
+	 * XXX This is pretty clunky. Can we do better?
+	 */
+	identity = getObjectIdentity(&address);
+	oldschname = get_namespace_name(oldschema.objectId);
+	if (!oldschname)
+		elog(ERROR, "cache lookup failed for schema with OID %u", oldschema.objectId);
+	ident = psprintf("%s%s",
+					 quote_identifier(oldschname),
+					 identity + strlen(quote_identifier(newschema)));
+	append_string_object(alterStmt, "identity", ident);
+
+	return alterStmt;
+}
+
 static ObjTree *
 deparse_AlterOwnerStmt(ObjectAddress address, Node *parsetree)
 {
@@ -5224,7 +5267,9 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_AlterObjectSchemaStmt:
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			command = deparse_AlterObjectSchemaStmt(cmd->d.simple.address,
+													parsetree,
+													cmd->d.simple.secondaryObject);
 			break;
 
 		case T_AlterOwnerStmt:
