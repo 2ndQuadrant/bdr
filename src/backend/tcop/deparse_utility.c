@@ -3405,11 +3405,12 @@ deparse_RenameStmt(ObjectAddress address, Node *parsetree)
 			relation_close(relation, AccessShareLock);
 			break;
 
+		case OBJECT_ATTRIBUTE:
 		case OBJECT_COLUMN:
 			relation = relation_open(address.objectId, AccessShareLock);
 			schemaId = RelationGetNamespace(relation);
 
-			if (node->relationType == OBJECT_TYPE)
+			if (node->renameType == OBJECT_ATTRIBUTE)
 			{
 
 				fmtstr = psprintf("ALTER TYPE %%{identity}D RENAME ATTRIBUTE %%{colname}I TO %%{newname}I");
