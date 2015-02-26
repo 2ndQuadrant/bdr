@@ -1068,7 +1068,8 @@ ProcessUtilitySlow(Node *parsetree,
 							break;
 						case 'C':		/* ADD CONSTRAINT */
 							AlterDomainAddConstraint(stmt->typeName,
-													 stmt->def);
+													 stmt->def,
+													 NULL);
 							break;
 						case 'X':		/* DROP CONSTRAINT */
 							AlterDomainDropConstraint(stmt->typeName,

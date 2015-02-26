@@ -108,7 +108,7 @@ static void checkEnumOwner(HeapTuple tup);
 static char *domainAddConstraint(Oid domainOid, Oid domainNamespace,
 					Oid baseTypeOid,
 					int typMod, Constraint *constr,
-					char *domainName);
+					char *domainName, ObjectAddress *constrAddr);
 
 
 /*
@@ -1076,7 +1076,7 @@ DefineDomain(CreateDomainStmt *stmt)
 			case CONSTR_CHECK:
 				domainAddConstraint(address.objectId, domainNamespace,
 									basetypeoid, basetypeMod,
-									constr, domainName);
+									constr, domainName, NULL);
 				break;
 
 				/* Other constraint types were fully processed above */
@@ -2483,7 +2483,8 @@ AlterDomainDropConstraint(List *names, const char *constrName,
  * Implements the ALTER DOMAIN .. ADD CONSTRAINT statement.
  */
 ObjectAddress
-AlterDomainAddConstraint(List *names, Node *newConstraint)
+AlterDomainAddConstraint(List *names, Node *newConstraint,
+						 ObjectAddress *constrAddr)
 {
 	TypeName   *typename;
 	Oid			domainoid;
@@ -2568,7 +2569,7 @@ AlterDomainAddConstraint(List *names, Node *newConstraint)
 
 	ccbin = domainAddConstraint(domainoid, typTup->typnamespace,
 								typTup->typbasetype, typTup->typtypmod,
-								constr, NameStr(typTup->typname));
+								constr, NameStr(typTup->typname), constrAddr);
 
 	/*
 	 * If requested to validate the constraint, test all values stored in the
@@ -2991,13 +2992,14 @@ checkDomainOwner(HeapTuple tup)
 static char *
 domainAddConstraint(Oid domainOid, Oid domainNamespace, Oid baseTypeOid,
 					int typMod, Constraint *constr,
-					char *domainName)
+					char *domainName, ObjectAddress *constrAddr)
 {
 	Node	   *expr;
 	char	   *ccsrc;
 	char	   *ccbin;
 	ParseState *pstate;
 	CoerceToDomainValue *domVal;
+	Oid			ccoid;
 
 	/*
 	 * Assign or validate constraint name
@@ -3076,34 +3078,37 @@ domainAddConstraint(Oid domainOid, Oid domainNamespace, Oid baseTypeOid,
 	/*
 	 * Store the constraint in pg_constraint
 	 */
-	CreateConstraintEntry(constr->conname,		/* Constraint Name */
-						  domainNamespace,		/* namespace */
-						  CONSTRAINT_CHECK,		/* Constraint Type */
-						  false,	/* Is Deferrable */
-						  false,	/* Is Deferred */
-						  !constr->skip_validation,		/* Is Validated */
-						  InvalidOid,	/* not a relation constraint */
-						  NULL,
-						  0,
-						  domainOid,	/* domain constraint */
-						  InvalidOid,	/* no associated index */
-						  InvalidOid,	/* Foreign key fields */
-						  NULL,
-						  NULL,
-						  NULL,
-						  NULL,
-						  0,
-						  ' ',
-						  ' ',
-						  ' ',
-						  NULL, /* not an exclusion constraint */
-						  expr, /* Tree form of check constraint */
-						  ccbin,	/* Binary form of check constraint */
-						  ccsrc,	/* Source form of check constraint */
-						  true, /* is local */
-						  0,	/* inhcount */
-						  false,	/* connoinherit */
-						  false);		/* is_internal */
+	ccoid =
+		CreateConstraintEntry(constr->conname,		/* Constraint Name */
+							  domainNamespace,		/* namespace */
+							  CONSTRAINT_CHECK,		/* Constraint Type */
+							  false,	/* Is Deferrable */
+							  false,	/* Is Deferred */
+							  !constr->skip_validation,		/* Is Validated */
+							  InvalidOid,	/* not a relation constraint */
+							  NULL,
+							  0,
+							  domainOid,	/* domain constraint */
+							  InvalidOid,	/* no associated index */
+							  InvalidOid,	/* Foreign key fields */
+							  NULL,
+							  NULL,
+							  NULL,
+							  NULL,
+							  0,
+							  ' ',
+							  ' ',
+							  ' ',
+							  NULL, /* not an exclusion constraint */
+							  expr, /* Tree form of check constraint */
+							  ccbin,	/* Binary form of check constraint */
+							  ccsrc,	/* Source form of check constraint */
+							  true, /* is local */
+							  0,	/* inhcount */
+							  false,	/* connoinherit */
+							  false);		/* is_internal */
+	if (constrAddr)
+		ObjectAddressSet(*constrAddr, ConstraintRelationId, ccoid);
 
 	/*
 	 * Return the compiled constraint expression so the calling routine can
