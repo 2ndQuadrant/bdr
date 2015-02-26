@@ -11046,7 +11046,7 @@ ATPrepChangePersistence(Relation rel, bool toLogged)
  * Execute ALTER TABLE SET SCHEMA
  */
 ObjectAddress
-AlterTableNamespace(AlterObjectSchemaStmt *stmt)
+AlterTableNamespace(AlterObjectSchemaStmt *stmt, Oid *oldschema)
 {
 	Relation	rel;
 	Oid			relid;
@@ -11100,6 +11100,9 @@ AlterTableNamespace(AlterObjectSchemaStmt *stmt)
 	free_object_addresses(objsMoved);
 
 	ObjectAddressSet(myself, RelationRelationId, relid);
+
+	if (oldschema)
+		*oldschema = oldNspOid;
 
 	/* close rel, but keep lock until commit */
 	relation_close(rel, NoLock);

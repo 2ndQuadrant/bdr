@@ -818,7 +818,7 @@ standard_ProcessUtility(Node *parsetree,
 									   context, params,
 									   dest, completionTag);
 				else
-					ExecAlterObjectSchemaStmt(stmt);
+					ExecAlterObjectSchemaStmt(stmt, NULL);
 			}
 			break;
 
@@ -1336,7 +1336,8 @@ ProcessUtilitySlow(Node *parsetree,
 				break;
 
 			case T_AlterObjectSchemaStmt:
-				ExecAlterObjectSchemaStmt((AlterObjectSchemaStmt *) parsetree);
+				ExecAlterObjectSchemaStmt((AlterObjectSchemaStmt *) parsetree,
+										  NULL);
 				break;
 
 			case T_AlterOwnerStmt:

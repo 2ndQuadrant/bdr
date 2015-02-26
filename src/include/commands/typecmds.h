@@ -46,7 +46,7 @@ extern ObjectAddress AlterTypeOwner(List *names, Oid newOwnerId, ObjectType obje
 extern void AlterTypeOwnerInternal(Oid typeOid, Oid newOwnerId,
 					   bool hasDependEntry);
 extern ObjectAddress AlterTypeNamespace(List *names, const char *newschema,
-				   ObjectType objecttype);
+				   ObjectType objecttype, Oid *oldschema);
 extern Oid	AlterTypeNamespace_oid(Oid typeOid, Oid nspOid, ObjectAddresses *objsMoved);
 extern Oid AlterTypeNamespaceInternal(Oid typeOid, Oid nspOid,
 						   bool isImplicitArray,
