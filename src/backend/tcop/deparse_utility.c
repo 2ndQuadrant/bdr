@@ -3172,8 +3172,6 @@ deparse_CreateFunction(Oid objectId, Node *parsetree)
  *
  * Given a function OID and the parsetree that created it, return the JSON
  * blob representing the alter command.
- *
- * XXX this is missing the per-function custom-GUC thing.
  */
 static ObjTree *
 deparse_AlterFunction(Oid objectId, Node *parsetree)
@@ -3243,7 +3241,7 @@ deparse_AlterFunction(Oid objectId, Node *parsetree)
 		else if (strcmp(defel->defname, "leakproof") == 0)
 		{
 			tmp = new_objtree_VA(intVal(defel->arg) ?
-								 "LEAKPROOF" : "", 0);
+								 "LEAKPROOF" : "NOT LEAKPROOF", 0);
 		}
 		else if (strcmp(defel->defname, "cost") == 0)
 		{
