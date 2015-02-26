@@ -363,7 +363,9 @@ format_type_detailed(Oid type_oid, int32 typemod,
 	 */
 	if (type_oid == INTERVALOID ||
 		type_oid == TIMESTAMPOID ||
-		type_oid == TIMESTAMPTZOID)
+		type_oid == TIMESTAMPTZOID ||
+		type_oid == TIMEOID ||
+		type_oid == TIMETZOID)
 	{
 		*typarray = false;
 
@@ -382,6 +384,16 @@ peculiar_typmod:
 				/* otherwise, WITH TZ is added by typmod, so fall through */
 			case TIMESTAMPOID:
 				*typname = pstrdup("TIMESTAMP");
+				break;
+			case TIMETZOID:
+				if (typemod < 0)
+				{
+					*typname = pstrdup("TIME WITH TIME ZONE");
+					break;
+				}
+				/* otherwise, WITH TZ is added by typmode, so fall through */
+			case TIMEOID:
+				*typname = pstrdup("TIME");
 				break;
 		}
 		*nspid = InvalidOid;
@@ -421,7 +433,9 @@ peculiar_typmod:
 		 */
 		if (type_oid == INTERVALOID ||
 			type_oid == TIMESTAMPTZOID ||
-			type_oid == TIMESTAMPOID)
+			type_oid == TIMESTAMPOID ||
+			type_oid == TIMETZOID ||
+			type_oid == TIMEOID)
 			goto peculiar_typmod;
 	}
 	else
