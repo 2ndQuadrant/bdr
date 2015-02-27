@@ -5056,6 +5056,8 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 	List	   *subcmds = NIL;
 	ListCell   *cell;
 	char	   *fmtstr;
+	const char *reltype;
+	bool		istype = false;
 
 	Assert(cmd->type == SCT_AlterTable);
 
@@ -5063,7 +5065,31 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 	dpcontext = deparse_context_for(RelationGetRelationName(rel),
 									cmd->d.alterTable.objectId);
 
-	fmtstr = psprintf("ALTER TABLE %%{identity}D %%{subcmds:, }s");
+	switch (rel->rd_rel->relkind)
+	{
+		case RELKIND_RELATION:
+			reltype = "TABLE";
+			break;
+		case RELKIND_INDEX:
+			reltype = "INDEX";
+			break;
+		case RELKIND_VIEW:
+			reltype = "VIEW";
+			break;
+		case RELKIND_COMPOSITE_TYPE:
+			reltype = "TYPE";
+			istype = true;
+			break;
+		case RELKIND_FOREIGN_TABLE:
+			reltype = "FOREIGN TABLE";
+			break;
+
+		default:
+			elog(ERROR, "unexpected relkind %d", rel->rd_rel->relkind);
+			reltype = NULL;;
+	}
+
+	fmtstr = psprintf("ALTER %s %%{identity}D %%{subcmds:, }s", reltype);
 	alterTableStmt = new_objtree_VA(fmtstr, 0);
 
 	tmp = new_objtree_for_qualname(rel->rd_rel->relnamespace,
@@ -5086,8 +5112,10 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 				Assert(IsA(subcmd->def, ColumnDef));
 				tree = deparse_ColumnDef(rel, dpcontext, false,
 										 (ColumnDef *) subcmd->def);
-				tmp = new_objtree_VA("ADD COLUMN %{definition}s",
-									 2, "type", ObjTypeString, "add column",
+				fmtstr = psprintf("ADD %s %%{definition}s",
+								  istype ? "ATTRIBUTE" : "COLUMN");
+				tmp = new_objtree_VA(fmtstr, 2,
+									 "type", ObjTypeString, "add column",
 									 "definition", ObjTypeObject, tree);
 				subcmds = lappend(subcmds, new_object_object(tmp));
 				break;
@@ -5181,9 +5209,19 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 				break;
 
 			case AT_DropColumn:
-				tmp = new_objtree_VA("DROP COLUMN %{column}I",
-									 2, "type", ObjTypeString, "drop column",
-								 "column", ObjTypeString, subcmd->name);
+				/*
+				 * FIXME -- this command is also reported by sql_drop. Should
+				 * we remove it from here?
+				 */
+				fmtstr = psprintf("DROP %s %%{column}I %%{cascade}s",
+								  istype ? "ATTRIBUTE" : "COLUMN");
+				tmp = new_objtree_VA(fmtstr, 2,
+									 "type", ObjTypeString, "drop column",
+									 "column", ObjTypeString, subcmd->name);
+				tmp2 = new_objtree_VA("CASCADE", 1,
+									  "present", ObjTypeBool, subcmd->behavior);
+				append_object_object(tmp, "cascade", tmp2);
+
 				subcmds = lappend(subcmds, new_object_object(tmp));
 				break;
 
@@ -5245,6 +5283,10 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 				break;
 
 			case AT_DropConstraint:
+				/*
+				 * FIXME -- this command is also reported by sql_drop. Should
+				 * we remove it from here?
+				 */
 				tmp = new_objtree_VA("DROP CONSTRAINT %{constraint}I", 2,
 									 "type", ObjTypeString, "drop constraint",
 									 "constraint", ObjTypeString, subcmd->name);
@@ -5260,8 +5302,12 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 					def = (ColumnDef *) subcmd->def;
 					Assert(IsA(def, ColumnDef));
 
-					tmp = new_objtree_VA("ALTER COLUMN %{column}I SET DATA TYPE %{datatype}T %{collation}s %{using}s",
-										 2, "type", ObjTypeString, "alter column type",
+					fmtstr = psprintf("ALTER %s %%{column}I SET DATA TYPE %%{datatype}T %%{collation}s %s",
+									  istype ? "ATTRIBUTE" : "COLUMN",
+									  istype ? "%{cascade}s" : "%{using}s");
+
+					tmp = new_objtree_VA(fmtstr, 2,
+										 "type", ObjTypeString, "alter column type",
 										 "column", ObjTypeString, subcmd->name);
 					/* add the TYPE clause */
 					append_object_object(tmp, "datatype",
@@ -5282,20 +5328,33 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 						append_bool_object(tmp2, "present", false);
 					append_object_object(tmp, "collation", tmp2);
 
-					/*
-					 * Error out if the USING clause was used.  We cannot use
-					 * it directly here, because it needs to run through
-					 * transformExpr() before being usable for ruleutils.c, and
-					 * we're not in a position to transform it ourselves.  To
-					 * fix this problem, tablecmds.c needs to be modified to store
-					 * the transformed expression somewhere in the StashedATSubcmd.
-					 */
-					tmp2 = new_objtree_VA("USING %{expression}s", 0);
-					if (def->raw_default)
-						elog(ERROR, "unimplemented deparse of ALTER TABLE TYPE USING");
-					else
-						append_bool_object(tmp2, "present", false);
-					append_object_object(tmp, "using", tmp2);
+					/* if not a composite type, add the USING clause */
+					if (!istype)
+					{
+						/*
+						 * Error out if the USING clause was used.  We cannot use
+						 * it directly here, because it needs to run through
+						 * transformExpr() before being usable for ruleutils.c, and
+						 * we're not in a position to transform it ourselves.  To
+						 * fix this problem, tablecmds.c needs to be modified to store
+						 * the transformed expression somewhere in the StashedATSubcmd.
+						 */
+						tmp2 = new_objtree_VA("USING %{expression}s", 0);
+						if (def->raw_default)
+							elog(ERROR, "unimplemented deparse of ALTER TABLE TYPE USING");
+						else
+							append_bool_object(tmp2, "present", false);
+						append_object_object(tmp, "using", tmp2);
+					}
+
+					/* if it's a composite type, add the CASCADE clause */
+					if (istype)
+					{
+						tmp2 = new_objtree_VA("CASCADE", 0);
+						if (subcmd->behavior != DROP_CASCADE)
+							append_bool_object(tmp2, "present", false);
+						append_object_object(tmp, "cascade", tmp2);
+					}
 
 					subcmds = lappend(subcmds, new_object_object(tmp));
 				}
