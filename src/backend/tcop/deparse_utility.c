@@ -4187,27 +4187,8 @@ deparse_CreateTableAsStmt(Oid objectId, Node *parsetree)
 	/* Add an ON COMMIT clause.  CREATE MATERIALIZED VIEW doesn't have one */
 	if (node->relkind == OBJECT_TABLE)
 	{
-		tmp = new_objtree_VA("ON COMMIT %{on_commit_value}s", 0);
-		switch (node->into->onCommit)
-		{
-			case ONCOMMIT_DROP:
-				append_string_object(tmp, "on_commit_value", "DROP");
-				break;
-
-			case ONCOMMIT_DELETE_ROWS:
-				append_string_object(tmp, "on_commit_value", "DELETE ROWS");
-				break;
-
-			case ONCOMMIT_PRESERVE_ROWS:
-				append_string_object(tmp, "on_commit_value", "PRESERVE ROWS");
-				break;
-
-			case ONCOMMIT_NOOP:
-				append_null_object(tmp, "on_commit_value");
-				append_bool_object(tmp, "present", false);
-				break;
-		}
-		append_object_object(createStmt, "on_commit", tmp);
+		append_object_object(createStmt, "on_commit",
+							 deparse_OnCommitClause(node->into->onCommit));
 	}
 
 	/* add a TABLESPACE clause */
