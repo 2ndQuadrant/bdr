@@ -56,6 +56,7 @@ typedef struct EventTriggerQueryState
 	Oid			table_rewrite_oid;	/* InvalidOid, or set for table_rewrite event */
 	int			table_rewrite_reason;	/* AT_REWRITE reason */
 
+	bool		commandCollectionInhibited;
 	MemoryContext cxt;
 	StashedCommand *curcmd;
 	List	   *stash;		/* list of StashedCommand; see deparse_utility.h */
@@ -1216,6 +1217,8 @@ EventTriggerBeginCompleteQuery(void)
 	slist_init(&(state->SQLDropList));
 	state->in_sql_drop = false;
 	state->table_rewrite_oid = InvalidOid;
+	state->commandCollectionInhibited = currentEventTriggerState ?
+		currentEventTriggerState->commandCollectionInhibited : false;
 	state->curcmd = NULL;
 	state->stash = NIL;
 	state->previous = currentEventTriggerState;
@@ -1563,6 +1566,9 @@ EventTriggerStashCommand(ObjectAddress address, ObjectAddress *secondaryObject,
 	MemoryContext oldcxt;
 	StashedCommand *stashed;
 
+	if (currentEventTriggerState->commandCollectionInhibited)
+		return;
+
 	oldcxt = MemoryContextSwitchTo(currentEventTriggerState->cxt);
 
 	stashed = palloc(sizeof(StashedCommand));
@@ -1579,6 +1585,18 @@ EventTriggerStashCommand(ObjectAddress address, ObjectAddress *secondaryObject,
 											  stashed);
 
 	MemoryContextSwitchTo(oldcxt);
+}
+
+void
+EventTriggerInhibitCommandCollection(void)
+{
+	currentEventTriggerState->commandCollectionInhibited = true;
+}
+
+void
+EventTriggerUndoInhibitCommandCollection(void)
+{
+	currentEventTriggerState->commandCollectionInhibited = false;
 }
 
 /*

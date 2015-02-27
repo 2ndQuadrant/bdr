@@ -63,6 +63,8 @@ extern void EventTriggerSQLDropAddObject(const ObjectAddress *object,
 
 extern void EventTriggerStashCommand(ObjectAddress address,
 						 ObjectAddress *secondaryObject, Node *parsetree);
+extern void EventTriggerInhibitCommandCollection(void);
+extern void EventTriggerUndoInhibitCommandCollection(void);
 
 extern void EventTriggerComplexCmdStart(Node *parsetree);
 extern void EventTriggerComplexCmdSetOid(Oid objectId);
