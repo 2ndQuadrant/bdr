@@ -71,6 +71,8 @@ BEGIN
 				obj.object_type, obj.object_identity);
 		END IF;
 
+		fmt := fmt || ' /* added by DROP support */ ';
+
 		INSERT INTO pg_deparse.deparse_test_commands (lsn, ord, command)
 		     VALUES (pg_current_xlog_insert_location(), i, fmt);
 		i := i + 1;
