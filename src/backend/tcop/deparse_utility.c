@@ -2365,6 +2365,38 @@ obtainConstraints(List *elements, Oid relationId, Oid domainId)
 }
 
 /*
+ * deparse the ON COMMMIT ... clause for CREATE ... TEMPORARY ...
+ */
+static ObjTree *
+deparse_OnCommitClause(OnCommitAction option)
+{
+	ObjTree	   *tmp;
+
+	tmp = new_objtree_VA("ON COMMIT %{on_commit_value}s", 0);
+	switch (option)
+	{
+		case ONCOMMIT_DROP:
+			append_string_object(tmp, "on_commit_value", "DROP");
+			break;
+
+		case ONCOMMIT_DELETE_ROWS:
+			append_string_object(tmp, "on_commit_value", "DELETE ROWS");
+			break;
+
+		case ONCOMMIT_PRESERVE_ROWS:
+			append_string_object(tmp, "on_commit_value", "PRESERVE ROWS");
+			break;
+
+		case ONCOMMIT_NOOP:
+			append_null_object(tmp, "on_commit_value");
+			append_bool_object(tmp, "present", false);
+			break;
+	}
+
+	return tmp;
+}
+
+/*
  * deparse_CreateStmt
  *		Deparse a CreateStmt (CREATE TABLE)
  *
@@ -2522,27 +2554,8 @@ deparse_CreateStmt(Oid objectId, Node *parsetree)
 	}
 	append_object_object(createStmt, "tablespace", tmp);
 
-	tmp = new_objtree_VA("ON COMMIT %{on_commit_value}s", 0);
-	switch (node->oncommit)
-	{
-		case ONCOMMIT_DROP:
-			append_string_object(tmp, "on_commit_value", "DROP");
-			break;
-
-		case ONCOMMIT_DELETE_ROWS:
-			append_string_object(tmp, "on_commit_value", "DELETE ROWS");
-			break;
-
-		case ONCOMMIT_PRESERVE_ROWS:
-			append_string_object(tmp, "on_commit_value", "PRESERVE ROWS");
-			break;
-
-		case ONCOMMIT_NOOP:
-			append_null_object(tmp, "on_commit_value");
-			append_bool_object(tmp, "present", false);
-			break;
-	}
-	append_object_object(createStmt, "on_commit", tmp);
+	append_object_object(createStmt, "on_commit",
+						 deparse_OnCommitClause(node->oncommit));
 
 	/*
 	 * WITH clause.  We always emit one, containing at least the OIDS option.
