@@ -3412,17 +3412,19 @@ deparse_RenameStmt(ObjectAddress address, Node *parsetree)
 
 			if (node->renameType == OBJECT_ATTRIBUTE)
 			{
-
-				fmtstr = psprintf("ALTER TYPE %%{identity}D RENAME ATTRIBUTE %%{colname}I TO %%{newname}I");
+				fmtstr = "ALTER TYPE %{identity}D RENAME ATTRIBUTE %{colname}I TO %{newname}I %{cascade}s";
 				renameStmt = new_objtree_VA(fmtstr, 0);
+				append_object_object(renameStmt, "cascade",
+									 new_objtree_VA("CASCADE", 1,
+													"present", ObjTypeBool,
+													node->behavior == DROP_CASCADE));
 			}
 			else
 			{
 				fmtstr = psprintf("ALTER %s %%{if_exists}s %%{identity}D RENAME COLUMN %%{colname}I TO %%{newname}I",
 								  stringify_objtype(node->relationType));
+				renameStmt = new_objtree_VA(fmtstr, 0);
 			}
-
-			renameStmt = new_objtree_VA(fmtstr, 0);
 
 			append_object_object(renameStmt, "identity",
 								 new_objtree_for_qualname(schemaId,
