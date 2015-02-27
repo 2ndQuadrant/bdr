@@ -1351,8 +1351,25 @@ ProcessUtilitySlow(Node *parsetree,
 				break;
 
 			case T_RefreshMatViewStmt:
-				address = ExecRefreshMatView((RefreshMatViewStmt *) parsetree,
-								   queryString, params, completionTag);
+				/*
+				 * REFRSH CONCURRENTLY executes some DDL commands internally.
+				 * Inhibit DDL command collection here to avoid those commands
+				 * from showing up in the deparsed command queue.  The refresh
+				 * command itself is queued, which is enough.
+				 */
+				EventTriggerInhibitCommandCollection();
+				PG_TRY();
+				{
+					address = ExecRefreshMatView((RefreshMatViewStmt *) parsetree,
+												 queryString, params, completionTag);
+				}
+				PG_CATCH();
+				{
+					EventTriggerUndoInhibitCommandCollection();
+					PG_RE_THROW();
+				}
+				PG_END_TRY();
+				EventTriggerUndoInhibitCommandCollection();
 				break;
 
 			case T_CreateTrigStmt:
