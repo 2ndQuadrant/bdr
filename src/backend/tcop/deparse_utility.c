@@ -3367,7 +3367,7 @@ stringify_objtype(ObjectType objtype)
 			return "VIEW";
 
 		default:
-			elog(ERROR, "unsupported objtype %d", objtype);
+			elog(ERROR, "unsupported object type %d", objtype);
 	}
 }
 
