@@ -5314,24 +5314,7 @@ deparse_GrantStmt(StashedCommand *cmd)
 	{
 		Oid		grantee = lfirst_oid(cell);
 
-		if (grantee == ACL_ID_PUBLIC)
-			tmp = new_objtree_VA("PUBLIC", 0);
-		else
-		{
-			HeapTuple	roltup;
-			char	   *rolname;
-
-			roltup = SearchSysCache1(AUTHOID, ObjectIdGetDatum(grantee));
-			if (!HeapTupleIsValid(roltup))
-				ereport(ERROR,
-						(errcode(ERRCODE_UNDEFINED_OBJECT),
-						 errmsg("role with OID %u does not exist", grantee)));
-
-			tmp = new_objtree_VA("%{name}I", 0);
-			rolname = NameStr(((Form_pg_authid) GETSTRUCT(roltup))->rolname);
-			append_string_object(tmp, "name", pstrdup(rolname));
-			ReleaseSysCache(roltup);
-		}
+		tmp = new_objtree_for_role(grantee);
 		list = lappend(list, new_object_object(tmp));
 	}
 	append_array_object(grantStmt, "grantees", list);
