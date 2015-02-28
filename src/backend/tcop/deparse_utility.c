@@ -53,6 +53,7 @@
 #include "catalog/pg_proc.h"
 #include "catalog/pg_range.h"
 #include "catalog/pg_rewrite.h"
+#include "catalog/pg_authid.h"
 #include "catalog/pg_trigger.h"
 #include "catalog/pg_ts_config.h"
 #include "catalog/pg_ts_config_map.h"
@@ -643,6 +644,33 @@ new_objtree_for_qualname_id(Oid classId, Oid objectId)
 	heap_close(catalog, AccessShareLock);
 
 	return qualified;
+}
+
+static ObjTree *
+new_objtree_for_role(Oid roleoid)
+{
+	ObjTree    *tmp;
+
+	if (roleoid == ACL_ID_PUBLIC)
+		tmp = new_objtree_VA("PUBLIC", 0);
+	else
+	{
+		HeapTuple	roltup;
+		char	   *rolname;
+
+		roltup = SearchSysCache1(AUTHOID, ObjectIdGetDatum(roleoid));
+		if (!HeapTupleIsValid(roltup))
+			ereport(ERROR,
+					(errcode(ERRCODE_UNDEFINED_OBJECT),
+					 errmsg("role with OID %u does not exist", roleoid)));
+
+		tmp = new_objtree_VA("%{name}I", 0);
+		rolname = NameStr(((Form_pg_authid) GETSTRUCT(roltup))->rolname);
+		append_string_object(tmp, "name", pstrdup(rolname));
+		ReleaseSysCache(roltup);
+	}
+
+	return tmp;
 }
 
 /*
