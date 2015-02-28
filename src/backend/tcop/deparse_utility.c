@@ -2397,6 +2397,36 @@ deparse_OnCommitClause(OnCommitAction option)
 }
 
 /*
+ * Deparse DefElems, as used e.g. by ALTER COLUMN ... SET, into a list of SET
+ * (...)  or RESET (...) contents.
+ */
+static ObjTree *
+deparse_DefElem(DefElem *elem, bool is_reset)
+{
+	ObjTree	   *set;
+	ObjTree	   *optname;
+
+	if (elem->defnamespace != NULL)
+		optname = new_objtree_VA("%{schema}I.%{label}I", 1,
+								 "schema", ObjTypeString, elem->defnamespace);
+	else
+		optname = new_objtree_VA("%{label}I", 0);
+
+	append_string_object(optname, "label", elem->defname);
+
+	if (is_reset)
+		set = new_objtree_VA("%{label}s", 0);
+	else
+		set = new_objtree_VA("%{label}s = %{value}L", 1,
+							 "value", ObjTypeString,
+							 elem->arg ? defGetString(elem) :
+							 defGetBoolean(elem) ? "TRUE" : "FALSE");
+
+	append_object_object(set, "label", optname);
+	return set;
+}
+
+/*
  * deparse_CreateStmt
  *		Deparse a CreateStmt (CREATE TABLE)
  *
@@ -2568,26 +2598,16 @@ deparse_CreateStmt(Oid objectId, Node *parsetree)
 						 "value", ObjTypeString,
 						 relation->rd_rel->relhasoids ? "ON" : "OFF");
 	list = list_make1(new_object_object(tmp));
+
 	foreach(cell, node->options)
 	{
 		DefElem	*opt = (DefElem *) lfirst(cell);
-		char   *defname;
-		char   *value;
 
 		/* already handled above */
 		if (strcmp(opt->defname, "oids") == 0)
 			continue;
 
-		if (opt->defnamespace)
-			defname = psprintf("%s.%s", opt->defnamespace, opt->defname);
-		else
-			defname = opt->defname;
-
-		value = opt->arg ? defGetString(opt) :
-			defGetBoolean(opt) ? "TRUE" : "FALSE";
-		tmp = new_objtree_VA("%{option}s=%{value}s", 2,
-							 "option", ObjTypeString, defname,
-							 "value", ObjTypeString, value);
+		tmp = deparse_DefElem(opt, false);
 		list = lappend(list, new_object_object(tmp));
 	}
 	append_array_object(createStmt, "with", list);
