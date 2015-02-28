@@ -2014,6 +2014,86 @@ deparse_AlterForeignServerStmt(Oid objectId, Node *parsetree)
 	return alterServer;
 }
 
+
+static ObjTree *
+deparse_CreateUserMappingStmt(Oid objectId, Node *parsetree)
+{
+	CreateUserMappingStmt *node = (CreateUserMappingStmt *) parsetree;
+	ObjTree	   *createStmt;
+	Relation	rel;
+	HeapTuple	tp;
+	Form_pg_user_mapping form;
+	ForeignServer *server;
+
+	rel = heap_open(UserMappingRelationId, RowExclusiveLock);
+
+	/*
+	 * Lookup up object in the catalog, so we don't have to deal with
+	 * current_user and such.
+	 */
+	tp = SearchSysCache1(USERMAPPINGOID, ObjectIdGetDatum(objectId));
+	if (!HeapTupleIsValid(tp))
+		elog(ERROR, "cache lookup failed for user mapping %u", objectId);
+
+	form = (Form_pg_user_mapping) GETSTRUCT(tp);
+
+	server = GetForeignServer(form->umserver);
+
+	createStmt = new_objtree_VA("CREATE USER MAPPING FOR %{role}s SERVER %{server}I "
+								"%{generic_options}s", 1,
+								"server", ObjTypeString, server->servername);
+
+	append_object_object(createStmt, "role", new_objtree_for_role(form->umuser));
+
+	/* add an OPTIONS clause, if any */
+	append_object_object(createStmt, "generic_options",
+						 deparse_FdwOptions(node->options));
+
+	ReleaseSysCache(tp);
+	heap_close(rel, RowExclusiveLock);
+	return createStmt;
+}
+
+static ObjTree *
+deparse_AlterUserMappingStmt(Oid objectId, Node *parsetree)
+{
+	AlterUserMappingStmt *node = (AlterUserMappingStmt *) parsetree;
+	ObjTree	   *alterStmt;
+	Relation	rel;
+	HeapTuple	tp;
+	Form_pg_user_mapping form;
+	ForeignServer *server;
+
+	rel = heap_open(UserMappingRelationId, RowExclusiveLock);
+
+	/*
+	 * Lookup up object in the catalog, so we don't have to deal with
+	 * current_user and such.
+	 */
+
+	tp = SearchSysCache1(USERMAPPINGOID, ObjectIdGetDatum(objectId));
+	if (!HeapTupleIsValid(tp))
+		elog(ERROR, "cache lookup failed for user mapping %u", objectId);
+
+	form = (Form_pg_user_mapping) GETSTRUCT(tp);
+
+	server = GetForeignServer(form->umserver);
+
+	alterStmt = new_objtree_VA("ALTER USER MAPPING FOR %{role}s SERVER %{server}I "
+								"%{generic_options}s", 1,
+								"server", ObjTypeString, server->servername);
+
+	append_object_object(alterStmt, "role", new_objtree_for_role(form->umuser));
+
+	/* add an OPTIONS clause, if any */
+	append_object_object(alterStmt, "generic_options",
+						 deparse_FdwOptions(node->options));
+
+	ReleaseSysCache(tp);
+	heap_close(rel, RowExclusiveLock);
+	return alterStmt;
+}
+
 /*
  * deparse_ViewStmt
  *		deparse a ViewStmt
@@ -2923,6 +3003,49 @@ deparse_CreateStmt(Oid objectId, Node *parsetree)
 
 	return createStmt;
 }
+
+static ObjTree *
+deparse_CreateForeignTableStmt(Oid objectId, Node *parsetree)
+{
+	CreateForeignTableStmt *stmt = (CreateForeignTableStmt *) parsetree;
+	Relation	relation = relation_open(objectId, AccessShareLock);
+	List	   *dpcontext;
+	ObjTree    *createStmt;
+	ObjTree    *tmp;
+	List	   *tableelts = NIL;
+
+	createStmt = new_objtree_VA(
+			"CREATE FOREIGN TABLE %{if_not_exists}s %{identity}D "
+			"(%{table_elements:, }s) SERVER %{server}I "
+			"%{generic_options}s", 0);
+
+	tmp = new_objtree_for_qualname(relation->rd_rel->relnamespace,
+								   RelationGetRelationName(relation));
+	append_object_object(createStmt, "identity", tmp);
+
+	append_string_object(createStmt, "if_not_exists",
+						 stmt->base.if_not_exists ? "IF NOT EXISTS" : "");
+
+	append_string_object(createStmt, "server", stmt->servername);
+
+	dpcontext = deparse_context_for(RelationGetRelationName(relation),
+									objectId);
+
+	tableelts = deparseTableElements(relation, stmt->base.tableElts, dpcontext,
+									 false,		/* not typed table */
+									 false);	/* not composite */
+	tableelts = obtainConstraints(tableelts, objectId, InvalidOid);
+
+	append_array_object(createStmt, "table_elements", tableelts);
+
+	/* add an OPTIONS clause, if any */
+	append_object_object(createStmt, "generic_options",
+						 deparse_FdwOptions(stmt->options));
+
+	relation_close(relation, AccessShareLock);
+	return createStmt;
+}
+
 
 /*
  * deparse_CompositeTypeStmt
@@ -5581,7 +5704,8 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 				break;
 
 			case AT_AlterColumnGenericOptions:
-				elog(ERROR, "unimplemented deparse of ALTER TABLE ALTER COLUMN OPTIONS");
+				tmp = deparse_FdwOptions((List *) subcmd->def);
+				subcmds = lappend(subcmds, new_object_object(tmp));
 				break;
 
 			case AT_ChangeOwner:
@@ -5790,7 +5914,8 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 				break;
 
 			case AT_GenericOptions:
-				elog(ERROR, "unimplemented deparse of ALTER TABLE OPTIONS (...)");
+				tmp = deparse_FdwOptions((List *) subcmd->def);
+				subcmds = lappend(subcmds, new_object_object(tmp));
 				break;
 
 			default:
@@ -5839,7 +5964,7 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_CreateForeignTableStmt:
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			command = deparse_CreateForeignTableStmt(objectId, parsetree);
 			break;
 
 		case T_AlterTableStmt:
@@ -5892,11 +6017,11 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_CreateUserMappingStmt:
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			command = deparse_CreateUserMappingStmt(objectId, parsetree);
 			break;
 
 		case T_AlterUserMappingStmt:
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			command = deparse_AlterUserMappingStmt(objectId, parsetree);
 			break;
 
 		case T_DropUserMappingStmt:
