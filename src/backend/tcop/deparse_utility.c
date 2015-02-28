@@ -2427,6 +2427,70 @@ deparse_DefElem(DefElem *elem, bool is_reset)
 }
 
 /*
+ * ... ALTER COLUMN ... SET/RESET (...)
+ */
+static ObjTree *
+deparse_ColumnSetOptions(AlterTableCmd *subcmd)
+{
+	List	   *sets = NIL;
+	ListCell   *cell;
+	ObjTree    *tmp;
+	bool		is_reset = subcmd->subtype == AT_ResetOptions;
+
+	if (is_reset)
+		tmp = new_objtree_VA("ALTER COLUMN %{column}I RESET (%{options:, }s)", 0);
+	else
+		tmp = new_objtree_VA("ALTER COLUMN %{column}I SET (%{options:, }s)", 0);
+
+	append_string_object(tmp, "column", subcmd->name);
+
+	foreach(cell, (List *) subcmd->def)
+	{
+		DefElem	   *elem;
+		ObjTree	   *set;
+
+		elem = (DefElem *) lfirst(cell);
+		set = deparse_DefElem(elem, is_reset);
+		sets = lappend(sets, new_object_object(set));
+	}
+
+	append_array_object(tmp, "options", sets);
+
+	return tmp;
+}
+
+/*
+ * ... ALTER COLUMN ... SET/RESET (...)
+ */
+static ObjTree *
+deparse_RelSetOptions(AlterTableCmd *subcmd)
+{
+	List	   *sets = NIL;
+	ListCell   *cell;
+	ObjTree    *tmp;
+	bool		is_reset = subcmd->subtype == AT_ResetRelOptions;
+
+	if (is_reset)
+		tmp = new_objtree_VA("RESET (%{options:, }s)", 0);
+	else
+		tmp = new_objtree_VA("SET (%{options:, }s)", 0);
+
+	foreach(cell, (List *) subcmd->def)
+	{
+		DefElem	   *elem;
+		ObjTree	   *set;
+
+		elem = (DefElem *) lfirst(cell);
+		set = deparse_DefElem(elem, is_reset);
+		sets = lappend(sets, new_object_object(set));
+	}
+
+	append_array_object(tmp, "options", sets);
+
+	return tmp;
+}
+
+/*
  * deparse_CreateStmt
  *		Deparse a CreateStmt (CREATE TABLE)
  *
@@ -5198,11 +5262,9 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 				break;
 
 			case AT_SetOptions:
-				elog(ERROR, "unimplemented deparse of ALTER TABLE SET OPTIONS");
-				break;
-
 			case AT_ResetOptions:
-				elog(ERROR, "unimplemented deparse of ALTER TABLE RESET OPTIONS");
+				subcmds = lappend(subcmds, new_object_object(
+									  deparse_ColumnSetOptions(subcmd)));
 				break;
 
 			case AT_SetStorage:
@@ -5423,11 +5485,9 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 				break;
 
 			case AT_SetRelOptions:
-				elog(ERROR, "unimplemented deparse of ALTER TABLE SET");
-				break;
-
 			case AT_ResetRelOptions:
-				elog(ERROR, "unimplemented deparse of ALTER TABLE RESET");
+				subcmds = lappend(subcmds, new_object_object(
+									  deparse_RelSetOptions(subcmd)));
 				break;
 
 			case AT_EnableTrig:
