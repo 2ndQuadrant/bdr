@@ -1728,7 +1728,8 @@ deparse_AlterExtensionStmt(Oid objectId, Node *parsetree)
 	HeapTuple   extTup;
 	Form_pg_extension extForm;
 	ObjTree	   *stmt;
-	char	   *version = NULL;
+	ObjTree	   *tmp;
+	List	   *list = NIL;
 	ListCell   *cell;
 
 	pg_extension = heap_open(ExtensionRelationId, AccessShareLock);
@@ -1738,7 +1739,7 @@ deparse_AlterExtensionStmt(Oid objectId, Node *parsetree)
 			 objectId);
 	extForm = (Form_pg_extension) GETSTRUCT(extTup);
 
-	stmt = new_objtree_VA("ALTER EXTENSION %{identity}I UPDATE%{to}s", 1,
+	stmt = new_objtree_VA("ALTER EXTENSION %{identity}I UPDATE %{options: }s", 1,
 						  "identity", ObjTypeString,
 						  NameStr(extForm->extname));
 
@@ -1747,15 +1748,17 @@ deparse_AlterExtensionStmt(Oid objectId, Node *parsetree)
 		DefElem *opt = (DefElem *) lfirst(cell);
 
 		if (strcmp(opt->defname, "new_version") == 0)
-			version = defGetString(opt);
+		{
+			tmp = new_objtree_VA("TO %{version}L", 2,
+								 "type", ObjTypeString, "version",
+								 "version", ObjTypeString, defGetString(opt));
+			list = lappend(list, new_object_object(tmp));
+		}
 		else
 			elog(ERROR, "unsupported option %s", opt->defname);
 	}
 
-	if (version)
-		append_string_object(stmt, "to", psprintf(" TO '%s'", version));
-	else
-		append_string_object(stmt, "to", "");
+	append_array_object(stmt, "options", list);
 
 	heap_close(pg_extension, AccessShareLock);
 
