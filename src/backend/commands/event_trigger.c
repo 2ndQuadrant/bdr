@@ -1600,8 +1600,8 @@ EventTriggerUndoInhibitCommandCollection(void)
 }
 
 /*
- * EventTriggerStartRecordingSubcmds
- *		Prepare to receive data on a complex DDL command about to be executed
+ * EventTriggerAlterTableStart
+ *		Prepare to receive data on an ALTER TABLE command about to be executed
  *
  * Note we don't actually stash the object we create here into the "stashed"
  * list; instead we keep it in curcmd, and only when we're done processing the
@@ -1613,7 +1613,7 @@ EventTriggerUndoInhibitCommandCollection(void)
  * raise an error.
  */
 void
-EventTriggerComplexCmdStart(Node *parsetree)
+EventTriggerAlterTableStart(Node *parsetree)
 {
 	MemoryContext	oldcxt;
 	StashedCommand *stashed;
@@ -1641,7 +1641,7 @@ EventTriggerComplexCmdStart(Node *parsetree)
  * This is needed because in some cases we don't know the OID until later.
  */
 void
-EventTriggerComplexCmdSetOid(Oid objectId)
+EventTriggerAlterTableRelid(Oid objectId)
 {
 	/*
 	 * When processing an ALTER TYPE command, the given objectId is the one
@@ -1669,7 +1669,7 @@ EventTriggerComplexCmdSetOid(Oid objectId)
 }
 
 /*
- * EventTriggerRecordSubcmd
+ * EventTriggerAlterTableStashSubcmd
  * 		Save data about a single part of a complex DDL command
  *
  * Several different commands go through this path, but apart from ALTER TABLE
@@ -1677,8 +1677,8 @@ EventTriggerComplexCmdSetOid(Oid objectId)
  * internally, so that's all that this code needs to handle at the moment.
  */
 void
-EventTriggerRecordSubcmd(Node *subcmd, Oid relid, AttrNumber attnum,
-						 Oid newoid)
+EventTriggerAlterTableStashSubcmd(Node *subcmd, Oid relid, AttrNumber attnum,
+							 Oid newoid)
 {
 	MemoryContext	oldcxt;
 	StashedATSubcmd *newsub;
@@ -1710,15 +1710,15 @@ EventTriggerRecordSubcmd(Node *subcmd, Oid relid, AttrNumber attnum,
 }
 
 /*
- * EventTriggerEndRecordingSubcmds
- * 		Finish up saving a complex DDL command
+ * EventTriggerAlterTableEnd
+ * 		Finish up saving an ALTER TABLE command, and add it to stash
  *
  * FIXME this API isn't considering the possibility that a xact/subxact is
  * aborted partway through.  Probably it's best to add an
  * AtEOSubXact_EventTriggers() to fix this.
  */
 void
-EventTriggerComplexCmdEnd(void)
+EventTriggerAlterTableEnd(void)
 {
 	/* If no subcommands, don't stash anything */
 	if (list_length(currentEventTriggerState->curcmd->d.alterTable.subcmds) != 0)

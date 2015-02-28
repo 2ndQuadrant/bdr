@@ -1028,8 +1028,8 @@ ProcessUtilitySlow(Node *parsetree,
 														queryString);
 
 						/* ... ensure we have an event trigger context ... */
-						EventTriggerComplexCmdStart(parsetree);
-						EventTriggerComplexCmdSetOid(relid);
+						EventTriggerAlterTableStart(parsetree);
+						EventTriggerAlterTableRelid(relid);
 
 						/* ... and do it */
 						foreach(l, stmts)
@@ -1052,15 +1052,15 @@ ProcessUtilitySlow(Node *parsetree,
 								 * commands is consistent with the way they are
 								 * executed here.
 								 */
-								EventTriggerComplexCmdEnd();
+								EventTriggerAlterTableEnd();
 								ProcessUtility(stmt,
 											   queryString,
 											   PROCESS_UTILITY_SUBCOMMAND,
 											   params,
 											   None_Receiver,
 											   NULL);
-								EventTriggerComplexCmdStart(parsetree);
-								EventTriggerComplexCmdSetOid(relid);
+								EventTriggerAlterTableStart(parsetree);
+								EventTriggerAlterTableRelid(relid);
 							}
 
 							/* Need CCI between commands */
@@ -1069,7 +1069,7 @@ ProcessUtilitySlow(Node *parsetree,
 						}
 
 						/* done */
-						EventTriggerComplexCmdEnd();
+						EventTriggerAlterTableEnd();
 					}
 					else
 						ereport(NOTICE,
@@ -1226,7 +1226,7 @@ ProcessUtilitySlow(Node *parsetree,
 					stmt = transformIndexStmt(relid, stmt, queryString);
 
 					/* ... and do it */
-					EventTriggerComplexCmdStart(parsetree);
+					EventTriggerAlterTableStart(parsetree);
 					address =
 						DefineIndex(relid,	/* OID of heap relation */
 									stmt,
@@ -1242,7 +1242,7 @@ ProcessUtilitySlow(Node *parsetree,
 					 */
 					EventTriggerStashCommand(address, NULL, parsetree);
 					commandStashed = true;
-					EventTriggerComplexCmdEnd();
+					EventTriggerAlterTableEnd();
 				}
 				break;
 
@@ -1317,12 +1317,12 @@ ProcessUtilitySlow(Node *parsetree,
 				break;
 
 			case T_ViewStmt:	/* CREATE VIEW */
-				EventTriggerComplexCmdStart(parsetree);
+				EventTriggerAlterTableStart(parsetree);
 				address = DefineView((ViewStmt *) parsetree, queryString);
 				EventTriggerStashCommand(address, NULL, parsetree);
 				/* stashed internally */
 				commandStashed = true;
-				EventTriggerComplexCmdEnd();
+				EventTriggerAlterTableEnd();
 				break;
 
 			case T_CreateFunctionStmt:	/* CREATE FUNCTION */

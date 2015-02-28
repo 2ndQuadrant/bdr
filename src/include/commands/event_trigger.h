@@ -66,11 +66,11 @@ extern void EventTriggerStashCommand(ObjectAddress address,
 extern void EventTriggerInhibitCommandCollection(void);
 extern void EventTriggerUndoInhibitCommandCollection(void);
 
-extern void EventTriggerComplexCmdStart(Node *parsetree);
-extern void EventTriggerComplexCmdSetOid(Oid objectId);
-extern void EventTriggerRecordSubcmd(Node *subcmd, Oid relid,
-						 AttrNumber attnum, Oid newoid);
-extern void EventTriggerComplexCmdEnd(void);
+extern void EventTriggerAlterTableStart(Node *parsetree);
+extern void EventTriggerAlterTableRelid(Oid objectId);
+extern void EventTriggerAlterTableStashSubcmd(Node *subcmd, Oid relid,
+								  AttrNumber attnum, Oid newoid);
+extern void EventTriggerAlterTableEnd(void);
 
 extern void EventTriggerStashGrant(InternalGrant *istmt);
 
