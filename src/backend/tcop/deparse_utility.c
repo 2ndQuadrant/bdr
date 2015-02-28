@@ -4170,10 +4170,12 @@ static ObjTree *
 deparse_CreateTableAsStmt(Oid objectId, Node *parsetree)
 {
 	CreateTableAsStmt *node = (CreateTableAsStmt *) parsetree;
+	Relation	relation = relation_open(objectId, AccessShareLock);
 	ObjTree	   *createStmt;
 	ObjTree	   *tmp;
 	char	   *fmt;
 	List	   *list;
+	ListCell   *cell;
 
 	/*
 	 * Reject unsupported case right away.
@@ -4187,11 +4189,11 @@ deparse_CreateTableAsStmt(Oid objectId, Node *parsetree)
 	 */
 	if (node->relkind == OBJECT_MATVIEW)
 		fmt = "CREATE %{persistence}s MATERIALIZED VIEW %{if_not_exists}s "
-			"%{identity}D %{columns}s %{with}s %{tablespace}s "
-			"AS %{query}s %{with_no_data}s";
+			"%{identity}D %{columns}s WITH (%{with:, }s) %{tablespace}s "
+			"AS %{query}s WITH %{with_no_data}s";
 	else
 		fmt = "CREATE %{persistence}s TABLE %{if_not_exists}s "
-			"%{identity}D %{columns}s %{with}s %{on_commit}s %{tablespace}s "
+			"%{identity}D %{columns}s WITH (%{with:, }s) %{on_commit}s %{tablespace}s "
 			"AS %{query}s %{with_no_data}s";
 
 	createStmt =
@@ -4250,40 +4252,31 @@ deparse_CreateTableAsStmt(Oid objectId, Node *parsetree)
 	append_string_object(createStmt, "query",
 						 pg_get_createtableas_def((Query *) node->query));
 
-	/* add a WITH clause, but only if any options are set */
-	tmp = new_objtree_VA("WITH (%{with_options:, }s)", 0);
-	if (node->into->options == NIL)
+
+	/*
+	 * WITH clause.  Like for CREATE TABLE we always emit one, containing at
+	 * least the OIDS option.
+	 */
+	tmp = new_objtree_VA("oids=%{value}s", 2,
+						 "option", ObjTypeString, "oids",
+						 "value", ObjTypeString,
+						 relation->rd_rel->relhasoids ? "ON" : "OFF");
+	list = list_make1(new_object_object(tmp));
+
+	list = NIL;
+	foreach (cell, node->into->options)
 	{
-		append_null_object(tmp, "with_options");
-		append_bool_object(tmp, "present", false);
+		DefElem	*opt = (DefElem *) lfirst(cell);
+
+		if (strcmp(opt->defname, "oids") == 0)
+			continue;
+
+		tmp = deparse_DefElem(opt, false);
+		list = lappend(list, new_object_object(tmp));
 	}
-	else
-	{
-		ListCell   *cell;
+	append_array_object(createStmt, "with", list);
 
-		list = NIL;
-		foreach (cell, node->into->options)
-		{
-			DefElem *opt = (DefElem *) lfirst(cell);
-			char   *defname;
-			char   *value;
-			ObjTree *tmp2;
-
-			if (opt->defnamespace)
-				defname = psprintf("%s.%s", opt->defnamespace, opt->defname);
-			else
-				defname = opt->defname;
-
-			value = opt->arg ? defGetString(opt) :
-				defGetBoolean(opt) ? "TRUE" : "FALSE";
-			tmp2 = new_objtree_VA("%{option}s=%{value}s", 2,
-								  "option", ObjTypeString, defname,
-								  "value", ObjTypeString, value);
-			list = lappend(list, new_object_object(tmp2));
-		}
-		append_array_object(tmp, "with_options", list);
-	}
-	append_object_object(createStmt, "with", tmp);
+	relation_close(relation, AccessShareLock);
 
 	return createStmt;
 }
