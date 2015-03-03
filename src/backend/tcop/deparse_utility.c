@@ -4606,6 +4606,7 @@ deparse_CreateTableAsStmt(Oid objectId, Node *parsetree)
 	Relation	relation = relation_open(objectId, AccessShareLock);
 	ObjTree	   *createStmt;
 	ObjTree	   *tmp;
+	ObjTree	   *tmp2;
 	char	   *fmt;
 	List	   *list;
 	ListCell   *cell;
@@ -4622,11 +4623,11 @@ deparse_CreateTableAsStmt(Oid objectId, Node *parsetree)
 	 */
 	if (node->relkind == OBJECT_MATVIEW)
 		fmt = "CREATE %{persistence}s MATERIALIZED VIEW %{if_not_exists}s "
-			"%{identity}D %{columns}s WITH (%{with:, }s) %{tablespace}s "
-			"AS %{query}s WITH %{with_no_data}s";
+			"%{identity}D %{columns}s %{with_clause}s %{tablespace}s "
+			"AS %{query}s %{with_no_data}s";
 	else
 		fmt = "CREATE %{persistence}s TABLE %{if_not_exists}s "
-			"%{identity}D %{columns}s WITH (%{with:, }s) %{on_commit}s %{tablespace}s "
+			"%{identity}D %{columns}s %{with_clause}s %{on_commit}s %{tablespace}s "
 			"AS %{query}s %{with_no_data}s";
 
 	createStmt =
@@ -4687,27 +4688,40 @@ deparse_CreateTableAsStmt(Oid objectId, Node *parsetree)
 
 
 	/*
-	 * WITH clause.  Like for CREATE TABLE we always emit one, containing at
-	 * least the OIDS option.
+	 * WITH clause.  In CREATE TABLE AS, like for CREATE TABLE, we always emit
+	 * one, containing at least the OIDS option; CREATE MATERIALIZED VIEW
+	 * doesn't support the oids option, so we have to make the clause reduce to
+	 * empty if no other options are specified.
 	 */
-	tmp = new_objtree_VA("oids=%{value}s", 2,
-						 "option", ObjTypeString, "oids",
-						 "value", ObjTypeString,
-						 relation->rd_rel->relhasoids ? "ON" : "OFF");
-	list = list_make1(new_object_object(tmp));
-
-	list = NIL;
-	foreach (cell, node->into->options)
+	tmp = new_objtree_VA("WITH (%{with:, }s)", 0);
+	if (node->relkind == OBJECT_MATVIEW && node->into->options == NIL)
+		append_bool_object(tmp, "present", false);
+	else
 	{
-		DefElem	*opt = (DefElem *) lfirst(cell);
+		if (node->relkind == OBJECT_TABLE)
+		{
+			tmp2 = new_objtree_VA("oids=%{value}s", 2,
+								  "option", ObjTypeString, "oids",
+								  "value", ObjTypeString,
+								  relation->rd_rel->relhasoids ? "ON" : "OFF");
+			list = list_make1(new_object_object(tmp2));
+		}
+		else
+			list = NIL;
 
-		if (strcmp(opt->defname, "oids") == 0)
-			continue;
+		foreach (cell, node->into->options)
+		{
+			DefElem	*opt = (DefElem *) lfirst(cell);
 
-		tmp = deparse_DefElem(opt, false);
-		list = lappend(list, new_object_object(tmp));
+			if (strcmp(opt->defname, "oids") == 0)
+				continue;
+
+			tmp2 = deparse_DefElem(opt, false);
+			list = lappend(list, new_object_object(tmp2));
+		}
+		append_array_object(tmp, "with", list);
 	}
-	append_array_object(createStmt, "with", list);
+	append_object_object(createStmt, "with_clause", tmp);
 
 	relation_close(relation, AccessShareLock);
 
