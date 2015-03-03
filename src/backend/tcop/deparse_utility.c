@@ -1796,6 +1796,9 @@ deparse_FdwOptions(List *options)
 				case DEFELEM_DROP:
 					opt = new_objtree_VA("DROP %{label}I", 0);
 					break;
+				default:
+					elog(ERROR, "invalid def action %d", elem->defaction);
+					opt = NULL;
 			}
 
 			append_string_object(opt, "label", elem->defname);
