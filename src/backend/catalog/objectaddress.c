@@ -520,7 +520,7 @@ ObjectTypeMap[] =
 	/* OCLASS_FOREIGN_SERVER */
 	{ "server", OBJECT_FOREIGN_SERVER },
 	/* OCLASS_USER_MAPPING */
-	{ "user mapping", -1 },		/* unmapped */
+	{ "user mapping", OBJECT_USER_MAPPING },
 	/* OCLASS_DEFACL */
 	{ "default acl", -1 },		/* unmapped */
 	/* OCLASS_EXTENSION */
@@ -555,6 +555,8 @@ static ObjectAddress get_object_address_type(ObjectType objtype,
 						List *objname, bool missing_ok);
 static ObjectAddress get_object_address_opcf(ObjectType objtype, List *objname,
 						List *objargs, bool missing_ok);
+static ObjectAddress get_object_address_usermapping(List *objname,
+							   List *objargs, bool missing_ok);
 static const ObjectPropertyType *get_object_property_data(Oid class_id);
 
 static void getRelationDescription(StringInfo buffer, Oid relid);
@@ -768,6 +770,10 @@ get_object_address(ObjectType objtype, List *objname, List *objargs,
 				address.classId = TSConfigRelationId;
 				address.objectId = get_ts_config_oid(objname, missing_ok);
 				address.objectSubId = 0;
+				break;
+			case OBJECT_USER_MAPPING:
+				address = get_object_address_usermapping(objname, objargs,
+														 missing_ok);
 				break;
 			default:
 				elog(ERROR, "unrecognized objtype: %d", (int) objtype);
@@ -1373,6 +1379,64 @@ get_object_address_opcf(ObjectType objtype,
 }
 
 /*
+ * Find the ObjectAddress for a user mapping.
+ */
+static ObjectAddress
+get_object_address_usermapping(List *objname, List *objargs, bool missing_ok)
+{
+	ObjectAddress address;
+	Oid			userid;
+	char	   *username;
+	char	   *servername;
+	ForeignServer *server;
+	HeapTuple	tp;
+
+	ObjectAddressSet(address, UserMappingRelationId, InvalidOid);
+
+	username = strVal(linitial(objname));
+	servername = strVal(linitial(objargs));
+	server = GetForeignServerByName(servername, false);
+
+	if (strcmp(username, "public") == 0)
+		userid = InvalidOid;
+	else
+	{
+		tp = SearchSysCache1(AUTHNAME,
+							 CStringGetDatum(username));
+		if (!HeapTupleIsValid(tp))
+		{
+			if (!missing_ok)
+				ereport(ERROR,
+						(errcode(ERRCODE_UNDEFINED_OBJECT),
+						 errmsg("user mapping for user \"%s\" in server \"%s\" does not exist",
+								username, servername)));
+			return address;
+		}
+		userid = HeapTupleGetOid(tp);
+		ReleaseSysCache(tp);
+	}
+
+	tp = SearchSysCache2(USERMAPPINGUSERSERVER,
+						 ObjectIdGetDatum(userid),
+						 ObjectIdGetDatum(server->serverid));
+	if (!HeapTupleIsValid(tp))
+	{
+		if (!missing_ok)
+			ereport(ERROR,
+					(errcode(ERRCODE_UNDEFINED_OBJECT),
+					 errmsg("user mapping for user \"%s\" in server \"%s\" does not exist",
+							username, servername)));
+		return address;
+	}
+
+	address.objectId = HeapTupleGetOid(tp);
+
+	ReleaseSysCache(tp);
+
+	return address;
+}
+
+/*
  * Convert an array of TEXT into a List of string Values, as emitted by the
  * parser, which is what get_object_address uses as input.
  */
@@ -1523,6 +1587,7 @@ pg_get_object_address(PG_FUNCTION_ARGS)
 		case OBJECT_OPCLASS:
 		case OBJECT_OPFAMILY:
 		case OBJECT_CAST:
+		case OBJECT_USER_MAPPING:
 			if (list_length(args) != 1)
 				ereport(ERROR,
 						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
@@ -3961,19 +4026,20 @@ getObjectIdentityParts(const ObjectAddress *object,
 
 				defacl = (Form_pg_default_acl) GETSTRUCT(tup);
 
+				username = GetUserNameFromId(defacl->defaclrole);
 				appendStringInfo(&buffer,
 								 "for role %s",
-					quote_identifier(GetUserNameFromId(defacl->defaclrole)));
+								 quote_identifier(username));
 
 				if (OidIsValid(defacl->defaclnamespace))
 				{
-					char	   *schema;
-
 					schema = get_namespace_name(defacl->defaclnamespace);
 					appendStringInfo(&buffer,
 									 " in schema %s",
 									 quote_identifier(schema));
 				}
+				else
+					schema = NULL;
 
 				switch (defacl->defaclobjtype)
 				{
