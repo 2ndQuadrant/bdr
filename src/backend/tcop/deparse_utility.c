@@ -4996,6 +4996,7 @@ deparse_CommentStmt(ObjectAddress address, Node *parsetree)
 	CommentStmt *node = (CommentStmt *) parsetree;
 	ObjTree	   *comment;
 	char	   *fmt;
+	char	   *identity;
 
 	/*
 	 * Constraints are sufficiently different that it is easier to handle them
@@ -5015,9 +5016,34 @@ deparse_CommentStmt(ObjectAddress address, Node *parsetree)
 	/* Add the comment clause; can be either NULL or a quoted literal.  */
 	append_literal_or_null(comment, "comment", node->comment);
 
-	/* Add the object identity clause */
-	append_string_object(comment, "identity",
-						 getObjectIdentity(&address));
+	/*
+	 * Add the object identity clause.  For zero argument aggregates we need to
+	 * add the (*) bit; in all other cases we can just use getObjectIdentity.
+	 *
+	 * XXX shouldn't we instead fix the object identities for zero-argument
+	 * aggregates?
+	 */
+	if (node->objtype == OBJECT_AGGREGATE)
+	{
+		HeapTuple		procTup;
+		Form_pg_proc	procForm;
+
+		procTup = SearchSysCache1(PROCOID, ObjectIdGetDatum(address.objectId));
+		if (!HeapTupleIsValid(procTup))
+			elog(ERROR, "cache lookup failed for procedure %u", address.objectId);
+		procForm = (Form_pg_proc) GETSTRUCT(procTup);
+		if (procForm->pronargs == 0)
+			identity = psprintf("%s(*)",
+								quote_qualified_identifier(get_namespace_name(procForm->pronamespace),
+														   NameStr(procForm->proname)));
+		else
+			identity = getObjectIdentity(&address);
+		ReleaseSysCache(procTup);
+	}
+	else
+		identity = getObjectIdentity(&address);
+
+	append_string_object(comment, "identity", identity);
 
 	return comment;
 }
