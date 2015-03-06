@@ -4,6 +4,7 @@
 
 -- create roles used throughout the tests
 create role clstr_user;
+create role foreign_data_user;
 create role regressgroup1;
 create role regressgroup2;
 create role regression_bob;
@@ -14,18 +15,30 @@ create role regression_user3;
 create role regression_user;
 create role regresslo;
 create role regress_rol_lock1;
+create role regress_test_indirect;
+create role regress_test_role;
+create role regress_test_role2;
 create role regress_test_role_super;
+create role regressuser1;
 create role regressuser2;
 create role regressuser3;
 create role regressuser4;
 create role regressuser5;
 create role regtest_unpriv_user;
+create role regtest_addr_user;
+create role regtest_alter_user1;
+create role regtest_alter_user2;
+create role regtest_alter_user3;
 create role rls_regress_group1;
+create role rls_regress_group2;
 create role rls_regress_user0;
 create role rls_regress_user1;
+create role rls_regress_user2;
+create role rls_regress_exempt_user;
 create role schemauser2;
 create role seclabel_user1;
 create role seclabel_user2;
+create role unprivileged_role;
 create role view_user2;
 
 \pset format unaligned
