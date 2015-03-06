@@ -693,6 +693,26 @@ get_persistence_str(char persistence)
 	}
 }
 
+/*
+ * Form an ObjElem to be used as a single argument in an aggregate argument
+ * list
+ */
+static ObjElem *
+form_agg_argument(int idx, char *modes, char **names, Oid *types)
+{
+	ObjTree	   *arg;
+
+	arg = new_objtree_VA("%{mode}s %{name}s %{type}T", 0);
+
+	append_string_object(arg, "mode",
+						 (modes && modes[idx] == 'v') ? "VARIADIC" : "");
+	append_string_object(arg, "name", names ? names[idx] : "");
+	append_object_object(arg, "type",
+						 new_objtree_for_type(types[idx], -1));
+
+	return new_object_object(arg);
+}
+
 static ObjTree *
 deparse_DefineStmt_Aggregate(Oid objectId, DefineStmt *define)
 {
@@ -717,26 +737,55 @@ deparse_DefineStmt_Aggregate(Oid objectId, DefineStmt *define)
 			 agg->aggfnoid);
 	proc = (Form_pg_proc) GETSTRUCT(procTup);
 
-	stmt = new_objtree_VA("CREATE AGGREGATE %{identity}D (%{types:, }s) "
+	stmt = new_objtree_VA("CREATE AGGREGATE %{identity}D(%{types}s) "
 						  "(%{elems:, }s)", 0);
 
 	append_object_object(stmt, "identity",
 						 new_objtree_for_qualname(proc->pronamespace,
 												  NameStr(proc->proname)));
 
-	list = NIL;
-
 	/*
-	 * An aggregate may have no arguments, in which case its signature
-	 * is (*), to match count(*). If it's not an ordered-set aggregate,
-	 * it may have a non-zero number of arguments. Otherwise it may have
-	 * zero or more direct arguments and zero or more ordered arguments.
-	 * There are no defaults or table parameters, and the only mode that
-	 * we need to consider is VARIADIC.
+	 * Add the argument list.  There are three cases to consider:
+	 *
+	 * 1. no arguments, in which case the signature is (*).
+	 *
+	 * 2. Not an ordered-set aggregate.  In this case there's one or more
+	 * arguments.
+	 *
+	 * 3. Ordered-set aggregates. These have zero or more direct arguments, and
+	 * one or more ordered arguments.
+	 *
+	 * We don't need to consider default values or table parameters, and the
+	 * only mode that we need to consider is VARIADIC.
 	 */
 
 	if (proc->pronargs == 0)
-		list = lappend(list, new_object_object(new_objtree_VA("*", 0)));
+	{
+		append_string_object(stmt, "agg type", "noargs");
+		append_string_object(stmt, "types", "*");
+	}
+	else if (!AGGKIND_IS_ORDERED_SET(agg->aggkind))
+	{
+		int			i;
+		int			nargs;
+		Oid		   *types;
+		char	   *modes;
+		char	  **names;
+
+		nargs = get_func_arg_info(procTup, &types, &names, &modes);
+
+		/* only direct arguments in this case */
+		list = NIL;
+		for (i = 0; i < nargs; i++)
+		{
+			list = lappend(list, form_agg_argument(i, modes, names, types));
+		}
+
+		tmp = new_objtree_VA("%{direct:, }s", 1,
+							 "direct", ObjTypeArray, list);
+		append_object_object(stmt, "types", tmp);
+		append_string_object(stmt, "agg type", "plain");
+	}
 	else
 	{
 		int			i;
@@ -744,50 +793,46 @@ deparse_DefineStmt_Aggregate(Oid objectId, DefineStmt *define)
 		Oid		   *types;
 		char	   *modes;
 		char	  **names;
-		int			insertorderbyat = -1;
 
 		nargs = get_func_arg_info(procTup, &types, &names, &modes);
 
-		if (AGGKIND_IS_ORDERED_SET(agg->aggkind))
-			insertorderbyat = agg->aggnumdirectargs;
+		tmp = new_objtree_VA("%{direct:, }s ORDER BY %{aggregated:, }s", 0);
 
-		for (i = 0; i < nargs; i++)
+		/* direct arguments ... */
+		list = NIL;
+		for (i = 0; i < agg->aggnumdirectargs; i++)
 		{
-			tmp = new_objtree_VA("%{order}s %{mode}s %{name}s %{type}T", 0);
-
-			if (i == insertorderbyat)
-				append_string_object(tmp, "order", "ORDER BY");
-			else
-				append_string_object(tmp, "order", "");
-
-			if (modes)
-				append_string_object(tmp, "mode",
-									 modes[i] == 'v' ? "VARIADIC" : "");
-			else
-				append_string_object(tmp, "mode", "");
-
-			if (names)
-				append_string_object(tmp, "name", names[i]);
-			else
-				append_string_object(tmp, "name", "");
-
-			append_object_object(tmp, "type",
-								 new_objtree_for_type(types[i], -1));
-
-			list = lappend(list, new_object_object(tmp));
-
-			/*
-			 * For variadic ordered-set aggregates, we have to repeat
-			 * the last argument. This nasty hack is copied from
-			 * print_function_arguments in ruleutils.c
-			 */
-			if (i == insertorderbyat && i == nargs-1)
-				list = lappend(list, new_object_object(tmp));
+			list = lappend(list, form_agg_argument(i, modes, names, types));
 		}
+		append_array_object(tmp, "direct", list);
+
+		/*
+		 * ... and aggregated arguments.  If the last direct argument is
+		 * VARIADIC, we need to repeat it here rather than searching for more
+		 * arguments.  (See aggr_args production in gram.y for an explanation.)
+		 */
+		if (modes && modes[agg->aggnumdirectargs - 1] == 'v')
+		{
+			list = list_make1(form_agg_argument(agg->aggnumdirectargs - 1,
+												modes, names, types));
+		}
+		else
+		{
+			list = NIL;
+			for (i = agg->aggnumdirectargs; i < nargs; i++)
+			{
+				list = lappend(list, form_agg_argument(i, modes, names, types));
+			}
+		}
+		append_array_object(tmp, "aggregated", list);
+
+		append_object_object(stmt, "types", tmp);
+		append_string_object(stmt, "agg type", "ordered-set");
 	}
 
-	append_array_object(stmt, "types", list);
-
+	/*
+	 * Now add the definition clause
+	 */
 	list = NIL;
 
 	tmp = new_objtree_VA("SFUNC=%{procedure}D", 0);
