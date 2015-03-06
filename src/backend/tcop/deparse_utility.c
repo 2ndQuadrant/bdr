@@ -1809,12 +1809,21 @@ deparse_AlterExtensionStmt(Oid objectId, Node *parsetree)
 	return stmt;
 }
 
+/*
+ * If a column name is specified, add an element for it; otherwise it's a
+ * table-level option.
+ */
 static ObjTree *
-deparse_FdwOptions(List *options)
+deparse_FdwOptions(List *options, char *colname)
 {
 	ObjTree	   *tmp;
 
-	tmp = new_objtree_VA("OPTIONS (%{option:, }s)", 0);
+	if (colname)
+		tmp = new_objtree_VA("ALTER COLUMN %{column}I OPTIONS (%{option:, }s)",
+							 1, "column", ObjTypeString, colname);
+	else
+		tmp = new_objtree_VA("OPTIONS (%{option:, }s)", 0);
+
 	if (options != NIL)
 	{
 		List	   *optout = NIL;
@@ -1912,7 +1921,7 @@ deparse_CreateFdwStmt(Oid objectId, Node *parsetree)
 
 	/* add an OPTIONS clause, if any */
 	append_object_object(createStmt, "generic_options",
-						 deparse_FdwOptions(node->options));
+						 deparse_FdwOptions(node->options, NULL));
 
 	ReleaseSysCache(fdwTup);
 	heap_close(rel, RowExclusiveLock);
@@ -1991,7 +2000,7 @@ deparse_AlterFdwStmt(Oid objectId, Node *parsetree)
 
 	/* add an OPTIONS clause, if any */
 	append_object_object(alterStmt, "generic_options",
-						 deparse_FdwOptions(node->options));
+						 deparse_FdwOptions(node->options, NULL));
 
 	ReleaseSysCache(fdwTup);
 	heap_close(rel, RowExclusiveLock);
@@ -2029,7 +2038,7 @@ deparse_CreateForeignServerStmt(Oid objectId, Node *parsetree)
 
 	/* add an OPTIONS clause, if any */
 	append_object_object(createServer, "generic_options",
-						 deparse_FdwOptions(node->options));
+						 deparse_FdwOptions(node->options, NULL));
 
 	return createServer;
 }
@@ -2057,7 +2066,7 @@ deparse_AlterForeignServerStmt(Oid objectId, Node *parsetree)
 
 	/* add an OPTIONS clause, if any */
 	append_object_object(alterServer, "generic_options",
-						 deparse_FdwOptions(node->options));
+						 deparse_FdwOptions(node->options, NULL));
 
 	return alterServer;
 }
@@ -2095,7 +2104,7 @@ deparse_CreateUserMappingStmt(Oid objectId, Node *parsetree)
 
 	/* add an OPTIONS clause, if any */
 	append_object_object(createStmt, "generic_options",
-						 deparse_FdwOptions(node->options));
+						 deparse_FdwOptions(node->options, NULL));
 
 	ReleaseSysCache(tp);
 	heap_close(rel, RowExclusiveLock);
@@ -2135,7 +2144,7 @@ deparse_AlterUserMappingStmt(Oid objectId, Node *parsetree)
 
 	/* add an OPTIONS clause, if any */
 	append_object_object(alterStmt, "generic_options",
-						 deparse_FdwOptions(node->options));
+						 deparse_FdwOptions(node->options, NULL));
 
 	ReleaseSysCache(tp);
 	heap_close(rel, RowExclusiveLock);
@@ -3088,7 +3097,7 @@ deparse_CreateForeignTableStmt(Oid objectId, Node *parsetree)
 
 	/* add an OPTIONS clause, if any */
 	append_object_object(createStmt, "generic_options",
-						 deparse_FdwOptions(stmt->options));
+						 deparse_FdwOptions(stmt->options, NULL));
 
 	relation_close(relation, AccessShareLock);
 	return createStmt;
@@ -5841,7 +5850,8 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 				break;
 
 			case AT_AlterColumnGenericOptions:
-				tmp = deparse_FdwOptions((List *) subcmd->def);
+				tmp = deparse_FdwOptions((List *) subcmd->def,
+										 subcmd->name);
 				subcmds = lappend(subcmds, new_object_object(tmp));
 				break;
 
@@ -6051,7 +6061,7 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 				break;
 
 			case AT_GenericOptions:
-				tmp = deparse_FdwOptions((List *) subcmd->def);
+				tmp = deparse_FdwOptions((List *) subcmd->def, NULL);
 				subcmds = lappend(subcmds, new_object_object(tmp));
 				break;
 
