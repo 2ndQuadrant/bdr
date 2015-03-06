@@ -2422,7 +2422,7 @@ deparse_RefreshMatViewStmt(Oid objectId, Node *parsetree)
  */
 static ObjTree *
 deparse_ColumnDef(Relation relation, List *dpcontext, bool composite,
-				  ColumnDef *coldef)
+				  ColumnDef *coldef, bool is_alter)
 {
 	ObjTree    *column;
 	ObjTree    *tmp;
@@ -2490,6 +2490,9 @@ deparse_ColumnDef(Relation relation, List *dpcontext, bool composite,
 		 * we scan the list of constraints attached to this column to determine
 		 * whether we need to emit anything.
 		 * (Fortunately, NOT NULL constraints cannot be table constraints.)
+		 *
+		 * In the ALTER TABLE cases, we also add a NOT NULL if the colDef is
+		 * marked is_not_null.
 		 */
 		saw_notnull = false;
 		foreach(cell, coldef->constraints)
@@ -2499,6 +2502,8 @@ deparse_ColumnDef(Relation relation, List *dpcontext, bool composite,
 			if (constr->contype == CONSTR_NOTNULL)
 				saw_notnull = true;
 		}
+		if (is_alter && coldef->is_not_null)
+			saw_notnull = true;
 
 		if (saw_notnull)
 			append_string_object(column, "not_null", "NOT NULL");
@@ -2563,6 +2568,7 @@ deparse_ColumnDef_typed(Relation relation, List *dpcontext, ColumnDef *coldef)
 	/*
 	 * Search for a NOT NULL declaration.  As in deparse_ColumnDef, we rely on
 	 * finding a constraint on the column rather than coldef->is_not_null.
+	 * (This routine is never used for ALTER cases.)
 	 */
 	saw_notnull = false;
 	foreach(cell, coldef->constraints)
@@ -2616,7 +2622,8 @@ deparseTableElements(Relation relation, List *tableElements, List *dpcontext,
 						deparse_ColumnDef_typed(relation, dpcontext,
 												(ColumnDef *) elt) :
 						deparse_ColumnDef(relation, dpcontext,
-										  composite, (ColumnDef *) elt);
+										  composite, (ColumnDef *) elt,
+										  false);
 					if (tree != NULL)
 					{
 						ObjElem    *column;
@@ -5602,7 +5609,7 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 				/* XXX need to set the "recurse" bit somewhere? */
 				Assert(IsA(subcmd->def, ColumnDef));
 				tree = deparse_ColumnDef(rel, dpcontext, false,
-										 (ColumnDef *) subcmd->def);
+										 (ColumnDef *) subcmd->def, true);
 				fmtstr = psprintf("ADD %s %%{definition}s",
 								  istype ? "ATTRIBUTE" : "COLUMN");
 				tmp = new_objtree_VA(fmtstr, 2,
