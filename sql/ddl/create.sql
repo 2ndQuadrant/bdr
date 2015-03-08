@@ -212,7 +212,14 @@ CREATE TABLE tbl_with_oids() WITH OIDS;
 CREATE TABLE tbl_without_oids() WITHOUT oids;
 DROP TABLE tbl_without_oids;
 SET default_with_oids = false;
+
+-- ensure storage attributes in CREATE TABLE are replicated properly
+\c postgres
+CREATE TABLE tbl_showfillfactor (name char(500), unique (name) with (fillfactor=65)) with (fillfactor=75);
+\d+ tbl_showfillfactor
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+\c regression
+\d+ tbl_showfillfactor
 
 --- AGGREGATE ---
 \c postgres

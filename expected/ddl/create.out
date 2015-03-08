@@ -774,12 +774,38 @@ ERROR:  Tables WITH OIDs are not supported with bdr
 CREATE TABLE tbl_without_oids() WITHOUT oids;
 DROP TABLE tbl_without_oids;
 SET default_with_oids = false;
+-- ensure storage attributes in CREATE TABLE are replicated properly
+\c postgres
+CREATE TABLE tbl_showfillfactor (name char(500), unique (name) with (fillfactor=65)) with (fillfactor=75);
+\d+ tbl_showfillfactor
+                      Table "public.tbl_showfillfactor"
+ Column |      Type      | Modifiers | Storage  | Stats target | Description 
+--------+----------------+-----------+----------+--------------+-------------
+ name   | character(500) |           | extended |              | 
+Indexes:
+    "tbl_showfillfactor_name_key" UNIQUE CONSTRAINT, btree (name) WITH (fillfactor=65)
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON tbl_showfillfactor FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+Options: fillfactor=75
+
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
  pg_xlog_wait_remote_apply 
 ---------------------------
  
  
 (2 rows)
+
+\c regression
+\d+ tbl_showfillfactor
+                      Table "public.tbl_showfillfactor"
+ Column |      Type      | Modifiers | Storage  | Stats target | Description 
+--------+----------------+-----------+----------+--------------+-------------
+ name   | character(500) |           | extended |              | 
+Indexes:
+    "tbl_showfillfactor_name_key" UNIQUE CONSTRAINT, btree (name) WITH (fillfactor=65)
+Triggers:
+    truncate_trigger AFTER TRUNCATE ON tbl_showfillfactor FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+Options: fillfactor=75
 
 --- AGGREGATE ---
 \c postgres
