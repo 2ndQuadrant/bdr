@@ -2175,6 +2175,8 @@ obtainConstraints(List *elements, Oid relationId, Oid domainId)
 	{
 		Form_pg_constraint constrForm;
 		char	   *contype;
+		Oid			indexid;
+		ObjTree	   *reloptions;
 
 		constrForm = (Form_pg_constraint) GETSTRUCT(tuple);
 
@@ -2201,6 +2203,31 @@ obtainConstraints(List *elements, Oid relationId, Oid domainId)
 				elog(ERROR, "unrecognized constraint type");
 		}
 
+		reloptions = new_objtree_VA("WITH (%{opts}s)", 0);
+		indexid = get_constraint_index(HeapTupleGetOid(tuple));
+		if (OidIsValid(indexid))
+		{
+			char	*ind_am = NULL;
+			char	*ind_def = NULL;
+			char	*ind_relopt = NULL;
+			char	*ind_tblspc = NULL;
+			char	*ind_where = NULL;
+
+			pg_get_indexdef_detailed(indexid,
+									 &ind_am,
+									 &ind_def,
+									 &ind_relopt,
+									 &ind_tblspc,
+									 &ind_where);
+			if (ind_relopt)
+				append_string_object(reloptions, "opts", ind_relopt);
+			else
+				append_bool_object(reloptions, "present", false);
+		}
+		else
+			append_bool_object(reloptions, "present", false);
+
+
 		/*
 		 * "type" and "contype" are not part of the printable output, but are
 		 * useful to programmatically distinguish these from columns and among
@@ -2208,14 +2235,15 @@ obtainConstraints(List *elements, Oid relationId, Oid domainId)
 		 *
 		 * XXX it might be useful to also list the column names in a PK, etc.
 		 */
-		tmp = new_objtree_VA("CONSTRAINT %{name}I %{definition}s",
-							 4,
+		tmp = new_objtree_VA("CONSTRAINT %{name}I %{definition}s %{relopt}s",
+							 5,
 							 "type", ObjTypeString, "constraint",
 							 "contype", ObjTypeString, contype,
 						 "name", ObjTypeString, NameStr(constrForm->conname),
 							 "definition", ObjTypeString,
 						  pg_get_constraintdef_string(HeapTupleGetOid(tuple),
-													  false));
+													  false),
+							 "relopt", ObjTypeObject, reloptions);
 		elements = lappend(elements, new_object_object(NULL, tmp));
 	}
 
