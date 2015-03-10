@@ -60,7 +60,7 @@
   </keywordset>
  </bookinfo>
 
- <part id="installation">
+ <part id="installation" xreflabel="Installation">
   <title>Installation</title>
 
   <partintro>
@@ -76,6 +76,9 @@
     Source installs are mainly useful if you want to keep track of the very
     latest BDR development and contribute to development.  They're also the
     only option if there are no packages for your operating system yet.
+   </para>
+   <para>
+    Before installing &bdr; make sure you satisfy the <xref linkend="bdr-requirements">.
    </para>
   </partintro>
 
