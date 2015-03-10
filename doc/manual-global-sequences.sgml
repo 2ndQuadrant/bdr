@@ -1,0 +1,13 @@
+<chapter id="global-sequences" xreflabel="Global sequences">
+ <title>Global Sequences</title>
+ <indexterm>
+  <primary>Global Sequence</primary>
+  <secondary>Distributed sequence</secondary>
+ </indexterm>
+ <para>
+  To help avoid <xref linkend="conflicts"> on concurrent inserts &bdr; provides global sequences.
+
+  <!-- TODO -->
+
+ </para>
+</chapter>

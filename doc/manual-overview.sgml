@@ -157,13 +157,32 @@
   </para>
 
   <para>
-   Major differences between physical replication and logical replication as implemented by &bdr;/&udr;:
+   Logical replication has a different set of trade-offs to physical
+   block-based replication. It isn't clearly better or worse. Physical
+   replication is a lot simpler, has less lag for big transactions, is
+   supported by older versions and may require less disk I/O, but generally
+   consumes more network bandwidth, can't replicate a subset of databases or
+   tables, and can't support multi-master or cross-version/cross-arch
+   replication. Which solution you should use depends on what you need to do.
+  </para>
+
+  <para>
+   The major differences between physical replication and logical replication as implemented by &bdr;/&udr; are:
    <itemizedlist>
     <listitem>
-     <simpara>There is no need to cancel long running queries on hot standbys, so there aren't any <quote>cancelling statement due to conflict with recovery</quote> errors.</simpara>
+     <simpara>Multi-master replication is possible (&bdr; only). All members are writable nodes that replicate changes.</simpara>
+    </listitem>
+    <listitem>
+     <simpara>Data from index writes, <literal>VACUUM</literal>, hint bits, etc are not sent over the network, so bandwidth requirements may be reduced - especially when compared to physical replication with <literal>full_page_writes</literal>.</simpara>
+    </listitem>
+    <listitem>
+     <simpara>There is no need to use <ulink url="http://www.postgresql.org/docs/current/static/runtime-config-replication.html#GUC-HOT-STANDBY-FEEDBACK"><literal>hot_standby_feedback</literal></ulink> or to cancel long running queries on hot standbys, so there aren't any <quote>cancelling statement due to conflict with recovery</quote> errors.</simpara>
     </listitem>
     <listitem>
      <simpara>Temporary tables may be used on replicas.</simpara>
+    </listitem>
+    <listitem>
+     <simpara>Tables that aren't being replicated from elsewhere may be written to (&udr; and &bdr;).</simpara>
     </listitem>
     <listitem>
      <simpara>Replication across major versions (e.g. 9.4 to 9.5) is supported.</simpara>
@@ -175,19 +194,10 @@
      <simpara>Replication is per-database (or finer grained), wheras physical replication can and must replicate all databases.</simpara>
     </listitem>
     <listitem>
-     <simpara>Logical replication imposes some restrictions on supported DDL (see: <xref linkend="ddl-replication">) that do not apply for physical replication</simpara>
+     <simpara>&bdr;'s logical replication implementation imposes some restrictions on supported DDL (see: <xref linkend="ddl-replication">) that do not apply for physical replication</simpara>
     </listitem>
     <listitem>
      <simpara>Commands that affect all databases, like <literal>ALTER SYSTEM</literal> or <literal>CREATE ROLE</literal> are <emphasis>not</emphasis> replicated by &bdr;/&udr; and must be managed by the administrator.</simpara>
-    </listitem>
-    <listitem>
-     <simpara>Tables that aren't being replicated from elsewhere may be written to (&udr; and &bdr;).</simpara>
-    </listitem>
-    <listitem>
-     <simpara>Multi-master replication is possible (&bdr; only).</simpara>
-    </listitem>
-    <listitem>
-     <simpara>Data from index writes, <literal>VACUUM</literal>, hint bits, etc are not sent on the wire, so network bandwidth requirements may be reduced - especially when compared to <literal>full_page_writes</literal>.</simpara>
     </listitem>
     <listitem>
      <simpara>Disk random I/O requirements and flush frequency may be higher than for physical replication.</simpara>
@@ -202,19 +212,12 @@
      <simpara>Logical replication cannot be used for point-in-time recovery (though it can support a replication delay).</simpara>
     </listitem>
     <listitem>
-     <simpara>Logical replication requires the use of a <ulink url="http://www.postgresql.org/docs/current/static/logicaldecoding-explanation.html">replication slot</ulink>, it isn't optional like in physical replication.</simpara>
+     <simpara>Logical replication only works via streaming, not WAL file archiving, and requires the use of a <ulink url="http://www.postgresql.org/docs/current/static/logicaldecoding-explanation.html">replication slot</ulink>.</simpara>
+    </listitem>
+    <listitem>
+     <simpara>Cascading replication is not (yet) supported by logical replication.</simpara>
     </listitem>
    </itemizedlist>
-  </para>
-
-  <para>
-   It should be clear that logical replication has a different set of
-   trade-offs to physical block-based replication. It isn't clearly better or
-   worse. Physical replication is a lot simpler, has less lag for big
-   transactions, is supported by older versions and may require less disk I/O,
-   but generally consumes more network bandwidth, can't replicate a subset
-   of databases or tables, and can't support multi-master or cross-version/cross-arch
-   replication. Which solution you should use depends on what you need to do.
   </para>
 
   <para>
@@ -309,7 +312,7 @@
   </para>
 
   <para>
-   Trigger-based replication also requires an external dæmon process on
+   Trigger-based replication also requires an external d&aelig;mon process on
    the sending and/or receiving side. &bdr; runs its management processes
    inside PostgreSQL its self, so there's no separate replication process
    to manage.
@@ -337,11 +340,20 @@
    or another technology) it is important to understand what's involved,
    and that not all multi-master systems are equal.
   </para>
-  
-  <para>
-   &bdr; is a loosely coupled shared-nothing multi-master design.
-  </para>
-   
+
+  <note>
+   <para>
+    You don't have to use &bdr; for multi-master. It's quite reasonable
+    to write to only one node, using &bdr; like an improved read-replica
+    system. It's also possible to make sure that any given table/schema
+    is only written to on one particular node, so no conflicts can arise.
+    You still have to consider replication lag, but no more or less than with
+    normal hot standbys. It only gets complicated when your application writes
+    to the same tables on multiple nodes at once. If you need to do that,
+    keep reading.
+   </para>
+  </note>
+
   <para>
    Some multi-master systems are <emphasis>tightly-coupled</emphasis>; these
    tend to make all nodes appear to be part of the same virtual database to
@@ -372,28 +384,101 @@
    the system very tolerant of latency between nodes, temporary network
    partitions or node outages, etc, and makes scale-out more efficient.
   </para>
+  
+  <para>
+   &bdr; is a loosely coupled shared-nothing multi-master design.
+  </para>
 
   <para>
-   This is a broad and overly simplified characterisation of replication, but it's
-   enough to help you understand a few key things about &bdr;:
+   This is a broad and overly simplified characterisation of replication, but
+   it's enough to explain why applications that use &bdr; for multi-master
+   writes need to be aware of the anomalies that can be introduced by
+   asynchronous multi-master replication. It should also help illustrate
+   that applications get some significant benefits in exchange:
    <itemizedlist>
-
-    <!--
-         * eventually consistent, no single view
-         * locks not replicated, serializable and read committed only within a node
-         * conflicts possible
-         * optimistic conflict handling, user defined handlers
-         * need to use global sequences, prefer insertion to updating where contention arises
-         * application may need to negotiate synchronisation
-    -->
-
     <listitem>
      <simpara>
-      WIP
+      Applications using &bdr; are free to write to any node so long as they
+      are careful to prevent or cope with conflicts.
      </simpara>
     </listitem>
-
+    <listitem>
+     <simpara>
+      There is no complex election of a new master if a node goes down or
+      network problems arise. There is no wait for failover. Each node is
+      always a master and always directly writeable.
+     </simpara>
+    </listitem>
+    <listitem>
+     <simpara>
+      The application can be geographically distributed so that the app and is
+      close to the data and the user for better performance and availability.
+      Reads can be satisfied locally.
+     </simpara>
+    </listitem>
+    <listitem>
+     <simpara>
+      Applications can be partition-tolerant: the application can keep keep
+      working even if it loses communication with some or all other nodes, then
+      re-sync automatically when connectivity is restored. Loss of a critical
+      VPN tunnel or WAN won't bring the entire store or satellite office to a
+      halt.
+     </simpara>
+    </listitem>
    </itemizedlist>
+  </para>
+
+  <para>
+   With the advantages come challenges.
+  </para>
+
+  <para>
+   Because &bdr; replicates asynchronously, not all nodes have the same view of
+   the data at any given instant. On a single node it is guaranteed that
+   committed transactions' changes become visible immediately to newly started
+   transactions (or in <literal>READ COMMITTED</literal> mode, statements).
+   This isn't true in &bdr; - if you <literal>COMMIT</literal> a transaction
+   that changes a row on one node, then <literal>SELECT</literal> that row on
+   another node, you may well still get the old value. Applications must
+   therefore be designed to be tolerant of stale data or to be "sticky" to a
+   node, where they prefer read data from the same node they write it to.
+   This is also true of applications using PostgreSQL's physical replication
+   feature unless it is used in synchronous mode with only one replica, so
+   it's a challenge that's far from unique to &bdr;.
+  </para>
+
+  <para>
+   Locking operations are not replicated to other nodes. If you lock a row
+   or table in one node the other nodes have no idea it is locked elsewhere.
+   Applications that rely on row or table locking for correctness will
+   only work correctly if all their writes and locked reads occur on a
+   single node. Applications might rely on locking explicitly via
+   <literal>LOCK TABLE</literal> or
+   <literal>SELECT ... FOR UPDATE / SHARE</literal>, but most applications
+   rely on it implicitly via <literal>UPDATE</literal> and
+   <literal>DELETE</literal> row-locking, so the absence of explicit locking
+   does not mean an app is automatically multi-master safe.
+  </para>
+
+  <para>
+   Because of asynchronous replication and the lack of global locking,
+   it is possible for transactions on different nodes to perform actions
+   that could not happen if both transactions ran on a single node.
+   These are called <emphasis>conflicts</emphasis> and are discussed in detail
+   separately; see <xref linkend="conflicts">. &bdr; can resolve
+   conflicts using a simple last-update-wins strategy or using user-defined
+   conflict handlers. Either way the application design needs to consider
+   that conflicts may occur, and where possible minimise them. Na&iuml;ive
+   applications that ignore the the possibility of conflicts when writing
+   to multiple masters may suffer from lost-updates and other undesirable
+   data anomalies.
+  </para>
+
+  <para>
+   &bdr; provides some tools to help make application design easier.  The most
+   important is <xref linkend="global-sequences">, which provide a
+   &bdr;-group-wide generator of unique values for use in synthetic keys.
+   Others are discussed in the <xref linkend="conflicts"> section.
   </para>
 
  </sect1>
@@ -404,15 +489,17 @@
   <sect2>
    <title>Differences between &bdr; and &udr;</title>
 
+   <!-- NEEDS-REVIEW -->
+
    <para>
     The most important difference between &bdr; and &udr; is that
     with &bdr; changes can be made on both nodes; and that methods
     for resolving conflicts arising due to that exist.
-
    </para>
 
    <sect3>
     <title>Primary Usecases for &udr;</title>
+
     <para>
      If changes are only ever made on one node and the others are
      just used for read scalability (including temporary tables on
@@ -420,18 +507,20 @@
      from different nodes &udr; is sufficient. These scenarios cover
      a large number of replication scenarios.
     </para>
+
     <para>
      Using &udr; can noticeably reduce the likelihood of application
-     incompatibilities, because they only one database will be
-     written to, which prevents conflicts and such. On the other
-     hand, a &bdr; setup can make failover much easier, because there
-     is no need to change the setup.
+     incompatibilities. Only one database will be written to, which prevents
+     conflicts and such. On the other hand, a &bdr; setup can make failover
+     much easier, because there is no need to change the setup.
     </para>
+
    </sect3>
 
    <sect3>
     <title>Primary Usecases for &udr;</title>
     <para>
+     <!-- NEEDS-REVIEW -->
     </para>
    </sect3>
   </sect2>
