@@ -39,6 +39,10 @@ BEGIN
 			CONTINUE;
 		END IF;
 
+		IF obj.object_type = 'default acl' THEN
+			CONTINUE;
+		END IF;
+
 		IF obj.object_type = 'table column' OR obj.object_type = 'foreign table column' THEN
 			fmt = format('ALTER TABLE %I.%I DROP COLUMN %I CASCADE',
 				obj.address_names[1],
@@ -66,6 +70,17 @@ BEGIN
 		ELSIF obj.object_type = 'foreign-data wrapper' THEN
 			fmt = format('DROP FOREIGN DATA WRAPPER %s CASCADE',
 				obj.object_identity);
+		ELSIF obj.object_type = 'user mapping' THEN
+			fmt = format('DROP USER MAPPING FOR %I SERVER %I',
+				obj.address_names[1], obj.address_args[1]);
+		ELSIF obj.object_type = 'operator of access method' THEN
+			fmt = format('ALTER OPERATOR FAMILY %I.%I USING %I DROP OPERATOR %s (%s, %s)',
+				obj.address_names[1], obj.address_names[2], obj.address_names[4], obj.address_names[3],
+				obj.address_args[1], obj.address_args[2]);
+		ELSIF obj.object_type = 'function of access method' THEN
+			fmt = format('ALTER OPERATOR FAMILY %I.%I USING %I DROP FUNCTION %s (%s, %s)',
+				obj.address_names[1], obj.address_names[2], obj.address_names[4], obj.address_names[3],
+				obj.address_args[1], obj.address_args[2]);
 		ELSE
 			fmt = format('DROP %s %s CASCADE',
 				obj.object_type, obj.object_identity);
