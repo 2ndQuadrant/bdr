@@ -5048,49 +5048,54 @@ deparse_CommentStmt(ObjectAddress address, Node *parsetree)
 	return comment;
 }
 
-static ObjTree *
-deparse_CreatePolicyStmt(Oid objectId, Node *parsetree)
+/*
+ * Add common clauses to CreatePolicy or AlterPolicy deparse objects
+ */
+static void
+add_policy_clauses(ObjTree *policyStmt, Oid policyOid, List *roles,
+				   bool do_qual, bool do_with_check)
 {
-	CreatePolicyStmt *node = (CreatePolicyStmt *) parsetree;
-	ObjTree	   *policy;
-	ObjTree	   *tmp;
 	Relation	polRel = heap_open(PolicyRelationId, AccessShareLock);
-	HeapTuple	polTup = get_catalog_object_by_oid(polRel, objectId);
+	HeapTuple	polTup = get_catalog_object_by_oid(polRel, policyOid);
+	ObjTree	   *tmp;
 	Form_pg_policy polForm;
-	ListCell   *cell;
-	List	   *list;
 
 	if (!HeapTupleIsValid(polTup))
-		elog(ERROR, "cache lookup failed for policy %u", objectId);
+		elog(ERROR, "cache lookup failed for policy %u", policyOid);
+
 	polForm = (Form_pg_policy) GETSTRUCT(polTup);
 
-	policy = new_objtree_VA("CREATE POLICY %{identity}I ON %{table}D %{for_command}s "
-							"%{to_role}s %{using}s %{with_check}s", 1,
-							"identity", ObjTypeString, node->policy_name);
-
 	/* add the "ON table" clause */
-	append_object_object(policy, "table",
+	append_object_object(policyStmt, "table",
 						 new_objtree_for_qualname_id(RelationRelationId,
 													 polForm->polrelid));
-	/* add "FOR command" clause */
-	tmp = new_objtree_VA("FOR %{command}s", 1,
-						 "command", ObjTypeString, node->cmd);
-	append_object_object(policy, "for_command", tmp);
 
-	/* add the "TO role" clause. Always contains at least PUBLIC */
+	/*
+	 * Add the "TO role" clause, if any.  In the CREATE case, it always
+	 * contains at least PUBLIC, but in the ALTER case it might be empty.
+	 */
 	tmp = new_objtree_VA("TO %{role:, }I", 0);
-	list = NIL;
-	foreach (cell, node->roles)
+	if (roles)
 	{
-		list = lappend(list,
-					   new_string_object(strVal(lfirst(cell))));
+		List   *list = NIL;
+		ListCell *cell;
+
+		foreach (cell, roles)
+		{
+			list = lappend(list,
+						   new_string_object(strVal(lfirst(cell))));
+		}
+		append_array_object(tmp, "role", list);
 	}
-	append_array_object(tmp, "role", list);
-	append_object_object(policy, "to_role", tmp);
+	else
+	{
+		append_bool_object(tmp, "present", false);
+	}
+	append_object_object(policyStmt, "to_role", tmp);
 
 	/* add the USING clause, if any */
 	tmp = new_objtree_VA("USING (%{expression}s)", 0);
-	if (node->qual)
+	if (do_qual)
 	{
 		Datum	deparsed;
 		Datum	storedexpr;
@@ -5099,18 +5104,18 @@ deparse_CreatePolicyStmt(Oid objectId, Node *parsetree)
 		storedexpr = heap_getattr(polTup, Anum_pg_policy_polqual,
 								  RelationGetDescr(polRel), &isnull);
 		if (isnull)
-			elog(ERROR, "invalid NULL polqual expression in policy %u", objectId);
+			elog(ERROR, "invalid NULL polqual expression in policy %u", policyOid);
 		deparsed = DirectFunctionCall2(pg_get_expr, storedexpr, polForm->polrelid);
 		append_string_object(tmp, "expression",
 							 TextDatumGetCString(deparsed));
 	}
 	else
 		append_bool_object(tmp, "present", false);
-	append_object_object(policy, "using", tmp);
+	append_object_object(policyStmt, "using", tmp);
 
 	/* add the WITH CHECK clause, if any */
 	tmp = new_objtree_VA("WITH CHECK (%{expression}s)", 0);
-	if (node->with_check)
+	if (do_with_check)
 	{
 		Datum	deparsed;
 		Datum	storedexpr;
@@ -5119,16 +5124,51 @@ deparse_CreatePolicyStmt(Oid objectId, Node *parsetree)
 		storedexpr = heap_getattr(polTup, Anum_pg_policy_polwithcheck,
 								  RelationGetDescr(polRel), &isnull);
 		if (isnull)
-			elog(ERROR, "invalid NULL polwithcheck expression in policy %u", objectId);
+			elog(ERROR, "invalid NULL polwithcheck expression in policy %u", policyOid);
 		deparsed = DirectFunctionCall2(pg_get_expr, storedexpr, polForm->polrelid);
 		append_string_object(tmp, "expression",
 							 TextDatumGetCString(deparsed));
 	}
 	else
 		append_bool_object(tmp, "present", false);
-	append_object_object(policy, "with_check", tmp);
+	append_object_object(policyStmt, "with_check", tmp);
 
-	heap_close(polRel, AccessShareLock);
+	relation_close(polRel, AccessShareLock);
+}
+
+static ObjTree *
+deparse_CreatePolicyStmt(Oid objectId, Node *parsetree)
+{
+	CreatePolicyStmt *node = (CreatePolicyStmt *) parsetree;
+	ObjTree	   *policy;
+
+	policy = new_objtree_VA("CREATE POLICY %{identity}I ON %{table}D %{for_command}s "
+							"%{to_role}s %{using}s %{with_check}s", 2,
+							"identity", ObjTypeString, node->policy_name,
+							"for_command", ObjTypeObject,
+							new_objtree_VA("FOR %{command}s", 1,
+										   "command", ObjTypeString, node->cmd));
+
+	/* add the rest of the stuff */
+	add_policy_clauses(policy, objectId, node->roles, !!node->qual,
+					   !!node->with_check);
+
+	return policy;
+}
+
+static ObjTree *
+deparse_AlterPolicyStmt(Oid objectId, Node *parsetree)
+{
+	AlterPolicyStmt *node = (AlterPolicyStmt *) parsetree;
+	ObjTree	   *policy;
+
+	policy = new_objtree_VA("ALTER POLICY %{identity}I ON %{table}D "
+							"%{to_role}s %{using}s %{with_check}s", 1,
+							"identity", ObjTypeString, node->policy_name);
+
+	/* add the rest of the stuff */
+	add_policy_clauses(policy, objectId, node->roles, !!node->qual,
+					   !!node->with_check);
 
 	return policy;
 }
@@ -6344,7 +6384,7 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_AlterPolicyStmt:		/* ALTER POLICY */
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			command = deparse_AlterPolicyStmt(objectId, parsetree);
 			break;
 
 		case T_SecLabelStmt:
