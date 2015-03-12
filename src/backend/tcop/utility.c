@@ -991,16 +991,16 @@ ProcessUtilitySlow(Node *parsetree,
 										   NULL);
 						}
 
-						/*
-						 * The multiple commands generated here are stashed
-						 * individually, so disable collection below.
-						 */
-						commandStashed = true;
-
 						/* Need CCI between commands */
 						if (lnext(l) != NULL)
 							CommandCounterIncrement();
 					}
+
+					/*
+					 * The multiple commands generated here are stashed
+					 * individually, so disable collection below.
+					 */
+					commandStashed = true;
 				}
 				break;
 
