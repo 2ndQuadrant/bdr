@@ -1115,7 +1115,7 @@ deparse_DefineStmt_TSConfig(Oid objectId, DefineStmt *define)
 	tspForm = (Form_pg_ts_parser) GETSTRUCT(tspTup);
 
 	stmt = new_objtree_VA("CREATE TEXT SEARCH CONFIGURATION %{identity}D "
-						  "(PARSER=%{parser}s)", 0);
+						  "(PARSER=%{parser}D)", 0);
 
 	append_object_object(stmt, "identity",
 						 new_objtree_for_qualname(tscForm->cfgnamespace,
