@@ -4539,7 +4539,7 @@ AlterUserMappingStmt: ALTER USER MAPPING FOR auth_ident SERVER name alter_generi
  *		QUERIES:
  *				CREATE POLICY name ON table [FOR cmd] [TO role, ...]
  *					[USING (qual)] [WITH CHECK (with_check)]
- *				ALTER POLICY name ON table [FOR cmd] [TO role, ...]
+ *				ALTER POLICY name ON table [TO role, ...]
  *					[USING (qual)] [WITH CHECK (with_check)]
  *				DROP POLICY name ON table
  *
