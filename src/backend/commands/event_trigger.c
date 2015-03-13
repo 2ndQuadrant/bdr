@@ -1622,6 +1622,9 @@ EventTriggerAlterTableStart(Node *parsetree)
 	MemoryContext	oldcxt;
 	StashedCommand *stashed;
 
+	if (currentEventTriggerState->commandCollectionInhibited)
+		return;
+
 	oldcxt = MemoryContextSwitchTo(currentEventTriggerState->cxt);
 
 	stashed = palloc(sizeof(StashedCommand));
@@ -1647,6 +1650,9 @@ EventTriggerAlterTableStart(Node *parsetree)
 void
 EventTriggerAlterTableRelid(Oid objectId)
 {
+	if (currentEventTriggerState->commandCollectionInhibited)
+		return;
+
 	currentEventTriggerState->curcmd->d.alterTable.objectId = objectId;
 }
 
@@ -1664,6 +1670,9 @@ EventTriggerAlterTableStashSubcmd(Node *subcmd, Oid relid, AttrNumber attnum,
 {
 	MemoryContext	oldcxt;
 	StashedATSubcmd *newsub;
+
+	if (currentEventTriggerState->commandCollectionInhibited)
+		return;
 
 	Assert(IsA(subcmd, AlterTableCmd));
 	Assert(OidIsValid(currentEventTriggerState->curcmd->d.alterTable.objectId));
@@ -1702,6 +1711,9 @@ EventTriggerAlterTableStashSubcmd(Node *subcmd, Oid relid, AttrNumber attnum,
 void
 EventTriggerAlterTableEnd(void)
 {
+	if (currentEventTriggerState->commandCollectionInhibited)
+		return;
+
 	/* If no subcommands, don't stash anything */
 	if (list_length(currentEventTriggerState->curcmd->d.alterTable.subcmds) != 0)
 	{
@@ -1766,6 +1778,9 @@ EventTriggerStashGrant(InternalGrant *istmt)
 	StashedCommand *stashed;
 	InternalGrant  *icopy;
 	ListCell	   *cell;
+
+	if (currentEventTriggerState->commandCollectionInhibited)
+		return;
 
 	oldcxt = MemoryContextSwitchTo(currentEventTriggerState->cxt);
 
