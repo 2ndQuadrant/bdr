@@ -940,7 +940,7 @@ ProcessUtilitySlow(Node *parsetree,
 							/* Create the table itself */
 							address = DefineRelation((CreateStmt *) stmt,
 													 RELKIND_RELATION,
-												   	 InvalidOid, NULL);
+													 InvalidOid, NULL);
 							EventTriggerStashCommand(address, NULL, stmt);
 
 							/*
