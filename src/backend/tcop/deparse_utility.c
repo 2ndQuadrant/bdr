@@ -1091,13 +1091,16 @@ deparse_DefineStmt_Operator(Oid objectId, DefineStmt *define)
 }
 
 static ObjTree *
-deparse_DefineStmt_TSConfig(Oid objectId, DefineStmt *define)
+deparse_DefineStmt_TSConfig(Oid objectId, DefineStmt *define,
+							ObjectAddress copied)
 {
 	HeapTuple   tscTup;
 	HeapTuple   tspTup;
 	ObjTree	   *stmt;
+	ObjTree	   *tmp;
 	Form_pg_ts_config tscForm;
 	Form_pg_ts_parser tspForm;
+	List	   *list;
 
 	tscTup = SearchSysCache1(TSCONFIGOID, ObjectIdGetDatum(objectId));
 	if (!HeapTupleIsValid(tscTup))
@@ -1112,56 +1115,32 @@ deparse_DefineStmt_TSConfig(Oid objectId, DefineStmt *define)
 	tspForm = (Form_pg_ts_parser) GETSTRUCT(tspTup);
 
 	stmt = new_objtree_VA("CREATE TEXT SEARCH CONFIGURATION %{identity}D "
-						  "(PARSER=%{parser}D)", 0);
+						  "(%{elems:, }s)", 0);
 
 	append_object_object(stmt, "identity",
 						 new_objtree_for_qualname(tscForm->cfgnamespace,
 												  NameStr(tscForm->cfgname)));
-	append_object_object(stmt, "parser",
-						 new_objtree_for_qualname(tspForm->prsnamespace,
-												  NameStr(tspForm->prsname)));
 
 	/*
-	 * If this text search configuration was created by copying another
-	 * one with "CREATE TEXT SEARCH CONFIGURATION x (COPY=y)", then y's
-	 * PARSER selection is copied along with its mappings of tokens to
-	 * dictionaries (created with ALTER … ADD MAPPING …).
-	 *
-	 * Unfortunately, there's no way to define these mappings in the
-	 * CREATE command, so if they exist for the configuration we're
-	 * deparsing, we must detect them and fail.
+	 * If tsconfig was copied from another one, define it like so.
 	 */
-
+	list = NIL;
+	if (copied.objectId != InvalidOid)
 	{
-		ScanKeyData skey;
-		SysScanDesc scan;
-		HeapTuple	tup;
-		Relation	map;
-		bool		has_mapping;
-
-		map = heap_open(TSConfigMapRelationId, AccessShareLock);
-
-		ScanKeyInit(&skey,
-					Anum_pg_ts_config_map_mapcfg,
-					BTEqualStrategyNumber, F_OIDEQ,
-					ObjectIdGetDatum(objectId));
-
-		scan = systable_beginscan(map, TSConfigMapIndexId, true,
-								  NULL, 1, &skey);
-
-		while (HeapTupleIsValid((tup = systable_getnext(scan))))
-		{
-			has_mapping = true;
-			break;
-		}
-
-		systable_endscan(scan);
-		heap_close(map, AccessShareLock);
-
-		if (has_mapping)
-			ereport(ERROR,
-					(errmsg("can't recreate text search configuration with mappings")));
+		tmp = new_objtree_VA("COPY=%{tsconfig}D", 0);
+		append_object_object(tmp, "tsconfig",
+							 new_objtree_for_qualname_id(TSConfigRelationId,
+														 copied.objectId));
 	}
+	else
+	{
+		tmp = new_objtree_VA("PARSER=%{parser}D", 0);
+		append_object_object(tmp, "parser",
+							 new_objtree_for_qualname(tspForm->prsnamespace,
+													  NameStr(tspForm->prsname)));
+	}
+	list = lappend(list, new_object_object(tmp));
+	append_array_object(stmt, "elems", list);
 
 	ReleaseSysCache(tspTup);
 	ReleaseSysCache(tscTup);
@@ -1536,7 +1515,7 @@ deparse_DefineStmt_Type(Oid objectId, DefineStmt *define)
 }
 
 static ObjTree *
-deparse_DefineStmt(Oid objectId, Node *parsetree)
+deparse_DefineStmt(Oid objectId, Node *parsetree, ObjectAddress secondaryObj)
 {
 	DefineStmt *define = (DefineStmt *) parsetree;
 	ObjTree	   *defStmt;
@@ -1556,7 +1535,7 @@ deparse_DefineStmt(Oid objectId, Node *parsetree)
 			break;
 
 		case OBJECT_TSCONFIGURATION:
-			defStmt = deparse_DefineStmt_TSConfig(objectId, define);
+			defStmt = deparse_DefineStmt_TSConfig(objectId, define, secondaryObj);
 			break;
 
 		case OBJECT_TSPARSER:
@@ -6258,7 +6237,8 @@ deparse_simple_command(StashedCommand *cmd)
 
 			/* other local objects */
 		case T_DefineStmt:
-			command = deparse_DefineStmt(objectId, parsetree);
+			command = deparse_DefineStmt(objectId, parsetree,
+										 cmd->d.simple.secondaryObject);
 			break;
 
 		case T_IndexStmt:
