@@ -983,7 +983,7 @@ deparse_DefineStmt_Collation(Oid objectId, DefineStmt *define)
 		elog(ERROR, "cache lookup failed for collation with OID %u", objectId);
 	colForm = (Form_pg_collation) GETSTRUCT(colTup);
 
-	stmt = new_objtree_VA("CREATE COLLATION %{identity}O "
+	stmt = new_objtree_VA("CREATE COLLATION %{identity}D "
 						  "(LC_COLLATE = %{collate}L,"
 						  " LC_CTYPE = %{ctype}L)", 0);
 
