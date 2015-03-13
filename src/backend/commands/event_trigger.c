@@ -20,6 +20,7 @@
 #include "catalog/objectaccess.h"
 #include "catalog/pg_event_trigger.h"
 #include "catalog/pg_namespace.h"
+#include "catalog/pg_opfamily.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_trigger.h"
 #include "catalog/pg_type.h"
@@ -1809,6 +1810,37 @@ EventTriggerStashGrant(InternalGrant *istmt)
 	MemoryContextSwitchTo(oldcxt);
 }
 
+/*
+ * EventTriggerStashAlterOpFam
+ * 		Save data about an ALTER OPERATOR FAMILY ADD/DROP command being
+ * 		executed
+ */
+void
+EventTriggerStashAlterOpFam(AlterOpFamilyStmt *stmt, Oid opfamoid,
+							List *operators, List *procedures)
+{
+	MemoryContext	oldcxt;
+	StashedCommand *stashed;
+
+	if (currentEventTriggerState->commandCollectionInhibited)
+		return;
+
+	oldcxt = MemoryContextSwitchTo(currentEventTriggerState->cxt);
+
+	stashed = palloc(sizeof(StashedCommand));
+	stashed->type = SCT_AlterOpFamily;
+	stashed->in_extension = creating_extension;
+	stashed->d.opfam.opfamOid = opfamoid;
+	stashed->d.opfam.operators = operators;		/* XXX prolly need to copy */
+	stashed->d.opfam.procedures = procedures;	/* XXX ditto */
+	stashed->parsetree = copyObject(stmt);
+
+	currentEventTriggerState->stash = lappend(currentEventTriggerState->stash,
+											  stashed);
+
+	MemoryContextSwitchTo(oldcxt);
+}
+
 Datum
 pg_event_trigger_get_creation_commands(PG_FUNCTION_ARGS)
 {
@@ -1889,7 +1921,8 @@ pg_event_trigger_get_creation_commands(PG_FUNCTION_ARGS)
 			MemSet(nulls, 0, sizeof(nulls));
 
 			if (cmd->type == SCT_Simple ||
-				cmd->type == SCT_AlterTable)
+				cmd->type == SCT_AlterTable ||
+				cmd->type == SCT_AlterOpFamily)
 			{
 				const char *tag;
 				char	   *identity;
@@ -1902,6 +1935,10 @@ pg_event_trigger_get_creation_commands(PG_FUNCTION_ARGS)
 					ObjectAddressSet(addr,
 									 cmd->d.alterTable.classId,
 									 cmd->d.alterTable.objectId);
+				else if (cmd->type == SCT_AlterOpFamily)
+					ObjectAddressSet(addr,
+									 OperatorFamilyRelationId,
+									 cmd->d.opfam.opfamOid);
 
 				tag = CreateCommandTag(cmd->parsetree);
 

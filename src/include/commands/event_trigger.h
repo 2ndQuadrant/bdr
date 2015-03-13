@@ -73,5 +73,7 @@ extern void EventTriggerAlterTableStashSubcmd(Node *subcmd, Oid relid,
 extern void EventTriggerAlterTableEnd(void);
 
 extern void EventTriggerStashGrant(InternalGrant *istmt);
+extern void EventTriggerStashAlterOpFam(AlterOpFamilyStmt *stmt, Oid opfamoid,
+							List *operators, List *procedures);
 
 #endif   /* EVENT_TRIGGER_H */

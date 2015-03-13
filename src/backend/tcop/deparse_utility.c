@@ -6331,7 +6331,8 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_AlterOpFamilyStmt:
-			command = deparse_AlterOpFamilyStmt(objectId, parsetree);
+			/* handled elsewhere */
+			elog(ERROR, "unexpected command type %s", CreateCommandTag(parsetree));
 			break;
 
 		case T_AlterTSDictionaryStmt:
@@ -6454,6 +6455,9 @@ deparse_utility_command(StashedCommand *cmd)
 			break;
 		case SCT_Grant:
 			tree = deparse_GrantStmt(cmd);
+			break;
+		case SCT_AlterOpFamily:
+			tree = deparse_AlterOpFamily(cmd);
 			break;
 		default:
 			elog(ERROR, "unexpected deparse node type %d", cmd->type);

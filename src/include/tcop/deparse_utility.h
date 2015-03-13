@@ -29,7 +29,8 @@ typedef enum StashedCommandType
 {
 	SCT_Simple,
 	SCT_AlterTable,
-	SCT_Grant
+	SCT_Grant,
+	SCT_AlterOpFamily
 } StashedCommandType;
 
 /*
@@ -69,6 +70,13 @@ typedef struct StashedCommand
 			InternalGrant *istmt;
 			const char *type;
 		} grant;
+
+		struct AlterOpFamily
+		{
+			Oid		opfamOid;
+			List   *operators;
+			List   *procedures;
+		} opfam;
 	} d;
 } StashedCommand;
 
