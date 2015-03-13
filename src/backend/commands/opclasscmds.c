@@ -25,6 +25,7 @@
 #include "catalog/dependency.h"
 #include "catalog/indexing.h"
 #include "catalog/objectaccess.h"
+#include "catalog/opfam_internal.h"
 #include "catalog/pg_amop.h"
 #include "catalog/pg_amproc.h"
 #include "catalog/pg_namespace.h"
@@ -45,20 +46,6 @@
 #include "utils/rel.h"
 #include "utils/syscache.h"
 #include "utils/tqual.h"
-
-
-/*
- * We use lists of this struct type to keep track of both operators and
- * procedures while building or adding to an opfamily.
- */
-typedef struct
-{
-	Oid			object;			/* operator or support proc's OID */
-	int			number;			/* strategy or support proc number */
-	Oid			lefttype;		/* lefttype */
-	Oid			righttype;		/* righttype */
-	Oid			sortfamily;		/* ordering operator's sort opfamily, or 0 */
-} OpFamilyMember;
 
 
 static void AlterOpFamilyAdd(List *opfamilyname, Oid amoid, Oid opfamilyoid,
