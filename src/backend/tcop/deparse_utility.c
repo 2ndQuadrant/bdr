@@ -31,6 +31,7 @@
 #include "catalog/heap.h"
 #include "catalog/index.h"
 #include "catalog/namespace.h"
+#include "catalog/opfam_internal.h"
 #include "catalog/pg_aggregate.h"
 #include "catalog/pg_authid.h"
 #include "catalog/pg_cast.h"
@@ -138,9 +139,7 @@ static void append_bool_object(ObjTree *tree, char *name, bool value);
 static void append_string_object(ObjTree *tree, char *name, char *value);
 static void append_object_object(ObjTree *tree, char *name, ObjTree *value);
 static void append_array_object(ObjTree *tree, char *name, List *array);
-#ifdef NOT_USED
 static void append_integer_object(ObjTree *tree, char *name, int64 value);
-#endif
 static void append_float_object(ObjTree *tree, char *name, float8 value);
 static inline void append_premade_object(ObjTree *tree, ObjElem *elem);
 static JsonbValue *objtree_to_jsonb_rec(ObjTree *tree, JsonbParseState *state);
@@ -344,7 +343,6 @@ new_float_object(float8 value)
 	return param;
 }
 
-#ifdef NOT_USED
 /*
  * Append an int64 parameter to a tree.
  */
@@ -357,7 +355,6 @@ append_integer_object(ObjTree *tree, char *name, int64 value)
 	param->name = name;
 	append_premade_object(tree, param);
 }
-#endif
 
 /*
  * Append a float8 parameter to a tree.
@@ -5345,81 +5342,6 @@ deparse_CreateOpFamily(Oid objectId, Node *parsetree)
 }
 
 static ObjTree *
-deparse_AlterOpFamilyStmt(Oid objectId, Node *parsetree)
-{
-#ifdef NOT_USED
-	AlterOpFamilyStmt *node = (AlterOpFamilyStmt *) parsetree;
-	ObjTree	   *alterStmt;
-	ObjTree	   *tmp;
-	char	   *fmt;
-	HeapTuple	opftup;
-	Oid			amoid;
-	Relation	opfrel;
-	List	   *list;
-	ListCell   *cell;
-
-	/*
-	 * XXX We can't support this case until we get more info from the command.
-	 * The issue is that from the parse node we don't have enough info about
-	 * the added/dropped operators and functions.  We need a new
-	 * StashedCommandType to implement this, so that we can return the OIDs of
-	 * the affected opfamily members and perhaps their strategy numbers.
-	 */
-	elog(ERROR, "unsupported deparse of ALTER OPERATOR FAMILY ADD/DROP");
-
-	opfrel = heap_open(OperatorFamilyRelationId, AccessShareLock);
-	opftup = get_catalog_object_by_oid(opfrel, objectId);
-	if (!HeapTupleIsValid(opftup))
-		elog(ERROR, "cache lookup failed for operator family %u", objectId);
-	amoid = ((Form_pg_opfamily) GETSTRUCT(opftup))->opfmethod;
-	amtup = SearchSysCache1(AMOID, ObjectIdGetDatum(amoid));
-	if (!HeapTupleIsValid(amtup))
-		elog(ERROR, "cache lookup failed for access method %u", amoid);
-
-	fmt = psprintf("ALTER OPERATOR FAMILY %%{identity}D USING %%{amname}I %s %%{items}s",
-				   node->isDrop ? "DROP" : "ADD");
-	alterStmt = new_objtree_VA(fmt, 1,
-							   "identity", ObjTypeObject,
-							   new_objtree_for_qualname_id(OperatorFamilyRelationId,
-														   objectId),
-							   "amname", ObjTypeString,
-							   pstrdup(NameStr(((Form_pg_am) GETSTRUCT(amtup))->amname)));
-
-	ReleaseSysCache(opftup);
-	heap_close(opfrel, AccessShareLock);
-
-	list = NIL;
-	foreach (cell, node->items)
-	{
-		CreateOpClassItem *item = lfirst(cell);
-
-		switch (item->itemtype)
-		{
-			case OPCLASS_ITEM_OPERATOR:
-				tmp = new_objtree_VA("OPERATOR %{num}n %{oper}s %{purpose}s", 0);
-				append_integer_object(tmp, "num", item->number);
-				append_object_object(tmp, "oper", "someoper");
-				append_string_object(tmp, "purpose",
-									 item->order_family ? "FOR ORDER BY xyz" : "FOR SEARCH");
-				break;
-			case OPCLASS_ITEM_FUNCTION:
-				tmp = new_objtree_VA("FUNCTION %{num}n %{function}s", 0);
-				append_integer_object(tmp, "num", item->number);
-				break;
-			case OPCLASS_ITEM_STORAGETYPE:
-				elog(ERROR, "ALTER OPERATOR FAMILY does not support STORAGE");
-				break;
-		}
-		list = lappend(list, new_object_object(tmp));
-	}
-	append_array_object(alterStmt, "items", list);
-
-	return alterStmt;
-#endif
-	return NULL;
-}
-
-static ObjTree *
 deparse_GrantStmt(StashedCommand *cmd)
 {
 	InternalGrant *istmt;
@@ -5607,6 +5529,142 @@ deparse_GrantStmt(StashedCommand *cmd)
 	}
 
 	return grantStmt;
+}
+
+/*
+ * Deparse an ALTER OPERATOR FAMILY ADD/DROP command.
+ */
+static ObjTree *
+deparse_AlterOpFamily(StashedCommand *cmd)
+{
+	ObjTree	   *alterOpFam;
+	AlterOpFamilyStmt *stmt = (AlterOpFamilyStmt *) cmd->parsetree;
+	HeapTuple	ftp;
+	Form_pg_opfamily opfForm;
+	List	   *list;
+	ListCell   *cell;
+
+	ftp = SearchSysCache1(OPFAMILYOID,
+						  ObjectIdGetDatum(cmd->d.opfam.opfamOid));
+	if (!HeapTupleIsValid(ftp))
+		elog(ERROR, "cache lookup failed for operator family %u", cmd->d.opfam.opfamOid);
+	opfForm = (Form_pg_opfamily) GETSTRUCT(ftp);
+
+	if (!stmt->isDrop)
+		alterOpFam = new_objtree_VA("ALTER OPERATOR FAMILY %{identity}D "
+									"USING %{amname}I ADD %{items:, }s", 0);
+	else
+		alterOpFam = new_objtree_VA("ALTER OPERATOR FAMILY %{identity}D "
+									"USING %{amname}I DROP %{items:, }s", 0);
+	append_object_object(alterOpFam, "identity",
+						 new_objtree_for_qualname(opfForm->opfnamespace,
+												  NameStr(opfForm->opfname)));
+	append_string_object(alterOpFam, "amname", stmt->amname);
+
+	list = NIL;
+	foreach(cell, cmd->d.opfam.operators)
+	{
+		OpFamilyMember *oper = lfirst(cell);
+		ObjTree	   *tmp;
+
+		if (!stmt->isDrop)
+			tmp = new_objtree_VA("OPERATOR %{num}n %{operator}O(%{ltype}T, %{rtype}T) %{purpose}s",
+								 0);
+		else
+			tmp = new_objtree_VA("OPERATOR %{num}n (%{ltype}T, %{rtype}T)",
+								 0);
+		append_integer_object(tmp, "num", oper->number);
+
+		/* Add the operator name; the DROP case doesn't have this */
+		if (!stmt->isDrop)
+		{
+			append_object_object(tmp, "operator",
+								 new_objtree_for_qualname_id(OperatorRelationId,
+															 oper->object));
+		}
+
+		/* Add the types */
+		append_object_object(tmp, "ltype",
+							 new_objtree_for_type(oper->lefttype, -1));
+		append_object_object(tmp, "rtype",
+							 new_objtree_for_type(oper->righttype, -1));
+
+		/* Add the FOR SEARCH / FOR ORDER BY clause; not in the DROP case */
+		if (!stmt->isDrop)
+		{
+			if (oper->sortfamily == InvalidOid)
+				append_string_object(tmp, "purpose", "FOR SEARCH");
+			else
+			{
+				ObjTree	   *tmp2;
+
+				tmp2 = new_objtree_VA("FOR ORDER BY %{opfamily}D", 0);
+				append_object_object(tmp2, "opfamily",
+									 new_objtree_for_qualname_id(OperatorFamilyRelationId,
+																 oper->sortfamily));
+				append_object_object(tmp, "purpose", tmp2);
+			}
+		}
+
+		list = lappend(list, new_object_object(tmp));
+	}
+
+	foreach(cell, cmd->d.opfam.procedures)
+	{
+		OpFamilyMember *proc = lfirst(cell);
+		ObjTree	   *tmp;
+
+		if (!stmt->isDrop)
+			tmp = new_objtree_VA("FUNCTION %{num}n (%{ltype}T, %{rtype}T) %{function}D(%{argtypes:, }T)", 0);
+		else
+			tmp = new_objtree_VA("FUNCTION %{num}n (%{ltype}T, %{rtype}T)", 0);
+		append_integer_object(tmp, "num", proc->number);
+
+		/* Add the function name and arg types; the DROP case doesn't have this */
+		if (!stmt->isDrop)
+		{
+			HeapTuple	procTup;
+			Form_pg_proc procForm;
+			Oid		   *proargtypes;
+			List	   *arglist;
+			int			i;
+
+			procTup = SearchSysCache1(PROCOID, ObjectIdGetDatum(proc->object));
+			if (!HeapTupleIsValid(procTup))
+				elog(ERROR, "cache lookup failed for procedure %u", proc->object);
+			procForm = (Form_pg_proc) GETSTRUCT(procTup);
+
+			append_object_object(tmp, "function",
+								 new_objtree_for_qualname(procForm->pronamespace,
+														  NameStr(procForm->proname)));
+			proargtypes = procForm->proargtypes.values;
+			arglist = NIL;
+			for (i = 0; i < procForm->pronargs; i++)
+			{
+				ObjTree	   *arg;
+
+				arg = new_objtree_for_type(proargtypes[i], -1);
+				arglist = lappend(arglist, new_object_object(arg));
+			}
+			append_array_object(tmp, "argtypes", arglist);
+
+			ReleaseSysCache(procTup);
+		}
+
+		/* Add the types */
+		append_object_object(tmp, "ltype",
+							 new_objtree_for_type(proc->lefttype, -1));
+		append_object_object(tmp, "rtype",
+							 new_objtree_for_type(proc->righttype, -1));
+
+		list = lappend(list, new_object_object(tmp));
+	}
+
+	append_array_object(alterOpFam, "items", list);
+
+	ReleaseSysCache(ftp);
+
+	return alterOpFam;
 }
 
 static ObjTree *
