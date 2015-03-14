@@ -35,6 +35,7 @@
 <!ENTITY manual-overview      SYSTEM "manual-overview.sgml">
 <!ENTITY manual-node-management      SYSTEM "manual-node-management.sgml">
 <!ENTITY manual-ddl-replication      SYSTEM "manual-ddl-replication.sgml">
+<!ENTITY manual-commands      SYSTEM "manual-commands.sgml">
 <!ENTITY manual-conflicts      SYSTEM "manual-conflicts.sgml">
 <!ENTITY manual-global-sequences      SYSTEM "manual-global-sequences.sgml">
 <!ENTITY manual-replication-sets      SYSTEM "manual-replication-sets.sgml">
