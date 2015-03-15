@@ -1461,7 +1461,7 @@ copy_file(char *fromfile, char *tofile)
 	if (srcfd < 0)
 		die(_("could not open file \"%s\""), fromfile);
 
-	dstfd = open(tofile, O_RDWR | PG_BINARY,
+	dstfd = open(tofile, O_RDWR | O_CREAT | O_TRUNC | PG_BINARY,
 							  S_IRUSR | S_IWUSR);
 	if (dstfd < 0)
 		die(_("could not create file \"%s\""), tofile);
