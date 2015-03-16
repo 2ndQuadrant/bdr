@@ -1887,6 +1887,52 @@ EventTriggerStashAlterOpFam(AlterOpFamilyStmt *stmt, Oid opfamoid,
 	MemoryContextSwitchTo(oldcxt);
 }
 
+/*
+ * EventTriggerStashAlterDefPrivs
+ * 		Save data about an ALTER DEFAULT PRIVILEGES command being
+ * 		executed
+ */
+void
+EventTriggerStashAlterDefPrivs(AlterDefaultPrivilegesStmt *stmt)
+{
+	MemoryContext	oldcxt;
+	StashedCommand *stashed;
+
+	if (currentEventTriggerState->commandCollectionInhibited)
+		return;
+
+	oldcxt = MemoryContextSwitchTo(currentEventTriggerState->cxt);
+
+	stashed = palloc0(sizeof(StashedCommand));
+	stashed->type = SCT_AlterDefaultPrivileges;
+
+	switch (stmt->action->objtype)
+	{
+		case ACL_OBJECT_RELATION:
+			stashed->d.defprivs.objtype = "TABLES";
+			break;
+		case ACL_OBJECT_FUNCTION:
+			stashed->d.defprivs.objtype = "FUNCTIONS";
+			break;
+		case ACL_OBJECT_SEQUENCE:
+			stashed->d.defprivs.objtype = "SEQUENCES";
+			break;
+		case ACL_OBJECT_TYPE:
+			stashed->d.defprivs.objtype = "TYPES";
+			break;
+		default:
+			elog(ERROR, "unexpected object type %d", stmt->action->objtype);
+	}
+
+
+	stashed->in_extension = creating_extension;
+	stashed->parsetree = copyObject(stmt);
+
+	currentEventTriggerState->stash = lappend(currentEventTriggerState->stash,
+											  stashed);
+	MemoryContextSwitchTo(oldcxt);
+}
+
 Datum
 pg_event_trigger_get_creation_commands(PG_FUNCTION_ARGS)
 {
@@ -2045,6 +2091,27 @@ pg_event_trigger_get_creation_commands(PG_FUNCTION_ARGS)
 				values[i++] = CStringGetTextDatum(schema);
 			/* identity */
 			values[i++] = CStringGetTextDatum(identity);
+			/* in_extension */
+			values[i++] = BoolGetDatum(cmd->in_extension);
+			/* command */
+			values[i++] = CStringGetTextDatum(command);
+		}
+		else if (cmd->type == SCT_AlterDefaultPrivileges)
+		{
+			/* classid */
+			nulls[i++] = true;
+			/* objid */
+			nulls[i++] = true;
+			/* objsubid */
+			nulls[i++] = true;
+			/* command tag */
+			values[i++] = CStringGetTextDatum(CreateCommandTag(cmd->parsetree));
+			/* object_type */
+			values[i++] = CStringGetTextDatum(cmd->d.defprivs.objtype);
+			/* schema */
+			nulls[i++] = true;
+			/* identity */
+			nulls[i++] = true;
 			/* in_extension */
 			values[i++] = BoolGetDatum(cmd->in_extension);
 			/* command */
