@@ -18,7 +18,7 @@ create role regress_rol_lock1;
 create role regress_test_indirect;
 create role regress_test_role;
 create role regress_test_role2;
-create role regress_test_role_super;
+create role regress_test_role_super superuser;
 create role regressuser1;
 create role regressuser2;
 create role regressuser3;
@@ -38,6 +38,7 @@ create role rls_regress_exempt_user;
 create role schemauser2;
 create role seclabel_user1;
 create role seclabel_user2;
+create role selinto_user;
 create role unprivileged_role;
 create role view_user2;
 
