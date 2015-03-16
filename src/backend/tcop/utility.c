@@ -1461,7 +1461,8 @@ ProcessUtilitySlow(Node *parsetree,
 
 			case T_AlterDefaultPrivilegesStmt:
 				ExecAlterDefaultPrivilegesStmt((AlterDefaultPrivilegesStmt *) parsetree);
-				/* XXX FIXME WTF? */
+				EventTriggerStashAlterDefPrivs(parsetree);
+				commandStashed = true;
 				break;
 
 			case T_CreatePolicyStmt:	/* CREATE POLICY */
