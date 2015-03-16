@@ -5650,6 +5650,124 @@ deparse_AlterOpFamily(StashedCommand *cmd)
 }
 
 static ObjTree *
+deparse_AlterDefaultPrivilegesStmt(StashedCommand *cmd)
+{
+	ObjTree	   *alterStmt;
+	AlterDefaultPrivilegesStmt *stmt = (AlterDefaultPrivilegesStmt *) cmd->parsetree;
+	List	   *roles = NIL;
+	List	   *schemas = NIL;
+	List	   *grantees;
+	List	   *privs;
+	ListCell   *cell;
+	ObjTree	   *tmp;
+	ObjTree	   *grant;
+
+	alterStmt = new_objtree_VA("ALTER DEFAULT PRIVILEGES %{in_schema}s "
+							   "%{for_roles}s %{grant}s", 0);
+
+	/* Scan the parse node to dig out the FOR ROLE and IN SCHEMA clauses */
+	foreach(cell, stmt->options)
+	{
+		DefElem	   *opt = (DefElem *) lfirst(cell);
+		ListCell   *cell2;
+
+		Assert(IsA(opt, DefElem));
+		Assert(IsA(opt->arg, List));
+		if (strcmp(opt->defname, "roles") == 0)
+		{
+			foreach(cell2, (List *) opt->arg)
+			{
+				Value  *val = lfirst(cell2);
+
+				roles = lappend(roles,
+								new_string_object(strVal(val)));
+			}
+		}
+		else if (strcmp(opt->defname, "schemas") == 0)
+		{
+			foreach(cell2, (List *) opt->arg)
+			{
+				Value  *val = lfirst(cell2);
+
+				schemas = lappend(schemas,
+								  new_string_object(strVal(val)));
+			}
+		}
+	}
+
+	/* Add the FOR ROLE clause, if any */
+	tmp = new_objtree_VA("FOR ROLE %{roles:, }I", 0);
+	append_array_object(tmp, "roles", roles);
+	if (roles == NIL)
+		append_bool_object(tmp, "present", false);
+	append_object_object(alterStmt, "for_roles", tmp);
+
+	/* Add the IN SCHEMA clause, if any */
+	tmp = new_objtree_VA("IN SCHEMA %{schemas:, }I", 0);
+	append_array_object(tmp, "schemas", schemas);
+	if (schemas == NIL)
+		append_bool_object(tmp, "present", false);
+	append_object_object(alterStmt, "in_schema", tmp);
+
+	/* Add the GRANT subcommand */
+	if (stmt->action->is_grant)
+		grant = new_objtree_VA("GRANT %{privileges:, }s ON %{target}s "
+							   "TO %{grantees:, }I %{grant_option}s", 0);
+	else
+		grant = new_objtree_VA("REVOKE %{grant_option}s %{privileges:, }s "
+							   "ON %{target}s FROM %{grantees:, }I", 0);
+
+	/* add the GRANT OPTION clause */
+	tmp = new_objtree_VA(stmt->action->is_grant ?
+						   "WITH GRANT OPTION" : "GRANT OPTION FOR",
+						   1, "present", ObjTypeBool,
+						   stmt->action->grant_option);
+	append_object_object(grant, "grant_option", tmp);
+
+	/* add the target object type */
+	append_string_object(grant, "target", cmd->d.defprivs.objtype);
+
+	/* add the grantee list */
+	grantees = NIL;
+	foreach(cell, stmt->action->grantees)
+	{
+		RoleSpec   *spec = (RoleSpec *) lfirst(cell);
+		char	   *role = spec->roletype == ROLESPEC_PUBLIC ? "PUBLIC" :
+			get_rolespec_name((Node *) spec);
+
+		grantees = lappend(grantees, new_string_object(role));
+	}
+	append_array_object(grant, "grantees", grantees);
+
+	/*
+	 * Add the privileges list.  This uses the parser struct, as opposed to the
+	 * InternalGrant format used by GRANT.  There are enough other differences
+	 * that this doesn't seem worth improving.
+	 */
+	if (stmt->action->privileges == NIL)
+		privs = list_make1(new_string_object("ALL PRIVILEGES"));
+	else
+	{
+		privs = NIL;
+
+		foreach(cell, stmt->action->privileges)
+		{
+			AccessPriv *priv = lfirst(cell);
+
+			Assert(priv->cols == NIL);
+			privs = lappend(privs,
+							new_string_object(priv->priv_name));
+		}
+	}
+
+	append_array_object(grant, "privileges", privs);
+
+	append_object_object(alterStmt, "grant", grant);
+
+	return alterStmt;
+}
+
+static ObjTree *
 deparse_AlterTableStmt(StashedCommand *cmd)
 {
 	ObjTree	   *alterTableStmt;
@@ -6419,7 +6537,8 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_AlterDefaultPrivilegesStmt:
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			/* handled elsewhere */
+			elog(ERROR, "unexpected command type %s", CreateCommandTag(parsetree));
 			break;
 
 		case T_CreatePolicyStmt:	/* CREATE POLICY */
@@ -6500,6 +6619,9 @@ deparse_utility_command(StashedCommand *cmd)
 			break;
 		case SCT_AlterOpFamily:
 			tree = deparse_AlterOpFamily(cmd);
+			break;
+		case SCT_AlterDefaultPrivileges:
+			tree = deparse_AlterDefaultPrivilegesStmt(cmd);
 			break;
 		default:
 			elog(ERROR, "unexpected deparse node type %d", cmd->type);
