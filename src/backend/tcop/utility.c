@@ -1407,7 +1407,7 @@ ProcessUtilitySlow(Node *parsetree,
 
 			case T_AlterOpFamilyStmt:
 				AlterOpFamily((AlterOpFamilyStmt *) parsetree);
-				/* commands are stashed in AlterOpFamily */ /* FIXME a lie actually */
+				/* commands are stashed in AlterOpFamily */
 				commandStashed = true;
 				break;
 
