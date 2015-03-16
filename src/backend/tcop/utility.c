@@ -1401,6 +1401,8 @@ ProcessUtilitySlow(Node *parsetree,
 
 			case T_CreateOpClassStmt:
 				address = DefineOpClass((CreateOpClassStmt *) parsetree);
+				/* command is stashed in DefineOpClass */
+				commandStashed = true;
 				break;
 
 			case T_CreateOpFamilyStmt:

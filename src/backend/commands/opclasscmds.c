@@ -665,6 +665,9 @@ DefineOpClass(CreateOpClassStmt *stmt)
 	storeProcedures(stmt->opfamilyname, amoid, opfamilyoid,
 					opclassoid, procedures, false);
 
+	/* let event triggers know what happened */
+	EventTriggerStashCreateOpClass(stmt, opclassoid, operators, procedures);
+
 	/*
 	 * Create dependencies for the opclass proper.  Note: we do not create a
 	 * dependency link to the AM, because we don't currently support DROP
@@ -1673,7 +1676,7 @@ RemoveAmProcEntryById(Oid entryOid)
 	heap_close(rel, RowExclusiveLock);
 }
 
-static char *
+char *
 get_am_name(Oid amOid)
 {
 	HeapTuple	tup;

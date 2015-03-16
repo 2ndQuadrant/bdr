@@ -76,6 +76,8 @@ extern void EventTriggerAlterTableEnd(void);
 extern void EventTriggerStashGrant(InternalGrant *istmt);
 extern void EventTriggerStashAlterOpFam(AlterOpFamilyStmt *stmt, Oid opfamoid,
 							List *operators, List *procedures);
+extern void EventTriggerStashCreateOpClass(CreateOpClassStmt *stmt, Oid opcoid,
+							   List *operators, List *procedures);
 extern void EventTriggerStashAlterDefPrivs(AlterDefaultPrivilegesStmt *stmt);
 
 #endif   /* EVENT_TRIGGER_H */

@@ -31,7 +31,8 @@ typedef enum StashedCommandType
 	SCT_AlterTable,
 	SCT_Grant,
 	SCT_AlterOpFamily,
-	SCT_AlterDefaultPrivileges
+	SCT_AlterDefaultPrivileges,
+	SCT_CreateOpClass
 } StashedCommandType;
 
 /*
@@ -81,6 +82,14 @@ typedef struct StashedCommand
 			List   *operators;
 			List   *procedures;
 		} opfam;
+
+		/* CREATE OPERATOR CLASS */
+		struct
+		{
+			Oid		opcOid;
+			List   *operators;
+			List   *procedures;
+		} createopc;
 
 		/* ALTER DEFAULT PRIVILEGES */
 		struct
