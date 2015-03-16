@@ -5286,6 +5286,158 @@ deparse_CreateCastStmt(Oid objectId, Node *parsetree)
 }
 
 static ObjTree *
+deparse_CreateOpClassStmt(StashedCommand *cmd)
+{
+	Oid			opcoid = cmd->d.createopc.opcOid;
+	HeapTuple   opcTup;
+	HeapTuple   opfTup;
+	Form_pg_opfamily opfForm;
+	Form_pg_opclass opcForm;
+	ObjTree	   *stmt;
+	ObjTree	   *tmp;
+	List	   *list;
+	ListCell   *cell;
+
+	opcTup = SearchSysCache1(CLAOID, ObjectIdGetDatum(opcoid));
+	if (!HeapTupleIsValid(opcTup))
+		elog(ERROR, "cache lookup failed for opclass with OID %u", opcoid);
+	opcForm = (Form_pg_opclass) GETSTRUCT(opcTup);
+
+	opfTup = SearchSysCache1(OPFAMILYOID, opcForm->opcfamily);
+	if (!HeapTupleIsValid(opfTup))
+		elog(ERROR, "cache lookup failed for operator family with OID %u", opcForm->opcfamily);
+	opfForm = (Form_pg_opfamily) GETSTRUCT(opfTup);
+
+	stmt = new_objtree_VA("CREATE OPERATOR CLASS %{identity}D %{default}s "
+						  "FOR TYPE %{type}T USING %{amname}I %{opfamily}s "
+						  "AS %{items:, }s", 0);
+
+	append_object_object(stmt, "identity",
+						 new_objtree_for_qualname(opcForm->opcnamespace,
+												  NameStr(opcForm->opcname)));
+
+	/*
+	 * Add the FAMILY clause; but if it has the same name and namespace as the
+	 * opclass, then have it expand to empty, because it would cause a failure
+	 * if the opfamily was created internally.
+	 */
+	tmp = new_objtree_VA("FAMILY %{opfamily}D", 1,
+						 "opfamily", ObjTypeObject,
+						 new_objtree_for_qualname(opfForm->opfnamespace,
+												  NameStr(opfForm->opfname)));
+	if (strcmp(NameStr(opfForm->opfname), NameStr(opcForm->opcname)) == 0 &&
+		opfForm->opfnamespace == opcForm->opcnamespace)
+		append_bool_object(tmp, "present", false);
+	append_object_object(stmt, "opfamily",  tmp);
+
+	/* Add the DEFAULT clause */
+	append_string_object(stmt, "default",
+						 opcForm->opcdefault ? "DEFAULT" : "");
+
+	/* Add the FOR TYPE clause */
+	append_object_object(stmt, "type",
+						 new_objtree_for_type(opcForm->opcintype, -1));
+
+	/* Add the USING clause */
+	append_string_object(stmt, "amname", get_am_name(opcForm->opcmethod));
+
+	/*
+	 * Add the initial item list.  Note we always add the STORAGE clause, even
+	 * when it is implicit in the original command.
+	 */
+	tmp = new_objtree_VA("STORAGE %{type}T", 0);
+	append_object_object(tmp, "type",
+						 new_objtree_for_type(opcForm->opckeytype != InvalidOid ?
+											  opcForm->opckeytype : opcForm->opcintype,
+											  -1));
+	list = list_make1(new_object_object(tmp));
+
+	/* Add the declared operators */
+	/* XXX this duplicates code in deparse_AlterOpFamily */
+	foreach(cell, cmd->d.createopc.operators)
+	{
+		OpFamilyMember *oper = lfirst(cell);
+		ObjTree	   *tmp;
+
+		tmp = new_objtree_VA("OPERATOR %{num}n %{operator}O(%{ltype}T, %{rtype}T) %{purpose}s",
+							 0);
+		append_integer_object(tmp, "num", oper->number);
+		append_object_object(tmp, "operator",
+							 new_objtree_for_qualname_id(OperatorRelationId,
+														 oper->object));
+		/* add the types */
+		append_object_object(tmp, "ltype",
+							 new_objtree_for_type(oper->lefttype, -1));
+		append_object_object(tmp, "rtype",
+							 new_objtree_for_type(oper->righttype, -1));
+		/* Add the FOR SEARCH / FOR ORDER BY clause */
+		if (oper->sortfamily == InvalidOid)
+			append_string_object(tmp, "purpose", "FOR SEARCH");
+		else
+		{
+			ObjTree	   *tmp2;
+
+			tmp2 = new_objtree_VA("FOR ORDER BY %{opfamily}D", 0);
+			append_object_object(tmp2, "opfamily",
+								 new_objtree_for_qualname_id(OperatorFamilyRelationId,
+															 oper->sortfamily));
+			append_object_object(tmp, "purpose", tmp2);
+		}
+
+		list = lappend(list, new_object_object(tmp));
+	}
+
+	/* Add the declared support functions */
+	foreach(cell, cmd->d.createopc.procedures)
+	{
+		OpFamilyMember *proc = lfirst(cell);
+		ObjTree	   *tmp;
+		HeapTuple	procTup;
+		Form_pg_proc procForm;
+		Oid		   *proargtypes;
+		List	   *arglist;
+		int			i;
+
+		tmp = new_objtree_VA("FUNCTION %{num}n (%{ltype}T, %{rtype}T) %{function}D(%{argtypes:, }T)", 0);
+		append_integer_object(tmp, "num", proc->number);
+		procTup = SearchSysCache1(PROCOID, ObjectIdGetDatum(proc->object));
+		if (!HeapTupleIsValid(procTup))
+			elog(ERROR, "cache lookup failed for procedure %u", proc->object);
+		procForm = (Form_pg_proc) GETSTRUCT(procTup);
+
+		append_object_object(tmp, "function",
+							 new_objtree_for_qualname(procForm->pronamespace,
+													  NameStr(procForm->proname)));
+		proargtypes = procForm->proargtypes.values;
+		arglist = NIL;
+		for (i = 0; i < procForm->pronargs; i++)
+		{
+			ObjTree	   *arg;
+
+			arg = new_objtree_for_type(proargtypes[i], -1);
+			arglist = lappend(arglist, new_object_object(arg));
+		}
+		append_array_object(tmp, "argtypes", arglist);
+
+		ReleaseSysCache(procTup);
+		/* Add the types */
+		append_object_object(tmp, "ltype",
+							 new_objtree_for_type(proc->lefttype, -1));
+		append_object_object(tmp, "rtype",
+							 new_objtree_for_type(proc->righttype, -1));
+
+		list = lappend(list, new_object_object(tmp));
+	}
+
+	append_array_object(stmt, "items", list);
+
+	ReleaseSysCache(opfTup);
+	ReleaseSysCache(opcTup);
+
+	return stmt;
+}
+
+static ObjTree *
 deparse_CreateOpFamily(Oid objectId, Node *parsetree)
 {
 	HeapTuple   opfTup;
@@ -6479,7 +6631,8 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_CreateOpClassStmt:
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			/* handled elsewhere */
+			elog(ERROR, "unexpected command type %s", CreateCommandTag(parsetree));
 			break;
 
 		case T_CreateOpFamilyStmt:
@@ -6615,6 +6768,9 @@ deparse_utility_command(StashedCommand *cmd)
 			break;
 		case SCT_AlterOpFamily:
 			tree = deparse_AlterOpFamily(cmd);
+			break;
+		case SCT_CreateOpClass:
+			tree = deparse_CreateOpClassStmt(cmd);
 			break;
 		case SCT_AlterDefaultPrivileges:
 			tree = deparse_AlterDefaultPrivilegesStmt(cmd);

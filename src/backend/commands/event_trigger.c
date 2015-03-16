@@ -20,6 +20,7 @@
 #include "catalog/objectaccess.h"
 #include "catalog/pg_event_trigger.h"
 #include "catalog/pg_namespace.h"
+#include "catalog/pg_opclass.h"
 #include "catalog/pg_opfamily.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_trigger.h"
@@ -1841,6 +1842,33 @@ EventTriggerStashAlterOpFam(AlterOpFamilyStmt *stmt, Oid opfamoid,
 	MemoryContextSwitchTo(oldcxt);
 }
 
+void
+EventTriggerStashCreateOpClass(CreateOpClassStmt *stmt, Oid opcoid,
+							   List *operators, List *procedures)
+{
+	MemoryContext	oldcxt;
+	StashedCommand *stashed;
+
+	if (currentEventTriggerState->commandCollectionInhibited)
+		return;
+
+	oldcxt = MemoryContextSwitchTo(currentEventTriggerState->cxt);
+
+	stashed = palloc0(sizeof(StashedCommand));
+	stashed->type = SCT_CreateOpClass;
+	stashed->in_extension = creating_extension;
+	stashed->d.createopc.opcOid = opcoid;
+	stashed->d.createopc.operators = operators;	/* XXX prolly need to copy */
+	stashed->d.createopc.procedures = procedures;
+	stashed->parsetree = copyObject(stmt);
+
+	currentEventTriggerState->stash = lappend(currentEventTriggerState->stash,
+											  stashed);
+
+	MemoryContextSwitchTo(oldcxt);
+}
+
+
 /*
  * EventTriggerStashAlterDefPrivs
  * 		Save data about an ALTER DEFAULT PRIVILEGES command being
@@ -1968,7 +1996,8 @@ pg_event_trigger_get_creation_commands(PG_FUNCTION_ARGS)
 
 			if (cmd->type == SCT_Simple ||
 				cmd->type == SCT_AlterTable ||
-				cmd->type == SCT_AlterOpFamily)
+				cmd->type == SCT_AlterOpFamily ||
+				cmd->type == SCT_CreateOpClass)
 			{
 				const char *tag;
 				char	   *identity;
@@ -1985,6 +2014,10 @@ pg_event_trigger_get_creation_commands(PG_FUNCTION_ARGS)
 					ObjectAddressSet(addr,
 									 OperatorFamilyRelationId,
 									 cmd->d.opfam.opfamOid);
+				else if (cmd->type == SCT_CreateOpClass)
+					ObjectAddressSet(addr,
+									 OperatorClassRelationId,
+									 cmd->d.createopc.opcOid);
 
 				tag = CreateCommandTag(cmd->parsetree);
 
