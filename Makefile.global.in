@@ -5,7 +5,7 @@
 # Can only be built using pgxs
 USE_PGXS=1
 
-bdr_abs_srcdir := @srcdir@
+bdr_abs_srcdir := @abs_srcdir@
 PG_CONFIG :=@PG_CONFIG@
 PGXS := $(shell $(PG_CONFIG) --pgxs)
 
