@@ -4,6 +4,8 @@
 CREATE SCHEMA deparse;
 UPDATE pg_namespace SET nspname = 'pg_deparse' WHERE nspname = 'deparse';
 CREATE TABLE pg_deparse.deparse_test_commands (
+  backend_id int,
+  backend_start timestamptz,
   lsn pg_lsn,
   ord integer,
   command TEXT
@@ -15,10 +17,14 @@ CREATE OR REPLACE FUNCTION pg_deparse.deparse_test_ddl_command_end()
 AS $fn$
 BEGIN
 	BEGIN
-		INSERT INTO pg_deparse.deparse_test_commands (command, ord, lsn)
-		SELECT pg_event_trigger_expand_command(command), ordinality, lsn
+		INSERT INTO pg_deparse.deparse_test_commands
+		            (backend_id, backend_start, command, ord, lsn)
+		SELECT id, pg_stat_get_backend_start(id),
+		     pg_event_trigger_expand_command(command), ordinality, lsn
 		FROM pg_event_trigger_get_creation_commands() WITH ORDINALITY,
-		pg_current_xlog_insert_location() lsn;
+		pg_current_xlog_insert_location() lsn,
+		pg_stat_get_backend_idset() id
+		 WHERE pg_stat_get_backend_pid(id) = pg_backend_pid();
 	EXCEPTION WHEN OTHERS THEN 
 			RAISE WARNING 'state: % errm: %', sqlstate, sqlerrm;
 	END;
@@ -89,12 +95,39 @@ BEGIN
 
 		fmt := fmt || ' /* added by DROP support */ ';
 
-		INSERT INTO pg_deparse.deparse_test_commands (lsn, ord, command)
-		     VALUES (pg_current_xlog_insert_location(), i, fmt);
+		INSERT INTO pg_deparse.deparse_test_commands
+		            (backend_id, backend_start, lsn, ord, command)
+			 SELECT id, pg_stat_get_backend_start(id),
+			        pg_current_xlog_insert_location(), i, fmt
+			   FROM pg_stat_get_backend_idset() id
+			  WHERE pg_stat_get_backend_pid(id) = pg_backend_pid();
 		i := i + 1;
 	END LOOP;
 END;
 $fn$;
+
+CREATE OR REPLACE FUNCTION pg_deparse.output_commands() RETURNS SETOF text LANGUAGE PLPGSQL AS $$
+DECLARE
+        cmd text;
+        prev_id int = -1;
+        prev_start timestamptz = '-infinity';
+        sess_id int;
+        sess_start timestamptz;
+BEGIN
+   FOR cmd, sess_id, sess_start IN
+			   SELECT command, backend_id, backend_start
+                 FROM pg_deparse.deparse_test_commands
+			 ORDER BY lsn, ord
+   LOOP
+          IF (sess_id, sess_start) <> (prev_id, prev_start) THEN
+                prev_id := sess_id;
+                prev_start := sess_start;
+                RETURN NEXT '\c';
+          END IF;
+      RETURN NEXT cmd || ';' ;
+   END LOOP;
+END;
+$$;
 
 CREATE EVENT TRIGGER deparse_test_trg_sql_drop
   ON sql_drop
