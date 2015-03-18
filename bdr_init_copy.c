@@ -368,7 +368,7 @@ main(int argc, char **argv)
 
 		/* Don't hold connection since the next step might take long time. */
 		PQfinish(remote_conn);
-		local_conn = NULL;
+		remote_conn = NULL;
 	}
 
 	/*
@@ -391,6 +391,7 @@ main(int argc, char **argv)
 	remote_lsn = create_restore_point(remote_conn, restore_point_name);
 
 	PQfinish(remote_conn);
+	remote_conn = NULL;
 
 	/*
 	 * Get local db to consistent state (for lsn after slot creation).
