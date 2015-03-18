@@ -1464,7 +1464,7 @@ ProcessUtilitySlow(Node *parsetree,
 
 			case T_AlterDefaultPrivilegesStmt:
 				ExecAlterDefaultPrivilegesStmt((AlterDefaultPrivilegesStmt *) parsetree);
-				EventTriggerStashAlterDefPrivs(parsetree);
+				EventTriggerStashAlterDefPrivs((AlterDefaultPrivilegesStmt *) parsetree);
 				commandStashed = true;
 				break;
 
