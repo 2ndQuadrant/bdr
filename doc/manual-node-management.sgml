@@ -44,7 +44,7 @@
   </para>
   <para>
    The SQL function <xref linkend="function-bdr-group-create">
-   is used to create the first node of a bdr cluster from a standalone
+   is used to create the first node of a &bdr; cluster from a standalone
    PostgreSQL database. Doing so makes &bdr; active on that
    database and allows other nodes to join the &bdr; cluster (which
    consists out of one node at that point). Once the initial node is
