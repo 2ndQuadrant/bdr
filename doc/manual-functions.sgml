@@ -99,4 +99,54 @@
 
   </para>
  </sect1>
+
+ <sect1 id="functions-replication-sets">
+  <title>Replication Set functions</title>
+  <para>
+   The following functions exist to manage <xref linkend="replication-sets">.
+   They are used in both &bdr; and &udr; context.
+
+   <table>
+    <title>Replication Set functions</title>
+    <tgroup cols="3">
+     <thead>
+      <row>
+       <entry>Function</entry>
+       <entry>Return Type</entry>
+       <entry>Description</entry>
+      </row>
+     </thead>
+     <tbody>
+
+      <row id="function-bdr-table-set-replication-sets">
+       <entry>
+        <indexterm>
+         <primary>bdr.table_set_replication_sets</primary>
+        </indexterm>
+        <literal><function>bdr.table_set_replication_sets(<replaceable>p_relation regclass</replaceable>, <replaceable>p_sets text[]</replaceable>)</function></literal>
+       </entry>
+       <entry>void</entry>
+       <entry>
+         Sets the replication sets of a table. The previous assignment will
+         be overwritten.
+       </entry>
+      </row>
+
+      <row id="function-bdr-table-get-replication-sets">
+       <entry>
+        <indexterm>
+         <primary>bdr.table_get_replication_sets</primary>
+        </indexterm>
+        <literal><function>bdr.table_get_replicatio_sets(<replaceable>relation regclass</replaceable>)</function></literal>
+       </entry>
+       <entry>text[]</entry>
+       <entry>
+        Returns the replication sets the specified table is part of.
+       </entry>
+      </row>
+     </tbody>
+    </tgroup>
+   </table>
+  <para>
+ </sect1>
 </chapter>
