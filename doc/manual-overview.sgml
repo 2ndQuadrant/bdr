@@ -282,7 +282,7 @@
 
  </sect1>
 
- <sect1 id="bdr-vs-trigger-based" xreflabel="Differences between &bdr; and trigger-based replication">
+ <sect1 id="bdr-vs-trigger-based" xreflabel="Differences between BDR and trigger-based replication">
   <title>Differences between &bdr; and trigger-based replication</title>
 
   <para>
@@ -332,7 +332,7 @@
  </sect1>
 
  <sect1 id="weak-coupled-multimaster"
-        xreflabel="&bdr;: Weakly coupled multi-master replication">
+        xreflabel="BDR: Weakly coupled multi-master replication">
   <title>&bdr;: weakly coupled multi-master replication</title>
 
   <para>
@@ -483,7 +483,7 @@
 
  </sect1>
 
- <sect1 id="how-bdr-works" xreflabel="How &bdr; and &udr; work">
+ <sect1 id="how-bdr-works" xreflabel="How BDR and UDR work">
   <title>How &bdr; and &udr; work</title>
 
   <sect2>
@@ -526,7 +526,7 @@
   </sect2>
  </sect1>
 
- <sect1 id="bdr-requirements" xreflabel="&bdr;/&udr; requirements">
+ <sect1 id="bdr-requirements" xreflabel="BDR and UDR requirements">
   <title>&bdr; / &udr; requirements</title>
 
   <para>
