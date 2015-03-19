@@ -1,4 +1,4 @@
-<chapter id="replication-sets">
+<chapter id="replication-sets" xreflabel="Replication Sets">
  <title>Replication Sets</title>
  <indexterm>
   <primary>Replication Sets</primary>
@@ -8,4 +8,65 @@
   in a database. E.g. it might not be convenient and efficient to
   replicate a table containing session data.
  </para>
+
+ <sect1 id="replication-sets-concepts" xreflabel="Replication Set Concepts">
+  <title>Replication Set Concepts</title>
+  <para>
+   Each table belongs to one or more replication sets. The replication
+   sets <literal>all</literal> and <literal>default</literal> are created
+   implicitly by &bdr;. As the names suggest, all tables are in replication
+   set <literal>all</literal>, and every table is in set
+   <literal>default</literal> initially.
+  </para>
+  <para>
+   When a new &bdr; node is created or connected to the &bdr; cluster, it
+   default to replicating all changes in the <literal>default</literal>
+   replication set. This behaviour can be altered with the
+   <xref linkend="functions-node-mgmt">.
+  </para>
+ </sect1>
+
+ <sect1 id="replication-sets-nodes" xreflabel="Node Replication Control">
+  <title>Node Replication Control</title>
+  <para>
+   The names of the replications sets of which changes should be received
+   can be set when adding the node to the &bdr; cluster using the (optional)
+   <literal>replication_sets</literal> parameter to
+   <xref linkend="function-bdr-group-create">,
+   <xref linkend="function-bdr-subscribe"> and
+   <xref linkend="function-bdr-group-join">.
+   This parameter is an array of replication set names. The replication
+   set do not have to exists to be referenced by
+   <literal>replication_sets</literal>.
+  </para>
+  <para>
+   To change one node's replication sets in a running &bdr; cluster,
+   <literal>bdr.bdr_connections.conn_replication_sets</literal> can be
+   modified with <literal>UPDATE</literal> during operation of the
+   cluster. As the <literal>bdr.bdr_connections</literal> table is replicated,
+   the whole cluster can be controlled from one node. Also, changes
+   affecting more than one node at a time (e.g. setting
+   <literal>conn_replication_sets</literal> for all nodes) are possible.
+   After changing replication sets this way, the apply workers in the
+   databases whose replication sets have been changed, have to be
+   restarted. The least intrusive way to do so is to
+   <literal>pg_terminate_backend()</literal> the involved processes.
+  </para>
+ </sect1>
+
+ <sect1 id="replication-sets-tables" xreflabel="Table Replication Control">
+  <title>Table Replication Control</title>
+  <para>
+   A newly created table is initially part of replication set
+   <literal>default</literal>. It is assigned to more or different sets
+   by <xref linkend="functions-replication-sets">.
+   This operation aquires a DDL lock and can be used in a functional
+   &bdr; cluster only.
+  </para>
+  <para>
+   The array of sets a table is part of is retrieved by
+   <xref linkend="functions-replication-sets">.
+  </para>
+ </sect1>
+
 </chapter>

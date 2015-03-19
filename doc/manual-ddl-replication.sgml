@@ -1,52 +1,60 @@
-<chapter id="ddl-replication">
+<chapter id="ddl-replication" xreflabel="DDL replication">
  <title>DDL Replication</title>
  <indexterm>
   <primary>DDL Replication</primary>
  </indexterm>
 
  <para>
-  &bdr; supports replicating changes to
-  a database's schemas to other connected nodes. That allows to
-  quite easily make certain DDL changes without worrying about
-  having to deploy them on other nodes first (which is not
-  always possible).
+  &bdr; supports replicating changes to a database's schemas to other
+  connected nodes. That makes it easier to make certain DDL changes
+  without worrying about having to manually distribute the DDL change
+  to all nodes and ensure they're consistent.
+ </para>
+
+ <para>
+  There is not currently an option to turn off DDL replication and
+  apply DDL manually instead.
  </para>
 
  <para>
   To safely manipulate the database schema in a asynchronous
-  multimaster setup, all pending changes have to be replicated
-  first. Otherwise it can e.g. happen that a column constains
-  data for a row that has been dropped, or no data for a row
-  that is marked NOT NULL. To handle that
-  problem, &bdr; acquires a so called
-  DDL lock the first time in a transaction schema changes are
-  moade.
+  multimaster setup, all pending changes have to be replicated first.
+  Otherwise it is possible that a row being replicated contains data
+  for a row that has been dropped, or has no data for a row that is
+  marked NOT NULL. More complex cases also exit.  To handle that
+  problem, &bdr; acquires a so called DDL lock the first time in a
+  transaction schema changes are made.
  </para>
 
  <para>
-  Acquiring such a DDL locks requires contacting all nodes in a
-  configiuration setup, asking them to replicate all pending
-  changes, and prevent further changes from being made. Once all
-  nodes are in that state, the originator of the DDL lock is
-  free to perform schema changes.
+  Acquiring such a DDL locks requires contacting all nodes in a BDR
+  group, asking them to replicate all pending changes, and prevent
+  further changes from being made. Once all nodes are in that state,
+  the originator of the DDL lock is free to perform schema changes.
  </para>
 
  <para>
-  This means that schema changes, in contrary to data changes,
-  can only be performed while all configured nodes are
-  reachable. If DDL has to be performed while a node is down, it
-  has to be removed from the configuration (using
-  bdr.bdr_part_by_node_names <!-- FIXME: link once
-                                  documented-->) first.
+  This means that schema changes, in contrary to data changes, can
+  only be performed while all configured nodes are reachable. If DDL
+  has to be performed while a node is down, it has to be removed from
+  the configuration (using <xref linkend="function-bdr-part-by-node-names">)
+  first.
  </para>
 
- <sect1>
+ <para>
+  This also makes DDL a heavier weight operation than on standalone
+  PostgreSQL. Performing DDL will cancel currently running
+  transactions and stop new transactions from proceeding until
+  replication has caught up and the DDL has been applied.
+ </para>
+
+ <sect1 id="ddl-replication-statements">
   <title>Statement specific DDL replication concerns</title>
 
   <para>
    Not all commands can be replicated automatically. Some are
    allowed regardless - generally ones that have affect on more
-   than one database -, others are disallowed.
+   than one database. Others are disallowed.
   </para>
 
   <sect2>
@@ -672,8 +680,34 @@
    <title>DDL statements with restrictions</title>
 
    <para>
+    BDR prevents some DDL statements from running when
+    it is active on a database. This protects the
+    consistency of the system by disallowing statements
+    that cannot be replicated correctly, or for which
+    replication is not yet supported.
+   </para>
+
+   <para>
+    If a statement is not permitted under BDR it is often
+    possible to find another way to do the same thing. For
+    example, you can't do a <literal>ALTER TABLE</literal>
+    that'll cause a full table rewrite, but it's generally
+    possible to rephrase that as a series of independent
+    <literal>ALTER TABLE</literal> and <literal>UPDATE</literal>
+    statements that don't do the full table rewrite.
+    See <xref linkend="ddl-alter-table"> below for details on
+    that example.
+   </para>
+
+   <para>
     Generally unsupported statements are prevented from being
-    executed, raising a 0A000/feature_not_supported error.
+    executed, raising a <literal>feature_not_supported</literal>
+    (SQLSTATE <literal>0A000</literal>) error.
+   </para>
+
+   <para>
+    The following statements or statement options are not currently
+    permitted when BDR is active on a database:
 
     <variablelist>
 
@@ -687,7 +721,9 @@
        <para>
         Generally <literal>CREATE TABLE</literal> is allowed. There
         are a few options/subcommands that are not supported.
+       </para>
 
+       <para>
         Not supported commands are:
         <itemizedlist spacing="compact" mark="bullet">
          <listitem>
@@ -722,9 +758,12 @@
       <listitem>
        <para>
         Generally <literal>ALTER TABLE</literal> commands are
-        allowed. There are a however several subcommands that are
-        not supported.
+        allowed. There are a however several sub-commands that are
+        not supported, mainly those that perform a full-table
+        re-write.
+       </para>
 
+       <para>
         Not supported commands are:
         <itemizedlist spacing="compact" mark="bullet">
          <listitem>
@@ -736,8 +775,8 @@
            <programlisting>
             BEGIN;
             ALTER TABLE mtab ADD COLUMN newcol;
-            UPDATE mtab SET newcol = default_value;
             ALTER TABLE mtab ALTER COLUMN newcal SET DEFAULT default_value;
+            UPDATE mtab SET newcol = default_value;
            </programlisting>
            If preexisiting rows do not need the default value, the
            UPDATE can obviously be avoided. In that case doing
@@ -746,12 +785,19 @@
            advantageous anyway as they don't rewrite the whole
            table.
           </para>
+          <para>
+           Unlike the single-statement version there will be a period in
+           which rows have the new column, but the column value is
+           null.
+          </para>
          </listitem>
 
          <listitem>
           <para>
            <literal>ADD CONSTRAINT ... EXCLUDE</literal> - exclusion
-           are not supported for now.
+           are not supported for now. Exclusion constraints don't
+           make much sense in an asynchronous system and lead to
+           changes that cannot be replayed.
           </para>
          </listitem>
 
@@ -825,7 +871,7 @@
        <para>
         Generally <literal>CREATE INDEX</literal> is supported,
         but <literal>CREATE UNIQUE INDEX ... WHERE</literal>,
-        i.e. partial unique indexecs are not allowed.
+        i.e. partial unique indexes are not allowed.
        </para>
       </listitem>
      </varlistentry>

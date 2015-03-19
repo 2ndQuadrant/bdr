@@ -1,7 +1,7 @@
-<chapter id="installation-source">
+<chapter id="installation-source" xreflabel="Installing from source code">
  <title>Installing &bdr; or &udr; from source</title>
 
- <sect1>
+ <sect1 id="installation-source-prereqs">
   <title>Prerequisites for installing from source</title>
   <para>
    To install either &bdr; or &udr; the prerequisites for compiling

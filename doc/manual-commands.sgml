@@ -1,0 +1,234 @@
+<chapter id="commands" xreflabel="Command-line Utilities">
+ <title>Command-line Utilities</title>
+ <indexterm>
+  <primary>Command-line Utilities</primary>
+ </indexterm>
+
+ <para>
+  Command-line utilities provided by &udr;/&bdr;.
+ </para>
+
+ <sect1 id="command-bdr-init-copy" xreflabel="bdr_init_copy">
+  <title>bdr_init_copy</title>
+  <para>
+   The <application>bdr_init_copy</> command is used to initialize a new
+   &udr;/&bdr; node by making physical copy of an existing node.
+  </para>
+
+  <cmdsynopsis>
+   <command>bdr_init_copy</command>
+   <arg rep="repeat"><replaceable>option</replaceable></arg>
+  </cmdsynopsis>
+
+  <sect2 id="commands-bdr-init-copy-options" xreflabel="Options for bdr_init_copy">
+   <title>Options</title>
+
+   <para>
+    The following command-line options control the behaviour of
+    <application>bdr_init_copy</>.
+   </para>
+
+   <para>
+    <variablelist>
+     <varlistentry>
+      <term><option>-D <replaceable class="parameter">directory</replaceable></option></term>
+      <term><option>--pgdata=<replaceable class="parameter">directory</replaceable></option></term>
+      <listitem>
+       <para>
+        Data directory of the new node.
+       </para>
+       <para>
+        This can be either directory made using <application>pg_basebackup</> of
+        the source node or empty directory. In case of empty directory, the full
+        backup of the source node will be made.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><option>-n <replaceable class="parameter">nodename</replaceable></option></term>
+      <term><option>--node-name=<replaceable class="parameter">nodename</replaceable></option></term>
+      <listitem>
+       <para>
+        Name of the new node.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><option>-s</option></term>
+      <listitem>
+       <para>
+        Stop the node after creation. The default behavior is to start the new
+        node once it's setup.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><option>--postgresql-conf<replaceable class="parameter">postgresql.conf</replaceable></option></term>
+      <listitem>
+       <para>
+        Path to postgresql.conf file which will be used by the new node. If not
+        specified, the postgresql.conf will be copied from the source node.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><option>--hba-conf<replaceable class="parameter">hba.conf</replaceable></option></term>
+      <listitem>
+       <para>
+        Path to hba.conf file which will be used by the new node. If not
+        specified, the hba.conf will be copied from the source node.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><option>--recovery-conf<replaceable class="parameter">recovery.conf</replaceable></option></term>
+      <listitem>
+       <para>
+        Path to recovery.conf template file which will be used during the
+        physical initialization of the node.
+       </para>
+       <para>
+        This parameter is useful if you can't use streaming replication for
+        initial synchronization and you want to use <varname>archive_command</>
+        instead.
+       </para>
+      </listitem>
+     </varlistentry>
+
+    </variablelist>
+   </para>
+
+   <para>
+    The following command-line options specify the source node to connect to.
+
+    <variablelist>
+     <varlistentry>
+      <term><option>-d <replaceable class="parameter">dbname</replaceable></></term>
+      <term><option>--remote-dbname=<replaceable class="parameter">dbname</replaceable></></term>
+      <listitem>
+      <para>
+       Specifies the name of the database to connect to. This is
+       equivalent to specifying <replaceable
+       class="parameter">dbname</replaceable> as the first non-option
+       argument on the command line.
+      </para>
+      <para>
+       If this parameter contains an <symbol>=</symbol> sign or starts
+       with a valid <acronym>URI</acronym> prefix
+       (<literal>postgresql://</literal>
+       or <literal>postgres://</literal>), it is treated as a
+       <parameter>conninfo</parameter> string.
+      </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><option>-h <replaceable class="parameter">host</replaceable></option></term>
+      <term><option>--remote-host=<replaceable class="parameter">host</replaceable></option></term>
+      <listitem>
+       <para>
+        Specifies the host name of the machine on which the server is
+        running.  If the value begins with a slash, it is used as the
+        directory for the Unix domain socket. The default is taken
+        from the <envar>PGHOST</envar> environment variable, if set,
+        else a Unix domain socket connection is attempted.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><option>-p <replaceable class="parameter">port</replaceable></option></term>
+      <term><option>--remote-port=<replaceable class="parameter">port</replaceable></option></term>
+      <listitem>
+       <para>
+        Specifies the TCP port or local Unix domain socket file
+        extension on which the server is listening for connections.
+        Defaults to the <envar>PGPORT</envar> environment variable, if
+        set, or a compiled-in default.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><option>-U <replaceable>username</replaceable></option></term>
+      <term><option>--remote-user=<replaceable class="parameter">username</replaceable></option></term>
+      <listitem>
+       <para>
+        User name to connect as.
+       </para>
+      </listitem>
+     </varlistentry>
+
+    </variablelist>
+   </para>
+
+   <para>
+    The following command-line options specify local connection to the newly
+    created node.
+
+    <variablelist>
+     <varlistentry>
+      <term><option>--local-dbname=<replaceable class="parameter">dbname</replaceable></></term>
+      <listitem>
+      <para>
+       Specifies the name of the database to connect to. This is
+       equivalent to specifying <replaceable
+       class="parameter">dbname</replaceable> as the first non-option
+       argument on the command line.
+      </para>
+      <para>
+       If this parameter contains an <symbol>=</symbol> sign or starts
+       with a valid <acronym>URI</acronym> prefix
+       (<literal>postgresql://</literal>
+       or <literal>postgres://</literal>), it is treated as a
+       <parameter>conninfo</parameter> string.
+      </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><option>--local-host=<replaceable class="parameter">host</replaceable></option></term>
+      <listitem>
+       <para>
+        Specifies the host name of the machine on which the server is
+        running.  If the value begins with a slash, it is used as the
+        directory for the Unix domain socket. The default is taken
+        from the <envar>PGHOST</envar> environment variable, if set,
+        else a Unix domain socket connection is attempted.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><option>--local-port=<replaceable class="parameter">port</replaceable></option></term>
+      <listitem>
+       <para>
+        Specifies the TCP port or local Unix domain socket file
+        extension on which the server is listening for connections.
+        Defaults to the <envar>PGPORT</envar> environment variable, if
+        set, or a compiled-in default.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><option>--local-user=<replaceable class="parameter">username</replaceable></option></term>
+      <listitem>
+       <para>
+        User name to connect as.
+       </para>
+      </listitem>
+     </varlistentry>
+
+    </variablelist>
+   </para>
+
+  </sect2>
+ </sect1>
+
+</chapter>

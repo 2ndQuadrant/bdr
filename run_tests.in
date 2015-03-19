@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 set -e
 #set -x
@@ -13,7 +13,22 @@ rm -rf tmp_check/postmaster.log
 rm -rf tmp_check/initdb.log
 mkdir tmp_check/data
 
-PARSEOPTS=$(getopt \
+set +e
+for getoptbin in $(which getopt) /usr/bin/getopt /usr/local/bin/getopt ; do
+  [ -x "${getoptbin}" ] || continue
+  "${getoptbin}" -T >/dev/null ; ret=$?
+  if [ "${ret}" -eq 4 ] ; then
+    EXTGETOPT="${getoptbin}"
+    break;
+  fi
+done
+if [ -z "${EXTGETOPT}" ] ; then
+  echo "no compatible (extended) getopt found" >&2
+  exit 1
+fi
+set -e
+
+PARSEOPTS=$("${EXTGETOPT}" \
     --longoptions testbinary: \
     --longoptions dbname: \
     --longoptions config: \

@@ -1,0 +1,13 @@
+<chapter id="conflicts" xreflabel="Multi-master conflicts">
+ <title>Multi-master conflicts</title>
+ <indexterm>
+  <primary>Conflicts</primary>
+ </indexterm>
+ <para>
+  In multi-master use of &bdr; writes to the same or related table(s) from multiple
+  different nodes can result in data conflicts.
+
+  <!-- TODO -->
+
+ </para>
+</chapter>
