@@ -137,16 +137,17 @@
         <indexterm>
          <primary>bdr.table_get_replication_sets</primary>
         </indexterm>
-        <literal><function>bdr.table_get_replicatio_sets(<replaceable>relation regclass</replaceable>)</function></literal>
+        <literal><function>bdr.table_get_replication_sets(<replaceable>relation regclass</replaceable>)</function></literal>
        </entry>
        <entry>text[]</entry>
        <entry>
         Returns the replication sets the specified table is part of.
        </entry>
       </row>
+
      </tbody>
     </tgroup>
    </table>
-  <para>
+  </para>
  </sect1>
 </chapter>
