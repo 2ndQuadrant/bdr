@@ -1,0 +1,117 @@
+ <chapter id="quickstart-install">
+  <title>Installing and Configuring PostgreSQL for &bdr </title>
+  <sect1 id="Installing">
+    <title>Installing the patched PostgreSQL binaries</title>
+    <para>
+    The information about installing &bdr; from packages can be found in <xref linkend="installation-packages"> or installing from source
+    can be found in <xref linkend="installation-source"> .
+    </para>
+    <para>
+    When the install finishes, the script prints:
+    </para>
+    <programlisting>
+    ---------------------------
+    BDR compiled and installed.
+
+    Sources at /home/myuser/2ndquadrant_bdr/bdr-src
+    Installed to /home/myuser/2ndquadrant_bdr/bdr
+
+    Now add it to your PATH:
+      export PATH=/home/myuser/2ndquadrant_bdr/bdr/bin:$PATH
+    and carry on with the quickstart at https://wiki.postgresql.org/wiki/BDR_Quick_Start
+     ---------------------------
+    </programlisting>
+
+    <para>
+    To use these new binaries, set your path to point to them:
+    </para>
+    <programlisting>
+    export PATH=$HOME/2ndquadrant_bdr/bdr/bin:$PATH 
+    </programlisting>
+    <para>
+    or, if you installed from RPMs, run:
+    </para>
+    <programlisting>
+    export PATH=/usr/pgsql-9.4/bin:$PATH
+    </programlisting>
+    <para>
+    This only affects the terminal you ran the install from and makes no permanent changes. You can change your path in your .bash_profile file so you can run the test of the demo.
+     
+    </para>
+  </sect1>
+
+  <sect1 id="Instances">
+    <title>Creating BDR-enabled PostgreSQL nodes/instances</title>
+    <para>
+    Since we're creating two new PostgreSQL node/instances for this example, run:
+    </para>
+    <programlisting>
+    initdb -D $HOME/2ndquadrant_bdr/bdr5598 -A trust -U postgres
+    </programlisting>
+    <programlisting>
+    initdb -D $HOME/2ndquadrant_bdr/bdr5599 -A trust -U postgres
+    </programlisting>
+  </sect1>
+
+  <sect1 id="Editing">
+    <title>Editing the configuration files to enable BDR</title>
+    <para>
+    Edit the postgresql.conf file for both nodes/instances:
+    </para>
+    <programlisting>
+    shared_preload_libraries = 'bdr'
+    wal_level = 'logical'
+    track_commit_timestamp = on
+    max_connections = 100
+    max_wal_senders = 10
+    max_replication_slots = 10
+    # Make sure there are enough background worker slots for BDR to run
+    max_worker_processes = 10
+ 
+    # These aren't required, but are useful for diagnosing problems
+    #log_error_verbosity = verbose
+    #log_min_messages = debug1
+    #log_line_prefix = 'd=%d p=%p a=%a%q '
+
+    # Useful options for playing with conflicts
+    #bdr.default_apply_delay=2000   # milliseconds
+    #bdr.log_conflicts_to_table=on
+    </programlisting>
+    <para>
+    Edit or uncomment authentication parameters to allow replication in the pg_hba.conf file for both nodes/instances:
+    </para>
+    <programlisting>
+    local   replication   postgres                  trust
+    host    replication   postgres     127.0.0.1/32 trust
+    </programlisting>
+  </sect1>
+
+  <sect1 id="Starting">
+    <title>Starting the BDR-enabled PostgreSQL nodes/instances</title>
+    <para>
+    Start your nodes/instances from the command line of your operating system:
+    </para>
+    <programlisting>
+    pg_ctl -l $HOME/2ndquadrant_bdr/bdr5598.log -D $HOME/2ndquadrant_bdr/bdr5598 -o "-p 5598" -w start
+    pg_ctl -l $HOME/2ndquadrant_bdr/bdr5599.log -D $HOME/2ndquadrant_bdr/bdr5599 -o "-p 5599" -w start
+    </programlisting>
+    <para>
+    Each node/instance will start up and then will run in the background.  You'll see the following:
+    </para>
+    <programlisting>
+    waiting for server to start.... done
+    server started
+    </programlisting>
+    <para>
+    If you see an issue with starting your nodes/instances:
+    </para>
+    <programlisting>
+    waiting for server to start........ stopped waiting
+    pg_ctl: could not start server
+    </programlisting>
+    <para>
+    Then take a look at the log files (the bdr5598.log or the bdr5599.log) depending on which one failed to start. Most likely you already have a PostgreSQL instance running on the target port.  
+    These nodes/instances won't start automatically on re-boot.
+    </para>
+  </sect1>
+ </chapter>

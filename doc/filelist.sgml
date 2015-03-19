@@ -31,7 +31,8 @@
  -->
 <!ENTITY install-packages      SYSTEM "install-packages.sgml">
 <!ENTITY install-source      SYSTEM "install-source.sgml">
-<!ENTITY quickstart      SYSTEM "quickstart.sgml">
+<!ENTITY quickstart-install      SYSTEM "quickstart-install.sgml">
+<!ENTITY quickstart-test      SYSTEM "quickstart-test.sgml">
 <!ENTITY manual-overview      SYSTEM "manual-overview.sgml">
 <!ENTITY manual-node-management      SYSTEM "manual-node-management.sgml">
 <!ENTITY manual-ddl-replication      SYSTEM "manual-ddl-replication.sgml">
