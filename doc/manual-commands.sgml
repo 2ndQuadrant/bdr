@@ -8,7 +8,7 @@
   Command-line utilities provided by &udr;/&bdr;.
  </para>
 
- <sect1 id="commands-bdr-init-copy">
+ <sect1 id="command-bdr-init-copy" xreflabel="bdr_init_copy">
   <title>bdr_init_copy</title>
   <para>
    The <application>bdr_init_copy</> command is used to initialize a new
@@ -20,7 +20,7 @@
    <arg rep="repeat"><replaceable>option</replaceable></arg>
   </cmdsynopsis>
 
-  <sect2 id="commands-bdr-init-copy-options">
+  <sect2 id="commands-bdr-init-copy-options" xreflabel="Options for bdr_init_copy">
    <title>Options</title>
 
    <para>

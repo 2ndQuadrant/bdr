@@ -37,9 +37,8 @@
   This means that schema changes, in contrary to data changes, can
   only be performed while all configured nodes are reachable. If DDL
   has to be performed while a node is down, it has to be removed from
-  the configuration (using
-  bdr.bdr_part_by_node_names <!-- FIXME: link once
-                                  documented-->) first.
+  the configuration (using <xref linkend="function-bdr-part-by-node-names">)
+  first.
  </para>
 
  <para>

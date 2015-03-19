@@ -24,7 +24,7 @@
  </note>
 
 
- <sect1>
+ <sect1 id="installation-packages-redhat" xreflabel="Installing from packages on RHEL, Fedora and CentOS">
   <title>RHEL, Fedora and CentOS</title>
 
   <para>

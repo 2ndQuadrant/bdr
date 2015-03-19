@@ -8,10 +8,10 @@
   &udr; as the former has to establish replication in two
   directions.
  </para>
- <sect1>
+ <sect1 id="node-management-udr" xreflabel="Node management for UDR">
   <title>Node Management for &udr;</title>
   <para>
-   The <function>bdr.bdr_subscribe()</function> is used to receive
+   The SQL function <xref linkend="function-bdr-subscribe"> is used to receive
    changes from the database specified in the function parameters
    into the current database. Subscribing to another node using this
    function will automatically copy the existing data in that the
@@ -21,7 +21,7 @@
    When subscribing to big databases (starting at tens of gigabytes)
    it can be desirable not to use a logical dump to clone the
    database. Instead a physical base backup can be used as the base
-   for joining. The <application>bdr_init_copy</application> tool
+   for joining. The <xref linkend="command-bdr-init-copy"> tool
    can be used to subscribe to an existing database with all its
    data. It will either take a new basebackup (by internally
    invoking <application>pg_basebackup</application>) or use a
@@ -35,7 +35,7 @@
   </para>
  </sect1>
 
- <sect1>
+ <sect1 id="node-management-bdr" xreflabel="Node management for BDR">
   <title>Node Management for &bdr;</title>
   <para>
    For &bdr; every node has to have a connection to every other
@@ -43,18 +43,19 @@
    automatically adds awareness of the new to all preexisting nodes.
   </para>
   <para>
-   The <function>bdr.bdr_group_create()</function> is used on the
-   first node of a bdr cluster. Doing so makes &bdr; active on that
+   The SQL function <xref linkend="function-bdr-group-create">
+   is used to create the first node of a bdr cluster from a standalone
+   PostgreSQL database. Doing so makes &bdr; active on that
    database and allows other nodes to join the &bdr; cluster (which
    consists out of one node at that point). Once the initial node is
    created every further node can join the &bdr; cluster using
-   the <function>bdr.bdr_group_join()</function> function.
+   the <xref linkend="function-bdr-group-join"> function.
   </para>
   <para>
    When subscribing to big databases (starting at tens of gigabytes)
    it can be desirable not to use a logical dump to clone the
    database. Instead a physical base backup can be used as the base
-   for joining. The <application>bdr_init_copy</application> tool
+   for joining. The <xref linkend="command-bdr-init-copy"> tool
    can be used to subscribe to an existing database with all its
    data. It will either take a new basebackup (by internally
    invoking <application>pg_basebackup</application>) or use a

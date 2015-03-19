@@ -22,19 +22,19 @@
      </thead>
      <tbody>
 
-      <row>
+      <row id="function-bdr-subscribe" xreflabel="bdr.bdr_subscribe">
        <entry>&udr;</entry>
        <entry>
         <indexterm>
-         <primary>bdr.bdr_subscribe_node</primary>
+         <primary>bdr.bdr_subscribe</primary>
         </indexterm>
-        <literal><function>bdr.bdr_subscribe_node(<replaceable>local_node_name</replaceable>, <replaceable>subscribe_to_dsn</replaceable>, <replaceable>node_local_dsn</replaceable>, <replaceable>apply_delay integer DEFAULT NULL</replaceable>, <replaceable>replication_sets text[] DEFAULT ARRAY['default']</replaceable>)</function></literal>
+        <literal><function>bdr.bdr_subscribe(<replaceable>local_node_name</replaceable>, <replaceable>subscribe_to_dsn</replaceable>, <replaceable>node_local_dsn</replaceable>, <replaceable>apply_delay integer DEFAULT NULL</replaceable>, <replaceable>replication_sets text[] DEFAULT ARRAY['default']</replaceable>)</function></literal>
        </entry>
        <entry>void</entry>
        <entry>Subscribes to changes made on another node</entry>
       </row>
 
-      <row>
+      <row id="function-bdr-group-create" xreflabel="bdr.bdr_group_create">
        <entry>&bdr;</entry>
        <entry>
         <indexterm>
@@ -48,7 +48,7 @@
        </entry>
       </row>
 
-      <row>
+      <row id="function-bdr-group-join" xreflabel="bdr.bdr_group_join">
        <entry>&bdr;</entry>
        <entry>
         <indexterm>
@@ -63,7 +63,7 @@
        </entry>
       </row>
 
-      <row>
+      <row id="function-bdr-part-by-node-names" xreflabel="bdr.bdr_part_by_node_names">
        <entry>&bdr;</entry>
        <entry>
         <indexterm>
@@ -79,7 +79,7 @@
        </entry>
       </row>
 
-      <row>
+      <row id="function-bdr-node-join-wait-for-ready" xreflabel="bdr.bdr_node_join_wait_for_ready">
        <entry>&bdr;/&udr;</entry>
        <entry>
         <indexterm>

@@ -6,7 +6,7 @@
   <secondary>of the server</secondary>
  </indexterm>
 
- <sect1 id="settings-prerequisite">
+ <sect1 id="settings-prerequisite" xreflabel="PostgreSQL settings for BDR/UDR">
   <title>Prerequisite postgres parameters</title>
 
   <para>
@@ -149,9 +149,17 @@
   </para>
  </sect1>
 
- <sect1>
+ <sect1 id="bdr-configuration-variables" xreflabel="BDR/UDR-specific configuration variables">
   <title>&bdr;/&bdr; specific configuration variables</title>
 
+  <para>
+   The &bdr; extension exposes a number of configuration parameters via
+   PostgreSQL's usual configuration mechanism. You can set these in the same
+   way as any other setting, via <literal>postgresql.conf</literal> or using
+   <literal>ALTER SYSTEM</literal>. Some variables can also be set per-user,
+   per-database or per-session, but most require a server reload or a full
+   server restart to take effect.
+  </para>
 
   <para>
    <variablelist>
@@ -164,8 +172,7 @@
      </term>
      <listitem>
       <para>
-       Log whole tuples when logging &bdr;
-       tuples.
+       Log whole tuples when logging &bdr; tuples. Requires a server reload to take effect.
       </para>
      </listitem>
     </varlistentry>
@@ -183,6 +190,7 @@
        to the bdr.bdr_conflict_history table. See Conflict logging
        for details. <!-- FIXME: Add link to not yet existing
                          conflict logging chapter-->
+       Requires a server reload to take effect.
       </para>
      </listitem>
     </varlistentry>
@@ -207,16 +215,26 @@
       </para>
       <para>
        It it always is safe to set in the sense that it'll never
-       cause transactions to not be replayed. If a minimal data loss
-       window is desirable it's adviseable to set it
-       to <literal>on</literal> and
-       configure &postgres;'s synchronous
+       cause transactions to not be replayed. If it's important that
+       nodes replicate data as soon as possible, so loss of a node causes
+       minimal loss of data that's still only on that node, you should
+       set this to <literal>on</literal> and configure &postgres;'s synchronous
        replication.
       </para>
+      <note>
+       <para>
+        Using synchronous commit and synchronous replication will
+        <emphasis>not</emphasis> prevent the apply conflicts that
+        arise with multi-master use of BDR. There is still no
+        locking between nodes and no global snapshot management
+        so concurrent transactions on different nodes can still
+        change the same tuple. See the <xref linkend="overview">.
+       </para>
+      </note>
       <para>
-       Using synchronous replication in combination
-       with <varname>bdr.synchronous_commit</varname> disabled, is
-       not generally adviseable, as it will noticeably increase the
+       Enabling PostgreSQL's synchronous replication but leaving
+       <varname>bdr.synchronous_commit</varname> disabled is
+       not generally adviseable. It will noticeably increase the
        time until a transaction is confirmed to have been
        replicated. That's because it can only be reported as having
        safely committed once the <acronym>WAL</acronym> is flushed
@@ -239,7 +257,8 @@
        database.
       </para>
       <para>
-       Only used during initial bringup.
+       This setting is only used during initial bringup via logical copy.
+       It is not used by <application>bdr_init_copy</application>.
       </para>
      </listitem>
     </varlistentry>
@@ -266,7 +285,8 @@
        </para>
        <para>
         This is primarily useful to simulate a high latency network
-        in a low latency testing environment.
+        in a low latency testing environment. It requires a server
+        reload to take effect.
        </para>
       </listitem>
      </varlistentry>
@@ -279,9 +299,9 @@
       </term>
       <listitem>
        <para>
-        For &bdr; don't acquire the global
-        schema lock when executing DDL statement. This primarily is
-        used internally, but can also be used in other cases.  This
+        Only affects &bdr;. Prevents acquisiton of the the global
+        DDL lock when executing DDL statement. This is mainly
+        used internally, but can also be useful in other cases.  This
         option can be set at any time, but only by superusers.
        </para>
        <warning>
@@ -301,8 +321,8 @@
       </term>
       <listitem>
        <para>
-        For &bdr; allow to execute schema
-        changes that cannot safely be replicated. This primarily is
+        Only affects &bdr;. Permits execution of schema
+        changes that cannot safely be replicated. This is primarily
         used internally, but can also be used in other cases.  This
         option can be set at any time, but only by superusers.
        </para>
@@ -324,8 +344,9 @@
       </term>
       <listitem>
        <para>
-        For &bdr; don't replicate schema
-        changes to other systems. This is primarily useful
+        Only affects &bdr;. Skips replication of DDL changes
+        made in a session where this option is set to other systems.
+        This is primarily useful
         for &bdr; internal use, but also can
         be used for some intentional schema changes like adding a
         index only on some nodes. This option can be set at any time,
