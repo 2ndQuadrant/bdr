@@ -79,6 +79,7 @@
 #include "rewrite/rewriteHandler.h"
 #include "tcop/deparse_utility.h"
 #include "tcop/utility.h"
+#include "utils/acl.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
 #include "utils/jsonb.h"
@@ -644,17 +645,22 @@ new_objtree_for_qualname_id(Oid classId, Oid objectId)
 	return qualified;
 }
 
+/*
+ * Helper routine for %{}R objects, with role specified by OID.  (ACL_ID_PUBLIC
+ * means to use "public").
+ */
 static ObjTree *
-new_objtree_for_role(Oid roleoid)
+new_objtree_for_role_id(Oid roleoid)
 {
-	ObjTree    *tmp;
+	ObjTree    *role;
 
-	if (roleoid == ACL_ID_PUBLIC)
-		tmp = new_objtree_VA("PUBLIC", 0);
-	else
+	role = new_objtree();
+	append_bool_object(role, "is_public", roleoid == ACL_ID_PUBLIC);
+
+	if (roleoid != ACL_ID_PUBLIC)
 	{
 		HeapTuple	roltup;
-		char	   *rolname;
+		char	   *rolename;
 
 		roltup = SearchSysCache1(AUTHOID, ObjectIdGetDatum(roleoid));
 		if (!HeapTupleIsValid(roltup))
@@ -662,13 +668,49 @@ new_objtree_for_role(Oid roleoid)
 					(errcode(ERRCODE_UNDEFINED_OBJECT),
 					 errmsg("role with OID %u does not exist", roleoid)));
 
-		tmp = new_objtree_VA("%{name}I", 0);
-		rolname = NameStr(((Form_pg_authid) GETSTRUCT(roltup))->rolname);
-		append_string_object(tmp, "name", pstrdup(rolname));
+		rolename = NameStr(((Form_pg_authid) GETSTRUCT(roltup))->rolname);
+		append_string_object(role, "rolename", pstrdup(rolename));
 		ReleaseSysCache(roltup);
 	}
 
-	return tmp;
+	return role;
+}
+
+/*
+ * Helper routine for %{}R objects, with role specified by name.
+ */
+static ObjTree *
+new_objtree_for_role(char *rolename)
+{
+	ObjTree	   *role;
+	bool		is_public;
+
+	role = new_objtree();
+	is_public = strcmp(rolename, "public") == 0;
+	append_bool_object(role, "is_public", is_public);
+	if (!is_public)
+		append_string_object(role, "rolename", rolename);
+
+	return role;
+}
+
+/*
+ * Helper routine for %{}R objects, with role specified by RoleSpec node.
+ * Special values such as ROLESPEC_CURRENT_USER are expanded to their final
+ * names.
+ */
+static ObjTree *
+new_objtree_for_rolespec(RoleSpec *spec)
+{
+	ObjTree	   *role;
+
+	role = new_objtree();
+	append_bool_object(role, "is_public",
+					   spec->roletype == ROLESPEC_PUBLIC);
+	if (spec->roletype != ROLESPEC_PUBLIC)
+		append_string_object(role, "rolename", get_rolespec_name((Node *) spec));
+
+	return role;
 }
 
 /*

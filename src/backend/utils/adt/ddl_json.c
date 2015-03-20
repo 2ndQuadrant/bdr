@@ -26,7 +26,8 @@ typedef enum
 	SpecString,
 	SpecNumber,
 	SpecStringLiteral,
-	SpecIdentifier
+	SpecIdentifier,
+	SpecRole
 } convSpecifier;
 
 typedef enum
@@ -228,6 +229,9 @@ expand_fmt_recursive(JsonbContainer *container, StringInfo out)
 				break;
 			case 'n':
 				specifier = SpecNumber;
+				break;
+			case 'R':
+				specifier = SpecRole;
 				break;
 			default:
 				ereport(ERROR,
@@ -473,6 +477,30 @@ expand_jsonval_number(StringInfo buf, JsonbValue *jsonval)
 }
 
 /*
+ * Expand a json value as a role name.  If the is_public element is set to
+ * true, PUBLIC is expanded (no quotes); otherwise, expand the given role name,
+ * quoting as an identifier.
+ */
+static void
+expand_jsonval_role(StringInfo buf, JsonbValue *jsonval)
+{
+	trivalue	is_public;
+
+	is_public = find_bool_in_jsonbcontainer(jsonval->val.binary.data,
+											"is_public");
+	if (is_public == tv_true)
+		appendStringInfoString(buf, "PUBLIC");
+	else
+	{
+		char *rolename;
+
+		rolename = find_string_in_jsonbcontainer(jsonval->val.binary.data,
+												 "rolename", false, NULL);
+		appendStringInfoString(buf, quote_identifier(rolename));
+	}
+}
+
+/*
  * Expand one json element into the output StringInfo according to the
  * conversion specifier.  The element type is validated, and an error is raised
  * if it doesn't match what we expect for the conversion specifier.
@@ -562,6 +590,15 @@ expand_one_jsonb_element(StringInfo out, char *param, JsonbValue *jsonval,
 								param, jsonval->type)));
 			expand_jsonval_number(out, jsonval);
 			break;
+
+		case SpecRole:
+			if (jsonval->type != jbvBinary)
+				ereport(ERROR,
+						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						 errmsg("expected JSON object for %%R element \"%s\", got %d",
+								param, jsonval->type)));
+			expand_jsonval_role(out, jsonval);
+			break;
 	}
 
 	if (fmt)
@@ -639,6 +676,7 @@ expand_jsonb_array(StringInfo out, char *param,
  * L		expand as a string literal (quote using single quotes)
  * s		expand as a simple string (no quoting)
  * n		expand as a simple number (no quoting)
+ * R		expand as a role name (possibly quoted name, or PUBLIC)
  *
  * The element name may have an optional separator specification preceded
  * by a colon.	Its presence indicates that the element is expected to be
