@@ -2113,11 +2113,11 @@ deparse_CreateUserMappingStmt(Oid objectId, Node *parsetree)
 
 	server = GetForeignServer(form->umserver);
 
-	createStmt = new_objtree_VA("CREATE USER MAPPING FOR %{role}s SERVER %{server}I "
+	createStmt = new_objtree_VA("CREATE USER MAPPING FOR %{role}R SERVER %{server}I "
 								"%{generic_options}s", 1,
 								"server", ObjTypeString, server->servername);
 
-	append_object_object(createStmt, "role", new_objtree_for_role(form->umuser));
+	append_object_object(createStmt, "role", new_objtree_for_role_id(form->umuser));
 
 	/* add an OPTIONS clause, if any */
 	append_object_object(createStmt, "generic_options",
@@ -2153,11 +2153,11 @@ deparse_AlterUserMappingStmt(Oid objectId, Node *parsetree)
 
 	server = GetForeignServer(form->umserver);
 
-	alterStmt = new_objtree_VA("ALTER USER MAPPING FOR %{role}s SERVER %{server}I "
+	alterStmt = new_objtree_VA("ALTER USER MAPPING FOR %{role}R SERVER %{server}I "
 								"%{generic_options}s", 1,
 								"server", ObjTypeString, server->servername);
 
-	append_object_object(alterStmt, "role", new_objtree_for_role(form->umuser));
+	append_object_object(alterStmt, "role", new_objtree_for_role_id(form->umuser));
 
 	/* add an OPTIONS clause, if any */
 	append_object_object(alterStmt, "generic_options",
