@@ -3305,6 +3305,73 @@ deparse_CreateRangeStmt(Oid objectId, Node *parsetree)
 }
 
 static ObjTree *
+deparse_CreatePLangStmt(Oid objectId, Node *parsetree)
+{
+	CreatePLangStmt *node = (CreatePLangStmt *) parsetree;
+	ObjTree	   *createLang;
+	ObjTree	   *tmp;
+	HeapTuple	langTup;
+	Form_pg_language langForm;
+
+
+	langTup = SearchSysCache1(LANGOID,
+							  ObjectIdGetDatum(objectId));
+	if (!HeapTupleIsValid(langTup))
+		elog(ERROR, "cache lookup failed for language %u", objectId);
+	langForm = (Form_pg_language) GETSTRUCT(langTup);
+
+	if (node->plhandler == NIL)
+		createLang =
+			new_objtree_VA("CREATE %{or_replace}s %{trusted}s PROCEDURAL LANGUAGE %{identity}I", 0);
+	else
+		createLang =
+			new_objtree_VA("CREATE %{or_replace}s %{trusted}s PROCEDURAL LANGUAGE %{identity}I "
+						   "HANDLER %{handler}D %{inline}s %{validator}s", 0);
+
+	append_string_object(createLang, "or_replace",
+						 node->replace ? "OR REPLACE" : "");
+	append_string_object(createLang, "identity", node->plname);
+	append_string_object(createLang, "trusted",
+						 langForm->lanpltrusted ? "TRUSTED" : "");
+
+	if (node->plhandler != NIL)
+	{
+		/* Add the HANDLER clause */
+		append_object_object(createLang, "handler",
+							 new_objtree_for_qualname_id(ProcedureRelationId,
+														 langForm->lanplcallfoid));
+
+		/* Add the INLINE clause, if any */
+		tmp = new_objtree_VA("INLINE %{handler_name}D", 0);
+		if (OidIsValid(langForm->laninline))
+		{
+			append_object_object(tmp, "handler_name",
+								 new_objtree_for_qualname_id(ProcedureRelationId,
+															 langForm->laninline));
+		}
+		else
+			append_bool_object(tmp, "present", false);
+		append_object_object(createLang, "inline", tmp);
+
+		/* Add the VALIDATOR clause, if any */
+		tmp = new_objtree_VA("VALIDATOR %{handler_name}D", 0);
+		if (OidIsValid(langForm->lanvalidator))
+		{
+			append_object_object(tmp, "handler_name",
+								 new_objtree_for_qualname_id(ProcedureRelationId,
+															 langForm->lanvalidator));
+		}
+		else
+			append_bool_object(tmp, "present", false);
+		append_object_object(createLang, "validator", tmp);
+	}
+
+	ReleaseSysCache(langTup);
+
+	return createLang;
+}
+
+static ObjTree *
 deparse_CreateDomain(Oid objectId, Node *parsetree)
 {
 	ObjTree	   *createDomain;
@@ -6651,7 +6718,7 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_CreatePLangStmt:
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			command = deparse_CreatePLangStmt(objectId, parsetree);
 			break;
 
 		case T_CreateDomainStmt:
