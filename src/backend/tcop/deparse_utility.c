@@ -6247,7 +6247,24 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 				break;
 
 			case AT_AlterConstraint:
-				elog(ERROR, "unimplemented deparse of ALTER TABLE ALTER CONSTRAINT");
+				{
+					Oid		constrOid = substashed->oid;
+					Constraint *c = (Constraint *) subcmd->def;
+
+					/* if no constraint was altered, silently skip it */
+					if (!OidIsValid(constrOid))
+						break;
+
+					Assert(IsA(c, Constraint));
+					tmp = new_objtree_VA("ALTER CONSTRAINT %{name}I %{deferrable}s %{init_deferred}s",
+										 2, "type", ObjTypeString, "alter constraint",
+										 "name", ObjTypeString, get_constraint_name(constrOid));
+					append_string_object(tmp, "deferrable", c->deferrable ?
+										 "DEFERRABLE" : "NOT DEFERRABLE");
+					append_string_object(tmp, "init_deferred", c->initdeferred ?
+										 "INITIALLY DEFERRED" : "INITIALLY IMMEDIATE");
+					subcmds = lappend(subcmds, new_object_object(tmp));
+				}
 				break;
 
 			case AT_ValidateConstraint:
