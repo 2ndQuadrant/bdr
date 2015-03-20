@@ -131,6 +131,7 @@ typedef struct SQLDropObject
 	List	   *addrargs;
 	bool		original;
 	bool		normal;
+	bool		istemp;
 	slist_node	next;
 } SQLDropObject;
 
@@ -1343,16 +1344,24 @@ EventTriggerSQLDropAddObject(const ObjectAddress *object, bool original, bool no
 					Oid			namespaceId;
 
 					namespaceId = DatumGetObjectId(datum);
-					/* Don't report objects in temp namespaces */
-					if (isAnyTempNamespace(namespaceId))
+					/* temp objects are only reported if they are my own */
+					if (isTempNamespace(namespaceId))
+					{
+						obj->schemaname = "pg_temp";
+						obj->istemp = true;
+					}
+					else if (isAnyTempNamespace(namespaceId))
 					{
 						pfree(obj);
 						heap_close(catalog, AccessShareLock);
 						MemoryContextSwitchTo(oldcxt);
 						return;
 					}
-
-					obj->schemaname = get_namespace_name(namespaceId);
+					else
+					{
+						obj->schemaname = get_namespace_name(namespaceId);
+						obj->istemp = false;
+					}
 				}
 			}
 
@@ -1440,8 +1449,8 @@ pg_event_trigger_dropped_objects(PG_FUNCTION_ARGS)
 	{
 		SQLDropObject *obj;
 		int			i = 0;
-		Datum		values[11];
-		bool		nulls[11];
+		Datum		values[12];
+		bool		nulls[12];
 
 		obj = slist_container(SQLDropObject, next, iter.cur);
 
@@ -1462,6 +1471,9 @@ pg_event_trigger_dropped_objects(PG_FUNCTION_ARGS)
 
 		/* normal */
 		values[i++] = BoolGetDatum(obj->normal);
+
+		/* is_temp */
+		values[i++] = BoolGetDatum(obj->istemp);
 
 		/* object_type */
 		values[i++] = CStringGetTextDatum(obj->objecttype);
