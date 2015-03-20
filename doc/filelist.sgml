@@ -29,6 +29,7 @@
 <!--
  Include external documentation sections
  -->
+<!ENTITY install SYSTEM "install.sgml">
 <!ENTITY install-packages      SYSTEM "install-packages.sgml">
 <!ENTITY install-source      SYSTEM "install-source.sgml">
 <!ENTITY quickstart-install      SYSTEM "quickstart-install.sgml">

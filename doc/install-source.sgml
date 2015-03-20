@@ -1,7 +1,7 @@
-<chapter id="installation-source" xreflabel="Installing from source code">
+<sect1 id="installation-source" xreflabel="Installing from source code">
  <title>Installing &bdr; or &udr; from source</title>
 
- <sect1 id="installation-source-prereqs">
+ <sect2 id="installation-source-prereqs">
   <title>Prerequisites for installing from source</title>
   <para>
    To install either &bdr; or &udr; the prerequisites for compiling
@@ -47,16 +47,16 @@
 
    </itemizedlist>
   </para>
- </sect1>
+ </sect2>
 
- <sect1 id="installation-get-source">
+ <sect2 id="installation-get-source">
   <title>Getting &bdr; source code</title>
 
   <para>
    There are two ways to get the &bdr; source code: with git, or by downloading tarballs of released versions.
   </para>
 
-  <sect2>
+  <sect3>
    <title>Using <application>git</application> to get the &bdr; sources</title>
 
    <para>
@@ -103,9 +103,9 @@
     <ulink url="http://git-scm.org/">git-scm.org</ulink>.
    </para>
 
-  </sect2>
+  </sect3>
 
-  <sect2>
+  <sect3>
    <title>Downloading release source tarballs</title>
 
    <para>
@@ -135,11 +135,11 @@
     clone.
    </para>
 
-  </sect2>
+  </sect3>
 
- </sect1>
+ </sect2>
 
- <sect1 id="installation-bdr-source">
+ <sect2 id="installation-bdr-source">
   <title>Installation of &bdr; from source</title>
   <para>
    Installing &bdr; from source consists out of two steps: First
@@ -169,9 +169,9 @@
     make -j4 -s all
    </programlisting>
   </para>
- </sect1>
+ </sect2>
 
- <sect1 id="installation-udr-source">
+ <sect2 id="installation-udr-source">
   <title>Installation of &udr; from source</title>
   <para>
    Installing &udr; is simpler than installing &bdr;. It compiles
@@ -225,6 +225,6 @@
     PATH=/usr/pgsql-9.4/bin:$PATH ./configure
    </programlisting>
   </para>
- </sect1>
+ </sect2>
 
-</chapter>
+</sect1>
