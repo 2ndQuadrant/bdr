@@ -6417,8 +6417,8 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 				break;
 
 			case AT_AddInherit:
-				tmp = new_objtree_VA("ADD INHERIT %{parent}D",
-									 2, "type", ObjTypeString, "add inherit",
+				tmp = new_objtree_VA("INHERIT %{parent}D",
+									 2, "type", ObjTypeString, "inherit",
 									 "parent", ObjTypeObject,
 									 new_objtree_for_qualname_id(RelationRelationId,
 																 substashed->oid));
