@@ -96,6 +96,8 @@ BEGIN
 				obj.address_names[1],
 				obj.address_names[2],
 				obj.address_names[3]);
+			-- ignore these; they are output by ALTER TABLE itself
+			fmt := NULL;
 		ELSIF obj.object_type = 'domain constraint' THEN
 			fmt = format('ALTER DOMAIN %s DROP CONSTRAINT %I CASCADE',
 				obj.address_names[1],
