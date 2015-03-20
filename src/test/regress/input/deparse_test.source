@@ -4,7 +4,9 @@
 
 -- create roles used throughout the tests
 create role clstr_user;
+create role "current_user";
 create role foreign_data_user;
+create role "Public";
 create role regressgroup1;
 create role regressgroup2;
 create role regression_bob;
@@ -39,7 +41,11 @@ create role schemauser2;
 create role seclabel_user1;
 create role seclabel_user2;
 create role selinto_user;
+create role testrol1;
+create role testrol2;
+create role testrolx;
 create role unprivileged_role;
+create role "user";
 create role view_user2;
 
 \pset format unaligned

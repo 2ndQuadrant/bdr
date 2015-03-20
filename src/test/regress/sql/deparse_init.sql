@@ -3,7 +3,7 @@
 --
 CREATE SCHEMA deparse;
 UPDATE pg_namespace SET nspname = 'pg_deparse' WHERE nspname = 'deparse';
-CREATE TABLE pg_deparse.deparse_test_commands (
+CREATE UNLOGGED TABLE pg_deparse.deparse_test_commands (
   backend_id int,
   backend_start timestamptz,
   lsn pg_lsn,
@@ -41,25 +41,56 @@ fmt	TEXT;
 obj RECORD;
 i	integer = 1;
 BEGIN
-	FOR obj IN SELECT * FROM pg_event_trigger_dropped_objects() LOOP
-		IF NOT obj.original THEN
-			CONTINUE;
-		END IF;
 
+	/* This function runs in the sql_drop event trigger.
+     *
+	 * When it runs, we know that all objects reported by the
+	 * pg_event_trigger_dropped_objects() function marked as "original" have
+	 * been mentioned in the DROP command, either directly by name or
+	 * indirectly by owner (DROP OWNED BY).  Since no objects that depend on
+	 * them can persist after that, we can replicate the effect of that by
+	 * executing an equivalent "DROP IF EXISTS object ... CASCADE".  CASCADE
+	 * lets the deletion work even in presence of objects that appear further
+	 * down in the return set of pg_event_trigger_dropped_objects, while IF
+	 * EXISTS let the deletion silently do nothing if the object was already
+	 * dropped because it was dependent on another object before it in the same
+	 * result set.
+     *
+     * (In general, it is impossible to reorder the result set in a way that
+     * would be completely free of dependency issues.)
+     */
+
+	FOR obj IN
+	SELECT object_type, address_names, address_args, object_identity
+	  FROM pg_event_trigger_dropped_objects()
+	 WHERE original
+	  LOOP
+
+		-- special case for default acls: ignore them.
 		IF obj.object_type = 'default acl' THEN
 			CONTINUE;
 		END IF;
 
+		/*
+		 * special cases for objects that are part of other objects: drop
+		 * each in a separate command.  Since we only deal with "original"
+		 * objects, these would not be reported in the complex case of
+		 * DROP OWNED.
+		 */
 		IF obj.object_type = 'table column' OR obj.object_type = 'foreign table column' THEN
 			fmt = format('ALTER TABLE %I.%I DROP COLUMN %I CASCADE',
 				obj.address_names[1],
 				obj.address_names[2],
 				obj.address_names[3]);
+			-- ignore these; they are output by ALTER TABLE itself
+			fmt := NULL;
 		ELSIF obj.object_type = 'composite type column' THEN
 			fmt = format('ALTER TYPE %I.%I DROP ATTRIBUTE %I CASCADE',
 				obj.address_names[1],
 				obj.address_names[2],
 				obj.address_names[3]);
+			-- ignore these; they are output by ALTER TYPE itself
+			fmt := NULL;
 		ELSIF obj.object_type = 'table constraint' THEN
 			fmt = format('ALTER TABLE %I.%I DROP CONSTRAINT %I CASCADE',
 				obj.address_names[1],
@@ -75,25 +106,34 @@ BEGIN
 				obj.address_names[2],
 				obj.address_names[3]);
 		ELSIF obj.object_type = 'foreign-data wrapper' THEN
-			fmt = format('DROP FOREIGN DATA WRAPPER %s CASCADE',
+			fmt = format('DROP FOREIGN DATA WRAPPER IF EXISTS %s CASCADE',
 				obj.object_identity);
 		ELSIF obj.object_type = 'user mapping' THEN
 			fmt = format('DROP USER MAPPING FOR %I SERVER %I',
 				obj.address_names[1], obj.address_args[1]);
 		ELSIF obj.object_type = 'operator of access method' THEN
 			fmt = format('ALTER OPERATOR FAMILY %I.%I USING %I DROP OPERATOR %s (%s, %s)',
-				obj.address_names[1], obj.address_names[2], obj.address_names[4], obj.address_names[3],
+				obj.address_names[2], obj.address_names[3], obj.address_names[1], obj.address_names[4],
 				obj.address_args[1], obj.address_args[2]);
+			-- ignore these; they are output by ALTER OPERATOR FAMILY itself
+			fmt := NULL;
 		ELSIF obj.object_type = 'function of access method' THEN
 			fmt = format('ALTER OPERATOR FAMILY %I.%I USING %I DROP FUNCTION %s (%s, %s)',
-				obj.address_names[1], obj.address_names[2], obj.address_names[4], obj.address_names[3],
+				obj.address_names[2], obj.address_names[3], obj.address_names[1], obj.address_names[4],
 				obj.address_args[1], obj.address_args[2]);
+			-- ignore these; they are output by ALTER OPERATOR FAMILY itself
+			fmt := NULL;
 		ELSE
-			fmt = format('DROP %s %s CASCADE',
+			-- all other cases
+			fmt := format('DROP %s IF EXISTS %s CASCADE',
 				obj.object_type, obj.object_identity);
 		END IF;
 
-		fmt := fmt || ' /* added by DROP support */ ';
+		IF fmt IS NULL THEN
+			CONTINUE;
+		END IF;
+
+		fmt := fmt || ' /* DROP support */';
 
 		INSERT INTO pg_deparse.deparse_test_commands
 		            (backend_id, backend_start, lsn, ord, command)
