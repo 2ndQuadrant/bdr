@@ -6101,10 +6101,6 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 				subcmds = lappend(subcmds, new_object_object(tmp));
 				break;
 
-			case AT_DropColumnRecurse:
-			case AT_ValidateConstraintRecurse:
-			case AT_DropConstraintRecurse:
-			case AT_AddOidsRecurse:
 			case AT_AddIndexConstraint:
 			case AT_ReAddIndex:
 			case AT_ReAddConstraint:
@@ -6187,6 +6183,7 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 				subcmds = lappend(subcmds, new_object_object(tmp));
 				break;
 
+			case AT_DropColumnRecurse:
 			case AT_DropColumn:
 				fmtstr = psprintf("DROP %s %%{column}I %%{cascade}s",
 								  istype ? "ATTRIBUTE" : "COLUMN");
@@ -6267,6 +6264,7 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 				}
 				break;
 
+			case AT_ValidateConstraintRecurse:
 			case AT_ValidateConstraint:
 				tmp = new_objtree_VA("VALIDATE CONSTRAINT %{constraint}I", 2,
 									 "type", ObjTypeString, "validate constraint",
@@ -6274,6 +6272,7 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 				subcmds = lappend(subcmds, new_object_object(tmp));
 				break;
 
+			case AT_DropConstraintRecurse:
 			case AT_DropConstraint:
 				tmp = new_objtree_VA("DROP CONSTRAINT %{constraint}I", 2,
 									 "type", ObjTypeString, "drop constraint",
@@ -6387,6 +6386,7 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 				subcmds = lappend(subcmds, new_object_object(tmp));
 				break;
 
+			case AT_AddOidsRecurse:
 			case AT_AddOids:
 				tmp = new_objtree_VA("SET WITH OIDS", 1,
 									 "type", ObjTypeString, "set with oids");
