@@ -5871,9 +5871,9 @@ deparse_AlterDefaultPrivilegesStmt(StashedCommand *cmd)
 			foreach(cell2, (List *) opt->arg)
 			{
 				Value  *val = lfirst(cell2);
+				ObjTree *obj = new_objtree_for_role(strVal(val));
 
-				roles = lappend(roles,
-								new_string_object(strVal(val)));
+				roles = lappend(roles, new_object_object(obj));
 			}
 		}
 		else if (strcmp(opt->defname, "schemas") == 0)
@@ -5889,7 +5889,7 @@ deparse_AlterDefaultPrivilegesStmt(StashedCommand *cmd)
 	}
 
 	/* Add the FOR ROLE clause, if any */
-	tmp = new_objtree_VA("FOR ROLE %{roles:, }I", 0);
+	tmp = new_objtree_VA("FOR ROLE %{roles:, }R", 0);
 	append_array_object(tmp, "roles", roles);
 	if (roles == NIL)
 		append_bool_object(tmp, "present", false);
@@ -5905,10 +5905,10 @@ deparse_AlterDefaultPrivilegesStmt(StashedCommand *cmd)
 	/* Add the GRANT subcommand */
 	if (stmt->action->is_grant)
 		grant = new_objtree_VA("GRANT %{privileges:, }s ON %{target}s "
-							   "TO %{grantees:, }I %{grant_option}s", 0);
+							   "TO %{grantees:, }R %{grant_option}s", 0);
 	else
 		grant = new_objtree_VA("REVOKE %{grant_option}s %{privileges:, }s "
-							   "ON %{target}s FROM %{grantees:, }I", 0);
+							   "ON %{target}s FROM %{grantees:, }R", 0);
 
 	/* add the GRANT OPTION clause */
 	tmp = new_objtree_VA(stmt->action->is_grant ?
@@ -5925,10 +5925,9 @@ deparse_AlterDefaultPrivilegesStmt(StashedCommand *cmd)
 	foreach(cell, stmt->action->grantees)
 	{
 		RoleSpec   *spec = (RoleSpec *) lfirst(cell);
-		char	   *role = spec->roletype == ROLESPEC_PUBLIC ? "PUBLIC" :
-			get_rolespec_name((Node *) spec);
+		ObjTree	   *obj = new_objtree_for_rolespec(spec);
 
-		grantees = lappend(grantees, new_string_object(role));
+		grantees = lappend(grantees, new_object_object(obj));
 	}
 	append_array_object(grant, "grantees", grantees);
 
