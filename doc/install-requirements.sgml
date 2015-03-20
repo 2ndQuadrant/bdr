@@ -1,0 +1,45 @@
+ <sect1 id="install-requirements" xreflabel="BDR and UDR requirements">
+  <title>&bdr; / &udr; requirements</title>
+
+  <para>
+   To use logical replication via &bdr; or &udr; you will need PostgreSQL 9.4
+   or newer. Earlier versions are not supported and will never be supported.
+  </para>
+
+  <para>
+   Currently &bdr; requires a modified version of PostgreSQL 9.4. This modified
+   PostgreSQL adds functionality BDR needs to support DDL replication, multi-master
+   last-update-wins conflict resolution, user-defined conflict handlers, etc. This
+   modified version of PostgreSQL 9.4 is available from the &bdr; download page
+   alongside the extension in both package and source form. This requirement
+   means that <emphasis>you can't use &bdr; on unmodified PostgreSQL 9.4</emphasis>.
+   <note>
+    <simpara>
+      All the new features required have been submitted for inclusion in
+      PostgreSQL 9.5. Many have already been accepted and included. If all the
+      functionality &bdr; requires is added to PostgreSQL 9.5 then the need for
+      a modified PostgreSQL will go away in the next version.
+    </simpara>
+   </note>
+   Some of these modifications make small changes to how PostgreSQL stores
+   data on disk. As a result the modified PostgreSQL 9.4 used by &bdr; can't
+   load data directories from unmodified PostgreSQL and vice versa. Users
+   must dump and reload their database(s) to switch to a &bdr;-capable PostgreSQL,
+   or use &udr; for online-upgrade. See <xref linkend="installation">.
+  </para>
+
+  <para>
+   &udr; runs on standard PostgreSQL 9.4 and is installed like any other
+   extension. It is a cut-down version of BDR that can work with only
+   the features present in PostgreSQL 9.4; see <xref linkend="overview-udr">.
+  </para>
+
+  <para>
+   As of the version this documentation was written for PostgreSQL 9.5 is
+   not yet supported. Neither is Microsoft Windows. Both of these limits
+   will be removed by a later release so check the
+   <ulink url="http://2ndquadrant.com/BDR">&bdr; website</ulink> for
+   the latest information.
+  </para>
+
+ </sect1>

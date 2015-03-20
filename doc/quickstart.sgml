@@ -1,5 +1,24 @@
- <chapter id="quickstart-install">
-  <title>Installing and Configuring PostgreSQL for &bdr </title>
+<chapter id="quickstart" xreflabel="Quick-start guide">
+ <title>Quick-start guide</title>
+
+ <para>
+  This section gives a quick introduction to &bdr, including setting up a
+  sample &bdr; installation and a few simple examples to try.
+ </para>
+
+ <para>
+  These instructions are not suitable for a production install, as
+  they neglect security considerations, proper system administration
+  procedure, etc. If you're trying to set up a production &bdr;
+  install, read the rest of the &bdr; manual, starting with <xref
+  linkend="installation">.
+ </para>
+
+ <para>
+  For this Quick Start example, we are setting up a two node cluster with two
+  PostgreSQL instances on the same server. We are using the terms node and instance
+  interchangebly.
+ </para>
 
   <para>
    To try out BDR you'll need to install the BDR extension and the modified
@@ -8,7 +27,7 @@
    configuration files to load BDR, and start them up.
   </para>
 
-  <sect1 id="Installing">
+  <sect1 id="quickstart-installing">
     <title>Installing the patched PostgreSQL binaries</title>
     <para>
     Information about installing &bdr; from packages can be found in <xref linkend="installation-packages"> or installing from source
@@ -64,7 +83,7 @@
     </para>
   </sect1>
 
-  <sect1 id="Instances">
+  <sect1 id="quickstart-instances">
     <title>Creating BDR-enabled PostgreSQL nodes/instances</title>
     <para>
      Since we're creating two new PostgreSQL node/instances for this example, run:
@@ -89,7 +108,7 @@
 
   </sect1>
 
-  <sect1 id="Editing">
+  <sect1 id="quickstart-editing">
     <title>Editing the configuration files to enable BDR</title>
 
     <para>
@@ -129,7 +148,7 @@
 
   </sect1>
 
-  <sect1 id="Starting">
+  <sect1 id="quickstart-starting">
     <title>Starting the BDR-enabled PostgreSQL nodes/instances</title>
 
     <para>
@@ -172,4 +191,107 @@
     </note>
 
   </sect1>
- </chapter>
+
+  <sect1 id="quickstart-creating">
+    <title>Creating the demo databases</title>
+    <para>
+    Create the databases for this demo on each node/instance from the command line of your operating system:
+    </para>
+    <programlisting>
+    createdb -p 5598 -U postgres bdrdemo
+    createdb -p 5599 -U postgres bdrdemo
+    </programlisting>
+  </sect1>
+
+  <sect1 id="quickstart-enabling">
+    <title>Enabling BDR in SQL sessions for both of your nodes/instances</title>
+    <para>
+    On the first node/instance in database <quote>bdrdemo</quote> as postgreSQL superuser, create the extensions necessary for &bdr;:
+    </para>
+    <programlisting>
+    psql -p 5598 -U postgres bdrdemo
+
+       CREATE EXTENSION btree_gist;
+       CREATE EXTENSION bdr;
+    </programlisting>
+    <para>
+    Then you run a function that identifies a &bdr; group that delineates a connection string for other nodes to communicate with (for the first node, we will use port 5598) from the same SQL session as above on port 5598:
+    </para>
+    <programlisting>
+    SELECT bdr.bdr_group_create(
+      local_node_name := 'node1',
+      node_external_dsn := 'port=5598 dbname=bdrdemo'
+);
+    </programlisting>
+    <para>
+    To ensure that the node is ready to replicate, run this function from the same SQL session as above on port 5598:
+    </para>
+    <programlisting>
+    SELECT bdr.bdr_node_join_wait_for_ready();
+    </programlisting>
+    <para>
+    On the second node/instance on port 5599 in database <quote>bdrdemo</quote> as postgreSQL superuser, create the extensions necessary for &bdr;:
+    </para>
+    <programlisting>
+    psql -p 5599 -U postgres bdrdemo
+
+       CREATE EXTENSION btree_gist;
+       CREATE EXTENSION bdr;
+    </programlisting>
+    <para>
+    Then run a function that joins this node/instance to your &bdr; group you created above (for the second node, we will use port 5599) from the same SQL session as above on port 5599:
+    </para>
+    <programlisting>
+    SELECT bdr.bdr_group_join(
+      local_node_name := 'node2',
+      node_external_dsn := 'port=5599 dbname=bdrdemo'
+      join_using_dsn := 'port=5598 dbname=bdrdemo'
+);
+    </programlisting>
+    <para>
+    To ensure that the node/instance is ready to replicate, run this function from the same SQL session as above on port 5599:
+    </para>
+    <programlisting>
+    SELECT bdr.bdr_node_join_wait_for_ready();
+    </programlisting>
+
+  </sect1>
+
+  <sect1 id="quickstart-testing">
+    <title>Testing your BDR-enabled system</title>
+    <para>
+    Create a table and insert rows from your first node/instance:
+    </para>
+    <programlisting>
+    psql -p 5598 -U postgres bdrdemo
+
+      CREATE TABLE t1bdr (c1 INT, PRIMARY KEY (c1));
+      INSERT INTO t1bdr VALUES (1);
+      INSERT INTO t1bdr VALUES (2);
+      -- you will see two rows
+      SELECT * FROM t1bdr;
+    </programlisting>
+    <para>
+    Check that the rows are there on your second node/instance. Now, delete a row:
+    </para>
+    <programlisting>
+    psql -p 5599 -U postgres bdrdemo
+
+      -- you will see two rows
+      SELECT * FROM t1bdr;
+      DELETE FROM t1bdr WHERE c1 = 2;
+      -- you will see one row
+      SELECT * FROM t1bdr;
+    </programlisting>
+    <para>
+    Check that one row has been deleted from the first node/instance::
+    </para>
+    <programlisting>
+    psql -p 5598 -U postgres bdrdemo
+
+      -- you will see one row
+      SELECT * FROM t1bdr;
+    </programlisting>
+
+  </sect1>
+</chapter>

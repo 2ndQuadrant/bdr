@@ -1,21 +1,30 @@
 <chapter id="overview" xreflabel="Overview">
  <title>&bdr;/&udr; overview</title>
 
- <sect1 id="bdr-udr-concepts">
-  <title>&bdr; &amp; &udr; concepts</title>
+ <para>
+  The &bdr; (Bi-Directional Replication) project adds multi-master replication
+  to PostgreSQL 9.4. This chapter explains what BDR is, how it works, and where
+  to best apply it. See <xref linkend="bdr-concepts"> to learn about
+  what &bdr; does and how it does it.
+ </para>
+
+ <para>
+  Because &bdr; requires a modified PostgreSQL 9.4 there is also a &udr;
+  (unidirectional replication) variant available. This version doesn't
+  require a modified version of PostgreSQL but has some limitations
+  that don't apply to &bdr;. See <xref linkend="overview-udr">.
+ </para>
+
+ <sect1 id="bdr-concepts" xreflabel="Concepts">
+  <title>Concepts</title>
 
   <para>
-   The &bdr; (Bi-Directional Replication for PostgreSQL) project adds
-   multi-master asynchronous logical replication to PostgreSQL 9.4 and
-   above.
-  </para>
-
-  <para>
-   This means that you can write to any server and the changes will, after they
-   have been committed, be sent row-by-row to all the aother servers that are
-   part of the same BDR group<footnote><simpara>We'd say "cluster", but
-   PostgreSQL has historically used that term for a different and confusing
-   purpose, to mean a particular PostgreSQL instance's collection of
+   &bdr; provides asynchronous multi-master logical replication. This means
+   that you can write to any server and the changes will, after they have been
+   committed, be sent row-by-row to all the other servers that are part of the
+   same BDR group<footnote><simpara>We'd say "cluster", but PostgreSQL has
+   historically used that term for a different and confusing purpose, to mean a
+   particular PostgreSQL instance's collection of
    databases.</simpara></footnote>.
   </para>
 
@@ -122,19 +131,8 @@
   <para>
    Because &bdr; needs some features that didn't make it into PostgreSQL by the
    time 9.4 was released, it needs a modified PostgreSQL to run. See <xref
-   linkend="bdr-requirements">.
-  </para>
-
-  <para>
-   That's why we've also released &udr; - Uni-Directional Replication for PostgreSQL.
-   &udr; is just &bdr; with support for things that won't work on unmodified PostgreSQL
-   removed. Most importantly it can only replicate in one direction, so it
-   doesn't support multi-master, and it cannot replicate DDL (schema changes).
-   &udr; is mainly useful for read-replicas and for performing minimal-downtime
-   upgrades to new PostgreSQL versions (or to PostgreSQL 9.4 with &bdr;). You can
-   get &udr; from the same download locations as &bdr; (and in fact it's the same
-   source code, just with different options). See <xref linkend="how-bdr-works">
-   for more on the differences between &bdr; and &udr;.
+   linkend="install-requirements">. The &udr; variant can run on an unmodified
+   PostgreSQL - see <xref linkend="overview-udr">.
   </para>
 
  </sect1>
@@ -333,7 +331,7 @@
 
  <sect1 id="weak-coupled-multimaster"
         xreflabel="BDR: Weakly coupled multi-master replication">
-  <title>&bdr;: weakly coupled multi-master replication</title>
+  <title>BDR: Weakly coupled multi-master replication</title>
 
   <para>
    When considering multi-master clustering or replication (with &bdr;
@@ -378,7 +376,7 @@
    to determine which node to find data on. There is generally no global lock
    manager or transaction manager, so transactions on one node aren't affected
    by locks taken on other nodes. Many loosely coupled systems are asynchronous
-   and eventually consistent (see: <xref linkend="bdr-udr-concepts">) so changes
+   and eventually consistent (see: <xref linkend="bdr-concepts">) so changes
    on one node aren't immediately visible on all other nodes at the same time.
    This can make application development more difficult, but in exchange makes
    the system very tolerant of latency between nodes, temporary network
@@ -483,92 +481,75 @@
 
  </sect1>
 
- <sect1 id="how-bdr-works" xreflabel="How BDR and UDR work">
-  <title>How &bdr; and &udr; work</title>
+ <sect1 id="overview-udr">
+  <title>UDR: Single-master logical replication</title>
 
-  <sect2>
-   <title>Differences between &bdr; and &udr;</title>
+  <para>
+   &udr; (Uni-Directional Replication for PostgreSQL) is a cut-down version of
+   &bdr; that will run on an unmodified version of PostgreSQL 9.4. It is &bdr;
+   with all the features that can't work on unmodified PostgreSQL 9.4 removed.
+  </para>
 
-   <!-- NEEDS-REVIEW -->
+  <para>
+   Most importantly &udr; can only replicate in one direction, so it doesn't
+   support multi-master. It cannot replicate DDL (schema changes), so users
+   must manually synchronise database schema changes. Unlike &bdr;, there are
+   no row-conflict resolution features in &udr;.
+  </para>
+  
+  <para>
+   &udr; is mainly useful for read-replicas and for performing minimal-downtime
+   upgrades to new PostgreSQL versions (or to PostgreSQL 9.4 with &bdr;). It
+   offers some significant advantages over streaming replication and over
+   trigger based solutions; see <xref linkend="logical-vs-physical"> and
+   <xref linkend="bdr-vs-trigger-based">.
+  </para>
 
-   <para>
-    The most important difference between &bdr; and &udr; is that
-    with &bdr; changes can be made on both nodes; and that methods
-    for resolving conflicts arising due to that exist.
-   </para>
+  <para>
+   You can get &udr; from the same download locations as &bdr; (and in fact
+   it's the same source code, just with different options).
+  </para>
 
-   <sect3>
-    <title>Primary Usecases for &udr;</title>
-
-    <para>
-     If changes are only ever made on one node and the others are
-     just used for read scalability (including temporary tables on
-     standbys), seamless major version upgrades or combining data
-     from different nodes &udr; is sufficient. These scenarios cover
-     a large number of replication scenarios.
-    </para>
-
-    <para>
-     Using &udr; can noticeably reduce the likelihood of application
-     incompatibilities. Only one database will be written to, which prevents
-     conflicts and such. On the other hand, a &bdr; setup can make failover
-     much easier, because there is no need to change the setup.
-    </para>
-
-   </sect3>
-
-   <sect3>
-    <title>Primary Usecases for &udr;</title>
-    <para>
-     <!-- NEEDS-REVIEW -->
-    </para>
-   </sect3>
-  </sect2>
  </sect1>
 
- <sect1 id="bdr-requirements" xreflabel="BDR and UDR requirements">
-  <title>&bdr; / &udr; requirements</title>
+ <sect1 id="usecases-bdr" xreflabel="Primary use-cases for BDR">
+  <title>Primary use-cases for &bdr;</title>
 
   <para>
-   To use logical replication via &bdr; or &udr; you will need PostgreSQL 9.4
-   or newer. Earlier versions are not supported and will never be supported.
+   &bdr; excels in environments where users are distributed across
+   high-latency and/or unreliable network links where conventional
+   tightly-coupled clustering software does not work well.
   </para>
 
   <para>
-   Currently &bdr; requires a modified version of PostgreSQL 9.4. This modified
-   PostgreSQL adds functionality BDR needs to support DDL replication, multi-master
-   last-update-wins conflict resolution, user-defined conflict handlers, etc. This
-   modified version of PostgreSQL 9.4 is available from the &bdr; download page
-   alongside the extension in both package and source form. This requirement
-   means that <emphasis>you can't use &bdr; on unmodified PostgreSQL 9.4</emphasis>.
-   <note>
-    <simpara>
-      All the new features required have been submitted for inclusion in
-      PostgreSQL 9.5. Many have already been accepted and included. If all the
-      functionality &bdr; requires is added to PostgreSQL 9.5 then the need for
-      a modified PostgreSQL will go away in the next version.
-    </simpara>
-   </note>
-   Some of these modifications make small changes to how PostgreSQL stores
-   data on disk. As a result the modified PostgreSQL 9.4 used by &bdr; can't
-   load data directories from unmodified PostgreSQL and vice versa. Users
-   must dump and reload their database(s) to switch to a &bdr;-capable PostgreSQL,
-   or use &udr; for online-upgrade. See <xref linkend="installation">.
+   It is a particularly good choice where the application writes
+   entirely, or almost entirely, to data that is clustered by
+   user group or location. For example, a department store will
+   write almost exclusively to tables relevant to its branch.
+  </para>
+
+  <!-- XXX FIXME needs more content -->
+
+ </sect1>
+
+ <sect1 id="usecases-udr" xreflabel="Primary use-cases for UDR">
+  <title>Primary use-cases for &udr;</title>
+
+  <para>
+   If changes are only ever made on one node and the others are just used for
+   read scalability (including temporary tables on standbys), seamless major
+   version upgrades or combining data from different nodes &udr; is sufficient.
+   These scenarios cover a large number of replication scenarios.
   </para>
 
   <para>
-   &udr; runs on standard PostgreSQL 9.4 and is installed like any other
-   extension. It is a cut-down version of BDR that can work with only
-   the features present in PostgreSQL 9.4; see <xref linkend="bdr-udr-concepts">.
+   Using &udr; can noticeably reduce the likelihood of application
+   incompatibilities as compared to &bdr;. Only one database will be written
+   to, which prevents conflicts and such. On the other hand, a &bdr; setup can
+   make failover much easier, because there is no need to change the setup.
   </para>
 
-  <para>
-   As of the version this documentation was written for PostgreSQL 9.5 is
-   not yet supported. Neither is Microsoft Windows. Both of these limits
-   will be removed by a later release so check the
-   <ulink url="http://2ndquadrant.com/BDR">&bdr; website</ulink> for
-   the latest information.
-  </para>
+  <!-- XXX FIXME needs more content -->
 
  </sect1>
 

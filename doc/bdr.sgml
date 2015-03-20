@@ -60,39 +60,18 @@
   </keywordset>
  </bookinfo>
 
-&install;
 
-<part id="quickstart">
-  <title>Quick Start</title>
-
-  <partintro>
-   <para>
-   This section gives a quick introduction into setting up a sample &bdr;
-   installation.
-   These instructions are not suitable for a production install, as
-   they neglect security considerations, proper system administration
-   procedure, etc. If you're trying to set up a production &bdr;
-   install, read the rest of the &bdr; manual.
-   For this Quick Start example, we are setting up a two node cluster with two
-   PostgreSQL instances on the same server. We are using the terms node and instance
-   interchangebly.
-   </para>
-  </partintro>
-
- &quickstart-install;
- &quickstart-test;
-
+ <part id="getting-started">
+  <title>Getting started</title>
+  &overview;
+  &quickstart;
  </part>
 
- <part id="manual">
-  <title>Main Manual</title>
-  <partintro>
-   <para>
-    This chapter documents how to configure &bdr; and &udr;'s.
-   </para>
-  </partintro>
+ &install;
 
-  &manual-overview;
+<part id="manual" xreflabel="BDR administration manual">
+  <title>&bdr; administration manual</title>
+
   &manual-node-management;
   &manual-ddl-replication;
   &manual-commands;

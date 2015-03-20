@@ -15,9 +15,10 @@
   only option if there are no packages for your operating system yet.
  </para>
  <para>
-  Before installing &bdr; make sure you satisfy the <xref linkend="bdr-requirements">.
+  Before installing &bdr; make sure you satisfy the <xref linkend="install-requirements">.
  </para>
 
+ &install-requirements;
  &install-packages;
  &install-source;
 
