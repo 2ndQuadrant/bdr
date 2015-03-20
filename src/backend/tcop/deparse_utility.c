@@ -5585,11 +5585,11 @@ deparse_GrantStmt(StashedCommand *cmd)
 	/* GRANT TO or REVOKE FROM */
 	if (istmt->is_grant)
 		fmt = psprintf("GRANT %%{privileges:, }s ON %s %%{privtarget:, }s "
-					   "TO %%{grantees:, }s %%{grant_option}s",
+					   "TO %%{grantees:, }R %%{grant_option}s",
 					   objtype);
 	else
 		fmt = psprintf("REVOKE %%{grant_option}s %%{privileges:, }s ON %s %%{privtarget:, }s "
-					   "FROM %%{grantees:, }s %%{cascade}s",
+					   "FROM %%{grantees:, }R %%{cascade}s",
 					   objtype);
 
 	grantStmt = new_objtree_VA(fmt, 0);
@@ -5682,7 +5682,7 @@ deparse_GrantStmt(StashedCommand *cmd)
 	{
 		Oid		grantee = lfirst_oid(cell);
 
-		tmp = new_objtree_for_role(grantee);
+		tmp = new_objtree_for_role_id(grantee);
 		list = lappend(list, new_object_object(tmp));
 	}
 	append_array_object(grantStmt, "grantees", list);
