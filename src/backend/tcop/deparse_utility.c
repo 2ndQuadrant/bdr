@@ -5092,7 +5092,7 @@ add_policy_clauses(ObjTree *policyStmt, Oid policyOid, List *roles,
 	 * Add the "TO role" clause, if any.  In the CREATE case, it always
 	 * contains at least PUBLIC, but in the ALTER case it might be empty.
 	 */
-	tmp = new_objtree_VA("TO %{role:, }I", 0);
+	tmp = new_objtree_VA("TO %{role:, }R", 0);
 	if (roles)
 	{
 		List   *list = NIL;
@@ -5101,10 +5101,9 @@ add_policy_clauses(ObjTree *policyStmt, Oid policyOid, List *roles,
 		foreach (cell, roles)
 		{
 			RoleSpec   *spec = (RoleSpec *) lfirst(cell);
-			char	   *role = spec->roletype == ROLESPEC_PUBLIC ? "PUBLIC" :
-				get_rolespec_name((Node *) spec);
 
-			list = lappend(list, new_string_object(role));
+			list = lappend(list,
+						   new_object_object(new_objtree_for_rolespec(spec)));
 		}
 		append_array_object(tmp, "role", list);
 	}
