@@ -6121,10 +6121,6 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 				break;
 
 			case AT_DropColumn:
-				/*
-				 * FIXME -- this command is also reported by sql_drop. Should
-				 * we remove it from here?
-				 */
 				fmtstr = psprintf("DROP %s %%{column}I %%{cascade}s",
 								  istype ? "ATTRIBUTE" : "COLUMN");
 				tmp = new_objtree_VA(fmtstr, 2,
@@ -6195,10 +6191,6 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 				break;
 
 			case AT_DropConstraint:
-				/*
-				 * FIXME -- this command is also reported by sql_drop. Should
-				 * we remove it from here?
-				 */
 				tmp = new_objtree_VA("DROP CONSTRAINT %{constraint}I", 2,
 									 "type", ObjTypeString, "drop constraint",
 									 "constraint", ObjTypeString, subcmd->name);
