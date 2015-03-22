@@ -28,10 +28,10 @@
         <indexterm>
          <primary>bdr.bdr_subscribe</primary>
         </indexterm>
-        <literal><function>bdr.bdr_subscribe(<replaceable>local_node_name</replaceable>, <replaceable>subscribe_to_dsn</replaceable>, <replaceable>node_local_dsn</replaceable>, <replaceable>apply_delay integer DEFAULT NULL</replaceable>, <replaceable>replication_sets text[] DEFAULT ARRAY['default']</replaceable>)</function></literal>
+        <literal><function>bdr.bdr_subscribe(<replaceable>local_node_name</replaceable>, <replaceable>subscribe_to_dsn</replaceable>, <replaceable>node_local_dsn</replaceable>, <replaceable>apply_delay integer DEFAULT NULL</replaceable>, <replaceable>replication_sets text[] DEFAULT ARRAY['default']</replaceable>), <replaceable>synchronize bdr_sync_type DEFAULT 'full'</replaceable></function></literal>
        </entry>
        <entry>void</entry>
-       <entry>Subscribes to changes made on another node</entry>
+       <entry>Subscribes to changes made on another node. See <xref linkend="functions-node-mgmt-subscribe">.</entry>
       </row>
 
       <row id="function-bdr-group-create" xreflabel="bdr.bdr_group_create">
@@ -96,8 +96,90 @@
      </tbody>
     </tgroup>
    </table>
-
   </para>
+
+  <sect2 id="functions-node-mgmt-subscribe">
+   <title><function>bdr.bdr_subscribe</function></title>
+
+   <indexterm>
+    <primary>subscribe</primary>
+   </indexterm>
+
+   <para>
+    The function <function>bdr.bdr_subscribe</> will create unidirectional
+    connection between the local node and <parameter>subscribe_to_dsn</> node.
+   </para>
+
+   <para>
+    The parameters are:
+    <variablelist>
+     <varlistentry>
+      <term><replaceable>local_node_name</replaceable></term>
+      <listitem>
+       <para>
+        A string specifying the name of the new node (for identification
+        purposes).
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><replaceable>subscribe_to_dsn</replaceable></term>
+      <listitem>
+       <para>
+        Connection string of the remote node from which replication should be
+        started.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><replaceable>node_local_dsn</replaceable></term>
+      <listitem>
+       <para>
+        <emphasis>Public</> connection string to the new local node. It is
+        used during initialization.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><replaceable>apply_delay</replaceable> (optional)</term>
+      <listitem>
+       <para>
+        Time (in milliseconds), the node will wait before applying changes
+        incoming from from the remote node.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><replaceable>replication_sets</replaceable> (optional)</term>
+      <listitem>
+       <para>
+        Text array of replication sets which should be replicated to the local
+        node. Note that you need to assign individual tables to the
+        replication sets on the <emphasis>remote</> node.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><replaceable>synchronize</replaceable> (optional)</term>
+      <listitem>
+       <para>
+        What to synchronize (copy) during the node initialization. Currently
+        supported values are <literal>full</> (the default) which means do
+        full schema and data copy and <literal>none</> which means don't copy
+        anything. Note that this can cause apply failures if the schemas of
+        nodes differ.
+       </para>
+      </listitem>
+     </varlistentry>
+    </variablelist>
+   </para>
+  </sect2>
+
  </sect1>
 
  <sect1 id="functions-replication-sets">
