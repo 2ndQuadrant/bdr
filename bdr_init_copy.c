@@ -931,7 +931,9 @@ install_extension(PGconn *conn, const char *extname)
 static void
 validate_remote_node(PGconn *conn)
 {
+#ifdef BUILDING_BDR
 	PGresult   *res;
+#endif
 	PQExpBuffer query = createPQExpBuffer();
 
 	if (!extension_exists(conn, "bdr"))
