@@ -39,6 +39,9 @@ DROP EXTENSION bdr;
 CREATE EXTENSION bdr VERSION '0.9.0.1';
 DROP EXTENSION bdr;
 
+CREATE EXTENSION bdr VERSION '0.9.0.2';
+DROP EXTENSION bdr;
+
 -- evolve version one by one from the oldest to the newest one
 CREATE EXTENSION bdr VERSION '0.8.0';
 ALTER EXTENSION bdr UPDATE TO '0.8.0.1';
@@ -50,6 +53,7 @@ ALTER EXTENSION bdr UPDATE TO '0.8.0.6';
 ALTER EXTENSION bdr UPDATE TO '0.8.0.7';
 ALTER EXTENSION bdr UPDATE TO '0.9.0.0';
 ALTER EXTENSION bdr UPDATE TO '0.9.0.1';
+ALTER EXTENSION bdr UPDATE TO '0.9.0.2';
 
 
 -- Should never have to do anything: You missed adding the new version above.
