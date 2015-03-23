@@ -4,7 +4,28 @@
   <primary>Functions</primary>
  </indexterm>
 
- <sect1 id="functions-node-mgmt">
+ <para>
+  &bdr; management is primarily accomplished via SQL-callable functions.
+  Functions intended for direct use by the end user are documented here.
+ </para>
+
+ <para>
+  All functions in &bdr; are exposed in the <literal>bdr</literal> schema. Unless you
+  put this on your <literal>search_path</literal> you'll need to schema-qualify their
+  names.
+ </para>
+
+ <warning>
+  <para>
+   Do <emphasis>not</emphasis> directly call functions with the suffix
+   <literal>internal</literal>, they are intended for &bdr;'s internal
+   use only and may lack sanity checks present in the public-facing
+   functions. Stick to using the functions documented here, others
+   are subject to change without notice.
+  </para>
+ </warning>
+
+ <sect1 id="functions-node-mgmt" xreflabel="Node management functions">
   <title>Node management functions</title>
   <para>
    The following functions exist to manage nodes:
@@ -28,10 +49,22 @@
         <indexterm>
          <primary>bdr.bdr_subscribe</primary>
         </indexterm>
-        <literal><function>bdr.bdr_subscribe(<replaceable>local_node_name</replaceable>, <replaceable>subscribe_to_dsn</replaceable>, <replaceable>node_local_dsn</replaceable>, <replaceable>apply_delay integer DEFAULT NULL</replaceable>, <replaceable>replication_sets text[] DEFAULT ARRAY['default']</replaceable>), <replaceable>synchronize bdr_sync_type DEFAULT 'full'</replaceable></function></literal>
+        <literal><function>bdr.bdr_subscribe(<replaceable>local_node_name</replaceable>, <replaceable>subscribe_to_dsn</replaceable>, <replaceable>node_local_dsn</replaceable>, <replaceable>apply_delay integer DEFAULT NULL</replaceable>, <replaceable>replication_sets text[] DEFAULT ARRAY['default']</replaceable>, <replaceable>synchronize bdr_sync_type DEFAULT 'full'</replaceable>)</function></literal>
        </entry>
        <entry>void</entry>
        <entry>Subscribes to changes made on another node. See <xref linkend="functions-node-mgmt-subscribe">.</entry>
+      </row>
+
+      <row>
+       <entry>&udr;</entry>
+       <entry>
+        <indexterm>
+         <primary>bdr.bdr_unsubscribe</primary>
+        </indexterm>
+        <literal><function>bdr.bdr_unsubscribe(<replaceable>local_node_name</replaceable>)</function></literal>
+       </entry>
+       <entry>void</entry>
+       <entry>Removes a previously created &udr; subscription.</entry>
       </row>
 
       <row id="function-bdr-group-create" xreflabel="bdr.bdr_group_create">
@@ -93,6 +126,42 @@
        </entry>
       </row>
 
+      <row>
+       <entry>&bdr;/&udr;</entry>
+       <entry>
+        <indexterm>
+         <primary>bdr.bdr_apply_pause</primary>
+        </indexterm>
+        <literal><function>bdr.bdr_apply_pause()</function></literal>
+       </entry>
+       <entry>
+        Temporarily stop applying changes from remote nodes to the local node,
+        until resume is requested with
+        <function>bdr.bdr_apply_resume()</function>.
+        Connections to the remote node(s) are retained but no data is read from
+        them. The effects of pausing apply are not persistent, so replay will
+        resume if PostgreSQL is restarted or the postmaster does crash recovery
+        after a backend crash. Terminating individual backends using
+        <function>pg_terminate_backend</function> will not
+        cause replay to resume; nor will reloading the postmaster without a full
+        restart. There is no option to pause replay from only one peer node.
+       </entry>
+      </row>
+
+      <row>
+       <entry>&bdr;/&udr;</entry>
+       <entry>
+        <indexterm>
+         <primary>bdr.bdr_apply_resume</primary>
+        </indexterm>
+        <literal><function>bdr.bdr_apply_resume()</function></literal>
+       </entry>
+       <entry>
+        Resume replaying changes from peer nodes after replay has been paused
+        by <function>bdr.bdr_apply_pause()</function>.
+       </entry>
+      </row>
+
      </tbody>
     </tgroup>
    </table>
@@ -108,6 +177,10 @@
    <para>
     The function <function>bdr.bdr_subscribe</> will create unidirectional
     connection between the local node and <parameter>subscribe_to_dsn</> node.
+   </para>
+
+   <para>
+    Since: version 0.9.0.
    </para>
 
    <para>
@@ -174,6 +247,15 @@
         anything. Note that this can cause apply failures if the schemas of
         nodes differ.
        </para>
+       <para>
+        If objects (tables, functions, types, views, etc) already exist on the
+        local node, i.e. the node calling this function, and have the same names
+        as objects on the upstream node being subscribed to, the subscribe may
+        fail. This failure will be visible in the logs but will not result
+        in any error being sent to the client that invoked the subscribe
+        function. Use <function>bdr.bdr_unsubscribe</function> to remove a
+        failed subscription.
+       </para>
       </listitem>
      </varlistentry>
     </variablelist>
@@ -182,7 +264,7 @@
 
  </sect1>
 
- <sect1 id="functions-replication-sets">
+ <sect1 id="functions-replication-sets" xreflabel="Replication Set functions">
   <title>Replication Set functions</title>
   <para>
    The following functions exist to manage <xref linkend="replication-sets">.
@@ -232,4 +314,162 @@
    </table>
   </para>
  </sect1>
+
+ <sect1 id="functions-conflict-handlers" xreflabel="Conflict handler management functions">
+  <title>Conflict handler management functions</title>
+
+  <para>
+   The following functions manage conflict handlers ("conflict triggers"):
+
+   <table>
+    <title>Conflict handler management functions</title>
+    <tgroup cols="4">
+     <thead>
+      <row>
+       <entry>&udr;/&bdr;</entry>
+       <entry>Function</entry>
+       <entry>Return Type</entry>
+       <entry>Description</entry>
+      </row>
+     </thead>
+     <tbody>
+
+      <row>
+       <entry>&bdr;</entry>
+       <entry>
+        <indexterm>
+         <primary>bdr.bdr_create_conflict_handler</primary>
+        </indexterm>
+        <literal><function>bdr.bdr_create_conflict_handler(<replaceable>ch_rel</replaceable>, <replaceable>ch_name</replaceable>, <replaceable>ch_proc</replaceable>, <replaceable>ch_type</replaceable>, <replaceable>ch_timeframe</replaceable>)</function></literal>
+       </entry>
+       <entry>void</entry>
+       <entry>Registers a conflict handler procedure named <replaceable>ch_name</replaceable> on table <replaceable>ch_rel</replaceable> to invoke the conflict handler procedure <replaceable>ch_proc</replaceable> when a conflict occurs within the interval <replaceable>ch_timeframe</replaceable>. See <xref linkend="conflicts"> for details.</entry>
+      </row>
+
+      <row>
+       <entry>&bdr;</entry>
+       <entry>
+        <literal><function>bdr.bdr_create_conflict_handler(<replaceable>ch_rel</replaceable>, <replaceable>ch_name</replaceable>, <replaceable>ch_proc</replaceable>, <replaceable>ch_type</replaceable>)</function></literal>
+       </entry>
+       <entry>void</entry>
+       <entry>The same as above, but always invoked irrespective of how different the two conflicting rows are in age, so takes no <replaceable>timeframe</replaceable> argument.</entry>
+      </row>
+
+      <row>
+       <entry>&bdr;</entry>
+       <entry>
+        <indexterm>
+         <primary>bdr.bdr_drop_conflict_handler</primary>
+        </indexterm>
+        <literal><function>bdr.bdr_drop_conflict_handler(<replaceable>ch_rel</replaceable>, <replaceable>ch_name</replaceable>)</function></literal>
+       </entry>
+       <entry>void</entry>
+       <entry>Unregisters the conflict handler procedure named <replaceable>ch_name</replaceable> on table <replaceable>ch_rel</replaceable>. See <xref linkend="conflicts">.</entry>
+      </row>
+
+     </tbody>
+    </tgroup>
+   </table>
+  </para>
+
+ </sect1>
+
+ <sect1 id="functions-information" xreflabel="Information functions">
+  <title>Information functions</title>
+
+  <para>
+   The following functions provide information about a BDR node:
+
+   <table>
+    <title>Node information functions</title>
+    <tgroup cols="4">
+     <thead>
+      <row>
+       <entry>&udr;/&bdr;</entry>
+       <entry>Function</entry>
+       <entry>Return Type</entry>
+       <entry>Description</entry>
+      </row>
+     </thead>
+     <tbody>
+
+      <row>
+       <entry>&bdr;/&udr;</entry>
+       <entry>
+        <indexterm>
+         <primary>bdr.bdr_variant</primary>
+        </indexterm>
+        <literal><function>bdr.bdr_variant()</function></literal>
+       </entry>
+       <entry>text</entry>
+       <entry>Returns the text <literal>BDR</literal> if run on a node with the full &bdr; extension installed, or <literal>UDR</literal> if the node has only &udr; capabilities.</entry>
+      </row>
+
+      <row>
+       <entry>&bdr;/&udr;</entry>
+       <entry>
+        <indexterm>
+         <primary>bdr.bdr_version</primary>
+        </indexterm>
+        <literal><function>bdr.bdr_version()</function></literal>
+       </entry>
+       <entry>text</entry>
+       <entry>Report the &bdr;/&udr; version in human-readable <replaceable>major.minor.rev-yyyy-mm-dd-gitrev</replaceable> text form, with build date and git revision, e.g. <literal>0.9.0-2015-02-08-3f3fb7c</literal>.</entry>
+      </row>
+
+      <row>
+       <entry>&bdr;/&udr;</entry>
+       <entry>
+        <indexterm>
+         <primary>bdr.bdr_version_num</primary>
+        </indexterm>
+        <literal><function>bdr.bdr_version_num()</function></literal>
+       </entry>
+       <entry>integer</entry>
+       <entry>Report just the &bdr;/&udr; version number in numeric AAAABBCC form, (A: major, B: minor, C: rev) e.g. <literal>0.9.0</literal> is <literal>900</literal> (00000900).</entry>
+      </row>
+
+      <row>
+       <entry>&bdr;/&udr;</entry>
+       <entry>
+        <indexterm>
+         <primary>bdr.bdr_min_remote_version_num</primary>
+        </indexterm>
+        <literal><function>bdr.min_remote_version_num()</function></literal>
+       </entry>
+       <entry>integer</entry>
+       <entry>Return the oldest version of the &bdr;/&udr; extension that this node can compatibly receive streamed changes from.</entry>
+      </row>
+
+      <row>
+       <entry>&bdr;/&udr;</entry>
+       <entry>
+        <indexterm>
+         <primary>bdr.bdr_get_remote_nodeinfo</primary>
+        </indexterm>
+        <literal><function>bdr.bdr_get_remote_nodeinfo(<replaceable>peer_dsn</replaceable>)</function></literal>
+       </entry>
+       <entry>record</entry>
+       <entry>Connect to a remote node and interrogate it for &bdr; information. This function is primarily for &bdr; internal use during setup and connection establishment.</entry>
+      </row>
+
+      <row>
+       <entry>&bdr;/&udr;</entry>
+       <entry>
+        <indexterm>
+         <primary>bdr.bdr_test_remote_connectback</primary>
+        </indexterm>
+        <literal><function>bdr.bdr_test_remote_connectback(<replaceable>peer_dsn</replaceable>, <replaceable>local_dsn</replaceable>)</function></literal>
+       </entry>
+       <entry>record</entry>
+       <entry>Ask a remote node to connect back to this node. This function is primarily for &bdr; internal use during setup and connection establishment.</entry>
+      </row>
+
+     </tbody>
+    </tgroup>
+   </table>
+  </para>
+
+ </sect1>
+
 </chapter>
