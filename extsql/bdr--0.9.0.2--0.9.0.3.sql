@@ -40,6 +40,20 @@ FROM
 WHERE (n.node_sysid, n.node_timeline, n.node_dboid)
     = (ps.remote_sysid, ps.remote_timeline, ps.remote_dboid);
 
+CREATE FUNCTION bdr.bdr_get_local_node_name() RETURNS text
+LANGUAGE sql
+AS $$
+SELECT node_name
+FROM bdr.bdr_nodes n,
+     bdr.bdr_get_local_nodeid() i
+WHERE n.node_sysid = i.sysid
+  AND n.node_timeline = i.timeline
+  AND n.node_dboid = i.dboid;
+$$;
+
+COMMENT ON FUNCTION bdr.bdr_get_local_node_name()
+IS 'Return the name from bdr.bdr_nodes for the local node, or null if no entry exists';
+
 RESET bdr.permit_unsafe_ddl_commands;
 RESET bdr.skip_ddl_replication;
 RESET search_path;

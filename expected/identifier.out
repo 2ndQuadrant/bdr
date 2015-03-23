@@ -90,3 +90,10 @@ ORDER BY node_name;
  node-regression
 (2 rows)
 
+-- Check to see if we can get the local node name
+SELECT bdr.bdr_get_local_node_name();
+ bdr_get_local_node_name 
+-------------------------
+ node-regression
+(1 row)
+

@@ -55,3 +55,6 @@ FROM namepairs;
 SELECT node_name
 FROM bdr.bdr_node_slots
 ORDER BY node_name;
+
+-- Check to see if we can get the local node name
+SELECT bdr.bdr_get_local_node_name();
