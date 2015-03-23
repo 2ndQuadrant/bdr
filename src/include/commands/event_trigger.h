@@ -61,10 +61,11 @@ extern bool trackDroppedObjectsNeeded(void);
 extern void EventTriggerSQLDropAddObject(const ObjectAddress *object,
 							 bool original, bool normal);
 
-extern void EventTriggerStashCommand(ObjectAddress address,
-						 ObjectAddress *secondaryObject, Node *parsetree);
 extern void EventTriggerInhibitCommandCollection(void);
 extern void EventTriggerUndoInhibitCommandCollection(void);
+
+extern void EventTriggerStashCommand(ObjectAddress address,
+						 ObjectAddress *secondaryObject, Node *parsetree);
 
 extern void EventTriggerAlterTableStart(Node *parsetree);
 extern void EventTriggerAlterTableRelid(Oid objectId);
