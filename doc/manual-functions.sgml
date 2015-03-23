@@ -194,7 +194,7 @@
    </table>
   </para>
 
-  <sect2 id="functions-node-mgmt-subscribe" xreflabel="bdr.bdr_subscribe">
+  <sect2 id="functions-node-mgmt-subscribe" xreflabel="Node management function examples">
    <title><function>bdr.bdr_subscribe</function></title>
 
    <indexterm>
@@ -288,6 +288,52 @@
     </variablelist>
    </para>
   </sect2>
+
+  <sect2 id="functions-node-mgmt-examples" xreflabel="node_">
+   <title>Node management function examples</title>
+   <para>
+   These examples show libpq connection strings without a host or hostadd.
+   </para>
+   <para>
+   To subscribe to a UDR group:
+   </para>
+   <programlisting>
+    SELECT bdr_bdr_subscribe(
+       local_node_name := 'udrnode',
+       subscribe_to_dsn := 'port=6000 dbname=udrdemo',
+       node_local_dsn := 'port=6001 dbname=udrdemo');
+   </programlisting>
+   <para>
+   To create a &bdr group on 'node1':
+   </para>
+   <programlisting>
+    SELECT bdr_bdr_group_create(
+       local_node_name := 'node1',
+       node_external_dsn := 'port=5598 dbname=bdrdemo');
+   </programlisting>
+   <para>
+   To join 'node2' to &bdr group created above:
+   </para>
+   <programlisting>
+    SELECT bdr.bdr_group_join(
+       local_node_name := 'node2',
+       node_external_dsn := 'port=5559 dbname=bdrdemo',
+       join_using_dsn := 'port=5558 dbname=bdrdemo');
+   </programlisting>
+   <para>
+
+   To remove 'node2' from the &bdr group created above:
+   </para>
+   <programlisting>
+   SELECT bdr.bdr_part_by_node_names('{node2}');
+   </programlisting>
+   <para>
+   To see if your node is ready for replication (if you see a NULL result set, your node is ready):
+   </para>
+   <programlisting>
+   SELECT bdr.bdr_node_join_wait_for_ready();
+   </programlisting>
+ </sect2>
 
  </sect1>
 
