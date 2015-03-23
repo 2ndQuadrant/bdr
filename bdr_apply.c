@@ -444,7 +444,7 @@ process_remote_insert(StringInfo s)
 
 	/* debug output */
 #ifdef VERBOSE_INSERT
-	log_tuple("INSERT:%s", RelationGetDescr(rel), newslot->tts_tuple);
+	log_tuple("INSERT:%s", RelationGetDescr(rel->rel), newslot->tts_tuple);
 #endif
 
 	/*
