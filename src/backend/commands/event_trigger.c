@@ -1302,9 +1302,10 @@ EventTriggerSQLDropAddObject(const ObjectAddress *object, bool original, bool no
 
 	Assert(EventTriggerSupportsObjectClass(getObjectClass(object)));
 
-	/* don't report temp schemas */
+	/* don't report temp schemas except my own */
 	if (object->classId == NamespaceRelationId &&
-		isAnyTempNamespace(object->objectId))
+		(isAnyTempNamespace(object->objectId) &&
+		 !isTempNamespace(object->objectId)))
 		return;
 
 	oldcxt = MemoryContextSwitchTo(currentEventTriggerState->cxt);
@@ -1380,6 +1381,12 @@ EventTriggerSQLDropAddObject(const ObjectAddress *object, bool original, bool no
 		}
 
 		heap_close(catalog, AccessShareLock);
+	}
+	else
+	{
+		if (object->classId == NamespaceRelationId &&
+			isTempNamespace(object->objectId))
+			obj->istemp = true;
 	}
 
 	/* object identity, objname and objargs */

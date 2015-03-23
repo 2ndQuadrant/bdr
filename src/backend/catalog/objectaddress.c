@@ -3570,16 +3570,6 @@ getProcedureTypeDescription(StringInfo buffer, Oid procid)
 	ReleaseSysCache(procTup);
 }
 
-/* XXX move elsewhere? */
-static char *
-get_namespace_name_or_temp(Oid namespaceOid)
-{
-	if (isAnyTempNamespace(namespaceOid))
-		return "pg_temp";
-	else
-		return get_namespace_name(namespaceOid);
-}
-
 /*
  * Obtain a given object's identity, as a palloc'ed string.
  *

@@ -2884,6 +2884,21 @@ get_namespace_name(Oid nspid)
 		return NULL;
 }
 
+/*
+ * get_namespace_name_or_temp
+ * 		As above, but if its a temporary schema, return "pg_temp"
+ *
+ * XXX should this throw an error when given another backend's temp namespace?
+ */
+char *
+get_namespace_name_or_temp(Oid nspid)
+{
+	if (isAnyTempNamespace(nspid))
+		return "pg_temp";
+	else
+		return get_namespace_name(nspid);
+}
+
 /*				---------- PG_RANGE CACHE ----------				 */
 
 /*
