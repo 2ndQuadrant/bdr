@@ -36,3 +36,15 @@ FROM bdr.bdr_test_replication_connection('dbname=postgres') r,
 SELECT
 	r.dboid = (SELECT oid FROM pg_database WHERE datname = current_database())
 FROM bdr.bdr_test_replication_connection('dbname='||current_database()) r;
+
+-- Verify that parsing slot names then formatting them again produces round-trip
+-- output.
+WITH namepairs(orig, remote_sysid, remote_timeline, remote_dboid, local_dboid, replication_name, formatted)
+AS (
+  SELECT
+    s.slot_name, p.*, bdr.bdr_format_slot_name(p.remote_sysid, p.remote_timeline, p.remote_dboid, p.local_dboid, '')
+  FROM pg_catalog.pg_replication_slots s,
+    LATERAL bdr.bdr_parse_slot_name(s.slot_name) p
+)
+SELECT orig = formatted
+FROM namepairs;
