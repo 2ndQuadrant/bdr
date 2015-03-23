@@ -1417,7 +1417,9 @@ ProcessUtilitySlow(Node *parsetree,
 				break;
 
 			case T_AlterTSConfigurationStmt:
-				address = AlterTSConfiguration((AlterTSConfigurationStmt *) parsetree);
+				AlterTSConfiguration((AlterTSConfigurationStmt *) parsetree);
+				/* commands are stashed in AlterTSConfiguration */
+				commandStashed = true;
 				break;
 
 			case T_AlterTableMoveAllStmt:
