@@ -31,6 +31,15 @@ LANGUAGE c STRICT IMMUTABLE AS 'MODULE_PATHNAME','bdr_format_slot_name_sql';
 COMMENT ON FUNCTION bdr.bdr_format_slot_name(text, oid, oid, oid, name)
 IS 'Format a BDR slot name from node identity parameters';
 
+CREATE VIEW bdr_node_slots AS
+SELECT n.node_name, s.slot_name
+FROM
+  pg_catalog.pg_replication_slots s,
+  bdr_nodes n,
+  LATERAL bdr_parse_slot_name(s.slot_name) ps
+WHERE (n.node_sysid, n.node_timeline, n.node_dboid)
+    = (ps.remote_sysid, ps.remote_timeline, ps.remote_dboid);
+
 RESET bdr.permit_unsafe_ddl_commands;
 RESET bdr.skip_ddl_replication;
 RESET search_path;

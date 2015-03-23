@@ -48,3 +48,10 @@ AS (
 )
 SELECT orig = formatted
 FROM namepairs;
+
+-- Check the view mapping slot names to bdr nodes. We can't really examine the slot
+-- name in the regresschecks, because it changes every run, so make sure we at least
+-- find the expected nodes.
+SELECT node_name
+FROM bdr.bdr_node_slots
+ORDER BY node_name;
