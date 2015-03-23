@@ -1,0 +1,115 @@
+<appendix id="releasenotes" xreflabel="Release notes">
+ <title>Release notes</title>
+ <indexterm>
+  <primary>Release notes</primary>
+ </indexterm>
+
+ <para>
+  Signficiant changes to the &bdr; extension (including &udr;) are documented
+  in the release notes. Please read the release notes for all versions between
+  yours and the version to plan to upgrade to before performing an upgrade,
+  as there may be version-specific upgrade steps.
+ </para>
+
+ <para>
+  See also: <xref linkend="upgrade">.
+ </para>
+
+ <sect1 id="release-0.7" xreflabel="0.7.x Releases">
+  <title>Release 0.7.0</title>
+
+  <para>
+   BDR 0.7.0 was tagged on Tue Aug 19 2014 as git tag
+   <literal>bdr/0.7.0</literal>.  The 0.7.0 release was the first &bdr; release
+   for which RPM packages were available, and the first significant release to
+   the public.
+  </para>
+
+  <para>
+   0.7.0 was based on PostgreSQL 9.4 beta2. It is not on-disk compatible with
+   final PostgreSQL releases.
+  </para>
+
+  <para>
+   There was no separate <literal>bdr-pg</literal> for this release.
+  </para>
+
+  <para>
+   Detailed release information for 0.7.0 and prior releases may be found in
+   the git tree.
+  </para>
+
+  <para>
+   0.7.0 was followed by a bugfix release, 0.7.1 on Tue Sep 2 2014 as git tag
+   <literal>bdr/0.7.1</literal>. See the tag comments for details.
+  </para>
+
+ </sect1>
+
+ <sect1 id="release-0.8.0">
+  <title>Release 0.8.0</title>
+
+  <para>
+   The 0.8.0 release was tagged on Fri Feb 6 2015 as git tag
+   <literal>bdr-plugin/0.8.0</literal>. This release requires
+   bdr-Pg <literal>bdr-pg/REL9_4_1-1</literal> to support full
+   BDR functionality.
+  </para>
+
+  <para>
+   Upgrading to 0.8.0 from 0.7.x requires a <application>pg_dump</application>
+   and <application>pg_restore</application> or
+   <application>pg_upgrade</application> because the on-disk format of
+   the PostgreSQL database changed between 9.4beta2 and 9.4.0 final.
+  </para>
+
+  <para>
+   Significant features and improvements to &bdr; in this release include:
+   <itemizedlist>
+    <listitem><para>UDR (Uni-Directional Replication)</para></listitem>
+    <listitem><para>Replication Sets</para></listitem>
+    <listitem><para>Global sequence performance improvements</para></listitem>
+    <listitem><para>Improvements to conflict handling</para></listitem>
+    <listitem><para>Many robustness and testing improvements</para></listitem>
+   </itemizedlist>
+  </para>
+
+  <para>
+   During the 0.8.0 development process the BDR extension source code was split
+   out of the BDR-patched PostgreSQL source tree. Prior releases of the BDR
+   plugin were in the <filename>contrib/bdr</filename> subdirectory of
+   the patched PostgreSQL source tree instead.
+  </para>
+
+ </sect1>
+
+ <sect1 id="release-0.9.0">
+  <title>Release 0.9.0</title>
+
+  <para>
+   <!-- TODO: taginfo -->
+   RELEASE TAG INFO HERE
+  </para>
+
+  <para>
+   The biggest change with 0.9.0 is that the <literal>bdr.connections</literal> is now
+   unused and ignored. Connections between nodes are now configured using SQL function
+   calls. For details, see the <xref linkend="node-management"> chapter.
+  </para>
+
+  <para>
+   Significant features and improvements to &bdr; in this release include:
+   <itemizedlist>
+    <listitem><para>Dynamic SQL-level configuration of connections between nodes</para></listitem>
+    <listitem><para>Joining new nodes no longer requires restarting all nodes</para></listitem>
+    <listitem><para>Easy node removal</para></listitem>
+    <listitem><para>Many helper and information functions</para></listitem>
+    <listitem><para><xref linkend="command-bdr-init-copy"> performs its own <application>pg_basebackup</application></para></listitem>
+    <listitem><para>Documentation expanded and moved into the source tree</para></listitem>
+    <listitem><para>FreeBSD compatibility</para></listitem>
+   </itemizedlist>
+  </para>
+
+ </sect1>
+
+</appendix>
