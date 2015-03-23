@@ -39,8 +39,12 @@
 Note that the status doesn't indicate whether the node is actually up right now. A node may be shut down, isolated from the network, or crashed and still appear as r in bdr.bdr_nodes because it's still conceptually part of the BDR group.
 At this time there are no SQL-level functions for adding/removing nodes. Do not directly modify bdr.bdr_nodes.
 </para>
+<para>
+Here is an example of a SELECT from bdr.bdr_nodes that indicates that one node is ready (r), one node has been removed/killed (k), and one node is initializing (i): 
+</para>
+
 <programlisting>
-select * from bdr.bdr_nodes;
+SELECT * FROM bdr.bdr_nodes;
      node_sysid      | node_timeline | node_dboid | node_status | node_name |      node_local_dsn      |    node_init_from_dsn    
 ---------------------+---------------+------------+-------------+-----------+--------------------------+--------------------------
  6125823754033780536 |             1 |      16385 | r           | node1     | port=5598 dbname=bdrdemo | 
@@ -48,16 +52,63 @@ select * from bdr.bdr_nodes;
  6125847382076805699 |             1 |      16386 | i           | node3     | port=6000 dbname=bdrdemo | port=5598 dbname=bdrdemo
 (3 rows)
 </programlisting>
+<para>
+Here is an example of a SELECT from pg_stat_replication that shows the pid (wal sender process admin process), the application (bdr), and other status information:
+</para>
 <programlisting>
-select * from pg_stat_replication;
+SELECT * FROM pg_stat_replication;
   pid  | usesysid | usename |              application_name              | client_addr | client_hostname | client_port |         backend_start         | backend_xmin |   stat
 e   | sent_location | write_location | flush_location | replay_location | sync_priority | sync_state 
 -------+----------+---------+--------------------------------------------+-------------+-----------------+-------------+-------------------------------+--------------+-------
 ----+---------------+----------------+----------------+-----------------+---------------+------------
- 29045 |    16385 | admin   | bdr (6127682459268878512,1,16386,):receive |             |                 |          -1 | 2015-03-18 21:03:28.717175+00 |              | stream
+ 29045 |    16385 | myadmin   | bdr (6127682459268878512,1,16386,):receive |             |                 |          -1 | 2015-03-18 21:03:28.717175+00 |              | stream
 ing | 0/189D3B8     | 0/189D3B8      | 0/189D3B8      | 0/189D3B8       |             0 | async
- 29082 |    16385 | admin   | bdr (6127682494973391064,1,16386,):receive |             |                 |          -1 | 2015-03-18 21:03:44.665272+00 |              | stream
+ 29082 |    16385 | myadmin   | bdr (6127682494973391064,1,16386,):receive |             |                 |          -1 | 2015-03-18 21:03:44.665272+00 |              | stream
 ing | 0/189D3B8     | 0/189D3B8      | 0/189D3B8      | 0/189D3B8       |             0 | async
 </programlisting>
+<para>
+You can see information about your slots in you &bdr; group with this query from pg_replication_slots: 
+</para>
+<programlisting>
+SELECT * FROM pg_replication_slots;
+                slot_name                | plugin | slot_type | datoid | database | active | xmin | catalog_xmin | resta
+rt_lsn 
+-----------------------------------------+--------+-----------+--------+----------+--------+------+--------------+------
+-------
+ bdr_16386_6127682459268878512_1_16386__ | bdr    | logical   |  16386 | bdrdemo  | t      |      |          749 | 0/191
+B130
+ bdr_16386_6127682494973391064_1_16386__ | bdr    | logical   |  16386 | bdrdemo  | t      |      |          749 | 0/191
+B130
+(2 rows)
+
+</programlisting>
+<para>
+You can see statistic from your &bdr; group with this query:
+</para>
+<programlisting>
+SELECT * FROM bdr.pg_stat_bdr;
+ rep_node_id | rilocalid |               riremoteid               | nr_commit | nr_rollback | nr_insert | nr_insert_conflict | nr_update
+ | nr_update_conflict | nr_delete | nr_delete_conflict | nr_disconnect 
+-------------+-----------+----------------------------------------+-----------+-------------+-----------+--------------------+----------
+-+--------------------+-----------+--------------------+---------------
+           1 |         1 | bdr_6127682459268878512_1_16386_16386_ |         4 |           0 |         6 |                  0 |         1
+ |                  0 |         0 |                  3 |             0
+           2 |         2 | bdr_6127682494973391064_1_16386_16386_ |         1 |           0 |         0 |                  0 |         1
+ |                  0 |         0 |                  0 |             0
+(2 rows)
+
+</programlisting>
+<para>
+You can track conflicts that have occurred on a particular node with bdr.bdr_conflict_history.  This catalog is not replication among your nodes. This is a technical limitation that may be lifted in a future release, but it also saves on unnecessary replication overhead.
+</para>
+<para>
+You can use the conflict history table to determine how rapidly your application creates conflicts and where those conflicts occur, allowing you to improve the application to reduce conflict rates. It also helps detect cases where conflict resolutions may not have produced the desired results, allowing you to identify places where a user defined conflict trigger or an application design change may be desirable.
+</para>
+<para>
+Row values may optionally be logged for row conflicts. This is controlled by the global database-wide option bdr.log_conflicts_to_table. There is no per-table control over row value logging at this time. Nor is there any limit applied on the number of fields a row may have, number of elements dumped in arrays, length of fields, etc, so it may not be wise to enable this if you regularly work with multi-megabyte rows that may trigger conflicts.
+</para>
+<para>
+Because the conflict history table contains data on every table in the database so each row's schema might be different, if row values are logged they are stored as json fields. The json is created with row_to_json, just like if you'd called it on the row yourself from SQL. There is no corresponding json_to_row function in PostgreSQL at this time, so you'll need table-specific code (pl/pgsql, pl/python, pl/perl, whatever) if you want to reconstruct a composite-typed tuple from the logged json.
+</para>
 
 </chapter>
