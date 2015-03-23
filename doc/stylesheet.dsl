@@ -42,6 +42,9 @@
 ;; Show comments during the development stage.
 (define %show-comments%         draft-mode)
 
+;; Force a chapter TOC even if it includes only a single entry
+(define %force-chapter-toc% #t)
+
 ;; Don't append period if run-in title ends with any of these
 ;; characters.  We had to add the colon here.  This is fixed in
 ;; stylesheets version 1.71, so it can be removed sometime.
