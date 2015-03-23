@@ -1604,6 +1604,98 @@ deparse_DefineStmt(Oid objectId, Node *parsetree, ObjectAddress secondaryObj)
 	return defStmt;
 }
 
+static ObjTree *
+deparse_AlterTSConfigurationStmt(StashedCommand *cmd)
+{
+	AlterTSConfigurationStmt *node = (AlterTSConfigurationStmt *) cmd->parsetree;
+	ObjTree *config;
+	const char *const fmtcommon = "ALTER TEXT SEARCH CONFIGURATION %{identity}D";
+	char	   *fmtrest;
+	List	   *list;
+	ListCell   *cell;
+	int			i;
+
+	/* determine the format string appropriate to each subcommand */
+	switch (node->kind)
+	{
+		case ALTER_TSCONFIG_ADD_MAPPING:
+			fmtrest = "ADD MAPPING FOR %{tokentype:, }I WITH %{dictionaries:, }D";
+			break;
+
+		case ALTER_TSCONFIG_DROP_MAPPING:
+			fmtrest = "DROP MAPPING %{if_exists}s FOR %{tokentype}I";
+			break;
+
+		case ALTER_TSCONFIG_ALTER_MAPPING_FOR_TOKEN:
+			fmtrest = "ALTER MAPPING FOR %{tokentype:, }I WITH %{dictionaries:, }D";
+			break;
+
+		case ALTER_TSCONFIG_REPLACE_DICT:
+			fmtrest = "ALTER MAPPING REPLACE %{old_dictionary}D WITH %{new_dictionary}D";
+			break;
+
+		case ALTER_TSCONFIG_REPLACE_DICT_FOR_TOKEN:
+			fmtrest = "ALTER MAPPING FOR %{tokentype:, }I REPLACE %{old_dictionary}D WITH %{new_dictionary}D";
+			break;
+	}
+	config = new_objtree_VA(psprintf("%s %s", fmtcommon, fmtrest),
+							1, "identity",
+							ObjTypeObject,
+							new_objtree_for_qualname_id(TSConfigRelationId,
+														cmd->d.atscfg.tscfgOid));
+
+	/* Add the affected token list, for subcommands that have one */
+	if (node->kind == ALTER_TSCONFIG_ADD_MAPPING ||
+		node->kind == ALTER_TSCONFIG_ALTER_MAPPING_FOR_TOKEN ||
+		node->kind == ALTER_TSCONFIG_REPLACE_DICT_FOR_TOKEN ||
+		node->kind == ALTER_TSCONFIG_DROP_MAPPING)
+	{
+		list = NIL;
+		foreach(cell, node->tokentype)
+			list = lappend(list, new_string_object(strVal(lfirst(cell))));
+		append_array_object(config, "tokentype", list);
+	}
+
+	/* add further subcommand-specific elements */
+	if (node->kind == ALTER_TSCONFIG_ADD_MAPPING ||
+		node->kind == ALTER_TSCONFIG_ALTER_MAPPING_FOR_TOKEN)
+	{
+		/* ADD MAPPING and ALTER MAPPING FOR need a list of dictionaries */
+		list = NIL;
+		for (i = 0; i < cmd->d.atscfg.ndicts; i++)
+		{
+			ObjTree	*dictobj;
+
+			dictobj = new_objtree_for_qualname_id(TSDictionaryRelationId,
+												  cmd->d.atscfg.dictIds[i]);
+			list = lappend(list,
+						   new_object_object(dictobj));
+		}
+		append_array_object(config, "dictionaries", list);
+	}
+	else if (node->kind == ALTER_TSCONFIG_REPLACE_DICT ||
+			 node->kind == ALTER_TSCONFIG_REPLACE_DICT_FOR_TOKEN)
+	{
+		/* the REPLACE forms want old and new dictionaries */
+		Assert(cmd->d.atscfg.ndicts == 2);
+		append_object_object(config, "old_dictionary",
+							 new_objtree_for_qualname_id(TSDictionaryRelationId,
+														 cmd->d.atscfg.dictIds[0]));
+		append_object_object(config, "new_dictionary",
+							 new_objtree_for_qualname_id(TSDictionaryRelationId,
+														 cmd->d.atscfg.dictIds[1]));
+	}
+	else
+	{
+		/* DROP wants the IF EXISTS clause */
+		Assert(node->kind == ALTER_TSCONFIG_DROP_MAPPING);
+		append_string_object(config, "if_exists",
+							 node->missing_ok ? "IF EXISTS" : "");
+	}
+
+	return config;
+}
+
 /*
  * deparse_CreateExtensionStmt
  *		deparse a CreateExtensionStmt
@@ -6778,7 +6870,8 @@ deparse_simple_command(StashedCommand *cmd)
 			break;
 
 		case T_AlterTSConfigurationStmt:
-			elog(ERROR, "unimplemented deparse of %s", CreateCommandTag(parsetree));
+			/* handled elsewhere */
+			elog(ERROR, "unexpected command type %s", CreateCommandTag(parsetree));
 			break;
 
 		case T_DropStmt:
