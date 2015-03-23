@@ -32,7 +32,8 @@ typedef enum StashedCommandType
 	SCT_Grant,
 	SCT_AlterOpFamily,
 	SCT_AlterDefaultPrivileges,
-	SCT_CreateOpClass
+	SCT_CreateOpClass,
+	SCT_AlterTSConfig
 } StashedCommandType;
 
 /*
@@ -87,6 +88,15 @@ typedef struct StashedCommand
 			List   *procedures;
 		} createopc;
 
+		/* ALTER TEXT SEARCH CONFIGURATION ADD/ALTER/DROP MAPPING */
+		struct
+		{
+			Oid		tscfgOid;
+			Oid	   *dictIds;
+			int		ndicts;
+		} atscfg;
+
+		/* ALTER DEFAULT PRIVILEGES */
 		struct
 		{
 			char   *objtype;

@@ -77,6 +77,8 @@ extern void EventTriggerStashAlterOpFam(AlterOpFamilyStmt *stmt, Oid opfamoid,
 							List *operators, List *procedures);
 extern void EventTriggerStashCreateOpClass(CreateOpClassStmt *stmt, Oid opcoid,
 							   List *operators, List *procedures);
+extern void EventTriggerStashAlterTSConfig(AlterTSConfigurationStmt *stmt,
+							   Oid cfgId, Oid *dicts, int ndicts);
 extern void EventTriggerStashAlterDefPrivs(AlterDefaultPrivilegesStmt *stmt);
 
 #endif   /* EVENT_TRIGGER_H */
