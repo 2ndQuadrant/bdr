@@ -6903,6 +6903,9 @@ deparse_utility_command(StashedCommand *cmd)
 		case SCT_AlterDefaultPrivileges:
 			tree = deparse_AlterDefaultPrivilegesStmt(cmd);
 			break;
+		case SCT_AlterTSConfig:
+			tree = deparse_AlterTSConfigurationStmt(cmd);
+			break;
 		default:
 			elog(ERROR, "unexpected deparse node type %d", cmd->type);
 	}

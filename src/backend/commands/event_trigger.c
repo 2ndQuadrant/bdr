@@ -24,6 +24,7 @@
 #include "catalog/pg_opfamily.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_trigger.h"
+#include "catalog/pg_ts_config.h"
 #include "catalog/pg_type.h"
 #include "commands/dbcommands.h"
 #include "commands/event_trigger.h"
@@ -1914,6 +1915,32 @@ EventTriggerStashCreateOpClass(CreateOpClassStmt *stmt, Oid opcoid,
 	MemoryContextSwitchTo(oldcxt);
 }
 
+void
+EventTriggerStashAlterTSConfig(AlterTSConfigurationStmt *stmt, Oid cfgId,
+							   Oid *dictIds, int ndicts)
+{
+	MemoryContext	oldcxt;
+	StashedCommand *stashed;
+
+	if (currentEventTriggerState->commandCollectionInhibited)
+		return;
+
+	oldcxt = MemoryContextSwitchTo(currentEventTriggerState->cxt);
+
+	stashed = palloc0(sizeof(StashedCommand));
+	stashed->type = SCT_AlterTSConfig;
+	stashed->in_extension = creating_extension;
+	stashed->d.atscfg.tscfgOid = cfgId;
+	stashed->d.atscfg.dictIds = palloc(sizeof(Oid) * ndicts);
+	memcpy(stashed->d.atscfg.dictIds, dictIds, sizeof(Oid) * ndicts);
+	stashed->d.atscfg.ndicts = ndicts;
+	stashed->parsetree = copyObject(stmt);
+
+	currentEventTriggerState->stash = lappend(currentEventTriggerState->stash,
+											  stashed);
+
+	MemoryContextSwitchTo(oldcxt);
+}
 
 /*
  * EventTriggerStashAlterDefPrivs
@@ -2042,7 +2069,8 @@ pg_event_trigger_get_creation_commands(PG_FUNCTION_ARGS)
 		if (cmd->type == SCT_Simple ||
 			cmd->type == SCT_AlterTable ||
 			cmd->type == SCT_AlterOpFamily ||
-			cmd->type == SCT_CreateOpClass)
+			cmd->type == SCT_CreateOpClass ||
+			cmd->type == SCT_AlterTSConfig)
 		{
 			const char *tag;
 			char	   *identity;
@@ -2063,6 +2091,10 @@ pg_event_trigger_get_creation_commands(PG_FUNCTION_ARGS)
 				ObjectAddressSet(addr,
 								 OperatorClassRelationId,
 								 cmd->d.createopc.opcOid);
+			else if (cmd->type == SCT_AlterTSConfig)
+				ObjectAddressSet(addr,
+								 TSConfigRelationId,
+								 cmd->d.atscfg.tscfgOid);
 
 			tag = CreateCommandTag(cmd->parsetree);
 
