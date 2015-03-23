@@ -28,6 +28,13 @@
 
  <sect1 id="functions-node-mgmt" xreflabel="Node management functions">
   <title>Node management functions</title>
+
+  <para>
+   &bdr; and &udr; use functions to manage the addition and removal
+   of nodes and related replication control functions. See
+   <xref linkend="node-management"> for more on how to manage &bdr;.
+  </para>
+
   <para>
    The following functions exist to manage nodes:
 

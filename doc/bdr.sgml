@@ -41,10 +41,10 @@
   <abstract>
    <para>
    This book is the official documentation of &bdr; &bdrversion; for
-   use with PostgreSQL &pgmajorversion;. It has been written by the
-   &postgres; and &bdr; developers and other volunteers in parallel to
-   the development of the &bdr; software.  It describes all the
-   functionality that the current version of &bdr; officially
+   use with PostgreSQL &pgmajorversion; (or the &bdr;-patched version of it).
+   It has been written by the &postgres; and &bdr; developers and other
+   volunteers in parallel to the development of the &bdr; software.  It
+   describes all the functionality that the current version of &bdr; officially
    supports.
    </para>
   </abstract>

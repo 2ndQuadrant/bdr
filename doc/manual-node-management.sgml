@@ -1,15 +1,100 @@
 <chapter id="node-management" xreflabel="Node management">
  <title>Node Management</title>
+
  <indexterm>
   <primary>Node Management</primary>
  </indexterm>
+
  <para>
-  How to control and setup replication differs between &bdr; and
-  &udr; as the former has to establish replication in two
-  directions.
+  &bdr; and &udr; require different steps for setting up a node,
+  as with &bdr; replication is all-to-all (mesh), wheras for &udr;
+  replication is unidirectional. The exact commands required
+  differ and are documented below under <xref linkend="node-management-udr">
+  and <xref linkend="node-management-bdr">. Both modes share
+  many of the same concepts; see <xref linkend="node-management-common">.
  </para>
+
+ <sect1 id="node-management-common" xreflabel="Node management common to both UDR and BDR">
+  <title>Node management common to both UDR and BDR</title>
+
+  <para>
+   When a new &bdr; node is joined to an existing &bdr; group, or when a
+   &udr; node is subscribed to an upstream peer, the system must copy
+   the existing data from the peer node(s) to the local node before
+   replication can begin. This copy has to be carefully co-ordinated
+   so that the local and remote data starts out <emphasis>identical</emphasis>,
+   so it's not sufficient to just use <application>pg_dump</application>
+   yourself. The extension provides built-in facilities for making
+   this initial copy.
+  </para>
+
+  <para>
+   There are two ways to join a new &bdr; node or create/subscribe a &udr;
+   node: logical or physical copy.  After the initial copy is done there is no
+   significant difference between physical or logical initialization of a &bdr;
+   node, so the choice is down to which setup method will be quickest and
+   easiest for your particular needs.
+  </para>
+
+  <para>
+   In a logical copy, a blank database in an existing standalone PostgreSQL
+   instance is enabled for &bdr; or &udr; via <acronym>SQL</acronym>
+   functions calls. The &bdr; extension makes a connection to an upstream
+   node designated by the user and takes a schema and data dump of that node.
+   The dump is then applied to the local blank database before replication
+   begins. Only the specified database is copied. With a logical copy you don't
+   have to create new init scripts, run separate instances on separate ports,
+   etc, as everything happens in your existing PostgreSQL instance.
+  </para>
+
+  <para>
+   In a physical copy, the <xref linkend="command-bdr-init-copy"> is used
+   to clone a user-designated upstream node. This clone is then reconfigured
+   and started up as a new node before replication begins. All databases
+   on the remote node are copied, though only the specified database is
+   initially activated for &bdr; or &udr;. (Support for multiple database
+   join/subscribe may be added at a later date). After a physical node
+   join or subscribe the admin will generally need to separately register
+   the new PostgreSQL instance with the operating system to auto-start,
+   as PostgreSQL does not do this automatically. You may also need to
+   select a different PostgreSQL port if there is already a local PostgreSQL
+   instance.
+  </para>
+
+  <para>
+   The advantages and disadvantages of each approach roughly mirror those
+   of a logical backup using <application>pg_dump</application> and
+   <application>pg_restore</application> vs a physical copy using
+   <application>pg_basebackup</application>. See the
+   <ulink url="http://www.postgresql.org/docs/current/static/backup.html">
+   PostgreSQL documentation on backup and restore</ulink> for more
+   information.
+  </para>
+
+  <para>
+   In general it's more convenient to use logical join when you have an
+   existing PostgreSQL instance, a reasonably small database, and other
+   databases you might not also want to copy/replicate.  Physical join is more
+   appropriate for big databases that are the only database in a given
+   PostgreSQL install.
+  </para>
+
+  <para>
+   For the details, see <xref linkend="node-management-udr"> or
+   <xref linkend="node-management-bdr"> as appropriate.
+  </para>
+
+ </sect1>
+
  <sect1 id="node-management-udr" xreflabel="Node management for UDR">
   <title>Node Management for &udr;</title>
+
+  <note>
+   <para>
+    Read <xref linkend="node-management-common"> before this section.
+   </para>
+  </note>
+
   <para>
    The SQL function <xref linkend="functions-node-mgmt-subscribe"> is used to receive
    changes from the database specified in the function parameters
@@ -17,31 +102,27 @@
    function will automatically copy the existing data in that the
    database subscribed to.
   </para>
+
   <para>
-   When subscribing to big databases (starting at tens of gigabytes)
-   it can be desirable not to use a logical dump to clone the
-   database. Instead a physical base backup can be used as the base
-   for joining. The <xref linkend="command-bdr-init-copy"> tool
-   can be used to subscribe to an existing database with all its
-   data. It will either take a new basebackup (by internally
-   invoking <application>pg_basebackup</application>) or use a
-   provided one. That basebackup will be brought online and receives
-   all changes that have happend since it's creation.
-   <note><para>
-     Using <application>bdr_init_copy</application> will clone all
-     databases from the origin server, but only connect one database
-     as a subscriber.
-   </para></note>
+   See also: <xref linkend="functions-node-mgmt">, <xref linkend="command-bdr-init-copy">.
   </para>
  </sect1>
 
  <sect1 id="node-management-bdr" xreflabel="Node management for BDR">
   <title>Node Management for &bdr;</title>
+
+  <note>
+   <para>
+    Read <xref linkend="node-management-common"> before this section.
+   </para>
+  </note>
+
   <para>
    For &bdr; every node has to have a connection to every other
    node. To make conifguration easy, every node addition
    automatically adds awareness of the new to all preexisting nodes.
   </para>
+
   <para>
    The SQL function <xref linkend="function-bdr-group-create">
    is used to create the first node of a &bdr; cluster from a standalone
@@ -51,21 +132,9 @@
    created every further node can join the &bdr; cluster using
    the <xref linkend="function-bdr-group-join"> function.
   </para>
+
   <para>
-   When subscribing to big databases (starting at tens of gigabytes)
-   it can be desirable not to use a logical dump to clone the
-   database. Instead a physical base backup can be used as the base
-   for joining. The <xref linkend="command-bdr-init-copy"> tool
-   can be used to subscribe to an existing database with all its
-   data. It will either take a new basebackup (by internally
-   invoking <application>pg_basebackup</application>) or use a
-   provided one. That basebackup will be brought online and receives
-   all changes that have happend since it's creation.
-   <note><para>
-     Using <application>bdr_init_copy</application> will clone all
-     databases from the origin server, but only connect one database
-     as a subscriber.
-   </para></note>
+   See also: <xref linkend="functions-node-mgmt">, <xref linkend="command-bdr-init-copy">.
   </para>
 
  </sect1>
