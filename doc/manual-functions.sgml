@@ -22,7 +22,7 @@
      </thead>
      <tbody>
 
-      <row id="function-bdr-subscribe" xreflabel="bdr.bdr_subscribe">
+      <row>
        <entry>&udr;</entry>
        <entry>
         <indexterm>
@@ -98,7 +98,7 @@
    </table>
   </para>
 
-  <sect2 id="functions-node-mgmt-subscribe">
+  <sect2 id="functions-node-mgmt-subscribe" xreflabel="bdr.bdr_subscribe">
    <title><function>bdr.bdr_subscribe</function></title>
 
    <indexterm>

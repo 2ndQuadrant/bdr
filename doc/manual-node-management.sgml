@@ -11,7 +11,7 @@
  <sect1 id="node-management-udr" xreflabel="Node management for UDR">
   <title>Node Management for &udr;</title>
   <para>
-   The SQL function <xref linkend="function-bdr-subscribe"> is used to receive
+   The SQL function <xref linkend="functions-node-mgmt-subscribe"> is used to receive
    changes from the database specified in the function parameters
    into the current database. Subscribing to another node using this
    function will automatically copy the existing data in that the

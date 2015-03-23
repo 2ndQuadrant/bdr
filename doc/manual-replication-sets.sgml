@@ -33,8 +33,8 @@
    can be set when adding the node to the &bdr; cluster using the (optional)
    <literal>replication_sets</literal> parameter to
    <xref linkend="function-bdr-group-create">,
-   <xref linkend="function-bdr-subscribe"> and
-   <xref linkend="function-bdr-group-join">.
+   <xref linkend="function-bdr-group-join"> and
+   <xref linkend="functions-node-mgmt-subscribe">.
    This parameter is an array of replication set names. The replication
    set do not have to exists to be referenced by
    <literal>replication_sets</literal>.
