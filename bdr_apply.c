@@ -2214,12 +2214,12 @@ abs_timestamp_difference(TimestampTz start_time, TimestampTz stop_time,
 
 #if defined(VERBOSE_INSERT) || defined(VERBOSE_UPDATE) || defined(VERBOSE_DELETE)
 static void
-log_tuple(const char *format, TupleDesc desc, HeapTuple tup);
+log_tuple(const char *format, TupleDesc desc, HeapTuple tup)
 {
 	StringInfoData o;
 
 	initStringInfo(&o);
-	tuple_to_stringinfo(&o, desc, tuple);
+	tuple_to_stringinfo(&o, desc, tup);
 	elog(DEBUG1, format, o.data);
 	resetStringInfo(&o);
 
