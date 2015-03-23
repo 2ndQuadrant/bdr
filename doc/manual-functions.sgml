@@ -17,10 +17,11 @@
 
  <warning>
   <para>
-   Do <emphasis>not</emphasis> directly call functions with the suffix
+   Do <emphasis>not</emphasis> directly call functions with the prefix
    <literal>internal</literal>, they are intended for &bdr;'s internal
    use only and may lack sanity checks present in the public-facing
-   functions. Stick to using the functions documented here, others
+   functions and <emphasis>could break your replication setup</emphasis>.
+   Stick to using the functions documented here, others
    are subject to change without notice.
   </para>
  </warning>
@@ -134,6 +135,7 @@
         </indexterm>
         <literal><function>bdr.bdr_apply_pause()</function></literal>
        </entry>
+       <entry>void</entry>
        <entry>
         Temporarily stop applying changes from remote nodes to the local node,
         until resume is requested with
@@ -156,9 +158,27 @@
         </indexterm>
         <literal><function>bdr.bdr_apply_resume()</function></literal>
        </entry>
+       <entry>void</entry>
        <entry>
         Resume replaying changes from peer nodes after replay has been paused
         by <function>bdr.bdr_apply_pause()</function>.
+       </entry>
+      </row>
+
+      <row>
+       <entry>&bdr;</entry>
+       <entry>
+        <indexterm>
+         <primary>bdr.bdr_replicate_ddl_command</primary>
+        </indexterm>
+        <literal><function>bdr.bdr_replicate_ddl_command(<replaceable>cmd text</replaceable>)</function></literal>
+       </entry>
+       <entry>void</entry>
+       <entry>
+        Execute the <acronym>SQL</acronym> (usually <acronym>DDL</acronym>)
+        <replaceable>cmd</replaceable> on the local node and queue it for
+        extension on all peer nodes. <emphasis>This function is mainly for &bdr; internal
+        use and bypasses some safety checks, use with caution.</emphasis>
        </entry>
       </row>
 
@@ -463,6 +483,44 @@
        </entry>
        <entry>record</entry>
        <entry>Ask a remote node to connect back to this node. This function is primarily for &bdr; internal use during setup and connection establishment.</entry>
+      </row>
+
+     </tbody>
+    </tgroup>
+   </table>
+  </para>
+
+ </sect1>
+
+ <sect1 id="functions-upgrade" xreflabel="Upgrade functions">
+  <title>Upgrade functions</title>
+
+  <para>
+   The following function(s) are used when upgrading &bdr; to a new version:
+
+   <table>
+    <title>Upgrade functions</title>
+    <tgroup cols="4">
+     <thead>
+      <row>
+       <entry>&udr;/&bdr;</entry>
+       <entry>Function</entry>
+       <entry>Return Type</entry>
+       <entry>Description</entry>
+      </row>
+     </thead>
+     <tbody>
+
+      <row>
+       <entry>&bdr;</entry>
+       <entry>
+        <indexterm>
+         <primary>bdr.bdr_upgrade_to_090</primary>
+        </indexterm>
+        <literal><function>bdr.bdr_upgrade_to_090(<replaceable>my_conninfo cstring</replaceable>, <replaceable>local_conninfo cstring</replaceable>, <replaceable>remote_conninfo cstring</replaceable>)</function></literal>
+       </entry>
+       <entry>void</entry>
+       <entry>Used during upgrade from 0.7.x or 0.8.x to &bdr; version 0.9.x. See <xref linkend="upgrade">.</entry>
       </row>
 
      </tbody>
