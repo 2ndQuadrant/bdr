@@ -6934,8 +6934,7 @@ deparse_simple_command(StashedCommand *cmd)
 }
 
 /*
- * Given a utility command parsetree and the OID of the corresponding object,
- * return a JSON representation of the command.
+ * Given a StashedCommand, return a JSON representation of the command.
  *
  * The command is expanded fully, so that there are no ambiguities even in the
  * face of search_path changes.
