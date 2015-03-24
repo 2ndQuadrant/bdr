@@ -1,13 +1,80 @@
 <chapter id="conflicts" xreflabel="Multi-master conflicts">
  <title>Multi-master conflicts</title>
+
  <indexterm>
   <primary>Conflicts</primary>
  </indexterm>
+
  <para>
   In multi-master use of &bdr; writes to the same or related table(s) from multiple
   different nodes can result in data conflicts.
-
-  <!-- TODO -->
-
  </para>
+
+ <!-- TODO -->
+
+ <sect1 id="conflicts-types" xreflabel="Types of conflict">
+  <title>Types of conflict</title>
+
+  <para>
+   Many conflict types are possible:
+   <itemizedlist>
+    <listitem><simpara><literal>INSERT</literal>/<literal>INSERT</literal></simpara></listitem>
+    <listitem><simpara><literal>INSERT</literal>/<literal>UPDATE</literal></simpara></listitem>
+    <listitem><simpara><literal>UPDATE</literal>/<literal>DELETE</literal></simpara></listitem>
+    <listitem><simpara><literal>INSERT</literal>/<literal>DELETE</literal></simpara></listitem>
+    <listitem><simpara>Transient unhandled conflicts, e.g. foreign key constraint replay order conflicts</simpara></listitem>
+    <listitem><simpara>Divergent conflicts</simpara></listitem>
+   </itemizedlist>
+  </para>
+
+  <!-- TODO: explain conflict types etc -->
+
+ </sect1>
+
+ <sect1 id="conflicts-logging" xreflabel="Conflict logging">
+  <title>Conflict logging</title>
+
+  <para>
+   To make diagnosis and handling of multi-master conflicts easier, &bdr;
+   supports logging of each conflict incident in a <xref linkend="catalog-bdr-conflict-history"> table.
+  </para>
+
+  <para>
+   Conflict logging is only enabled when <xref
+   linkend="guc-bdr-conflict-logging-include-tuples"> is
+   <literal>true</literal>.
+  </para>
+
+  <para>
+   You can use the conflict history table to determine how rapidly your
+   application creates conflicts and where those conflicts occur, allowing you to
+   improve the application to reduce conflict rates. It also helps detect cases
+   where conflict resolutions may not have produced the desired results, allowing
+   you to identify places where a user defined conflict trigger or an application
+   design change may be desirable.
+  </para>
+
+  <para>
+   Row values may optionally be logged for row conflicts. This is controlled by
+   the global database-wide option <xref linkend="guc-bdr-log-conflicts-to-table">.
+   There is no per-table control over row value logging at this time. Nor is
+   there any limit applied on the number of fields a row may have, number of
+   elements dumped in arrays, length of fields, etc, so it may not be wise to
+   enable this if you regularly work with multi-megabyte rows that may trigger
+   conflicts.
+  </para>
+
+  <para>
+   Because the conflict history table contains data on every table in the
+   database so each row's schema might be different, if row values are logged
+   they are stored as json fields. The json is created with
+   <function>row_to_json</function>, just like if you'd called it on the row
+   yourself from SQL. There is no corresponding
+   <function>json_to_row</function> function in PostgreSQL at this time, so
+   you'll need table-specific code (pl/pgsql, pl/python, pl/perl, whatever) if
+   you want to reconstruct a composite-typed tuple from the logged json.
+  </para>
+
+ </sect1>
+
 </chapter>

@@ -5,9 +5,99 @@
   <secondary>Views</secondary>
   <seealso>Monitoring</seealso>
  </indexterm>
- <para>
 
-  <!-- TODO -->
+ <sect1 id="catalog-bdr-nodes" xreflabel="bdr.bdr_nodes">
+  <title>bdr.bdr_nodes</title>
 
- </para>
+  <para>
+   The <literal>bdr.bdr_nodes</literal> table keeps track of a node's
+   membership in a &bdr; group.  A row is inserted or updated in the table
+   during the node join process, and during node removal.
+  </para>
+
+  <para>
+   The 'status' column may have the following values, which are subject to change:
+   <itemizedlist>
+    <listitem><para><literal>r</literal>- Ready: The node can function fully. Slots may be created on this node and it can participate with the &bdr group.  </para> </listitem>
+    <listitem><para><literal>b</literal>- Joining: The node is bootstrapping. This state occurs when join has been initiated but a copy has not yet been begun.</para></listitem>
+    <listitem><para><literal>i</literal>- Joining: The node is doing initial slot creation or an initial dump and load</para> </listitem>
+    <listitem><para><literal>c</literal>- Joining: The node is catching up to the target node and is not yet ready to participate with the &bdr; group.  </para> </listitem>
+    <listitem><para><literal>o</literal>- Joining: The node has caught up with the target node and is waiting for all inbound and outbound slots to be created.  </para> </listitem>
+    <listitem><para><literal>k</literal>- Parting/Parted: The node has been 'killed' or removed by the user with the function <literal>bdr.bdr_part_by_node_names</literal>.</para> </listitem>
+    <!-- TODO: list incomplete for 0.9 -->
+   </itemizedlist>
+  </para>
+
+  <para>
+   Note that the status doesn't indicate whether the node is actually up right
+   now. A node may be shut down, isolated from the network, or crashed and still
+   appear as <literal>r</literal> in <literal>bdr.bdr_nodes</literal> because it's
+   still conceptually part of the BDR group. Check
+   <ulink url="http://www.postgresql.org/docs/current/static/monitoring-stats.html#PG-STAT-REPLICATION-VIEW">pg_stat_replication</ulink>
+   and
+   <ulink url="http://www.postgresql.org/docs/current/static/catalog-pg-replication-slots.html">pg_replication_slots</ulink>
+   for the connection and replay status of a node. See <xref linkend="monitoring">.
+  </para>
+
+  <warning>
+   <para>
+    Do not directly modify <literal>bdr.bdr_nodes</literal>. Use the provided
+    node management functions instead. See <xref linkend="functions-node-mgmt">.
+   </para>
+  </warning>
+
+  <!-- TODO: column definitions, copy from wiki -->
+
+ </sect1>
+
+ <sect1 id="catalog-pg-stat-bdr" xreflabel="bdr.pg_stat_bdr">
+  <title>bdr.pg_stat_bdr</title>
+
+  <para>
+   Performance and conflict statistics are maintained for each node by &bdr; in
+   the <literal>bdr.pg_stat_bdr</literal> table. This table is <emphasis>not
+   replicated</emphasis> between nodes, so each node has separate stats. Each row
+   represents the &bdr; apply statistics for a different peer node.
+  </para>
+
+  <para>
+   An example listing from this table might look like:
+   <programlisting>
+   SELECT * FROM bdr.pg_stat_bdr;
+    rep_node_id | rilocalid |               riremoteid               | nr_commit | nr_rollback | nr_insert | nr_insert_conflict | nr_update | nr_update_conflict | nr_delete | nr_delete_conflict | nr_disconnect
+   -------------+-----------+----------------------------------------+-----------+-------------+-----------+--------------------+-----------+--------------------+-----------+--------------------+---------------
+              1 |         1 | bdr_6127682459268878512_1_16386_16386_ |         4 |           0 |         6 |                  0 |         1 |                  0 |         0 |                  3 |             0
+              2 |         2 | bdr_6127682494973391064_1_16386_16386_ |         1 |           0 |         0 |                  0 |         1 |                  0 |         0 |                  0 |             0
+   (2 rows)
+   </programlisting>
+  </para>
+
+  <!-- TODO: Column definitions, copy from wiki -->
+
+ </sect1>
+
+ <sect1 id="catalog-bdr-conflict-history" xreflabel="bdr.bdr_conflict_history">
+  <title>bdr.bdr_conflict_history</title>
+
+  <para>
+   <literal>bdr.bdr_conflict_history</literal> contains an entry for each
+   conflict generated in the system while <xref linkend="conflicts-logging">
+   is enabled.
+  </para>
+
+  <para>
+   This history table is <emphasis>not replicated</emphasis> between nodes, so
+   each node has separate conflict history records. This is a technical
+   limitation that may be lifted in a future release, but it also saves on
+   unnecessary replication overhead.
+  </para>
+
+  <para>
+   It is safe to <literal>TRUNCATE</literal> this table to save disk space.
+  </para>
+
+  <!-- TODO: colun definitions, example content -->
+
+ </sect1>
+
 </chapter>
