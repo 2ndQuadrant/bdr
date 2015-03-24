@@ -10,31 +10,306 @@
   different nodes can result in data conflicts.
  </para>
 
- <note>
+ <para>
+  Some clustering systems use distributed lock mechanisms to prevent
+  concurrent access to data. These can perform reasonably when servers are
+  very close but cannot support geographically distributed applications as
+  very low latency is critical for acceptable performance.
+ </para>
+
+ <para>
+  Distributed locking is essentially a pessimistic approach, whereas BDR
+  advocates an optimistic approach: avoid conflicts where possible but allow
+  some types of conflict to occur and and resolve them when they arise.
+ </para>
+
+ <sect1 id="conflicts-how" xreflabel="How conflicts happen">
+  <title>How conflicts happen</title>
+
   <para>
-   The documentation on multi-master conflicts is under ongoing development and
-   will see significant enhancements in the next point release.
+   Inter-node conflicts arise as a result of sequences of events that could not
+   happen if all the involved transactions happened concurrently on the same
+   node. Because the nodes only exchange changes after transactions commit, each
+   transaction is individually valid on the node it committed on but would not
+   be valid if run on another node that has done other work in the mean time.
+   Since &bdr; apply essentially replays the transaction on the other nodes, the
+   replay operation can fail if there is a conflict between a transaction being
+   applied and a transaction that was committed on the receiving node.
   </para>
- </note>
-
- <!-- TODO -->
-
- <sect1 id="conflicts-types" xreflabel="Types of conflict">
-  <title>Types of conflict</title>
 
   <para>
-   Many conflict types are possible:
-   <itemizedlist>
-    <listitem><simpara><literal>INSERT</literal>/<literal>INSERT</literal></simpara></listitem>
-    <listitem><simpara><literal>INSERT</literal>/<literal>UPDATE</literal></simpara></listitem>
-    <listitem><simpara><literal>UPDATE</literal>/<literal>DELETE</literal></simpara></listitem>
-    <listitem><simpara><literal>INSERT</literal>/<literal>DELETE</literal></simpara></listitem>
-    <listitem><simpara>Transient unhandled conflicts, e.g. foreign key constraint replay order conflicts</simpara></listitem>
-    <listitem><simpara>Divergent conflicts</simpara></listitem>
-   </itemizedlist>
+   The reason most conflicts can't happen when all transactions run on a single
+   node is that PostgreSQL has inter-transaction communication mechanisms
+   to prevent it - <literal>UNIQUE</literal> indexes,
+   <literal>SEQUENCE</literal>s, row and relation locking,
+   <literal>SERIALIZABLE</literal> dependency tracking, etc. All of these
+   mechanisms are ways to communicate between transactions to prevent
+   undesirable concurrency issues.
   </para>
 
-  <!-- TODO: explain conflict types etc -->
+  <para>
+   &bdr; does not have a distributed transaction manager or lock manager.
+   That's part of why it performs well with latency and network partitions. As
+   a result, so <emphasis>transactions on different nodes execute entirely in
+   isolation from each other</emphasis>. Despite the usual perception that
+   "more isolation is good" you actually need to reduce isolation to prevent
+   conflicts.
+  </para>
+
+  <sect2 id="conflicts-types" xreflabel="Types of conflict">
+   <title>Types of conflict</title>
+
+   <sect3>
+    <title>Row conflicts</title>
+
+    <para>
+     The most common conflicts are row conflicts where two operations affect a
+     row with the same key in ways they could not do on a single node. &bdr; can
+     detect most of those and apply last-update-wins conflict handling or invoke
+     a user-defined conflict handler.
+    </para>
+
+    <para>
+     Row conflicts include:
+     <itemizedlist>
+      <listitem><simpara><literal>INSERT</literal> vs <literal>INSERT</literal></simpara></listitem>
+      <listitem><simpara><literal>INSERT</literal> vs <literal>UPDATE</literal></simpara></listitem>
+      <listitem><simpara><literal>UPDATE</literal> vs <literal>DELETE</literal></simpara></listitem>
+      <listitem><simpara><literal>INSERT</literal> vs <literal>DELETE</literal></simpara></listitem>
+     </itemizedlist>
+     <!-- todo explain -->
+    </para>
+   </sect3>
+
+   <sect3>
+    <title>Constraint conflicts</title>
+
+    <para>
+     Constraint conflicts can also occur, mainly with foreign keys. These are
+     usually transient issues that arise from transactions being applied in a
+     different order to the order they appeared to occur logically on the nodes
+     that originated them.
+    </para>
+
+    <para>
+     While apply is strictly ordered for any given origin node, there is no
+     enforcemnet of ordering of transactions between two different nodes, so
+     it's possible for (e.g.) node1 to insert a row into T1, which is replayed to node2.
+     node2 inserts a row into T2 which has a foreign key reference to the row from T1.
+     On node3, if the transaction from node2 that inserts the row into T2 is received
+     <emphasis>before</emphasis> the transaction from node1 that inserts the row into T1,
+     the transaction from node2 will fail to apply. This failure will record a rollback
+     in <xref linkend="catalog-pg-stat-bdr"> and an <literal>ERROR</literal>
+     with details in the PostgreSQL error log on the applying node (node3). In
+     this case &bdr; will retry the transaction from node2 periodicially, so
+     once it's replayed the transaction from node1 that it depends on the
+     transaction will commit successfully.
+    </para>
+
+    <para>
+     Constraint conflicts are generally transient and require no administrator action.
+    </para>
+
+    <note>
+     <para>
+      Constraint conflicts are the reason why &bdr; does not support exclusion
+      constraints. In a distributed asynchronous system it is not possible to
+      ensure that no set of rows that violates the constraint exists, because
+      all transactions on different nodes are fully isolated. Exclusion constraints
+      would lead to replay deadlocks where replay could not progress from any
+      node to any other node because of exclusion constraint violations.
+     </para>
+    </note>
+
+   </sect3>
+
+   <sect3>
+    <title>Global data conflicts</title>
+
+    <para>
+     Conflicts can also arise where nodes have global (PostgreSQL-system-wide)
+     data, like roles, that differs. This can result in operations - mainly
+     <acronym>DDL</acronym> - that can be run successfully and committed
+     on one node, but then fail to apply to other nodes.
+    </para>
+
+    <para>
+     For example, node1 might have a user named
+     <literal>fred</literal>, but that user was not created on node2.
+     &bdr; does not replicate <literal>CREATE USER</literal> (see
+     <xref linkend="ddl-create-role">) so this situation can arise easily.
+     If <literal>fred</literal> on node1 creates a table, it will
+     be replicated with its owner set to <literal>fred</literal>.
+     When the DDL command is applied to node2 the DDL will fail
+     because there is no user named <literal>fred</literal>.
+     This failure will emit an <literal>ERROR</literal> in the
+     PostgreSQL logs on node2 and increment
+     <xref linkend="catalog-pg-stat-bdr"><literal>.nr_rollbacks</literal>.
+    </para>
+
+    <para>
+     Administrator intervention is required to resolve this conflict
+     by creating the user <literal>fred</literal> on node2.
+     (It need not have the same permissions, but must exist).
+    </para>
+
+   </sect3>
+
+   <sect3>
+    <title>Lock conflicts and deadlock aborts</title>
+
+    <para>
+     Because &bdr; apply processes operate very like normal user sessions
+     they are subject to the usual rules around row and table locking. This
+     can sometimes lead to &bdr; apply processes waiting on locks held
+     by user transactions, or even by each other.
+    </para>
+
+    <para>
+     Relevant locking includes;
+     <itemizedlist>
+      <listitem><simpara>explicit table-level locking (<literal>LOCK TABLE ...</literal>) by user sessions</simpara></listitem>
+      <listitem><simpara>explicit row level locking (<literal>SELECT ... FOR UPDATE/FOR SHARE</literal>) by user sessions</simpara></listitem>
+      <listitem><simpara>locking from foreign keys</simpara></listitem>
+      <listitem><simpara>implicit locking because of row <literal>UPDATE</literal>s, <literal>INSERT</literal>s or <literal>DELETE</literal>s, either from local activity or apply from other servers</simpara></listitem>
+     </itemizedlist>
+    </para>
+
+    <para>
+     It is even possible for a &bdr; apply process to deadlock with a user
+     transaction, where the user transaction is waiting on a lock held
+     by the apply process and vice versa. Two apply processes may also
+     deadlock with each other. PostgreSQL's deadlock detector will
+     step in and terminate one of the problem transactions. If the &bdr; apply
+     worker's process is terminated it will simply retry and generally succeed.
+    </para>
+
+    <para>
+     All these issues are transient and generally require no administrator
+     action. If an apply process is stuck for a long time behind a lock
+     on an idle user session the administrator may choose to terminate
+     the user session to get replication flowing again, but this is
+     no different to a user holding a long lock that impacts another
+     user session.
+    </para>
+
+    <para>
+     Use of the <ulink
+     url="http://www.postgresql.org/docs/current/static/runtime-config-logging.html#GUC-LOG-LOCK-WAITS">
+     log_lock_waits</ulink> facility in PostgreSQL can help identify locking
+     related replay stalls.
+    </para>
+
+   </sect3>
+
+   <sect3>
+    <title>Divergent conflicts</title>
+
+    <para>
+     Divergent conflicts arise when data that should be the same on different
+     nodes differs unexpectedly. Divergent conflicts should not occur, but not
+     all such conflicts can be reliably prevented at time of writing.
+    </para>
+
+    <warning>
+     <para>
+      Changing the <literal>PRIMARY KEY</literal> of a row can lead to a
+      divergent conflict if another node changes the key of the same row before
+      all nodes have replayed the change. Avoid changing primary keys, or
+      change them only on one designated node.
+     </para>
+    </warning>
+
+    <para>
+     Divergent conflicts involving row data generally require administrator
+     action to manually adjust the data on one of the nodes to be consistent
+     with the other one while replication is temporarily disabled using <xref
+     linkend="guc-bdr-do-not-replicate">. Such conflicts should not arise
+     so long as &bdr; is used as documented and settings or functions marked
+     as unsafe are avoided.
+    </para>
+
+    <!-- TODO: how do we do this? -->
+
+   </sect3>
+
+  </sect2>
+
+ </sect1>
+
+ <sect1 id="conflicts-avoidance" xreflabel="Conflict avoidance">
+  <title>Avoiding or tolerating conflicts</title>
+
+  <para>
+   In most cases appropriate application design can be used to avoid conflicts
+   and/or the application can be made tolerant of conflicts.
+  </para>
+
+  <para>
+   Conflicts can only happen if there are things happening at the same time on
+   multiple nodes, so the simplest way to avoid conflicts is to only ever write
+   to one node, or to only ever write to independent subsets of the database on
+   each node. For example, each node might have a separate schema, and while
+   they all exchange data with each other, writes are only ever performed on
+   the node that "owns" a given schema.
+  </para>
+
+  <para>
+   For <literal>INSERT</literal> vs <literal>INSERT</literal> conflicts, use of
+   <xref linkend="global-sequences"> can completely prevent conflicts.
+  </para>
+
+  <para>
+   BDR users may sometimes find it useful to perform distributed locking at the
+   application level in cases where conflicts are not acceptable.
+  </para>
+
+  <para>
+   The best course of action is frequently to allow conflicts to occur and
+   design the application to work with &bdr;'s conflict resolution
+   mechansisms to cope with the conflict. See <xref linkend="conflicts-resolution">.
+  </para>
+
+ </sect1>
+
+ <sect1 id="conflicts-resolution" xreflabel="Conflict resolution">
+  <title>Conflict resolution</title>
+
+  <para>
+   When &bdr; detects data row conflicts it ensures that the conflict is
+   handled the same way on all nodes, so that the resulting state of the table
+   is the same for every node.
+  </para>
+
+  <para>
+   By default &bdr; uses a <emphasis>last-update-wins</emphasis> strategy
+   to resolve conflicts. The most recent update will be retained,
+   and the oldest update discarded in its entirety. No attempt to merge
+   the data in the conflicting rows is made.
+  </para>
+
+  <para>
+   Users may override this behaviour with application-specific knowledge
+   in <xref linkend="conflicts-user-defined-handlers">.
+  </para>
+
+  <!-- TODO -->
+
+ </sect1>
+
+ <sect1 id="conflicts-user-defined-handlers" xreflabel="User defined conflict handlers">
+  <title>User defined conflict handlers</title>
+
+  <para>
+   &bdr; provides facilities for users to override the default last-update-wins
+   data row conflict resolution strategy.
+  </para>
+
+  <!-- TODO -->
+
+  <para>
+   See also: <xref linkend="functions-conflict-handlers">
+  </para>
 
  </sect1>
 

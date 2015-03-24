@@ -377,6 +377,27 @@
       </listitem>
      </varlistentry>
 
+     <varlistentry id="guc-bdr-do-not-replicate" xreflabel="bdr.do_not_replicate">
+      <term><varname>bdr.do_not_replicate</varname> (<type>boolean</type>)
+       <indexterm>
+        <primary><varname>bdr.do_not_replicate</varname> configuration parameter</primary>
+       </indexterm>
+      </term>
+      <listitem>
+       <para>
+        This parameter is intended for internal use only. Changes made in a
+        transaction with this parameter set will not be queued for replication
+        to other nodes.
+       </para>
+       <warning>
+        <para>
+         Inconsiderate usage of this option easily allows to break
+         replication setups.
+        </para>
+       </warning>
+      </listitem>
+     </varlistentry>
+
     </variablelist>
    </para>
   </sect2>
