@@ -65,21 +65,20 @@
   <title>Getting started</title>
   &overview;
   &quickstart;
+  &install;
  </part>
 
- &install;
-
-<part id="manual" xreflabel="BDR administration manual">
+ <part id="manual" xreflabel="BDR administration manual">
   <title>&bdr; administration manual</title>
 
   &manual-node-management;
-  &manual-ddl-replication;
+  &manual-settings;
   &manual-commands;
+  &manual-monitoring;
+  &manual-ddl-replication;
   &manual-conflicts;
   &manual-global-sequences;
   &manual-replication-sets;
-  &manual-monitoring;
-  &manual-settings;
   &manual-functions;
   &manual-catalogs-views;
   &manual-upgrade;
