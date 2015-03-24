@@ -154,7 +154,7 @@ CreateSchemaCommand(CreateSchemaStmt *stmt, const char *queryString)
 	 * objects created below are reported before the schema, which would be
 	 * wrong.
 	 */
-	EventTriggerStashCommand(address, NULL, (Node *) stmt);
+	EventTriggerStashCommand(address, InvalidObjectAddress, (Node *) stmt);
 
 	/*
 	 * Examine the list of commands embedded in the CREATE SCHEMA command, and

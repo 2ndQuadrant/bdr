@@ -65,7 +65,7 @@ extern void EventTriggerInhibitCommandCollection(void);
 extern void EventTriggerUndoInhibitCommandCollection(void);
 
 extern void EventTriggerStashCommand(ObjectAddress address,
-						 ObjectAddress *secondaryObject, Node *parsetree);
+						 ObjectAddress secondaryObject, Node *parsetree);
 
 extern void EventTriggerAlterTableStart(Node *parsetree);
 extern void EventTriggerAlterTableRelid(Oid objectId);

@@ -942,7 +942,8 @@ ProcessUtilitySlow(Node *parsetree,
 							address = DefineRelation((CreateStmt *) stmt,
 													 RELKIND_RELATION,
 													 InvalidOid, NULL);
-							EventTriggerStashCommand(address, NULL, stmt);
+							EventTriggerStashCommand(address, secondaryObject,
+													 stmt);
 
 							/*
 							 * Let NewRelationCreateToastTable decide if this
@@ -975,7 +976,8 @@ ProcessUtilitySlow(Node *parsetree,
 													 InvalidOid, NULL);
 							CreateForeignTable((CreateForeignTableStmt *) stmt,
 											   address.objectId);
-							EventTriggerStashCommand(address, NULL, stmt);
+							EventTriggerStashCommand(address, secondaryObject,
+													 stmt);
 						}
 						else
 						{
@@ -1242,7 +1244,8 @@ ProcessUtilitySlow(Node *parsetree,
 					 * there were any commands stashed in the ALTER TABLE code,
 					 * we need them to appear after this one.
 					 */
-					EventTriggerStashCommand(address, NULL, parsetree);
+					EventTriggerStashCommand(address, secondaryObject,
+											 parsetree);
 					commandStashed = true;
 					EventTriggerAlterTableEnd();
 				}
@@ -1321,7 +1324,7 @@ ProcessUtilitySlow(Node *parsetree,
 			case T_ViewStmt:	/* CREATE VIEW */
 				EventTriggerAlterTableStart(parsetree);
 				address = DefineView((ViewStmt *) parsetree, queryString);
-				EventTriggerStashCommand(address, NULL, parsetree);
+				EventTriggerStashCommand(address, secondaryObject, parsetree);
 				/* stashed internally */
 				commandStashed = true;
 				EventTriggerAlterTableEnd();
@@ -1493,7 +1496,7 @@ ProcessUtilitySlow(Node *parsetree,
 		 * access to it.
 		 */
 		if (!commandStashed)
-			EventTriggerStashCommand(address, &secondaryObject, parsetree);
+			EventTriggerStashCommand(address, secondaryObject, parsetree);
 
 		if (isCompleteQuery)
 		{

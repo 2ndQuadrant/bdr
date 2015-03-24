@@ -1615,7 +1615,7 @@ pg_event_trigger_table_rewrite_reason(PG_FUNCTION_ARGS)
  * of the object.)
  */
 void
-EventTriggerStashCommand(ObjectAddress address, ObjectAddress *secondaryObject,
+EventTriggerStashCommand(ObjectAddress address, ObjectAddress secondaryObject,
 						 Node *parsetree)
 {
 	MemoryContext oldcxt;
@@ -1632,8 +1632,7 @@ EventTriggerStashCommand(ObjectAddress address, ObjectAddress *secondaryObject,
 	stashed->in_extension = creating_extension;
 
 	stashed->d.simple.address = address;
-	stashed->d.simple.secondaryObject =
-		secondaryObject ? *secondaryObject : InvalidObjectAddress;
+	stashed->d.simple.secondaryObject = secondaryObject;
 	stashed->parsetree = copyObject(parsetree);
 
 	currentEventTriggerState->stash = lappend(currentEventTriggerState->stash,
