@@ -10,6 +10,13 @@
   different nodes can result in data conflicts.
  </para>
 
+ <note>
+  <para>
+   The documentation on multi-master conflicts is under ongoing development and
+   will see significant enhancements in the next point release.
+  </para>
+ </note>
+
  <!-- TODO -->
 
  <sect1 id="conflicts-types" xreflabel="Types of conflict">

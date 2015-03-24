@@ -9,6 +9,13 @@
   replicate a table containing session data.
  </para>
 
+ <note>
+  <para>
+   The documentation on replication sets is under ongoing development and will
+   see significant enhancements in the next point release.
+  </para>
+ </note>
+
  <sect1 id="replication-sets-concepts" xreflabel="Replication Set Concepts">
   <title>Replication Set Concepts</title>
   <para>
