@@ -54,6 +54,11 @@ $$;
 COMMENT ON FUNCTION bdr.bdr_get_local_node_name()
 IS 'Return the name from bdr.bdr_nodes for the local node, or null if no entry exists';
 
+-- See https://github.com/2ndQuadrant/bdr/issues/5
+ALTER FUNCTION bdr.queue_truncate()
+SECURITY DEFINER
+SET search_path = 'bdr';
+
 RESET bdr.permit_unsafe_ddl_commands;
 RESET bdr.skip_ddl_replication;
 RESET search_path;

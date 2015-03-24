@@ -39,7 +39,8 @@
    202, 302, ...; etc. This is easily done with PostgreSQL's existing sequences,
    but becomes a major problem if you don't allow enough room for growth - in
    the above, if you have 101 nodes you're in serious trouble. It's also
-   awkward, requiring node-specific DDL and setup.
+   awkward, requiring node-specific DDL and setup. See <xref
+   linkend="global-sequences-alternatives">.
   </para>
 
   <para>
