@@ -6291,7 +6291,7 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 
 			case AT_AddIndex:
 				{
-					Oid			idxOid = substashed->oid;
+					Oid			idxOid = substashed->address.objectId;
 					IndexStmt  *istmt;
 					Relation	idx;
 					const char *idxname;
@@ -6324,7 +6324,7 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 			case AT_AddConstraintRecurse:
 				{
 					/* XXX need to set the "recurse" bit somewhere? */
-					Oid			constrOid = substashed->oid;
+					Oid			constrOid = substashed->address.objectId;
 
 					tmp = new_objtree_VA("ADD CONSTRAINT %{name}I %{definition}s",
 										 3, "type", ObjTypeString, "add constraint",
@@ -6337,7 +6337,7 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 
 			case AT_AlterConstraint:
 				{
-					Oid		constrOid = substashed->oid;
+					Oid		constrOid = substashed->address.objectId;
 					Constraint *c = (Constraint *) subcmd->def;
 
 					/* if no constraint was altered, silently skip it */
@@ -6375,9 +6375,10 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 			case AT_AlterColumnType:
 				{
 					TupleDesc tupdesc = RelationGetDescr(rel);
-					Form_pg_attribute att = tupdesc->attrs[substashed->attnum - 1];
+					Form_pg_attribute att;
 					ColumnDef	   *def;
 
+					att = tupdesc->attrs[substashed->address.objectSubId - 1];
 					def = (ColumnDef *) subcmd->def;
 					Assert(IsA(def, ColumnDef));
 
@@ -6597,7 +6598,7 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 									 2, "type", ObjTypeString, "inherit",
 									 "parent", ObjTypeObject,
 									 new_objtree_for_qualname_id(RelationRelationId,
-																 substashed->oid));
+																 substashed->address.objectId));
 				subcmds = lappend(subcmds, new_object_object(tmp));
 				break;
 
@@ -6606,7 +6607,7 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 									 2, "type", ObjTypeString, "drop inherit",
 									 "parent", ObjTypeObject,
 									 new_objtree_for_qualname_id(RelationRelationId,
-																 substashed->oid));
+																 substashed->address.objectId));
 				subcmds = lappend(subcmds, new_object_object(tmp));
 				break;
 
@@ -6614,7 +6615,7 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 				tmp = new_objtree_VA("OF %{type_of}T",
 									 2, "type", ObjTypeString, "add of",
 									 "type_of", ObjTypeObject,
-									 new_objtree_for_type(substashed->oid, -1));
+									 new_objtree_for_type(substashed->address.objectId, -1));
 				subcmds = lappend(subcmds, new_object_object(tmp));
 				break;
 

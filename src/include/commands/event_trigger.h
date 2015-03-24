@@ -70,7 +70,7 @@ extern void EventTriggerStashCommand(ObjectAddress address,
 extern void EventTriggerAlterTableStart(Node *parsetree);
 extern void EventTriggerAlterTableRelid(Oid objectId);
 extern void EventTriggerAlterTableStashSubcmd(Node *subcmd, Oid relid,
-								  AttrNumber attnum, Oid newoid);
+								  ObjectAddress address);
 extern void EventTriggerAlterTableEnd(void);
 
 extern void EventTriggerStashGrant(InternalGrant *istmt);

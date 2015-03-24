@@ -41,8 +41,7 @@ typedef enum StashedCommandType
  */
 typedef struct StashedATSubcmd
 {
-	AttrNumber		attnum;	/* affected column number */
-	Oid				oid;	/* affected constraint, default value or index */
+	ObjectAddress	address; /* affected column, constraint, index, ... */
 	Node		   *parsetree;
 } StashedATSubcmd;
 

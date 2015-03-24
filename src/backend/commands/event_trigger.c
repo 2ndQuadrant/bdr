@@ -1716,8 +1716,8 @@ EventTriggerAlterTableRelid(Oid objectId)
  * internally, so that's all that this code needs to handle at the moment.
  */
 void
-EventTriggerAlterTableStashSubcmd(Node *subcmd, Oid relid, AttrNumber attnum,
-							 Oid newoid)
+EventTriggerAlterTableStashSubcmd(Node *subcmd, Oid relid,
+								  ObjectAddress address)
 {
 	MemoryContext	oldcxt;
 	StashedATSubcmd *newsub;
@@ -1741,8 +1741,7 @@ EventTriggerAlterTableStashSubcmd(Node *subcmd, Oid relid, AttrNumber attnum,
 	oldcxt = MemoryContextSwitchTo(currentEventTriggerState->cxt);
 
 	newsub = palloc(sizeof(StashedATSubcmd));
-	newsub->attnum = attnum;
-	newsub->oid = newoid;
+	newsub->address = address;
 	newsub->parsetree = copyObject(subcmd);
 
 	currentEventTriggerState->curcmd->d.alterTable.subcmds =

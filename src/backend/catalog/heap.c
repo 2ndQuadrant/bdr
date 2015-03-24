@@ -2083,7 +2083,7 @@ StoreConstraints(Relation rel, List *cooked_constraints, bool is_internal)
 	int			numchecks = 0;
 	ListCell   *lc;
 
-	if (list_length(cooked_constraints) == 0)
+	if (cooked_constraints == NIL)
 		return;					/* nothing to do */
 
 	/*
