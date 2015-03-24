@@ -6411,16 +6411,24 @@ deparse_AlterTableStmt(StashedCommand *cmd)
 					if (!istype)
 					{
 						/*
-						 * Error out if the USING clause was used.  We cannot use
-						 * it directly here, because it needs to run through
-						 * transformExpr() before being usable for ruleutils.c, and
-						 * we're not in a position to transform it ourselves.  To
-						 * fix this problem, tablecmds.c needs to be modified to store
-						 * the transformed expression somewhere in the StashedATSubcmd.
+						 * If there's a USING clause, transformAlterTableStmt
+						 * ran it through transformExpr and stored the
+						 * resulting node in cooked_default, which we can use
+						 * here.
 						 */
 						tmp2 = new_objtree_VA("USING %{expression}s", 0);
 						if (def->raw_default)
-							elog(ERROR, "unimplemented deparse of ALTER TABLE TYPE USING");
+						{
+							Datum	deparsed;
+							char   *defexpr;
+
+							defexpr = nodeToString(def->cooked_default);
+							deparsed = DirectFunctionCall2(pg_get_expr,
+														   CStringGetTextDatum(defexpr),
+														   RelationGetRelid(rel));
+							append_string_object(tmp2, "expression",
+												 TextDatumGetCString(deparsed));
+						}
 						else
 							append_bool_object(tmp2, "present", false);
 						append_object_object(tmp, "using", tmp2);
