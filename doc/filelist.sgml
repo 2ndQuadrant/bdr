@@ -42,7 +42,6 @@
 <!ENTITY manual-conflicts      SYSTEM "manual-conflicts.sgml">
 <!ENTITY manual-global-sequences      SYSTEM "manual-global-sequences.sgml">
 <!ENTITY manual-replication-sets      SYSTEM "manual-replication-sets.sgml">
-<!ENTITY manual-distributed-sequences      SYSTEM "manual-distributed-sequences.sgml">
 <!ENTITY manual-monitoring      SYSTEM "manual-monitoring.sgml">
 <!ENTITY manual-settings      SYSTEM "manual-settings.sgml">
 <!ENTITY manual-functions      SYSTEM "manual-functions.sgml">
