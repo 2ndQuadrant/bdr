@@ -2,13 +2,14 @@
  <title>Verifying digital signatures</title>
 
  <para>
-  The signing key ID used for BDR releases based on PostgreSQL 9.4 is <ulink
+  The signing key ID used for source code and RPM releases of BDR versions
+  based on PostgreSQL 9.4 is <ulink
   url="http://packages.2ndquadrant.com/postgresql-bdr94-2ndquadrant/RPM-GPG-KEY-2NDQ-BDR-94">
   the key <literal>0x6E192B0E</literal></ulink>.
  </para>
 
  <para>
-  To download the BDR 9.4 repository key to your computer:
+  To download the BDR 9.4 RPM repository key to your computer:
   <programlisting>
    curl -s http://packages.2ndquadrant.com/postgresql-bdr94-2ndquadrant/RPM-GPG-KEY-2NDQ-BDR-94 | gpg --import
    gpg --fingerprint 0x6E192B0E
@@ -20,7 +21,7 @@
  </para>
 
  <para>
-  The BDR / 9.4 releases key key is in turn signed by
+  The BDR / 9.4 RPM releases key key is in turn signed by
   <ulink url="http://packages.2ndquadrant.com/2NDQUADRANT-PACKAGING-MASTER-KEY.asc">
   the 2ndQuadrant master packaging/releases key with key ID
   <literal>0x2B11E054</literal></ulink>. You can <ulink
@@ -57,6 +58,14 @@
    sudo rpmkeys --import http://packages.2ndquadrant.com/postgresql-bdr94-2ndquadrant/RPM-GPG-KEY-2NDQ-BDR-94
    rpm -K some-bdr-rpm.rpm
   </programlisting>
+ </para>
+
+ <para>
+  The packaging master key also signs the repository key for the Debian and
+  Ubuntu packages. The current repository key ID for the apt repository
+  is <literal>0xAA7A6805</literal> and can be downloaded from
+  <ulink url="http://packages.2ndquadrant.com/bdr/apt/AA7A6805.asc">
+  the repository site</ulink>.
  </para>
 
 </appendix>
