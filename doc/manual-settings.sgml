@@ -145,6 +145,22 @@
      </listitem>
     </varlistentry>
 
+    <varlistentry id="guc-default-sequenceam" xreflabel="default_sequenceam">
+     <term><varname>default_sequenceam</varname> (<type>string</type>)
+      <indexterm>
+       <primary><varname>default_sequenceam</varname> configuration parameter</primary>
+      </indexterm>
+     </term>
+     <listitem>
+      <para>
+       Only present in &bdr;. Controls the type of sequence created by unqualifieed
+       <literal>CREATE SEQUENCE</literal> commands and by <literal>SERIAL</literal>
+       and <literal>BIGSERIAL</literal>. See <xref linkend="global-sequences">.
+       May be set per-session with <literal>SET</literal>.
+      </para>
+     </listitem>
+    </varlistentry>
+
    </variablelist>
   </para>
  </sect1>

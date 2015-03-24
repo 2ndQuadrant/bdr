@@ -4,9 +4,24 @@
   <primary>Monitoring</primary>
   <seealso>Catalogs</seealso>
  </indexterm>
+
  <para>
   Monitoring replication setups is important to ensure that your system performs optimally
   and doesn't run out of disk space or encounter other faults that may halt operations.
+ </para>
+
+ <para>
+  If one or more nodes are down in a &bdr; group then <acronym>DDL</acronym>
+  locking for <xref linkend="ddl-replication"> will wait indefinitely or until
+  cancelled. <acronym>DDL</acronym> locking requires <emphasis>consensus</emphasis>
+  across all nodes, not just a quorum, so it must be able to reach all nodes.
+  So it's important to monitor for node outages.
+ </para>
+
+ <para>
+  Global sequence chunk allocations can also be distrupted if half or more of
+  the nodes are down or unreachable. See
+  <xref linkend="global-sequence-voting">.
  </para>
 
  <para>
