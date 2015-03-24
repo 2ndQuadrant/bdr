@@ -46,5 +46,6 @@
 <!ENTITY manual-monitoring      SYSTEM "manual-monitoring.sgml">
 <!ENTITY manual-settings      SYSTEM "manual-settings.sgml">
 <!ENTITY manual-functions      SYSTEM "manual-functions.sgml">
+<!ENTITY manual-catalogs-views      SYSTEM "manual-catalogs-views.sgml">
 <!ENTITY manual-upgrade		SYSTEM "manual-upgrade.sgml">
 <!ENTITY appendix-signatures      SYSTEM "appendix-signatures.sgml">

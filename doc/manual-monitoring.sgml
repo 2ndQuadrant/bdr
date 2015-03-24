@@ -2,6 +2,7 @@
  <title>Monitoring</title>
  <indexterm>
   <primary>Monitoring</primary>
+  <seealso>Catalogs</seealso>
  </indexterm>
  <para>
   Monitoring replication setups is important to ensure that your system performs optimally
