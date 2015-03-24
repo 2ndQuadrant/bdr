@@ -7700,7 +7700,7 @@ ATPrepAlterColumnType(List **wqueue,
 	char	   *colName = cmd->name;
 	ColumnDef  *def = (ColumnDef *) cmd->def;
 	TypeName   *typeName = def->typeName;
-	Node	   *transform = def->raw_default;
+	Node	   *transform;
 	HeapTuple	tuple;
 	Form_pg_attribute attTup;
 	AttrNumber	attnum;
@@ -7759,32 +7759,16 @@ ATPrepAlterColumnType(List **wqueue,
 	{
 		/*
 		 * Set up an expression to transform the old data value to the new
-		 * type. If a USING option was given, transform and use that
-		 * expression, else just take the old value and try to coerce it.  We
-		 * do this first so that type incompatibility can be detected before
-		 * we waste effort, and because we need the expression to be parsed
-		 * against the original table row type.
+		 * type. If a USING option was given, use the expression as transformed
+		 * by transformAlterTableStmt, else just take the old value and try to
+		 * coerce it.  We do this first so that type incompatibility can be
+		 * detected before we waste effort, and because we need the expression
+		 * to be parsed against the original table row type.
 		 */
-		if (transform)
+		if (def->cooked_default)
 		{
-			RangeTblEntry *rte;
-
-			/* Expression must be able to access vars of old table */
-			rte = addRangeTableEntryForRelation(pstate,
-												rel,
-												NULL,
-												false,
-												true);
-			addRTEtoQuery(pstate, rte, false, true, true);
-
-			transform = transformExpr(pstate, transform,
-									  EXPR_KIND_ALTER_COL_TRANSFORM);
-
-			/* It can't return a set */
-			if (expression_returns_set(transform))
-				ereport(ERROR,
-						(errcode(ERRCODE_DATATYPE_MISMATCH),
-					  errmsg("transform expression must not return a set")));
+			/* transformAlterTableStmt already did the work */
+			transform = def->cooked_default;
 		}
 		else
 		{
@@ -7825,11 +7809,6 @@ ATPrepAlterColumnType(List **wqueue,
 		if (ATColumnChangeRequiresRewrite(transform, attnum))
 			tab->rewrite |= AT_REWRITE_COLUMN_REWRITE;
 	}
-	else if (transform)
-		ereport(ERROR,
-				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
-				 errmsg("\"%s\" is not a table",
-						RelationGetRelationName(rel))));
 
 	if (tab->relkind == RELKIND_COMPOSITE_TYPE ||
 		tab->relkind == RELKIND_FOREIGN_TABLE)

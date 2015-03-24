@@ -2367,6 +2367,7 @@ transformAlterTableStmt(Oid relid, AlterTableStmt *stmt,
 	List	   *newcmds = NIL;
 	bool		skipValidation = true;
 	AlterTableCmd *newcmd;
+	RangeTblEntry *rte;
 
 	/*
 	 * We must not scribble on the passed-in AlterTableStmt, so copy it. (This
@@ -2406,6 +2407,13 @@ transformAlterTableStmt(Oid relid, AlterTableStmt *stmt,
 	cxt.alist = NIL;
 	cxt.pkey = NULL;
 
+	rte = addRangeTableEntryForRelation(pstate,
+										rel,
+										NULL,
+										false,
+										true);
+	addRTEtoQuery(pstate, rte, false, true, true);
+
 	/*
 	 * The only subtypes that currently require parse transformation handling
 	 * are ADD COLUMN and ADD CONSTRAINT.  These largely re-use code from
@@ -2441,6 +2449,38 @@ transformAlterTableStmt(Oid relid, AlterTableStmt *stmt,
 					newcmds = lappend(newcmds, cmd);
 					break;
 				}
+			case AT_AlterColumnType:
+				{
+					ColumnDef *def = (ColumnDef *) cmd->def;
+
+					/*
+					 * For ALTER COLUMN TYPE, transform the USING clause if
+					 * one was specified.
+					 */
+					if (def->raw_default)
+					{
+						/* USING is only valid for plain tables */
+						if (rel->rd_rel->relkind != RELKIND_RELATION)
+							ereport(ERROR,
+									(errcode(ERRCODE_WRONG_OBJECT_TYPE),
+									 errmsg("\"%s\" is not a table",
+											RelationGetRelationName(rel))));
+
+						def->cooked_default =
+							transformExpr(pstate, def->raw_default,
+										  EXPR_KIND_ALTER_COL_TRANSFORM);
+
+						/* it can't return a set */
+						if (expression_returns_set(def->cooked_default))
+							ereport(ERROR,
+									(errcode(ERRCODE_DATATYPE_MISMATCH),
+									 errmsg("transform expression must not return a set")));
+					}
+
+					newcmds = lappend(newcmds, cmd);
+					break;
+				}
+
 			case AT_AddConstraint:
 
 				/*
