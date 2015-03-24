@@ -74,12 +74,127 @@
    </itemizedlist>
   </para>
 
-  <para>
-   During the 0.8.0 development process the BDR extension source code was split
-   out of the BDR-patched PostgreSQL source tree. Prior releases of the BDR
-   plugin were in the <filename>contrib/bdr</filename> subdirectory of
-   the patched PostgreSQL source tree instead.
-  </para>
+  <sect2 id="release-0.8.0-replication-sets" xreflabel="Replication sets">
+   <title>Replication sets</title>
+
+   <para>
+    Replication sets have been introduced. This new feature allows admins to
+    specify sets of tables that each node should receive changes on. It is now
+    possible to exclude tables that are not of interest to a particular node, or to
+    include only a subset of tables for replication to a node. Replication sets can
+    be used for data distribution, for data integration and for limited sharding.
+   </para>
+
+  </sect2>
+
+  <sect2 id="release-0.8.0-global-sequence-performance" xreflabel="Global sequence performance improvements">
+   <title>Global sequence performance improvements</title>
+
+   <para>
+    The performance of global sequence voting has been greatly improved,
+    especially at higher node counts. It is now less likely for transactions to
+    fail because of global sequence exhaustion when the BDR group is under
+    significant write load.
+   </para>
+
+  </sect2>
+
+  <sect2 id="release-0.8.0-ddl-replication" xreflabel="DDL replication improvements">
+   <title>DDL Replication improvements</title>
+
+   <para>
+    Many more DDL commands can be replicated. Fixes have been applied for
+    issues with replicating a few of the previously supported commands.
+   </para>
+
+   <para>
+    DDL commands that will cause full table rewrites are detected and
+    prohibited early.
+   </para>
+
+   <para>
+    Commands that are disallowed on normal tables are now permitted on temp
+    tables, including <literal>CREATE TABLE ... AS SELECT ...</literal>.
+   </para>
+
+  </sect2>
+
+  <sect2 id="release-0.8.0-conflict-handling" xreflabel="Conflict handling enhancements">
+   <title>Conflict handling enhancements</title>
+
+   <para>
+    User defined conflict handlers can now return replacement tuples for
+    <literal>UPDATE</literal>/<literal>DELETE</literal> conflicts.
+   </para>
+
+   <para>
+    User defined conflict handlers are invoked for
+    <literal>DELETE</literal>/<literal>DELETE</literal> conflicts.
+   </para>
+
+   <para>
+    Spurious conflicts are no longer logged after node initialisation.
+   </para>
+
+  </sect2>
+
+  <sect2 id="release-0.8.0-source-split" xreflabel="Extension source code separation">
+   <title>Extension source code separation</title>
+
+   <para>
+    The BDR source code has been split into two parts: a set of patches to
+    PostgreSQL 9.4 and a separate PostgreSQL extension. This helps streamline
+    work on integrating the features BDR requires into core PostgreSQL for
+    releases 9.5 and onward.
+   </para>
+
+   <para>
+    The patched PostgreSQL is now tracked in git branches prefixed with
+    <filename>bdr-pg/</filename>, mainly
+    <filename>bdr-pg/REL9_4_STABLE</filename>.  The extension is now tracked in
+    git branches prefixed with <filename>bdr-plugin/</filename>, mainly
+    <filename>bdr-plugin/stable</filename> (last stable release)
+    and <filename>bdr-plugin/next</filename> (current development tree).
+    All branches share the same working repository.
+   </para>
+
+   <para>
+    Prior releases of the BDR plugin were in the
+    <filename>contrib/bdr</filename> subdirectory of the patched PostgreSQL
+    source tree instead.
+   </para>
+
+  </sect2>
+
+  <sect2 id="release-0.8.0-other" xreflabel="Other changes">
+   <title>Other changes</title>
+
+   <itemizedlist>
+    <listitem>
+     <simpara>
+      Permit the 'bdr' output plugin to be used from the SQL interface for
+      logical replication. This is primarily useful for debugging.
+     </simpara>
+    </listitem>
+    <listitem>
+     <simpara>
+      Less memory is required to replay and apply large transactions.
+     </simpara>
+    </listitem>
+    <listitem>
+     <simpara>
+      The bdr_get_local_nodeid() function is available to return the local node's (sysid,timeline,dboid) tuple.
+     </simpara>
+    </listitem>
+    <listitem>
+     <simpara>
+      The <literal>bdr_version_num()</literal> and <literal>bdr_min_remote_version_num()</literal>
+      functions were added. See <xref linkend="functions">.
+     </simpara>
+    </listitem>
+   </itemizedlist>
+
+  </sect2>
 
  </sect1>
 
@@ -109,6 +224,7 @@
     <listitem><para>FreeBSD compatibility</para></listitem>
    </itemizedlist>
   </para>
+
 
  </sect1>
 
