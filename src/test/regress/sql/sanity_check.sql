@@ -5,7 +5,7 @@ VACUUM;
 -- complete.  But skip TOAST relations (since they will have varying
 -- names depending on the current OID counter) as well as temp tables
 -- of other backends (to avoid timing-dependent behavior).  Also exclude
--- the table used for the deparse test, as it might not be there at all.
+-- the schema used for the deparse test, as it might not be there at all.
 --
 
 -- temporarily disable fancy output, so catalog changes create less diff noise
@@ -13,8 +13,7 @@ VACUUM;
 
 SELECT relname, relhasindex
    FROM pg_class c LEFT JOIN pg_namespace n ON n.oid = relnamespace
-   WHERE relkind = 'r' AND (nspname ~ '^pg_temp_') IS NOT TRUE
-     AND relname <> 'deparse_test_commands'
+   WHERE relkind = 'r' AND (nspname ~ '^pg_temp_' OR nspname ~ '^pg_deparse') IS NOT TRUE
    ORDER BY relname;
 
 -- restore normal output mode

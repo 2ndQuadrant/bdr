@@ -1288,7 +1288,9 @@ where virtualtransaction = (
         from pg_locks
         where transactionid = txid_current()::integer)
 and locktype = 'relation'
-and relnamespace NOT IN (select oid from pg_namespace where nspname LIKE 'pg\_%')
+and relnamespace NOT IN (
+	select oid from pg_namespace
+	where nspname IN ('pg_catalog', 'pg_deparse'))
 and c.relname != 'my_locks'
 group by c.relname;
 

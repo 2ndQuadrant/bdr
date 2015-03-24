@@ -1,7 +1,6 @@
 ---
 --- DEPARSE_TEST
 ---
-
 -- create roles used throughout the tests
 create role clstr_user;
 create role "current_user";
@@ -47,11 +46,8 @@ create role testrolx;
 create role unprivileged_role;
 create role "user";
 create role view_user2;
-
 \pset format unaligned
 \pset tuples_only
 \o ./sql/deparse_dump.sql
-
 SELECT * FROM pg_deparse.output_commands();
-
 \! @abs_builddir@/../../bin/psql/psql --dbname=@deparse_test_db@ -e < ./sql/deparse_dump.sql > results/deparse_dump.out 2>&1

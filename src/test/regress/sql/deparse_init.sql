@@ -24,7 +24,8 @@ BEGIN
 		FROM pg_event_trigger_get_creation_commands() WITH ORDINALITY,
 		pg_current_xlog_insert_location() lsn,
 		pg_stat_get_backend_idset() id
-		 WHERE pg_stat_get_backend_pid(id) = pg_backend_pid();
+		 WHERE pg_stat_get_backend_pid(id) = pg_backend_pid() AND
+		NOT command_tag = 'CREATE TABLE AS EXECUTE';
 	EXCEPTION WHEN OTHERS THEN 
 			RAISE WARNING 'state: % errm: %', sqlstate, sqlerrm;
 	END;
