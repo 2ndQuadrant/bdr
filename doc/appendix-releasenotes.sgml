@@ -15,34 +15,107 @@
   See also: <xref linkend="upgrade">.
  </para>
 
- <sect1 id="release-0.7" xreflabel="0.7.x Releases">
-  <title>Release 0.7.0</title>
+ <sect1 id="release-0.9.0">
+  <title>Release 0.9.0</title>
 
   <para>
-   BDR 0.7.0 was tagged on Tue Aug 19 2014 as git tag
-   <literal>bdr/0.7.0</literal>.  The 0.7.0 release was the first &bdr; release
-   for which RPM packages were available, and the first significant release to
-   the public.
+   The 0.9.0 release was tagged on Tue Mar 24 2015 as git tag
+   <literal>bdr-plugin/0.9.0</literal>. This release requires
+   bdr-Pg <literal>bdr-pg/REL9_4_1-1</literal> to support full
+   BDR functionality.
   </para>
 
   <para>
-   0.7.0 was based on PostgreSQL 9.4 beta2. It is not on-disk compatible with
-   final PostgreSQL releases.
+   Significant features and improvements to &bdr; in this release include:
+   <itemizedlist>
+    <listitem><para>Dynamic SQL-level configuration of connections between nodes</para></listitem>
+    <listitem><para>Joining new nodes no longer requires restarting all nodes</para></listitem>
+    <listitem><para>Easy node removal</para></listitem>
+    <listitem><para><xref linkend="command-bdr-init-copy"> performs its own <application>pg_basebackup</application></para></listitem>
+    <listitem><para>Many helper and information functions</para></listitem>
+    <listitem><para>Documentation expanded and moved into the source tree</para></listitem>
+    <listitem><para>FreeBSD compatibility</para></listitem>
+   </itemizedlist>
   </para>
 
-  <para>
-   There was no separate <literal>bdr-pg</literal> for this release.
-  </para>
+  <sect2 id="release-0.9.0-dynconf" xreflabel="Dynamic configuration">
+   <title>Dynamic configuration</title>
 
-  <para>
-   Detailed release information for 0.7.0 and prior releases may be found in
-   the git tree.
-  </para>
+   <para>
+    The biggest change with 0.9.0 is that connections between nodes are now
+    configured using the <xref linkend="function-bdr-group-create"> and
+    <xref linkend="function-bdr-group-join"> SQL function calls. It is no
+    longer necessary to restart any existing nodes when joining a node. Even
+    the newly joining node can join without a restart if it was initially
+    configured with the settings required for running &bdr; (see
+    <xref linkend="settings-prerequisite">).
+   </para>
 
-  <para>
-   0.7.0 was followed by a bugfix release, 0.7.1 on Tue Sep 2 2014 as git tag
-   <literal>bdr/0.7.1</literal>. See the tag comments for details.
-  </para>
+   <para>
+    <literal>bdr.connections</literal> is now unused and ignored. If it
+    remains in <filename>postgresql.conf</filename> a warning will be issued
+    in the PostgreSQL log on startup.
+   </para>
+
+   <para>
+    For details, see the <xref linkend="node-management"> chapter.
+   </para>
+
+  </sect2>
+
+  <sect2 id="release-0.9.0-node-removal" xreflabel="Easy node removal">
+   <title>Easy node removal</title>
+
+   <para>
+    The new <xref linkend="function-bdr-part-by-node-names"> function allows easy
+    online node removal. There is no need to restart nodes or to manually
+    delete replication identifiers and slots. Multiple nodes may be
+    removed at once.
+   </para>
+
+  </sect2>
+
+  <sect2 id="release-0.9.0-init-copy" xreflabel="bdr_init_copy">
+   <title><application>bdr_init_copy</application> makes its own base backup</title>
+
+   <para>
+    <application>bdr_init_copy</application> can now make its own base backup
+    of the target node, and does so by default. Its user interface has also
+    been overhauled as part of the update to support dynamic configuration.
+   </para>
+
+  </sect2>
+
+  <sect2 id="release-0.9.0-docs" xreflabel="Documentation in the source tree">
+   <title>Documentation in the source tree</title>
+
+   <para>
+    Formal documentation has been written and added to the &bdr; source tree
+    to replace the prior ad-hoc wiki based documentation. This allows users
+    to more easily refer to documentation specific to their particular
+    version and permits the documentation to be updated at the same time
+    as the source code.
+   </para>
+
+  </sect2>
+
+  <sect2 id="release-0.9.0-freebsd" xreflabel="FreeBSD compatibility">
+   <title>FreeBSD compatibility</title>
+
+   <para>
+    &bdr; is now tested and built automatically on FreeBSD.
+   </para>
+
+  </sect2>
+
+  <sect2 id="release-0.9.0-functions" xreflabel="New helper functions">
+   <title>New helper functions</title>
+
+   <para>
+    Many new helper functions have been added, see <xref linkend="functions">.
+   </para>
+
+  </sect2>
 
  </sect1>
 
@@ -198,108 +271,37 @@
 
  </sect1>
 
- <sect1 id="release-0.9.0">
-  <title>Release 0.9.0</title>
+
+ <sect1 id="release-0.7" xreflabel="0.7.x Releases">
+  <title>Release 0.7.0</title>
 
   <para>
-   The 0.9.0 release was tagged on Tue Mar 24 2015 as git tag
-   <literal>bdr-plugin/0.9.0</literal>. This release requires
-   bdr-Pg <literal>bdr-pg/REL9_4_1-1</literal> to support full
-   BDR functionality.
+   BDR 0.7.0 was tagged on Tue Aug 19 2014 as git tag
+   <literal>bdr/0.7.0</literal>.  The 0.7.0 release was the first &bdr; release
+   for which RPM packages were available, and the first significant release to
+   the public.
   </para>
 
   <para>
-   Significant features and improvements to &bdr; in this release include:
-   <itemizedlist>
-    <listitem><para>Dynamic SQL-level configuration of connections between nodes</para></listitem>
-    <listitem><para>Joining new nodes no longer requires restarting all nodes</para></listitem>
-    <listitem><para>Easy node removal</para></listitem>
-    <listitem><para><xref linkend="command-bdr-init-copy"> performs its own <application>pg_basebackup</application></para></listitem>
-    <listitem><para>Many helper and information functions</para></listitem>
-    <listitem><para>Documentation expanded and moved into the source tree</para></listitem>
-    <listitem><para>FreeBSD compatibility</para></listitem>
-   </itemizedlist>
+   0.7.0 was based on PostgreSQL 9.4 beta2. It is not on-disk compatible with
+   final PostgreSQL releases.
   </para>
 
-  <sect2 id="release-0.9.0-dynconf" xreflabel="Dynamic configuration">
-   <title>Dynamic configuration</title>
+  <para>
+   There was no separate <literal>bdr-pg</literal> for this release.
+  </para>
 
-   <para>
-    The biggest change with 0.9.0 is that connections between nodes are now
-    configured using the <xref linkend="function-bdr-group-create"> and
-    <xref linkend="function-bdr-group-join"> SQL function calls. It is no
-    longer necessary to restart any existing nodes when joining a node. Even
-    the newly joining node can join without a restart if it was initially
-    configured with the settings required for running &bdr; (see
-    <xref linkend="settings-prerequisite">).
-   </para>
+  <para>
+   Detailed release information for 0.7.0 and prior releases may be found in
+   the git tree.
+  </para>
 
-   <para>
-    <literal>bdr.connections</literal> is now unused and ignored. If it
-    remains in <filename>postgresql.conf</filename> a warning will be issued
-    in the PostgreSQL log on startup.
-   </para>
-
-   <para>
-    For details, see the <xref linkend="node-management"> chapter.
-   </para>
-
-  </sect2>
-
-  <sect2 id="release-0.9.0-node-removal" xreflabel="Easy node removal">
-   <title>Easy node removal</title>
-
-   <para>
-    The new <xref linkend="function-bdr-part-by-node-names"> function allows easy
-    online node removal. There is no need to restart nodes or to manually
-    delete replication identifiers and slots. Multiple nodes may be
-    removed at once.
-   </para>
-
-  </sect2>
-
-  <sect2 id="release-0.9.0-init-copy" xreflabel="bdr_init_copy">
-   <title><application>bdr_init_copy</application> makes its own base backup</title>
-
-   <para>
-    <application>bdr_init_copy</application> can now make its own base backup
-    of the target node, and does so by default. Its user interface has also
-    been overhauled as part of the update to support dynamic configuration.
-   </para>
-
-  </sect2>
-
-  <sect2 id="release-0.9.0-docs" xreflabel="Documentation in the source tree">
-   <title>Documentation in the source tree</title>
-
-   <para>
-    Formal documentation has been written and added to the &bdr; source tree
-    to replace the prior ad-hoc wiki based documentation. This allows users
-    to more easily refer to documentation specific to their particular
-    version and permits the documentation to be updated at the same time
-    as the source code.
-   </para>
-
-  </sect2>
-
-  <sect2 id="release-0.9.0-freebsd" xreflabel="FreeBSD compatibility">
-   <title>FreeBSD compatibility</title>
-
-   <para>
-    &bdr; is now tested and built automatically on FreeBSD.
-   </para>
-
-  </sect2>
-
-  <sect2 id="release-0.9.0-functions" xreflabel="New helper functions">
-   <title>New helper functions</title>
-
-   <para>
-    Many new helper functions have been added, see <xref linkend="functions">.
-   </para>
-
-  </sect2>
+  <para>
+   0.7.0 was followed by a bugfix release, 0.7.1 on Tue Sep 2 2014 as git tag
+   <literal>bdr/0.7.1</literal>. See the tag comments for details.
+  </para>
 
  </sect1>
+
 
 </appendix>
