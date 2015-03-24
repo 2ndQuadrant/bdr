@@ -5,7 +5,7 @@
  </indexterm>
 
  <para>
-  Signficiant changes to the &bdr; extension (including &udr;) are documented
+  Signficant changes to the &bdr; extension (including &udr;) are documented
   in the release notes. Please read the release notes for all versions between
   yours and the version to plan to upgrade to before performing an upgrade,
   as there may be version-specific upgrade steps.
@@ -24,6 +24,14 @@
    bdr-Pg <literal>bdr-pg/REL9_4_1-1</literal> to support full
    BDR functionality.
   </para>
+
+   <para>
+    Development of BDR 0.9.0 was performed by the
+    <ulink url="2ndquadrant.com">2ndQuadrant</ulink> BDR team.
+    Multiple customers contributed funding and other resources to make this
+    release possible. 2ndQuadrant continues to fund the ongoing development of
+    BDR to meet internal needs and those of customers.
+   </para>
 
   <para>
    Significant features and improvements to &bdr; in this release include:
