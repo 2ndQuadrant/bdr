@@ -184,4 +184,28 @@
   </sect3>
 
  </sect2>
+
+ <sect2 id="installation-packages-debian" xreflabel="Installing from packages on Debian or Ubuntu">
+  <title>Installing from packages on Debian or Ubuntu</title>
+
+  <para>
+   At time of writing packages for Debian and Ubuntu are available from
+   <ulink url="http://packages.2ndquadrant.com/bdr/apt/">http://packages.2ndquadrant.com/bdr/apt/</ulink>.
+   Debian and Ubuntu packaging is still subject to ongoing development
+   and may change. See <ulink url="http://bdr-project.org">bdr-project.org</ulink>
+   for the latest information.
+  </para>
+
+ </sect2>
+
+ <sect2 id="installation-packages-windows" xreflabel="Installing from packages on Windows">
+  <title>Installing from packages on Windows</title>
+
+  <para>
+   Windows is not supported at this time. There is no major technical barrier
+   to doing so but it has not been a time allocation priority. See <xref linkend="install-requirements">.
+  </para>
+
+ </sect2>
+
 </sect1>
