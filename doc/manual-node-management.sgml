@@ -209,7 +209,22 @@
   <para>
    A node is removed with the <xref linkend="function-bdr-part-by-node-names">
    function. You must specify the node name (as passed during node creation)
-   to remove a node.
+   to remove a node. You can call <literal>bdr.bdr_part_by_node_names</literal>
+   on the node to be removed (if it is up) or on any other node. Multiple
+   nodes may be removed at once. No value is returned; the removal status may
+   be seen by checking the <literal>status</literal> field in
+   <literal>bdr.bdr_nodes</literal> for that node.
+  </para>
+
+  <para>
+   To remove <literal>node1</literal>:
+   <programlisting>
+    SELECT bdr.bdr_part_by_node_names(ARRAY['node-1']);
+   </programlisting>
+   or to remove multiple nodes at once:
+   <programlisting>
+    SELECT bdr.bdr_part_by_node_names(ARRAY['node-1', 'node-2', 'node-3']);
+   </programlisting>
   </para>
 
   <para>
