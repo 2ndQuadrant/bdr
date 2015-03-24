@@ -189,7 +189,7 @@
      <simpara>Replication across architectures and OSes (e.g. PPC64 Linux to x86_64 OS X) is supported.</simpara>
     </listitem>
     <listitem>
-     <simpara>Replication is per-database (or finer grained), wheras physical replication can and must replicate all databases.</simpara>
+     <simpara>Replication is per-database (or finer grained), whereas physical replication can and must replicate all databases.</simpara>
     </listitem>
     <listitem>
      <simpara>&bdr;'s logical replication implementation imposes some restrictions on supported DDL (see: <xref linkend="ddl-replication">) that do not apply for physical replication</simpara>

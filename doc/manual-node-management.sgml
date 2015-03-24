@@ -10,7 +10,7 @@
 
   <para>
    &bdr; and &udr; require different steps for setting up a node
-   because &bdr; replication is all-to-all (mesh), wheras for &udr;
+   because &bdr; replication is all-to-all (mesh), whereas for &udr;
    replication is unidirectional. Both modes share many of the same concepts as
    discussed below. The exact commands required differ and are documented below
    under <xref linkend="node-management-joining-udr"> and <xref
