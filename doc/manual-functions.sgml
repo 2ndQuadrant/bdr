@@ -173,7 +173,7 @@
       </row>
 
       <row>
-       <entry>&bdr;</entry>
+       <entry>&bdr;/&udr;</entry>
        <entry>
         <indexterm>
          <primary>bdr.bdr_replicate_ddl_command</primary>
@@ -184,8 +184,9 @@
        <entry>
         Execute the <acronym>SQL</acronym> (usually <acronym>DDL</acronym>)
         <replaceable>cmd</replaceable> on the local node and queue it for
-        extension on all peer nodes. <emphasis>This function is mainly for &bdr; internal
-        use and bypasses some safety checks, use with caution.</emphasis>
+        extension on all peer nodes. This function is useful mainly for
+        replicating <acronym>DDL</acronym> in an &udr; setup where the
+        transparent <acronym>DDL</acronym> replication is not available.
        </entry>
       </row>
 
