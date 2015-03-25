@@ -171,8 +171,9 @@
   </para>
 
   <para>
-   Support for the sequence access method (<literal>seqam</literal>) field in
-   <application>psql</application> is pending in PostgreSQL 9.5.
+   When using the <application>psql</> client provided by BDR PostgreSQL,
+   the sequence access method is also visible in the output of the
+   <command>\ds</> command.
   </para>
 
  </sect1>
