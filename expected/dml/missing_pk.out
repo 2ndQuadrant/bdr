@@ -3,9 +3,16 @@ SELECT * FROM public.bdr_regress_variables()
 \gset
 \c :writedb1
 SELECT bdr.bdr_replicate_ddl_command($$
-	CREATE TABLE public.bdr_missing_pk(a serial);
+	CREATE TABLE public.bdr_missing_pk_parent(a serial PRIMARY KEY);
+	CREATE TABLE public.bdr_missing_pk(a serial) INHERITS (public.bdr_missing_pk_parent);
 	CREATE VIEW public.bdr_missing_pk_view AS SELECT * FROM public.bdr_missing_pk;
 $$);
+NOTICE:  merging column "a" with inherited definition
+CONTEXT:  during DDL replay of ddl statement: 
+	CREATE TABLE public.bdr_missing_pk_parent(a serial PRIMARY KEY);
+	CREATE TABLE public.bdr_missing_pk(a serial) INHERITS (public.bdr_missing_pk_parent);
+	CREATE VIEW public.bdr_missing_pk_view AS SELECT * FROM public.bdr_missing_pk;
+
  bdr_replicate_ddl_command 
 ---------------------------
  
@@ -37,36 +44,52 @@ SELECT * FROM bdr_missing_pk;
 -- these should fail
 \c :writedb2
 UPDATE bdr_missing_pk SET a = 1;
-ERROR:  Cannot UPDATE table bdr_missing_pk because it does not have primary key.
+ERROR:  Cannot run UPDATE or DELETE on table bdr_missing_pk because it does not have primary key.
 HINT:  Add primary key to the table
 DELETE FROM bdr_missing_pk WHERE a = 1;
-ERROR:  Cannot DELETE table bdr_missing_pk because it does not have primary key.
+ERROR:  Cannot run UPDATE or DELETE on table bdr_missing_pk because it does not have primary key.
+HINT:  Add primary key to the table
+UPDATE bdr_missing_pk_parent SET a = 1;
+ERROR:  Cannot run UPDATE or DELETE on table bdr_missing_pk because it does not have primary key.
+HINT:  Add primary key to the table
+DELETE FROM bdr_missing_pk_parent WHERE a = 1;
+ERROR:  Cannot run UPDATE or DELETE on table bdr_missing_pk because it does not have primary key.
 HINT:  Add primary key to the table
 WITH foo AS (
 	UPDATE bdr_missing_pk SET a = 1 WHERE a > 1 RETURNING a
 ) SELECT * FROM foo;
-ERROR:  Cannot UPDATE table bdr_missing_pk because it does not have primary key.
+ERROR:  Cannot run UPDATE or DELETE on table bdr_missing_pk because it does not have primary key.
 HINT:  Add primary key to the table
 WITH foo AS (
 	DELETE FROM bdr_missing_pk RETURNING a
 ) SELECT * FROM foo;
-ERROR:  Cannot DELETE table bdr_missing_pk because it does not have primary key.
+ERROR:  Cannot run UPDATE or DELETE on table bdr_missing_pk because it does not have primary key.
 HINT:  Add primary key to the table
 UPDATE bdr_missing_pk_view SET a = 1;
-ERROR:  Cannot UPDATE table bdr_missing_pk because it does not have primary key.
+ERROR:  Cannot run UPDATE or DELETE on table bdr_missing_pk because it does not have primary key.
 HINT:  Add primary key to the table
 DELETE FROM bdr_missing_pk_view WHERE a = 1;
-ERROR:  Cannot DELETE table bdr_missing_pk because it does not have primary key.
+ERROR:  Cannot run UPDATE or DELETE on table bdr_missing_pk because it does not have primary key.
 HINT:  Add primary key to the table
 WITH foo AS (
 	UPDATE bdr_missing_pk_view SET a = 1 WHERE a > 1 RETURNING a
 ) SELECT * FROM foo;
-ERROR:  Cannot UPDATE table bdr_missing_pk because it does not have primary key.
+ERROR:  Cannot run UPDATE or DELETE on table bdr_missing_pk because it does not have primary key.
 HINT:  Add primary key to the table
 WITH foo AS (
 	DELETE FROM bdr_missing_pk_view RETURNING a
 ) SELECT * FROM foo;
-ERROR:  Cannot DELETE table bdr_missing_pk because it does not have primary key.
+ERROR:  Cannot run UPDATE or DELETE on table bdr_missing_pk because it does not have primary key.
+HINT:  Add primary key to the table
+WITH foo AS (
+	UPDATE bdr_missing_pk SET a = 1 RETURNING *
+) INSERT INTO bdr_missing_pk SELECT * FROM foo;
+ERROR:  Cannot run UPDATE or DELETE on table bdr_missing_pk because it does not have primary key.
+HINT:  Add primary key to the table
+WITH foo AS (
+	DELETE FROM bdr_missing_pk_view RETURNING a
+) INSERT INTO bdr_missing_pk SELECT * FROM foo;
+ERROR:  Cannot run UPDATE or DELETE on table bdr_missing_pk because it does not have primary key.
 HINT:  Add primary key to the table
 -- success again
 TRUNCATE bdr_missing_pk;
