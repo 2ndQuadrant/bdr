@@ -137,8 +137,8 @@
     <para>
      To install the &bdr;-enabled PostgreSQL server, &bdr; extension, and the client programs, simply:
      <programlisting>
-      yum check-update
-      yum install postgresql-bdr94-bdr
+      sudo yum check-update
+      sudo yum install postgresql-bdr94-bdr
      </programlisting>
     </para>
 
@@ -177,7 +177,7 @@
     normal. Then install the repository RPMs as outlined above.
     Finally, install the UDR package:
     <programlisting>
-     yum install postgresql94-udr
+     sudo yum install postgresql94-udr
     </programlisting>
    </para>
 
