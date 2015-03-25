@@ -17,7 +17,7 @@
  <para>
   For this Quick Start example, we are setting up a two node cluster with two
   PostgreSQL instances on the same server. We are using the terms node and instance
-  interchangebly.
+  interchangeably.
  </para>
 
   <para>
@@ -36,8 +36,8 @@
     <para>
     If you just want to try BDR out quickly and you're on a Linux system (or have a Linux VM to play with),
     you can run a script that'll set up a temporary BDR install in your home directory. <emphasis>
-    this installation method is only suitable for trying out BDR, not for production or for use on a
-    system with valuable data on it.</emphasis> 
+    This installation method is only suitable for trying out BDR, not for production or for use on a
+    system with valuable data on it.</emphasis>
     To install the latest stable release, run:
     <screen>
     <prompt>$</prompt> curl -s "http://git.postgresql.org/gitweb/?p=2ndquadrant_bdr.git;a=blob_plain;f=scripts/bdr_quickstart.sh;hb=bdr-plugin/next" | bash

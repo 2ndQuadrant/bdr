@@ -312,7 +312,7 @@
   <para>
    Trigger-based replication also requires an external d&aelig;mon process on
    the sending and/or receiving side. &bdr; runs its management processes
-   inside PostgreSQL its self, so there's no separate replication process
+   inside PostgreSQL itself, so there's no separate replication process
    to manage.
   </para>
 
@@ -323,7 +323,7 @@
    events and confirmations. Slony-I provides infrastructure for handling
    DDL while also running on unmodified PostgreSQL 9.4. Bucardo supports
    multi-master on unmodified PostgreSQL 9.4. So while &bdr; offers some
-   significant benfits it won't suit every need and every workload. Evaluate
+   significant benefits it won't suit every need and every workload. Evaluate
    your needs carefully before choosing a technology.
   </para>
 
@@ -382,7 +382,7 @@
    the system very tolerant of latency between nodes, temporary network
    partitions or node outages, etc, and makes scale-out more efficient.
   </para>
-  
+
   <para>
    &bdr; is a loosely coupled shared-nothing multi-master design.
   </para>
@@ -496,7 +496,7 @@
    must manually synchronise database schema changes. Unlike &bdr;, there are
    no row-conflict resolution features in &udr;.
   </para>
-  
+
   <para>
    &udr; is mainly useful for read-replicas and for performing minimal-downtime
    upgrades to new PostgreSQL versions (or to PostgreSQL 9.4 with &bdr;). It
