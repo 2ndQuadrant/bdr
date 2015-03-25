@@ -35,9 +35,9 @@
   </para>
 
   <para>
-   As of the version this documentation was written for PostgreSQL 9.5 is
-   not yet supported. Neither is Microsoft Windows. Both of these limits
-   will be removed by a later release so check the
+   As of the time of writing, the upcoming PostgreSQL 9.5 release is not yet
+   supported. Neither is Microsoft Windows. Support for both will be added
+   in later releases; please check the
    <ulink url="http://2ndquadrant.com/BDR">&bdr; website</ulink> for
    the latest information.
   </para>
