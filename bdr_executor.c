@@ -41,6 +41,7 @@
 #include "nodes/parsenodes.h"
 
 #include "parser/parse_relation.h"
+#include "parser/parsetree.h"
 
 #include "storage/bufmgr.h"
 #include "storage/lmgr.h"
@@ -772,6 +773,7 @@ BdrExecutorStart(QueryDesc *queryDesc, int eflags)
 {
 	bool		performs_writes = false;
 	ListCell   *l;
+	List	   *rangeTable = queryDesc->plannedstmt->rtable;
 
 	if (bdr_always_allow_writes)
 		goto done;
@@ -793,22 +795,17 @@ BdrExecutorStart(QueryDesc *queryDesc, int eflags)
 	bdr_locks_check_query();
 #endif
 
-	/* INSERTs are always ok beyond this point */
-	if (queryDesc->operation == CMD_INSERT)
+	/* plain INSERTs are always ok beyond this point */
+	if (queryDesc->operation == CMD_INSERT &&
+		!queryDesc->plannedstmt->hasModifyingCTE)
 		goto done;
 
 	/* Fail if query tries to UPDATE or DELETE any of tables without PK */
-	foreach(l, queryDesc->plannedstmt->rtable)
+	foreach(l, queryDesc->plannedstmt->resultRelations)
 	{
-		RangeTblEntry  *rte = (RangeTblEntry *) lfirst(l);
+		Index			rtei = lfirst_int(l);
+		RangeTblEntry  *rte = rt_fetch(rtei, rangeTable);
 		Relation		rel;
-
-		/* Executor should get views already expanded */
-		if (rte->rtekind != RTE_RELATION || rte->relkind != RELKIND_RELATION)
-			continue;
-
-		if ((rte->requiredPerms & (ACL_UPDATE | ACL_DELETE)) == 0)
-			continue;
 
 		rel = RelationIdGetRelation(rte->relid);
 
@@ -829,8 +826,7 @@ BdrExecutorStart(QueryDesc *queryDesc, int eflags)
 
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("Cannot %s table %s because it does not have primary key.",
-						rte->requiredPerms & ACL_UPDATE ? "UPDATE" : "DELETE",
+				 errmsg("Cannot run UPDATE or DELETE on table %s because it does not have primary key.",
 						RelationGetRelationName(rel)),
 				 errhint("Add primary key to the table")));
 
