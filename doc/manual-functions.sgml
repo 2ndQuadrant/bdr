@@ -195,7 +195,7 @@
    </table>
   </para>
 
-  <sect2 id="functions-node-mgmt-subscribe" xreflabel="Node management function examples">
+  <sect2 id="functions-node-mgmt-subscribe" xreflabel="bdr.bdr_subscribe">
    <title><function>bdr.bdr_subscribe</function></title>
 
    <indexterm>
@@ -290,7 +290,7 @@
    </para>
   </sect2>
 
-  <sect2 id="functions-node-mgmt-examples" xreflabel="node_">
+  <sect2 id="functions-node-mgmt-examples" xreflabel="Node management function examples">
    <title>Node management function examples</title>
    <para>
    These examples show libpq connection strings without a host or hostadd.
