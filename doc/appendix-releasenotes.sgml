@@ -234,7 +234,7 @@
     <filename>bdr-pg/</filename>, mainly
     <filename>bdr-pg/REL9_4_STABLE</filename>.  The extension is now tracked in
     git branches prefixed with <filename>bdr-plugin/</filename>, mainly
-    <filename>bdr-plugin/stable</filename> (last stable release)
+    <filename>bdr-plugin/RELX_Y_STABLE</filename> (stable releases)
     and <filename>bdr-plugin/next</filename> (current development tree).
     All branches share the same working repository.
    </para>
