@@ -38,7 +38,7 @@ CATALOG(pg_ts_dict,3600)
 	Oid			dicttemplate;	/* dictionary's template */
 
 #ifdef CATALOG_VARLEN			/* variable-length fields start here */
-	text		dictinitoption; /* options passed to dict_init() */
+	text		dictinitoption; /* options passed to the tmplinit proc */
 #endif
 } FormData_pg_ts_dict;
 
