@@ -765,6 +765,8 @@ deparse_DefineStmt_Aggregate(Oid objectId, DefineStmt *define)
 	bool		isnull;
 	Form_pg_aggregate agg;
 	Form_pg_proc proc;
+	Form_pg_operator op;
+	HeapTuple	tup;
 
 	aggTup = SearchSysCache1(AGGFNOID, ObjectIdGetDatum(objectId));
 	if (!HeapTupleIsValid(aggTup))
@@ -870,142 +872,167 @@ deparse_DefineStmt_Aggregate(Oid objectId, DefineStmt *define)
 		append_string_object(stmt, "agg type", "ordered-set");
 	}
 
-	/*
-	 * Now add the definition clause
-	 */
+	/* Add the definition clause */
 	list = NIL;
 
-	tmp = new_objtree_VA("SFUNC=%{procedure}D", 0);
+	/* SFUNC */
+	tmp = new_objtree_VA("SFUNC=%{procedure}D", 1,
+						 "clause", ObjTypeString, "sfunc");
 	append_object_object(tmp, "procedure",
 						 new_objtree_for_qualname_id(ProcedureRelationId,
 													 agg->aggtransfn));
 	list = lappend(list, new_object_object(tmp));
 
-	tmp = new_objtree_VA("STYPE=%{type}T", 0);
+	/* STYPE */
+	tmp = new_objtree_VA("STYPE=%{type}T", 1,
+						 "clause", ObjTypeString, "stype");
 	append_object_object(tmp, "type",
 						 new_objtree_for_type(agg->aggtranstype, -1));
 	list = lappend(list, new_object_object(tmp));
 
+	/* SSPACE */
+	tmp = new_objtree_VA("SSPACE=%{space}n", 1,
+						 "clause", ObjTypeString, "sspace");
 	if (agg->aggtransspace != 0)
-	{
-		tmp = new_objtree_VA("SSPACE=%{space}n", 1,
-							 "space", ObjTypeInteger,
-							 agg->aggtransspace);
-		list = lappend(list, new_object_object(tmp));
-	}
+		append_integer_object(tmp, "space", agg->aggtransspace);
+	else
+		append_bool_object(tmp, "present", false);
+	list = lappend(list, new_object_object(tmp));
 
-	if (OidIsValid(agg->aggfinalfn))
-	{
-		tmp = new_objtree_VA("FINALFUNC=%{procedure}D", 0);
-		append_object_object(tmp, "procedure",
+	/* FINALFUNC */
+	tmp = new_objtree_VA("FINALFUNC=%{procedure}D", 1,
+						 "clause", ObjTypeString, "finalfunc");
+	if (OidIsValid(agg->aggfinalfn)) append_object_object(tmp, "procedure",
 							 new_objtree_for_qualname_id(ProcedureRelationId,
 														 agg->aggfinalfn));
-		list = lappend(list, new_object_object(tmp));
-	}
+	else
+		append_bool_object(tmp, "present", false);
+	list = lappend(list, new_object_object(tmp));
 
+	/* FINALFUNC_EXTRA */
+	tmp = new_objtree_VA("FINALFUNC_EXTRA=%{value}s", 1,
+						 "clause", ObjTypeString, "finalfunc_extra");
 	if (agg->aggfinalextra)
-	{
-		tmp = new_objtree_VA("FINALFUNC_EXTRA=true", 0);
-		list = lappend(list, new_object_object(tmp));
-	}
+		append_string_object(tmp, "value", "true");
+	else
+		append_string_object(tmp, "value", "false");
+	list = lappend(list, new_object_object(tmp))X;
 
+	/* INITCOND */
 	initval = SysCacheGetAttr(AGGFNOID, aggTup,
 							  Anum_pg_aggregate_agginitval,
 							  &isnull);
+	tmp = new_objtree_VA("INITCOND=%{initval}L", 1,
+						 "clause", ObjTypeString, "initcond");
 	if (!isnull)
-	{
-		tmp = new_objtree_VA("INITCOND=%{initval}L",
-							 1, "initval", ObjTypeString,
+		append_string_object(tmp, "initval",
 							 TextDatumGetCString(initval));
-		list = lappend(list, new_object_object(tmp));
-	}
+	else
+		append_bool_object(tmp, "present", false);
+	list = lappend(list, new_object_object(tmp));
 
+	/* MSFUNC */
+	tmp = new_objtree_VA("MSFUNC=%{procedure}D", 1,
+						 "clause", ObjTypeString, "msfunc");
 	if (OidIsValid(agg->aggmtransfn))
-	{
-		tmp = new_objtree_VA("MSFUNC=%{procedure}D", 0);
 		append_object_object(tmp, "procedure",
 							 new_objtree_for_qualname_id(ProcedureRelationId,
 														 agg->aggmtransfn));
-		list = lappend(list, new_object_object(tmp));
-	}
+	else
+		append_bool_object(tmp, "present", false);
+	list = lappend(list, new_object_object(tmp));
 
+	/* MSTYPE */
+	tmp = new_objtree_VA("MSTYPE=%{type}T", 1,
+						 "clause", ObjTypeString, "mstype");
 	if (OidIsValid(agg->aggmtranstype))
-	{
-		tmp = new_objtree_VA("MSTYPE=%{type}T", 0);
 		append_object_object(tmp, "type",
 							 new_objtree_for_type(agg->aggmtranstype, -1));
-		list = lappend(list, new_object_object(tmp));
-	}
+	else
+		append_bool_object(tmp, "present", false);
+	list = lappend(list, new_object_object(tmp));
 
+	/* MSSPACE */
+	tmp = new_objtree_VA("MSSPACE=%{space}n", 1,
+						 "clause", ObjTypeString, "msspace");
 	if (agg->aggmtransspace != 0)
-	{
-		tmp = new_objtree_VA("MSSPACE=%{space}n", 1,
-							 "space", ObjTypeInteger,
-							 agg->aggmtransspace);
-		list = lappend(list, new_object_object(tmp));
-	}
+		append_integer_object(tmp, "space", agg->aggmtransspace);
+	else
+		append_bool_object(tmp, "present", false);
+	list = lappend(list, new_object_object(tmp));
 
+	/* MINVFUNC */
+	tmp = new_objtree_VA("MINVFUNC=%{procedure}D", 1,
+						 "clause", ObjTypeString, "minvfunc");
 	if (OidIsValid(agg->aggminvtransfn))
-	{
-		tmp = new_objtree_VA("MINVFUNC=%{procedure}D", 0);
 		append_object_object(tmp, "procedure",
 							 new_objtree_for_qualname_id(ProcedureRelationId,
 														 agg->aggminvtransfn));
-		list = lappend(list, new_object_object(tmp));
-	}
+	else
+		append_bool_object(tmp, "present", false);
+	list = lappend(list, new_object_object(tmp));
 
+	/* MFINALFUNC */
+	tmp = new_objtree_VA("MFINALFUNC=%{procedure}D", 1,
+						 "clause", ObjTypeString, "mfinalfunc");
 	if (OidIsValid(agg->aggmfinalfn))
-	{
-		tmp = new_objtree_VA("MFINALFUNC=%{procedure}D", 0);
 		append_object_object(tmp, "procedure",
 							 new_objtree_for_qualname_id(ProcedureRelationId,
 														 agg->aggmfinalfn));
-		list = lappend(list, new_object_object(tmp));
-	}
+	else
+		append_bool_object(tmp, "present", false);
+	list = lappend(list, new_object_object(tmp));
 
+	/* MFINALFUNC_EXTRA */
+	tmp = new_objtree_VA("MFINALFUNC_EXTRA=%{value}s", 1,
+						 "clause", ObjTypeString, "mfinalfunc_extra");
 	if (agg->aggmfinalextra)
-	{
-		tmp = new_objtree_VA("MFINALFUNC_EXTRA=true", 0);
-		list = lappend(list, new_object_object(tmp));
-	}
+		append_string_object(tmp, "value", "true");
+	else
+		append_bool_object(tmp, "present", false);
+	list = lappend(list, new_object_object(tmp));
 
+	/* MINITCOND */
 	initval = SysCacheGetAttr(AGGFNOID, aggTup,
 							  Anum_pg_aggregate_aggminitval,
 							  &isnull);
+	tmp = new_objtree_VA("MINITCOND=%{initval}L", 1,
+						 "clause", ObjTypeString, "minitcond");
 	if (!isnull)
-	{
-		tmp = new_objtree_VA("MINITCOND=%{initval}L",
-							 1, "initval", ObjTypeString,
+		append_string_object(tmp, "initval",
 							 TextDatumGetCString(initval));
-		list = lappend(list, new_object_object(tmp));
-	}
+	else
+		append_bool_object(tmp, "present", false);
+	list = lappend(list, new_object_object(tmp));
 
+	/* HYPOTHETICAL */
+	tmp = new_objtree_VA("HYPOTHETICAL=%{value}s", 1,
+						 "clause", ObjTypeString, "hypothetical");
 	if (agg->aggkind == AGGKIND_HYPOTHETICAL)
-	{
-		tmp = new_objtree_VA("HYPOTHETICAL=true", 0);
-		list = lappend(list, new_object_object(tmp));
-	}
+		append_string_object(tmp, "value", "true");
+	else
+		append_bool_object(tmp, "present", false);
+	list = lappend(list, new_object_object(tmp));
 
+	/* SORTOP */
+	tup = SearchSysCache1(OPEROID, ObjectIdGetDatum(agg->aggsortop));
+	if (!HeapTupleIsValid(tup))
+		elog(ERROR, "cache lookup failed for operator with OID %u", agg->aggsortop);
+	op = (Form_pg_operator) GETSTRUCT(tup);
+
+	tmp = new_objtree_VA("SORTOP=%{operator}D", 1,
+						 "clause", ObjTypeString, "sortop");
 	if (OidIsValid(agg->aggsortop))
-	{
-		Oid sortop = agg->aggsortop;
-		Form_pg_operator op;
-		HeapTuple tup;
-
-		tup = SearchSysCache1(OPEROID, ObjectIdGetDatum(sortop));
-		if (!HeapTupleIsValid(tup))
-			elog(ERROR, "cache lookup failed for operator with OID %u", sortop);
-		op = (Form_pg_operator) GETSTRUCT(tup);
-
-		tmp = new_objtree_VA("SORTOP=%{operator}D", 0);
 		append_object_object(tmp, "operator",
 							 new_objtree_for_qualname(op->oprnamespace,
 													  NameStr(op->oprname)));
-		list = lappend(list, new_object_object(tmp));
+	else
+		append_bool_object(tmp, "present", false);
+	list = lappend(list, new_object_object(tmp));
 
-		ReleaseSysCache(tup);
-	}
+	ReleaseSysCache(tup);
 
+	/* Done with the definition clause */
 	append_array_object(stmt, "elems", list);
 
 	ReleaseSysCache(procTup);
@@ -1026,9 +1053,9 @@ deparse_DefineStmt_Collation(Oid objectId, DefineStmt *define)
 		elog(ERROR, "cache lookup failed for collation with OID %u", objectId);
 	colForm = (Form_pg_collation) GETSTRUCT(colTup);
 
-	stmt = new_objtree_VA("CREATE COLLATION %{identity}D "
-						  "(LC_COLLATE = %{collate}L,"
-						  " LC_CTYPE = %{ctype}L)", 0);
+	stmt = new_objtree_VA(
+						  "CREATE COLLATION %{identity}D (LC_COLLATE = %{collate}L, LC_CTYPE = %{ctype}L)",
+						  0);
 
 	append_object_object(stmt, "identity",
 						 new_objtree_for_qualname(colForm->collnamespace,
@@ -1061,70 +1088,84 @@ deparse_DefineStmt_Operator(Oid objectId, DefineStmt *define)
 						 new_objtree_for_qualname(oprForm->oprnamespace,
 												  NameStr(oprForm->oprname)));
 
+	/* Add the definition clause */
 	list = NIL;
 
+	/* PROCEDURE */
 	tmp = new_objtree_VA("PROCEDURE=%{procedure}D", 0);
 	append_object_object(tmp, "procedure",
 						 new_objtree_for_qualname_id(ProcedureRelationId,
 													 oprForm->oprcode));
 	list = lappend(list, new_object_object(tmp));
 
+	/* LEFTARG */
+	tmp = new_objtree_VA("LEFTARG=%{type}T", 0);
 	if (OidIsValid(oprForm->oprleft))
-	{
-		tmp = new_objtree_VA("LEFTARG=%{type}T", 0);
 		append_object_object(tmp, "type",
 							 new_objtree_for_type(oprForm->oprleft, -1));
-		list = lappend(list, new_object_object(tmp));
-	}
+	else
+		append_bool_object(tmp, "present", false);
+	list = lappend(list, new_object_object(tmp));
 
+	/* RIGHTARG */
+	tmp = new_objtree_VA("RIGHTARG=%{type}T", 0);
 	if (OidIsValid(oprForm->oprright))
-	{
-		tmp = new_objtree_VA("RIGHTARG=%{type}T", 0);
 		append_object_object(tmp, "type",
 							 new_objtree_for_type(oprForm->oprright, -1));
-		list = lappend(list, new_object_object(tmp));
-	}
+	append_bool_object(tmp, "present", false);
+	list = lappend(list, new_object_object(tmp));
 
+	/* COMMUTATOR */
+	tmp = new_objtree_VA("COMMUTATOR=%{oper}D", 0);
 	if (OidIsValid(oprForm->oprcom))
-	{
-		tmp = new_objtree_VA("COMMUTATOR=%{oper}D", 0);
 		append_object_object(tmp, "oper",
 							 new_objtree_for_qualname_id(OperatorRelationId,
 														 oprForm->oprcom));
-		list = lappend(list, new_object_object(tmp));
-	}
+	else
+		append_bool_object(tmp, "present", false);
+	list = lappend(list, new_object_object(tmp));
 
+	/* NEGATOR */
+	tmp = new_objtree_VA("NEGATOR=%{oper}D", 0);
 	if (OidIsValid(oprForm->oprnegate))
-	{
-		tmp = new_objtree_VA("NEGATOR=%{oper}D", 0);
 		append_object_object(tmp, "oper",
 							 new_objtree_for_qualname_id(OperatorRelationId,
 														 oprForm->oprnegate));
-		list = lappend(list, new_object_object(tmp));
-	}
+	else
+		append_bool_object(tmp, "present", false);
+	list = lappend(list, new_object_object(tmp));
 
+	/* RESTRICT */
+	tmp = new_objtree_VA("RESTRICT=%{procedure}D", 0);
 	if (OidIsValid(oprForm->oprrest))
-	{
-		tmp = new_objtree_VA("RESTRICT=%{procedure}D", 0);
 		append_object_object(tmp, "procedure",
 							 new_objtree_for_qualname_id(ProcedureRelationId,
 														 oprForm->oprrest));
-		list = lappend(list, new_object_object(tmp));
-	}
+	else
+		append_bool_object(tmp, "present", false);
+	list = lappend(list, new_object_object(tmp));
 
+	/* JOIN */
+	tmp = new_objtree_VA("JOIN=%{procedure}D", 0);
 	if (OidIsValid(oprForm->oprjoin))
-	{
-		tmp = new_objtree_VA("JOIN=%{procedure}D", 0);
 		append_object_object(tmp, "procedure",
 							 new_objtree_for_qualname_id(ProcedureRelationId,
 														 oprForm->oprjoin));
-		list = lappend(list, new_object_object(tmp));
-	}
+	else
+		append_bool_object(tmp, "present", false);
+	list = lappend(list, new_object_object(tmp));
 
-	if (oprForm->oprcanmerge)
-		list = lappend(list, new_object_object(new_objtree_VA("MERGES", 0)));
-	if (oprForm->oprcanhash)
-		list = lappend(list, new_object_object(new_objtree_VA("HASHES", 0)));
+	/* MERGES */
+	tmp = new_objtree_VA("MERGES", 0);
+	if (!oprForm->oprcanmerge)
+		append_bool_object(tmp, "present", false);
+	list = lappend(list, new_object_object(tmp));
+
+	/* HASHES */
+	tmp = new_objtree_VA("HASHES", 0);
+	if (!oprForm->oprcanhash)
+		append_bool_object(tmp, "present", false);
+	list = lappend(list, new_object_object(tmp));
 
 	append_array_object(stmt, "elems", list);
 
@@ -1165,24 +1206,32 @@ deparse_DefineStmt_TSConfig(Oid objectId, DefineStmt *define,
 												  NameStr(tscForm->cfgname)));
 
 	/*
-	 * If tsconfig was copied from another one, define it like so.
+	 * Add the definition clause.  If we have COPY'ed an existing config, add
+	 * a COPY clause; otherwise add a PARSER clause.
 	 */
 	list = NIL;
+	/* COPY */
+	tmp = new_objtree_VA("COPY=%{tsconfig}D", 1,
+						 "clause", ObjTypeString, "copy");
 	if (copied.objectId != InvalidOid)
-	{
-		tmp = new_objtree_VA("COPY=%{tsconfig}D", 0);
 		append_object_object(tmp, "tsconfig",
 							 new_objtree_for_qualname_id(TSConfigRelationId,
 														 copied.objectId));
-	}
 	else
-	{
-		tmp = new_objtree_VA("PARSER=%{parser}D", 0);
+		append_bool_object(tmp, "present", false);
+	list = lappend(list, new_object_object(tmp));
+
+	/* PARSER */
+	tmp = new_objtree_VA("PARSER=%{parser}D", 1,
+						 "clause", ObjTypeString, "parser");
+	if (copied.objectId == InvalidOid)
 		append_object_object(tmp, "parser",
 							 new_objtree_for_qualname(tspForm->prsnamespace,
 													  NameStr(tspForm->prsname)));
-	}
+	else
+		append_bool_object(tmp, "present", false);
 	list = lappend(list, new_object_object(tmp));
+
 	append_array_object(stmt, "elems", list);
 
 	ReleaseSysCache(tspTup);
