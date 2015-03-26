@@ -728,7 +728,8 @@ get_persistence_str(char persistence)
 		case RELPERSISTENCE_PERMANENT:
 			return "";
 		default:
-			return "???";
+			elog(ERROR, "unexpected persistence marking %c", persistence);
+			return "";		/* make compiler happy */
 	}
 }
 
