@@ -1,6 +1,6 @@
 \c postgres
 SELECT bdr.bdr_subscribe(
-	local_node_name := 'postgres',
+	local_node_name := 'node-pg',
 	subscribe_to_dsn := 'dbname=regression',
 	node_local_dsn := 'dbname=postgres',
 	replication_sets := ARRAY['default', 'important', 'for-node-2', 'for-node-2-insert', 'for-node-2-update', 'for-node-2-delete']
