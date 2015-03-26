@@ -46,9 +46,8 @@ AS (
   FROM pg_catalog.pg_replication_slots s,
     LATERAL bdr.bdr_parse_slot_name(s.slot_name) p
 )
-SELECT 'fail'
-FROM namepairs
-WHERE orig <> formatted;
+SELECT orig = formatted
+FROM namepairs;
 
 -- Check the view mapping slot names to bdr nodes. We can't really examine the slot
 -- name in the regresschecks, because it changes every run, so make sure we at least
