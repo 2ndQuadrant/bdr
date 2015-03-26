@@ -1092,14 +1092,16 @@ deparse_DefineStmt_Operator(Oid objectId, DefineStmt *define)
 	list = NIL;
 
 	/* PROCEDURE */
-	tmp = new_objtree_VA("PROCEDURE=%{procedure}D", 0);
+	tmp = new_objtree_VA("PROCEDURE=%{procedure}D", 1,
+						 "clause", ObjTypeString, "procedure");
 	append_object_object(tmp, "procedure",
 						 new_objtree_for_qualname_id(ProcedureRelationId,
 													 oprForm->oprcode));
 	list = lappend(list, new_object_object(tmp));
 
 	/* LEFTARG */
-	tmp = new_objtree_VA("LEFTARG=%{type}T", 0);
+	tmp = new_objtree_VA("LEFTARG=%{type}T", 1,
+						 "clause", ObjTypeString, "leftarg");
 	if (OidIsValid(oprForm->oprleft))
 		append_object_object(tmp, "type",
 							 new_objtree_for_type(oprForm->oprleft, -1));
@@ -1108,7 +1110,8 @@ deparse_DefineStmt_Operator(Oid objectId, DefineStmt *define)
 	list = lappend(list, new_object_object(tmp));
 
 	/* RIGHTARG */
-	tmp = new_objtree_VA("RIGHTARG=%{type}T", 0);
+	tmp = new_objtree_VA("RIGHTARG=%{type}T", 1,
+						 "clause", ObjTypeString, "rightarg");
 	if (OidIsValid(oprForm->oprright))
 		append_object_object(tmp, "type",
 							 new_objtree_for_type(oprForm->oprright, -1));
@@ -1116,7 +1119,8 @@ deparse_DefineStmt_Operator(Oid objectId, DefineStmt *define)
 	list = lappend(list, new_object_object(tmp));
 
 	/* COMMUTATOR */
-	tmp = new_objtree_VA("COMMUTATOR=%{oper}D", 0);
+	tmp = new_objtree_VA("COMMUTATOR=%{oper}D", 1,
+						 "clause", ObjTypeString, "commutator");
 	if (OidIsValid(oprForm->oprcom))
 		append_object_object(tmp, "oper",
 							 new_objtree_for_qualname_id(OperatorRelationId,
@@ -1126,7 +1130,8 @@ deparse_DefineStmt_Operator(Oid objectId, DefineStmt *define)
 	list = lappend(list, new_object_object(tmp));
 
 	/* NEGATOR */
-	tmp = new_objtree_VA("NEGATOR=%{oper}D", 0);
+	tmp = new_objtree_VA("NEGATOR=%{oper}D", 1,
+						 "clause", ObjTypeString, "negator");
 	if (OidIsValid(oprForm->oprnegate))
 		append_object_object(tmp, "oper",
 							 new_objtree_for_qualname_id(OperatorRelationId,
@@ -1136,7 +1141,8 @@ deparse_DefineStmt_Operator(Oid objectId, DefineStmt *define)
 	list = lappend(list, new_object_object(tmp));
 
 	/* RESTRICT */
-	tmp = new_objtree_VA("RESTRICT=%{procedure}D", 0);
+	tmp = new_objtree_VA("RESTRICT=%{procedure}D", 1,
+						 "clause", ObjTypeString, "restrict");
 	if (OidIsValid(oprForm->oprrest))
 		append_object_object(tmp, "procedure",
 							 new_objtree_for_qualname_id(ProcedureRelationId,
@@ -1146,7 +1152,8 @@ deparse_DefineStmt_Operator(Oid objectId, DefineStmt *define)
 	list = lappend(list, new_object_object(tmp));
 
 	/* JOIN */
-	tmp = new_objtree_VA("JOIN=%{procedure}D", 0);
+	tmp = new_objtree_VA("JOIN=%{procedure}D", 1,
+						 "clause", ObjTypeString, "join");
 	if (OidIsValid(oprForm->oprjoin))
 		append_object_object(tmp, "procedure",
 							 new_objtree_for_qualname_id(ProcedureRelationId,
@@ -1156,13 +1163,15 @@ deparse_DefineStmt_Operator(Oid objectId, DefineStmt *define)
 	list = lappend(list, new_object_object(tmp));
 
 	/* MERGES */
-	tmp = new_objtree_VA("MERGES", 0);
+	tmp = new_objtree_VA("MERGES", 1,
+						 "clause", ObjTypeString, "merges");
 	if (!oprForm->oprcanmerge)
 		append_bool_object(tmp, "present", false);
 	list = lappend(list, new_object_object(tmp));
 
 	/* HASHES */
-	tmp = new_objtree_VA("HASHES", 0);
+	tmp = new_objtree_VA("HASHES", 1,
+						 "clause", ObjTypeString, "hashes");
 	if (!oprForm->oprcanhash)
 		append_bool_object(tmp, "present", false);
 	list = lappend(list, new_object_object(tmp));
@@ -1188,18 +1197,18 @@ deparse_DefineStmt_TSConfig(Oid objectId, DefineStmt *define,
 
 	tscTup = SearchSysCache1(TSCONFIGOID, ObjectIdGetDatum(objectId));
 	if (!HeapTupleIsValid(tscTup))
-		elog(ERROR, "cache lookup failed for text search configuration "
-			 "with OID %u", objectId);
+		elog(ERROR, "cache lookup failed for text search configuration %u",
+			 objectId);
 	tscForm = (Form_pg_ts_config) GETSTRUCT(tscTup);
 
 	tspTup = SearchSysCache1(TSPARSEROID, ObjectIdGetDatum(tscForm->cfgparser));
 	if (!HeapTupleIsValid(tspTup))
-		elog(ERROR, "cache lookup failed for text search parser with OID %u",
+		elog(ERROR, "cache lookup failed for text search parser %u",
 			 tscForm->cfgparser);
 	tspForm = (Form_pg_ts_parser) GETSTRUCT(tspTup);
 
-	stmt = new_objtree_VA("CREATE TEXT SEARCH CONFIGURATION %{identity}D "
-						  "(%{elems:, }s)", 0);
+	stmt = new_objtree_VA("CREATE TEXT SEARCH CONFIGURATION %{identity}D (%{elems:, }s)",
+						  0);
 
 	append_object_object(stmt, "identity",
 						 new_objtree_for_qualname(tscForm->cfgnamespace,
@@ -1255,47 +1264,58 @@ deparse_DefineStmt_TSParser(Oid objectId, DefineStmt *define)
 			 objectId);
 	tspForm = (Form_pg_ts_parser) GETSTRUCT(tspTup);
 
-	stmt = new_objtree_VA("CREATE TEXT SEARCH PARSER %{identity}D "
-						  "(%{elems:, }s)", 0);
+	stmt = new_objtree_VA("CREATE TEXT SEARCH PARSER %{identity}D (%{elems:, }s)",
+						  0);
 
 	append_object_object(stmt, "identity",
 						 new_objtree_for_qualname(tspForm->prsnamespace,
 												  NameStr(tspForm->prsname)));
 
+	/* Add the definition clause */
 	list = NIL;
 
-	tmp = new_objtree_VA("START=%{procedure}D", 0);
+	/* START */
+	tmp = new_objtree_VA("START=%{procedure}D", 1,
+						 "clause", ObjTypeString, "start");
 	append_object_object(tmp, "procedure",
 						 new_objtree_for_qualname_id(ProcedureRelationId,
 													 tspForm->prsstart));
 	list = lappend(list, new_object_object(tmp));
 
-	tmp = new_objtree_VA("GETTOKEN=%{procedure}D", 0);
+	/* GETTOKEN */
+	tmp = new_objtree_VA("GETTOKEN=%{procedure}D", 1,
+						 "clause", ObjTypeString, "gettoken");
 	append_object_object(tmp, "procedure",
 						 new_objtree_for_qualname_id(ProcedureRelationId,
 													 tspForm->prstoken));
 	list = lappend(list, new_object_object(tmp));
 
-	tmp = new_objtree_VA("END=%{procedure}D", 0);
+	/* END */
+	tmp = new_objtree_VA("END=%{procedure}D", 1,
+						 "clause", ObjTypeString, "end");
 	append_object_object(tmp, "procedure",
 						 new_objtree_for_qualname_id(ProcedureRelationId,
 													 tspForm->prsend));
 	list = lappend(list, new_object_object(tmp));
 
-	tmp = new_objtree_VA("LEXTYPES=%{procedure}D", 0);
+	/* LEXTYPES */
+	tmp = new_objtree_VA("LEXTYPES=%{procedure}D", 1,
+						 "clause", ObjTypeString, "lextypes");
 	append_object_object(tmp, "procedure",
 						 new_objtree_for_qualname_id(ProcedureRelationId,
 													 tspForm->prslextype));
 	list = lappend(list, new_object_object(tmp));
 
+	/* HEADLINE */
+	tmp = new_objtree_VA("HEADLINE=%{procedure}D", 1,
+						 "clause", ObjTypeString, "headline");
 	if (OidIsValid(tspForm->prsheadline))
-	{
-		tmp = new_objtree_VA("HEADLINE=%{procedure}D", 0);
 		append_object_object(tmp, "procedure",
 							 new_objtree_for_qualname_id(ProcedureRelationId,
 														 tspForm->prsheadline));
-		list = lappend(list, new_object_object(tmp));
-	}
+	else
+		append_bool_object(tmp, "present", false);
+	list = lappend(list, new_object_object(tmp));
 
 	append_array_object(stmt, "elems", list);
 
@@ -1328,23 +1348,30 @@ deparse_DefineStmt_TSDictionary(Oid objectId, DefineStmt *define)
 						 new_objtree_for_qualname(tsdForm->dictnamespace,
 												  NameStr(tsdForm->dictname)));
 
+	/* Add the definition clause */
 	list = NIL;
 
-	tmp = new_objtree_VA("TEMPLATE=%{template}D", 0);
+	/* TEMPLATE */
+	tmp = new_objtree_VA("TEMPLATE=%{template}D", 1,
+						 "clause", ObjTypeString, "template");
 	append_object_object(tmp, "template",
 						 new_objtree_for_qualname_id(TSTemplateRelationId,
 													 tsdForm->dicttemplate));
 	list = lappend(list, new_object_object(tmp));
 
+	/*
+	 * options.  XXX this is a pretty useless representation, but we can't do
+	 * better without more ts_cache.c cooperation ...
+	 */
 	options = SysCacheGetAttr(TSDICTOID, tsdTup,
 							  Anum_pg_ts_dict_dictinitoption,
 							  &isnull);
+	tmp = new_objtree_VA("%{options}s", 0);
 	if (!isnull)
-	{
-		tmp = new_objtree_VA("%{options}s", 0);
 		append_string_object(tmp, "options", TextDatumGetCString(options));
-		list = lappend(list, new_object_object(tmp));
-	}
+	else
+		append_bool_object(tmp, "present", false);
+	list = lappend(list, new_object_object(tmp));
 
 	append_array_object(stmt, "elems", list);
 
@@ -1375,18 +1402,23 @@ deparse_DefineStmt_TSTemplate(Oid objectId, DefineStmt *define)
 						 new_objtree_for_qualname(tstForm->tmplnamespace,
 												  NameStr(tstForm->tmplname)));
 
+	/* Add the definition clause */
 	list = NIL;
 
+	/* INIT */
+	tmp = new_objtree_VA("INIT=%{procedure}D", 1,
+						 "clause", ObjTypeString, "init");
 	if (OidIsValid(tstForm->tmplinit))
-	{
-		tmp = new_objtree_VA("INIT=%{procedure}D", 0);
 		append_object_object(tmp, "procedure",
 							 new_objtree_for_qualname_id(ProcedureRelationId,
 														 tstForm->tmplinit));
-		list = lappend(list, new_object_object(tmp));
-	}
+	else
+		append_bool_object(tmp, "present", false);
+	list = lappend(list, new_object_object(tmp));
 
-	tmp = new_objtree_VA("LEXIZE=%{procedure}D", 0);
+	/* LEXIZE */
+	tmp = new_objtree_VA("LEXIZE=%{procedure}D", 1,
+						 "clause", ObjTypeString, "lexize");
 	append_object_object(tmp, "procedure",
 						 new_objtree_for_qualname_id(ProcedureRelationId,
 													 tstForm->tmpllexize));
@@ -1419,7 +1451,8 @@ deparse_DefineStmt_Type(Oid objectId, DefineStmt *define)
 	/* Shortcut processing for shell types. */
 	if (!typForm->typisdefined)
 	{
-		stmt = new_objtree_VA("CREATE TYPE %{identity}D", 0);
+		stmt = new_objtree_VA("CREATE TYPE %{identity}D", 1,
+							  "is_shell", ObjTypeBool, true);
 		append_object_object(stmt, "identity",
 							 new_objtree_for_qualname(typForm->typnamespace,
 													  NameStr(typForm->typname)));
@@ -1427,77 +1460,86 @@ deparse_DefineStmt_Type(Oid objectId, DefineStmt *define)
 		return stmt;
 	}
 
-	stmt = new_objtree_VA("CREATE TYPE %{identity}D (%{elems:, }s)", 0);
+	stmt = new_objtree_VA("CREATE TYPE %{identity}D (%{elems:, }s)", 1,
+						  "is_shell", ObjTypeBool, false);
 
 	append_object_object(stmt, "identity",
 						 new_objtree_for_qualname(typForm->typnamespace,
 												  NameStr(typForm->typname)));
 
+	/* Add the definition clause */
 	list = NIL;
 
 	/* INPUT */
-	tmp = new_objtree_VA("INPUT=%{procedure}D", 0);
+	tmp = new_objtree_VA("INPUT=%{procedure}D", 1,
+						 "clause", ObjTypeString, "input");
 	append_object_object(tmp, "procedure",
 						 new_objtree_for_qualname_id(ProcedureRelationId,
 													 typForm->typinput));
 	list = lappend(list, new_object_object(tmp));
 
 	/* OUTPUT */
-	tmp = new_objtree_VA("OUTPUT=%{procedure}D", 0);
+	tmp = new_objtree_VA("OUTPUT=%{procedure}D", 1,
+						 "clause", ObjTypeString, "output");
 	append_object_object(tmp, "procedure",
 						 new_objtree_for_qualname_id(ProcedureRelationId,
 													 typForm->typoutput));
 	list = lappend(list, new_object_object(tmp));
 
 	/* RECEIVE */
+	tmp = new_objtree_VA("RECEIVE=%{procedure}D", 1,
+						 "clause", ObjTypeString, "receive");
 	if (OidIsValid(typForm->typreceive))
-	{
-		tmp = new_objtree_VA("RECEIVE=%{procedure}D", 0);
 		append_object_object(tmp, "procedure",
 							 new_objtree_for_qualname_id(ProcedureRelationId,
 														 typForm->typreceive));
-		list = lappend(list, new_object_object(tmp));
-	}
+	else
+		append_bool_object(tmp, "present", false);
+	list = lappend(list, new_object_object(tmp));
 
 	/* SEND */
+	tmp = new_objtree_VA("SEND=%{procedure}D", 1,
+						 "clause", ObjTypeString, "send");
 	if (OidIsValid(typForm->typsend))
-	{
-		tmp = new_objtree_VA("SEND=%{procedure}D", 0);
 		append_object_object(tmp, "procedure",
 							 new_objtree_for_qualname_id(ProcedureRelationId,
 														 typForm->typsend));
-		list = lappend(list, new_object_object(tmp));
-	}
+	else
+		append_bool_object(tmp, "present", false);
+	list = lappend(list, new_object_object(tmp));
 
 	/* TYPMOD_IN */
+	tmp = new_objtree_VA("TYPMOD_IN=%{procedure}D", 1,
+						 "clause", ObjTypeString, "typmod_in");
 	if (OidIsValid(typForm->typmodin))
-	{
-		tmp = new_objtree_VA("TYPMOD_IN=%{procedure}D", 0);
 		append_object_object(tmp, "procedure",
 							 new_objtree_for_qualname_id(ProcedureRelationId,
 														 typForm->typmodin));
-		list = lappend(list, new_object_object(tmp));
-	}
+	else
+		append_bool_object(tmp, "present", false);
+	list = lappend(list, new_object_object(tmp));
 
 	/* TYPMOD_OUT */
+	tmp = new_objtree_VA("TYPMOD_OUT=%{procedure}D", 1,
+						 "clause", ObjTypeString, "typmod_out");
 	if (OidIsValid(typForm->typmodout))
-	{
-		tmp = new_objtree_VA("TYPMOD_OUT=%{procedure}D", 0);
 		append_object_object(tmp, "procedure",
 							 new_objtree_for_qualname_id(ProcedureRelationId,
 														 typForm->typmodout));
-		list = lappend(list, new_object_object(tmp));
-	}
+	else
+		append_bool_object(tmp, "present", false);
+	list = lappend(list, new_object_object(tmp));
 
 	/* ANALYZE */
+	tmp = new_objtree_VA("ANALYZE=%{procedure}D", 1,
+						 "clause", ObjTypeString, "analyze");
 	if (OidIsValid(typForm->typanalyze))
-	{
-		tmp = new_objtree_VA("ANALYZE=%{procedure}D", 0);
 		append_object_object(tmp, "procedure",
 							 new_objtree_for_qualname_id(ProcedureRelationId,
 														 typForm->typanalyze));
-		list = lappend(list, new_object_object(tmp));
-	}
+	else
+		append_bool_object(tmp, "present", false);
+	list = lappend(list, new_object_object(tmp));
 
 	/* INTERNALLENGTH */
 	if (typForm->typlen == -1)
@@ -1509,14 +1551,20 @@ deparse_DefineStmt_Type(Oid objectId, DefineStmt *define)
 		tmp = new_objtree_VA("INTERNALLENGTH=%{typlen}n", 1,
 							 "typlen", ObjTypeInteger, typForm->typlen);
 	}
+	append_string_object(tmp, "clause", "internallength");
 	list = lappend(list, new_object_object(tmp));
 
 	/* PASSEDBYVALUE */
-	if (typForm->typbyval)
-		list = lappend(list, new_object_object(new_objtree_VA("PASSEDBYVALUE", 0)));
+	tmp = new_objtree_VA("PASSEDBYVALUE", 1,
+						 "clause", ObjTypeString, "passedbyvalue");
+	if (!typForm->typbyval)
+		append_bool_object(tmp, "present", false);
+	list = lappend(list, new_object_object(tmp));
 
 	/* ALIGNMENT */
-	tmp = new_objtree_VA("ALIGNMENT=%{align}s", 0);
+	tmp = new_objtree_VA("ALIGNMENT=%{align}s", 1,
+						 "clause", ObjTypeString, "alignment");
+	/* XXX it's odd to represent alignment with schema-qualified type names */
 	switch (typForm->typalign)
 	{
 		case 'd':
@@ -1537,7 +1585,8 @@ deparse_DefineStmt_Type(Oid objectId, DefineStmt *define)
 	append_string_object(tmp, "align", str);
 	list = lappend(list, new_object_object(tmp));
 
-	tmp = new_objtree_VA("STORAGE=%{storage}s", 0);
+	tmp = new_objtree_VA("STORAGE=%{storage}s", 1,
+						 "clause", ObjTypeString, "storage");
 	switch (typForm->typstorage)
 	{
 		case 'p':
@@ -1559,45 +1608,54 @@ deparse_DefineStmt_Type(Oid objectId, DefineStmt *define)
 	list = lappend(list, new_object_object(tmp));
 
 	/* CATEGORY */
-	tmp = new_objtree_VA("CATEGORY=%{category}L", 0);
+	tmp = new_objtree_VA("CATEGORY=%{category}L", 1,
+						 "clause", ObjTypeString, "category");
 	append_string_object(tmp, "category",
 						 psprintf("%c", typForm->typcategory));
 	list = lappend(list, new_object_object(tmp));
 
 	/* PREFERRED */
-	if (typForm->typispreferred)
-		list = lappend(list, new_object_object(new_objtree_VA("PREFERRED=true", 0)));
+	tmp = new_objtree_VA("PREFERRED=true", 1,
+						 "clause", ObjTypeString, "preferred");
+	if (!typForm->typispreferred)
+		append_bool_object(tmp, "present", false);
+	list = lappend(list, new_object_object(tmp));
 
 	/* DEFAULT */
 	dflt = SysCacheGetAttr(TYPEOID, typTup,
 						   Anum_pg_type_typdefault,
 						   &isnull);
+	tmp = new_objtree_VA("DEFAULT=%{default}L", 1,
+						 "clause", ObjTypeString, "default");
 	if (!isnull)
-	{
-		tmp = new_objtree_VA("DEFAULT=%{default}L", 0);
 		append_string_object(tmp, "default", TextDatumGetCString(dflt));
-		list = lappend(list, new_object_object(tmp));
-	}
+	else
+		append_bool_object(tmp, "present", false);
+	list = lappend(list, new_object_object(tmp));
 
 	/* ELEMENT */
+	tmp = new_objtree_VA("ELEMENT=%{elem}T", 1,
+						 "clause", ObjTypeString, "element");
 	if (OidIsValid(typForm->typelem))
-	{
-		tmp = new_objtree_VA("ELEMENT=%{elem}T", 0);
 		append_object_object(tmp, "elem",
 							 new_objtree_for_type(typForm->typelem, -1));
-		list = lappend(list, new_object_object(tmp));
-	}
+	else
+		append_bool_object(tmp, "present", false);
+	list = lappend(list, new_object_object(tmp));
 
 	/* DELIMITER */
-	tmp = new_objtree_VA("DELIMITER=%{delim}L", 0);
+	tmp = new_objtree_VA("DELIMITER=%{delim}L", 1,
+						 "clause", ObjTypeString, "delimiter");
 	append_string_object(tmp, "delim",
 						 psprintf("%c", typForm->typdelim));
 	list = lappend(list, new_object_object(tmp));
 
 	/* COLLATABLE */
-	if (OidIsValid(typForm->typcollation))
-		list = lappend(list,
-					   new_object_object(new_objtree_VA("COLLATABLE=true", 0)));
+	tmp = new_objtree_VA("COLLATABLE=true", 1,
+						 "clause", ObjTypeString, "collatable");
+	if (!OidIsValid(typForm->typcollation))
+		append_bool_object(tmp, "present", false);
+	list = lappend(list, new_object_object(tmp));
 
 	append_array_object(stmt, "elems", list);
 
