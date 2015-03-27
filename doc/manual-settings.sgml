@@ -96,7 +96,7 @@
      <listitem>
       <para>
        For both &bdr;
-       and &udr; this parameter has to to
+       and &udr; this parameter has to
        include <literal>bdr</literal> as one of the comma separated
        values. The parameter can only be changed at server start.
       </para>
