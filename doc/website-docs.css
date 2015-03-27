@@ -2,7 +2,14 @@
 
 /* requires global.css, table.css and text.css to be loaded before this file! */
 body {
+  font-family: verdana, sans-serif;
   font-size: 76%;
+}
+
+/* monospace font size fix */
+pre, code, kbd, samp, tt {
+  font-family: monospace,monospace;
+  font-size: 1em;
 }
 
 div.NAVHEADER table {
