@@ -14,7 +14,7 @@
 ]>
 
 <book id="bdr">
- <title>&bdr; Documentation</title>
+ <title>&bdr; &bdrversion; Documentation</title>
 
  <bookinfo>
   <corpauthor>The PostgreSQL Global Development Group</corpauthor>
