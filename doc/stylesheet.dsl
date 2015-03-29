@@ -30,8 +30,6 @@
 
 (define draft-mode              #f)
 
-(define pgsql-docs-list "pgsql-docs@postgresql.org")
-
 ;; Don't show manpage volume numbers
 (define %refentry-xref-manvolnum% #f)
 
@@ -187,9 +185,10 @@
 (define %generate-legalnotice-link% #t)
 (define %html-ext%              ".html")
 (define %root-filename%         "index")
-(define %link-mailto-url%       (string-append "mailto:" pgsql-docs-list))
+(define %link-mailto-url%       (string-append "mailto: bdr@2ndquadrant.com"))
 (define %use-id-as-filename%    #t)
-(define %stylesheet%            "website-docs.css")
+(define website-build           #f)
+(define %stylesheet%            (if website-build "/resources/docs.css" "website-docs.css"))
 (define %graphic-default-extension% "gif")
 (define %body-attr%             '())
 (define ($generate-book-lot-list$) '())
@@ -421,6 +420,15 @@
       (make formatting-instruction data: string)
       (htmlnewline))))
 
+(define ($html-body-start$)
+        (if website-build
+            (make empty-element gi: "!--#include virtual=\"/resources/docs-header.html\"--")
+            (empty-sosofo)))
+
+(define ($html-body-end$)
+        (if website-build
+            (make empty-element gi: "!--#include virtual=\"/resources/docs-footer.html\"--")
+            (empty-sosofo)))
 
 ]]> <!-- %output-html -->
 
