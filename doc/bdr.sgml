@@ -78,8 +78,8 @@
  <part id="manual" xreflabel="BDR administration manual">
   <title>&bdr; administration manual</title>
 
-  &manual-node-management;
   &manual-settings;
+  &manual-node-management;
   &manual-commands;
   &manual-monitoring;
   &manual-ddl-replication;
