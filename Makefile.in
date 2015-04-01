@@ -24,7 +24,8 @@ DATA = \
 	extsql/bdr--0.9.0.0--0.9.0.1.sql \
 	extsql/bdr--0.9.0.1--0.9.0.2.sql \
 	extsql/bdr--0.9.0.2--0.9.0.3.sql \
-	extsql/bdr--0.9.0.3--0.10.0.0.sql
+	extsql/bdr--0.9.0.3--0.9.0.4.sql \
+	extsql/bdr--0.9.0.4--0.10.0.0.sql
 
 DATA_built = \
 	extsql/bdr--0.8.0.1.sql \
@@ -38,6 +39,7 @@ DATA_built = \
 	extsql/bdr--0.9.0.1.sql \
 	extsql/bdr--0.9.0.2.sql \
 	extsql/bdr--0.9.0.3.sql \
+	extsql/bdr--0.9.0.4.sql \
 	extsql/bdr--0.10.0.0.sql
 
 DOCS = bdr.conf.sample README.bdr
@@ -161,7 +163,11 @@ extsql/bdr--0.9.0.3.sql: extsql/bdr--0.9.0.2.sql extsql/bdr--0.9.0.2--0.9.0.3.sq
 	mkdir -p extsql
 	cat $^ > $@
 
-extsql/bdr--0.10.0.0.sql: extsql/bdr--0.9.0.3.sql extsql/bdr--0.9.0.3--0.10.0.0.sql
+extsql/bdr--0.9.0.4.sql: extsql/bdr--0.9.0.3.sql extsql/bdr--0.9.0.3--0.9.0.4.sql
+	mkdir -p extsql
+	cat $^ > $@
+
+extsql/bdr--0.10.0.0.sql: extsql/bdr--0.9.0.4.sql extsql/bdr--0.9.0.4--0.10.0.0.sql
 	mkdir -p extsql
 	cat $^ > $@
 

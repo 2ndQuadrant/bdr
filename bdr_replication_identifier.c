@@ -157,7 +157,7 @@ GetReplicationIdentifier(char *riname, bool missing_ok)
 
 		heap_deform_tuple(tuple, RelationGetDescr(rel),
 						  values, nulls);
-		riident = DatumGetObjectId(values[0]);
+		riident = DatumGetObjectId(values[Anum_pg_replication_riident - 1]);
 
 	}
 	else if (!missing_ok)
