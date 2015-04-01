@@ -299,7 +299,7 @@
    To subscribe to a UDR group:
    </para>
    <programlisting>
-    SELECT bdr_bdr_subscribe(
+    SELECT bdr.bdr_subscribe(
        local_node_name := 'udrnode',
        subscribe_to_dsn := 'port=6000 dbname=udrdemo',
        node_local_dsn := 'port=6001 dbname=udrdemo');
@@ -308,7 +308,7 @@
    To create a &bdr group on 'node1':
    </para>
    <programlisting>
-    SELECT bdr_bdr_group_create(
+    SELECT bdr.bdr_group_create(
        local_node_name := 'node1',
        node_external_dsn := 'port=5598 dbname=bdrdemo');
    </programlisting>
