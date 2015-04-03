@@ -269,6 +269,7 @@ void
 bdr_locks_startup()
 {
 	Relation		rel;
+	ScanKey			key;
 	SysScanDesc		scan;
 	Snapshot		snap;
 	HeapTuple		tuple;
@@ -311,7 +312,14 @@ bdr_locks_startup()
 	snap = RegisterSnapshot(GetLatestSnapshot());
 	rel = heap_open(BdrLocksRelid, RowExclusiveLock);
 
-	scan = systable_beginscan(rel, 0, true, snap, 0, NULL);
+	key = (ScanKey) palloc(sizeof(ScanKeyData) * 1);
+
+	ScanKeyInit(&key[0],
+				8,
+				BTEqualStrategyNumber, F_OIDEQ,
+				bdr_my_locks_database->dboid);
+
+	scan = systable_beginscan(rel, 0, true, snap, 1, key);
 
 	while ((tuple = systable_getnext(scan)) != NULL)
 	{
@@ -334,17 +342,15 @@ bdr_locks_startup()
 
 		if (strcmp(state, "acquired") == 0)
 		{
-			BdrLocksDBState *db =
-				bdr_locks_find_database(DatumGetObjectId(values[7]), false);
-			db->lock_holder = node_id;
-			db->lockcount++;
+			/* XXX: There should be only one item so this is probably fine. */
+			bdr_my_locks_database->lock_holder = node_id;
+			bdr_my_locks_database->lockcount++;
 			/* A remote node might have held the local DDL lock before restart */
 			elog(DEBUG1, "reacquiring local DDL lock held before shutdown");
 		}
 		else if (strcmp(state, "catchup") == 0)
 		{
 			XLogRecPtr		wait_for_lsn;
-			BdrLocksDBState *db;
 
 			/*
 			 * Restart the catchup period. There shouldn't be any need to
@@ -357,11 +363,11 @@ bdr_locks_startup()
 			XLogFlush(lsn);
 			resetStringInfo(&s);
 
-			db = bdr_locks_find_database(DatumGetObjectId(values[7]), false);
-			db->lock_holder = node_id;
-			db->lockcount++;
-			db->replay_confirmed = 0;
-			db->replay_confirmed_lsn = wait_for_lsn;
+			/* XXX: There should be only one item so this is probably fine. */
+			bdr_my_locks_database->lock_holder = node_id;
+			bdr_my_locks_database->lockcount++;
+			bdr_my_locks_database->replay_confirmed = 0;
+			bdr_my_locks_database->replay_confirmed_lsn = wait_for_lsn;
 
 			elog(DEBUG1, "restarting DDL lock replay catchup phase");
 		}
