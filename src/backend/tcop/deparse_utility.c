@@ -1845,8 +1845,13 @@ deparse_CreateExtensionStmt(Oid objectId, Node *parsetree)
 	extStmt = new_objtree_VA("CREATE EXTENSION %{if_not_exists}s %{identity}I "
 							 "%{options: }s",
 							 1, "identity", ObjTypeString, node->extname);
-	append_string_object(extStmt, "if_not_exists",
-						 node->if_not_exists ? "IF NOT EXISTS" : "");
+
+	/* IF NOT EXISTS */
+	tmp = new_objtree_VA("IF NOT EXISTS", 0);
+	append_bool_object(tmp, "present", node->if_not_exists);
+	append_object_object(config, "if_not_exists", tmp);
+
+	/* List of options */
 	list = NIL;
 	foreach(cell, node->options)
 	{
@@ -1875,12 +1880,14 @@ deparse_CreateExtensionStmt(Oid objectId, Node *parsetree)
 			elog(ERROR, "unsupported option %s", opt->defname);
 	}
 
+	/* Add the SCHEMA option */
 	tmp = new_objtree_VA("SCHEMA %{schema}I",
 						 2, "type", ObjTypeString, "schema",
 						 "schema", ObjTypeString,
 						 get_namespace_name(extForm->extnamespace));
 	list = lappend(list, new_object_object(tmp));
 
+	/* done */
 	append_array_object(extStmt, "options", list);
 
 	heap_close(pg_extension, AccessShareLock);
@@ -1933,6 +1940,9 @@ deparse_AlterExtensionStmt(Oid objectId, Node *parsetree)
 	return stmt;
 }
 
+/*
+ * ALTER EXTENSION ext ADD/DROP object
+ */
 static ObjTree *
 deparse_AlterExtensionContentsStmt(Oid objectId, Node *parsetree,
 								   ObjectAddress objectAddress)
