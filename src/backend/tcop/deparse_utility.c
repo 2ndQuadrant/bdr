@@ -1685,7 +1685,8 @@ deparse_DefineStmt(Oid objectId, Node *parsetree, ObjectAddress secondaryObj)
 			break;
 
 		case OBJECT_TSCONFIGURATION:
-			defStmt = deparse_DefineStmt_TSConfig(objectId, define, secondaryObj);
+			defStmt = deparse_DefineStmt_TSConfig(objectId, define,
+												  secondaryObj);
 			break;
 
 		case OBJECT_TSPARSER:
@@ -1719,6 +1720,7 @@ deparse_AlterTSConfigurationStmt(StashedCommand *cmd)
 	ObjTree *config;
 	const char *const fmtcommon = "ALTER TEXT SEARCH CONFIGURATION %{identity}D";
 	char	   *fmtrest;
+	char	   *type;
 	List	   *list;
 	ListCell   *cell;
 	int			i;
@@ -1728,29 +1730,35 @@ deparse_AlterTSConfigurationStmt(StashedCommand *cmd)
 	{
 		case ALTER_TSCONFIG_ADD_MAPPING:
 			fmtrest = "ADD MAPPING FOR %{tokentype:, }I WITH %{dictionaries:, }D";
+			type = "add mapping for token"
 			break;
 
 		case ALTER_TSCONFIG_DROP_MAPPING:
 			fmtrest = "DROP MAPPING %{if_exists}s FOR %{tokentype}I";
+			type = "drop mapping for token";
 			break;
 
 		case ALTER_TSCONFIG_ALTER_MAPPING_FOR_TOKEN:
 			fmtrest = "ALTER MAPPING FOR %{tokentype:, }I WITH %{dictionaries:, }D";
+			type = "alter mapping for token";
 			break;
 
 		case ALTER_TSCONFIG_REPLACE_DICT:
 			fmtrest = "ALTER MAPPING REPLACE %{old_dictionary}D WITH %{new_dictionary}D";
+			type = "alter mapping replace";
 			break;
 
 		case ALTER_TSCONFIG_REPLACE_DICT_FOR_TOKEN:
 			fmtrest = "ALTER MAPPING FOR %{tokentype:, }I REPLACE %{old_dictionary}D WITH %{new_dictionary}D";
+			type = "alter mapping replace for token"
 			break;
 	}
 	config = new_objtree_VA(psprintf("%s %s", fmtcommon, fmtrest),
-							1, "identity",
+							2, "identity",
 							ObjTypeObject,
 							new_objtree_for_qualname_id(TSConfigRelationId,
-														cmd->d.atscfg.tscfgOid));
+														cmd->d.atscfg.tscfgOid),
+							"type", ObjTypeString, type);
 
 	/* Add the affected token list, for subcommands that have one */
 	if (node->kind == ALTER_TSCONFIG_ADD_MAPPING ||
@@ -1797,8 +1805,9 @@ deparse_AlterTSConfigurationStmt(StashedCommand *cmd)
 	{
 		/* DROP wants the IF EXISTS clause */
 		Assert(node->kind == ALTER_TSCONFIG_DROP_MAPPING);
-		append_string_object(config, "if_exists",
-							 node->missing_ok ? "IF EXISTS" : "");
+		tmp = new_objtree_VA("IF EXISTS", 0);
+		append_bool_object(tmp, "present", node->missing_ok);
+		append_object_object(config, "if_exists", tmp);
 	}
 
 	return config;
