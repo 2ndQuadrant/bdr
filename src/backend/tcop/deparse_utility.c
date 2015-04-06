@@ -1973,6 +1973,7 @@ deparse_AlterDomainStmt(Oid objectId, Node *parsetree,
 	Form_pg_type domForm;
 	ObjTree	   *alterDom;
 	char	   *fmt;
+	const char *type;
 
 	/* ALTER DOMAIN DROP CONSTRAINT is handled by the DROP support code */
 	if (node->subtype == 'X')
@@ -1989,31 +1990,41 @@ deparse_AlterDomainStmt(Oid objectId, Node *parsetree,
 		case 'T':
 			/* SET DEFAULT / DROP DEFAULT */
 			if (node->def == NULL)
+			{
 				fmt = "ALTER DOMAIN %{identity}D DROP DEFAULT";
+				type = "drop default";
+			}
 			else
+			{
 				fmt = "ALTER DOMAIN %{identity}D SET DEFAULT %{default}s";
+				type = "set default";
+			}
 			break;
 		case 'N':
 			/* DROP NOT NULL */
 			fmt = "ALTER DOMAIN %{identity}D DROP NOT NULL";
+			type = "drop not null";
 			break;
 		case 'O':
 			/* SET NOT NULL */
 			fmt = "ALTER DOMAIN %{identity}D SET NOT NULL";
+			type = "set not null";
 			break;
 		case 'C':
 			/* ADD CONSTRAINT.  Only CHECK constraints are supported by domains */
 			fmt = "ALTER DOMAIN %{identity}D ADD CONSTRAINT %{constraint_name}I %{definition}s";
+			type = "add constraint";
 			break;
 		case 'V':
 			/* VALIDATE CONSTRAINT */
 			fmt = "ALTER DOMAIN %{identity}D VALIDATE CONSTRAINT %{constraint_name}I";
+			type = "validate constraint";
 			break;
 		default:
 			elog(ERROR, "invalid subtype %c", node->subtype);
 	}
 
-	alterDom = new_objtree_VA(fmt, 0);
+	alterDom = new_objtree_VA(fmt, 1, "type", ObjTypeString, type);
 	append_object_object(alterDom, "identity",
 						 new_objtree_for_qualname(domForm->typnamespace,
 												  NameStr(domForm->typname)));
