@@ -190,6 +190,42 @@
        </entry>
       </row>
 
+      <row>
+       <entry>&bdr;</entry>
+       <entry>
+        <indexterm>
+         <primary>pg_xlog_wait_remote_apply</primary>
+        </indexterm>
+        <literal><function>pg_xlog_wait_remote_apply(<replaceable>lsn pg_lsn</replaceable>, <replaceable>pid integer</replaceable>)</function></literal>
+       </entry>
+       <entry>void</entry>
+       <entry>
+        Wait until the replication connection with process id <replaceable>pid</replaceable>
+        (or all connections if <replaceable>pid</replaceable> is <literal>0</literal>)
+        in <literal>pg_stat_replication</literal> has replayed WAL up to at least
+        <replaceable>lsn</replaceable>. Typically used with
+        <function>pg_current_xlog_insert_location()</function> as the target LSN.
+        (This function was added to PostgreSQL 9.4 by the BDR patches and is not part
+         of the BDR extension as such.)
+       </entry>
+      </row>
+
+      <row>
+       <entry>&bdr;</entry>
+       <entry>
+        <indexterm>
+         <primary>pg_xlog_wait_remote_receive</primary>
+        </indexterm>
+        <literal><function>pg_xlog_wait_remote_receive(<replaceable>lsn pg_lsn</replaceable>, <replaceable>pid integer</replaceable>)</function></literal>
+       </entry>
+       <entry>void</entry>
+       <entry>
+        Same as <function>pg_xlog_wait_remote_receive(...)</function>, but
+        returns as soon as the remote confirms it has received the changes, not
+        necessarily applied them.
+       </entry>
+      </row>
+
      </tbody>
     </tgroup>
    </table>
