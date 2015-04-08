@@ -52,8 +52,6 @@ static ProcessUtility_hook_type next_ProcessUtility_hook = NULL;
 /* GUCs */
 bool bdr_permit_unsafe_commands = false;
 
-bool bdr_always_allow_ddl = false;
-
 static void error_unsupported_command(const char *cmdtag) __attribute__((noreturn));
 
 /*
@@ -578,7 +576,7 @@ bdr_commandfilter(Node *parsetree,
 		goto done;
 
 	/* don't filter if explicitly told so */
-	if (bdr_always_allow_ddl || bdr_permit_unsafe_commands)
+	if (bdr_permit_unsafe_commands)
 		goto done;
 
 	/* extension contents aren't individually replicated */
@@ -899,13 +897,6 @@ done:
 	else
 		standard_ProcessUtility(parsetree, queryString, context, params,
 								dest, completionTag);
-}
-
-void
-bdr_commandfilter_always_allow_ddl(bool always_allow)
-{
-	Assert(IsUnderPostmaster);
-	bdr_always_allow_ddl = always_allow;
 }
 
 /* Module load */

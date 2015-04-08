@@ -734,7 +734,6 @@ bdr_replicate_ddl_command(PG_FUNCTION_ARGS)
 							 GUC_ACTION_SAVE, true, 0);
 
 	/* Execute the query locally. */
-	bdr_commandfilter_always_allow_ddl(true);
 	in_bdr_replicate_ddl_command = true;
 
 	PG_TRY();
@@ -745,12 +744,10 @@ bdr_replicate_ddl_command(PG_FUNCTION_ARGS)
 		bdr_execute_ddl_command(query, GetUserNameFromId(GetUserId()), false);
 	PG_CATCH();
 		in_bdr_replicate_ddl_command = false;
-		bdr_commandfilter_always_allow_ddl(false);
 		PG_RE_THROW();
 	PG_END_TRY();
 
 	in_bdr_replicate_ddl_command = false;
-	bdr_commandfilter_always_allow_ddl(false);
 
 	PG_RETURN_VOID();
 }
