@@ -1256,7 +1256,7 @@ bdr_locks_process_remote_startup(uint64 sysid, TimeLineID tli, Oid datid)
  * Should be caled from ExecutorStart_hook.
  */
 void
-bdr_locks_check_query(void)
+bdr_locks_check_dml(void)
 {
 
 	if (bdr_skip_ddl_locking)
@@ -1312,6 +1312,11 @@ bdr_locks_shmem_init()
 
 void
 bdr_acquire_ddl_lock(void)
+{
+}
+
+void
+bdr_locks_check_dml(void)
 {
 }
 #endif

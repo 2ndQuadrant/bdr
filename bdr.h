@@ -476,7 +476,7 @@ extern void bdr_queue_ddl_command(char *command_tag, char *command);
 extern void bdr_execute_ddl_command(char *cmdstr, char *perpetrator, bool tx_just_started);
 
 extern void bdr_locks_shmem_init(void);
-extern void bdr_locks_check_query(void);
+extern void bdr_locks_check_dml(void);
 
 /* background workers and supporting functions for them */
 PGDLLEXPORT extern void bdr_apply_main(Datum main_arg);

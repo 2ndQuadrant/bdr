@@ -791,9 +791,8 @@ BdrExecutorStart(QueryDesc *queryDesc, int eflags)
 	if (!bdr_is_bdr_activated_db(MyDatabaseId))
 		goto done;
 
-#ifdef BUILDING_BDR
-	bdr_locks_check_query();
-#endif
+	/* check for concurrent global DDL locks */
+	bdr_locks_check_dml();
 
 	/* plain INSERTs are always ok beyond this point */
 	if (queryDesc->operation == CMD_INSERT &&
