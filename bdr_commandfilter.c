@@ -99,6 +99,16 @@ error_unsupported_command(const char *cmdtag)
 					cmdtag)));
 }
 
+static bool ispermanent(const char persistence)
+{
+	/* In case someone adds a new type we don't know about */
+	Assert(persistence == RELPERSISTENCE_TEMP
+			|| persistence == RELPERSISTENCE_UNLOGGED
+			|| persistence == RELPERSISTENCE_PERMANENT);
+
+	return persistence == RELPERSISTENCE_PERMANENT;
+}
+
 static void
 filter_CreateStmt(Node *parsetree,
 				  char *completionTag)
@@ -142,7 +152,7 @@ filter_CreateStmt(Node *parsetree,
 			Constraint *con = (Constraint *) element;
 
 			if (con->contype == CONSTR_EXCLUSION &&
-				stmt->relation->relpersistence != RELPERSISTENCE_TEMP)
+				ispermanent(stmt->relation->relpersistence))
 			{
 				ereport(ERROR,
 						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -470,24 +480,24 @@ filter_CreateTableAs(Node *parsetree)
 	CreateTableAsStmt *stmt;
 	stmt = (CreateTableAsStmt *) parsetree;
 
-	if (stmt->into->rel->relpersistence != RELPERSISTENCE_TEMP)
+	if (ispermanent(stmt->into->rel->relpersistence))
 		error_unsupported_command(CreateCommandTag(parsetree));
 }
 
 static bool
-statement_affects_only_temp(Node *parsetree)
+statement_affects_only_nonpermanent(Node *parsetree)
 {
 	switch (nodeTag(parsetree))
 	{
 		case T_CreateTableAsStmt:
 			{
 				CreateTableAsStmt *stmt = (CreateTableAsStmt *) parsetree;
-				return stmt->into->rel->relpersistence == RELPERSISTENCE_TEMP;
+				return !ispermanent(stmt->into->rel->relpersistence);
 			}
 		case T_CreateStmt:
 			{
 				CreateStmt *stmt = (CreateStmt *) parsetree;
-				return stmt->relation->relpersistence == RELPERSISTENCE_TEMP;
+				return !ispermanent(stmt->relation->relpersistence);
 			}
 		case T_DropStmt:
 			{
@@ -547,7 +557,7 @@ statement_affects_only_temp(Node *parsetree)
 						continue;
 
 					rel = relation_open(relOid, AccessExclusiveLock);
-					istemp = rel->rd_rel->relpersistence == RELPERSISTENCE_TEMP;
+					istemp = !ispermanent(rel->rd_rel->relpersistence);
 					relation_close(rel, NoLock);
 
 					if (!istemp)
@@ -641,7 +651,7 @@ bdr_commandfilter(Node *parsetree,
 #ifdef BUILDING_UDR
 	if (!in_bdr_replicate_ddl_command &&
 		bdr_is_bdr_activated_db(MyDatabaseId) &&
-		!statement_affects_only_temp(parsetree))
+		!statement_affects_only_nonpermanent(parsetree))
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 				 errmsg("DDL commands are not allowed when UDR is active unless bdr.permit_unsafe_ddl_commands is true")));
@@ -887,7 +897,7 @@ bdr_commandfilter(Node *parsetree,
 	}
 
 	/* now lock other nodes in the bdr flock against ddl */
-	if (!bdr_skip_ddl_locking && !statement_affects_only_temp(parsetree))
+	if (!bdr_skip_ddl_locking && !statement_affects_only_nonpermanent(parsetree))
 		bdr_acquire_ddl_lock();
 
 done:
