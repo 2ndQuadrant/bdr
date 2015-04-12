@@ -179,13 +179,11 @@ filter_AlterTableStmt(Node *parsetree,
 	hasInvalid = false;
 
 	/*
-	 * XXX: Is NoLock sufficient? It should be as we don't allow concurrent
-	 * DDL in BDR at all at the moment.
-	 *
 	 * Can't use AlterTableGetLockLevel(astmt->cmds);
 	 * Otherwise we deadlock between the global DDL locks and DML replay.
+	 * ShareUpdateExclusiveLock should be enough to block DDL but not DML.
 	 */
-	lockmode = NoLock;
+	lockmode = ShareUpdateExclusiveLock;
 	relid = AlterTableLookupRelation(astmt, lockmode);
 
 	stmts = transformAlterTableStmt(relid, astmt, queryString);
