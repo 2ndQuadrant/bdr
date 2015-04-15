@@ -187,7 +187,7 @@
   <para>
    Each node saves up change information (using one
    <ulink url="http://www.postgresql.org/docs/current/static/logicaldecoding-explanation.html">
-   replication slot</ulink> for each peer node) so it can replay changs to a
+   replication slot</ulink> for each peer node) so it can replay changes to a
    temporarily unreachable node. If a peer node remains offline indefinitely
    this accumulating change information will cause the node to run out of
    storage space for PostgreSQL transaction logs (<acronym>WAL</acronym>, in
