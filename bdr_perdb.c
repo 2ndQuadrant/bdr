@@ -500,7 +500,7 @@ bdr_maintain_db_workers(void)
 		Assert(!isnull);
 		node_status = DatumGetChar(temp_datum);
 
-		elog(LOG, "Found bdr_connections entry for "BDR_LOCALID_FORMAT" (origin specific: %d, unidirectional: %d, status: %c)",
+		elog(DEBUG1, "Found bdr_connections entry for "BDR_LOCALID_FORMAT" (origin specific: %d, unidirectional: %d, status: %c)",
 			 target_sysid, target_timeline, target_dboid,
 			 EMPTY_REPLICATION_NAME,
 			 (int) origin_is_my_id, (int) conn_is_unidirectional, node_status);
