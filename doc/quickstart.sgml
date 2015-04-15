@@ -244,7 +244,7 @@
     <programlisting>
     SELECT bdr.bdr_group_join(
       local_node_name := 'node2',
-      node_external_dsn := 'port=5599 dbname=bdrdemo'
+      node_external_dsn := 'port=5599 dbname=bdrdemo',
       join_using_dsn := 'port=5598 dbname=bdrdemo'
 );
     </programlisting>
