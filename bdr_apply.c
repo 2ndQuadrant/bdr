@@ -2384,7 +2384,12 @@ bdr_apply_work(PGconn* streamConn)
 		while (BdrWorkerCtl->pause_apply && !IsTransactionState())
 		{
 			ResetLatch(&MyProc->procLatch);
-			rc = WaitLatch(&MyProc->procLatch, WL_TIMEOUT, 1000L);
+			rc = WaitLatch(&MyProc->procLatch,
+						   WL_TIMEOUT | WL_LATCH_SET | WL_POSTMASTER_DEATH,
+						   1000L);
+
+			if (rc & WL_POSTMASTER_DEATH)
+				proc_exit(1);
 		}
 		MemoryContextResetAndDeleteChildren(MessageContext);
 	}
