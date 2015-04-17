@@ -44,8 +44,22 @@
  <para>
   This also makes DDL a heavier weight operation than on standalone
   PostgreSQL. Performing DDL will cancel currently running
-  transactions and stop new transactions from proceeding until
+  transactions and prevent new transactions from proceeding until
   replication has caught up and the DDL has been applied.
+  <important>
+   <para>
+    While DDL is in progress on any node in the system, statements that perform
+    writes (<literal>INSERT</literal>, <literal>UPDATE</literal>
+    <literal>DELETE</literal>, any DDL, etc) on that node or any other node will
+    <literal>ERROR</literal> with <literal>SQLSTATE</literal> <literal>55P03</literal>:
+    <programlisting>
+     ERROR: Database is locked against DDL operations
+    </programlisting>
+    This makes DDL a very heavyweight operation. Transactions performing DDL
+    should be short, should not be combined with lots of row changes, and
+    should avoid long running foreign key lookups, etc.
+   </para>
+  </important>
  </para>
 
  <sect1 id="ddl-replication-statements">
