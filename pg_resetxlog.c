@@ -441,6 +441,81 @@ GenerateSystemIdentifier(void)
 }
 
 
+#if PG_VERSION_NUM >= 90500
+/*
+ * Try to read the existing pg_control file.
+ *
+ * This routine is also responsible for updating old pg_control versions
+ * to the current format.  (Currently we don't do anything of the sort.)
+ */
+static bool
+ReadControlFile(void)
+{
+	int			fd;
+	int			len;
+	char	   *buffer;
+	pg_crc32c	crc;
+
+	if ((fd = open(XLOG_CONTROL_FILE, O_RDONLY | PG_BINARY, 0)) < 0)
+	{
+		/*
+		 * If pg_control is not there at all, or we can't read it, the odds
+		 * are we've been handed a bad DataDir path, so give up. User can do
+		 * "touch pg_control" to force us to proceed.
+		 */
+		fprintf(stderr, _("%s: could not open file \"%s\" for reading: %s\n"),
+				progname, XLOG_CONTROL_FILE, strerror(errno));
+		if (errno == ENOENT)
+			fprintf(stderr, _("If you are sure the data directory path is correct, execute\n"
+							  "  touch %s\n"
+							  "and try again.\n"),
+					XLOG_CONTROL_FILE);
+		exit(1);
+	}
+
+	/* Use malloc to ensure we have a maxaligned buffer */
+	buffer = (char *) pg_malloc(PG_CONTROL_SIZE);
+
+	len = read(fd, buffer, PG_CONTROL_SIZE);
+	if (len < 0)
+	{
+		fprintf(stderr, _("%s: could not read file \"%s\": %s\n"),
+				progname, XLOG_CONTROL_FILE, strerror(errno));
+		exit(1);
+	}
+	close(fd);
+
+	if (len >= sizeof(ControlFileData) &&
+	  ((ControlFileData *) buffer)->pg_control_version == PG_CONTROL_VERSION)
+	{
+		/* Check the CRC. */
+		INIT_CRC32C(crc);
+		COMP_CRC32C(crc,
+					buffer,
+					offsetof(ControlFileData, crc));
+		FIN_CRC32C(crc);
+
+		if (EQ_CRC32C(crc, ((ControlFileData *) buffer)->crc))
+		{
+			/* Valid data... */
+			memcpy(&ControlFile, buffer, sizeof(ControlFile));
+			return true;
+		}
+
+		fprintf(stderr, _("%s: pg_control exists but has invalid CRC; proceed with caution\n"),
+				progname);
+		/* We will use the data anyway, but treat it as guessed. */
+		memcpy(&ControlFile, buffer, sizeof(ControlFile));
+		guessed = true;
+		return true;
+	}
+
+	/* Looks like it's a mess. */
+	fprintf(stderr, _("%s: pg_control exists but is broken or unknown version; ignoring it\n"),
+			progname);
+	return false;
+}
+#else
 /*
  * Try to read the existing pg_control file.
  *
@@ -514,7 +589,7 @@ ReadControlFile(void)
 			progname);
 	return false;
 }
-
+#endif
 
 /*
  * Guess at pg_control values when we can't read the old ones.
@@ -732,6 +807,107 @@ PrintNewControlValues()
 }
 
 
+#if PG_VERSION_NUM >= 90500
+/*
+ * Write out the new pg_control file.
+ */
+static void
+RewriteControlFile(void)
+{
+	int			fd;
+	char		buffer[PG_CONTROL_SIZE];		/* need not be aligned */
+
+	/*
+	 * Adjust fields as needed to force an empty XLOG starting at
+	 * newXlogSegNo.
+	 */
+	XLogSegNoOffsetToRecPtr(newXlogSegNo, SizeOfXLogLongPHD,
+							ControlFile.checkPointCopy.redo);
+	ControlFile.checkPointCopy.time = (pg_time_t) time(NULL);
+
+	ControlFile.state = DB_SHUTDOWNED;
+	ControlFile.time = (pg_time_t) time(NULL);
+	ControlFile.checkPoint = ControlFile.checkPointCopy.redo;
+	ControlFile.prevCheckPoint = 0;
+	ControlFile.minRecoveryPoint = 0;
+	ControlFile.minRecoveryPointTLI = 0;
+	ControlFile.backupStartPoint = 0;
+	ControlFile.backupEndPoint = 0;
+	ControlFile.backupEndRequired = false;
+
+	/*
+	 * Force the defaults for max_* settings. The values don't really matter
+	 * as long as wal_level='minimal'; the postmaster will reset these fields
+	 * anyway at startup.
+	 */
+	ControlFile.wal_level = WAL_LEVEL_MINIMAL;
+	ControlFile.wal_log_hints = false;
+	ControlFile.track_commit_timestamp = false;
+	ControlFile.MaxConnections = 100;
+	ControlFile.max_worker_processes = 8;
+	ControlFile.max_prepared_xacts = 0;
+	ControlFile.max_locks_per_xact = 64;
+
+	/* Now we can force the recorded xlog seg size to the right thing. */
+	ControlFile.xlog_seg_size = XLogSegSize;
+
+	/* Contents are protected with a CRC */
+	INIT_CRC32C(ControlFile.crc);
+	COMP_CRC32C(ControlFile.crc,
+				(char *) &ControlFile,
+				offsetof(ControlFileData, crc));
+	FIN_CRC32C(ControlFile.crc);
+
+	/*
+	 * We write out PG_CONTROL_SIZE bytes into pg_control, zero-padding the
+	 * excess over sizeof(ControlFileData).  This reduces the odds of
+	 * premature-EOF errors when reading pg_control.  We'll still fail when we
+	 * check the contents of the file, but hopefully with a more specific
+	 * error than "couldn't read pg_control".
+	 */
+	if (sizeof(ControlFileData) > PG_CONTROL_SIZE)
+	{
+		fprintf(stderr,
+				_("%s: internal error -- sizeof(ControlFileData) is too large ... fix PG_CONTROL_SIZE\n"),
+				progname);
+		exit(1);
+	}
+
+	memset(buffer, 0, PG_CONTROL_SIZE);
+	memcpy(buffer, &ControlFile, sizeof(ControlFileData));
+
+	unlink(XLOG_CONTROL_FILE);
+
+	fd = open(XLOG_CONTROL_FILE,
+			  O_RDWR | O_CREAT | O_EXCL | PG_BINARY,
+			  S_IRUSR | S_IWUSR);
+	if (fd < 0)
+	{
+		fprintf(stderr, _("%s: could not create pg_control file: %s\n"),
+				progname, strerror(errno));
+		exit(1);
+	}
+
+	errno = 0;
+	if (write(fd, buffer, PG_CONTROL_SIZE) != PG_CONTROL_SIZE)
+	{
+		/* if write didn't set errno, assume problem is no disk space */
+		if (errno == 0)
+			errno = ENOSPC;
+		fprintf(stderr, _("%s: could not write pg_control file: %s\n"),
+				progname, strerror(errno));
+		exit(1);
+	}
+
+	if (fsync(fd) != 0)
+	{
+		fprintf(stderr, _("%s: fsync error: %s\n"), progname, strerror(errno));
+		exit(1);
+	}
+
+	close(fd);
+}
+#else
 /*
  * Write out the new pg_control file.
  */
@@ -830,7 +1006,7 @@ RewriteControlFile(void)
 
 	close(fd);
 }
-
+#endif
 
 /*
  * Scan existing XLOG files and determine the highest existing WAL address
@@ -1017,7 +1193,108 @@ KillExistingArchiveStatus(void)
 	}
 }
 
+#if PG_VERSION_NUM >= 90500
+/*
+ * Write an empty XLOG file, containing only the checkpoint record
+ * already set up in ControlFile.
+ */
+static void
+WriteEmptyXLOG(void)
+{
+	char	   *buffer;
+	XLogPageHeader page;
+	XLogLongPageHeader longpage;
+	XLogRecord *record;
+	pg_crc32c	crc;
+	char		path[MAXPGPATH];
+	int			fd;
+	int			nbytes;
+	char	   *recptr;
 
+	/* Use malloc() to ensure buffer is MAXALIGNED */
+	buffer = (char *) pg_malloc(XLOG_BLCKSZ);
+	page = (XLogPageHeader) buffer;
+	memset(buffer, 0, XLOG_BLCKSZ);
+
+	/* Set up the XLOG page header */
+	page->xlp_magic = XLOG_PAGE_MAGIC;
+	page->xlp_info = XLP_LONG_HEADER;
+	page->xlp_tli = ControlFile.checkPointCopy.ThisTimeLineID;
+	page->xlp_pageaddr = ControlFile.checkPointCopy.redo - SizeOfXLogLongPHD;
+	longpage = (XLogLongPageHeader) page;
+	longpage->xlp_sysid = ControlFile.system_identifier;
+	longpage->xlp_seg_size = XLogSegSize;
+	longpage->xlp_xlog_blcksz = XLOG_BLCKSZ;
+
+	/* Insert the initial checkpoint record */
+	recptr = (char *) page + SizeOfXLogLongPHD;
+	record = (XLogRecord *) recptr;
+	record->xl_prev = 0;
+	record->xl_xid = InvalidTransactionId;
+	record->xl_tot_len = SizeOfXLogRecord + SizeOfXLogRecordDataHeaderShort + sizeof(CheckPoint);
+	record->xl_info = XLOG_CHECKPOINT_SHUTDOWN;
+	record->xl_rmid = RM_XLOG_ID;
+	recptr += SizeOfXLogRecord;
+	*(recptr++) = XLR_BLOCK_ID_DATA_SHORT;
+	*(recptr++) = sizeof(CheckPoint);
+	memcpy(recptr, &ControlFile.checkPointCopy,
+		   sizeof(CheckPoint));
+
+	INIT_CRC32C(crc);
+	COMP_CRC32C(crc, ((char *) record) + SizeOfXLogRecord, record->xl_tot_len - SizeOfXLogRecord);
+	COMP_CRC32C(crc, (char *) record, offsetof(XLogRecord, xl_crc));
+	FIN_CRC32C(crc);
+	record->xl_crc = crc;
+
+	/* Write the first page */
+	XLogFilePath(path, ControlFile.checkPointCopy.ThisTimeLineID, newXlogSegNo);
+
+	unlink(path);
+
+	fd = open(path, O_RDWR | O_CREAT | O_EXCL | PG_BINARY,
+			  S_IRUSR | S_IWUSR);
+	if (fd < 0)
+	{
+		fprintf(stderr, _("%s: could not open file \"%s\": %s\n"),
+				progname, path, strerror(errno));
+		exit(1);
+	}
+
+	errno = 0;
+	if (write(fd, buffer, XLOG_BLCKSZ) != XLOG_BLCKSZ)
+	{
+		/* if write didn't set errno, assume problem is no disk space */
+		if (errno == 0)
+			errno = ENOSPC;
+		fprintf(stderr, _("%s: could not write file \"%s\": %s\n"),
+				progname, path, strerror(errno));
+		exit(1);
+	}
+
+	/* Fill the rest of the file with zeroes */
+	memset(buffer, 0, XLOG_BLCKSZ);
+	for (nbytes = XLOG_BLCKSZ; nbytes < XLogSegSize; nbytes += XLOG_BLCKSZ)
+	{
+		errno = 0;
+		if (write(fd, buffer, XLOG_BLCKSZ) != XLOG_BLCKSZ)
+		{
+			if (errno == 0)
+				errno = ENOSPC;
+			fprintf(stderr, _("%s: could not write file \"%s\": %s\n"),
+					progname, path, strerror(errno));
+			exit(1);
+		}
+	}
+
+	if (fsync(fd) != 0)
+	{
+		fprintf(stderr, _("%s: fsync error: %s\n"), progname, strerror(errno));
+		exit(1);
+	}
+
+	close(fd);
+}
+#else
 /*
  * Write an empty XLOG file, containing only the checkpoint record
  * already set up in ControlFile.
@@ -1114,6 +1391,7 @@ WriteEmptyXLOG(void)
 
 	close(fd);
 }
+#endif
 
 /*
  * Copy the last logical checkpoint to new name

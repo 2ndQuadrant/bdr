@@ -41,6 +41,12 @@
 #include "utils/fmgroids.h"
 #include "utils/guc.h"
 
+#if PG_VERSION_NUM >= 90500
+	#define CONNECTION_LIMIT_STR "connection_limit"
+#else
+	#define CONNECTION_LIMIT_STR "connectionlimit"
+#endif
+
 /*
  * Register a new perdb worker for the named database. The worker MUST
  * not already exist.
@@ -269,7 +275,7 @@ bdr_supervisor_createdb()
 		de_template.type = T_String;
 		de_template.arg = (Node*) makeString("template1");
 
-		de_connlimit.defname = "connectionlimit";
+		de_connlimit.defname = CONNECTION_LIMIT_STR;
 		de_template.type = T_Integer;
 		de_connlimit.arg = (Node*) makeInteger(1);
 

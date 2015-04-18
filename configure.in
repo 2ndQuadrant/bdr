@@ -23,7 +23,7 @@ pgac_pg_config_version=$($PG_CONFIG --version 2>/dev/null)
 version_num=$(echo "$pgac_pg_config_version"|
               $SED -e 's/^PostgreSQL \([[0-9]]*\)\.\([[0-9]]*\)\([[a-zA-Z0-9.]]*\)$/\1.\2/')
 
-if test "$version_num" != '9.4'; then
+if test "$version_num" != '9.4' -a "$version_num" != '9.5'; then
    AC_MSG_ERROR([bdr is not compatible with postgres $version_num])
 else
    AC_MSG_NOTICE([building against PostgreSQL $version_num])
