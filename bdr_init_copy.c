@@ -215,7 +215,7 @@ main(int argc, char **argv)
 	}
 
 	/* Option parsing and validation */
-	while ((c = getopt_long(argc, argv, "D:d:h:n:p:s:U:v", long_options, &optindex)) != -1)
+	while ((c = getopt_long(argc, argv, "D:d:h:n:p:sU:v", long_options, &optindex)) != -1)
 	{
 		switch (c)
 		{
@@ -849,6 +849,25 @@ get_remote_info(char* remote_connstr)
 		die(_("Could fetch remote database list: %s"), PQerrorMessage(remote_conn));
 
 	ri->numdbs = PQntuples(res);
+
+	/*
+	 * If no databases were found, UDR will just subscribe to the database
+	 * provided as the remote connection string commandline parameter.
+	 */
+#ifdef BUILDING_UDR
+	if (ri->numdbs == 0)
+	{
+		PQclear(res);
+
+		res = PQexec(remote_conn, "SELECT d.oid, d.datname "
+					 "FROM pg_catalog.pg_database d "
+					 "WHERE d.datname = current_database();");
+		if (PQresultStatus(res) != PGRES_TUPLES_OK)
+			die(_("Could fetch remote database list: %s"), PQerrorMessage(remote_conn));
+
+		ri->numdbs = PQntuples(res);
+	}
+#endif
 	ri->dboids = (Oid *) pg_malloc(ri->numdbs * sizeof(Oid));
 	ri->dbnames = (char **) pg_malloc(ri->numdbs * sizeof(char *));
 
