@@ -641,17 +641,20 @@ _PG_init(void)
 {
 	MemoryContext old_context;
 
-	if (!process_shared_preload_libraries_in_progress)
-		ereport(ERROR,
-				(errcode(ERRCODE_CONFIG_FILE_ERROR),
-				 errmsg("bdr can only be loaded via shared_preload_libraries")));
+	if (!IsBinaryUpgrade)
+	{
+		if (!process_shared_preload_libraries_in_progress)
+			ereport(ERROR,
+					(errcode(ERRCODE_CONFIG_FILE_ERROR),
+					 errmsg("bdr can only be loaded via shared_preload_libraries")));
 
 #ifdef BUILDING_BDR
-	if (!commit_ts_enabled)
-		ereport(ERROR,
-				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("bdr requires \"track_commit_timestamp\" to be enabled")));
+		if (!commit_ts_enabled)
+			ereport(ERROR,
+					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+					 errmsg("bdr requires \"track_commit_timestamp\" to be enabled")));
 #endif
+	}
 
 	/*
 	 * Force btree_gist to be loaded - its absolutely not required at this
@@ -762,22 +765,26 @@ _PG_init(void)
 							 bdr_do_not_replicate_assign_hook,
 							 NULL);
 
-	bdr_label_init();
-
-	bdr_supervisor_register();
-
-	/*
-	 * Reserve shared memory segment to store bgworker connection information
-	 * and hook into shmem initialization.
-	 */
-	bdr_shmem_init();
-
 	EmitWarningsOnPlaceholders("bdr");
 
-	bdr_executor_init();
+	bdr_label_init();
 
-	/* Set up a ProcessUtility_hook to stop unsupported commands being run */
-	init_bdr_commandfilter();
+	if (!IsBinaryUpgrade)
+	{
+
+		bdr_supervisor_register();
+
+		/*
+		 * Reserve shared memory segment to store bgworker connection information
+		 * and hook into shmem initialization.
+		 */
+		bdr_shmem_init();
+
+		bdr_executor_init();
+
+		/* Set up a ProcessUtility_hook to stop unsupported commands being run */
+		init_bdr_commandfilter();
+	}
 
 	MemoryContextSwitchTo(old_context);
 }

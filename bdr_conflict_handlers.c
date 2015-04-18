@@ -58,7 +58,7 @@ const char *handler_queued_table_sql =
 "   VALUES (pg_current_xlog_location(), NOW(), CURRENT_USER, 'SELECT', $1)";
 
 const char *get_conflict_handlers_for_table_sql =
-"SELECT ch_fun, ch_type::text ch_type, ch_timeframe FROM bdr.bdr_conflict_handlers" \
+"SELECT ch_fun::regprocedure, ch_type::text ch_type, ch_timeframe FROM bdr.bdr_conflict_handlers" \
 "   WHERE ch_reloid = $1 ORDER BY ch_type, ch_name";
 
 static void bdr_conflict_handlers_check_handler_fun(Relation rel, Oid proc_oid);
@@ -206,9 +206,10 @@ bdr_create_conflict_handler(PG_FUNCTION_ARGS)
 	nulls[2] = false;
 	values[2] = PG_GETARG_DATUM(0);
 
-	argtypes[3] = REGPROCOID;
+	argtypes[3] = TEXTOID;
 	nulls[3] = false;
-	values[3] = PG_GETARG_DATUM(2);
+	values[3] =
+		CStringGetTextDatum(format_procedure_qualified(PG_GETARG_OID(2)));
 
 	argtypes[4] = INTERVALOID;
 	if (PG_NARGS() == 4)
