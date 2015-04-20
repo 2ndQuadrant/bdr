@@ -144,7 +144,10 @@
        pid, application_name
      FROM pg_stat_replication;
     </programlisting>
-    This will show lag for all replication consumers, including non-&bdr;
+    This query will show how much lag downstream servers have from the upstream
+    server you run the query on. You can't use this to see, from the downstream
+    server, how far it is behind an upstream it's receiving from.
+    Also, the query will show lag for all replication consumers, including non-&bdr;
     ones. To show only &bdr; peers, append
     <literal>WHERE application_name LIKE 'bdr%'</literal>.
    </para>
