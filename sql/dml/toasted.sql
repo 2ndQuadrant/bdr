@@ -4,6 +4,8 @@ SELECT * FROM public.bdr_regress_variables()
 
 \c :writedb1
 
+BEGIN;
+SET LOCAL bdr.permit_ddl_locking = true;
 SELECT bdr.bdr_replicate_ddl_command($$
 	CREATE TABLE public.toasted (
 		id serial primary key,
@@ -15,6 +17,7 @@ $$);
 SELECT bdr.bdr_replicate_ddl_command($$
 	ALTER TABLE public.toasted ALTER COLUMN data SET STORAGE EXTERNAL;
 $$);
+COMMIT;
 
 -- check replication of toast values
 INSERT INTO toasted(other, data) VALUES('foo', repeat('1234567890', 300));
@@ -42,4 +45,7 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
 SELECT * FROM toasted ORDER BY id;
 
 \c :writedb1
+BEGIN;
+SET LOCAL bdr.permit_ddl_locking = true;
 SELECT bdr.bdr_replicate_ddl_command($$DROP TABLE public.toasted;$$);
+COMMIT;

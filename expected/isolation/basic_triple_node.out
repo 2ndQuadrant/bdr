@@ -1,6 +1,8 @@
 Parsed test spec with 3 sessions
 
-starting permutation: n1s1 n1sync n2reada n2readb n2readc n2s1 n2sync n3reada n3s1 n3sync n1readb n1s2 n1sync n2readc n2s2 n2sync n3reada n3readb n3s2 n3sync n1readb
+starting permutation: n1setup n2setup n1s1 n1sync n2reada n2readb n2readc n2s1 n2sync n3reada n3s1 n3sync n1readb n1s2 n1sync n2readc n2s2 n2sync n3reada n3readb n3s2 n3sync n1readb
+step n1setup: SET bdr.permit_ddl_locking = true;
+step n2setup: SET bdr.permit_ddl_locking = true;
 step n1s1: 
  INSERT INTO tsta (a, b) VALUES
   (1, ARRAY['aaa', 'bba', 'cca']),

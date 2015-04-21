@@ -2,6 +2,8 @@
 SELECT * FROM public.bdr_regress_variables()
 \gset
 \c :writedb1
+BEGIN;
+SET LOCAL bdr.permit_ddl_locking = true;
 SELECT bdr.bdr_replicate_ddl_command($$
 	CREATE TABLE public.basic_dml (
 		id serial primary key,
@@ -15,6 +17,7 @@ $$);
  
 (1 row)
 
+COMMIT;
 -- check basic insert replication
 INSERT INTO basic_dml(other, data, something)
 VALUES (5, 'foo', '1 minute'::interval),
@@ -170,9 +173,12 @@ SELECT id, other, data, something FROM basic_dml ORDER BY id;
 (4 rows)
 
 \c :writedb1
+BEGIN;
+SET LOCAL bdr.permit_ddl_locking = true;
 SELECT bdr.bdr_replicate_ddl_command($$DROP TABLE public.basic_dml;$$);
  bdr_replicate_ddl_command 
 ---------------------------
  
 (1 row)
 
+COMMIT;

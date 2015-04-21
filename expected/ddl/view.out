@@ -147,12 +147,26 @@ SELECT * FROM renamed_test_view;
 (4 rows)
 
 DROP VIEW renamed_test_view;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
 \d renamed_test_view
 \c regression
 \d renamed_test_view
 CREATE VIEW test_view AS SELECT * FROM test_src_tbl;
 DROP TABLE test_src_tbl CASCADE;
 NOTICE:  drop cascades to view test_view
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
 \d test_view
 \c postgres
 \d test_view

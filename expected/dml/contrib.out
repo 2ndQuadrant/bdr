@@ -2,6 +2,8 @@
 SELECT * FROM public.bdr_regress_variables()
 \gset
 \c :writedb1
+BEGIN;
+SET LOCAL bdr.permit_ddl_locking = true;
 SELECT bdr.bdr_replicate_ddl_command($$
 	CREATE EXTENSION IF NOT EXISTS cube SCHEMA public;
 	CREATE EXTENSION IF NOT EXISTS hstore SCHEMA public;
@@ -17,6 +19,7 @@ $$);
  
 (1 row)
 
+COMMIT;
 -- check basic insert replication
 INSERT INTO contrib_dml(fixed, variable)
 VALUES ('(1,2)', 'a=>1,b=>2'),
@@ -145,9 +148,12 @@ SELECT id, fixed, variable FROM contrib_dml ORDER BY id;
 (0 rows)
 
 \c :writedb1
+BEGIN;
+SET LOCAL bdr.permit_ddl_locking = true;
 SELECT bdr.bdr_replicate_ddl_command($$DROP TABLE public.contrib_dml;$$);
  bdr_replicate_ddl_command 
 ---------------------------
  
 (1 row)
 
+COMMIT;

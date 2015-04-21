@@ -270,6 +270,7 @@ extern int bdr_max_databases;
 extern char *bdr_temp_dump_directory;
 extern bool bdr_log_conflicts_to_table;
 extern bool bdr_conflict_logging_include_tuples;
+extern bool bdr_permit_ddl_locking;
 extern bool bdr_permit_unsafe_commands;
 extern bool bdr_skip_ddl_locking;
 #ifdef BUILDING_UDR

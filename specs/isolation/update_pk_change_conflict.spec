@@ -5,12 +5,14 @@ conninfo "node3" "dbname=node3"
 
 setup
 {
+ SET bdr.permit_ddl_locking = true;
  CREATE TABLE tst (a INTEGER PRIMARY KEY, b TEXT);
  INSERT INTO tst (a, b) VALUES (1, 'one');
 }
 
 teardown
 {
+ SET bdr.permit_ddl_locking = true;
  DROP TABLE tst;
 }
 

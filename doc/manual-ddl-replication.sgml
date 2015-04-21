@@ -94,6 +94,16 @@
   </para>
 
   <para>
+   Because DDL is disruptive in &bdr;, transactions can't do DDL
+   that requires a heavy global lock by default. This is controlled
+   by the <xref linkend="guc-bdr-permit-ddl-locking"> setting. If
+   set to <literal>false</literal> (the default), any command that would
+   acquire the global DDL lock is rejected with an
+   <literal>ERROR</literal> instead. This helps prevent unintended global
+   DDL lock acquisitions.
+  </para>
+
+  <para>
    To minimise the impact of DDL, transactions performing DDL should be short,
    should not be combined with lots of row changes, and should avoid long
    running foreign key lookups.

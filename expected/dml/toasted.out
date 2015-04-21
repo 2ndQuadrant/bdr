@@ -2,6 +2,8 @@
 SELECT * FROM public.bdr_regress_variables()
 \gset
 \c :writedb1
+BEGIN;
+SET LOCAL bdr.permit_ddl_locking = true;
 SELECT bdr.bdr_replicate_ddl_command($$
 	CREATE TABLE public.toasted (
 		id serial primary key,
@@ -22,6 +24,7 @@ $$);
  
 (1 row)
 
+COMMIT;
 -- check replication of toast values
 INSERT INTO toasted(other, data) VALUES('foo', repeat('1234567890', 300));
 -- check that unchanged toast values work correctly
@@ -62,9 +65,12 @@ SELECT * FROM toasted ORDER BY id;
 (6 rows)
 
 \c :writedb1
+BEGIN;
+SET LOCAL bdr.permit_ddl_locking = true;
 SELECT bdr.bdr_replicate_ddl_command($$DROP TABLE public.toasted;$$);
  bdr_replicate_ddl_command 
 ---------------------------
  
 (1 row)
 
+COMMIT;

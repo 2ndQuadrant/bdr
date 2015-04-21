@@ -702,6 +702,15 @@ _PG_init(void)
 							 NULL, NULL, NULL);
 #endif
 
+	DefineCustomBoolVariable("bdr.permit_ddl_locking",
+							 "Allow commands that can acquire the global "
+							 "DDL lock",
+							 NULL,
+							 &bdr_permit_ddl_locking,
+							 true, PGC_USERSET,
+							 0,
+							 NULL, NULL, NULL);
+
 	DefineCustomBoolVariable("bdr.permit_unsafe_ddl_commands",
 							 "Allow commands that might cause data or " \
 							 "replication problems under BDR to run",

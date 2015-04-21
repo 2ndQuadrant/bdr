@@ -4,6 +4,7 @@ conninfo "node3" "dbname=node3"
 
 setup
 {
+ SET bdr.permit_ddl_locking = true;
  CREATE TABLE tsta (a INTEGER PRIMARY KEY, b TEXT[]);
  CREATE TABLE tstb (a INTEGER PRIMARY KEY, b tstzrange);
  CREATE TABLE tstc (a INTEGER PRIMARY KEY, b jsonb);
@@ -11,6 +12,7 @@ setup
 
 teardown
 {
+ SET bdr.permit_ddl_locking = true;
  DROP TABLE tsta;
  DROP TABLE tstb;
  DROP TABLE tstc;
@@ -18,6 +20,7 @@ teardown
 
 session "s1"
 connection "node1"
+step "n1setup" { SET bdr.permit_ddl_locking = true; }
 step "n1sync" { SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication; }
 step "n1reada" { SELECT a, b FROM tsta ORDER BY a; }
 step "n1readb" { SELECT a, b FROM tstb ORDER BY a; }
@@ -44,6 +47,7 @@ step "n1s2"
 
 session "s2"
 connection "node2"
+step "n2setup" { SET bdr.permit_ddl_locking = true; }
 step "n2sync" { SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication; }
 step "n2reada" { SELECT a, b FROM tsta ORDER BY a; }
 step "n2readb" { SELECT a, b FROM tstb ORDER BY a; }
@@ -70,4 +74,4 @@ step "n3s2" {
   (3, '[2003-03-03 03:03:03, 2003-04-05 03:03:03]');
 }
 
-permutation "n1s1" "n1sync" "n2reada" "n2readb" "n2readc" "n2s1" "n2sync" "n3reada" "n3s1" "n3sync" "n1readb" "n1s2" "n1sync" "n2readc" "n2s2" "n2sync" "n3reada" "n3readb" "n3s2" "n3sync" "n1readb"
+permutation "n1setup" "n2setup" "n1s1" "n1sync" "n2reada" "n2readb" "n2readc" "n2s1" "n2sync" "n3reada" "n3s1" "n3sync" "n1readb" "n1s2" "n1sync" "n2readc" "n2s2" "n2sync" "n3reada" "n3readb" "n3s2" "n3sync" "n1readb"
