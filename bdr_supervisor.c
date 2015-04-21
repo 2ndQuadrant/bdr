@@ -257,7 +257,7 @@ bdr_supervisor_createdb()
 	StartTransactionCommand();
 
 	/* If the DB already exists, no need to create it */
-	dboid = get_database_oid("bdr", true);
+	dboid = get_database_oid(BDR_SUPERVISOR_DBNAME, true);
 
 	if (dboid == InvalidOid)
 	{
@@ -273,21 +273,21 @@ bdr_supervisor_createdb()
 		de_template.type = T_Integer;
 		de_connlimit.arg = (Node*) makeInteger(1);
 
-		stmt.dbname = "bdr";
+		stmt.dbname = BDR_SUPERVISOR_DBNAME;
 		stmt.options = list_make2(&de_template, &de_connlimit);
 
 		dboid = createdb(&stmt);
 
 		if (dboid == InvalidOid)
-			elog(ERROR, "Failed to create 'bdr' DB");
+			elog(ERROR, "Failed to create "BDR_SUPERVISOR_DBNAME" DB");
 
 		/* TODO DYNCONF: Add a comment to the db, and/or a dummy table */
 
-		elog(LOG, "Created database 'bdr' (oid=%i) during BDR startup", dboid);
+		elog(LOG, "Created database "BDR_SUPERVISOR_DBNAME" (oid=%i) during BDR startup", dboid);
 	}
 	else
 	{
-		elog(DEBUG3, "Database 'bdr' (oid=%i) already exists, not creating", dboid);
+		elog(DEBUG3, "Database "BDR_SUPERVISOR_DBNAME" (oid=%i) already exists, not creating", dboid);
 	}
 
 	CommitTransactionCommand();
@@ -325,8 +325,10 @@ bdr_supervisor_worker_main(Datum main_arg)
 	 * can be accessed before being connected to a database - and
 	 * pg_shseclabel is not one of those.
 	 *
-	 * Instead we have a database "bdr" that's supposed to be empty which we
-	 * just use to read pg_shseclabel. Not pretty, but it works.
+	 * Instead we have a database BDR_SUPERVISOR_DBNAME that's supposed to
+	 * be empty which we just use to read pg_shseclabel. Not pretty, but it
+	 * works. (The need for this goes away in 9.5 with the new oid-based
+	 * alternative bgworker api).
 	 *
 	 * Without copying significant parts of InitPostgres() we can't even read
 	 * pg_database without connecting to a database.  As we can't connect to
@@ -347,13 +349,13 @@ bdr_supervisor_worker_main(Datum main_arg)
 		proc_exit(1);
 	}
 
-	BackgroundWorkerInitializeConnection("bdr", NULL);
+	BackgroundWorkerInitializeConnection(BDR_SUPERVISOR_DBNAME, NULL);
 
 	LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
 	BdrWorkerCtl->supervisor_latch = &MyProc->procLatch;
 	LWLockRelease(BdrWorkerCtl->lock);
 
-	elog(DEBUG1, "BDR supervisor connected to DB 'bdr'");
+	elog(DEBUG1, "BDR supervisor connected to DB "BDR_SUPERVISOR_DBNAME);
 
 	SetConfigOption("application_name", "bdr supervisor", PGC_USERSET, PGC_S_SESSION);
 
