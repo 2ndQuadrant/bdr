@@ -17,50 +17,104 @@
  </para>
 
  <para>
-  To safely manipulate the database schema in a asynchronous
-  multimaster setup, all pending changes have to be replicated first.
-  Otherwise it is possible that a row being replicated contains data
-  for a row that has been dropped, or has no data for a row that is
-  marked NOT NULL. More complex cases also exit.  To handle that
-  problem, &bdr; acquires a so called DDL lock the first time in a
-  transaction schema changes are made.
+  Before doing DDL on &bdr;, read <xref linkend="ddl-replication-advice">
+  and <xref linkend="ddl-replication-statements">.
  </para>
 
  <para>
-  Acquiring such a DDL locks requires contacting all nodes in a BDR
-  group, asking them to replicate all pending changes, and prevent
-  further changes from being made. Once all nodes are in that state,
-  the originator of the DDL lock is free to perform schema changes.
+  &bdr; is significantly different to standalone PostgreSQL when it
+  comes to DDL, and treating it as the same is a fast path to replication
+  problems.
  </para>
 
- <para>
-  This means that schema changes, in contrary to data changes, can
-  only be performed while all configured nodes are reachable. If DDL
-  has to be performed while a node is down, it has to be removed from
-  the configuration (using <xref linkend="function-bdr-part-by-node-names">)
-  first.
- </para>
+ <important>
+  <para>
+   While DDL is in progress on any node in the system, statements that perform
+   writes (<literal>INSERT</literal>, <literal>UPDATE</literal>
+   <literal>DELETE</literal>, any DDL, etc) on that node or any other node will
+   <literal>ERROR</literal> even if the writes have nothing to do with the
+   objects currently being modified by the DDL in progress.
+  </para>
+ </important>
 
- <para>
-  This also makes DDL a heavier weight operation than on standalone
-  PostgreSQL. Performing DDL will cancel currently running
-  transactions and prevent new transactions from proceeding until
-  replication has caught up and the DDL has been applied.
-  <important>
-   <para>
-    While DDL is in progress on any node in the system, statements that perform
-    writes (<literal>INSERT</literal>, <literal>UPDATE</literal>
-    <literal>DELETE</literal>, any DDL, etc) on that node or any other node will
-    <literal>ERROR</literal> with <literal>SQLSTATE</literal> <literal>55P03</literal>:
-    <programlisting>
-     ERROR: Database is locked against DDL operations
-    </programlisting>
-    This makes DDL a very heavyweight operation. Transactions performing DDL
-    should be short, should not be combined with lots of row changes, and
-    should avoid long running foreign key lookups, etc.
-   </para>
-  </important>
- </para>
+ <sect1 id="ddl-replication-advice">
+  <title>Executing DDL on BDR systems</title>
+
+  <para>
+   A BDR group is not the same as a standalone PostgreSQL server. It
+   is based on asynchronous multi-master replication without a central
+   locking and transaction co-ordinator. This has important implications
+   when executing DDL.
+  </para>
+
+  <para>
+   To safely manipulate the database schema in a asynchronous
+   multimaster setup, all pending changes have to be replicated first.
+   Otherwise it is possible that a row being replicated contains data
+   for a row that has been dropped, or has no data for a row that is
+   marked <literal>NOT NULL</literal>. More complex cases also exit.  To handle
+   that problem, &bdr; acquires a so-called DDL lock the first time in a
+   transaction schema changes are made.
+  </para>
+
+  <para>
+   Acquiring the global DDL lock requires contacting all nodes in a BDR
+   group, asking them to replicate all pending changes, and prevent
+   further changes from being made. Once all nodes are fully caught up,
+   the originator of the DDL lock is free to perform schema changes
+   and replicate them to the other nodes.  <emphasis>While the global DDL lock
+   is held by a node, no nodes may perform any DDL or make any changes to
+   rows</emphasis>.
+  </para>
+
+  <para>
+   This means that schema changes, in contrary to data changes, can
+   only be performed while all configured nodes are reachable. If DDL
+   has to be performed while a node is down, it has to be removed from
+   the configuration (using <xref linkend="function-bdr-part-by-node-names">)
+   first.
+  </para>
+
+  <para>
+   DDL is a heavier weight operation than on standalone
+   PostgreSQL. Performing DDL on any node will cancel (abort) currently running
+   transactions <emphasis>on all nodes</emphasis> with an <literal>ERROR</literal>,
+   and will reject new DML (<literal>INSERT</literal>,
+   <literal>UPDATE</literal> and <literal>DELETE</literal> on all nodes with
+   an <literal>ERROR</literal> with <literal>SQLSTATE</literal>
+   <literal>55P03</literal>:
+   <programlisting>
+    ERROR: Database is locked against DDL operations
+   </programlisting>
+   This continues until the DDL operation has replicated to all nodes, been
+   applied, and all nodes have confirmed to the DDL originator that the changes
+   have been applied. <emphasis>All DDL and DML will <literal>ERROR</literal>,
+   even if it does not affect the objects the currently in-progress DDL
+   is modifying.</emphasis>
+  </para>
+
+  <para>
+   To minimise the impact of DDL, transactions performing DDL should be short,
+   should not be combined with lots of row changes, and should avoid long
+   running foreign key lookups.
+  </para>
+
+  <para>
+   If DDL is holding the system up for too long, it is possible and safe to
+   cancel the DDL on the originating node like you would cancel any other
+   statement, e.g. with <literal>Control-C</literal> in
+   <application>psql</application> or with
+   <function>pg_cancel_backend</function>.
+  </para>
+
+  <para>
+   Once the DDL operation has committed on the originating node, you cannot
+   cancel or abort it. You must wait for it to apply successfully on all
+   other nodes and for them to replay confirmation. This is why it is important
+   to keep DDL transactions short and fast.
+  </para>
+
+ </sect1>
 
  <sect1 id="ddl-replication-statements">
   <title>Statement specific DDL replication concerns</title>
@@ -71,11 +125,53 @@
    than one database. Others are disallowed.
   </para>
 
+  <important>
+   <para>
+    Global DDL, like <literal>CREATE ROLE</literal>, <literal>CREATE USER</literal>
+    etc is <emphasis>not replicated</emphasis> and should be applied on each node
+    if the created objects will be referenced by a BDR-enabled database.
+   </para>
+  </important>
+
   <sect2>
    <title>Not replicated DDL statements</title>
 
    <para>
-    The following DDL statements are not replicated:
+    Some DDL statements, mainly those that affect objects that are
+    PostgreSQL-instance-wide rather than database-sepecific, are not
+    replicated. They are applied on the node that executes them without taking
+    the global DDL lock and are not sent to other nodes.
+   </para>
+
+   <para>
+    If you create non-replicated objects that create are to be referenced
+    by replicated objects (e.g. creating a role, not replicated, then creating
+    a table, replicated, that's owned by that role) you must ensure that the
+    non-replicated object is created on all &bdr; nodes. You can do this
+    manually, by running the statement on each node. Or you can use
+    <xref linkend="function-bdr-replicate-ddl-command"> to apply the statement
+    on the local node and manually enqueue it for replication on all nodes.
+   </para>
+
+   <para>
+    Using <function>bdr.bdr_replicate_ddl_command</function> is the recommended
+    approach, e.g.:
+    <programlisting>
+     SELECT bdr.bdr_replicate_ddl_command('CREATE USER myuser;');
+    </programlisting>
+   </para>
+
+   <note>
+    <para>
+     It is not necessary that the definition of objects like roles be the same
+     on all nodes, only that they exist. You can for example
+     <literal>CREATE ROLE somerole WITH NOLOGIN</literal> on most nodes, but
+     on one node you can create them <literal>WITH LOGIN</literal>.
+    </para>
+   </note>
+
+   <para>
+    The statements that are applied locally but not replicated are:
 
     <variablelist>
 
@@ -303,10 +399,27 @@
    </para>
   </sect2>
 
-  <sect2>
+  <sect2 id="ddl-replication-prohibited-commands" xreflabel="Prohibited DDL statements">
    <title>Prohibited DDL statements</title>
 
    <para>
+    BDR prevents some DDL statements from running when it is active on a
+    database. This protects the consistency of the system by disallowing
+    statements that cannot be replicated correctly, or for which replication is
+    not yet supported. Statements that are supported with some restrictions
+    are covered in <xref linkend="ddl-replication-restricted-commands">;
+    commands that are entirely disallowed in &bdr; are covered below.
+   </para>
+
+   <para>
+    Generally unsupported statements are prevented from being
+    executed, raising a <literal>feature_not_supported</literal>
+    (SQLSTATE <literal>0A000</literal>) error.
+   </para>
+
+   <para>
+    The following DDL commands are rejected by &bdr; when &bdr; is active on a
+    database, and will fail with an <literal>ERROR</literal>:
 
     <variablelist>
 
@@ -690,15 +803,16 @@
    </para>
   </sect2>
 
-  <sect2>
+  <sect2 id="ddl-replication-restricted-commands" xreflabel="DDL statements with restrictions">
    <title>DDL statements with restrictions</title>
 
    <para>
-    BDR prevents some DDL statements from running when
-    it is active on a database. This protects the
-    consistency of the system by disallowing statements
-    that cannot be replicated correctly, or for which
-    replication is not yet supported.
+    BDR prevents some DDL statements from running when it is active on a
+    database. This protects the consistency of the system by disallowing
+    statements that cannot be replicated correctly, or for which replication is
+    not yet supported. Entirely prohibited statements are covered above in
+    <xref linkend="ddl-replication-prohibited-commands">; commands where
+    some subcommands or features are limited are covered below.
    </para>
 
    <para>
