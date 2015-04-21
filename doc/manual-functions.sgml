@@ -172,7 +172,7 @@
        </entry>
       </row>
 
-      <row>
+      <row id="function-bdr-replicate-ddl-command" xreflabel="bdr.bdr_replicate_ddl_command">
        <entry>&bdr;/&udr;</entry>
        <entry>
         <indexterm>
@@ -187,6 +187,10 @@
         extension on all peer nodes. This function is useful mainly for
         replicating <acronym>DDL</acronym> in an &udr; setup where the
         transparent <acronym>DDL</acronym> replication is not available.
+        The same limitations apply to this function as to DDL run directly
+        by the user, except that DDL not normally replicated by &bdr;
+        will be replicated if run with this function; see
+        <xref linkend="ddl-replication">.
        </entry>
       </row>
 
