@@ -28,6 +28,7 @@ BEGIN
 		  JOIN pg_namespace n ON n.oid = c.relnamespace
 	     WHERE c.relname = 'bdr_nodes_node_name'
 	       AND n.nspname = 'bdr'
+	       AND c.relkind = 'i'
 	) THEN
 		-- make sure node names are unique, renaming as few nodes as possible
 		WITH nodes_to_rename AS (
@@ -52,8 +53,9 @@ BEGIN
 
 		-- add constrains ensuring node_names are unique and not null
 		ALTER TABLE bdr.bdr_nodes ALTER COLUMN node_name SET NOT NULL;
+
 		CREATE UNIQUE INDEX bdr_nodes_node_name
-		ON bdr.bdr_nodes_node_name(node_name);
+		ON bdr.bdr_nodes(node_name);
 	END IF;
 END;$$;
 
