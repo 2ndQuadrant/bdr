@@ -51,6 +51,7 @@
 #define BDR_DUMP_CMD "pg_dump"
 #endif
 
+#define BDR_SUPERVISOR_DBNAME "bdr_supervisordb"
 
 /*
  * Don't include libpq here, msvc infrastructure requires linking to libpq
