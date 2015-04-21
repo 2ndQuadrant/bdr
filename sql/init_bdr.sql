@@ -30,6 +30,8 @@ SELECT node_status, node_local_dsn, node_init_from_dsn FROM bdr.bdr_nodes ORDER 
 SELECT conn_dsn, conn_replication_sets FROM bdr.bdr_connections ORDER BY conn_dsn;
 SELECT node_status, node_local_dsn, node_init_from_dsn FROM bdr.bdr_nodes ORDER BY node_local_dsn;
 
+SET bdr.permit_ddl_locking = true;
+
 SELECT bdr.bdr_replicate_ddl_command($DDL$
 CREATE OR REPLACE FUNCTION public.bdr_regress_variables(
     OUT readdb1 text,

@@ -1,6 +1,8 @@
 Parsed test spec with 2 sessions
 
-starting permutation: n1s1 n1sync n2read n1s2 n1sync n2read n1s3 n1s4 n1sync n2read n1s5 n1s6 n1sync n2read n1s7 n1sync n2read n1s8 n1s9 n1s10 n2s1 n2sync n1s11 n1sync n2sync n2read n1read n2s2 n2sync n1read
+starting permutation: n1setup n2setup n1s1 n1sync n2read n1s2 n1sync n2read n1s3 n1s4 n1sync n2read n1s5 n1s6 n1sync n2read n1s7 n1sync n2read n1s8 n1s9 n1s10 n2s1 n2sync n1s11 n1sync n2sync n2read n1read n2s2 n2sync n1read
+step n1setup: SET bdr.permit_ddl_locking = true;
+step n2setup: SET bdr.permit_ddl_locking = true;
 step n1s1: INSERT INTO tst (a, b) VALUES (4, 'four');
 step n1sync: SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 pg_xlog_wait_remote_apply

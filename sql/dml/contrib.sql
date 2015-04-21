@@ -4,6 +4,8 @@ SELECT * FROM public.bdr_regress_variables()
 
 \c :writedb1
 
+BEGIN;
+SET LOCAL bdr.permit_ddl_locking = true;
 SELECT bdr.bdr_replicate_ddl_command($$
 	CREATE EXTENSION IF NOT EXISTS cube SCHEMA public;
 	CREATE EXTENSION IF NOT EXISTS hstore SCHEMA public;
@@ -14,6 +16,7 @@ SELECT bdr.bdr_replicate_ddl_command($$
 		variable public.hstore
 	);
 $$);
+COMMIT;
 
 -- check basic insert replication
 INSERT INTO contrib_dml(fixed, variable)
@@ -64,4 +67,7 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
 SELECT id, fixed, variable FROM contrib_dml ORDER BY id;
 
 \c :writedb1
+BEGIN;
+SET LOCAL bdr.permit_ddl_locking = true;
 SELECT bdr.bdr_replicate_ddl_command($$DROP TABLE public.contrib_dml;$$);
+COMMIT;

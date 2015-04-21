@@ -5,6 +5,7 @@ conninfo "node3" "dbname=node3"
 setup
 {
 	BEGIN;
+    SET LOCAL bdr.permit_ddl_locking = true;
 	CREATE TABLE test_dmlconflict(a text, b int primary key, c text);
 	COMMIT;
 	SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
@@ -12,6 +13,7 @@ setup
 
 teardown
 {
+    SET bdr.permit_ddl_locking = true;
 	DROP TABLE test_dmlconflict;
 }
 

@@ -78,6 +78,7 @@ SELECT node_status, node_local_dsn, node_init_from_dsn FROM bdr.bdr_nodes ORDER 
  r           | dbname=regression | dbname=postgres
 (2 rows)
 
+SET bdr.permit_ddl_locking = true;
 SELECT bdr.bdr_replicate_ddl_command($DDL$
 CREATE OR REPLACE FUNCTION public.bdr_regress_variables(
     OUT readdb1 text,

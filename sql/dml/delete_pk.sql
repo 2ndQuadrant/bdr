@@ -4,6 +4,8 @@ SELECT * FROM public.bdr_regress_variables()
 
 \c :writedb1
 
+BEGIN;
+SET LOCAL bdr.permit_ddl_locking = true;
 SELECT bdr.bdr_replicate_ddl_command($$
 	CREATE TABLE public.test (
 		id TEXT,
@@ -11,6 +13,7 @@ SELECT bdr.bdr_replicate_ddl_command($$
 		PRIMARY KEY (id)
 	);
 $$);
+COMMIT;
 
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
 
@@ -39,4 +42,7 @@ SELECT id FROM test ORDER BY ts;
 SELECT id FROM test ORDER BY ts;
 
 \c :writedb1
+BEGIN;
+SET LOCAL bdr.permit_ddl_locking = true;
 SELECT bdr.bdr_replicate_ddl_command($$DROP TABLE public.test;$$);
+COMMIT;

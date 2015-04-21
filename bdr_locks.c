@@ -152,6 +152,9 @@ static BdrLocksDBState *bdr_my_locks_database = NULL;
 
 static bool this_xact_acquired_lock = false;
 
+/* GUCs */
+bool bdr_permit_ddl_locking = false;
+
 static size_t
 bdr_locks_shmem_size(void)
 {
@@ -537,6 +540,17 @@ bdr_acquire_ddl_lock(void)
 
 	if (this_xact_acquired_lock)
 		return;
+
+	if (!bdr_permit_ddl_locking)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("Global DDL locking attempt rejected by configuration"),
+				 errdetail("bdr.permit_ddl_locking is false and the attempted command "
+						   "would require the global DDL lock to be acquired. "
+						   "Command rejected."),
+				 errhint("See the 'DDL replication' chapter of the documentation.")));
+	}
 
 	initStringInfo(&s);
 

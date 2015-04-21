@@ -4,11 +4,14 @@ SELECT * FROM public.bdr_regress_variables()
 
 \c :writedb1
 
+BEGIN;
+SET LOCAL bdr.permit_ddl_locking = true;
 SELECT bdr.bdr_replicate_ddl_command($$
 	CREATE TABLE public.bdr_missing_pk_parent(a serial PRIMARY KEY);
 	CREATE TABLE public.bdr_missing_pk(a serial) INHERITS (public.bdr_missing_pk_parent);
 	CREATE VIEW public.bdr_missing_pk_view AS SELECT * FROM public.bdr_missing_pk;
 $$);
+COMMIT;
 
 INSERT INTO bdr_missing_pk SELECT generate_series(1, 10);
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
@@ -58,4 +61,7 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
 SELECT * FROM bdr_missing_pk;
 
 \c :writedb1
+BEGIN;
+SET LOCAL bdr.permit_ddl_locking = true;
 SELECT bdr.bdr_replicate_ddl_command($$DROP TABLE public.bdr_missing_pk CASCADE;$$);
+COMMIT;

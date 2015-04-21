@@ -1,8 +1,9 @@
 Parsed test spec with 2 sessions
 
-starting permutation: s1b s1ct s2b s2ct s1c s2c s2dt s1wait s2wait s2ct2
-step s1b: BEGIN;
+starting permutation: s1b s1ct s2a s2b s2ct s1c s2c s2dt s1wait s2wait s2ct2
+step s1b: BEGIN; SET LOCAL bdr.permit_ddl_locking = true;
 step s1ct: CREATE TABLE bdr_ddl_conflict_a(f1 int);
+step s2a: SET bdr.permit_ddl_locking = true;
 step s2b: BEGIN;
 step s2ct: CREATE TABLE bdr_ddl_conflict_b(f1 int);
 ERROR:  database is locked against ddl by another node

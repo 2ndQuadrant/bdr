@@ -329,6 +329,20 @@
       </listitem>
      </varlistentry>
 
+     <varlistentry id="guc-bdr-permit-ddl-locking" xreflabel="bdr.permit_ddl_locking">
+      <term><varname>bdr.permit_ddl_locking</varname> (<type>boolean</type>)
+       <indexterm>
+        <primary><varname>bdr.permit_ddl_locking</varname> configuration parameter</primary>
+       </indexterm>
+      </term>
+      <listitem>
+       Allow sessions to run DDL commands that acquire the global DDL lock. See
+       <xref linkend="ddl-replication"> for details on the DDL lock. Setting this
+       to off by default means that unintended DDL that can be disruptive to
+       production is prevented.
+      </listitem>
+     </varlistentry>
+
      <varlistentry id="guc-bdr-permit-unsafe-ddl-commands" xreflabel="bdr.permit_unsafe_ddl_commands">
       <term><varname>bdr.permit_unsafe_ddl_commands</varname> (<type>boolean</type>)
        <indexterm>

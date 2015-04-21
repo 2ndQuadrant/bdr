@@ -5,6 +5,7 @@ conninfo "node3" "dbname=node3"
 setup
 {
 	BEGIN;
+    SET LOCAL bdr.permit_ddl_locking = true;
 	CREATE TABLE test_dmlconflict(a text, b int primary key, c text);
 	INSERT INTO test_dmlconflict VALUES('x', 1, 'foo');
 	COMMIT;
@@ -13,6 +14,7 @@ setup
 
 teardown
 {
+    SET bdr.permit_ddl_locking = true;
 	DROP TABLE test_dmlconflict;
 }
 
