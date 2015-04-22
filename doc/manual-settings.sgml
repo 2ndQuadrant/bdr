@@ -336,10 +336,12 @@
        </indexterm>
       </term>
       <listitem>
-       Allow sessions to run DDL commands that acquire the global DDL lock. See
-       <xref linkend="ddl-replication"> for details on the DDL lock. Setting this
-       to off by default means that unintended DDL that can be disruptive to
-       production is prevented.
+       <para>
+        Allow sessions to run DDL commands that acquire the global DDL lock. See
+        <xref linkend="ddl-replication"> for details on the DDL lock. Setting this
+        to off by default means that unintended DDL that can be disruptive to
+        production is prevented.
+       </para>
       </listitem>
      </varlistentry>
 
