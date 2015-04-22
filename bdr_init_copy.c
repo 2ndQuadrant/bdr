@@ -500,7 +500,7 @@ usage(void)
 	printf(_("Usage:\n"));
 	printf(_("  %s [OPTION]...\n"), progname);
 	printf(_("\nGeneral options:\n"));
-	printf(_("  -D, --pgdata=DIRECTORY data directory to be used for new node,\n"));
+	printf(_("  -D, --pgdata=DIRECTORY data directory to be used for new nodem,\n"));
 	printf(_("                         can be either empty/non-existing directory,\n"));
 	printf(_("                         or directory populated using pg_basebackup -X stream\n"));
 	printf(_("                         command\n"));
@@ -1334,7 +1334,7 @@ appendPQExpBufferConnstrValue(PQExpBuffer buf, const char *str)
 	for (s = str; *s; s++)
 	{
 		if (!((*s >= 'a' && *s <= 'z') || (*s >= 'A' && *s <= 'Z') ||
-			  (*s >= '0' && *s <= '9') || *s == '_' || *s == '.' || *s == '-'))
+			  (*s >= '0' && *s <= '9') || *s == '_' || *s == '.'))
 		{
 			needquotes = true;
 			break;
