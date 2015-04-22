@@ -89,8 +89,8 @@ static void wait_postmaster_connection(const char *connstr);
 static void wait_postmaster_shutdown(void);
 
 static void validate_remote_node(PGconn *conn);
-static void initialize_node_entry(PGconn *conn, NodeInfo *ni, Oid dboid,
-								  char *remote_connstr);
+static void initialize_node_entry(PGconn *conn, NodeInfo *ni, char *node_name,
+								  Oid dboid, char *remote_connstr);
 static void remove_unwanted_files(void);
 static void remove_unwanted_data(PGconn *conn, char *dbname);
 static void initialize_replication_identifier(PGconn *conn, NodeInfo *ni, Oid dboid, char *remote_lsn);
@@ -363,7 +363,7 @@ main(int argc, char **argv)
 		 */
 		print_msg(VERBOSITY_NORMAL,
 				  _(" %s: creating node entry for local node ...\n"), dbname);
-		initialize_node_entry(remote_conn, &node_info, remote_info->dboids[i],
+		initialize_node_entry(remote_conn, &node_info, node_name, remote_info->dboids[i],
 							  remote_connstr);
 
 		/* Don't hold connection since the next step might take long time. */
@@ -981,7 +981,7 @@ validate_remote_node(PGconn *conn)
  * Insert node entry for local node to the remote's bdr_nodes.
  */
 void
-initialize_node_entry(PGconn *conn, NodeInfo *ni, Oid dboid,
+initialize_node_entry(PGconn *conn, NodeInfo *ni, char* node_name, Oid dboid,
 					  char *remote_connstr)
 {
 	PQExpBuffer		query = createPQExpBuffer();
@@ -989,9 +989,10 @@ initialize_node_entry(PGconn *conn, NodeInfo *ni, Oid dboid,
 
 	printfPQExpBuffer(query, "INSERT INTO bdr.bdr_nodes"
 							 " (node_status, node_sysid, node_timeline,"
-							 "	node_dboid, node_init_from_dsn)"
-							 " VALUES ('c', '"UINT64_FORMAT"', %u, %u, %s);",
+							 "	node_dboid, node_name, node_init_from_dsn)"
+							 " VALUES ('c', '"UINT64_FORMAT"', %u, %u, %s, %s);",
 					  ni->local_sysid, ni->local_tlid, dboid,
+					  PQescapeLiteral(conn, remote_connstr, strlen(node_name)),
 					  PQescapeLiteral(conn, remote_connstr, strlen(remote_connstr)));
 	res = PQexec(conn, query->data);
 
