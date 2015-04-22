@@ -405,7 +405,8 @@ main(int argc, char **argv)
 	else
 	{
 		appendPQExpBuffer(recoveryconfcontents, "standby_mode = 'on'\n");
-		appendPQExpBuffer(recoveryconfcontents, "primary_conninfo = '%s'\n", remote_connstr);
+		appendPQExpBuffer(recoveryconfcontents, "primary_conninfo = '%s'\n",
+								escape_single_quotes_ascii(remote_connstr));
 	}
 	appendPQExpBuffer(recoveryconfcontents, "recovery_target_name = '%s'\n", restore_point_name);
 	appendPQExpBuffer(recoveryconfcontents, "recovery_target_inclusive = true\n");
