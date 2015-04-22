@@ -649,6 +649,7 @@ enable_bdr
       ac_precious_vars='build_alias
 host_alias
 target_alias
+PG_CONFIG
 CC
 CFLAGS
 LDFLAGS
@@ -1270,6 +1271,7 @@ Optional Features:
                           PostgreSQL 9.4 [yes/no/auto] [default=auto]
 
 Some influential environment variables:
+  PG_CONFIG   Location to find pg_config for target PostgresQL (default PATH)
   CC          C compiler command
   CFLAGS      C compiler flags
   LDFLAGS     linker flags, e.g. -L<lib dir> if you have libraries in a
@@ -1869,6 +1871,8 @@ $as_echo "$ac_cv_path_SED" >&6; }
   rm -f conftest.sed
 
 
+
+
 if test -z "$PG_CONFIG"; then
   # Extract the first word of "pg_config", so it can be a program name with args.
 set dummy pg_config; ac_word=$2
@@ -1913,7 +1917,7 @@ fi
 fi
 
 if test -z "$PG_CONFIG"; then
-   as_fn_error $? "could not find pg_config" "$LINENO" 5
+   as_fn_error $? "could not find pg_config, set PG_CONFIG or PATH" "$LINENO" 5
 fi
 
 pgac_pg_config_version=$($PG_CONFIG --version 2>/dev/null)
