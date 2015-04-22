@@ -38,9 +38,12 @@ AC_CHECK_HEADERS([replication/replication_identifier.h], [], [],
 [#include "postgres.h"
 ])
 
+AC_ARG_VAR([PATH], [PATH for target PostgreSQL install pg_config])
+AC_ARG_VAR([BUILDING_UDR], [Compile UDR only])
+AC_ARG_VAR([BUILDING_BDR], [Compile BDR (requires patched PostgreSQL 9.4])
+
 if test "$ac_cv_header_replication_replication_identifier_h" != 'yes'; then
    AC_MSG_NOTICE([postgres-bdr patches missing, forcing UDR build])
-   AC_ARG_VAR([BUILDING_UDR], 1)
    AC_SUBST([BUILDING_UDR], 1)
    AC_DEFINE([BUILDING_UDR], 1, ['Building UDR'])
    if test "$enable_bdr" = "yes"; then
@@ -48,7 +51,6 @@ if test "$ac_cv_header_replication_replication_identifier_h" != 'yes'; then
    fi
 else
    AC_MSG_NOTICE([building against appropriately patched PostgreSQL])
-   AC_ARG_VAR([BUILDING_BDR], 1)
    AC_SUBST([BUILDING_BDR], 1)
    AC_DEFINE([BUILDING_BDR], 1, ['Building BDR'])
    if test "$enable_bdr" = "no"; then
