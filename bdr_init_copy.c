@@ -500,7 +500,7 @@ usage(void)
 	printf(_("Usage:\n"));
 	printf(_("  %s [OPTION]...\n"), progname);
 	printf(_("\nGeneral options:\n"));
-	printf(_("  -D, --pgdata=DIRECTORY data directory to be used for new nodem,\n"));
+	printf(_("  -D, --pgdata=DIRECTORY data directory to be used for new node,\n"));
 	printf(_("                         can be either empty/non-existing directory,\n"));
 	printf(_("                         or directory populated using pg_basebackup -X stream\n"));
 	printf(_("                         command\n"));
