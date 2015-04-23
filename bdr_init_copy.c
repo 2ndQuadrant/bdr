@@ -992,7 +992,7 @@ initialize_node_entry(PGconn *conn, NodeInfo *ni, char* node_name, Oid dboid,
 							 "	node_dboid, node_name, node_init_from_dsn)"
 							 " VALUES ('c', '"UINT64_FORMAT"', %u, %u, %s, %s);",
 					  ni->local_sysid, ni->local_tlid, dboid,
-					  PQescapeLiteral(conn, remote_connstr, strlen(node_name)),
+					  PQescapeLiteral(conn, node_name, strlen(node_name)),
 					  PQescapeLiteral(conn, remote_connstr, strlen(remote_connstr)));
 	res = PQexec(conn, query->data);
 
