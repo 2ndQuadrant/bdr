@@ -32,6 +32,9 @@
 #include "commands/defrem.h"
 #include "commands/tablecmds.h"
 
+/* For the client auth filter */
+#include "libpq/auth.h"
+
 #include "parser/parse_utilcmd.h"
 
 #include "storage/standby.h"
@@ -48,6 +51,8 @@
 */
 
 static ProcessUtility_hook_type next_ProcessUtility_hook = NULL;
+
+static ClientAuthentication_hook_type next_ClientAuthentication_hook = NULL;
 
 /* GUCs */
 bool bdr_permit_unsafe_commands = false;
@@ -949,10 +954,39 @@ done:
 								dest, completionTag);
 }
 
+static void
+bdr_ClientAuthentication_hook(Port *port, int status)
+{
+	if (MyProcPort->database_name != NULL
+		&& strcmp(MyProcPort->database_name, BDR_SUPERVISOR_DBNAME) == 0)
+	{
+
+		/*
+		 * No commands may be executed under the supervisor database.
+		 *
+		 * This check won't catch execution attempts by bgworkers, but as currently
+		 * database_name isn't set for those. They'd better just know better.  It's
+		 * relatively harmless to run things in the supervisor database anyway.
+		 */
+		ereport(ERROR,
+				(errcode(ERRCODE_RESERVED_NAME),
+				 errmsg("The BDR extension reserves the database "
+						BDR_SUPERVISOR_DBNAME" for its own use"),
+				 errhint("Use a different database")));
+	}
+
+	if (next_ClientAuthentication_hook)
+		next_ClientAuthentication_hook(port, status);
+}
+
+
 /* Module load */
 void
 init_bdr_commandfilter(void)
 {
 	next_ProcessUtility_hook = ProcessUtility_hook;
 	ProcessUtility_hook = bdr_commandfilter;
+
+	next_ClientAuthentication_hook = ClientAuthentication_hook;
+	ClientAuthentication_hook = bdr_ClientAuthentication_hook;
 }

@@ -10,3 +10,6 @@ DROP DATABASE bdr_supervisordb;
 ALTER DATABASE bdr_supervisordb RENAME TO someothername;
 
 ALTER DATABASE regression RENAME TO bdr_supervisordb;
+
+-- Connections to the supervisordb are also prevented, but
+-- cannot be tested here because of #63 at this point.
