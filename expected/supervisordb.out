@@ -1,0 +1,15 @@
+\c postgres
+-- The DB name bdr_supervisordb is reserved by BDR. None
+-- of these commands may be permitted.
+CREATE DATABASE bdr_supervisordb;
+ERROR:  The BDR extension reserves the database name bdr_supervisordb for its own use
+HINT:  Use a different database name
+DROP DATABASE bdr_supervisordb;
+ERROR:  The BDR extension reserves the database name bdr_supervisordb for its own use
+HINT:  Use a different database name
+ALTER DATABASE bdr_supervisordb RENAME TO someothername;
+ERROR:  The BDR extension reserves the database name bdr_supervisordb for its own use
+HINT:  Use a different database name
+ALTER DATABASE regression RENAME TO bdr_supervisordb;
+ERROR:  The BDR extension reserves the database name bdr_supervisordb for its own use
+HINT:  Use a different database name
