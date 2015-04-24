@@ -224,8 +224,8 @@ endif
 
 REGRESSCHECKS= \
 	init \
-	supervisordb \
 	$(REGRESSINIT) \
+	supervisordb \
 	upgrade \
 	identifier \
 	$(DDLREGRESSCHECKS) \
