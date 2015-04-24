@@ -710,7 +710,7 @@ _PG_init(void)
 							 "DDL lock",
 							 NULL,
 							 &bdr_permit_ddl_locking,
-							 false, PGC_USERSET,
+							 true, PGC_USERSET,
 							 0,
 							 NULL, NULL, NULL);
 
