@@ -236,6 +236,7 @@ endif
 
 REGRESSCHECKS= \
 	init \
+	supervisordb \
 	$(REGRESSINIT) \
 	upgrade \
 	identifier \

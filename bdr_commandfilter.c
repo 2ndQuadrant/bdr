@@ -572,6 +572,19 @@ statement_affects_only_nonpermanent(Node *parsetree)
 }
 
 static void
+bdr_commandfilter_dbname(const char *dbname)
+{
+	if (strcmp(dbname, BDR_SUPERVISOR_DBNAME) == 0)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_RESERVED_NAME),
+				 errmsg("The BDR extension reserves the database name "
+						BDR_SUPERVISOR_DBNAME" for its own use"),
+				 errhint("Use a different database name")));
+	}
+}
+
+static void
 bdr_commandfilter(Node *parsetree,
 				  const char *queryString,
 				  ProcessUtilityContext context,
@@ -614,10 +627,8 @@ bdr_commandfilter(Node *parsetree,
 		case T_DeallocateStmt:
 		case T_GrantStmt: /* XXX: we could replicate some of these these */;
 		case T_GrantRoleStmt:
-		case T_CreatedbStmt:
 		case T_AlterDatabaseStmt:
 		case T_AlterDatabaseSetStmt:
-		case T_DropdbStmt:
 		case T_NotifyStmt:
 		case T_ListenStmt:
 		case T_UnlistenStmt:
@@ -641,6 +652,37 @@ bdr_commandfilter(Node *parsetree,
 		case T_CheckPointStmt:
 		case T_ReindexStmt:
 			goto done;
+
+		default:
+			break;
+	}
+
+	/*
+	 * We stop people from creating a DB named BDR_SUPERVISOR_DBNAME if the BDR
+	 * extension is installed because we reserve that name, even if BDR isn't
+	 * actually active.
+	 *
+	 */
+	switch (nodeTag(parsetree))
+	{
+		case T_CreatedbStmt:
+			bdr_commandfilter_dbname(((CreatedbStmt*)parsetree)->dbname);
+			goto done;
+		case T_DropdbStmt:
+			bdr_commandfilter_dbname(((DropdbStmt*)parsetree)->dbname);
+			goto done;
+		case T_RenameStmt:
+			/*
+			 * ALTER DATABASE ... RENAME TO ... is actually a RenameStmt not an
+			 * AlterDatabaseStmt. It's handled here for the database target only
+			 * then falls through for the other rename object type.
+			 */
+			if (((RenameStmt*)parsetree)->renameType == OBJECT_DATABASE)
+			{
+				bdr_commandfilter_dbname(((RenameStmt*)parsetree)->subname);
+				bdr_commandfilter_dbname(((RenameStmt*)parsetree)->newname);
+			}
+			break;
 
 		default:
 			break;
