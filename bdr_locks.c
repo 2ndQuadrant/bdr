@@ -100,6 +100,7 @@
 #include "storage/proc.h"
 #include "storage/procarray.h"
 #include "storage/shmem.h"
+#include "storage/sinvaladt.h"
 #include "storage/standby.h"
 
 #include "utils/builtins.h"
@@ -154,6 +155,8 @@ static bool this_xact_acquired_lock = false;
 
 /* GUCs */
 bool bdr_permit_ddl_locking = false;
+int bdr_ddl_grace_timeout = 10000;
+
 
 static size_t
 bdr_locks_shmem_size(void)
@@ -701,6 +704,67 @@ check_is_my_node(uint64 sysid, TimeLineID tli, Oid datid)
 }
 
 /*
+ * Kill any writing transactions while giving them some grace period for
+ * finishing.
+ *
+ * Caller is responsible for ensuring that no new writes can be started during
+ * the execution of this function.
+ */
+static void
+cancel_conflicting_transactions(void)
+{
+	VirtualTransactionId *conflict;
+	TimestampTz		endtime = TimestampTzPlusMilliseconds(GetCurrentTimestamp(), bdr_ddl_grace_timeout),
+					waittime = 1000;
+
+	conflict = GetConflictingVirtualXIDs(InvalidTransactionId, MyDatabaseId);
+
+	while (conflict->backendId != InvalidBackendId)
+	{
+		PGPROC	   *pgproc = BackendIdGetProc(conflict->backendId);
+		PGXACT	   *pgxact;
+
+		if (pgproc == NULL)
+			continue;
+
+		pgxact = &ProcGlobal->allPgXact[pgproc->pgprocno];
+
+		/* Skip the transactions that didn't do any writes. */
+		if (!TransactionIdIsValid(pgxact->xid))
+		{
+			conflict++;
+			continue;
+		}
+
+		/* If here is writing transaction give it time to finish */
+		if (GetCurrentTimestamp() < endtime)
+		{
+			/* Increasing backoff interval for wait time with limit of 1s */
+			pg_usleep(waittime);
+			waittime *= 2;
+			if (waittime > 1000000)
+				waittime = 1000000;
+		}
+		else
+		{
+			/* We reached timeout so lets kill the writing transaction */
+			pid_t p = CancelVirtualTransaction(*conflict, PROCSIG_RECOVERY_CONFLICT_LOCK);
+
+			/*
+			 * Either confirm kill or sleep a bit to prevent the other node
+			 * being busy with signal processing.
+			 */
+			if (p == 0)
+				conflict++;
+			else
+				pg_usleep(1000);
+
+			elog(DEBUG2, "signaled pid %d to terminate because it conflicts with a DDL lock requested by another node", p);
+		}
+	}
+}
+
+/*
  * Another node has asked for a DDL lock. Try to acquire the local ddl lock.
  *
  * Runs in the apply worker.
@@ -729,7 +793,6 @@ bdr_process_acquire_ddl_lock(uint64 sysid, TimeLineID tli, Oid datid)
 	if (bdr_my_locks_database->lockcount == 0)
 	{
 		XLogRecPtr wait_for_lsn;
-		VirtualTransactionId *conflicts;
 		Relation rel;
 		Datum	values[10];
 		bool	nulls[10];
@@ -797,41 +860,14 @@ bdr_process_acquire_ddl_lock(uint64 sysid, TimeLineID tli, Oid datid)
 		/*
 		 * Now kill all local processes that are still writing. We can't just
 		 * prevent them from writing via the acquired lock as they are still
-		 * running. We're using drastic measures here because it'd be a bad
-		 * idea to wait: The primary is waiting for us and during that time
-		 * the entire flock has to wait.
+		 * running.
 		 *
 		 * TODO: It'd be *far* nicer to only cancel other transactions if they
 		 * held conflicting locks, but that's not easiliy possible at the
 		 * moment.
 		 */
 		elog(DEBUG1, "terminating any local processes that conflict with the DDL lock");
-		conflicts = GetConflictingVirtualXIDs(InvalidTransactionId, MyDatabaseId);
-		while (conflicts->backendId != InvalidBackendId)
-		{
-			pid_t p;
-
-			/* Don't kill ourselves */
-			if (conflicts->backendId == MyBackendId)
-			{
-				conflicts++;
-				continue;
-			}
-
-			/* try to kill */
-			p = CancelVirtualTransaction(*conflicts, PROCSIG_RECOVERY_CONFLICT_LOCK);
-
-			/*
-			 * Either confirm kill or sleep a bit to prevent the other node
-			 * being busy with signal processing.
-			 */
-			if (p == 0)
-				conflicts++;
-			else
-				pg_usleep(5000);
-
-			elog(DEBUG2, "signaled pid %d to terminate because it conflicts with a DDL lock requested by another node", p);
-		}
+		cancel_conflicting_transactions();
 
 		/*
 		 * We now have to wait till all our local pending changes have been
