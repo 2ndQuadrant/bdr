@@ -34,10 +34,10 @@ step "n1s11" { COMMIT; }
 
 session "s2"
 connection "node2"
-step "n2setup" { SET bdr.permit_ddl_locking = true; }
+step "n2setup" { SET bdr.permit_ddl_locking = true; SET statement_timeout = '5s'; }
 step "n2sync" { SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication; }
 step "n2read" { SELECT * FROM tst ORDER BY a; }
 step "n2s1" { UPDATE tst SET c = 'changed' WHERE a = 1; }
 step "n2s2" { UPDATE tst SET b = 'changed' WHERE a = 1; }
 
-permutation "n1setup" "n2setup" "n1s1" "n1sync" "n2read" "n1s2" "n1sync" "n2read" "n1s3" "n1s4" "n1sync" "n2read" "n1s5" "n1s6" "n1sync" "n2read" "n1s7" "n1sync" "n2read" "n1s8" "n1s9" "n1s10" "n2s1" "n2sync" "n1s11" "n1sync" "n2sync" "n2read" "n1read" "n2s2" "n2sync" "n1read"
+permutation "n1setup" "n2setup" "n1s1" "n1sync" "n2read" "n1s2" "n1sync" "n2read" "n1s3" "n1s4" "n1sync" "n2read" "n1s5" "n1s6" "n1sync" "n2read" "n1s7" "n1sync" "n2read" "n1s8" "n1s9" "n1s10" "n2sync" "n2s1" "n1s11" "n1sync" "n2sync" "n2read" "n1read" "n2s2" "n2sync" "n1read"
