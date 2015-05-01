@@ -13,3 +13,5 @@ HINT:  Use a different database name
 ALTER DATABASE regression RENAME TO bdr_supervisordb;
 ERROR:  The BDR extension reserves the database name bdr_supervisordb for its own use
 HINT:  Use a different database name
+-- Connections to the supervisordb are also prevented, but
+-- cannot be tested here because of #63 at this point.
