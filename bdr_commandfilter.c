@@ -597,6 +597,9 @@ bdr_commandfilter(Node *parsetree,
 				  DestReceiver *dest,
 				  char *completionTag)
 {
+	/* take strongest lock by default. */
+	BDRLockType	lock_type = BDR_LOCK_WRITE;
+
 	/* don't filter in single user mode */
 	if (!IsUnderPostmaster)
 		goto done;
@@ -943,7 +946,7 @@ bdr_commandfilter(Node *parsetree,
 
 	/* now lock other nodes in the bdr flock against ddl */
 	if (!bdr_skip_ddl_locking && !statement_affects_only_nonpermanent(parsetree))
-		bdr_acquire_ddl_lock();
+		bdr_acquire_ddl_lock(lock_type);
 
 done:
 	if (next_ProcessUtility_hook)

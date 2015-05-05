@@ -1285,7 +1285,7 @@ process_remote_message(StringInfo s)
 	bool		transactional;
 	int			chanlen;
 	const char *chan;
-	int			type;
+	int			msg_type;
 	uint64		origin_sysid;
 	TimeLineID	origin_tlid;
 	Oid			origin_datid;
@@ -1310,7 +1310,7 @@ process_remote_message(StringInfo s)
 		return;
 	}
 
-	type = pq_getmsgint(&message, 4);
+	msg_type = pq_getmsgint(&message, 4);
 	origin_sysid = pq_getmsgint64(&message);
 	origin_tlid = pq_getmsgint(&message, 4);
 	origin_datid = pq_getmsgint(&message, 4);
@@ -1319,35 +1319,23 @@ process_remote_message(StringInfo s)
 		elog(ERROR, "no names expected yet");
 
 	elog(DEBUG1, "message type %d from "UINT64_FORMAT":%u database %u at %X/%X",
-		 type, origin_sysid, origin_tlid, origin_datid,
+		 msg_type, origin_sysid, origin_tlid, origin_datid,
 		 (uint32) (lsn >> 32),
 		 (uint32) lsn);
 
-	if (type == BDR_MESSAGE_START)
+	if (msg_type == BDR_MESSAGE_START)
 	{
 		bdr_locks_process_remote_startup(
 			origin_sysid, origin_tlid, origin_datid);
 	}
-	else if (type == BDR_MESSAGE_ACQUIRE_LOCK)
+	else if (msg_type == BDR_MESSAGE_ACQUIRE_LOCK)
 	{
-		bdr_process_acquire_ddl_lock(
-			origin_sysid, origin_tlid, origin_datid);
+		int			lock_type;
+		lock_type = pq_getmsgint(&message, 4);
+		bdr_process_acquire_ddl_lock(origin_sysid, origin_tlid, origin_datid,
+									 lock_type);
 	}
-	else if (type == BDR_MESSAGE_RELEASE_LOCK)
-	{
-		uint64		lock_sysid;
-		TimeLineID	lock_tlid;
-		Oid			lock_datid;
-
-		lock_sysid = pq_getmsgint64(&message);
-		lock_tlid = pq_getmsgint(&message, 4);
-		lock_datid = pq_getmsgint(&message, 4);
-
-		bdr_process_release_ddl_lock(
-			origin_sysid, origin_tlid, origin_datid,
-			lock_sysid, lock_tlid, lock_datid);
-	}
-	else if (type == BDR_MESSAGE_CONFIRM_LOCK)
+	else if (msg_type == BDR_MESSAGE_RELEASE_LOCK)
 	{
 		uint64		lock_sysid;
 		TimeLineID	lock_tlid;
@@ -1357,42 +1345,59 @@ process_remote_message(StringInfo s)
 		lock_tlid = pq_getmsgint(&message, 4);
 		lock_datid = pq_getmsgint(&message, 4);
 
-		bdr_process_confirm_ddl_lock(
-			origin_sysid, origin_tlid, origin_datid,
-			lock_sysid, lock_tlid, lock_datid);
+		bdr_process_release_ddl_lock(origin_sysid, origin_tlid, origin_datid,
+									 lock_sysid, lock_tlid, lock_datid);
 	}
-	else if (type == BDR_MESSAGE_DECLINE_LOCK)
+	else if (msg_type == BDR_MESSAGE_CONFIRM_LOCK)
 	{
 		uint64		lock_sysid;
 		TimeLineID	lock_tlid;
 		Oid			lock_datid;
+		int			lock_type;
 
 		lock_sysid = pq_getmsgint64(&message);
 		lock_tlid = pq_getmsgint(&message, 4);
 		lock_datid = pq_getmsgint(&message, 4);
+		lock_type = pq_getmsgint(&message, 4);
 
-		bdr_process_decline_ddl_lock(
-			origin_sysid, origin_tlid, origin_datid,
-			lock_sysid, lock_tlid, lock_datid);
+		bdr_process_confirm_ddl_lock(origin_sysid, origin_tlid, origin_datid,
+									 lock_sysid, lock_tlid, lock_datid,
+									 lock_type);
 	}
-	else if (type == BDR_MESSAGE_REQUEST_REPLAY_CONFIRM)
+	else if (msg_type == BDR_MESSAGE_DECLINE_LOCK)
+	{
+		uint64		lock_sysid;
+		TimeLineID	lock_tlid;
+		Oid			lock_datid;
+		int			lock_type;
+
+		lock_sysid = pq_getmsgint64(&message);
+		lock_tlid = pq_getmsgint(&message, 4);
+		lock_datid = pq_getmsgint(&message, 4);
+		lock_type = pq_getmsgint(&message, 4);
+
+		bdr_process_decline_ddl_lock(origin_sysid, origin_tlid, origin_datid,
+									 lock_sysid, lock_tlid, lock_datid,
+									 lock_type);
+	}
+	else if (msg_type == BDR_MESSAGE_REQUEST_REPLAY_CONFIRM)
 	{
 		XLogRecPtr confirm_lsn;
 		confirm_lsn = pq_getmsgint64(&message);
 
-		bdr_process_request_replay_confirm(
-			origin_sysid, origin_tlid, origin_datid, confirm_lsn);
+		bdr_process_request_replay_confirm(origin_sysid, origin_tlid,
+										   origin_datid, confirm_lsn);
 	}
-	else if (type == BDR_MESSAGE_REPLAY_CONFIRM)
+	else if (msg_type == BDR_MESSAGE_REPLAY_CONFIRM)
 	{
 		XLogRecPtr confirm_lsn;
 		confirm_lsn = pq_getmsgint64(&message);
 
-		bdr_process_replay_confirm(
-			origin_sysid, origin_tlid, origin_datid, confirm_lsn);
+		bdr_process_replay_confirm(origin_sysid, origin_tlid, origin_datid,
+								   confirm_lsn);
 	}
 	else
-		elog(LOG, "unknown message type %d", type);
+		elog(LOG, "unknown message type %d", msg_type);
 
 	if (!transactional)
 		AdvanceCachedReplicationIdentifier(lsn, InvalidXLogRecPtr);

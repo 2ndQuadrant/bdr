@@ -1,6 +1,6 @@
 Parsed test spec with 2 sessions
 
-starting permutation: n1setup n2setup n1s1 n1sync n2read n1s2 n1sync n2read n1s3 n1s4 n1sync n2read n1s5 n1s6 n1sync n2read n1s7 n1sync n2read n1s8 n1s9 n1s10 n2sync n2s1 n1s11 n1sync n2sync n2read n1read n2s2 n2sync n1read
+starting permutation: n1setup n2setup n1s1 n1sync n2read n1s2 n1sync n2read n1s3 n1s4 n1sync n2read n1s5 n1s6 n1sync n2read n1s7 n1sync n2read n1s8 n1s9 n1s10 n2sync n2s1 n2s2 n1s11 n1sync n2sync n2read n1read n2s3 n2sync n1read
 step n1setup: SET bdr.permit_ddl_locking = true;
 step n2setup: SET bdr.permit_ddl_locking = true; SET statement_timeout = '5s';
 step n1s1: INSERT INTO tst (a, b) VALUES (4, 'four');
@@ -109,6 +109,8 @@ pg_xlog_wait_remote_apply
                
 step n2s1: UPDATE tst SET c = 'changed' WHERE a = 1;
 ERROR:  canceling statement due to statement timeout
+step n2s2: ALTER TABLE tst ADD COLUMN c TEXT;
+ERROR:  database is locked against ddl by another node
 step n1s11: COMMIT;
 step n1sync: SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 pg_xlog_wait_remote_apply
@@ -144,7 +146,7 @@ a              b
 3              three          
 4              four           
 6              six            
-step n2s2: UPDATE tst SET b = 'changed' WHERE a = 1;
+step n2s3: UPDATE tst SET b = 'changed' WHERE a = 1;
 step n2sync: SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 pg_xlog_wait_remote_apply
 
