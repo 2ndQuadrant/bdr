@@ -739,6 +739,8 @@ bdr_commandfilter(Node *parsetree,
 			{
 				AlterOwnerStmt *stmt = (AlterOwnerStmt *) parsetree;
 
+				lock_type = BDR_LOCK_DDL;
+
 				if (EventTriggerSupportsObjectType(stmt->objectType))
 					break;
 				else
@@ -762,13 +764,16 @@ bdr_commandfilter(Node *parsetree,
 	switch (nodeTag(parsetree))
 	{
 		case T_CreateSchemaStmt:
+			lock_type = BDR_LOCK_DDL;
 			break;
 
 		case T_CreateStmt:
 			filter_CreateStmt(parsetree, completionTag);
+			lock_type = BDR_LOCK_DDL;
 			break;
 
 		case T_CreateForeignTableStmt:
+			lock_type = BDR_LOCK_DDL;
 			break;
 
 		case T_AlterTableStmt:
@@ -796,6 +801,7 @@ bdr_commandfilter(Node *parsetree,
 						break;
 				}
 
+				lock_type = BDR_LOCK_DDL;
 				break;
 			}
 
@@ -809,6 +815,14 @@ bdr_commandfilter(Node *parsetree,
 					error_on_persistent_rv(stmt->relation,
 										   "CREATE UNIQUE INDEX ... WHERE",
 										   AccessExclusiveLock, false);
+
+				/*
+				 * Non-unique concurrently built indexes can be done in
+				 * parallel with writing.
+				 */
+				if (!stmt->unique && stmt->concurrent)
+					lock_type = BDR_LOCK_DDL;
+
 				break;
 			}
 		case T_CreateExtensionStmt:
@@ -837,11 +851,15 @@ bdr_commandfilter(Node *parsetree,
 		case T_CompositeTypeStmt:	/* CREATE TYPE (composite) */
 		case T_CreateEnumStmt:		/* CREATE TYPE AS ENUM */
 		case T_CreateRangeStmt:		/* CREATE TYPE AS RANGE */
+			lock_type = BDR_LOCK_DDL;
+			break;
+
+		case T_ViewStmt:	/* CREATE VIEW */
+		case T_CreateFunctionStmt:	/* CREATE FUNCTION */
+			lock_type = BDR_LOCK_DDL;
 			break;
 
 		case T_AlterEnumStmt:
-		case T_ViewStmt:	/* CREATE VIEW */
-		case T_CreateFunctionStmt:	/* CREATE FUNCTION */
 		case T_AlterFunctionStmt:	/* ALTER FUNCTION */
 		case T_RuleStmt:	/* CREATE RULE */
 			break;
@@ -871,6 +889,7 @@ bdr_commandfilter(Node *parsetree,
 			break;
 
 		case T_CreateDomainStmt:
+			lock_type = BDR_LOCK_DDL;
 			break;
 
 		case T_CreateConversionStmt:
@@ -925,6 +944,7 @@ bdr_commandfilter(Node *parsetree,
 			break;
 
 		case T_AlterDefaultPrivilegesStmt:
+			lock_type = BDR_LOCK_DDL;
 			break;
 
 		case T_SecLabelStmt:
