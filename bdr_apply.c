@@ -2450,6 +2450,27 @@ bdr_apply_main(Datum main_arg)
 		   bdr_apply_config->timeline == bdr_apply_worker->remote_timeline &&
 		   bdr_apply_config->dboid == bdr_apply_worker->remote_dboid);
 
+	/*
+	 * Got default remote connection info, read also local defaults.
+	 * Otherwise we would be using replication sets and apply delay from the
+	 * remote node instead of the local one.
+	 *
+	 * Note: this is slightly hacky and we should probably use the bdr_nodes
+	 * for this instead.
+	 */
+	if (!bdr_apply_config->origin_is_my_id &&
+		!bdr_apply_config->is_unidirectional)
+	{
+		BdrConnectionConfig *cfg =
+			bdr_get_connection_config(GetSystemIdentifier(), ThisTimeLineID,
+									  MyDatabaseId, false);
+
+		bdr_apply_config->apply_delay = cfg->apply_delay;
+		pfree(bdr_apply_config->replication_sets);
+		bdr_apply_config->replication_sets = pstrdup(cfg->replication_sets);
+		bdr_free_connection_config(cfg);
+	}
+
 	CurrentResourceOwner = ResourceOwnerCreate(NULL, "bdr apply top-level resource owner");
 	bdr_saved_resowner = CurrentResourceOwner;
 

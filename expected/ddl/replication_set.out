@@ -190,7 +190,7 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
  * node1: dbname regression, sets: default, important, for-node-1
  * node2: dbname postgres, sets: default, important, for-node-2
  */
-\c regression
+\c postgres
 CREATE TABLE settest_1(data text primary key);
 INSERT INTO settest_1(data) VALUES ('should-replicate-via-default');
 SELECT bdr.table_set_replication_sets('settest_1', '{}');
@@ -254,7 +254,7 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
  
 (2 rows)
 
-\c postgres
+\c regression
 SELECT * FROM settest_1 ORDER BY data;
                         data                         
 -----------------------------------------------------
@@ -264,7 +264,7 @@ SELECT * FROM settest_1 ORDER BY data;
  should-replicate-via-for-node-2-even-though-unknown
 (4 rows)
 
-\c regression
+\c postgres
 DROP TABLE settest_1;
 /*
  * Now test configurations where only some actions are replicated.
@@ -371,7 +371,7 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
  
 (2 rows)
 
-\c postgres
+\c regression
 SELECT * FROM settest_2 ORDER BY data;
                 data                
 ------------------------------------
@@ -385,4 +385,3 @@ SELECT * FROM settest_2 ORDER BY data;
  repl-update--insert-#4
 (8 rows)
 
-\c regression

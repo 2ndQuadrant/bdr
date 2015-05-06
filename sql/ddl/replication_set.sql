@@ -66,7 +66,7 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
  * node1: dbname regression, sets: default, important, for-node-1
  * node2: dbname postgres, sets: default, important, for-node-2
  */
-\c regression
+\c postgres
 
 CREATE TABLE settest_1(data text primary key);
 
@@ -92,9 +92,9 @@ INSERT INTO settest_1(data) VALUES ('should-replicate-via-for-node-2-and-importa
 
 SELECT * FROM settest_1 ORDER BY data;
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c postgres
-SELECT * FROM settest_1 ORDER BY data;
 \c regression
+SELECT * FROM settest_1 ORDER BY data;
+\c postgres
 DROP TABLE settest_1;
 
 
@@ -181,6 +181,5 @@ WHERE data = 'repl-combined--insert-#2-then-delete';
 
 SELECT * FROM settest_2 ORDER BY data;
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
-\c postgres
-SELECT * FROM settest_2 ORDER BY data;
 \c regression
+SELECT * FROM settest_2 ORDER BY data;
