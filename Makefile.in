@@ -215,10 +215,12 @@ DDLREGRESSCHECKS=ddl/enable_ddl ddl/create ddl/alter_table ddl/extension ddl/fun
 				 ddl/grant ddl/mixed ddl/namespace ddl/replication_set \
 				 ddl/sequence ddl/view ddl/disable_ddl
 REGRESSINIT=init_bdr
+REGRESSTEARDOWN=part_bdr
 else
 check: regresscheck
 DDLREGRESSCHECKS=
 REGRESSINIT=init_udr
+REGRESSTEARDOWN=part_udr
 endif
 
 
@@ -229,7 +231,8 @@ REGRESSCHECKS= \
 	upgrade \
 	identifier \
 	$(DDLREGRESSCHECKS) \
-	dml/basic dml/contrib dml/delete_pk dml/extended dml/missing_pk dml/toasted
+	dml/basic dml/contrib dml/delete_pk dml/extended dml/missing_pk dml/toasted \
+	$(REGRESSTEARDOWN)
 
 
 ISOLATIONCHECKS=\
