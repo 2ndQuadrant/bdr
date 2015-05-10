@@ -672,6 +672,9 @@ out:
 	bdr_sequencer_set_nnodes(nnodes);
 #endif
 
+	/* The node cache needs to be invalidated as bdr_nodes may have changed */
+	bdr_local_node_cache_invalidate();
+
 	elog(DEBUG2, "updated worker counts");
 }
 

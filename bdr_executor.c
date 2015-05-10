@@ -23,6 +23,7 @@
 #include "access/xact.h"
 #include "access/xlog_fn.h"
 
+#include "catalog/indexing.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_trigger.h"
 
@@ -46,7 +47,10 @@
 #include "storage/bufmgr.h"
 #include "storage/lmgr.h"
 
+#include "tcop/utility.h"
+
 #include "utils/builtins.h"
+#include "utils/fmgroids.h"
 #include "utils/guc.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
@@ -72,6 +76,9 @@ PGDLLEXPORT Datum bdr_replicate_ddl_command(PG_FUNCTION_ARGS);
 PG_FUNCTION_INFO_V1(bdr_replicate_ddl_command);
 PGDLLEXPORT Datum bdr_(PG_FUNCTION_ARGS);
 PG_FUNCTION_INFO_V1(bdr_truncate_trigger_add);
+
+PGDLLEXPORT Datum bdr_node_set_read_only(PG_FUNCTION_ARGS);
+PG_FUNCTION_INFO_V1(bdr_node_set_read_only);
 
 EState *
 bdr_create_rel_estate(Relation rel)
@@ -756,11 +763,96 @@ bdr_replicate_ddl_command(PG_FUNCTION_ARGS)
 	PG_RETURN_VOID();
 }
 
+/*
+ * Set node_read_only field in bdr_nodes entry for given node.
+ *
+ * This has to be C function to avoid being subject to the executor read-only
+ * filtering.
+ */
+Datum
+bdr_node_set_read_only(PG_FUNCTION_ARGS)
+{
+	text   *node_name = PG_GETARG_TEXT_PP(0);
+	bool	read_only = PG_GETARG_BOOL(1);
+
+	HeapTuple tuple = NULL;
+	Relation rel;
+	RangeVar	   *rv;
+	SnapshotData SnapshotDirty;
+	SysScanDesc scan;
+	ScanKeyData key;
+
+	Assert(IsTransactionState());
+
+	InitDirtySnapshot(SnapshotDirty);
+
+	rv = makeRangeVar("bdr", "bdr_nodes", -1);
+	rel = heap_openrv(rv, RowExclusiveLock);
+
+	ScanKeyInit(&key,
+				get_attnum(rel->rd_id, "node_name"),
+				BTEqualStrategyNumber, F_TEXTEQ,
+				PointerGetDatum(node_name));
+
+	scan = systable_beginscan(rel, InvalidOid,
+							  true,
+							  &SnapshotDirty,
+							  1, &key);
+
+	tuple = systable_getnext(scan);
+
+	if (HeapTupleIsValid(tuple))
+	{
+		HeapTuple	newtuple;
+		Datum	   *values;
+		bool	   *nulls;
+		TupleDesc	tupDesc;
+		AttrNumber	attnum = get_attnum(rel->rd_id, "node_read_only");
+
+		tupDesc = RelationGetDescr(rel);
+
+		values = (Datum *) palloc(tupDesc->natts * sizeof(Datum));
+		nulls = (bool *) palloc(tupDesc->natts * sizeof(bool));
+
+		heap_deform_tuple(tuple, tupDesc, values, nulls);
+
+		values[attnum - 1] = BoolGetDatum(read_only);
+
+		newtuple = heap_form_tuple(RelationGetDescr(rel),
+								   values, nulls);
+		simple_heap_update(rel, &tuple->t_self, newtuple);
+		CatalogUpdateIndexes(rel, newtuple);
+	}
+	else
+		elog(ERROR, "Node %s not found.", text_to_cstring(node_name));
+
+	systable_endscan(scan);
+
+	CommandCounterIncrement();
+
+	/* now release lock again,  */
+	heap_close(rel, RowExclusiveLock);
+
+	bdr_connections_changed(NULL);
+
+	PG_RETURN_VOID();
+}
+
+
 void
 bdr_executor_always_allow_writes(bool always_allow)
 {
 	Assert(IsUnderPostmaster);
 	bdr_always_allow_writes = always_allow;
+}
+
+static const char *
+CreateWritableStmtTag(PlannedStmt *plannedstmt)
+{
+	if (plannedstmt->commandType == CMD_SELECT)
+		return "DML"; /* SELECT INTO/WCTE */
+
+	return CreateCommandTag((Node *) plannedstmt);
 }
 
 /*
@@ -772,16 +864,19 @@ bdr_executor_always_allow_writes(bool always_allow)
 static void
 BdrExecutorStart(QueryDesc *queryDesc, int eflags)
 {
-	bool		performs_writes = false;
-	ListCell   *l;
-	List	   *rangeTable = queryDesc->plannedstmt->rtable;
+	bool			performs_writes = false;
+	bool			read_only_node;
+	ListCell	   *l;
+	List		   *rangeTable;
+	PlannedStmt	   *plannedstmt = queryDesc->plannedstmt;
 
 	if (bdr_always_allow_writes)
 		goto done;
 
 	/* identify whether this is a modifying statement */
-	if (queryDesc->plannedstmt != NULL &&
-		queryDesc->plannedstmt->hasModifyingCTE)
+	if (plannedstmt != NULL &&
+		(plannedstmt->hasModifyingCTE ||
+		 plannedstmt->rowMarks != NIL))
 		performs_writes = true;
 	else if (queryDesc->operation != CMD_SELECT)
 		performs_writes = true;
@@ -792,16 +887,19 @@ BdrExecutorStart(QueryDesc *queryDesc, int eflags)
 	if (!bdr_is_bdr_activated_db(MyDatabaseId))
 		goto done;
 
+	read_only_node = bdr_local_node_read_only();
+
 	/* check for concurrent global DDL locks */
 	bdr_locks_check_dml();
 
-	/* plain INSERTs are always ok beyond this point */
+	/* plain INSERTs are ok beyond this point if node is not read-only */
 	if (queryDesc->operation == CMD_INSERT &&
-		!queryDesc->plannedstmt->hasModifyingCTE)
+		!plannedstmt->hasModifyingCTE && !read_only_node)
 		goto done;
 
 	/* Fail if query tries to UPDATE or DELETE any of tables without PK */
-	foreach(l, queryDesc->plannedstmt->resultRelations)
+	rangeTable = plannedstmt->rtable;
+	foreach(l, plannedstmt->resultRelations)
 	{
 		Index			rtei = lfirst_int(l);
 		RangeTblEntry  *rte = rt_fetch(rtei, rangeTable);
@@ -815,6 +913,14 @@ BdrExecutorStart(QueryDesc *queryDesc, int eflags)
 			RelationClose(rel);
 			continue;
 		}
+
+		if (read_only_node)
+			ereport(ERROR,
+					(errcode(ERRCODE_READ_ONLY_SQL_TRANSACTION),
+					 errmsg("%s may only affect UNLOGGED or TEMPORARY tables "\
+							"on read-only BDR node; %s is a regular table",
+							CreateWritableStmtTag(plannedstmt),
+							RelationGetRelationName(rel))));
 
 		if (rel->rd_indexvalid == 0)
 			RelationGetIndexList(rel);

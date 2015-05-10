@@ -67,6 +67,8 @@ bdr_shmem_init(void)
 #ifdef BUILDING_BDR
 	bdr_sequencer_shmem_init(bdr_max_databases);
 #endif
+
+	bdr_local_node_cache_shmem_init();
 	bdr_locks_shmem_init();
 }
 

@@ -333,6 +333,8 @@ typedef struct BDRNodeInfo
 
 	char	   *local_dsn;
 	char	   *init_from_dsn;
+
+	bool		read_only;
 } BDRNodeInfo;
 
 extern Oid bdr_lookup_relid(const char *relname, Oid schema_oid);
@@ -533,6 +535,11 @@ extern void
 bdr_copytable(PGconn *copyfrom_conn, PGconn *copyto_conn,
 		const char * copyfrom_query, const char *copyto_query);
 
+/* local node info cache (bdr_nodecache.c) */
+void bdr_local_node_cache_shmem_init(void);
+void bdr_local_node_cache_invalidate(void);
+bool bdr_local_node_read_only(void);
+char bdr_local_node_status(void);
 
 /* helpers shared by multiple worker types */
 extern struct pg_conn* bdr_connect(const char *conninfo, Name appname,

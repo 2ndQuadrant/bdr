@@ -576,6 +576,88 @@ statement_affects_only_nonpermanent(Node *parsetree)
 	return false;
 }
 
+static bool
+allowed_on_read_only_node(Node *parsetree)
+{
+	/*
+	 * This list is copied verbatim from check_xact_readonly
+	 * we only do different action on it. */
+	switch (nodeTag(parsetree))
+	{
+		case T_AlterDatabaseStmt:
+		case T_AlterDatabaseSetStmt:
+		case T_AlterDomainStmt:
+		case T_AlterFunctionStmt:
+		case T_AlterRoleStmt:
+		case T_AlterRoleSetStmt:
+		case T_AlterObjectSchemaStmt:
+		case T_AlterOwnerStmt:
+		case T_AlterSeqStmt:
+		case T_AlterTableMoveAllStmt:
+		case T_AlterTableStmt:
+		case T_RenameStmt:
+		case T_CommentStmt:
+		case T_DefineStmt:
+		case T_CreateCastStmt:
+		case T_CreateEventTrigStmt:
+		case T_AlterEventTrigStmt:
+		case T_CreateConversionStmt:
+		case T_CreatedbStmt:
+		case T_CreateDomainStmt:
+		case T_CreateFunctionStmt:
+		case T_CreateRoleStmt:
+		case T_IndexStmt:
+		case T_CreatePLangStmt:
+		case T_CreateOpClassStmt:
+		case T_CreateOpFamilyStmt:
+		case T_AlterOpFamilyStmt:
+		case T_RuleStmt:
+		case T_CreateSchemaStmt:
+		case T_CreateSeqStmt:
+		case T_CreateStmt:
+		case T_CreateTableAsStmt:
+		case T_RefreshMatViewStmt:
+		case T_CreateTableSpaceStmt:
+		case T_CreateTrigStmt:
+		case T_CompositeTypeStmt:
+		case T_CreateEnumStmt:
+		case T_CreateRangeStmt:
+		case T_AlterEnumStmt:
+		case T_ViewStmt:
+		case T_DropStmt:
+		case T_DropdbStmt:
+		case T_DropTableSpaceStmt:
+		case T_DropRoleStmt:
+		case T_GrantStmt:
+		case T_GrantRoleStmt:
+		case T_AlterDefaultPrivilegesStmt:
+		case T_TruncateStmt:
+		case T_DropOwnedStmt:
+		case T_ReassignOwnedStmt:
+		case T_AlterTSDictionaryStmt:
+		case T_AlterTSConfigurationStmt:
+		case T_CreateExtensionStmt:
+		case T_AlterExtensionStmt:
+		case T_AlterExtensionContentsStmt:
+		case T_CreateFdwStmt:
+		case T_AlterFdwStmt:
+		case T_CreateForeignServerStmt:
+		case T_AlterForeignServerStmt:
+		case T_CreateUserMappingStmt:
+		case T_AlterUserMappingStmt:
+		case T_DropUserMappingStmt:
+		case T_AlterTableSpaceOptionsStmt:
+		case T_CreateForeignTableStmt:
+		case T_SecLabelStmt:
+			return statement_affects_only_nonpermanent(parsetree);
+		default:
+			/* do nothing */
+			break;
+	}
+
+	return true;
+}
+
 static void
 bdr_commandfilter_dbname(const char *dbname)
 {
@@ -604,10 +686,6 @@ bdr_commandfilter(Node *parsetree,
 	if (!IsUnderPostmaster)
 		goto done;
 
-	/* don't filter if explicitly told so */
-	if (bdr_permit_unsafe_commands)
-		goto done;
-
 	/* extension contents aren't individually replicated */
 	if (creating_extension)
 		goto done;
@@ -616,10 +694,31 @@ bdr_commandfilter(Node *parsetree,
 	if (replication_origin_id != InvalidRepNodeId)
 		goto done;
 
+	/*
+	 * Skip transaction control commands first as the following function
+	 * calls might require transaction access.
+	 */
+	if (nodeTag(parsetree) == T_TransactionStmt)
+		goto done;
+
+	/* don't filter if this database isn't using bdr */
+	if (!bdr_is_bdr_activated_db(MyDatabaseId))
+		goto done;
+
+	/* check for read-only mode */
+	if (bdr_local_node_read_only() && !allowed_on_read_only_node(parsetree))
+		ereport(ERROR,
+				(errcode(ERRCODE_READ_ONLY_SQL_TRANSACTION),
+				 errmsg("Cannot run %s on read-only BDR node.",
+						CreateCommandTag(parsetree))));
+
+	/* don't filter if explicitly told so */
+	if (bdr_permit_unsafe_commands)
+		goto done;
+
 	/* commands we skip (for now) */
 	switch (nodeTag(parsetree))
 	{
-		case T_TransactionStmt:
 		case T_PlannedStmt:
 		case T_ClosePortalStmt:
 		case T_FetchStmt:
@@ -698,7 +797,6 @@ bdr_commandfilter(Node *parsetree,
 
 #ifdef BUILDING_UDR
 	if (!in_bdr_replicate_ddl_command &&
-		bdr_is_bdr_activated_db(MyDatabaseId) &&
 		!statement_affects_only_nonpermanent(parsetree))
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -750,15 +848,6 @@ bdr_commandfilter(Node *parsetree,
 		default:
 			break;
 	}
-
-	/*
-	 * Don't filter if this database isn't using bdr. Check after the above
-	 * fasts tests as this can be comparatively expensive. This also requires
-	 * to be in a transaction and thus isn't admissible for transaction
-	 * control commands.
-	 */
-	if (!bdr_is_bdr_activated_db(MyDatabaseId))
-		goto done;
 
 	/* all commands handled by ProcessUtilitySlow() */
 	switch (nodeTag(parsetree))

@@ -172,7 +172,7 @@ bdr_nodes_get_local_info(uint64 sysid, TimeLineID tli, Oid dboid)
 	values[2] = ObjectIdGetDatum(dboid);
 
 	spi_ret = SPI_execute_with_args(
-			"SELECT node_status, node_local_dsn, node_init_from_dsn"
+			"SELECT node_status, node_local_dsn, node_init_from_dsn, node_read_only"
 			"  FROM bdr.bdr_nodes"
 			" WHERE node_sysid = $1 AND node_timeline = $2 AND node_dboid = $3",
 			3, argtypes, values, NULL, false, 1);
@@ -194,13 +194,19 @@ bdr_nodes_get_local_info(uint64 sysid, TimeLineID tli, Oid dboid)
 	node->status = DatumGetChar(SPI_getbinval(SPI_tuptable->vals[0],
 											  SPI_tuptable->tupdesc, 1,
 											  &isnull));
+	if (isnull)
+		elog(ERROR, "bdr.bdr_nodes.status NULL; shouldn't happen");
+
 	node->local_dsn = SPI_getvalue(SPI_tuptable->vals[0],
 								   SPI_tuptable->tupdesc, 2);
 	node->init_from_dsn = SPI_getvalue(SPI_tuptable->vals[0],
 									   SPI_tuptable->tupdesc, 3);
 
+	node->read_only = (bool) SPI_getbinval(SPI_tuptable->vals[0],
+										   SPI_tuptable->tupdesc, 4,
+										   &isnull);
 	if (isnull)
-		elog(ERROR, "bdr.bdr_nodes.status NULL; shouldn't happen");
+		node->read_only = false;
 
 	return node;
 }
