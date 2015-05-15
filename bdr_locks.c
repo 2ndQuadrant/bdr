@@ -107,6 +107,15 @@
 #include "utils/fmgroids.h"
 #include "utils/snapmgr.h"
 
+#endif
+
+/* GUCs */
+bool bdr_permit_ddl_locking = false;
+int bdr_ddl_grace_timeout = 10000;
+
+
+#ifdef BUILDING_BDR
+
 typedef struct BDRLockWaiter {
 	PGPROC	   *proc;
 	slist_node	node;
@@ -158,8 +167,8 @@ static BDRLockType bdr_lock_name_to_type(const char *lock_type);
 static void bdr_request_replay_confirmation(void);
 static void bdr_send_confirm_lock(void);
 
-void bdr_locks_addwaiter(PGPROC *proc);
-void bdr_locks_on_unlock(void);
+static void bdr_locks_addwaiter(PGPROC *proc);
+static void bdr_locks_on_unlock(void);
 
 static BdrLocksCtl *bdr_locks_ctl;
 
@@ -170,10 +179,6 @@ static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
 static BdrLocksDBState *bdr_my_locks_database = NULL;
 
 static bool this_xact_acquired_lock = false;
-
-/* GUCs */
-bool bdr_permit_ddl_locking = false;
-int bdr_ddl_grace_timeout = 10000;
 
 
 static size_t
@@ -1598,7 +1603,7 @@ bdr_locks_shmem_init()
 }
 
 void
-bdr_acquire_ddl_lock(void)
+bdr_acquire_ddl_lock(BDRLockType lock_type)
 {
 }
 
