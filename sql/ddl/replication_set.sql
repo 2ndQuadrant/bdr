@@ -1,62 +1,67 @@
 /* First test whether a table's replication set can be properly manipulated */
 \c postgres
-CREATE SCHEMA normalschema;
-CREATE SCHEMA "strange.schema-IS";
-CREATE TABLE switcheroo(id serial primary key, data text);
-CREATE TABLE normalschema.sometbl_normalschema();
-CREATE TABLE "strange.schema-IS".sometbl_strangeschema();
+
+SHOW search_path;
+
+SET search_path = 'public';
+
+SELECT bdr.bdr_replicate_ddl_command('CREATE SCHEMA normalschema;');
+SELECT bdr.bdr_replicate_ddl_command('CREATE SCHEMA "strange.schema-IS";');
+SELECT bdr.bdr_replicate_ddl_command('CREATE TABLE public.switcheroo(id serial primary key, data text);');
+SELECT bdr.bdr_replicate_ddl_command('CREATE TABLE normalschema.sometbl_normalschema();');
+SELECT bdr.bdr_replicate_ddl_command('CREATE TABLE "strange.schema-IS".sometbl_strangeschema();');
 
 -- show initial replication sets
-SELECT * FROM bdr.table_get_replication_sets('switcheroo');
+SELECT * FROM bdr.table_get_replication_sets('public.switcheroo');
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 \c regression
-SELECT * FROM bdr.table_get_replication_sets('switcheroo');
+SELECT * FROM bdr.table_get_replication_sets('public.switcheroo');
 
 \c postgres
 -- empty replication set (just 'all')
-SELECT bdr.table_set_replication_sets('switcheroo', '{}');
-SELECT * FROM bdr.table_get_replication_sets('switcheroo');
+SELECT bdr.table_set_replication_sets('public.switcheroo', '{}');
+SELECT * FROM bdr.table_get_replication_sets('public.switcheroo');
 SELECT * FROM bdr.table_get_replication_sets('normalschema.sometbl_normalschema');
 SELECT * FROM bdr.table_get_replication_sets('"strange.schema-IS".sometbl_strangeschema');
 -- configure a couple
-SELECT bdr.table_set_replication_sets('switcheroo', '{fascinating, is-it-not}');
+SELECT bdr.table_set_replication_sets('public.switcheroo', '{fascinating, is-it-not}');
 SELECT * FROM bdr.table_set_replication_sets('normalschema.sometbl_normalschema', '{a}');
 SELECT * FROM bdr.table_set_replication_sets('"strange.schema-IS".sometbl_strangeschema', '{a}');
 
-SELECT * FROM bdr.table_get_replication_sets('switcheroo');
+SELECT * FROM bdr.table_get_replication_sets('public.switcheroo');
 SELECT * FROM bdr.table_get_replication_sets('normalschema.sometbl_normalschema');
 SELECT * FROM bdr.table_get_replication_sets('"strange.schema-IS".sometbl_strangeschema');
 
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 \c regression
-SELECT * FROM bdr.table_get_replication_sets('switcheroo');
+SELECT * FROM bdr.table_get_replication_sets('public.switcheroo');
 SELECT * FROM bdr.table_get_replication_sets('normalschema.sometbl_normalschema');
 SELECT * FROM bdr.table_get_replication_sets('"strange.schema-IS".sometbl_strangeschema');
 
 \c postgres
 -- make sure we can reset replication sets to the default again
 -- configure a couple
-SELECT bdr.table_set_replication_sets('switcheroo', NULL);
-SELECT * FROM bdr.table_get_replication_sets('switcheroo');
+SELECT bdr.table_set_replication_sets('public.switcheroo', NULL);
+SELECT * FROM bdr.table_get_replication_sets('public.switcheroo');
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 \c regression
-SELECT * FROM bdr.table_get_replication_sets('switcheroo');
+SELECT * FROM bdr.table_get_replication_sets('public.switcheroo');
 
 \c postgres
 -- make sure reserved names can't be set
-SELECT bdr.table_set_replication_sets('switcheroo', '{default,blubber}');
-SELECT bdr.table_set_replication_sets('switcheroo', '{blubber,default}');
-SELECT bdr.table_set_replication_sets('switcheroo', '{frakbar,all}');
+SELECT bdr.table_set_replication_sets('public.switcheroo', '{default,blubber}');
+SELECT bdr.table_set_replication_sets('public.switcheroo', '{blubber,default}');
+SELECT bdr.table_set_replication_sets('public.switcheroo', '{frakbar,all}');
 --invalid characters
-SELECT bdr.table_set_replication_sets('switcheroo', '{///}');
+SELECT bdr.table_set_replication_sets('public.switcheroo', '{///}');
 --too short/long
-SELECT bdr.table_set_replication_sets('switcheroo', '{""}');
-SELECT bdr.table_set_replication_sets('switcheroo', '{12345678901234567890123456789012345678901234567890123456789012345678901234567890}');
+SELECT bdr.table_set_replication_sets('public.switcheroo', '{""}');
+SELECT bdr.table_set_replication_sets('public.switcheroo', '{12345678901234567890123456789012345678901234567890123456789012345678901234567890}');
 
 \c postgres
-DROP TABLE switcheroo;
-DROP TABLE normalschema.sometbl_normalschema;
-DROP TABLE "strange.schema-IS".sometbl_strangeschema;
+SELECT bdr.bdr_replicate_ddl_command('DROP TABLE public.switcheroo;');
+SELECT bdr.bdr_replicate_ddl_command('DROP TABLE normalschema.sometbl_normalschema;');
+SELECT bdr.bdr_replicate_ddl_command('DROP TABLE "strange.schema-IS".sometbl_strangeschema;');
 
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 
@@ -68,7 +73,7 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
  */
 \c postgres
 
-CREATE TABLE settest_1(data text primary key);
+SELECT bdr.bdr_replicate_ddl_command('CREATE TABLE public.settest_1(data text primary key);');
 
 INSERT INTO settest_1(data) VALUES ('should-replicate-via-default');
 
@@ -95,13 +100,13 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
 \c regression
 SELECT * FROM settest_1 ORDER BY data;
 \c postgres
-DROP TABLE settest_1;
+SELECT bdr.bdr_replicate_ddl_command('DROP TABLE public.settest_1;');
 
 
 /*
  * Now test configurations where only some actions are replicated.
  */
-CREATE TABLE settest_2(data text primary key);
+SELECT bdr.bdr_replicate_ddl_command('CREATE TABLE public.settest_2(data text primary key);');
 
 -- Test 1: ensure that inserts are replicated while update/delete are filtered
 SELECT bdr.table_set_replication_sets('settest_2', '{for-node-2-insert}');
