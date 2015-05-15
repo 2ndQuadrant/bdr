@@ -384,8 +384,62 @@ bdr_maintain_db_workers(void)
 		}
 		else
 		{
-			/* Drop slots of dead node */
-			elog(LOG, "need to drop slots for remote (a,b,c)");
+			List *drop = NIL;
+			ListCell *dc;
+			bool we_were_dropped;
+			NameData slot_name_dropped; /* slot of the dropped node */
+
+			/* if a remote node (got) parted, we can easily drop their slot */
+			bdr_slot_name(&slot_name_dropped,
+						  node_sysid, node_timeline, node_datoid,
+						  MyDatabaseId);
+
+			we_were_dropped = node_sysid == GetSystemIdentifier() &&
+				node_timeline == ThisTimeLineID &&
+				node_datoid == MyDatabaseId;
+
+			LWLockAcquire(ReplicationSlotControlLock, LW_SHARED);
+			for (i = 0; i < max_replication_slots; i++)
+			{
+				ReplicationSlot *s = &ReplicationSlotCtl->replication_slots[i];
+
+				if (!s->in_use)
+					continue;
+
+				if (strcmp("bdr", NameStr(s->data.plugin)) != 0)
+					continue;
+
+				if (we_were_dropped &&
+					s->data.database == MyDatabaseId)
+				{
+					elog(LOG, "need to drop slot %s as we got parted",
+						 NameStr(s->data.name));
+					drop = lappend(drop, pstrdup(NameStr(s->data.name)));
+				}
+
+				if (strcmp(NameStr(s->data.name),
+						   NameStr(slot_name_dropped)) == 0)
+				{
+					elog(LOG, "need to drop slot %s of dropped node",
+						 NameStr(s->data.name));
+					drop = lappend(drop, pstrdup(NameStr(s->data.name)));
+				}
+			}
+			LWLockRelease(ReplicationSlotControlLock);
+
+			foreach(dc, drop)
+			{
+				char *slot_name = (char *) lfirst(dc);
+				elog(LOG, "dropping slot %s due to node part", slot_name);
+				ReplicationSlotDrop(slot_name);
+				elog(LOG, "dropped slot %s due to node part", slot_name);
+			}
+
+			/*
+			 * TODO: It'd be a good idea to set the slot to dead (in contrast
+			 * to being killed) here. That way we wouldn't constantly rescan
+			 * killed nodes.
+			 */
 		}
 
 		LWLockRelease(BdrWorkerCtl->lock);
