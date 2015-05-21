@@ -14276,7 +14276,7 @@ dumpSequence(Archive *fout, TableInfo *tbinfo)
 			   *maxv = NULL,
 			   *minv = NULL,
 			   *cache,
-			   *amname = "local";
+			   *amname = NULL;
 	char		bufm[100],
 				bufx[100];
 	bool		cycled;
@@ -14421,7 +14421,10 @@ dumpSequence(Archive *fout, TableInfo *tbinfo)
 					  "    CACHE %s%s",
 					  cache, (cycled ? "\n    CYCLE" : ""));
 
-	appendPQExpBuffer(query, "\n    USING %s", fmtId(amname));
+	/* only dump sequence AM if pg_seqam exists */
+	if (amname)
+		appendPQExpBuffer(query, "\n    USING %s", fmtId(amname));
+
 	appendPQExpBufferStr(query, ";\n");
 
 	appendPQExpBuffer(labelq, "SEQUENCE %s", fmtId(tbinfo->dobj.name));
