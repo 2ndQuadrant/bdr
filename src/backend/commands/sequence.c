@@ -374,6 +374,10 @@ fill_seq_with_data(Relation rel, HeapTuple tuple)
 	tuple->t_data->t_infomask |= HEAP_XMAX_INVALID;
 	ItemPointerSet(&tuple->t_data->t_ctid, 0, FirstOffsetNumber);
 
+	/* check the comment above sequence_local_alloc()'s equivalent call. */
+	if (RelationNeedsWAL(rel))
+		GetTopTransactionId();
+
 	START_CRIT_SECTION();
 
 	MarkBufferDirty(buf);
@@ -1665,6 +1669,16 @@ sequence_local_alloc(PG_FUNCTION_ARGS)
 	elm->cached = last;
 	elm->last_valid = true;
 
+	/*
+	 * If something might need to be WAL logged, acquire an xid, so this
+	 * transaction's commit will trigger a WAL flush and wait for
+	 * syncrep. It's sufficient to ensure the toplevel transaction has a xid,
+	 * no need to assign xids subxacts, that'll already trigger a appropriate
+	 * wait.  (Have to do that here, so we're outside the critical section)
+	 */
+	if (logit && RelationNeedsWAL(seqrel))
+		GetTopTransactionId();
+
 	/* ready to change the on-disk (or really, in-buffer) tuple */
 	START_CRIT_SECTION();
 
@@ -1719,6 +1733,10 @@ sequence_local_setval(PG_FUNCTION_ARGS)
 	bool		iscalled = PG_GETARG_BOOL(5);
 	Page		page = BufferGetPage(buf);
 	Form_pg_sequence seq = (Form_pg_sequence) GETSTRUCT(seqtuple);
+
+	/* check the comment above sequence_local_alloc()'s equivalent call. */
+	if (RelationNeedsWAL(seqrel))
+		GetTopTransactionId();
 
 	/* ready to change the on-disk (or really, in-buffer) tuple */
 	START_CRIT_SECTION();

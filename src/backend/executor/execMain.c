@@ -808,6 +808,10 @@ InitPlan(QueryDesc *queryDesc, int eflags)
 		if (rc->isParent)
 			continue;
 
+		/*
+		 * If you change the conditions under which rel locks are acquired
+		 * here, be sure to adjust ExecOpenScanRelation to match.
+		 */
 		switch (rc->markType)
 		{
 			case ROW_MARK_EXCLUSIVE:
@@ -2104,7 +2108,7 @@ EvalPlanQualFetch(EState *estate, Relation relation, int lockmode, bool noWait,
 				}
 				else
 					XactLockTableWait(SnapshotDirty.xmax,
-									  relation, &tuple.t_data->t_ctid,
+									  relation, &tuple.t_self,
 									  XLTW_FetchUpdated);
 				continue;		/* loop back to repeat heap_fetch */
 			}
@@ -2407,7 +2411,9 @@ EvalPlanQualFetchRowMarks(EPQState *epqstate)
 			/* build a temporary HeapTuple control structure */
 			tuple.t_len = HeapTupleHeaderGetDatumLength(td);
 			ItemPointerSetInvalid(&(tuple.t_self));
-			tuple.t_tableOid = InvalidOid;
+			/* relation might be a foreign table, if so provide tableoid */
+			tuple.t_tableOid = getrelid(erm->rti,
+										epqstate->estate->es_range_table);
 			tuple.t_data = td;
 
 			/* copy and store tuple */
