@@ -351,7 +351,8 @@ bdr_supervisor_worker_main(Datum main_arg)
 
 		BdrWorkerCtl->is_supervisor_restart = true;
 
-		elog(DEBUG1, "BDR supervisor restarting to connect to 'bdr' DB");
+		elog(DEBUG1, "BDR supervisor restarting to connect to '%s' DB",
+			 BDR_SUPERVISOR_DBNAME);
 		proc_exit(1);
 	}
 
