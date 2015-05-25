@@ -323,6 +323,9 @@ process_remote_commit(StringInfo s)
 		flushpos->remote_end = end_lsn;
 
 		dlist_push_tail(&bdr_lsn_association, &flushpos->node);
+
+		/* report stats, only relevant if something was actually written */
+		pgstat_report_stat(false);
 	}
 
 	pgstat_report_activity(STATE_IDLE, NULL);
