@@ -1,0 +1,4 @@
+-- The change in 0.9.0.5 is the same as 0.10.0.2 but it is
+-- safe to repeat it. So we can just go to 0.10.0.0 and then upgrade
+-- from there, making this the same as a 0.9.0.4 to 0.10.x upgrade.
+-- The file must still exist though.
