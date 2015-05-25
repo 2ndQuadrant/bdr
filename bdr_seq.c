@@ -544,20 +544,21 @@ bdr_sequencer_init(int new_seq_slot, Size nnodes)
 	slot->nnodes = nnodes;
 }
 
-static void
-bdr_sequencer_lock_rel(char *relname, Oid relid)
-{
-	SetCurrentStatementStartTimestamp();
-	pgstat_report_activity(STATE_RUNNING, relname);
-	LockRelationOid(relid, ExclusiveLock);
-}
-
-static void
+/*
+ * Acquire sequencer lock.
+ *
+ * We lock on on our seqam instead of the underlying relations. That's
+ * advantageous because we only want to prevent modifications by the sequencer
+ * or apply processes, it's perfectly fine for auto-analyze/vacuum to process
+ * the relation.
+ */
+void
 bdr_sequencer_lock(void)
 {
-	bdr_sequencer_lock_rel("bdr_votes", BdrVotesRelid);
-	bdr_sequencer_lock_rel("bdr_sequence_elections", BdrSequenceElectionsRelid);
-	bdr_sequencer_lock_rel("bdr_sequence_values", BdrSequenceValuesRelid);
+	SetCurrentStatementStartTimestamp();
+	pgstat_report_activity(STATE_RUNNING, "acquiring sequencer lock");
+	LockDatabaseObject(SeqAccessMethodRelationId, BdrSeqamOid, InvalidOid,
+					   ExclusiveLock);
 }
 
 bool
@@ -625,6 +626,7 @@ bdr_sequencer_vote(void)
 	PopActiveSnapshot();
 	SPI_finish();
 	CommitTransactionCommand();
+	pgstat_report_stat(false);
 
 	elog(DEBUG1, "started %d votes", processed);
 
@@ -691,6 +693,7 @@ bdr_sequencer_start_elections(void)
 	PopActiveSnapshot();
 	SPI_finish();
 	CommitTransactionCommand();
+	pgstat_report_stat(false);
 
 	return processed > 0;
 }
@@ -757,6 +760,7 @@ bdr_sequencer_tally(void)
 	PopActiveSnapshot();
 	SPI_finish();
 	CommitTransactionCommand();
+	pgstat_report_stat(false);
 }
 
 
@@ -1030,6 +1034,7 @@ bdr_sequencer_fill_sequences(void)
 	PopActiveSnapshot();
 	SPI_finish();
 	CommitTransactionCommand();
+	pgstat_report_stat(false);
 
 	elog(DEBUG1, "checked %d sequences for filling", total);
 }

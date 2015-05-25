@@ -26,6 +26,7 @@
 
 #ifdef BUILDING_BDR
 #include "access/committs.h"
+#include "access/seqam.h"
 #endif
 #include "access/heapam.h"
 #include "access/xact.h"
@@ -77,6 +78,7 @@ Oid   BdrConflictHistoryRelId;
 Oid   BdrLocksRelid;
 Oid   BdrLocksByOwnerRelid;
 Oid   BdrReplicationSetConfigRelid;
+Oid   BdrSeqamOid;
 
 /* GUC storage */
 static bool bdr_synchronous_commit;
@@ -894,6 +896,7 @@ bdr_maintain_schema(bool update_extensions)
 		bdr_lookup_relid("bdr_global_locks", schema_oid);
 	BdrLocksByOwnerRelid =
 		bdr_lookup_relid("bdr_global_locks_byowner", schema_oid);
+	BdrSeqamOid = get_seqam_oid("bdr", false);
 #endif
 
 	bdr_conflict_handlers_init();
