@@ -318,6 +318,7 @@ extern Oid	QueuedDropsRelid;
 extern Oid	BdrSequenceValuesRelid;
 extern Oid	BdrSequenceElectionsRelid;
 extern Oid	BdrVotesRelid;
+extern Oid	BdrSeqamOid;
 #endif
 
 /* Structure representing bdr_nodes record */
@@ -415,6 +416,7 @@ extern void tuple_to_stringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple
 /* sequence support */
 extern void bdr_sequencer_shmem_init(int sequencers);
 extern void bdr_sequencer_init(int seq_slot, Size nnodes);
+extern void bdr_sequencer_lock(void);
 extern bool bdr_sequencer_vote(void);
 extern void bdr_sequencer_tally(void);
 extern bool bdr_sequencer_start_elections(void);

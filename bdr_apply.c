@@ -1981,6 +1981,18 @@ read_rel(StringInfo s, LOCKMODE mode)
 
 	relid = RangeVarGetRelidExtended(rv, mode, false, false, NULL, NULL);
 
+#ifdef BUILDING_BDR
+	/*
+	 * Acquire sequencer lock if any of the sequencer relations are
+	 * modified. We used to rely on relation locks, but that had problems with
+	 * deadlocks and interrupting auto-analyze/vacuum.
+	 */
+	if (relid == BdrSequenceValuesRelid ||
+		relid == BdrSequenceElectionsRelid ||
+		relid == BdrVotesRelid)
+		bdr_sequencer_lock();
+#endif
+
 	return bdr_heap_open(relid, NoLock);
 }
 
