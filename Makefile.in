@@ -92,7 +92,7 @@ DUMPOBJS = pg_dump/pg_dump.o pg_dump/common.o pg_dump/pg_dump_sort.o \
 	pg_dump/pg_backup_tar.o pg_dump/pg_backup_directory.o \
 	pg_dump/pg_backup_utils.o pg_dump/parallel.o \
 	pg_dump/compress_io.o pg_dump/dumputils.o \
-	pg_dump/keywords.o
+	pg_dump/keywords.o pg_dump/kwlookup.o
 
 include Makefile.global
 
