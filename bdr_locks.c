@@ -106,6 +106,13 @@
 #include "utils/fmgroids.h"
 #include "utils/snapmgr.h"
 
+#endif
+
+/* GUCs */
+bool bdr_permit_ddl_locking = false;
+
+#ifdef BUILDING_BDR
+
 typedef struct BdrLocksDBState {
 	/* db slot used */
 	bool		in_use;
@@ -151,9 +158,6 @@ static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
 static BdrLocksDBState *bdr_my_locks_database = NULL;
 
 static bool this_xact_acquired_lock = false;
-
-/* GUCs */
-bool bdr_permit_ddl_locking = false;
 
 static size_t
 bdr_locks_shmem_size(void)
