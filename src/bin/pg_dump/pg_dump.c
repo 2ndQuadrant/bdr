@@ -14203,6 +14203,46 @@ findLastBuiltinOid_V70(Archive *fout)
 }
 
 /*
+ * If pg_seqam exists, return the sequence AM name for the specified
+ * sequence. If there's no pg_seqam, return null.
+ *
+ * The string returned, if any, must be free'd by the caller.
+ */
+static char*
+find_sequence_seqam(Archive *fout, Oid seq_oid)
+{
+	PGresult   *res;
+	const char *amname = NULL;
+	PQExpBuffer query = createPQExpBuffer();
+
+	res = ExecuteSqlQuery(fout, "SELECT EXISTS(SELECT 1 "
+								"FROM pg_catalog.pg_class c, "
+								"pg_catalog.pg_namespace n "
+								"WHERE n.oid = c.relnamespace "
+								"AND c.relname = 'pg_seqam' "
+								"AND c.relkind = 'r');",
+						  PGRES_TUPLES_OK);
+	if (strcmp(PQgetvalue(res, 0, 0), "t") == 0)
+	{
+		PQclear(res);
+
+		printfPQExpBuffer(query, "SELECT a.seqamname\n"
+								 "FROM pg_catalog.pg_seqam a, pg_catalog.pg_class c\n"
+								 "WHERE c.relam = a.oid AND c.oid = %u",
+						  seq_oid);
+
+		res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
+
+		amname = pg_strdup(PQgetvalue(res, 0, 0));
+	}
+
+	PQclear(res);
+
+	destroyPQExpBuffer(query);
+	return amname;
+}
+
+/*
  * dumpSequence
  *	  write the declaration (not data) of one user-defined sequence
  */
@@ -14215,7 +14255,7 @@ dumpSequence(Archive *fout, TableInfo *tbinfo)
 			   *maxv = NULL,
 			   *minv = NULL,
 			   *cache,
-			   *amname = "local";
+			   *amname;
 	char		bufm[100],
 				bufx[100];
 	bool		cycled;
@@ -14296,28 +14336,7 @@ dumpSequence(Archive *fout, TableInfo *tbinfo)
 
 	PQclear(res);
 
-	res = ExecuteSqlQuery(fout, "SELECT EXISTS(SELECT 1 "
-								"FROM pg_catalog.pg_class c, "
-								"pg_catalog.pg_namespace n "
-								"WHERE n.oid = c.relnamespace "
-								"AND c.relname = 'pg_seqam' "
-								"AND c.relkind = 'r');",
-						  PGRES_TUPLES_OK);
-	if (strcmp(PQgetvalue(res, 0, 0), "t") == 0)
-	{
-		PQclear(res);
-
-		printfPQExpBuffer(query, "SELECT a.seqamname\n"
-								 "FROM pg_catalog.pg_seqam a, pg_catalog.pg_class c\n"
-								 "WHERE c.relam = a.oid AND c.oid = %u",
-						  tbinfo->dobj.catId.oid);
-
-		res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
-
-		amname = pg_strdup(PQgetvalue(res, 0, 0));
-	}
-
-	PQclear(res);
+	amname = find_sequence_seqam(fout, tbinfo->dobj.catId.oid);
 
 	/*
 	 * DROP must be fully qualified in case same name appears in pg_catalog
@@ -14360,10 +14379,23 @@ dumpSequence(Archive *fout, TableInfo *tbinfo)
 					  "    CACHE %s%s",
 					  cache, (cycled ? "\n    CYCLE" : ""));
 
-	appendPQExpBuffer(query, "\n    USING %s", fmtId(amname));
+	/*
+	 * Only dump the sequence access method if it's not a PostgreSQL
+	 * built-in sequence.
+	 *
+	 * FIXME: For 'bdr' sequences we should really delay them
+	 * until the data from the 'bdr' extension schema has been
+	 * restored.
+	 */
+	if (amname != NULL && strcmp(amname, "local") != 0)
+		appendPQExpBuffer(query, "\n    USING %s", fmtId(amname));
+
+	free(amname);
+
 	appendPQExpBufferStr(query, ";\n");
 
 	appendPQExpBuffer(labelq, "SEQUENCE %s", fmtId(tbinfo->dobj.name));
+
 
 	/* binary_upgrade:	no need to clear TOAST table oid */
 
