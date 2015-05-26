@@ -236,6 +236,7 @@ REGRESSCHECKS= \
 	supervisordb \
 	upgrade \
 	identifier \
+	pause \
 	$(DDLREGRESSCHECKS) \
 	dml/basic dml/contrib dml/delete_pk dml/extended dml/missing_pk dml/toasted \
 	$(REGRESSTEARDOWN)
