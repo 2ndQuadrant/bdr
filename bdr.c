@@ -95,6 +95,7 @@ void		_PG_init(void);
 
 PGDLLEXPORT Datum bdr_apply_pause(PG_FUNCTION_ARGS);
 PGDLLEXPORT Datum bdr_apply_resume(PG_FUNCTION_ARGS);
+PGDLLEXPORT Datum bdr_apply_is_paused(PG_FUNCTION_ARGS);
 PGDLLEXPORT Datum bdr_version(PG_FUNCTION_ARGS);
 PGDLLEXPORT Datum bdr_version_num(PG_FUNCTION_ARGS);
 PGDLLEXPORT Datum bdr_min_remote_version_num(PG_FUNCTION_ARGS);
@@ -105,6 +106,7 @@ PGDLLEXPORT Datum bdr_format_slot_name_sql(PG_FUNCTION_ARGS);
 
 PG_FUNCTION_INFO_V1(bdr_apply_pause);
 PG_FUNCTION_INFO_V1(bdr_apply_resume);
+PG_FUNCTION_INFO_V1(bdr_apply_is_paused);
 PG_FUNCTION_INFO_V1(bdr_version);
 PG_FUNCTION_INFO_V1(bdr_version_num);
 PG_FUNCTION_INFO_V1(bdr_min_remote_version_num);
@@ -916,6 +918,12 @@ bdr_apply_resume(PG_FUNCTION_ARGS)
 {
 	BdrWorkerCtl->pause_apply = false;
 	PG_RETURN_VOID();
+}
+
+Datum
+bdr_apply_is_paused(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_BOOL(BdrWorkerCtl->pause_apply);
 }
 
 Datum

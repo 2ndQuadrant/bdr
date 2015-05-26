@@ -172,6 +172,23 @@
        </entry>
       </row>
 
+      <row>
+       <entry>&bdr;/&udr;</entry>
+       <entry>
+        <indexterm>
+         <primary>bdr.bdr_apply_is_paused</primary>
+        </indexterm>
+        <literal><function>bdr.bdr_apply_is_paused()</function></literal>
+       </entry>
+       <entry>boolean</entry>
+       <entry>
+        Report whether replay is paused (e.g. with
+        <function>bdr.bdr_apply_pause()</function>). A false return
+        does not mean replay is actually progressing, only that
+        it's not intentionally paused.
+       </entry>
+      </row>
+
       <row id="function-bdr-replicate-ddl-command" xreflabel="bdr.bdr_replicate_ddl_command">
        <entry>&bdr;/&udr;</entry>
        <entry>
