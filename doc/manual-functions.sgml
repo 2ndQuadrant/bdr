@@ -190,7 +190,10 @@
         The same limitations apply to this function as to DDL run directly
         by the user, except that DDL not normally replicated by &bdr;
         will be replicated if run with this function; see
-        <xref linkend="ddl-replication">.
+        <xref linkend="ddl-replication">. References to objects in DDL
+        must be fully schema-qualified (e.g. <literal>public.mytable</literal>
+        not just <literal>mytable</literal>), otherwise the error <literal>no
+        schema has been selected to create in</literal> will be emitted.
        </entry>
       </row>
 
