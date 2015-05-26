@@ -14473,12 +14473,30 @@ dumpSequenceData(Archive *fout, TableDataInfo *tdinfo)
 {
 	TableInfo  *tbinfo = tdinfo->tdtable;
 	PGresult   *res;
-	char	   *last;
+	char	   *last, *amname;
 	bool		called;
 	PQExpBuffer query = createPQExpBuffer();
 
 	/* Make sure we are in proper schema */
 	selectSourceSchema(fout, tbinfo->dobj.namespace->dobj.name);
+
+	amname = find_sequence_seqam(fout, tbinfo->dobj.catId.oid);
+
+	if (amname != NULL && strcmp(amname, "bdr") == 0)
+	{
+		/*
+		 * BDR global sequences don't need the sequence data dumped.
+		 * It's actually part of the BDR extension's catalogs and not
+		 * easily separated. We don't support setval(...) on a bdr
+		 * global sequence.
+		 *
+		 * There's no need to generate an empty archive entry so
+		 * just return.
+		 */
+		free(amname);
+		destroyPQExpBuffer(query);
+		return;
+	}
 
 	appendPQExpBuffer(query,
 					  "SELECT last_value, is_called FROM %s",
@@ -14516,6 +14534,7 @@ dumpSequenceData(Archive *fout, TableDataInfo *tdinfo)
 
 	PQclear(res);
 
+	free(amname);
 	destroyPQExpBuffer(query);
 }
 
