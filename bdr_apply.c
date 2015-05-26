@@ -1334,7 +1334,11 @@ process_remote_message(StringInfo s)
 	else if (msg_type == BDR_MESSAGE_ACQUIRE_LOCK)
 	{
 		int			lock_type;
-		lock_type = pq_getmsgint(&message, 4);
+
+		if (message.cursor == message.len) 		/* Old proto */
+			lock_type = BDR_LOCK_WRITE;
+		else
+			lock_type = pq_getmsgint(&message, 4);
 		bdr_process_acquire_ddl_lock(origin_sysid, origin_tlid, origin_datid,
 									 lock_type);
 	}
@@ -1361,7 +1365,11 @@ process_remote_message(StringInfo s)
 		lock_sysid = pq_getmsgint64(&message);
 		lock_tlid = pq_getmsgint(&message, 4);
 		lock_datid = pq_getmsgint(&message, 4);
-		lock_type = pq_getmsgint(&message, 4);
+
+		if (message.cursor == message.len) 		/* Old proto */
+			lock_type = BDR_LOCK_WRITE;
+		else
+			lock_type = pq_getmsgint(&message, 4);
 
 		bdr_process_confirm_ddl_lock(origin_sysid, origin_tlid, origin_datid,
 									 lock_sysid, lock_tlid, lock_datid,
@@ -1377,7 +1385,11 @@ process_remote_message(StringInfo s)
 		lock_sysid = pq_getmsgint64(&message);
 		lock_tlid = pq_getmsgint(&message, 4);
 		lock_datid = pq_getmsgint(&message, 4);
-		lock_type = pq_getmsgint(&message, 4);
+
+		if (message.cursor == message.len) 		/* Old proto */
+			lock_type = BDR_LOCK_WRITE;
+		else
+			lock_type = pq_getmsgint(&message, 4);
 
 		bdr_process_decline_ddl_lock(origin_sysid, origin_tlid, origin_datid,
 									 lock_sysid, lock_tlid, lock_datid,
