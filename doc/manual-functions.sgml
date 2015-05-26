@@ -172,7 +172,7 @@
        </entry>
       </row>
 
-      <row>
+      <row id="function-bdr-apply-is-paused" xreflabel="bdr.bdr_apply_is_paused()">
        <entry>&bdr;/&udr;</entry>
        <entry>
         <indexterm>
