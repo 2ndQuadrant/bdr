@@ -15,6 +15,56 @@
   See also: <xref linkend="upgrade">.
  </para>
 
+ <sect1 id="release-0.9.1">
+  <title>Release 0.9.1</title>
+
+  <para>
+   Version 0.9.1 is a maintenance release focused on stability
+   and performance.
+  </para>
+
+  <para>
+   Significant improvements to &bdr; and &udr; in this release include:
+   <itemizedlist>
+    <listitem><para>Fix PK detection on inherited tables (BDR)</para></listitem>
+    <listitem><para>Fix bdr.bdr_replication_identifier table definition (UDR)</para></listitem>
+    <listitem><para>Don't acquire table locks in command filter (BDR/UDR)</para></listitem>
+    <listitem><para>Rename 'bdr' reserved db to 'bdr_supervisordb', prevent users from connecting, and protect against drop (BDR/UDR, #60)</para></listitem>
+    <listitem><para>Bug fixes in <application>bdr_init_copy</application> handling of connection strings (BDR/UDR, #61)</para></listitem>
+    <listitem><para>Fixes for UNLOGGED tables in the command filter (BDR/UDR, #44)</para></listitem>
+    <listitem><para>Permit fast shutdown when replication is paused (BDR/UDR, #58)</para></listitem>
+    <listitem><para>Introduce <xref linkend="guc-bdr-permit-ddl-locking"> to help prevent unintended global DDL locks</para></listitem>
+    <listitem><para>Remove slots when parting a node (BDR, #73)</para></listitem>
+    <listitem><para><literal>bdr.table_set_replication_sets</literal> no longer requires <literal>permit_unsafe_ddl_commands</literal> (UDR, #67)</para></listitem>
+    <listitem><para>Improve sequencer locking and pgstat reporting (BDR/UDR)</para></listitem>
+    <listitem><para>Add <xref linkend="function-bdr-apply-is-paused"> information function</para></listitem>
+   </itemizedlist>
+   Where available a github bug number follows the release entry. Additional
+   details are available from the changelog in git.
+  </para>
+
+  <para>
+   Two changes add minor new functionality:
+  </para>
+
+  <para>
+   As of 0.9.1 it is now possible for sessions to <literal>SET
+   bdr.permit_ddl_locking = false</literal> to cause commands that would
+   require the global DDL lock to be acquired to instead fail with an ERROR.
+   Administrators may choose to set this in <literal>postgresql.conf</literal>
+   then have sessions that intend to do DDL override it. See <xref
+   linkend="guc-bdr-permit-ddl-locking"> and <xref
+   linkend="ddl-replication"> for more information.
+  </para>
+
+  <para>
+   The new information function <xref linkend="function-bdr-apply-is-paused">
+   can be called on a node to determine whether replay from peer nodes is
+   paused on that node.
+  </para>
+
+ </sect1>
+
  <sect1 id="release-0.9.0">
   <title>Release 0.9.0</title>
 
