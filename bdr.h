@@ -322,12 +322,20 @@ extern Oid	BdrSeqamOid;
 #endif
 
 /* Structure representing bdr_nodes record */
-typedef struct BDRNodeInfo
+typedef struct BDRNodeId
 {
-	/* ID */
 	uint64		sysid;
 	TimeLineID	timeline;
 	Oid			dboid;
+} BDRNodeId;
+
+typedef struct BDRNodeInfo
+{
+	/* hash key */
+	BDRNodeId	id;
+
+	/* is this entry valid */
+	bool		valid;
 
 	char		status;
 
@@ -536,8 +544,7 @@ bdr_copytable(PGconn *copyfrom_conn, PGconn *copyto_conn,
 		const char * copyfrom_query, const char *copyto_query);
 
 /* local node info cache (bdr_nodecache.c) */
-void bdr_local_node_cache_shmem_init(void);
-void bdr_local_node_cache_invalidate(void);
+void bdr_nodecache_invalidate(void);
 bool bdr_local_node_read_only(void);
 char bdr_local_node_status(void);
 

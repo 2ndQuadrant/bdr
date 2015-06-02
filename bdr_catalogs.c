@@ -188,9 +188,9 @@ bdr_nodes_get_local_info(uint64 sysid, TimeLineID tli, Oid dboid)
 	Assert(MemoryContextIsValid(saved_ctx));
 
 	node = palloc(sizeof(BDRNodeInfo));
-	node->sysid = sysid;
-	node->timeline = tli;
-	node->dboid = dboid;
+	node->id.sysid = sysid;
+	node->id.timeline = tli;
+	node->id.dboid = dboid;
 	node->status = DatumGetChar(SPI_getbinval(SPI_tuptable->vals[0],
 											  SPI_tuptable->tupdesc, 1,
 											  &isnull));
@@ -207,6 +207,8 @@ bdr_nodes_get_local_info(uint64 sysid, TimeLineID tli, Oid dboid)
 										   &isnull);
 	if (isnull)
 		node->read_only = false;
+
+	node->valid = true;
 
 	return node;
 }

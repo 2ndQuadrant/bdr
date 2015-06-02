@@ -15,187 +15,175 @@
 
 #include "bdr.h"
 
+#include "access/heapam.h"
 #include "access/xact.h"
+#include "catalog/namespace.h"
 #include "executor/spi.h"
 #include "miscadmin.h"
-#include "storage/ipc.h"
+#include "nodes/makefuncs.h"
+#include "utils/catcache.h"
+#include "utils/inval.h"
 #include "utils/memutils.h"
 
-/* Cache entry. */
-typedef struct BDRLocalNodeEntry
+static HTAB *BDRNodeCacheHash = NULL;
+
+/*
+ * Because PostgreSQL does not have enought relation lookup functions.
+ */
+static Oid
+bdr_get_relname_relid(const char *nspname, const char *relname)
 {
-	/* valid entry */
-	bool		in_use;
+	Oid			nspid;
+	Oid			relid;
 
-	/* database oid (this is all we need as we only store local nodes here) */
-	Oid			dboid;
+	nspid = get_namespace_oid(nspname, false);
+	relid = get_relname_relid(relname, nspid);
 
-	/* node status */
-	char		status;
+	if (!relid)
+		elog(ERROR, "cache lookup failed for relation %s.%s",
+			 nspname, relname);
 
-	/* is the node read only? */
-	bool		read_only;
-} BDRLocalNodeEntry;
-
-typedef struct BdrLocalNodeCacheCtl {
-	LWLock			   *lock;
-	BDRLocalNodeEntry  *nodes;
-} BdrLocalNodeCacheCtl;
-
-static BdrLocalNodeCacheCtl *bdr_node_cache_ctl;
-static BDRLocalNodeEntry *bdr_local_node = NULL;
-
-static BDRLocalNodeEntry *bdr_nodecache_lookup(bool create);
-
-static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
-
-static BDRLocalNodeEntry*
-bdr_nodecache_lookup(bool create)
-{
-	int off;
-	int free_off = -1;
-
-	if (bdr_local_node != NULL && bdr_local_node->in_use)
-		return bdr_local_node;
-
-	for(off = 0; off < bdr_max_databases; off++)
-	{
-		BDRLocalNodeEntry *node = &bdr_node_cache_ctl->nodes[off];
-
-		if (node->in_use && node->dboid == MyDatabaseId)
-		{
-			bdr_local_node = node;
-			return node;
-		}
-
-		if (!node->in_use && free_off == -1)
-			free_off = off;
-	}
-
-	if (!create)
-		return NULL;
-
-	if (free_off != -1)
-	{
-		BDRLocalNodeEntry  *node = &bdr_node_cache_ctl->nodes[free_off];
-		BDRNodeInfo		   *nodeinfo;
-		bool				tx_started = false;
-		bool				spi_pushed;
-		MemoryContext		saved_ctx;
-
-		if (!IsTransactionState())
-		{
-			tx_started = true;
-			StartTransactionCommand();
-		}
-		spi_pushed = SPI_push_conditional();
-		SPI_connect();
-
-		saved_ctx = MemoryContextSwitchTo(TopMemoryContext);
-		nodeinfo = bdr_nodes_get_local_info(GetSystemIdentifier(),
-											ThisTimeLineID,
-											MyDatabaseId);
-		MemoryContextSwitchTo(saved_ctx);
-
-		if (nodeinfo == NULL)
-			return NULL;
-
-		SPI_finish();
-		SPI_pop_conditional(spi_pushed);
-		if (tx_started)
-			CommitTransactionCommand();
-
-		LWLockAcquire(bdr_node_cache_ctl->lock, LW_EXCLUSIVE);
-		node->dboid = nodeinfo->dboid;
-		node->in_use = true;
-		node->status = nodeinfo->status;
-		node->read_only = nodeinfo->read_only;
-		bdr_local_node = node;
-		LWLockRelease(bdr_node_cache_ctl->lock);
-
-		bdr_bdr_node_free(nodeinfo);
-
-		return node;
-	}
-
-	ereport(ERROR,
-			(errcode(ERRCODE_CONFIGURATION_LIMIT_EXCEEDED),
-			errmsg("Too many databases BDR-enabled for bdr.max_databases"),
-			errhint("Increase bdr.max_databases above the current limit of %d", bdr_max_databases)));
-
+	return relid;
 }
 
-static size_t
-bdr_local_node_cache_shmem_size(void)
+/*
+ * Send cache invalidation singal to all backends.
+ */
+void
+bdr_nodecache_invalidate(void)
 {
-	Size		size = 0;
+	CacheInvalidateRelcacheByRelid(bdr_get_relname_relid("bdr", "bdr_nodes"));
+}
 
-	size = add_size(size, sizeof(BdrLocalNodeCacheCtl));
-	size = add_size(size, mul_size(sizeof(BDRLocalNodeEntry),
-								   bdr_max_databases));
+/*
+ * Invalidate the session local cache.
+ */
+static void
+bdr_nodecache_invalidate_callback(Datum arg, Oid relid)
+{
+	if (BDRNodeCacheHash == NULL)
+		return;
 
-	return size;
+	if (relid == InvalidOid ||
+		relid == bdr_get_relname_relid("bdr", "bdr_nodes"))
+	{
+		HASH_SEQ_STATUS status;
+		BDRNodeInfo	   *entry;
+
+		hash_seq_init(&status, BDRNodeCacheHash);
+
+		/* We currently always invalidate everything */
+		while ((entry = (BDRNodeInfo *) hash_seq_search(&status)) != NULL)
+		{
+			entry->valid = false;
+		}
+	}
 }
 
 static void
-bdr_local_node_cache_shmem_startup(void)
+bdr_nodecache_initialize()
 {
-	bool        found;
+	HASHCTL		ctl;
 
-	if (prev_shmem_startup_hook != NULL)
-		prev_shmem_startup_hook();
+	/* Make sure we've initialized CacheMemoryContext. */
+	if (CacheMemoryContext == NULL)
+		CreateCacheMemoryContext();
 
-	LWLockAcquire(AddinShmemInitLock, LW_EXCLUSIVE);
-	bdr_node_cache_ctl = ShmemInitStruct("bdr_local_node_cache",
-	 									 bdr_local_node_cache_shmem_size(),
-										 &found);
-	if (!found)
-	{
-		memset(bdr_node_cache_ctl, 0, bdr_local_node_cache_shmem_size());
-		bdr_node_cache_ctl->lock = LWLockAssign();
-		bdr_node_cache_ctl->nodes = (BDRLocalNodeEntry *)
-			bdr_node_cache_ctl + sizeof(BdrLocalNodeCacheCtl);
-	}
-	LWLockRelease(AddinShmemInitLock);
+	/* Initialize the hash table. */
+	MemSet(&ctl, 0, sizeof(ctl));
+	ctl.keysize = sizeof(BDRNodeId);
+	ctl.entrysize = sizeof(BDRNodeInfo);
+	ctl.hash = tag_hash;
+	ctl.hcxt = CacheMemoryContext;
+
+	BDRNodeCacheHash = hash_create("BDR node cache", 128, &ctl,
+								   HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+
+	/* Watch for invalidation events. */
+	CacheRegisterRelcacheCallback(bdr_nodecache_invalidate_callback,
+								  (Datum) 0);
 }
 
-/* Needs to be called from a shared_preload_library _PG_init() */
-void
-bdr_local_node_cache_shmem_init(void)
+static BDRNodeInfo*
+bdr_nodecache_lookup(BDRNodeId nodeid, bool missing_ok)
 {
-	/* Must be called from postmaster its self */
-	Assert(IsPostmasterEnvironment && !IsUnderPostmaster);
+	BDRNodeInfo	   *entry,
+				   *nodeinfo;
+	bool			found;
+	bool			tx_started = false;
+	bool			spi_pushed;
+	MemoryContext	saved_ctx;
 
-	bdr_node_cache_ctl = NULL;
+	if (BDRNodeCacheHash == NULL)
+		bdr_nodecache_initialize();
 
-	RequestAddinShmemSpace(bdr_local_node_cache_shmem_size());
-	RequestAddinLWLocks(1);
+	/*
+	 * HASH_ENTER returns the existing entry if present or creates a new one.
+	 */
+	entry = hash_search(BDRNodeCacheHash, (void *) &nodeid,
+						HASH_ENTER, &found);
 
-	prev_shmem_startup_hook = shmem_startup_hook;
-	shmem_startup_hook = bdr_local_node_cache_shmem_startup;
-}
+	if (found && entry->valid)
+		return entry;
 
+	/* zero out data part of the entry */
+	memset(((char *) entry) + offsetof(BDRNodeInfo, valid),
+		   0,
+		   sizeof(BDRNodeInfo) - offsetof(BDRNodeInfo, valid));
 
-void
-bdr_local_node_cache_invalidate(void)
-{
-	int off;
-
-	LWLockAcquire(bdr_node_cache_ctl->lock, LW_EXCLUSIVE);
-
-	for(off = 0; off < bdr_max_databases; off++)
+	if (!IsTransactionState())
 	{
-		BDRLocalNodeEntry *node = &bdr_node_cache_ctl->nodes[off];
-		node->in_use = false;
+		tx_started = true;
+		StartTransactionCommand();
+	}
+	spi_pushed = SPI_push_conditional();
+	SPI_connect();
+
+	saved_ctx = MemoryContextSwitchTo(TopMemoryContext);
+	nodeinfo = bdr_nodes_get_local_info(nodeid.sysid,
+										nodeid.timeline,
+										nodeid.dboid);
+	MemoryContextSwitchTo(saved_ctx);
+
+	if (nodeinfo == NULL)
+	{
+		if (!missing_ok)
+			elog(ERROR, "could not find node " UINT64_FORMAT ":%u:%u", nodeid.sysid, nodeid.timeline, nodeid.dboid);
+		else
+			return NULL;
 	}
 
-	LWLockRelease(bdr_node_cache_ctl->lock);
+	SPI_finish();
+	SPI_pop_conditional(spi_pushed);
+	if (tx_started)
+		CommitTransactionCommand();
+
+	entry->status = nodeinfo->status;
+	if (nodeinfo->local_dsn)
+		entry->local_dsn = MemoryContextStrdup(CacheMemoryContext,
+											   nodeinfo->local_dsn);
+	if (nodeinfo->init_from_dsn)
+		entry->init_from_dsn = MemoryContextStrdup(CacheMemoryContext,
+												   nodeinfo->init_from_dsn);
+	entry->read_only = nodeinfo->read_only;
+
+	entry->valid = true;
+
+	bdr_bdr_node_free(nodeinfo);
+
+	return entry;
 }
 
 bool
 bdr_local_node_read_only(void)
 {
-	BDRLocalNodeEntry  *node = bdr_nodecache_lookup(true);
+	BDRNodeId		nodeid;
+	BDRNodeInfo	   *node;
+
+	nodeid.sysid = GetSystemIdentifier();
+	nodeid.timeline = ThisTimeLineID;
+	nodeid.dboid = MyDatabaseId;
+	node = bdr_nodecache_lookup(nodeid, true);
 
 	if (node == NULL)
 		return false;
@@ -206,7 +194,13 @@ bdr_local_node_read_only(void)
 char
 bdr_local_node_status(void)
 {
-	BDRLocalNodeEntry  *node = bdr_nodecache_lookup(true);
+	BDRNodeId		nodeid;
+	BDRNodeInfo	   *node;
+
+	nodeid.sysid = GetSystemIdentifier();
+	nodeid.timeline = ThisTimeLineID;
+	nodeid.dboid = MyDatabaseId;
+	node = bdr_nodecache_lookup(nodeid, true);
 
 	if (node == NULL)
 		return '\0';

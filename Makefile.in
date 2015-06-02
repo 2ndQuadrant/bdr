@@ -251,7 +251,7 @@ installcheck: ;
 ifeq "@BUILDING_BDR@" "1"
 check: regresscheck isolationcheck
 DDLREGRESSCHECKS=ddl/enable_ddl ddl/create ddl/alter_table ddl/extension ddl/function \
-				 ddl/grant ddl/mixed ddl/namespace ddl/replication_set \
+				 ddl/grant ddl/mixed ddl/namespace ddl/read_only ddl/replication_set \
 				 ddl/sequence ddl/view ddl/disable_ddl
 REGRESSINIT=init_bdr
 REGRESSTEARDOWN=part_bdr
