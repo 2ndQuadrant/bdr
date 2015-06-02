@@ -23,6 +23,7 @@
 #include "utils/catcache.h"
 #include "utils/inval.h"
 #include "utils/memutils.h"
+#include "utils/lsyscache.h"
 
 static HTAB *BDRNodeCacheHash = NULL;
 
