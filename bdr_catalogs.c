@@ -29,9 +29,13 @@
 
 #include "bdr_replication_identifier.h"
 
+#include "nodes/makefuncs.h"
+
 #include "utils/builtins.h"
+#include "utils/fmgroids.h"
 #include "utils/guc.h"
 #include "utils/memutils.h"
+#include "utils/snapmgr.h"
 #include "utils/syscache.h"
 
 static int getattno(const char *colname);
@@ -133,82 +137,66 @@ bdr_nodes_get_local_status(uint64 sysid, TimeLineID tli, Oid dboid)
 BDRNodeInfo *
 bdr_nodes_get_local_info(uint64 sysid, TimeLineID tli, Oid dboid)
 {
-	int			spi_ret;
-	Oid			argtypes[] = { TEXTOID, OIDOID, OIDOID };
-	Datum		values[3];
-	bool		isnull;
-	BDRNodeInfo *node;
+	BDRNodeInfo *node = NULL;
 	char		sysid_str[33];
-	Oid			schema_oid;
-	MemoryContext caller_ctx;
-	MemoryContext saved_ctx PG_USED_FOR_ASSERTS_ONLY;
-
-	Assert(IsTransactionState());
-
-	/* Save the calling memory context, which we'll allocate results in */
-	caller_ctx = MemoryContextSwitchTo(CurTransactionContext);
-
-	Assert(MemoryContextIsValid(caller_ctx));
+	HeapTuple	tuple = NULL;
+	Relation	rel;
+	RangeVar   *rv;
+	SysScanDesc scan;
+	Snapshot	snap;
+	ScanKeyData	key[3];
 
 	snprintf(sysid_str, sizeof(sysid_str), UINT64_FORMAT, sysid);
 	sysid_str[sizeof(sysid_str)-1] = '\0';
 
-	/*
-	 * Determine if BDR is present on this DB. The output plugin can
-	 * be started on a db that doesn't actually have BDR active, but
-	 * we don't want to allow that.
-	 *
-	 * Check for a bdr schema.
-	 */
-	schema_oid = GetSysCacheOid1(NAMESPACENAME, CStringGetDatum("bdr"));
-	if (schema_oid == InvalidOid)
-		ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				errmsg("No bdr schema is present in database %s, cannot create a bdr slot",
-					   get_database_name(MyDatabaseId)),
-				errhint("There is no bdr.connections entry for this database on the target node or bdr is not in shared_preload_libraries")));
+	rv = makeRangeVar("bdr", "bdr_nodes", -1);
+	rel = heap_openrv(rv, RowExclusiveLock);
 
-	values[0] = CStringGetTextDatum(sysid_str);
-	values[1] = ObjectIdGetDatum(tli);
-	values[2] = ObjectIdGetDatum(dboid);
+	ScanKeyInit(&key[0],
+				1,
+				BTEqualStrategyNumber, F_TEXTEQ,
+				CStringGetTextDatum(sysid_str));
+	ScanKeyInit(&key[1],
+				2,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(tli));
+	ScanKeyInit(&key[2],
+				3,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(dboid));
 
-	spi_ret = SPI_execute_with_args(
-			"SELECT node_status, node_local_dsn, node_init_from_dsn, node_read_only"
-			"  FROM bdr.bdr_nodes"
-			" WHERE node_sysid = $1 AND node_timeline = $2 AND node_dboid = $3",
-			3, argtypes, values, NULL, false, 1);
+	scan = systable_beginscan(rel, 0, true, NULL, 3, key);
 
-	if (spi_ret != SPI_OK_SELECT)
-		elog(ERROR, "Unable to query bdr.bdr_nodes, SPI error %d", spi_ret);
+	tuple = systable_getnext(scan);
 
-	if (SPI_processed == 0)
-		return NULL;
+	if (HeapTupleIsValid(tuple))
+	{
+		bool		isnull;
+		TupleDesc	desc = RelationGetDescr(rel);
+		Datum		dsn;
 
-	/* Switch to calling memory context to copy results */
-	saved_ctx = MemoryContextSwitchTo(caller_ctx);
-	Assert(MemoryContextIsValid(saved_ctx));
+		node = palloc0(sizeof(BDRNodeInfo));
+		node->id.sysid = sysid;
+		node->id.timeline = tli;
+		node->id.dboid = dboid;
+		node->status = DatumGetChar(fastgetattr(tuple, 4, desc, &isnull));
+		if (isnull)
+			elog(ERROR, "bdr.bdr_nodes.status NULL; shouldn't happen");
 
-	node = palloc(sizeof(BDRNodeInfo));
-	node->id.sysid = sysid;
-	node->id.timeline = tli;
-	node->id.dboid = dboid;
-	node->status = DatumGetChar(SPI_getbinval(SPI_tuptable->vals[0],
-											  SPI_tuptable->tupdesc, 1,
-											  &isnull));
-	if (isnull)
-		elog(ERROR, "bdr.bdr_nodes.status NULL; shouldn't happen");
+		dsn = fastgetattr(tuple, 6, desc, &isnull);
+		if (!isnull)
+			node->local_dsn = pstrdup(TextDatumGetCString(dsn));
 
-	node->local_dsn = SPI_getvalue(SPI_tuptable->vals[0],
-								   SPI_tuptable->tupdesc, 2);
-	node->init_from_dsn = SPI_getvalue(SPI_tuptable->vals[0],
-									   SPI_tuptable->tupdesc, 3);
+		dsn = fastgetattr(tuple, 7, desc, &isnull);
+		if (!isnull)
+			node->init_from_dsn = pstrdup(TextDatumGetCString(dsn));
 
-	node->read_only = (bool) SPI_getbinval(SPI_tuptable->vals[0],
-										   SPI_tuptable->tupdesc, 4,
-										   &isnull);
-	if (isnull)
-		node->read_only = false;
+		node->read_only = DatumGetBool(fastgetattr(tuple, 8, desc, &isnull));
+		node->valid = true;
+	}
 
-	node->valid = true;
+	systable_endscan(scan);
+	heap_close(rel, RowExclusiveLock);
 
 	return node;
 }

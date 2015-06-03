@@ -18,7 +18,6 @@
 #include "access/heapam.h"
 #include "access/xact.h"
 #include "catalog/namespace.h"
-#include "executor/spi.h"
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
 #include "utils/catcache.h"
@@ -110,8 +109,6 @@ bdr_nodecache_lookup(BDRNodeId nodeid, bool missing_ok)
 	BDRNodeInfo	   *entry,
 				   *nodeinfo;
 	bool			found;
-	bool			tx_started = false;
-	bool			spi_pushed;
 	MemoryContext	saved_ctx;
 
 	if (BDRNodeCacheHash == NULL)
@@ -131,14 +128,6 @@ bdr_nodecache_lookup(BDRNodeId nodeid, bool missing_ok)
 		   0,
 		   sizeof(BDRNodeInfo) - offsetof(BDRNodeInfo, valid));
 
-	if (!IsTransactionState())
-	{
-		tx_started = true;
-		StartTransactionCommand();
-	}
-	spi_pushed = SPI_push_conditional();
-	SPI_connect();
-
 	saved_ctx = MemoryContextSwitchTo(TopMemoryContext);
 	nodeinfo = bdr_nodes_get_local_info(nodeid.sysid,
 										nodeid.timeline,
@@ -152,11 +141,6 @@ bdr_nodecache_lookup(BDRNodeId nodeid, bool missing_ok)
 		else
 			return NULL;
 	}
-
-	SPI_finish();
-	SPI_pop_conditional(spi_pushed);
-	if (tx_started)
-		CommitTransactionCommand();
 
 	entry->status = nodeinfo->status;
 	if (nodeinfo->local_dsn)
