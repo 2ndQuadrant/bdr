@@ -1,4 +1,5 @@
 \c regression
+SELECT bdr.bdr_unsubscribe('node-pg');
 SELECT bdr.bdr_part_by_node_names(ARRAY['node-pg']);
 
 -- wait till all slots are killed, we need a better way for that.

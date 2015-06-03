@@ -44,7 +44,10 @@
 #include "utils/memutils.h"
 #include "utils/snapmgr.h"
 
+PGDLLEXPORT Datum bdr_get_apply_pid(PG_FUNCTION_ARGS);
+
 PG_FUNCTION_INFO_V1(bdr_connections_changed);
+PG_FUNCTION_INFO_V1(bdr_get_apply_pid);
 
 /* In the commit hook, should we attempt to start a per-db worker? */
 static bool xacthook_registered = false;
@@ -315,7 +318,6 @@ bdr_maintain_db_workers(void)
 		Assert(!isnull);
 
 		LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
-
 		for (slotoff = 0; slotoff < bdr_max_workers; slotoff++)
 		{
 			BdrWorker  *w = &BdrWorkerCtl->slots[slotoff];
@@ -376,6 +378,7 @@ bdr_maintain_db_workers(void)
 				kill(w->worker_pid, SIGTERM);
 			}
 		}
+		LWLockRelease(BdrWorkerCtl->lock);
 
 		if (found_alive)
 		{
@@ -442,7 +445,6 @@ bdr_maintain_db_workers(void)
 			 */
 		}
 
-		LWLockRelease(BdrWorkerCtl->lock);
 		continue;
 	}
 
@@ -849,4 +851,37 @@ bdr_perdb_worker_main(Datum main_arg)
 
 	perdb->database_oid = InvalidOid;
 	proc_exit(0);
+}
+
+
+/* Get pid of current apply backend for given node. */
+Datum
+bdr_get_apply_pid(PG_FUNCTION_ARGS)
+{
+	const char *remote_sysid_str = text_to_cstring(PG_GETARG_TEXT_P(0));
+	Oid			remote_tli = PG_GETARG_OID(1);
+	Oid			remote_dboid = PG_GETARG_OID(2);
+	uint64		remote_sysid;
+	BdrWorker  *worker = NULL;
+	pid_t		ret;
+
+	if (sscanf(remote_sysid_str, UINT64_FORMAT, &remote_sysid) != 1)
+		elog(ERROR, "Parsing of remote sysid as uint64 failed");
+
+	LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
+
+	find_apply_worker_slot(remote_sysid, remote_tli, remote_dboid, &worker);
+
+	/* Worker slot not found or worker isn't running. */
+	if (worker == NULL || worker->worker_proc == NULL)
+	{
+		LWLockRelease(BdrWorkerCtl->lock);
+		PG_RETURN_NULL();
+	}
+
+	ret = worker->worker_pid;
+
+	LWLockRelease(BdrWorkerCtl->lock);
+
+	PG_RETURN_INT32(ret);
 }

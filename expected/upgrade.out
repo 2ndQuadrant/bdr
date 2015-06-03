@@ -45,6 +45,8 @@ CREATE EXTENSION bdr VERSION '0.10.0.2';
 DROP EXTENSION bdr;
 CREATE EXTENSION bdr VERSION '0.10.0.3';
 DROP EXTENSION bdr;
+CREATE EXTENSION bdr VERSION '0.10.0.4';
+DROP EXTENSION bdr;
 -- evolve version one by one from the oldest to the newest one
 CREATE EXTENSION bdr VERSION '0.8.0';
 ALTER EXTENSION bdr UPDATE TO '0.8.0.1';
@@ -65,14 +67,15 @@ ALTER EXTENSION bdr UPDATE TO '0.10.0.0';
 ALTER EXTENSION bdr UPDATE TO '0.10.0.1';
 ALTER EXTENSION bdr UPDATE TO '0.10.0.2';
 ALTER EXTENSION bdr UPDATE TO '0.10.0.3';
+ALTER EXTENSION bdr UPDATE TO '0.10.0.4';
 -- Should never have to do anything: You missed adding the new version above.
 ALTER EXTENSION bdr UPDATE;
-NOTICE:  version "0.10.0.3" of extension "bdr" is already installed
+NOTICE:  version "0.10.0.4" of extension "bdr" is already installed
 \dx bdr
                        List of installed extensions
  Name | Version  |   Schema   |                Description                
 ------+----------+------------+-------------------------------------------
- bdr  | 0.10.0.3 | pg_catalog | Bi-directional replication for PostgreSQL
+ bdr  | 0.10.0.4 | pg_catalog | Bi-directional replication for PostgreSQL
 (1 row)
 
 \c postgres

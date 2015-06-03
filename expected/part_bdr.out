@@ -1,4 +1,6 @@
 \c regression
+SELECT bdr.bdr_unsubscribe('node-pg');
+ERROR:  Unidirectional connection to node node-pg not found
 SELECT bdr.bdr_part_by_node_names(ARRAY['node-pg']);
  bdr_part_by_node_names 
 ------------------------
