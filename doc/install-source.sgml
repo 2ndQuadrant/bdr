@@ -156,7 +156,7 @@
    like:
    <programlisting>
     cd /path/to/bdr-pg-source/
-    ./configure --prefix=/path/to/install --enable-debug --enable-openssl
+    ./configure --prefix=/path/to/install --enable-debug --with-openssl
     make -j4 -s install-world
    </programlisting>
   </para>
