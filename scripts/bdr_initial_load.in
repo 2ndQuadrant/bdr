@@ -50,8 +50,8 @@ while (($i < ${#argv[*]})); do
 		((i++)); PGRESTORE="${argv[$i]}"
 	;;
 	--help)
-		errlog "Usage: bdr_replica --source <dsn> --target <dsn> [--snapshot <name>] --dir /path/to/dir [--jobs N]"
-		errlog "<dsn> is a libpq conninfo string, e.g. \"host=/tmp post=5433 dbname=xxx\""
+		errlog "Usage: bdr_initial_load --source <dsn> --target <dsn> [--snapshot <name>] --dir /path/to/dir [--jobs N]"
+		errlog "<dsn> is a libpq conninfo string, e.g. \"host=/tmp port=5433 dbname=xxx\""
 		exit 0
 	;;
 	*)
