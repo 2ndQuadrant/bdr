@@ -154,7 +154,7 @@
    </para>
 
    <para>
-    If you create non-replicated objects that create are to be referenced
+    If you create non-replicated objects that are to be referenced
     by replicated objects (e.g. creating a role, not replicated, then creating
     a table, replicated, that's owned by that role) you must ensure that the
     non-replicated object is created on all &bdr; nodes. You can do this
