@@ -1589,31 +1589,7 @@ bdr_locks_check_dml(void)
 	}
 }
 
-#else
-
-/* bdr_locks are not used by UDR at the moment */
-void
-bdr_locks_startup()
-{
-}
-
-void
-bdr_locks_shmem_init()
-{
-}
-
-void
-bdr_acquire_ddl_lock(BDRLockType lock_type)
-{
-}
-
-void
-bdr_locks_check_dml(void)
-{
-}
-#endif
-
-
+/* Lock type conversion functions */
 static char *
 bdr_lock_type_to_name(BDRLockType lock_type)
 {
@@ -1642,3 +1618,27 @@ bdr_lock_name_to_type(const char *lock_type)
 	else
 		elog(ERROR, "unknown lock type %s", lock_type);
 }
+
+#else
+
+/* bdr_locks are not used by UDR at the moment */
+void
+bdr_locks_startup()
+{
+}
+
+void
+bdr_locks_shmem_init()
+{
+}
+
+void
+bdr_acquire_ddl_lock(BDRLockType lock_type)
+{
+}
+
+void
+bdr_locks_check_dml(void)
+{
+}
+#endif

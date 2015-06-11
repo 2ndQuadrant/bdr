@@ -143,7 +143,6 @@ bdr_nodes_get_local_info(uint64 sysid, TimeLineID tli, Oid dboid)
 	Relation	rel;
 	RangeVar   *rv;
 	SysScanDesc scan;
-	Snapshot	snap;
 	ScanKeyData	key[3];
 
 	snprintf(sysid_str, sizeof(sysid_str), UINT64_FORMAT, sysid);

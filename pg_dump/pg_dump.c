@@ -14212,7 +14212,7 @@ static char*
 find_sequence_seqam(Archive *fout, Oid seq_oid)
 {
 	PGresult   *res;
-	const char *amname = NULL;
+	char	   *amname = NULL;
 	PQExpBuffer query = createPQExpBuffer();
 
 	res = ExecuteSqlQuery(fout, "SELECT EXISTS(SELECT 1 "
