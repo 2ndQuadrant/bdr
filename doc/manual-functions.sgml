@@ -569,7 +569,7 @@
         <indexterm>
          <primary>bdr.bdr_min_remote_version_num</primary>
         </indexterm>
-        <literal><function>bdr.min_remote_version_num()</function></literal>
+        <literal><function>bdr.bdr_min_remote_version_num()</function></literal>
        </entry>
        <entry>integer</entry>
        <entry>Return the oldest version of the &bdr;/&udr; extension that this node can compatibly receive streamed changes from.</entry>
