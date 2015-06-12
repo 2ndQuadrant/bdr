@@ -587,6 +587,17 @@
        <entry>Look up the local node in <literal>bdr.bdr_nodes</literal> and return the node name - or null if the node is not a &bdr;/&udr; peer</entry>
       </row>
 
+      <row id="functions-bdr-get-local-node-id" xreflabel="bdr.bdr_get_local_nodeid()">
+       <entry>&bdr;/&udr;</entry>
+       <entry>
+        <indexterm>
+         <primary>bdr.bdr_get_local_nodeid</primary>
+        </indexterm>
+        <literal><function>bdr.bdr_get_local_nodeid()</function></literal>
+       </entry>
+       <entry>record</entry>
+       <entry>Returns a tuple containing the local node's <literal>sysid</literal>, <literal>timeline</literal>, and <literal>dboid</literal>.</entry>
+      </row>
 
       <row>
        <entry>&bdr;/&udr;</entry>
