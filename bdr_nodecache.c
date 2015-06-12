@@ -65,7 +65,7 @@ bdr_nodecache_invalidate_callback(Datum arg, Oid relid)
 		return;
 
 	if (relid == InvalidOid ||
-		relid == bdr_get_relname_relid("bdr", "bdr_nodes"))
+		relid == BdrNodesRelid)
 	{
 		HASH_SEQ_STATUS status;
 		BDRNodeInfo	   *entry;
@@ -99,7 +99,12 @@ bdr_nodecache_initialize()
 	BDRNodeCacheHash = hash_create("BDR node cache", 128, &ctl,
 								   HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
 
-	/* Watch for invalidation events. */
+	/*
+	 * Watch for invalidation events.
+	 * XXX: This breaks if the table is dropped and recreated, during the
+	 * lifetime of this backend.
+	 */
+	BdrNodesRelid = bdr_get_relname_relid("bdr", "bdr_nodes");
 	CacheRegisterRelcacheCallback(bdr_nodecache_invalidate_callback,
 								  (Datum) 0);
 }
@@ -111,6 +116,9 @@ bdr_nodecache_lookup(BDRNodeId nodeid, bool missing_ok)
 				   *nodeinfo;
 	bool			found;
 	MemoryContext	saved_ctx;
+
+	/* potentially need to access syscaches */
+	Assert(IsTransactionState());
 
 	if (BDRNodeCacheHash == NULL)
 		bdr_nodecache_initialize();

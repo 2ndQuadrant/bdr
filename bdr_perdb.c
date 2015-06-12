@@ -103,7 +103,6 @@ find_apply_worker_slot(uint64 sysid, TimeLineID timeline, Oid dboid, BdrWorker *
 {
 	int i, found = -1;
 
-	Assert(bdr_worker_type == BDR_WORKER_PERDB);
 	Assert(LWLockHeldByMe(BdrWorkerCtl->lock));
 
 	for (i = 0; i < bdr_max_workers; i++)

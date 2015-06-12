@@ -72,13 +72,13 @@ extern Oid			origin_dboid;
 /* end externs for bdr apply state */
 
 ResourceOwner bdr_saved_resowner;
-Oid   BdrSchemaOid;
-Oid   BdrNodesRelid;
-Oid   BdrConflictHistoryRelId;
-Oid   BdrLocksRelid;
-Oid   BdrLocksByOwnerRelid;
-Oid   BdrReplicationSetConfigRelid;
-Oid   BdrSeqamOid;
+Oid   BdrSchemaOid = InvalidOid;
+Oid   BdrNodesRelid = InvalidOid;
+Oid   BdrConflictHistoryRelId = InvalidOid;
+Oid   BdrLocksRelid = InvalidOid;
+Oid   BdrLocksByOwnerRelid = InvalidOid;
+Oid   BdrReplicationSetConfigRelid = InvalidOid;
+Oid   BdrSeqamOid = InvalidOid;
 
 /* GUC storage */
 static bool bdr_synchronous_commit;
