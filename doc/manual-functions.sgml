@@ -587,6 +587,7 @@
        <entry>Look up the local node in <literal>bdr.bdr_nodes</literal> and return the node name - or null if the node is not a &bdr;/&udr; peer</entry>
       </row>
 
+
       <row>
        <entry>&bdr;/&udr;</entry>
        <entry>
