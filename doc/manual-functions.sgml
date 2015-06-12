@@ -575,7 +575,7 @@
        <entry>Return the oldest version of the &bdr;/&udr; extension that this node can compatibly receive streamed changes from.</entry>
       </row>
 
-      <row id="functions-bdr-get-node-name" xreflabel="bdr.bdr_get_node_name()">
+      <row id="functions-bdr-get-local-node-name" xreflabel="bdr.bdr_get_local_node_name()">
        <entry>&bdr;/&udr;</entry>
        <entry>
         <indexterm>
@@ -586,6 +586,7 @@
        <entry>text</entry>
        <entry>Look up the local node in <literal>bdr.bdr_nodes</literal> and return the node name - or null if the node is not a &bdr;/&udr; peer</entry>
       </row>
+
 
       <row>
        <entry>&bdr;/&udr;</entry>

@@ -230,7 +230,7 @@
   <para>
    If you only know the slot name from <literal>pg_replication_slots</literal>
    and not the node name from <literal>bdr.bdr_nodes</literal> you can either
-   <literal>SELECT</literal> <xref linkend="functions-bdr-get-node-name">
+   <literal>SELECT</literal> <xref linkend="functions-bdr-get-local-node-name">
    on the node you plan to remove, or look it up from the slot name using
    <!-- TODO make this a proper xref -->
    the <literal>bdr.bdr_node_slots</literal> view.
