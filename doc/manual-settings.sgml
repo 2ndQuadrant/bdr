@@ -153,7 +153,7 @@
      </term>
      <listitem>
       <para>
-       Only present in &bdr;. Controls the type of sequence created by unqualifieed
+       Only present in &bdr;. Controls the type of sequence created by unqualified
        <literal>CREATE SEQUENCE</literal> commands and by <literal>SERIAL</literal>
        and <literal>BIGSERIAL</literal>. See <xref linkend="global-sequences">.
        May be set per-session with <literal>SET</literal>.
