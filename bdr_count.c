@@ -346,7 +346,7 @@ pg_stat_get_bdr(PG_FUNCTION_ARGS)
 		memset(values, 0, sizeof(values));
 		memset(nulls, 0, sizeof(nulls));
 
-		GetReplicationInfoByIdentifier(slot->node_id, false, &riname);
+		GetReplicationInfoByIdentifierWrapper(slot->node_id, false, &riname);
 
 		values[ 0] = ObjectIdGetDatum(slot->node_id);
 		values[ 1] = ObjectIdGetDatum(slot->node_id);

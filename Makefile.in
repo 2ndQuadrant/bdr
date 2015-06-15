@@ -75,7 +75,8 @@ OBJS = \
 
 ifeq "@BUILDING_BDR@" "1"
 OBJS += \
-	bdr_seq.o
+	bdr_seq.o \
+	bdr_94b2_compat.o
 else
 OBJS += \
 	bdr_replication_identifier.o

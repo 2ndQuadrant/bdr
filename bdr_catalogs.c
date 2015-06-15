@@ -303,7 +303,7 @@ bdr_fetch_sysid_via_node_id(RepNodeId node_id, uint64 *sysid, TimeLineID *tli,
 		Oid local_dboid;
 		NameData replication_name;
 
-		GetReplicationInfoByIdentifier(node_id, false, &riname);
+		GetReplicationInfoByIdentifierWrapper(node_id, false, &riname);
 
 		if (sscanf(riname, BDR_NODE_ID_FORMAT,
 				   &remote_sysid, &remote_tli, &remote_dboid, &local_dboid,
