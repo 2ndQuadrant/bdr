@@ -61,6 +61,8 @@
 #include "utils/syscache.h"
 #include "utils/timestamp.h"
 
+#include "bdr_94b2_compat.h"
+
 #define MAXCONNINFO		1024
 
 volatile sig_atomic_t got_SIGTERM = false;

@@ -28,6 +28,7 @@
 #include "executor/spi.h"
 
 #include "bdr_replication_identifier.h"
+#include "bdr_94b2_compat.h"
 
 #include "utils/builtins.h"
 #include "utils/guc.h"

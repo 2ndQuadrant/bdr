@@ -31,6 +31,8 @@
 #include "utils/builtins.h"
 #include "utils/syscache.h"
 
+#include "bdr_94b2_compat.h"
+
 /*
  * Statistics about logical replication
  *
