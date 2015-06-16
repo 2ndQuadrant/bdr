@@ -59,8 +59,8 @@
   <sect2 id="conflicts-types" xreflabel="Types of conflict">
    <title>Types of conflict</title>
 
-   <sect3>
-    <title>Row conflicts</title>
+   <sect3 id="conflicts-key" xreflabel="PRIMARY KEY or UNIQUE conflicts">
+    <title><literal>PRIMARY KEY</literal> or <literal>UNIQUE</literal> conflicts</title>
 
     <para>
      The most common conflicts are row conflicts where two operations affect a
@@ -77,23 +77,82 @@
       <listitem><simpara><literal>UPDATE</literal> vs <literal>DELETE</literal></simpara></listitem>
       <listitem><simpara><literal>INSERT</literal> vs <literal>DELETE</literal></simpara></listitem>
      </itemizedlist>
-     <!-- todo explain -->
     </para>
+
+    <sect4 id="conflicts-insert-unique"
+           xreflabel="INSERTs that violate one UNIQUE constraint">
+
+     <para>
+      The most common conflict,  <literal>INSERT</literal> vs
+      <literal>INSERT</literal>, arises where <literal>INSERT</literal>s on two
+      different nodes create a tuple with the same <literal>PRIMARY
+      KEY</literal> values (or the same values for a single
+      <literal>UNIQUE</literal> constraint).  &bdr; handles this by retaining
+      the most recently inserted tuple of the two according to the originating
+      host's timestamps unless a user-defined conflict handler overrides this.
+     </para>
+
+     <para>
+      No special administrator action is required to deal with these conflicts,
+      but the user must undersand that <emphasis>one of the
+      <literal>INSERT</literal>ed tuples is effectively discarded on all
+      nodes</emphasis> - there is no data merging done unless a user defined
+      conflict handler does it.
+     </para>
+
+    </sect4>
+
+    <sect4 id="conflicts-insert-unique-multiple-index"
+          xreflabel="INSERTs that violate multiple UNIQUE constraints">
+      <title>INSERTs that violate multiple UNIQUE constraints</title>
+
+     <para>
+      An <literal>INSERT</literal>/<literal>INSERT</literal> conflict
+      can violate more than one <literal>UNIQUE</literal> constraint
+      (of which one might be the <literal>PRIMARY KEY</literal>).
+     </para>
+
+     <para>
+      &bdr; can only handle an
+      <literal>INSERT</literal>/<literal>INSERT</literal> conflict on one
+      unique constraint (including the <literal>PRIMARY KEY</literal>). If a
+      new row conflicts with more than one <literal>UNIQUE</literal> constraint
+      then the apply worker that's trying to apply the change will
+      <literal>ERROR</literal> out with:
+      <programlisting>
+      ERROR: multiple unique constraints violated by remotely INSERTed tuple
+      </programlisting>
+      (Older versions would report a <literal>"diverging uniqueness
+      conflict"</literal> error instead).
+     </para>
+
+     <para>
+      In case of such a conflict, you must manually remove the conflicting
+      tuple(s) from the local side by <literal>DELETE</literal>ing it or by
+      <literal>UPDATE</literal>ing it so that it no longer conflicts with the
+      new remote tuple. There may be more than one conflicting tuple. There is
+      not currently any built-in facility to ignore, discard or merge tuples
+      that violate more than one local unique constraint.
+     </para>
+
+    </important>
+
    </sect3>
 
-   <sect3>
+   <sect3 id="conflicts-foreign-key" xreflabel="Foreign key conflicts">
     <title>Constraint conflicts</title>
 
     <para>
-     Constraint conflicts can also occur, mainly with foreign keys. These are
-     usually transient issues that arise from transactions being applied in a
-     different order to the order they appeared to occur logically on the nodes
-     that originated them.
+     Conflicts between a remote transaction being applied and existing local data
+     can also occur for <literal>FOREIGN KEY</literal> constraints. These
+     conflicts are usually transient issues that arise from transactions being
+     applied in a different order to the order they appeared to occur logically
+     on the nodes that originated them.
     </para>
 
     <para>
      While apply is strictly ordered for any given origin node, there is no
-     enforcemnet of ordering of transactions between two different nodes, so
+     enforcement of ordering of transactions between two different nodes, so
      it's possible for (e.g.) node1 to insert a row into T1, which is replayed to node2.
      node2 inserts a row into T2 which has a foreign key reference to the row from T1.
      On node3, if the transaction from node2 that inserts the row into T2 is received
@@ -106,20 +165,116 @@
      transaction will commit successfully.
     </para>
 
+    <sect4 id="conflict-foreign-key-deadlock"
+           xreflabel="Foreign key constraint deadlocks">
+     <title>Foreign key constraint deadlocks</title>
+
     <para>
-     Constraint conflicts are generally transient and require no administrator action.
+     Simple foreign key constraint conflicts are generally transient and
+     require no administrator action, but for transactions that change multiple
+     entities this is not always the case. It is possible for
+     concurrent changes to tables with foreign key constraints to create
+     <emphasis>inter-node replication deadlocks</emphasis> where no node can
+     apply changes from any other node because they conflict with local data.
+     This causes replication activity to stop until the deadlock is broken by a
+     local data change on one or more of the nodes.
     </para>
 
-    <note>
+    <para>
+     For example, take a two node system with two tables and some existing data:
+     <programlisting>
+     CREATE TABLE parent(
+      id integer primary key
+     );
+
+     CREATE TABLE child(
+      id integer primary key,
+      parent_id integer not null references parent(id)
+     );
+
+     INSERT INTO parent(id)
+     VALUES (1), (2);
+
+     INSERT INTO child(id, parent_id)
+     VALUES (11, 1), (11, 2);
+     </programlisting>
+     If node A does:
+     <programlisting>
+     INSERT INTO child(id, parent_id)
+     VALUES (21, 2);
+     </programlisting>
+     and <emphasis>at the same time</emphasis> node B does:
+     <programlisting>
+     DELETE FROM child WHERE parent_id = 2;
+     DELETE FROM parent WHERE id = 2;
+     </programlisting>
+     then we have a situation where the transaction from node A cannot apply
+     successfully to the <literal>child</literal> table on node B because the
+     referenced <literal>parent</literal> no longer exists. The transaction
+     from node B cannot apply to node A because it deletes a
+     <literal>parent</literal> tuple that's still referenced, the new one with
+     id=21. Neither transaction can replay, and both will output periodic
+     <literal>ERROR</literal>s in the log files as they are retried. Since
+     &bdr; replays transactions from a given node strictly in order, neither
+     node can make progress with replication unless the user, or some 3rd node,
+     makes changes that resolve the deadlock.
+    </para>
+
+    <para>
+     It is important to note that when we manually deleted the child tuples
+     on node B, the newly inserted child on node A was not affected because
+     it had not yet replicated to node B. If either node replays the other's
+     transaction before attempting its own local transaction then no problem
+     will occur.
+    </para>
+
+    <para>
+     Solving such a foreign key deadlock requires that you fix the constraint
+     issue on each end. In this case, you would need to insert a dummy
+     <literal>parent</literal> row on node B and delete the new child on node
+     A. Replay will continue past the deadlock point.
+    </para>
+
+    <para>
+     &bdr; can't just apply the changes from each end anyway because doing so
+     would result in tables that violated their declared foreign key
+     constraints, which most users would view as corruption.
+    </para>
+
+    </sect4>
+
+   </sect3>
+
+   <sect3 id="conflicts-exclusion"
+          xreflabel="Exclusion constraint conflicts">
+    <title>Exclusion constraint conflicts</title>
+
+    <para>
+     &bdr; doesn't support exclusion constraints and restricts their creation.
+    </para>
+
+    <important>
      <para>
-      Constraint conflicts are the reason why &bdr; does not support exclusion
-      constraints. In a distributed asynchronous system it is not possible to
-      ensure that no set of rows that violates the constraint exists, because
-      all transactions on different nodes are fully isolated. Exclusion constraints
-      would lead to replay deadlocks where replay could not progress from any
-      node to any other node because of exclusion constraint violations.
+      If an existing stand-alone database is converted to a &bdr; database then
+      all exclusion constraints should be manually dropped.
      </para>
-    </note>
+    </important>
+
+    <para>
+     In a distributed asynchronous system it is not possible to ensure that no
+     set of rows that violates the constraint exists, because all transactions
+     on different nodes are fully isolated. Exclusion constraints would lead to
+     replay deadlocks where replay could not progress from any node to any
+     other node because of exclusion constraint violations.
+    </para>
+
+    <para>
+     If you force &bdr; to create an exclusion constraint, or you don't drop
+     existing ones when converting a standalone database to &bdr; you should
+     expect replication to break. You can get it to progress again by
+     removing or altering the local tuple(s) that an incoming remote tuple
+     conflicts with so that the remote transaction can be applied.
+    </para>
 
    </sect3>
 
