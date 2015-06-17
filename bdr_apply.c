@@ -1735,10 +1735,11 @@ process_queued_drop(HeapTuple cmdtup)
 			datum = heap_getattr(&tmptup, 3, elemdesc, &isnull);
 			if (isnull)
 			{
-				elog(WARNING, "null typename !?");
-
-				if (objtype != OBJECT_AGGREGATE)
+				if (objtype == OBJECT_OPERATOR)
+				{
+					elog(WARNING, "null typename !?");
 					continue;
+				}
 			}
 			else
 			{
@@ -1797,6 +1798,7 @@ process_queued_drop(HeapTuple cmdtup)
 
 		addr = get_object_address(objtype, objnames, objargs, &objrel,
 								  AccessExclusiveLock, false);
+
 		/* unsupported object? */
 		if (addr.classId == InvalidOid)
 			continue;
