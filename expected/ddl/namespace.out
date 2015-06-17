@@ -7,6 +7,8 @@ CREATE SCHEMA test_schema_1
               a serial,
               b int UNIQUE
        );
+CREATE FUNCTION test_schema_1.abc_func() RETURNS void
+       AS $$ BEGIN END; $$ LANGUAGE plpgsql;
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
  pg_xlog_wait_remote_apply 
 ---------------------------
@@ -70,9 +72,10 @@ ERROR:  schema "test_schema_renamed" already exists
 CREATE SCHEMA IF NOT EXISTS test_schema_renamed; -- ok with notice
 NOTICE:  schema "test_schema_renamed" already exists, skipping
 DROP SCHEMA test_schema_renamed CASCADE;
-NOTICE:  drop cascades to 2 other objects
+NOTICE:  drop cascades to 3 other objects
 DETAIL:  drop cascades to table test_schema_renamed.abc
 drop cascades to view test_schema_renamed.abc_view
+drop cascades to function test_schema_renamed.abc_func()
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
  pg_xlog_wait_remote_apply 
 ---------------------------

@@ -10,6 +10,9 @@ CREATE SCHEMA test_schema_1
               b int UNIQUE
        );
 
+CREATE FUNCTION test_schema_1.abc_func() RETURNS void
+       AS $$ BEGIN END; $$ LANGUAGE plpgsql;
+
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 \c regression
 SELECT COUNT(*) FROM pg_class WHERE relnamespace =
