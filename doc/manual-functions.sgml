@@ -116,7 +116,8 @@
        <entry>
         Removes all the nodes - identified by the node names in the
         array. All the remaining nodes in the cluster have to be
-        reachable for this to succeed.
+        reachable for this to succeed. This function must be run
+        on a node that is not being removed.
        </entry>
       </row>
 
