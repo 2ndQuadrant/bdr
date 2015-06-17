@@ -492,8 +492,15 @@ process_remote_insert(StringInfo s)
 			!ItemPointerEquals(&oldslot->tts_tuple->t_self,
 							   &conflicting_tid))
 		{
-			/* FIXME: improve logging here */
-			elog(ERROR, "diverging uniqueness conflict");
+			/* TODO: Report tuple identity in log */
+			ereport(ERROR,
+				(errcode(ERRCODE_UNIQUE_VIOLATION),
+				errmsg("multiple unique constraints violated by remotely INSERTed tuple"),
+				errdetail("Cannot apply transaction because remotely INSERTed tuple "
+					  "conflicts with a local tuple on more than one UNIQUE "
+					  "constraint and/or PRIMARY KEY"),
+				errhint("Resolve the conflict by removing or changing the conflicting "
+					"local tuple")));
 		}
 		else if (found)
 		{
