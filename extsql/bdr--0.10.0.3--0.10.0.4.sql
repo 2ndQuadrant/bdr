@@ -113,6 +113,84 @@ BEGIN
 END;
 $body$;
 
+CREATE OR REPLACE FUNCTION bdr.bdr_part_by_node_names(p_nodes text[])
+RETURNS void LANGUAGE plpgsql VOLATILE
+SET search_path = bdr, pg_catalog
+SET bdr.permit_unsafe_ddl_commands = on
+SET bdr.skip_ddl_replication = on
+SET bdr.skip_ddl_locking = on
+AS $body$
+DECLARE
+    unknown_node_names text := NULL;
+    r record;
+BEGIN
+    -- concurrency
+    LOCK TABLE bdr.bdr_connections IN EXCLUSIVE MODE;
+    LOCK TABLE bdr.bdr_nodes IN EXCLUSIVE MODE;
+    LOCK TABLE pg_catalog.pg_shseclabel IN EXCLUSIVE MODE;
+
+    -- Ensure we're not running on the node being parted.
+    -- We can't safely ensure that the change gets replicated
+    -- to peer nodes before we cut off our local connections
+    -- if running on the node being parted.
+    --
+    -- (This restriction can be lifted later if we add
+    --  multi-phase negotiated part).
+    --
+    IF bdr.bdr_get_local_node_name() = ANY(p_nodes) THEN
+        RAISE USING
+            MESSAGE = 'Cannot part a node from its self',
+            DETAIL = 'Attempted to bdr_part_by_node_names(...) on node '||bdr.bdr_get_local_node_name()||' which is one of the nodes being parted',
+            HINT = 'You must call call bdr_part_by_node_names on a node that is not being removed',
+            ERRCODE = 'object_in_use';
+    END IF;
+
+    SELECT
+        string_agg(to_remove.remove_node_name, ', ')
+    FROM
+        bdr.bdr_nodes
+        RIGHT JOIN unnest(p_nodes) AS to_remove(remove_node_name)
+        ON (bdr_nodes.node_name = to_remove.remove_node_name)
+    WHERE bdr_nodes.node_name IS NULL
+    INTO unknown_node_names;
+
+    IF unknown_node_names IS NOT NULL THEN
+        RAISE USING
+            MESSAGE = format('No node(s) named %s found', unknown_node_names),
+            ERRCODE = 'no_data_found';
+    END IF;
+
+    FOR r IN
+        SELECT
+            node_name, node_status
+        FROM
+            bdr.bdr_nodes
+            INNER JOIN unnest(p_nodes) AS to_remove(remove_node_name)
+            ON (bdr_nodes.node_name = to_remove.remove_node_name)
+        WHERE bdr_nodes.node_status <> 'r'
+    LOOP
+        RAISE WARNING 'Node % is in state % not expected ''r''. Attempting to remove anyway.',
+            r.node_name, r.node_status;
+    END LOOP;
+
+    UPDATE bdr.bdr_nodes
+    SET node_status = 'k'
+    WHERE node_name = ANY(p_nodes);
+
+    -- Notify local perdb worker to kill nodes.
+    PERFORM bdr.bdr_connections_changed();
+
+    UPDATE bdr.bdr_nodes
+    SET node_status = 'k'
+    WHERE node_name = ANY(p_nodes);
+
+    -- Notify local perdb worker to kill nodes.
+    PERFORM bdr.bdr_connections_changed();
+
+END;
+$body$;
+
+
 RESET bdr.permit_unsafe_ddl_commands;
 RESET bdr.skip_ddl_replication;
 RESET search_path;
