@@ -984,6 +984,7 @@ void
 initialize_node_entry(PGconn *conn, NodeInfo *ni, char* node_name, Oid dboid,
 					  char *remote_connstr)
 {
+#ifdef BUILDING_BDR
 	PQExpBuffer		query = createPQExpBuffer();
 	PGresult	   *res;
 
@@ -1004,6 +1005,7 @@ initialize_node_entry(PGconn *conn, NodeInfo *ni, char* node_name, Oid dboid,
 
 	PQclear(res);
 	destroyPQExpBuffer(query);
+#endif
 }
 
 /*
