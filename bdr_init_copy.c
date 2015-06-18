@@ -570,7 +570,7 @@ run_pg_ctl(const char *arg)
 {
 	int			 ret;
 	PQExpBuffer  cmd = createPQExpBuffer();
-	char		*exec_path = find_other_exec_or_die(argv0, "pg_ctl", "pg_ctl (PostgreSQL) " PG_VERSION "\n");
+	char		*exec_path = find_other_exec_or_die(argv0, "pg_ctl", NULL);
 
 	appendPQExpBuffer(cmd, "%s %s -D \"%s\" -s", exec_path, arg, data_dir);
 
@@ -595,7 +595,7 @@ run_basebackup(const char *remote_connstr, const char *data_dir)
 {
 	int			 ret;
 	PQExpBuffer  cmd = createPQExpBuffer();
-	char		*exec_path = find_other_exec_or_die(argv0, "pg_basebackup", "pg_basebackup (PostgreSQL) " PG_VERSION "\n");
+	char		*exec_path = find_other_exec_or_die(argv0, "pg_basebackup", NULL);
 
 	appendPQExpBuffer(cmd, "%s -D \"%s\" -d \"%s\" -X s -P", exec_path, data_dir, remote_connstr);
 
@@ -1521,19 +1521,22 @@ copy_file(char *fromfile, char *tofile)
 	free(buffer);
 }
 
-/*
- * Utility functions taken from pg_ctl
- */
 
 static char *
 find_other_exec_or_die(const char *argv0, const char *target, const char *versionstr)
 {
 	int			ret;
 	char	   *found_path;
+	uint32		bin_version;
 
 	found_path = pg_malloc(MAXPGPATH);
 
-	if ((ret = find_other_exec(argv0, target, versionstr, found_path)) < 0)
+	if (versionstr)
+		ret = find_other_exec(argv0, target, versionstr, found_path);
+	else
+		ret = bdr_find_other_exec(argv0, target, &bin_version, found_path);
+
+	if (ret < 0)
 	{
 		char		full_path[MAXPGPATH];
 
@@ -1551,6 +1554,20 @@ find_other_exec_or_die(const char *argv0, const char *target, const char *versio
 						   "but was not the same version as %s.\n"
 						   "Check your installation.\n"),
 						 target, full_path, progname);
+	}
+	else if (!versionstr)
+	{
+		char		full_path[MAXPGPATH];
+
+		if (find_my_exec(argv0, full_path) < 0)
+			strlcpy(full_path, progname, sizeof(full_path));
+
+		if (bin_version / 100 != PG_VERSION_NUM / 100)
+			die(_("The program \"%s\" was found by \"%s\"\n"
+						   "but was not the same version as %s.\n"
+						   "Check your installation.\n"),
+						 target, full_path, progname);
+
 	}
 
 	return found_path;

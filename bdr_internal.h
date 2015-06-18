@@ -73,4 +73,7 @@ extern void bdr_parse_slot_name(const char *name, uint64 *remote_sysid,
 								Oid *remote_dboid, TimeLineID *remote_tli,
 								Oid *local_dboid);
 
+extern int bdr_find_other_exec(const char *argv0, const char *target,
+							   uint32 *version, char *retpath);
+
 #endif   /* BDR_INTERNAL_H */
