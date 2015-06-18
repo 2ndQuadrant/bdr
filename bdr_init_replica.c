@@ -210,6 +210,7 @@ bdr_init_exec_dump_restore(BDRNodeInfo *node,
 	StringInfoData origin_dsn;
 	StringInfoData local_dsn;
 	int   saved_errno;
+	uint32	bin_version;
 
 	initStringInfo(&path);
 	initStringInfo(&origin_dsn);
@@ -222,27 +223,41 @@ bdr_init_exec_dump_restore(BDRNodeInfo *node,
 						BDR_INIT_REPLICA_CMD " (PostgreSQL " PG_VERSION ", BDR " BDR_VERSION ")\n",
 						&bdr_init_replica_script_path[0]) < 0)
 	{
-		elog(ERROR, "bdr: failed to find " BDR_INIT_REPLICA_CMD
+		elog(ERROR, "bdr node init failed to find " BDR_INIT_REPLICA_CMD
 			 " relative to binary %s or wrong version. Expected (PostgreSQL %s, BDR %s)",
 			 my_exec_path, PG_VERSION, BDR_VERSION);
 	}
 
-	if (find_other_exec(my_exec_path, BDR_DUMP_CMD,
-						"pg_dump (PostgreSQL) " PG_VERSION "\n",
+	if (bdr_find_other_exec(my_exec_path, BDR_DUMP_CMD,
+						&bin_version,
 						&bdr_dump_path[0]) < 0)
 	{
-		elog(ERROR, "bdr: failed to find " BDR_DUMP_CMD
-			 " relative to binary %s or wrong version (expected %s)",
-			 my_exec_path, PG_VERSION);
+		elog(ERROR, "bdr node init failed to find " BDR_DUMP_CMD
+			 " relative to binary %s",
+			 my_exec_path);
+	}
+	if (bin_version / 100 != PG_VERSION_NUM / 100)
+	{
+		elog(ERROR, "bdr node init found " BDR_DUMP_CMD
+			 " with wrong major version %d.%d, expected %d.%d",
+			 bin_version / 100 / 100, bin_version / 100 % 100,
+			 PG_VERSION_NUM / 100 / 100, PG_VERSION_NUM / 100 % 100);
 	}
 
-	if (find_other_exec(my_exec_path, BDR_RESTORE_CMD,
-						BDR_RESTORE_CMD " (PostgreSQL) " PG_VERSION "\n",
+	if (bdr_find_other_exec(my_exec_path, BDR_RESTORE_CMD,
+						&bin_version,
 						&bdr_restore_path[0]) < 0)
 	{
-		elog(ERROR, "bdr: failed to find " BDR_RESTORE_CMD
-			 " relative to binary %s or wrong version (expected %s)",
-			 my_exec_path, PG_VERSION);
+		elog(ERROR, "bdr node init failed to find " BDR_RESTORE_CMD
+			 " relative to binary %s",
+			 my_exec_path);
+	}
+	if (bin_version / 100 != PG_VERSION_NUM / 100)
+	{
+		elog(ERROR, "bdr node init found " BDR_RESTORE_CMD
+			 " with wrong major version %d.%d, expected %d.%d",
+			 bin_version / 100 / 100, bin_version / 100 % 100,
+			 PG_VERSION_NUM / 100 / 100, PG_VERSION_NUM / 100 % 100);
 	}
 
 

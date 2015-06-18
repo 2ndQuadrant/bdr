@@ -67,6 +67,7 @@ OBJS = \
 	bdr_label.o \
 	bdr_locks.o \
 	bdr_output.o \
+	bdr_pgutils.o \
 	bdr_relcache.o \
 	bdr_remotecalls.o \
 	bdr_shmem.o \
@@ -112,7 +113,7 @@ bdr_version.h: bdr_version.h.in
 
 bdr.o: bdr_version.h
 
-bdr_init_copy: bdr_init_copy.o bdr_common.o
+bdr_init_copy: bdr_init_copy.o bdr_common.o bdr_pgutils.o
 	$(CC) $(CFLAGS) $^ $(LDFLAGS) $(LDFLAGS_EX) $(libpq_pgport) $(LIBS) -o $@$(X)
 
 scripts/bdr_initial_load: scripts/bdr_initial_load.in
