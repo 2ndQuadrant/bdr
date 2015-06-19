@@ -36,6 +36,13 @@
    creation.
   </para>
 
+  <note>
+   <para>
+    <application>bdr_init_copy</application> only supports setup
+    of a single &bdr;-enabled database at this time.
+   </para>
+  </note>
+
   <cmdsynopsis>
    <command>bdr_init_copy</command>
    <arg rep="repeat"><replaceable>option</replaceable></arg>

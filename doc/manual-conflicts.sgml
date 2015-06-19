@@ -56,337 +56,348 @@
    conflicts.
   </para>
 
-  <sect2 id="conflicts-types" xreflabel="Types of conflict">
-   <title>Types of conflict</title>
+ </sect1>
 
-   <sect3 id="conflicts-key" xreflabel="PRIMARY KEY or UNIQUE conflicts">
-    <title><literal>PRIMARY KEY</literal> or <literal>UNIQUE</literal> conflicts</title>
+ <sect1 id="conflicts-types" xreflabel="Types of conflict">
+  <title>Types of conflict</title>
+
+  <sect2 id="conflicts-key" xreflabel="PRIMARY KEY or UNIQUE row conflicts">
+   <title><literal>PRIMARY KEY</literal> or <literal>UNIQUE</literal> conflicts</title>
+
+   <para>
+    The most common conflicts are row conflicts where two operations affect a
+    row with the same key in ways they could not do on a single node. &bdr; can
+    detect most of those and apply last-update-wins conflict handling or invoke
+    a user-defined conflict handler.
+   </para>
+
+   <para>
+    Row conflicts include:
+    <itemizedlist>
+     <listitem><simpara><literal>INSERT</literal> vs <literal>INSERT</literal></simpara></listitem>
+     <listitem><simpara><literal>INSERT</literal> vs <literal>UPDATE</literal></simpara></listitem>
+     <listitem><simpara><literal>UPDATE</literal> vs <literal>DELETE</literal></simpara></listitem>
+     <listitem><simpara><literal>INSERT</literal> vs <literal>DELETE</literal></simpara></listitem>
+    </itemizedlist>
+   </para>
+
+   <sect3 id="conflicts-insert-unique"
+          xreflabel="INSERTs that violate one UNIQUE constraint">
+
+    <title>INSERTs that violate one UNIQUE constraint</title>
 
     <para>
-     The most common conflicts are row conflicts where two operations affect a
-     row with the same key in ways they could not do on a single node. &bdr; can
-     detect most of those and apply last-update-wins conflict handling or invoke
-     a user-defined conflict handler.
+     The most common conflict,  <literal>INSERT</literal> vs
+     <literal>INSERT</literal>, arises where <literal>INSERT</literal>s on two
+     different nodes create a tuple with the same <literal>PRIMARY
+     KEY</literal> values (or the same values for a single
+     <literal>UNIQUE</literal> constraint).  &bdr; handles this by retaining
+     the most recently inserted tuple of the two according to the originating
+     host's timestamps unless a user-defined conflict handler overrides this.
     </para>
 
     <para>
-     Row conflicts include:
-     <itemizedlist>
-      <listitem><simpara><literal>INSERT</literal> vs <literal>INSERT</literal></simpara></listitem>
-      <listitem><simpara><literal>INSERT</literal> vs <literal>UPDATE</literal></simpara></listitem>
-      <listitem><simpara><literal>UPDATE</literal> vs <literal>DELETE</literal></simpara></listitem>
-      <listitem><simpara><literal>INSERT</literal> vs <literal>DELETE</literal></simpara></listitem>
-     </itemizedlist>
+     No special administrator action is required to deal with these conflicts,
+     but the user must undersand that <emphasis>one of the
+     <literal>INSERT</literal>ed tuples is effectively discarded on all
+     nodes</emphasis> - there is no data merging done unless a user defined
+     conflict handler does it.
     </para>
-
-    <sect4 id="conflicts-insert-unique"
-           xreflabel="INSERTs that violate one UNIQUE constraint">
-
-     <para>
-      The most common conflict,  <literal>INSERT</literal> vs
-      <literal>INSERT</literal>, arises where <literal>INSERT</literal>s on two
-      different nodes create a tuple with the same <literal>PRIMARY
-      KEY</literal> values (or the same values for a single
-      <literal>UNIQUE</literal> constraint).  &bdr; handles this by retaining
-      the most recently inserted tuple of the two according to the originating
-      host's timestamps unless a user-defined conflict handler overrides this.
-     </para>
-
-     <para>
-      No special administrator action is required to deal with these conflicts,
-      but the user must undersand that <emphasis>one of the
-      <literal>INSERT</literal>ed tuples is effectively discarded on all
-      nodes</emphasis> - there is no data merging done unless a user defined
-      conflict handler does it.
-     </para>
-
-    </sect4>
-
-    <sect4 id="conflicts-insert-unique-multiple-index"
-          xreflabel="INSERTs that violate multiple UNIQUE constraints">
-      <title>INSERTs that violate multiple UNIQUE constraints</title>
-
-     <para>
-      An <literal>INSERT</literal>/<literal>INSERT</literal> conflict
-      can violate more than one <literal>UNIQUE</literal> constraint
-      (of which one might be the <literal>PRIMARY KEY</literal>).
-     </para>
-
-     <para>
-      &bdr; can only handle an
-      <literal>INSERT</literal>/<literal>INSERT</literal> conflict on one
-      unique constraint (including the <literal>PRIMARY KEY</literal>). If a
-      new row conflicts with more than one <literal>UNIQUE</literal> constraint
-      then the apply worker that's trying to apply the change will
-      <literal>ERROR</literal> out with:
-      <programlisting>
-      ERROR: multiple unique constraints violated by remotely INSERTed tuple
-      </programlisting>
-      (Older versions would report a <literal>"diverging uniqueness
-      conflict"</literal> error instead).
-     </para>
-
-     <para>
-      In case of such a conflict, you must manually remove the conflicting
-      tuple(s) from the local side by <literal>DELETE</literal>ing it or by
-      <literal>UPDATE</literal>ing it so that it no longer conflicts with the
-      new remote tuple. There may be more than one conflicting tuple. There is
-      not currently any built-in facility to ignore, discard or merge tuples
-      that violate more than one local unique constraint.
-     </para>
-
-    </important>
 
    </sect3>
 
-   <sect3 id="conflicts-foreign-key" xreflabel="Foreign key conflicts">
-    <title>Constraint conflicts</title>
+   <sect3 id="conflicts-insert-unique-multiple-index"
+         xreflabel="INSERTs that violate multiple UNIQUE constraints">
+
+    <title>INSERTs that violate multiple UNIQUE constraints</title>
 
     <para>
-     Conflicts between a remote transaction being applied and existing local data
-     can also occur for <literal>FOREIGN KEY</literal> constraints. These
-     conflicts are usually transient issues that arise from transactions being
-     applied in a different order to the order they appeared to occur logically
-     on the nodes that originated them.
+     An <literal>INSERT</literal>/<literal>INSERT</literal> conflict
+     can violate more than one <literal>UNIQUE</literal> constraint
+     (of which one might be the <literal>PRIMARY KEY</literal>).
     </para>
 
     <para>
-     While apply is strictly ordered for any given origin node, there is no
-     enforcement of ordering of transactions between two different nodes, so
-     it's possible for (e.g.) node1 to insert a row into T1, which is replayed to node2.
-     node2 inserts a row into T2 which has a foreign key reference to the row from T1.
-     On node3, if the transaction from node2 that inserts the row into T2 is received
-     <emphasis>before</emphasis> the transaction from node1 that inserts the row into T1,
-     the transaction from node2 will fail to apply. This failure will record a rollback
-     in <xref linkend="catalog-pg-stat-bdr"> and an <literal>ERROR</literal>
-     with details in the PostgreSQL error log on the applying node (node3). In
-     this case &bdr; will retry the transaction from node2 periodicially, so
-     once it's replayed the transaction from node1 that it depends on the
-     transaction will commit successfully.
-    </para>
-
-    <sect4 id="conflict-foreign-key-deadlock"
-           xreflabel="Foreign key constraint deadlocks">
-     <title>Foreign key constraint deadlocks</title>
-
-    <para>
-     Simple foreign key constraint conflicts are generally transient and
-     require no administrator action, but for transactions that change multiple
-     entities this is not always the case. It is possible for
-     concurrent changes to tables with foreign key constraints to create
-     <emphasis>inter-node replication deadlocks</emphasis> where no node can
-     apply changes from any other node because they conflict with local data.
-     This causes replication activity to stop until the deadlock is broken by a
-     local data change on one or more of the nodes.
-    </para>
-
-    <para>
-     For example, take a two node system with two tables and some existing data:
+     &bdr; can only handle an
+     <literal>INSERT</literal>/<literal>INSERT</literal> conflict on one
+     unique constraint (including the <literal>PRIMARY KEY</literal>). If a
+     new row conflicts with more than one <literal>UNIQUE</literal> constraint
+     then the apply worker that's trying to apply the change will
+     <literal>ERROR</literal> out with:
      <programlisting>
-     CREATE TABLE parent(
-      id integer primary key
-     );
-
-     CREATE TABLE child(
-      id integer primary key,
-      parent_id integer not null references parent(id)
-     );
-
-     INSERT INTO parent(id)
-     VALUES (1), (2);
-
-     INSERT INTO child(id, parent_id)
-     VALUES (11, 1), (11, 2);
+     ERROR: multiple unique constraints violated by remotely INSERTed tuple
      </programlisting>
-     If node A does:
-     <programlisting>
-     INSERT INTO child(id, parent_id)
-     VALUES (21, 2);
-     </programlisting>
-     and <emphasis>at the same time</emphasis> node B does:
-     <programlisting>
-     DELETE FROM child WHERE parent_id = 2;
-     DELETE FROM parent WHERE id = 2;
-     </programlisting>
-     then we have a situation where the transaction from node A cannot apply
-     successfully to the <literal>child</literal> table on node B because the
-     referenced <literal>parent</literal> no longer exists. The transaction
-     from node B cannot apply to node A because it deletes a
-     <literal>parent</literal> tuple that's still referenced, the new one with
-     id=21. Neither transaction can replay, and both will output periodic
-     <literal>ERROR</literal>s in the log files as they are retried. Since
-     &bdr; replays transactions from a given node strictly in order, neither
-     node can make progress with replication unless the user, or some 3rd node,
-     makes changes that resolve the deadlock.
+     (Older versions would report a <literal>"diverging uniqueness
+     conflict"</literal> error instead).
     </para>
 
     <para>
-     It is important to note that when we manually deleted the child tuples
-     on node B, the newly inserted child on node A was not affected because
-     it had not yet replicated to node B. If either node replays the other's
-     transaction before attempting its own local transaction then no problem
-     will occur.
-    </para>
-
-    <para>
-     Solving such a foreign key deadlock requires that you fix the constraint
-     issue on each end. In this case, you would need to insert a dummy
-     <literal>parent</literal> row on node B and delete the new child on node
-     A. Replay will continue past the deadlock point.
-    </para>
-
-    <para>
-     &bdr; can't just apply the changes from each end anyway because doing so
-     would result in tables that violated their declared foreign key
-     constraints, which most users would view as corruption.
-    </para>
-
-    </sect4>
-
-   </sect3>
-
-   <sect3 id="conflicts-exclusion"
-          xreflabel="Exclusion constraint conflicts">
-    <title>Exclusion constraint conflicts</title>
-
-    <para>
-     &bdr; doesn't support exclusion constraints and restricts their creation.
-    </para>
-
-    <important>
-     <para>
-      If an existing stand-alone database is converted to a &bdr; database then
-      all exclusion constraints should be manually dropped.
-     </para>
-    </important>
-
-    <para>
-     In a distributed asynchronous system it is not possible to ensure that no
-     set of rows that violates the constraint exists, because all transactions
-     on different nodes are fully isolated. Exclusion constraints would lead to
-     replay deadlocks where replay could not progress from any node to any
-     other node because of exclusion constraint violations.
-    </para>
-
-    <para>
-     If you force &bdr; to create an exclusion constraint, or you don't drop
-     existing ones when converting a standalone database to &bdr; you should
-     expect replication to break. You can get it to progress again by
-     removing or altering the local tuple(s) that an incoming remote tuple
-     conflicts with so that the remote transaction can be applied.
+     In case of such a conflict, you must manually remove the conflicting
+     tuple(s) from the local side by <literal>DELETE</literal>ing it or by
+     <literal>UPDATE</literal>ing it so that it no longer conflicts with the
+     new remote tuple. There may be more than one conflicting tuple. There is
+     not currently any built-in facility to ignore, discard or merge tuples
+     that violate more than one local unique constraint.
     </para>
 
    </sect3>
 
-   <sect3>
-    <title>Global data conflicts</title>
+  </sect2>
 
-    <para>
-     Conflicts can also arise where nodes have global (PostgreSQL-system-wide)
-     data, like roles, that differs. This can result in operations - mainly
-     <acronym>DDL</acronym> - that can be run successfully and committed
-     on one node, but then fail to apply to other nodes.
-    </para>
+  <sect2 id="conflicts-foreign-key" xreflabel="Foreign key conflicts">
+   <title>Foreign Key Constraint conflicts</title>
 
-    <para>
-     For example, node1 might have a user named
-     <literal>fred</literal>, but that user was not created on node2.
-     &bdr; does not replicate <literal>CREATE USER</literal> (see
-     <xref linkend="ddl-create-role">) so this situation can arise easily.
-     If <literal>fred</literal> on node1 creates a table, it will
-     be replicated with its owner set to <literal>fred</literal>.
-     When the DDL command is applied to node2 the DDL will fail
-     because there is no user named <literal>fred</literal>.
-     This failure will emit an <literal>ERROR</literal> in the
-     PostgreSQL logs on node2 and increment
-     <xref linkend="catalog-pg-stat-bdr"><literal>.nr_rollbacks</literal>.
-    </para>
+   <para>
+    Conflicts between a remote transaction being applied and existing local data
+    can also occur for <literal>FOREIGN KEY</literal> constraints. These
+    conflicts are usually transient issues that arise from transactions being
+    applied in a different order to the order they appeared to occur logically
+    on the nodes that originated them.
+   </para>
 
-    <para>
-     Administrator intervention is required to resolve this conflict
-     by creating the user <literal>fred</literal> on node2.
-     (It need not have the same permissions, but must exist).
-    </para>
+   <para>
+    While apply is strictly ordered for any given origin node, there is no
+    enforcement of ordering of transactions between two different nodes, so
+    it's possible for (e.g.) node1 to insert a row into T1, which is replayed to node2.
+    node2 inserts a row into T2 which has a foreign key reference to the row from T1.
+    On node3, if the transaction from node2 that inserts the row into T2 is received
+    <emphasis>before</emphasis> the transaction from node1 that inserts the row into T1,
+    the transaction from node2 will fail to apply. This failure will record a rollback
+    in <xref linkend="catalog-pg-stat-bdr"> and an <literal>ERROR</literal>
+    with details in the PostgreSQL error log on the applying node (node3). In
+    this case &bdr; will retry the transaction from node2 periodicially, so
+    once it's replayed the transaction from node1 that it depends on the
+    transaction will commit successfully.
+   </para>
 
-   </sect3>
+   <sect3 id="conflict-foreign-key-deadlock"
+          xreflabel="Foreign key constraint deadlocks">
+    <title>Foreign key constraint deadlocks</title>
 
-   <sect3>
-    <title>Lock conflicts and deadlock aborts</title>
+   <para>
+    Simple foreign key constraint conflicts are generally transient and
+    require no administrator action, but for transactions that change multiple
+    entities this is not always the case. It is possible for
+    concurrent changes to tables with foreign key constraints to create
+    <emphasis>inter-node replication deadlocks</emphasis> where no node can
+    apply changes from any other node because they conflict with local data.
+    This causes replication activity to stop until the deadlock is broken by a
+    local data change on one or more of the nodes.
+   </para>
 
-    <para>
-     Because &bdr; apply processes operate very like normal user sessions
-     they are subject to the usual rules around row and table locking. This
-     can sometimes lead to &bdr; apply processes waiting on locks held
-     by user transactions, or even by each other.
-    </para>
+   <para>
+    For example, take a two node system with two tables and some existing data:
+    <programlisting>
+    CREATE TABLE parent(
+     id integer primary key
+    );
 
-    <para>
-     Relevant locking includes;
-     <itemizedlist>
-      <listitem><simpara>explicit table-level locking (<literal>LOCK TABLE ...</literal>) by user sessions</simpara></listitem>
-      <listitem><simpara>explicit row level locking (<literal>SELECT ... FOR UPDATE/FOR SHARE</literal>) by user sessions</simpara></listitem>
-      <listitem><simpara>locking from foreign keys</simpara></listitem>
-      <listitem><simpara>implicit locking because of row <literal>UPDATE</literal>s, <literal>INSERT</literal>s or <literal>DELETE</literal>s, either from local activity or apply from other servers</simpara></listitem>
-     </itemizedlist>
-    </para>
+    CREATE TABLE child(
+     id integer primary key,
+     parent_id integer not null references parent(id)
+    );
 
-    <para>
-     It is even possible for a &bdr; apply process to deadlock with a user
-     transaction, where the user transaction is waiting on a lock held
-     by the apply process and vice versa. Two apply processes may also
-     deadlock with each other. PostgreSQL's deadlock detector will
-     step in and terminate one of the problem transactions. If the &bdr; apply
-     worker's process is terminated it will simply retry and generally succeed.
-    </para>
+    INSERT INTO parent(id)
+    VALUES (1), (2);
 
-    <para>
-     All these issues are transient and generally require no administrator
-     action. If an apply process is stuck for a long time behind a lock
-     on an idle user session the administrator may choose to terminate
-     the user session to get replication flowing again, but this is
-     no different to a user holding a long lock that impacts another
-     user session.
-    </para>
+    INSERT INTO child(id, parent_id)
+    VALUES (11, 1), (11, 2);
+    </programlisting>
+    If node A does:
+    <programlisting>
+    INSERT INTO child(id, parent_id)
+    VALUES (21, 2);
+    </programlisting>
+    and <emphasis>at the same time</emphasis> node B does:
+    <programlisting>
+    DELETE FROM child WHERE parent_id = 2;
+    DELETE FROM parent WHERE id = 2;
+    </programlisting>
+    then we have a situation where the transaction from node A cannot apply
+    successfully to the <literal>child</literal> table on node B because the
+    referenced <literal>parent</literal> no longer exists. The transaction
+    from node B cannot apply to node A because it deletes a
+    <literal>parent</literal> tuple that's still referenced, the new one with
+    id=21. Neither transaction can replay, and both will output periodic
+    <literal>ERROR</literal>s in the log files as they are retried. Since
+    &bdr; replays transactions from a given node strictly in order, neither
+    node can make progress with replication unless the user, or some 3rd node,
+    makes changes that resolve the deadlock.
+   </para>
 
-    <para>
-     Use of the <ulink
-     url="http://www.postgresql.org/docs/current/static/runtime-config-logging.html#GUC-LOG-LOCK-WAITS">
-     log_lock_waits</ulink> facility in PostgreSQL can help identify locking
-     related replay stalls.
-    </para>
+   <para>
+    It is important to note that when we manually deleted the child tuples
+    on node B, the newly inserted child on node A was not affected because
+    it had not yet replicated to node B. If either node replays the other's
+    transaction before attempting its own local transaction then no problem
+    will occur.
+   </para>
 
-   </sect3>
+   <para>
+    Solving such a foreign key deadlock requires that you fix the constraint
+    issue on each end. In this case, you would need to insert a dummy
+    <literal>parent</literal> row on node B and delete the new child on node
+    A. Replay will continue past the deadlock point.
+   </para>
 
-   <sect3>
-    <title>Divergent conflicts</title>
-
-    <para>
-     Divergent conflicts arise when data that should be the same on different
-     nodes differs unexpectedly. Divergent conflicts should not occur, but not
-     all such conflicts can be reliably prevented at time of writing.
-    </para>
-
-    <warning>
-     <para>
-      Changing the <literal>PRIMARY KEY</literal> of a row can lead to a
-      divergent conflict if another node changes the key of the same row before
-      all nodes have replayed the change. Avoid changing primary keys, or
-      change them only on one designated node.
-     </para>
-    </warning>
-
-    <para>
-     Divergent conflicts involving row data generally require administrator
-     action to manually adjust the data on one of the nodes to be consistent
-     with the other one while replication is temporarily disabled using <xref
-     linkend="guc-bdr-do-not-replicate">. Such conflicts should not arise
-     so long as &bdr; is used as documented and settings or functions marked
-     as unsafe are avoided.
-    </para>
-
-    <!-- TODO: how do we do this? -->
+   <para>
+    &bdr; can't just apply the changes from each end anyway because doing so
+    would result in tables that violated their declared foreign key
+    constraints, which most users would view as corruption.
+   </para>
 
    </sect3>
+
+  </sect2>
+
+  <sect2 id="conflicts-exclusion"
+         xreflabel="Exclusion constraint conflicts">
+   <title>Exclusion constraint conflicts</title>
+
+   <para>
+    &bdr; doesn't support exclusion constraints and restricts their creation.
+   </para>
+
+   <important>
+    <para>
+     If an existing stand-alone database is converted to a &bdr; database then
+     all exclusion constraints should be manually dropped.
+    </para>
+   </important>
+
+   <para>
+    In a distributed asynchronous system it is not possible to ensure that no
+    set of rows that violates the constraint exists, because all transactions
+    on different nodes are fully isolated. Exclusion constraints would lead to
+    replay deadlocks where replay could not progress from any node to any
+    other node because of exclusion constraint violations.
+   </para>
+
+   <para>
+    If you force &bdr; to create an exclusion constraint, or you don't drop
+    existing ones when converting a standalone database to &bdr; you should
+    expect replication to break. You can get it to progress again by
+    removing or altering the local tuple(s) that an incoming remote tuple
+    conflicts with so that the remote transaction can be applied.
+   </para>
+
+  </sect2>
+
+  <sect2>
+   <title>Global data conflicts</title>
+
+   <para>
+    Conflicts can also arise where nodes have global (PostgreSQL-system-wide)
+    data, like roles, that differs. This can result in operations - mainly
+    <acronym>DDL</acronym> - that can be run successfully and committed
+    on one node, but then fail to apply to other nodes.
+   </para>
+
+   <para>
+    For example, node1 might have a user named
+    <literal>fred</literal>, but that user was not created on node2.
+    &bdr; does not replicate <literal>CREATE USER</literal> (see
+    <xref linkend="ddl-create-role">) so this situation can arise easily.
+    If <literal>fred</literal> on node1 creates a table, it will
+    be replicated with its owner set to <literal>fred</literal>.
+    When the DDL command is applied to node2 the DDL will fail
+    because there is no user named <literal>fred</literal>.
+    This failure will emit an <literal>ERROR</literal> in the
+    PostgreSQL logs on node2 and increment
+    <xref linkend="catalog-pg-stat-bdr"><literal>.nr_rollbacks</literal>.
+   </para>
+
+   <para>
+    Administrator intervention is required to resolve this conflict
+    by creating the user <literal>fred</literal> on node2.
+    (It need not have the same permissions, but must exist).
+   </para>
+
+  </sect2>
+
+  <sect2>
+   <title>Lock conflicts and deadlock aborts</title>
+
+   <para>
+    Because &bdr; apply processes operate very like normal user sessions
+    they are subject to the usual rules around row and table locking. This
+    can sometimes lead to &bdr; apply processes waiting on locks held
+    by user transactions, or even by each other.
+   </para>
+
+   <para>
+    Relevant locking includes;
+    <itemizedlist>
+     <listitem><simpara>explicit table-level locking (<literal>LOCK TABLE ...</literal>) by user sessions</simpara></listitem>
+     <listitem><simpara>explicit row level locking (<literal>SELECT ... FOR UPDATE/FOR SHARE</literal>) by user sessions</simpara></listitem>
+     <listitem><simpara>locking from foreign keys</simpara></listitem>
+     <listitem><simpara>implicit locking because of row <literal>UPDATE</literal>s, <literal>INSERT</literal>s or <literal>DELETE</literal>s, either from local activity or apply from other servers</simpara></listitem>
+    </itemizedlist>
+   </para>
+
+   <para>
+    It is even possible for a &bdr; apply process to deadlock with a user
+    transaction, where the user transaction is waiting on a lock held
+    by the apply process and vice versa. Two apply processes may also
+    deadlock with each other. PostgreSQL's deadlock detector will
+    step in and terminate one of the problem transactions. If the &bdr; apply
+    worker's process is terminated it will simply retry and generally succeed.
+   </para>
+
+   <para>
+    All these issues are transient and generally require no administrator
+    action. If an apply process is stuck for a long time behind a lock
+    on an idle user session the administrator may choose to terminate
+    the user session to get replication flowing again, but this is
+    no different to a user holding a long lock that impacts another
+    user session.
+   </para>
+
+   <para>
+    Use of the <ulink
+    url="http://www.postgresql.org/docs/current/static/runtime-config-logging.html#GUC-LOG-LOCK-WAITS">
+    log_lock_waits</ulink> facility in PostgreSQL can help identify locking
+    related replay stalls.
+   </para>
+
+  </sect2>
+
+  <sect2>
+   <title>Divergent conflicts</title>
+
+   <para>
+    Divergent conflicts arise when data that should be the same on different
+    nodes differs unexpectedly. Divergent conflicts should not occur, but not
+    all such conflicts can be reliably prevented at time of writing.
+   </para>
+
+   <warning>
+    <para>
+     Changing the <literal>PRIMARY KEY</literal> of a row can lead to a
+     divergent conflict if another node changes the key of the same row before
+     all nodes have replayed the change. Avoid changing primary keys, or
+     change them only on one designated node.
+    </para>
+   </warning>
+
+   <para>
+    Divergent conflicts involving row data generally require administrator
+    action to manually adjust the data on one of the nodes to be consistent
+    with the other one while replication is temporarily disabled using <xref
+    linkend="guc-bdr-do-not-replicate">. Such conflicts should not arise
+    so long as &bdr; is used as documented and settings or functions marked
+    as unsafe are avoided.
+   </para>
+
+   <para>
+    The administrator must manually resolve such conflicts. Use of the
+    advanced options <xref linkend="guc-bdr-do-not-replicate">,
+    <xref linkend="guc-bdr-skip-ddl-replication"> and
+    <xref linkend="guc-bdr-permit-unsafe-ddl-commands"> may be required depending
+    on the nature of the conflict. However, careless use of these options
+    can make things much worse and it isn't possible to give general
+    instructions for resolving all possible kinds of conflict.
+   </para>
 
   </sect2>
 
@@ -422,10 +433,8 @@
   <para>
    The best course of action is frequently to allow conflicts to occur and
    design the application to work with &bdr;'s conflict resolution
-   mechansisms to cope with the conflict. See <xref linkend="conflicts-resolution">.
+   mechansisms to cope with the conflict. See <xref linkend="conflicts-types">.
   </para>
-
- </sect1>
 
  </sect1>
 
@@ -434,8 +443,34 @@
 
   <para>
    &bdr; provides facilities for users to override the default last-update-wins
-   data row conflict resolution strategy.
+   data row conflict resolution strategy on row key conflicts.
   </para>
+
+  <para>
+   A user defined conflict handler, if provided, is called before default
+   row conflict resolution is performed. The user defined handler may choose
+   to ignore the new row and keep the original local row, to apply the new
+   row, or to generate a new row (possibly merging old and new) and apply
+   that instead of the new incoming row. A conflict handler may also
+   choose to <literal>ERROR</literal> out, which can be useful if it wishes
+   to abort apply of a transaction and retry it later.
+  </para>
+
+  <para>
+   Conflict handlers cannot skip whole transactions.
+  </para>
+
+  <note>
+   <para>
+    User-defined conflict handlers do not have access to both the old and new
+    versions of the remote row, so they cannot tell which field(s) in the
+    remote incoming tuple changed. It is thus not possible to do reliable row
+    merging. Attempts to so for the general case will usually prove to be
+    incorrect in an asynchronous replication envirionment. It's possible in
+    some application-specific situations where the app "knows" more about
+    the data.
+   </para>
+  </note>
 
   <!-- TODO -->
 
