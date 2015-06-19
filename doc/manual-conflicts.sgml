@@ -427,29 +427,6 @@
 
  </sect1>
 
- <sect1 id="conflicts-resolution" xreflabel="Conflict resolution">
-  <title>Conflict resolution</title>
-
-  <para>
-   When &bdr; detects data row conflicts it ensures that the conflict is
-   handled the same way on all nodes, so that the resulting state of the table
-   is the same for every node.
-  </para>
-
-  <para>
-   By default &bdr; uses a <emphasis>last-update-wins</emphasis> strategy
-   to resolve conflicts. The most recent update will be retained,
-   and the oldest update discarded in its entirety. No attempt to merge
-   the data in the conflicting rows is made.
-  </para>
-
-  <para>
-   Users may override this behaviour with application-specific knowledge
-   in <xref linkend="conflicts-user-defined-handlers">.
-  </para>
-
-  <!-- TODO -->
-
  </sect1>
 
  <sect1 id="conflicts-user-defined-handlers" xreflabel="User defined conflict handlers">
