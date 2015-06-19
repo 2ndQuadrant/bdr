@@ -169,6 +169,15 @@
      exists, a user-defined conflict handler.
     </para>
 
+    <para>
+     Because a <literal>PRIMARY KEY</literal> must exist in order to match tuples
+     and perform conflict resolution, <literal>UPDATE</literal>s are rejected
+     on tables without a <literal>PRIMARY KEY</literal> with:
+     <programlisting>
+      ERROR: Cannot run UPDATE or DELETE on table (tablename) because it does not have a primary key.
+     </programlisting>
+    </para>
+
    </sect3>
 
    <sect3 id="conflicts-update-pk" xreflabel="UPDATE conflicts on the PRIMARY KEY">
@@ -224,6 +233,15 @@
      <literal>UPDATE</literal> that arrives after the
      <literal>DELETE</literal> unless a user-defined conflict handler specifies
      otherwise.
+    </para>
+
+    <para>
+     Because a <literal>PRIMARY KEY</literal> must exist in order to match tuples
+     and perform conflict resolution, <literal>DELETE</literal>s are rejected
+     on tables without a <literal>PRIMARY KEY</literal> with:
+     <programlisting>
+      ERROR: Cannot run UPDATE or DELETE on table (tablename) because it does not have a primary key.
+     </programlisting>
     </para>
 
     <note>
