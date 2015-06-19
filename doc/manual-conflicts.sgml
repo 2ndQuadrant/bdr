@@ -78,22 +78,24 @@
      <listitem><simpara><literal>INSERT</literal> vs <literal>UPDATE</literal></simpara></listitem>
      <listitem><simpara><literal>UPDATE</literal> vs <literal>DELETE</literal></simpara></listitem>
      <listitem><simpara><literal>INSERT</literal> vs <literal>DELETE</literal></simpara></listitem>
+     <listitem><simpara><literal>DELETE</literal> vs <literal>DELETE</literal></simpara></listitem>
     </itemizedlist>
    </para>
 
-   <sect3 id="conflicts-insert-unique"
-          xreflabel="INSERTs that violate one UNIQUE constraint">
+   <sect3 id="conflicts-insert-insert"
+          xreflabel="INSERT/INSERT conflicts">
 
-    <title>INSERTs that violate one UNIQUE constraint</title>
+    <title>INSERT/INSERT conflicts</title>
 
     <para>
-     The most common conflict,  <literal>INSERT</literal> vs
+     The most common conflict, <literal>INSERT</literal> vs
      <literal>INSERT</literal>, arises where <literal>INSERT</literal>s on two
      different nodes create a tuple with the same <literal>PRIMARY
      KEY</literal> values (or the same values for a single
-     <literal>UNIQUE</literal> constraint).  &bdr; handles this by retaining
-     the most recently inserted tuple of the two according to the originating
-     host's timestamps unless a user-defined conflict handler overrides this.
+     <literal>UNIQUE</literal> constraint if no <literal>PRIMARY KEY</literal>
+     exists).  &bdr; handles this by retaining the most recently inserted tuple
+     of the two according to the originating host's timestamps unless a
+     user-defined conflict handler overrides this.
     </para>
 
     <para>
@@ -104,12 +106,22 @@
      conflict handler does it.
     </para>
 
+    <para>
+     Conflict handling is only possible when <emphasis>only one constraint
+     is violated by the incoming insert from the remote node</emphasis>;
+     <xref linkend="conflicts-insert-unique-multiple-index"> are more
+     problematic.
+    </para>
+
    </sect3>
 
    <sect3 id="conflicts-insert-unique-multiple-index"
          xreflabel="INSERTs that violate multiple UNIQUE constraints">
 
     <title>INSERTs that violate multiple UNIQUE constraints</title>
+
+    <indexterm><primary>limitations</primary></indexterm>
+    <indexterm><primary>divergence</primary></indexterm>
 
     <para>
      An <literal>INSERT</literal>/<literal>INSERT</literal> conflict
@@ -138,6 +150,132 @@
      new remote tuple. There may be more than one conflicting tuple. There is
      not currently any built-in facility to ignore, discard or merge tuples
      that violate more than one local unique constraint.
+    </para>
+
+    <para>
+     See also: <xref linkend="conflicts-update-unique-multiple-index">
+    </para>
+
+   </sect3>
+
+   <sect3 id="conflicts-update-update" xreflabel="UPDATE/UPDATE conflicts">
+    <title>UPDATE/UPDATE conflicts</title>
+
+    <para>
+     Where two concurrent <literal>UPDATE</literal>s on different nodes change
+     the same tuple (but not its <literal>PRIMARY KEY</literal>), an
+     <literal>UPDATE</literal>/<literal>UPDATE</literal> conflict occurs on
+     replay. These are resolved using last-update-wins handling or, if it
+     exists, a user-defined conflict handler.
+    </para>
+
+   </sect3>
+
+   <sect3 id="conflicts-update-pk" xreflabel="UPDATE conflicts on the PRIMARY KEY">
+    <title>UPDATE conflicts on the PRIMARY KEY</title>
+
+    <indexterm><primary>limitations</primary></indexterm>
+    <indexterm><primary>divergence</primary></indexterm>
+
+    <para>
+     &bdr; cannot currently perform last-update-wins conflict resolution where
+     the <literal>PRIMARY KEY</literal> is changed by an <literal>UPDATE</literal>
+     operation. It is permissible to update the primary key, but you must
+     ensure that no conflict with existing values is possible.
+    </para>
+
+    <para>
+     Conflicts on update of the primary key are divergent conflicts that require
+     manual operator intervention; see <xref linkend="conflicts-divergent">.
+    </para>
+
+   </sect3>
+
+   <sect3 id="conflicts-update-unique-multiple-index"
+    xreflabel="UPDATEs that violate multiple UNIQUE constraints">
+
+    <title>UPDATEs that violate multiple UNIQUE constraints</title>
+
+    <indexterm><primary>limitations</primary></indexterm>
+    <indexterm><primary>divergence</primary></indexterm>
+
+    <para>
+     Like <xref linkend="conflicts-insert-unique-multiple-index">,
+     where an incoming <literal>UPDATE</literal> violates more than
+     one <literal>UNIQUE</literal> index (and/or the <literal>PRIMARY
+     KEY</literal>), &bdr; cannot apply last-update-wins conflict resolution.
+    </para>
+
+    <para>
+     This is a divergent conflict that will require operator intervention;
+     see <xref linkend="conflicts-divergent">.
+    </para>
+
+   </sect3>
+
+   <sect3 id="conflicts-update-delete" xreflabel="UPDATE/DELETE conflicts">
+    <title>UPDATE/DELETE conflicts</title>
+
+    <para>
+     It is possible for one node to <literal>UPDATE</literal> a row that
+     another node simultaneously <literal>DELETE</literal>s. In this case a
+     <literal>UPDATE</literal>/<literal>DELETE</literal> conflict occurs on
+     replay. The resolution of this conflict is to discard any
+     <literal>UPDATE</literal> that arrives after the
+     <literal>DELETE</literal> unless a user-defined conflict handler specifies
+     otherwise.
+    </para>
+
+    <note>
+     <para>
+      <indexterm><primary>limitations</primary></indexterm>
+      <indexterm><primary>divergence</primary></indexterm>
+      &bdr; cannot currently differentiate between
+      <literal>UPDATE</literal>/<literal>DELETE</literal> conflicts and
+      <xref linkend="conflicts-insert-update">. In both
+      cases an <literal>UPDATE</literal> arrives that affects a nonexistent
+      row. Since &bdr; is asynchronous and there's no ordering of replay
+      between nodes, it can't tell if this is an update to a new row we haven't
+      yet received the insert for, or a row we've already replayed a delete
+      for. In both cases the resolution is the same - the update is discarded.
+     </para>
+    </note>
+
+   </sect3>
+
+   <sect3 id="conflicts-insert-update" xreflabel="INSERT/UPDATE conflicts">
+    <title>INSERT/UPDATE conflicts</title>
+
+    <para>
+     If one node <literal>INSERT</literal>s a row which is then replayed
+     to a 2nd node and <literal>UPDATE</literal>d there, a 3rd node may
+     receive the <literal>UPDATE</literal> from the 2nd node before it receives
+     the <literal>INSERT</literal> from the 1st node. This is an
+     <literal>INSERT</literal>/<literal>UPDATE</literal> conflict.
+    </para>
+
+    <para>
+     <indexterm><primary>limitations</primary></indexterm>
+     <indexterm><primary>divergence</primary></indexterm>
+     Unless a user defined conflict trigger determines otherwise these
+     conflicts are handled by discarding the <literal>UPDATE</literal>.  This
+     can lead to <emphasis>different data on different nodes</emphasis>. See
+     <xref linkend="conflicts-update-delete"> for details.
+    </para>
+
+   </sect3>
+
+   <sect3 id="conflicts-delete-delete" xreflabel="DELETE/DELETE conflicts">
+    <title>DELETE/DELETE conflicts</title>
+
+    <para>
+     A <literal>DELETE</literal>/<literal>DELETE</literal> conflict arises
+     where two different nodes concurrently delete the same tuple.
+    </para>
+
+    <para>
+     This conflict is harmless since both <literal>DELETE</literal>s have
+     the same effect, so one of them can be safely ignored.
     </para>
 
    </sect3>
@@ -175,6 +313,8 @@
     <title>Foreign key constraint deadlocks</title>
 
    <para>
+    <indexterm><primary>limitations</primary></indexterm>
+    <indexterm><primary>divergence</primary></indexterm>
     Simple foreign key constraint conflicts are generally transient and
     require no administrator action, but for transactions that change multiple
     entities this is not always the case. It is possible for
@@ -255,6 +395,7 @@
    <title>Exclusion constraint conflicts</title>
 
    <para>
+    <indexterm><primary>limitations</primary></indexterm>
     &bdr; doesn't support exclusion constraints and restricts their creation.
    </para>
 
@@ -287,6 +428,8 @@
    <title>Global data conflicts</title>
 
    <para>
+    <indexterm><primary>limitations</primary></indexterm>
+    <indexterm><primary>divergence</primary></indexterm>
     Conflicts can also arise where nodes have global (PostgreSQL-system-wide)
     data, like roles, that differs. This can result in operations - mainly
     <acronym>DDL</acronym> - that can be run successfully and committed
@@ -362,8 +505,10 @@
 
   </sect2>
 
-  <sect2>
+  <sect2 id="conflicts-divergent" xreflabel="Divergent conflicts">
    <title>Divergent conflicts</title>
+
+   <indexterm><primary>divergence</primary></indexterm>
 
    <para>
     Divergent conflicts arise when data that should be the same on different
@@ -377,6 +522,7 @@
      divergent conflict if another node changes the key of the same row before
      all nodes have replayed the change. Avoid changing primary keys, or
      change them only on one designated node.
+     See <xref linkend="conflicts-update-pk">.
     </para>
    </warning>
 
