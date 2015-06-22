@@ -916,7 +916,7 @@ deparse_DefineStmt_Aggregate(Oid objectId, DefineStmt *define)
 		append_string_object(tmp, "value", "true");
 	else
 		append_string_object(tmp, "value", "false");
-	list = lappend(list, new_object_object(tmp))X;
+	list = lappend(list, new_object_object(tmp));
 
 	/* INITCOND */
 	initval = SysCacheGetAttr(AGGFNOID, aggTup,
@@ -1730,7 +1730,7 @@ deparse_AlterTSConfigurationStmt(StashedCommand *cmd)
 	{
 		case ALTER_TSCONFIG_ADD_MAPPING:
 			fmtrest = "ADD MAPPING FOR %{tokentype:, }I WITH %{dictionaries:, }D";
-			type = "add mapping for token"
+			type = "add mapping for token";
 			break;
 
 		case ALTER_TSCONFIG_DROP_MAPPING:
@@ -1750,7 +1750,7 @@ deparse_AlterTSConfigurationStmt(StashedCommand *cmd)
 
 		case ALTER_TSCONFIG_REPLACE_DICT_FOR_TOKEN:
 			fmtrest = "ALTER MAPPING FOR %{tokentype:, }I REPLACE %{old_dictionary}D WITH %{new_dictionary}D";
-			type = "alter mapping replace for token"
+			type = "alter mapping replace for token";
 			break;
 	}
 	config = new_objtree_VA(psprintf("%s %s", fmtcommon, fmtrest),
@@ -1804,6 +1804,7 @@ deparse_AlterTSConfigurationStmt(StashedCommand *cmd)
 	else
 	{
 		/* DROP wants the IF EXISTS clause */
+		ObjTree    *tmp;
 		Assert(node->kind == ALTER_TSCONFIG_DROP_MAPPING);
 		tmp = new_objtree_VA("IF EXISTS", 0);
 		append_bool_object(tmp, "present", node->missing_ok);
@@ -1849,7 +1850,7 @@ deparse_CreateExtensionStmt(Oid objectId, Node *parsetree)
 	/* IF NOT EXISTS */
 	tmp = new_objtree_VA("IF NOT EXISTS", 0);
 	append_bool_object(tmp, "present", node->if_not_exists);
-	append_object_object(config, "if_not_exists", tmp);
+	append_object_object(extStmt, "if_not_exists", tmp);
 
 	/* List of options */
 	list = NIL;
