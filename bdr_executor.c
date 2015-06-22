@@ -74,8 +74,10 @@ PG_FUNCTION_INFO_V1(bdr_queue_dropped_objects);
 #endif
 PGDLLEXPORT Datum bdr_replicate_ddl_command(PG_FUNCTION_ARGS);
 PG_FUNCTION_INFO_V1(bdr_replicate_ddl_command);
-PGDLLEXPORT Datum bdr_(PG_FUNCTION_ARGS);
+PGDLLEXPORT Datum bdr_truncate_trigger_add(PG_FUNCTION_ARGS);
 PG_FUNCTION_INFO_V1(bdr_truncate_trigger_add);
+PGDLLEXPORT Datum bdr_internal_create_truncate_trigger(PG_FUNCTION_ARGS);
+PG_FUNCTION_INFO_V1(bdr_internal_create_truncate_trigger);
 
 PGDLLEXPORT Datum bdr_node_set_read_only(PG_FUNCTION_ARGS);
 PG_FUNCTION_INFO_V1(bdr_node_set_read_only);
@@ -374,11 +376,67 @@ bdr_queue_ddl_command(char *command_tag, char *command)
 	heap_close(queuedcmds, RowExclusiveLock);
 }
 
+/*
+ * Create a TRUNCATE trigger for a persistent table and mark
+ * it tgisinternal so that it's not dumped by pg_dump.
+ *
+ * We create such triggers automatically on restore or
+ * bdr_group_create so dumping the triggers isn't necessary, and
+ * also makes restores to non-BDR databases harder.
+ */
+static void
+bdr_create_truncate_trigger(const char *relname, const char *nspname)
+{
+	char	   *query;
+	int			res;
+
+	SPI_connect();
+
+	query = psprintf("CREATE TRIGGER truncate_trigger AFTER TRUNCATE "
+					 "ON %s.%s FOR EACH STATEMENT EXECUTE PROCEDURE "
+					 "bdr.queue_truncate()",
+					 quote_identifier(nspname),
+					 quote_identifier(relname));
+	res = SPI_execute(query, false, 0);
+	if (res != SPI_OK_UTILITY)
+		elog(ERROR, "SPI failure: %d", res);
+
+	/*
+	 * If this is inside manually replicated DDL, the
+	 * bdr_queue_ddl_commands will skip queueing the CREATE TRIGGER
+	 * command, so we have to do it ourselves.
+	 *
+	 * XXX: The whole in_bdr_replicate_ddl_command concept is not very nice
+	 */
+	if (in_bdr_replicate_ddl_command)
+		bdr_queue_ddl_command("CREATE TRIGGER", query);
+
+	SPI_finish();
+}
+
+/*
+ * Wrapper to call bdr_create_truncate_trigger from SQL for
+ * during bdr_group_create(...).
+ */
+Datum
+bdr_internal_create_truncate_trigger(PG_FUNCTION_ARGS)
+{
+	Oid relid = PG_GETARG_OID(0);
+	Relation rel = heap_open(relid, AccessExclusiveLock);
+	const char * relname = RelationGetRelationName(rel);
+	char * nspname = get_namespace_name(RelationGetNamespace(rel));
+	bdr_create_truncate_trigger(relname, nspname);
+	pfree(nspname);
+	heap_close(rel, AccessExclusiveLock);
+	PG_RETURN_VOID();
+}
+
 
 /*
  * bdr_truncate_trigger_add
  *
- * This function adds TRUNCATE trigger to newly created tables.
+ * This function, which is called as an event trigger handler, adds TRUNCATE
+ * trigger to newly created tables where appropriate.
  *
  * Note: it's important that this function be named so that it comes
  * after bdr_queue_ddl_commands when triggers are alphabetically sorted.
@@ -414,38 +472,15 @@ bdr_truncate_trigger_add(PG_FUNCTION_ARGS)
 		IsA(trigdata->parsetree, CreateStmt))
 	{
 		CreateStmt *stmt = (CreateStmt *)trigdata->parsetree;
-		char	   *nspname;
-		char	   *query;
-		int			res;
+		char * nspname;
 
 		/* Skip temporary and unlogged tables */
 		if (stmt->relation->relpersistence != RELPERSISTENCE_PERMANENT)
 			PG_RETURN_VOID();
 
 		nspname = get_namespace_name(RangeVarGetCreationNamespace(stmt->relation));
-
-		SPI_connect();
-
-		query = psprintf("CREATE TRIGGER truncate_trigger AFTER TRUNCATE "
-						 "ON %s.%s FOR EACH STATEMENT EXECUTE PROCEDURE "
-						 "bdr.queue_truncate()",
-						 quote_identifier(nspname),
-						 quote_identifier(stmt->relation->relname));
-		res = SPI_execute(query, false, 0);
-		if (res != SPI_OK_UTILITY)
-			elog(ERROR, "SPI failure: %d", res);
-
-		/*
-		 * If this is inside manually replicated DDL, the
-		 * bdr_queue_ddl_commands will skip queueing the CREATE TRIGGER
-		 * command, so we have to do it ourselves.
-		 *
-		 * XXX: The whole in_bdr_replicate_ddl_command concept is not very nice
-		 */
-		if (in_bdr_replicate_ddl_command)
-			bdr_queue_ddl_command("CREATE TRIGGER", query);
-
-		SPI_finish();
+		bdr_create_truncate_trigger(stmt->relation->relname, nspname);
+		pfree(nspname);
 	}
 
 	PG_RETURN_VOID();
