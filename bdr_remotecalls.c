@@ -404,10 +404,7 @@ bdr_get_remote_nodeinfo(PG_FUNCTION_ARGS)
 
 /*
  * Test a given dsn as a replication connection, appending the replication
- * parameter.
- *
- * If non-null, the node identity information arguments will be checked
- * against the identity reported by the connection.
+ * parameter, and return the node identity information from IDENTIFY SYSTEM.
  *
  * This can be used safely against the local_dsn, as it does not enforce
  * that the local node ID differ from the identity on the other end.
