@@ -1170,7 +1170,10 @@ get_connstr(char *dbname, char *dbhost, char *dbport, char *dbuser)
 	 * and options
 	 */
 	i = 0;
-	if (dbname)
+	if (dbname &&
+		(strncmp(dbname, "postgresql://", 13) == 0 ||
+		 strncmp(dbname, "postgres://", 11) == 0 ||
+		 strchr(dbname, '=') != NULL))
 	{
 		conn_opts = PQconninfoParse(dbname, &err_msg);
 		if (conn_opts == NULL)
