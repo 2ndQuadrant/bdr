@@ -11,7 +11,8 @@ EXTENSION = bdr
 
 DATA = \
 	extsql/bdr--0.7--0.7.1.sql \
-	extsql/bdr--0.7.1--0.8.0.sql \
+	extsql/bdr--0.7.1--0.7.2.sql \
+	extsql/bdr--0.7.2--0.8.0.sql \
 	extsql/bdr--0.8.0.sql \
 	extsql/bdr--0.8.0--0.8.0.1.sql \
 	extsql/bdr--0.8.0.1--0.8.0.2.sql \
