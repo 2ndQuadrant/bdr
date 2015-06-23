@@ -28,7 +28,7 @@ END;$$;
 DO $$
 BEGIN
 	IF NOT EXISTS(SELECT 1 FROM pg_catalog.pg_proc WHERE proname = 'bdr_variant' AND pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'bdr')) THEN
-		CREATE OR REPLACE FUNCTION bdr_variant()
+		CREATE OR REPLACE FUNCTION bdr.bdr_variant()
 		RETURNS TEXT
 		LANGUAGE C
 		AS 'MODULE_PATHNAME';
