@@ -25,23 +25,17 @@ BEGIN
 	DROP TYPE bdr.bdr_conflict_resolution_old;
 END;$$;
 
-DO $$
-BEGIN
-	IF NOT EXISTS(SELECT 1 FROM pg_catalog.pg_proc WHERE proname = 'bdr_variant' AND pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'bdr')) THEN
+
 		CREATE OR REPLACE FUNCTION bdr.bdr_variant()
 		RETURNS TEXT
 		LANGUAGE C
 		AS 'MODULE_PATHNAME';
-	END IF;
 
-	IF NOT EXISTS(SELECT 1 FROM pg_catalog.pg_proc WHERE proname = 'bdr_replicate_ddl_command' AND pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'bdr')) THEN
 		CREATE OR REPLACE FUNCTION bdr.bdr_replicate_ddl_command(cmd TEXT)
 		RETURNS VOID
 		LANGUAGE C
 		AS 'MODULE_PATHNAME';
-	END IF;
 
-	IF NOT EXISTS(SELECT 1 FROM pg_catalog.pg_proc WHERE proname = 'bdr_truncate_trigger_add' AND pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'bdr')) THEN
 		CREATE OR REPLACE FUNCTION bdr.bdr_truncate_trigger_add()
 		RETURNS event_trigger
 		LANGUAGE C
@@ -50,5 +44,3 @@ BEGIN
 		CREATE EVENT TRIGGER bdr_truncate_trigger_add
 		ON ddl_command_end
 		EXECUTE PROCEDURE bdr.bdr_truncate_trigger_add();
-	END IF;
-END;$$;
