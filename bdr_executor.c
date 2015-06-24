@@ -826,9 +826,9 @@ BdrExecutorStart(QueryDesc *queryDesc, int eflags)
 
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("Cannot run UPDATE or DELETE on table %s because it does not have primary key.",
+				 errmsg("Cannot run UPDATE or DELETE on table %s because it does not have a PRIMARY KEY.",
 						RelationGetRelationName(rel)),
-				 errhint("Add primary key to the table")));
+				 errhint("Add a PRIMARY KEY to the table")));
 
 		RelationClose(rel);
 	}
