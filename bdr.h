@@ -273,6 +273,7 @@ extern bool bdr_conflict_logging_include_tuples;
 extern bool bdr_permit_ddl_locking;
 extern bool bdr_permit_unsafe_commands;
 extern bool bdr_skip_ddl_locking;
+extern bool bdr_do_not_replicate;
 #ifdef BUILDING_UDR
 extern bool bdr_conflict_default_apply;
 #endif
