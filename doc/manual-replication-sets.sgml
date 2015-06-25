@@ -43,7 +43,7 @@
    <xref linkend="function-bdr-group-join"> and
    <xref linkend="functions-node-mgmt-subscribe">.
    This parameter is an array of replication set names. The replication
-   set do not have to exists to be referenced by
+   set do not have to exist to be referenced by
    <literal>replication_sets</literal>.
   </para>
   <para>
