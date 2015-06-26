@@ -23,9 +23,21 @@
    and performance.
   </para>
 
+  <important>
+   <para>
+    There is a minor incompatible bug fix in this release. The direction of
+    replication sets is reversed between nodes whose set memberships differ.
+    Previously, if node A was a member of set x, and node B was a member of set
+    y, then a table that is part of set x would be replicated from A=>B but not
+    B=>A. That is reversed as of BDR 0.9.1 so that nodes receive data on tables
+    that are part of their replication sets.
+   </para>
+  </important>
+
   <para>
    Significant improvements to &bdr; and &udr; in this release include:
    <itemizedlist>
+    <listitem><para>Fix direction of replication sets (see above)</para></listitem>
     <listitem><para>Fix PK detection on inherited tables (BDR)</para></listitem>
     <listitem><para>Fix bdr.bdr_replication_identifier table definition (UDR)</para></listitem>
     <listitem><para>Don't acquire table locks in command filter (BDR/UDR)</para></listitem>
