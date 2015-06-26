@@ -949,6 +949,13 @@ BdrExecutorStart(QueryDesc *queryDesc, int eflags)
 			continue;
 		}
 
+		/* If replication is suppressed then no key is required */
+		if (bdr_do_not_replicate)
+		{
+			RelationClose(rel);
+			continue;
+		}
+
 		if (read_only_node)
 			ereport(ERROR,
 					(errcode(ERRCODE_READ_ONLY_SQL_TRANSACTION),
