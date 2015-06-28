@@ -94,7 +94,7 @@
      </varlistentry>
 
      <varlistentry>
-      <term><option>--postgresql-conf<replaceable class="parameter">postgresql.conf</replaceable></option></term>
+      <term><option>--postgresql-conf=<replaceable class="parameter">postgresql.conf</replaceable></option></term>
       <listitem>
        <para>
         Path to postgresql.conf file which will be used by the new node. If not
@@ -104,7 +104,7 @@
      </varlistentry>
 
      <varlistentry>
-      <term><option>--hba-conf<replaceable class="parameter">hba.conf</replaceable></option></term>
+      <term><option>--hba-conf=<replaceable class="parameter">hba.conf</replaceable></option></term>
       <listitem>
        <para>
         Path to hba.conf file which will be used by the new node. If not
@@ -114,7 +114,7 @@
      </varlistentry>
 
      <varlistentry>
-      <term><option>--recovery-conf<replaceable class="parameter">recovery.conf</replaceable></option></term>
+      <term><option>--recovery-conf=<replaceable class="parameter">recovery.conf</replaceable></option></term>
       <listitem>
        <para>
         Path to recovery.conf template file which will be used during the
