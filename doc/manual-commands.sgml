@@ -84,6 +84,15 @@
      </varlistentry>
 
      <varlistentry>
+      <term><option>--replication_sets=<replaceable class="parameter">sets</replaceable></option></term>
+      <listitem>
+       <para>
+        Comma separated list of replication set names to use.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
       <term><option>-s</option></term>
       <listitem>
        <para>
