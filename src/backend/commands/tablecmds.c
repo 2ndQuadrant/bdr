@@ -262,6 +262,7 @@ struct DropRelationCallbackState
 #define		ATT_INDEX				0x0008
 #define		ATT_COMPOSITE_TYPE		0x0010
 #define		ATT_FOREIGN_TABLE		0x0020
+#define		ATT_SEQUENCE			0x0040
 
 static void truncate_check_rel(Relation rel);
 static List *MergeAttributes(List *schema, List *supers, char relpersistence,
@@ -3228,7 +3229,7 @@ ATPrepCmd(List **wqueue, Relation rel, AlterTableCmd *cmd,
 		case AT_SetRelOptions:	/* SET (...) */
 		case AT_ResetRelOptions:		/* RESET (...) */
 		case AT_ReplaceRelOptions:		/* reset them all, then set just these */
-			ATSimplePermissions(rel, ATT_TABLE | ATT_VIEW | ATT_MATVIEW | ATT_INDEX);
+			ATSimplePermissions(rel, ATT_TABLE | ATT_VIEW | ATT_MATVIEW | ATT_INDEX | ATT_SEQUENCE);
 			/* This command never recurses */
 			/* No command-specific prep needed */
 			pass = AT_PASS_MISC;
@@ -4147,6 +4148,9 @@ ATSimplePermissions(Relation rel, int allowed_targets)
 		case RELKIND_FOREIGN_TABLE:
 			actual_target = ATT_FOREIGN_TABLE;
 			break;
+		case RELKIND_SEQUENCE:
+			actual_target = ATT_SEQUENCE;
+			break;
 		default:
 			actual_target = 0;
 			break;
@@ -4187,8 +4191,8 @@ ATWrongRelkindError(Relation rel, int allowed_targets)
 		case ATT_TABLE | ATT_VIEW:
 			msg = _("\"%s\" is not a table or view");
 			break;
-		case ATT_TABLE | ATT_VIEW | ATT_MATVIEW | ATT_INDEX:
-			msg = _("\"%s\" is not a table, view, materialized view, or index");
+		case ATT_TABLE | ATT_VIEW | ATT_MATVIEW | ATT_INDEX | ATT_SEQUENCE:
+			msg = _("\"%s\" is not a table, view, materialized view, index or sequence");
 			break;
 		case ATT_TABLE | ATT_MATVIEW:
 			msg = _("\"%s\" is not a table or materialized view");
@@ -4203,7 +4207,7 @@ ATWrongRelkindError(Relation rel, int allowed_targets)
 			msg = _("\"%s\" is not a table, composite type, or foreign table");
 			break;
 		case ATT_TABLE | ATT_MATVIEW | ATT_INDEX | ATT_FOREIGN_TABLE:
-			msg = _("\"%s\" is not a table, materialized view, composite type, or foreign table");
+			msg = _("\"%s\" is not a table, materialized view, composite type or foreign table");
 			break;
 		case ATT_VIEW:
 			msg = _("\"%s\" is not a view");
@@ -9051,7 +9055,7 @@ ATExecSetRelOptions(Relation rel, List *defList, AlterTableType operation,
 			(void) index_reloptions(rel->rd_am->amoptions, newOptions, true);
 			break;
 		case RELKIND_SEQUENCE:
-			(void) sequence_reloptions(rel->rd_am->amoptions, newOptions, true);
+			(void) sequence_reloptions(rel->rd_seqam->seqamoptions, newOptions, true);
 			break;
 		default:
 			ereport(ERROR,
