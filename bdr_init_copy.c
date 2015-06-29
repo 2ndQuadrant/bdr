@@ -112,7 +112,7 @@ static bool check_data_dir(char *data_dir, RemoteInfo *remoteinfo);
 
 static uint64 GenerateSystemIdentifier(void);
 static uint64 read_sysid(const char *data_dir);
-static int set_sysid(uint64 sysid);
+static void set_sysid(uint64 sysid);
 
 static void WriteRecoveryConf(PQExpBuffer contents);
 static void CopyConfFile(char *fromfile, char *tofile);
@@ -672,14 +672,20 @@ run_basebackup(const char *remote_connstr, const char *data_dir)
 
 	destroyPQExpBuffer(cmd);
 
-	if (ret != 0)
-		die(_("pg_basebackup failed, cannot continue.\n"));
+	if (WIFEXITED(ret) && WEXITSTATUS(ret))
+		return;
+	if (WIFEXITED(ret))
+		die(_("pg_basebackup failed with exit status %d, cannot continue.\n"), WEXITSTATUS(ret));
+	else if (WIFSIGNALED(ret))
+		die(_("pg_basebackup exited with signal %d, cannot continue"), WTERMSIG(ret));
+	else
+		die(_("pg_basebackup exited for an unknown reason (system() returned %d)"), ret);
 }
 
 /*
  * Set system identifier to system id we used for registering the slots.
  */
-static int
+static void
 set_sysid(uint64 sysid)
 {
 	int			 ret;
@@ -693,7 +699,14 @@ set_sysid(uint64 sysid)
 
 	destroyPQExpBuffer(cmd);
 
-	return ret;
+	if (WIFEXITED(ret) && WEXITSTATUS(ret))
+		return;
+	if (WIFEXITED(ret))
+		die(_("pg_basebackup failed with exit status %d, cannot continue.\n"), WEXITSTATUS(ret));
+	else if (WIFSIGNALED(ret))
+		die(_("pg_basebackup exited with signal %d, cannot continue"), WTERMSIG(ret));
+	else
+		die(_("pg_basebackup exited for an unknown reason (system() returned %d)"), ret);
 }
 
 /*
