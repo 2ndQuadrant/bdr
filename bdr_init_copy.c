@@ -17,6 +17,7 @@
 #include <signal.h>
 #include <time.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -81,12 +82,12 @@ static PGconn		*remote_conn = NULL;
 
 static void signal_handler(int sig);
 static void usage(void);
-static void die(const char *fmt,...)
+static void BDR_NORETURN die(const char *fmt,...)
 __attribute__((format(PG_PRINTF_ATTRIBUTE, 1, 2)));
 static void print_msg(VerbosityLevelEnum level, const char *fmt,...)
 __attribute__((format(PG_PRINTF_ATTRIBUTE, 2, 3)));
 
-static int run_pg_ctl(const char *arg);
+static int BDR_WARN_UNUSED run_pg_ctl(const char *arg);
 static void run_basebackup(const char *remote_connstr, const char *data_dir);
 static void wait_postmaster_connection(const char *connstr);
 static void wait_postmaster_shutdown(void);
@@ -174,6 +175,7 @@ main(int argc, char **argv)
 			   *recovery_conf = NULL;
 	char	   *replication_sets = NULL;
 	bool		use_existing_data_dir;
+	int			pg_ctl_ret;
 
 	static struct option long_options[] = {
 		{"node-name", required_argument, NULL, 'n'},
@@ -438,7 +440,10 @@ main(int argc, char **argv)
 	 * Start local node with BDR disabled, and wait until it starts accepting
 	 * connections which means it has caught up to the restore point.
 	 */
-	run_pg_ctl("start -l \"bdr_init_copy_postgres.log\" -o \"-c shared_preload_libraries=''\"");
+	pg_ctl_ret = run_pg_ctl("start -l \"bdr_init_copy_postgres.log\" -o \"-c shared_preload_libraries=''\"");
+	if (pg_ctl_ret != 0)
+		die(_("postgres startup for restore point catchup failed with %d. See bdr_init_copy_postgres.log."), pg_ctl_ret);
+
 	wait_postmaster_connection(local_connstr);
 
 	/*
@@ -459,7 +464,9 @@ main(int argc, char **argv)
 	}
 
 	/* Stop Postgres so we can reset system id and start it with BDR loaded. */
-	run_pg_ctl("stop");
+	pg_ctl_ret = run_pg_ctl("stop");
+	if (pg_ctl_ret != 0)
+		die(_("postgres stop after restore point catchup failed with %d. See bdr_init_copy_postgres.log."), pg_ctl_ret);
 	wait_postmaster_shutdown();
 
 	/*
@@ -475,7 +482,9 @@ main(int argc, char **argv)
 	print_msg(VERBOSITY_NORMAL,
 			  _("Initializing BDR on the local node:\n"));
 
-	run_pg_ctl("start -l \"bdr_init_copy_postgres.log\"");
+	pg_ctl_ret = run_pg_ctl("start -l \"bdr_init_copy_postgres.log\"");
+	if (pg_ctl_ret != 0)
+		die(_("postgres restart with bdr enabled failed with %d. See bdr_init_copy_postgres.log."), pg_ctl_ret);
 	wait_postmaster_connection(local_connstr);
 
 	for (i = 0; i < remote_info->numdbs; i++)
@@ -518,7 +527,9 @@ main(int argc, char **argv)
 	if (stop)
 	{
 		print_msg(VERBOSITY_NORMAL, _("Stopping the local node ...\n"));
-		run_pg_ctl("stop");
+		pg_ctl_ret = run_pg_ctl("stop");
+		if (pg_ctl_ret != 0)
+			die(_("Stopping postgres after successful join failed with %d. See bdr_init_copy_postgres.log."), pg_ctl_ret);
 		wait_postmaster_shutdown();
 	}
 
@@ -580,7 +591,12 @@ die(const char *fmt,...)
 		PQfinish(remote_conn);
 
 	if (get_pgpid())
-		run_pg_ctl("stop -s");
+	{
+		if (!run_pg_ctl("stop -s"))
+		{
+			fprintf(stderr, _("WARNING: postgres seems to be running, but could not be stopped"));
+		}
+	}
 
 	exit(1);
 }
@@ -604,6 +620,9 @@ print_msg(VerbosityLevelEnum level, const char *fmt,...)
 
 /*
  * Start pg_ctl with given argument(s) - used to start/stop postgres
+ *
+ * Returns the exit code reported by pg_ctl. If pg_ctl exits due to a
+ * signal this call will die and not return.
  */
 static int
 run_pg_ctl(const char *arg)
@@ -623,7 +642,12 @@ run_pg_ctl(const char *arg)
 
 	destroyPQExpBuffer(cmd);
 
-	return ret;
+	if (WIFEXITED(ret))
+		return WEXITSTATUS(ret);
+	else if (WIFSIGNALED(ret))
+		die(_("pg_ctl exited with signal %d"), WTERMSIG(ret));
+	else
+		die(_("pg_ctl exited for an unknown reason (system() returned %d)"), ret);
 }
 
 
