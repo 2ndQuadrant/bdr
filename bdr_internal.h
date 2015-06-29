@@ -18,6 +18,14 @@
 #define BDR_SLOT_NAME_FORMAT "bdr_%u_"UINT64_FORMAT"_%u_%u__%s"
 #define BDR_NODE_ID_FORMAT "bdr_"UINT64_FORMAT"_%u_%u_%u_%s"
 
+#ifdef __GNUC__
+#define BDR_WARN_UNUSED __attribute__((warn_unused_result))
+#define BDR_NORETURN __attribute__((noreturn))
+#else
+#define BDR_WARN_UNUSED
+#define BDR_NORETURN
+#endif
+
 /* A configured BDR connection from bdr_connections */
 typedef struct BdrConnectionConfig
 {
