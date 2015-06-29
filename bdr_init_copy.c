@@ -175,7 +175,8 @@ main(int argc, char **argv)
 			   *recovery_conf = NULL;
 	char	   *replication_sets = NULL;
 	bool		use_existing_data_dir;
-	int			pg_ctl_ret;
+	int			pg_ctl_ret,
+				logfd;
 
 	static struct option long_options[] = {
 		{"node-name", required_argument, NULL, 'n'},
@@ -312,6 +313,15 @@ main(int argc, char **argv)
 		die(_("Remote connection must be specified.\n"));
 	if (!local_connstr || !strlen(local_connstr))
 		die(_("Local connection must be specified.\n"));
+
+	logfd = open("bdr_init_copy_postgres.log", O_CREAT|O_RDWR);
+	if (logfd == -1)
+	{
+		die(_("Creating bdr_init_copy_postgres.log failed: %s"),
+				strerror(errno));
+	}
+	/* Safe to close() unchecked, we didn't write */
+	(void) close(logfd);
 
 	print_msg(VERBOSITY_NORMAL, _("%s: starting ...\n"), progname);
 
