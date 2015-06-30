@@ -314,7 +314,8 @@ main(int argc, char **argv)
 	if (!local_connstr || !strlen(local_connstr))
 		die(_("Local connection must be specified.\n"));
 
-	logfd = open("bdr_init_copy_postgres.log", O_CREAT|O_RDWR);
+	logfd = open("bdr_init_copy_postgres.log", O_CREAT | O_RDWR,
+				 S_IRUSR | S_IWUSR);
 	if (logfd == -1)
 	{
 		die(_("Creating bdr_init_copy_postgres.log failed: %s"),
