@@ -682,7 +682,7 @@ run_basebackup(const char *remote_connstr, const char *data_dir)
 
 	destroyPQExpBuffer(cmd);
 
-	if (WIFEXITED(ret) && WEXITSTATUS(ret))
+	if (WIFEXITED(ret) && WEXITSTATUS(ret) == 0)
 		return;
 	if (WIFEXITED(ret))
 		die(_("pg_basebackup failed with exit status %d, cannot continue.\n"), WEXITSTATUS(ret));
@@ -709,14 +709,14 @@ set_sysid(uint64 sysid)
 
 	destroyPQExpBuffer(cmd);
 
-	if (WIFEXITED(ret) && WEXITSTATUS(ret))
+	if (WIFEXITED(ret) && WEXITSTATUS(ret) == 0)
 		return;
 	if (WIFEXITED(ret))
-		die(_("pg_basebackup failed with exit status %d, cannot continue.\n"), WEXITSTATUS(ret));
+		die(_("bdr_resetxlog failed with exit status %d, cannot continue.\n"), WEXITSTATUS(ret));
 	else if (WIFSIGNALED(ret))
-		die(_("pg_basebackup exited with signal %d, cannot continue"), WTERMSIG(ret));
+		die(_("bdr_resetxlog exited with signal %d, cannot continue"), WTERMSIG(ret));
 	else
-		die(_("pg_basebackup exited for an unknown reason (system() returned %d)"), ret);
+		die(_("bdr_resetxlog exited for an unknown reason (system() returned %d)"), ret);
 }
 
 /*
