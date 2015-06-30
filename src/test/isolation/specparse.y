@@ -40,13 +40,13 @@ TestSpec		parseresult;			/* result of parsing is left here */
 %type <str> opt_setup opt_teardown opt_connection
 %type <str> setup connection
 %type <ptr_list> step_list session_list permutation_list opt_permutation_list
-%type <ptr_list> string_list
+%type <ptr_list> string_literal_list
 %type <session> session
 %type <step> step
 %type <permutation> permutation
 %type <connection> conninfo
 
-%token <str> sqlblock string
+%token <str> sqlblock string_literal
 %token CONNINFO PERMUTATION SESSION CONNECTION SETUP STEP TEARDOWN TEST
 
 %%
@@ -86,7 +86,7 @@ conninfo_list:
 		;
 
 conninfo:
-			CONNINFO string string
+			CONNINFO string_literal string_literal
 			{
 				$$ = malloc(sizeof(Connection));
 				$$->name = $2;
@@ -148,11 +148,11 @@ opt_connection:
 		;
 
 connection:
-			CONNECTION string   { $$ = $2; }
+			CONNECTION string_literal   { $$ = $2; }
 		;
 
 session:
-			SESSION string opt_connection opt_setup step_list opt_teardown
+			SESSION string_literal opt_connection opt_setup step_list opt_teardown
 			{
 				$$ = malloc(sizeof(Session));
 				$$->name = $2;
@@ -182,7 +182,7 @@ step_list:
 
 
 step:
-			STEP string sqlblock
+			STEP string_literal sqlblock
 			{
 				$$ = malloc(sizeof(Step));
 				$$->name = $2;
@@ -221,7 +221,7 @@ permutation_list:
 
 
 permutation:
-			PERMUTATION string_list
+			PERMUTATION string_literal_list
 			{
 				$$ = malloc(sizeof(Permutation));
 				$$->stepnames = (char **) $2.elements;
@@ -229,15 +229,15 @@ permutation:
 			}
 		;
 
-string_list:
-			string_list string
+string_literal_list:
+			string_literal_list string_literal
 			{
 				$$.elements = realloc($1.elements,
 									  ($1.nelements + 1) * sizeof(void *));
 				$$.elements[$1.nelements] = $2;
 				$$.nelements = $1.nelements + 1;
 			}
-			| string
+			| string_literal
 			{
 				$$.nelements = 1;
 				$$.elements = malloc(sizeof(void *));
