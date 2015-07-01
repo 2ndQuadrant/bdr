@@ -25,6 +25,7 @@
 
 #include "catalog/indexing.h"
 #include "catalog/namespace.h"
+#include "catalog/pg_namespace.h"
 #include "catalog/pg_trigger.h"
 
 #include "commands/event_trigger.h"
@@ -951,6 +952,18 @@ BdrExecutorStart(QueryDesc *queryDesc, int eflags)
 
 		/* If replication is suppressed then no key is required */
 		if (bdr_do_not_replicate)
+		{
+			RelationClose(rel);
+			continue;
+		}
+
+		/*
+		 * Since changes to pg_catalog aren't replicated directly there's
+		 * no strong need to suppress direct UPDATEs on them. The usual
+		 * rule of "it's dumb to modify the catalogs directly if you don't
+		 * know what you're doing" applies.
+		 */
+		if (RelationGetNamespace(rel) == PG_CATALOG_NAMESPACE)
 		{
 			RelationClose(rel);
 			continue;

@@ -61,6 +61,24 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
 SELECT * FROM bdr_missing_pk;
 
 \c :writedb1
+-- Direct updates to the catalogs should be permitted, though
+-- not necessarily smart.
+UPDATE pg_class
+SET relname = 'bdr_missing_pk_renamed'
+WHERE relname = 'bdr_missing_pk';
+
+\dt bdr_missing_pk*
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+
+\c :readdb2
+-- The catalog change should not replicate
+\dt bdr_missing_pk*
+
+\c :writedb1
+UPDATE pg_class
+SET relname = 'bdr_missing_pk'
+WHERE relname = 'bdr_missing_pk_renamed';
+
 BEGIN;
 SET LOCAL bdr.permit_ddl_locking = true;
 SELECT bdr.bdr_replicate_ddl_command($$DROP TABLE public.bdr_missing_pk CASCADE;$$);
