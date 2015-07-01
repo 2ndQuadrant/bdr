@@ -24,6 +24,7 @@
 #include "access/xlog_fn.h"
 
 #include "catalog/namespace.h"
+#include "catalog/pg_namespace.h"
 #include "catalog/pg_trigger.h"
 
 #include "commands/event_trigger.h"
@@ -811,6 +812,18 @@ BdrExecutorStart(QueryDesc *queryDesc, int eflags)
 
 		/* Skip UNLOGGED and TEMP tables */
 		if (!RelationNeedsWAL(rel))
+		{
+			RelationClose(rel);
+			continue;
+		}
+
+		/*
+		 * Since changes to pg_catalog aren't replicated directly there's
+		 * no strong need to suppress direct UPDATEs on them. The usual
+		 * rule of "it's dumb to modify the catalogs directly if you don't
+		 * know what you're doing" applies.
+		 */
+		if (RelationGetNamespace(rel) == PG_CATALOG_NAMESPACE)
 		{
 			RelationClose(rel);
 			continue;
