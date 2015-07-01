@@ -97,7 +97,8 @@ static char *validate_replication_set_input(char *replication_sets);
 static void initialize_node_entry(PGconn *conn, NodeInfo *ni, char *node_name,
 								  Oid dboid, char *remote_connstr, char *local_connstr);
 static void remove_unwanted_files(void);
-static void remove_unwanted_data(PGconn *conn, char *dbname);
+static void remove_unwanted_data(PGconn *conn);
+static void reset_bdr_sequence_cache(PGconn *conn);
 static void initialize_replication_identifier(PGconn *conn, NodeInfo *ni, Oid dboid, char *remote_lsn);
 static char *create_restore_point(PGconn *conn, char *restore_point_name);
 static void initialize_replication_slot(PGconn *conn, NodeInfo *ni, Oid dboid);
@@ -468,7 +469,7 @@ main(int argc, char **argv)
 
 		local_conn = connectdb(db_connstr);
 
-		remove_unwanted_data(local_conn, dbname);
+		remove_unwanted_data(local_conn);
 
 		PQfinish(local_conn);
 		local_conn = NULL;
@@ -510,6 +511,13 @@ main(int argc, char **argv)
 			replication_sets = remote_info->replication_sets[i];
 
 		local_conn = connectdb(db_local_connstr);
+
+		/*
+		 * Clean the sequence amdata cache which was copied from the remote
+		 * server verbatim but isn't valid on the new node and would cause
+		 * duplicate values being returned by the sequence on both servers.
+		 */
+		reset_bdr_sequence_cache(local_conn);
 
 		/*
 		 * Create the identifier which is setup with the position to which we
@@ -1185,7 +1193,7 @@ initialize_node_entry(PGconn *conn, NodeInfo *ni, char* node_name, Oid dboid,
  * want it here (currently shared security labels and replication identifiers).
  */
 static void
-remove_unwanted_data(PGconn *conn, char *dbname)
+remove_unwanted_data(PGconn *conn)
 {
 	PGresult	   *res;
 
@@ -1197,6 +1205,7 @@ remove_unwanted_data(PGconn *conn, char *dbname)
 		PQclear(res);
 		die(_("Could not update security label: %s\n"), PQerrorMessage(conn));
 	}
+	PQclear(res);
 
 	/* Remove replication identifiers. */
 	res = PQexec(conn, "SELECT "RIINTERFACE_PREFIX"replication_identifier_drop(riname) FROM "RIINTERFACE_PREFIX"replication_identifier;");
@@ -1204,6 +1213,33 @@ remove_unwanted_data(PGconn *conn, char *dbname)
 	{
 		PQclear(res);
 		die(_("Could not remove existing replication identifiers: %s\n"), PQerrorMessage(conn));
+	}
+	PQclear(res);
+}
+
+/*
+ * Cleans up sequence cache, has to be run when BDR so it can't be in the
+ * remove_unwanted_data function.
+ */
+static void
+reset_bdr_sequence_cache(PGconn *conn)
+{
+	PGresult	   *res;
+
+	/* Cleanup sequence cache */
+	res = PQexec(conn,
+				 "SELECT\n"
+				 "    bdr.bdr_internal_sequence_reset_cache(pg_class.oid)\n"
+				 "FROM pg_class\n"
+				 "    JOIN pg_seqam ON (pg_seqam.oid = pg_class.relam)\n"
+				 "    JOIN pg_namespace ON (pg_class.relnamespace = pg_namespace.oid)\n"
+				 "WHERE\n"
+				 "    relkind = 'S'\n"
+				 "    AND seqamname = 'bdr'\n");
+	if (PQresultStatus(res) != PGRES_TUPLES_OK)
+	{
+		PQclear(res);
+		die(_("Could not clean sequence cache: %s\n"), PQerrorMessage(conn));
 	}
 	PQclear(res);
 }
