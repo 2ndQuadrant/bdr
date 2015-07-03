@@ -97,7 +97,6 @@ BEGIN
     LOOP
         -- We use a C function here because in addition to trigger creation
         -- we must also mark it tgisinternal.
-        RAISE NOTICE 'Relation id is %', t.relid;
         PERFORM bdr.bdr_internal_create_truncate_trigger(t.relid);
     END LOOP;
 
