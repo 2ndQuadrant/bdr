@@ -950,13 +950,6 @@ BdrExecutorStart(QueryDesc *queryDesc, int eflags)
 			continue;
 		}
 
-		/* If replication is suppressed then no key is required */
-		if (bdr_do_not_replicate)
-		{
-			RelationClose(rel);
-			continue;
-		}
-
 		/*
 		 * Since changes to pg_catalog aren't replicated directly there's
 		 * no strong need to suppress direct UPDATEs on them. The usual
