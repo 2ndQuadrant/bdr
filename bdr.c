@@ -673,12 +673,12 @@ _PG_init(void)
 
 	/* XXX: make it changeable at SIGHUP? */
 	DefineCustomBoolVariable("bdr.synchronous_commit",
-							   "bdr specific synchronous commit value",
-							   NULL,
-							   &bdr_synchronous_commit,
-							   false, PGC_POSTMASTER,
-							   0,
-							   NULL, NULL, NULL);
+							 "bdr specific synchronous commit value",
+							 NULL,
+							 &bdr_synchronous_commit,
+							 false, PGC_POSTMASTER,
+							 0,
+							 NULL, NULL, NULL);
 
 	DefineCustomBoolVariable("bdr.log_conflicts_to_table",
 							 "Log BDR conflicts to bdr.conflict_history table",
