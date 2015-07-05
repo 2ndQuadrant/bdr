@@ -217,8 +217,40 @@
   <title>Global sequence voting</title>
 
   <para>
-   Global sequences allocate values in chunks. Each chunk allocation
-   is done by voting between the nodes to make sure that no chunk
+   Global sequences allocate values in chunks of 1000 sequence numbers.
+  </para>
+
+  <para>
+   &bdr; uses two level caching of the chunks. The first level is
+   used for immediate consumption by <function>nextval</function> and has
+   fixed size of 10 chunks. The second level cache which is used to fill first
+   level cache is subject to voting. The size of second level cache defaults
+   to 5 chunks. This means that &bdr; will keep somewhere between 10 and 15
+   thousand of sequence numbers cached on each node. If this is not enough
+   (for example, applcation is consuming sequences faster in peak times), the
+   voting cache size can be adjusted using following command:
+   <programlisting>
+    ALTER SEQUENCE sequence_name SET (cache_chunks = 10);
+   </programlisting>
+   The above command will change the voting cache to 10 chunks or 10 thousand
+   sequence numbers. Minimum value for cache_chunks is 5 and maximum is 100.
+  </para>
+
+  <note>
+   <para>
+    <indexterm><primary>limitations</primary></indexterm>
+    <indexterm><primary>ddl</primary></indexterm>
+    &bdr; cannot currently currently automatically replicate the
+    <literal>ALTER SEQUENCE ... SET (...)</literal> commands, so the
+    above command will only affect local node and it either needs to be
+    executed on all nodes in the cluster manually or executed using the
+    <function>bdr.bdr_replicate_ddl_command</function>. This limitation is
+    likely to be fixed in future versions of &bdr;.
+   </para>
+  </note>
+
+  <para>
+   The voting is done between the nodes to make sure that no chunk
    is ever allocated to more than one node. For this to work, enough
    nodes must be reachable to reach a binding vote. &bdr; requires
    that half the nodes, plus one, be able to communicate in order
