@@ -59,7 +59,7 @@
   <title>When to use global sequences</title>
 
   <para>
-   Using distributed sequences allows you to avoid the problems with inserts
+   Using distributed sequences allows you to avoid the problems with insert
    conflicts. If you define a <literal>PRIMARY KEY</literal> or
    <literal>UNIQUE</literal> column with a <literal>DEFAULT
    nextval(...)</literal> expression that refers to a global sequence shared
@@ -125,8 +125,8 @@
   </para>
 
   <para>
-   Once you've created a global sequence you may use it with nextval like
-   any other sequence.
+   Once you've created a global sequence you may use it with <literal>nextval</literal>
+   like any other sequence.
   </para>
 
   <para>
@@ -221,19 +221,20 @@
   </para>
 
   <para>
-   &bdr; uses two level caching of the chunks. The first level is
-   used for immediate consumption by <function>nextval</function> and has
-   fixed size of 10 chunks. The second level cache which is used to fill first
-   level cache is subject to voting. The size of second level cache defaults
-   to 5 chunks. This means that &bdr; will keep somewhere between 10 and 15
-   thousand of sequence numbers cached on each node. If this is not enough
-   (for example, applcation is consuming sequences faster in peak times), the
-   voting cache size can be adjusted using following command:
+   &bdr; uses two-level caching for the chunks. The first level is
+   used for immediate consumption by <function>nextval</function> and has a
+   fixed size of 10 chunks. The second level cache, which is used to fill the
+   first level cache, is subject to voting. The size of the second level cache
+   defaults to 5 chunks. This means that &bdr; will keep somewhere between
+   10 and 15 thousand sequence numbers cached on each node. If this is not
+   enough (for example, the application is consuming sequences faster in peak
+   times), the voting cache size can be adjusted using the following command:
    <programlisting>
     ALTER SEQUENCE sequence_name SET (cache_chunks = 10);
    </programlisting>
-   The above command will change the voting cache to 10 chunks or 10 thousand
-   sequence numbers. Minimum value for cache_chunks is 5 and maximum is 100.
+   The above command will change the voting cache to 10 chunks (i.e. 10 thousand
+   sequence numbers). Minimum value for <literal>cache_chunks<literal> is 5
+   and maximum is 100.
   </para>
 
   <note>
@@ -242,7 +243,7 @@
     <indexterm><primary>ddl</primary></indexterm>
     &bdr; cannot currently currently automatically replicate the
     <literal>ALTER SEQUENCE ... SET (...)</literal> commands, so the
-    above command will only affect local node and it either needs to be
+    above command will only affect the local node and it either needs to be
     executed on all nodes in the cluster manually or executed using the
     <function>bdr.bdr_replicate_ddl_command</function>. This limitation is
     likely to be fixed in future versions of &bdr;.
@@ -250,7 +251,7 @@
   </note>
 
   <para>
-   The voting is done between the nodes to make sure that no chunk
+   Voting is done between the nodes to make sure that no chunk
    is ever allocated to more than one node. For this to work, enough
    nodes must be reachable to reach a binding vote. &bdr; requires
    that half the nodes, plus one, be able to communicate in order
@@ -270,17 +271,17 @@
   </para>
 
   <para>
-   It is possible nodes that are up but isolated to be unable to get new
+   It is possible for nodes that are up but isolated to be unable to get new
    global sequence chunks while the rest of the &bdr; group continues to
-   function normally. If no individual connected group of nodes contains more
-   than half the total node count then no node will be able to allocate global
+   function normally. If no individually connected group of nodes contains more
+   than half the total node count, then no node will be able to allocate global
    sequence chunks.
   </para>
 
   <para>
-   Global sequences are not immediately ready for use. Attemting to create
-   then immediately use a global sequence, before the first round of voting,
-   will result in an error like:
+   Global sequences are not immediately ready for use. Attempting to use a
+   global sequence immediately after its creation, but before the first round
+   of voting has taken place, will result in an error like:
    <programlisting>
     ERROR: global sequence public.myseq is not initialized yet
    </programlisting>
