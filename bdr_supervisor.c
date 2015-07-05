@@ -141,7 +141,7 @@ bdr_supervisor_rescan_dbs()
 	StartTransactionCommand();
 
 	/*
-	 * Scan pg_seclabel looking for entries for pg_database with the bdr label
+	 * Scan pg_shseclabel looking for entries for pg_database with the bdr label
 	 * provider. We'll find all labels for the BDR provider, irrespective
 	 * of value.
 	 *
