@@ -32,6 +32,7 @@
 #include "executor/spi.h"
 
 #include "utils/builtins.h"
+#include "utils/guc.h"
 #include "utils/lsyscache.h"
 #include "utils/snapmgr.h"
 
@@ -464,6 +465,10 @@ bdr_sequencer_shmem_init(int sequencers)
 	prev_shmem_startup_hook = shmem_startup_hook;
 	shmem_startup_hook = bdr_sequencer_shmem_startup;
 
+	/*
+	 * We do the reloptions initialization here because this function is called
+	 * at startup for every backend.
+	 */
 	bdr_seq_relopt_kind = add_reloption_kind();
 	add_int_reloption(bdr_seq_relopt_kind, "cache_chunks",
 					  "Sets how many chunks shoult be cached on each node.",
@@ -1321,4 +1326,87 @@ bdr_sequence_options(PG_FUNCTION_ARGS)
 		PG_RETURN_BYTEA_P((bytea *)sopts);
 
 	PG_RETURN_NULL();
+}
+
+
+/*
+ * Resets the sequence cache, needed for initialization from binary clone.
+ */
+PGDLLEXPORT Datum bdr_internal_sequence_reset_cache(PG_FUNCTION_ARGS);
+
+PG_FUNCTION_INFO_V1(bdr_internal_sequence_reset_cache);
+
+Datum
+bdr_internal_sequence_reset_cache(PG_FUNCTION_ARGS)
+{
+	Oid			seqoid = PG_GETARG_OID(0);
+	Buffer		buf;
+	SeqTable	elm;
+	Relation	rel;
+	HeapTupleData seqtuple;
+	Datum		values[SEQ_COL_LASTCOL];
+	bool		nulls[SEQ_COL_LASTCOL];
+	HeapTuple	newtup;
+	Page		page, temppage;
+
+	/* lock page, fill heaptup */
+	init_sequence(seqoid, &elm, &rel);
+	(void) read_seq_tuple(elm, rel, &buf, &seqtuple);
+
+	/* get values */
+	heap_deform_tuple(&seqtuple, RelationGetDescr(rel),
+					  values, nulls);
+
+	/* if already null nothing needs to be done */
+	if (nulls[SEQ_COL_AMDATA - 1])
+		goto done_with_sequence;
+
+	/* otherwise create new tuple with null amdata and save it */
+	nulls[SEQ_COL_AMDATA - 1] = true;
+	newtup = heap_form_tuple(RelationGetDescr(rel), values, nulls);
+
+	/* special requirements for sequence tuples */
+	HeapTupleHeaderSetXmin(newtup->t_data, FrozenTransactionId);
+	HeapTupleHeaderSetXminFrozen(newtup->t_data);
+	HeapTupleHeaderSetCmin(newtup->t_data, FirstCommandId);
+	HeapTupleHeaderSetXmax(newtup->t_data, InvalidTransactionId);
+	newtup->t_data->t_infomask |= HEAP_XMAX_INVALID;
+	ItemPointerSet(&newtup->t_data->t_ctid, 0, FirstOffsetNumber);
+
+	page = BufferGetPage(buf);
+	temppage = PageGetTempPage(page);
+
+	/* replace page contents, the direct way */
+	PageInit(temppage, BufferGetPageSize(buf), PageGetSpecialSize(page));
+	memcpy(PageGetSpecialPointer(temppage),
+		   PageGetSpecialPointer(page),
+		   PageGetSpecialSize(page));
+
+	if (PageAddItem(temppage, (Item) newtup->t_data, newtup->t_len,
+					FirstOffsetNumber, false, false) == InvalidOffsetNumber)
+		elog(PANIC, "reset_sequence_cache: failed to add item to page");
+
+	PageSetLSN(temppage, PageGetLSN(page));
+
+	START_CRIT_SECTION();
+
+	MarkBufferDirty(buf);
+
+	memcpy(page, temppage, BufferGetPageSize(buf));
+
+	seqtuple.t_len = newtup->t_len;
+
+	log_sequence_tuple(rel, &seqtuple, page);
+
+	END_CRIT_SECTION();
+
+done_with_sequence:
+
+	UnlockReleaseBuffer(buf);
+	heap_close(rel, NoLock);
+
+	bdr_sequencer_wakeup();
+	bdr_schedule_eoxact_sequencer_wakeup();
+
+	PG_RETURN_VOID();
 }

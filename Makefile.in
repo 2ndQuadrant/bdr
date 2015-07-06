@@ -26,7 +26,8 @@ DATA = \
 	extsql/bdr--0.9.0.2--0.9.0.3.sql \
 	extsql/bdr--0.9.0.3--0.9.0.4.sql \
 	extsql/bdr--0.9.0.4--0.9.0.5.sql \
-	extsql/bdr--0.9.0.5--0.9.1.0.sql
+	extsql/bdr--0.9.0.5--0.9.1.0.sql \
+	extsql/bdr--0.9.1.0--0.9.2.0.sql
 
 DATA_built = \
 	extsql/bdr--0.8.0.1.sql \
@@ -42,7 +43,8 @@ DATA_built = \
 	extsql/bdr--0.9.0.3.sql \
 	extsql/bdr--0.9.0.4.sql \
 	extsql/bdr--0.9.0.5.sql \
-	extsql/bdr--0.9.1.0.sql
+	extsql/bdr--0.9.1.0.sql \
+	extsql/bdr--0.9.2.0.sql
 
 DOCS = bdr.conf.sample README.bdr
 SCRIPTS = scripts/bdr_initial_load bdr_init_copy bdr_resetxlog bdr_dump
@@ -178,6 +180,10 @@ extsql/bdr--0.9.1.0.sql: extsql/bdr--0.9.0.5.sql extsql/bdr--0.9.0.5--0.9.1.0.sq
 	mkdir -p extsql
 	cat $^ > $@
 
+extsql/bdr--0.9.2.0.sql: extsql/bdr--0.9.1.0.sql extsql/bdr--0.9.1.0--0.9.2.0.sql
+	mkdir -p extsql
+	cat $^ > $@
+
 bdr_resetxlog: pg_resetxlog.o
 	$(CC) $(CFLAGS) $^ $(LDFLAGS) $(LDFLAGS_EX) $(libpq_pgport) $(LIBS) -o $@$(X)
 
@@ -227,11 +233,13 @@ check: regresscheck isolationcheck
 DDLREGRESSCHECKS=ddl/enable_ddl ddl/create ddl/alter_table ddl/extension ddl/function \
 				 ddl/grant ddl/mixed ddl/namespace ddl/replication_set \
 				 ddl/sequence ddl/view ddl/disable_ddl
+EXTRAREGRESSCHECKS=dml/sequence
 REGRESSINIT=init_bdr
 REGRESSTEARDOWN=part_bdr
 else
 check: regresscheck
 DDLREGRESSCHECKS=
+EXTRAREGRESSCHECKS=
 REGRESSINIT=init_udr
 REGRESSTEARDOWN=part_udr
 endif
@@ -246,6 +254,7 @@ REGRESSCHECKS= \
 	pause \
 	$(DDLREGRESSCHECKS) \
 	dml/basic dml/contrib dml/delete_pk dml/extended dml/missing_pk dml/toasted \
+	$(EXTRAREGRESSCHECKS) \
 	$(REGRESSTEARDOWN)
 
 
