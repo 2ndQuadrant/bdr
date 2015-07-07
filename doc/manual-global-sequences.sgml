@@ -233,7 +233,7 @@
     ALTER SEQUENCE sequence_name SET (cache_chunks = 10);
    </programlisting>
    The above command will change the voting cache to 10 chunks (i.e. 10 thousand
-   sequence numbers). Minimum value for <literal>cache_chunks<literal> is 5
+   sequence numbers). Minimum value for <literal>cache_chunks</literal> is 5
    and maximum is 100.
   </para>
 
