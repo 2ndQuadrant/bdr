@@ -15,6 +15,38 @@
   See also: <xref linkend="upgrade">.
  </para>
 
+ <sect1 id="release-0.9.2">
+  <title>Release 0.9.2</title>
+
+  <para>
+   Version 0.9.1 is a maintenance release focused on stability
+   and usability, specially in <application>bdr_init_copy</application>.
+  </para>
+
+  <para>
+   Significant improvements to &bdr; and &udr; in this release include:
+   <itemizedlist>
+    <listitem><para>New nodes created by <application>bdr_init_copy</application> could re-use global sequence values (#101)</para></listitem>
+    <listitem><para>Permit DML on <literal>pg_catalog</literal> tables (#102)</para></listitem>
+    <listitem><para>Check exit code of utilities lauched by <application>bdr_init_copy</application> (#100)</para></listitem>
+    <listitem><para>Ensure log locations are writeable before <application>bdr_init_copy</application> (#99)</para></listitem>
+    <listitem><para>add <literal>--replication_sets</literal> option for <application>bdr_init_copy</application></para></listitem>
+    <listitem><para>sanity check existing data directory before doing <application>bdr_init_copy</application> (#91)</para></listitem>
+    <listitem><para>handle multiple remote BDR databases correctly with <application>bdr_init_copy</application> (#88)</para></listitem>
+    <listitem><para>set <literal>node_local_dsn</literal> and <literal>node_name</literal> correctly in <application>bdr_init_copy</application></para></listitem>
+    <listitem><para><application>bdr_init_copy</application> fixes for connection string parsing</para></listitem>
+    <listitem><para>be less strict about version string matching for <application>pg_dump</application>, etc (#89, #75)</para></listitem>
+    <listitem><para>improve error message on apply failures caused by multiple unique indexes</para></listitem>
+    <listitem><para>Make sequence pernode cache configurable</para></listitem>
+   </itemizedlist>
+  </para>
+
+  <para>
+   There are no compatibility-affecting changes in this release.
+  </para>
+
+ </sect1>
+
  <sect1 id="release-0.9.1">
   <title>Release 0.9.1</title>
 
