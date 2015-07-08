@@ -1,17 +1,18 @@
-/*
+/* -------------------------------------------------------------------------
+ *
  * bdr_common.c
+ *		Utility functions
  *
- * BiDirectionalReplication
- *
- * Utility functions that can be share between extension and cli
- * (don't require server side libraries).
+ * Functions which can be shared between extension and cli
+ * (i.e. don't require server side libraries).
  *
  * Copyright (c) 2015, PostgreSQL Global Development Group
  *
- * bdr_common.c
+ * IDENTIFICATION
+ *		bdr_common.c
+ *
+ * -------------------------------------------------------------------------
  */
-
-
 #include "postgres.h"
 
 #include "access/xlogdefs.h"
