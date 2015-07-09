@@ -354,7 +354,7 @@
        <warning>
         <para>
          Renaming a role only on some nodes can lead to
-         problems due to replicated DDL statmeents not
+         problems due to replicated DDL statements not
          being able to execute anymore.
         </para>
        </warning>
