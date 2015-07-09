@@ -230,7 +230,7 @@ BEGIN
     -- so that pg_hba.conf issues get caught early.
     IF remote_dsn IS NOT NULL THEN
         -- Returns (sysid, timeline, dboid) on success, else ERRORs
-        SELECT * FROM bdr_test_replication_connection(remote_dsn || ' replication=database')
+        SELECT * FROM bdr_test_replication_connection(remote_dsn)
         INTO remote_nodeinfo_r;
 
         IF (remote_nodeinfo_r.sysid, remote_nodeinfo_r.timeline, remote_nodeinfo_r.dboid)
