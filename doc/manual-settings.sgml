@@ -166,7 +166,7 @@
  </sect1>
 
  <sect1 id="bdr-configuration-variables" xreflabel="BDR/UDR-specific configuration variables">
-  <title>&bdr;/&bdr; specific configuration variables</title>
+  <title>&bdr;/&udr; specific configuration variables</title>
 
   <para>
    The &bdr; extension exposes a number of configuration parameters via
