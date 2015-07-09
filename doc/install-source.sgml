@@ -177,7 +177,10 @@
   <para>
    Installing &udr; is simpler than installing &bdr;. It compiles
    against a stock (unmodified) &postgres; 9.4 if the relevant
-   headers are installed.
+   headers are installed. The configure script will automatically
+   check whether the target &postgres; version is modified for &bdr;;
+   if it's the stock (unmodified) version, &udr; will be built
+   instead of &bdr;.
   </para>
 
   <para>
