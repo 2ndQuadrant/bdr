@@ -101,7 +101,34 @@ ALTER EXTENSION bdr UPDATE TO '0.10.0.3';
 ALTER EXTENSION bdr UPDATE TO '0.10.0.4';
 ALTER EXTENSION bdr UPDATE TO '0.10.0.5';
 ALTER EXTENSION bdr UPDATE TO '0.10.0.6';
+
+-- We need a table with a faked "old" truncate trigger on it so we can test
+-- this upgrade step. It doesn't matter that BDR will also create a new
+-- tgisinternal one, we'll just get two. That won't happen in the wild.
+CREATE TABLE truncate_trigger_upgrade(
+	id integer
+);
+
+CREATE TRIGGER truncate_trigger AFTER TRUNCATE
+ON truncate_trigger_upgrade FOR EACH STATEMENT EXECUTE PROCEDURE
+bdr.queue_truncate();
+
+SELECT
+  CASE WHEN t.tgname LIKE 'truncate_trigger_%' THEN 'truncate_trigger_internal' ELSE t.tgname END,
+  t.tgenabled, t.tgisinternal
+FROM pg_catalog.pg_trigger t
+WHERE t.tgrelid = 'truncate_trigger_upgrade'::regclass
+ORDER BY t.tgname;
+
 ALTER EXTENSION bdr UPDATE TO '0.10.0.7';
+
+SELECT
+  CASE WHEN t.tgname LIKE 'truncate_trigger_%' THEN 'truncate_trigger_internal' ELSE t.tgname END,
+  t.tgenabled, t.tgisinternal
+FROM pg_catalog.pg_trigger t
+WHERE t.tgrelid = 'truncate_trigger_upgrade'::regclass
+ORDER BY t.tgname;
+
 
 -- Should never have to do anything: You missed adding the new version above.
 ALTER EXTENSION bdr UPDATE;
