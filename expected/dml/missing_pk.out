@@ -114,12 +114,19 @@ SELECT * FROM bdr_missing_pk;
 UPDATE pg_class
 SET relname = 'bdr_missing_pk_renamed'
 WHERE relname = 'bdr_missing_pk';
-\dt bdr_missing_pk*
-                List of relations
- Schema |          Name          | Type  | Owner 
---------+------------------------+-------+-------
- public | bdr_missing_pk_parent  | table | craig
- public | bdr_missing_pk_renamed | table | craig
+SELECT n.nspname as "Schema",
+  c.relname as "Name"
+FROM pg_catalog.pg_class c
+     LEFT JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+WHERE c.relkind = 'r'
+  AND n.nspname !~ '^pg_toast'
+  AND c.relname ~ '^(bdr_missing_pk.*)$'
+  AND pg_catalog.pg_table_is_visible(c.oid)
+ORDER BY 1,2;
+ Schema |          Name          
+--------+------------------------
+ public | bdr_missing_pk_parent
+ public | bdr_missing_pk_renamed
 (2 rows)
 
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
@@ -130,12 +137,19 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
 
 \c :readdb2
 -- The catalog change should not replicate
-\dt bdr_missing_pk*
-               List of relations
- Schema |         Name          | Type  | Owner 
---------+-----------------------+-------+-------
- public | bdr_missing_pk        | table | craig
- public | bdr_missing_pk_parent | table | craig
+SELECT n.nspname as "Schema",
+  c.relname as "Name"
+FROM pg_catalog.pg_class c
+     LEFT JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+WHERE c.relkind = 'r'
+  AND n.nspname !~ '^pg_toast'
+  AND c.relname ~ '^(bdr_missing_pk.*)$'
+  AND pg_catalog.pg_table_is_visible(c.oid)
+ORDER BY 1,2;
+ Schema |         Name          
+--------+-----------------------
+ public | bdr_missing_pk
+ public | bdr_missing_pk_parent
 (2 rows)
 
 \c :writedb1
