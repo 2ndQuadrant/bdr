@@ -108,6 +108,20 @@ $$ LANGUAGE plpgsql;
         |                 |                  |                     |         |          |            |       |          |             | 
 (1 row)
 
+CREATE FUNCTION showtrigstate(rel regclass)
+RETURNS TABLE (
+	tgname name,
+	tgenabled "char",
+	tgisinternal boolean)
+LANGUAGE sql AS
+$$
+SELECT
+  CASE WHEN t.tgname LIKE 'truncate_trigger%' THEN 'truncate_trigger' ELSE t.tgname END,
+  t.tgenabled, t.tgisinternal
+FROM pg_catalog.pg_trigger t
+WHERE t.tgrelid = $1
+ORDER BY t.tgname;
+$$;
 CREATE TABLE test_trigger_table (f1 integer, f2 text);
 CREATE TRIGGER test_trigger_fn_trg1 BEFORE INSERT OR DELETE ON test_trigger_table FOR EACH STATEMENT WHEN (True) EXECUTE PROCEDURE test_trigger_fn();
 CREATE TRIGGER test_trigger_fn_trg2 AFTER UPDATE OF f1 ON test_trigger_table FOR EACH ROW EXECUTE PROCEDURE test_trigger_fn();
@@ -118,28 +132,24 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
  
 (2 rows)
 
-\d+ test_trigger_table
-                  Table "public.test_trigger_table"
- Column |  Type   | Modifiers | Storage  | Stats target | Description 
---------+---------+-----------+----------+--------------+-------------
- f1     | integer |           | plain    |              | 
- f2     | text    |           | extended |              | 
-Triggers:
-    test_trigger_fn_trg1 BEFORE INSERT OR DELETE ON test_trigger_table FOR EACH STATEMENT WHEN (true) EXECUTE PROCEDURE test_trigger_fn()
-    test_trigger_fn_trg2 AFTER UPDATE OF f1 ON test_trigger_table FOR EACH ROW EXECUTE PROCEDURE test_trigger_fn()
-    truncate_trigger AFTER TRUNCATE ON test_trigger_table FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+-- We can't use \d+ here because tgisinternal triggers have names with the oid
+-- appended, and that varies run-to-run. Use a custom query.
+SELECT * FROM showtrigstate('test_trigger_table'::regclass);
+        tgname        | tgenabled | tgisinternal 
+----------------------+-----------+--------------
+ test_trigger_fn_trg1 | O         | f
+ test_trigger_fn_trg2 | O         | f
+ truncate_trigger     | O         | t
+(3 rows)
 
 \c regression
-\d+ test_trigger_table
-                  Table "public.test_trigger_table"
- Column |  Type   | Modifiers | Storage  | Stats target | Description 
---------+---------+-----------+----------+--------------+-------------
- f1     | integer |           | plain    |              | 
- f2     | text    |           | extended |              | 
-Triggers:
-    test_trigger_fn_trg1 BEFORE INSERT OR DELETE ON test_trigger_table FOR EACH STATEMENT WHEN (true) EXECUTE PROCEDURE test_trigger_fn()
-    test_trigger_fn_trg2 AFTER UPDATE OF f1 ON test_trigger_table FOR EACH ROW EXECUTE PROCEDURE test_trigger_fn()
-    truncate_trigger AFTER TRUNCATE ON test_trigger_table FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+SELECT * FROM showtrigstate('test_trigger_table'::regclass);
+        tgname        | tgenabled | tgisinternal 
+----------------------+-----------+--------------
+ test_trigger_fn_trg1 | O         | f
+ test_trigger_fn_trg2 | O         | f
+ truncate_trigger     | O         | t
+(3 rows)
 
 ALTER TRIGGER test_trigger_fn_trg1 ON test_trigger_table RENAME TO test_trigger_fn_trg;
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
@@ -149,28 +159,22 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
  
 (2 rows)
 
-\d+ test_trigger_table
-                  Table "public.test_trigger_table"
- Column |  Type   | Modifiers | Storage  | Stats target | Description 
---------+---------+-----------+----------+--------------+-------------
- f1     | integer |           | plain    |              | 
- f2     | text    |           | extended |              | 
-Triggers:
-    test_trigger_fn_trg BEFORE INSERT OR DELETE ON test_trigger_table FOR EACH STATEMENT WHEN (true) EXECUTE PROCEDURE test_trigger_fn()
-    test_trigger_fn_trg2 AFTER UPDATE OF f1 ON test_trigger_table FOR EACH ROW EXECUTE PROCEDURE test_trigger_fn()
-    truncate_trigger AFTER TRUNCATE ON test_trigger_table FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+SELECT * FROM showtrigstate('test_trigger_table'::regclass);
+        tgname        | tgenabled | tgisinternal 
+----------------------+-----------+--------------
+ test_trigger_fn_trg  | O         | f
+ test_trigger_fn_trg2 | O         | f
+ truncate_trigger     | O         | t
+(3 rows)
 
 \c postgres
-\d+ test_trigger_table
-                  Table "public.test_trigger_table"
- Column |  Type   | Modifiers | Storage  | Stats target | Description 
---------+---------+-----------+----------+--------------+-------------
- f1     | integer |           | plain    |              | 
- f2     | text    |           | extended |              | 
-Triggers:
-    test_trigger_fn_trg BEFORE INSERT OR DELETE ON test_trigger_table FOR EACH STATEMENT WHEN (true) EXECUTE PROCEDURE test_trigger_fn()
-    test_trigger_fn_trg2 AFTER UPDATE OF f1 ON test_trigger_table FOR EACH ROW EXECUTE PROCEDURE test_trigger_fn()
-    truncate_trigger AFTER TRUNCATE ON test_trigger_table FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+SELECT * FROM showtrigstate('test_trigger_table'::regclass);
+        tgname        | tgenabled | tgisinternal 
+----------------------+-----------+--------------
+ test_trigger_fn_trg  | O         | f
+ test_trigger_fn_trg2 | O         | f
+ truncate_trigger     | O         | t
+(3 rows)
 
 ALTER TABLE test_trigger_table DISABLE TRIGGER test_trigger_fn_trg;
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
@@ -180,30 +184,22 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
  
 (2 rows)
 
-\d+ test_trigger_table
-                  Table "public.test_trigger_table"
- Column |  Type   | Modifiers | Storage  | Stats target | Description 
---------+---------+-----------+----------+--------------+-------------
- f1     | integer |           | plain    |              | 
- f2     | text    |           | extended |              | 
-Triggers:
-    test_trigger_fn_trg2 AFTER UPDATE OF f1 ON test_trigger_table FOR EACH ROW EXECUTE PROCEDURE test_trigger_fn()
-    truncate_trigger AFTER TRUNCATE ON test_trigger_table FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
-Disabled user triggers:
-    test_trigger_fn_trg BEFORE INSERT OR DELETE ON test_trigger_table FOR EACH STATEMENT WHEN (true) EXECUTE PROCEDURE test_trigger_fn()
+SELECT * FROM showtrigstate('test_trigger_table'::regclass);
+        tgname        | tgenabled | tgisinternal 
+----------------------+-----------+--------------
+ test_trigger_fn_trg  | D         | f
+ test_trigger_fn_trg2 | O         | f
+ truncate_trigger     | O         | t
+(3 rows)
 
 \c regression
-\d+ test_trigger_table
-                  Table "public.test_trigger_table"
- Column |  Type   | Modifiers | Storage  | Stats target | Description 
---------+---------+-----------+----------+--------------+-------------
- f1     | integer |           | plain    |              | 
- f2     | text    |           | extended |              | 
-Triggers:
-    test_trigger_fn_trg2 AFTER UPDATE OF f1 ON test_trigger_table FOR EACH ROW EXECUTE PROCEDURE test_trigger_fn()
-    truncate_trigger AFTER TRUNCATE ON test_trigger_table FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
-Disabled user triggers:
-    test_trigger_fn_trg BEFORE INSERT OR DELETE ON test_trigger_table FOR EACH STATEMENT WHEN (true) EXECUTE PROCEDURE test_trigger_fn()
+SELECT * FROM showtrigstate('test_trigger_table'::regclass);
+        tgname        | tgenabled | tgisinternal 
+----------------------+-----------+--------------
+ test_trigger_fn_trg  | D         | f
+ test_trigger_fn_trg2 | O         | f
+ truncate_trigger     | O         | t
+(3 rows)
 
 ALTER TABLE test_trigger_table DISABLE TRIGGER ALL;
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
@@ -213,28 +209,22 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
  
 (2 rows)
 
-\d+ test_trigger_table
-                  Table "public.test_trigger_table"
- Column |  Type   | Modifiers | Storage  | Stats target | Description 
---------+---------+-----------+----------+--------------+-------------
- f1     | integer |           | plain    |              | 
- f2     | text    |           | extended |              | 
-Disabled user triggers:
-    test_trigger_fn_trg BEFORE INSERT OR DELETE ON test_trigger_table FOR EACH STATEMENT WHEN (true) EXECUTE PROCEDURE test_trigger_fn()
-    test_trigger_fn_trg2 AFTER UPDATE OF f1 ON test_trigger_table FOR EACH ROW EXECUTE PROCEDURE test_trigger_fn()
-    truncate_trigger AFTER TRUNCATE ON test_trigger_table FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+SELECT * FROM showtrigstate('test_trigger_table'::regclass);
+        tgname        | tgenabled | tgisinternal 
+----------------------+-----------+--------------
+ test_trigger_fn_trg  | D         | f
+ test_trigger_fn_trg2 | D         | f
+ truncate_trigger     | D         | t
+(3 rows)
 
 \c postgres
-\d+ test_trigger_table
-                  Table "public.test_trigger_table"
- Column |  Type   | Modifiers | Storage  | Stats target | Description 
---------+---------+-----------+----------+--------------+-------------
- f1     | integer |           | plain    |              | 
- f2     | text    |           | extended |              | 
-Disabled user triggers:
-    test_trigger_fn_trg BEFORE INSERT OR DELETE ON test_trigger_table FOR EACH STATEMENT WHEN (true) EXECUTE PROCEDURE test_trigger_fn()
-    test_trigger_fn_trg2 AFTER UPDATE OF f1 ON test_trigger_table FOR EACH ROW EXECUTE PROCEDURE test_trigger_fn()
-    truncate_trigger AFTER TRUNCATE ON test_trigger_table FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+SELECT * FROM showtrigstate('test_trigger_table'::regclass);
+        tgname        | tgenabled | tgisinternal 
+----------------------+-----------+--------------
+ test_trigger_fn_trg  | D         | f
+ test_trigger_fn_trg2 | D         | f
+ truncate_trigger     | D         | t
+(3 rows)
 
 ALTER TABLE test_trigger_table ENABLE TRIGGER test_trigger_fn_trg2;
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
@@ -244,30 +234,22 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
  
 (2 rows)
 
-\d+ test_trigger_table
-                  Table "public.test_trigger_table"
- Column |  Type   | Modifiers | Storage  | Stats target | Description 
---------+---------+-----------+----------+--------------+-------------
- f1     | integer |           | plain    |              | 
- f2     | text    |           | extended |              | 
-Triggers:
-    test_trigger_fn_trg2 AFTER UPDATE OF f1 ON test_trigger_table FOR EACH ROW EXECUTE PROCEDURE test_trigger_fn()
-Disabled user triggers:
-    test_trigger_fn_trg BEFORE INSERT OR DELETE ON test_trigger_table FOR EACH STATEMENT WHEN (true) EXECUTE PROCEDURE test_trigger_fn()
-    truncate_trigger AFTER TRUNCATE ON test_trigger_table FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+SELECT * FROM showtrigstate('test_trigger_table'::regclass);
+        tgname        | tgenabled | tgisinternal 
+----------------------+-----------+--------------
+ test_trigger_fn_trg  | D         | f
+ test_trigger_fn_trg2 | O         | f
+ truncate_trigger     | D         | t
+(3 rows)
 
 \c regression
-\d+ test_trigger_table
-                  Table "public.test_trigger_table"
- Column |  Type   | Modifiers | Storage  | Stats target | Description 
---------+---------+-----------+----------+--------------+-------------
- f1     | integer |           | plain    |              | 
- f2     | text    |           | extended |              | 
-Triggers:
-    test_trigger_fn_trg2 AFTER UPDATE OF f1 ON test_trigger_table FOR EACH ROW EXECUTE PROCEDURE test_trigger_fn()
-Disabled user triggers:
-    test_trigger_fn_trg BEFORE INSERT OR DELETE ON test_trigger_table FOR EACH STATEMENT WHEN (true) EXECUTE PROCEDURE test_trigger_fn()
-    truncate_trigger AFTER TRUNCATE ON test_trigger_table FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+SELECT * FROM showtrigstate('test_trigger_table'::regclass);
+        tgname        | tgenabled | tgisinternal 
+----------------------+-----------+--------------
+ test_trigger_fn_trg  | D         | f
+ test_trigger_fn_trg2 | O         | f
+ truncate_trigger     | D         | t
+(3 rows)
 
 ALTER TABLE test_trigger_table ENABLE TRIGGER USER;
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
@@ -277,28 +259,22 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
  
 (2 rows)
 
-\d+ test_trigger_table
-                  Table "public.test_trigger_table"
- Column |  Type   | Modifiers | Storage  | Stats target | Description 
---------+---------+-----------+----------+--------------+-------------
- f1     | integer |           | plain    |              | 
- f2     | text    |           | extended |              | 
-Triggers:
-    test_trigger_fn_trg BEFORE INSERT OR DELETE ON test_trigger_table FOR EACH STATEMENT WHEN (true) EXECUTE PROCEDURE test_trigger_fn()
-    test_trigger_fn_trg2 AFTER UPDATE OF f1 ON test_trigger_table FOR EACH ROW EXECUTE PROCEDURE test_trigger_fn()
-    truncate_trigger AFTER TRUNCATE ON test_trigger_table FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+SELECT * FROM showtrigstate('test_trigger_table'::regclass);
+        tgname        | tgenabled | tgisinternal 
+----------------------+-----------+--------------
+ test_trigger_fn_trg  | O         | f
+ test_trigger_fn_trg2 | O         | f
+ truncate_trigger     | D         | t
+(3 rows)
 
 \c postgres
-\d+ test_trigger_table
-                  Table "public.test_trigger_table"
- Column |  Type   | Modifiers | Storage  | Stats target | Description 
---------+---------+-----------+----------+--------------+-------------
- f1     | integer |           | plain    |              | 
- f2     | text    |           | extended |              | 
-Triggers:
-    test_trigger_fn_trg BEFORE INSERT OR DELETE ON test_trigger_table FOR EACH STATEMENT WHEN (true) EXECUTE PROCEDURE test_trigger_fn()
-    test_trigger_fn_trg2 AFTER UPDATE OF f1 ON test_trigger_table FOR EACH ROW EXECUTE PROCEDURE test_trigger_fn()
-    truncate_trigger AFTER TRUNCATE ON test_trigger_table FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
+SELECT * FROM showtrigstate('test_trigger_table'::regclass);
+        tgname        | tgenabled | tgisinternal 
+----------------------+-----------+--------------
+ test_trigger_fn_trg  | O         | f
+ test_trigger_fn_trg2 | O         | f
+ truncate_trigger     | D         | t
+(3 rows)
 
 ALTER TABLE test_trigger_table ENABLE ALWAYS TRIGGER test_trigger_fn_trg;
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
@@ -308,30 +284,22 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
  
 (2 rows)
 
-\d+ test_trigger_table
-                  Table "public.test_trigger_table"
- Column |  Type   | Modifiers | Storage  | Stats target | Description 
---------+---------+-----------+----------+--------------+-------------
- f1     | integer |           | plain    |              | 
- f2     | text    |           | extended |              | 
-Triggers:
-    test_trigger_fn_trg2 AFTER UPDATE OF f1 ON test_trigger_table FOR EACH ROW EXECUTE PROCEDURE test_trigger_fn()
-    truncate_trigger AFTER TRUNCATE ON test_trigger_table FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
-Triggers firing always:
-    test_trigger_fn_trg BEFORE INSERT OR DELETE ON test_trigger_table FOR EACH STATEMENT WHEN (true) EXECUTE PROCEDURE test_trigger_fn()
+SELECT * FROM showtrigstate('test_trigger_table'::regclass);
+        tgname        | tgenabled | tgisinternal 
+----------------------+-----------+--------------
+ test_trigger_fn_trg  | A         | f
+ test_trigger_fn_trg2 | O         | f
+ truncate_trigger     | D         | t
+(3 rows)
 
 \c regression
-\d+ test_trigger_table
-                  Table "public.test_trigger_table"
- Column |  Type   | Modifiers | Storage  | Stats target | Description 
---------+---------+-----------+----------+--------------+-------------
- f1     | integer |           | plain    |              | 
- f2     | text    |           | extended |              | 
-Triggers:
-    test_trigger_fn_trg2 AFTER UPDATE OF f1 ON test_trigger_table FOR EACH ROW EXECUTE PROCEDURE test_trigger_fn()
-    truncate_trigger AFTER TRUNCATE ON test_trigger_table FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
-Triggers firing always:
-    test_trigger_fn_trg BEFORE INSERT OR DELETE ON test_trigger_table FOR EACH STATEMENT WHEN (true) EXECUTE PROCEDURE test_trigger_fn()
+SELECT * FROM showtrigstate('test_trigger_table'::regclass);
+        tgname        | tgenabled | tgisinternal 
+----------------------+-----------+--------------
+ test_trigger_fn_trg  | A         | f
+ test_trigger_fn_trg2 | O         | f
+ truncate_trigger     | D         | t
+(3 rows)
 
 ALTER TABLE test_trigger_table ENABLE REPLICA TRIGGER test_trigger_fn_trg2;
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
@@ -341,32 +309,22 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
  
 (2 rows)
 
-\d+ test_trigger_table
-                  Table "public.test_trigger_table"
- Column |  Type   | Modifiers | Storage  | Stats target | Description 
---------+---------+-----------+----------+--------------+-------------
- f1     | integer |           | plain    |              | 
- f2     | text    |           | extended |              | 
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_trigger_table FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
-Triggers firing always:
-    test_trigger_fn_trg BEFORE INSERT OR DELETE ON test_trigger_table FOR EACH STATEMENT WHEN (true) EXECUTE PROCEDURE test_trigger_fn()
-Triggers firing on replica only:
-    test_trigger_fn_trg2 AFTER UPDATE OF f1 ON test_trigger_table FOR EACH ROW EXECUTE PROCEDURE test_trigger_fn()
+SELECT * FROM showtrigstate('test_trigger_table'::regclass);
+        tgname        | tgenabled | tgisinternal 
+----------------------+-----------+--------------
+ test_trigger_fn_trg  | A         | f
+ test_trigger_fn_trg2 | R         | f
+ truncate_trigger     | D         | t
+(3 rows)
 
 \c postgres
-\d+ test_trigger_table
-                  Table "public.test_trigger_table"
- Column |  Type   | Modifiers | Storage  | Stats target | Description 
---------+---------+-----------+----------+--------------+-------------
- f1     | integer |           | plain    |              | 
- f2     | text    |           | extended |              | 
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_trigger_table FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
-Triggers firing always:
-    test_trigger_fn_trg BEFORE INSERT OR DELETE ON test_trigger_table FOR EACH STATEMENT WHEN (true) EXECUTE PROCEDURE test_trigger_fn()
-Triggers firing on replica only:
-    test_trigger_fn_trg2 AFTER UPDATE OF f1 ON test_trigger_table FOR EACH ROW EXECUTE PROCEDURE test_trigger_fn()
+SELECT * FROM showtrigstate('test_trigger_table'::regclass);
+        tgname        | tgenabled | tgisinternal 
+----------------------+-----------+--------------
+ test_trigger_fn_trg  | A         | f
+ test_trigger_fn_trg2 | R         | f
+ truncate_trigger     | D         | t
+(3 rows)
 
 DROP TRIGGER test_trigger_fn_trg2 ON test_trigger_table;
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
@@ -376,28 +334,20 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
  
 (2 rows)
 
-\d+ test_trigger_table
-                  Table "public.test_trigger_table"
- Column |  Type   | Modifiers | Storage  | Stats target | Description 
---------+---------+-----------+----------+--------------+-------------
- f1     | integer |           | plain    |              | 
- f2     | text    |           | extended |              | 
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_trigger_table FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
-Triggers firing always:
-    test_trigger_fn_trg BEFORE INSERT OR DELETE ON test_trigger_table FOR EACH STATEMENT WHEN (true) EXECUTE PROCEDURE test_trigger_fn()
+SELECT * FROM showtrigstate('test_trigger_table'::regclass);
+       tgname        | tgenabled | tgisinternal 
+---------------------+-----------+--------------
+ test_trigger_fn_trg | A         | f
+ truncate_trigger    | D         | t
+(2 rows)
 
 \c regression
-\d+ test_trigger_table
-                  Table "public.test_trigger_table"
- Column |  Type   | Modifiers | Storage  | Stats target | Description 
---------+---------+-----------+----------+--------------+-------------
- f1     | integer |           | plain    |              | 
- f2     | text    |           | extended |              | 
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_trigger_table FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
-Triggers firing always:
-    test_trigger_fn_trg BEFORE INSERT OR DELETE ON test_trigger_table FOR EACH STATEMENT WHEN (true) EXECUTE PROCEDURE test_trigger_fn()
+SELECT * FROM showtrigstate('test_trigger_table'::regclass);
+       tgname        | tgenabled | tgisinternal 
+---------------------+-----------+--------------
+ test_trigger_fn_trg | A         | f
+ truncate_trigger    | D         | t
+(2 rows)
 
 -- should fail (for test to be useful it should be called on different node than CREATE FUNCTION)
 DROP FUNCTION test_trigger_fn();

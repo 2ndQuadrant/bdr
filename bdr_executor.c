@@ -382,37 +382,39 @@ bdr_queue_ddl_command(char *command_tag, char *command)
  * it tgisinternal so that it's not dumped by pg_dump.
  *
  * We create such triggers automatically on restore or
- * bdr_group_create so dumping the triggers isn't necessary, and
- * also makes restores to non-BDR databases harder.
+ * bdr_group_create so dumping the triggers isn't necessary,
+ * and dumping them makes it harder to restore to a DB
+ * without BDR.
+ *
+ * The target object oid may be InvalidOid, in which case
+ * it will be looked up from the catalogs.
  */
 static void
-bdr_create_truncate_trigger(const char *relname, const char *nspname)
+bdr_create_truncate_trigger(char *schemaname, char *relname, Oid relid)
 {
-	char	   *query;
-	int			res;
+	CreateTrigStmt *tgstmt;
+	RangeVar *relrv = makeRangeVar(schemaname, relname, -1);
 
-	SPI_connect();
+	tgstmt = makeNode(CreateTrigStmt);
+	tgstmt->trigname = "truncate_trigger";
+	tgstmt->relation = copyObject(relrv);
+	tgstmt->funcname = list_make2(makeString("bdr"), makeString("queue_truncate"));
+	tgstmt->args = NIL;
+	tgstmt->row = false;
+	tgstmt->timing = TRIGGER_TYPE_AFTER;
+	tgstmt->events = TRIGGER_TYPE_TRUNCATE;
+	tgstmt->columns = NIL;
+	tgstmt->whenClause = NULL;
+	tgstmt->isconstraint = false;
+	tgstmt->deferrable = false;
+	tgstmt->initdeferred = false;
+	tgstmt->constrrel = NULL;
 
-	query = psprintf("CREATE TRIGGER truncate_trigger AFTER TRUNCATE "
-					 "ON %s.%s FOR EACH STATEMENT EXECUTE PROCEDURE "
-					 "bdr.queue_truncate()",
-					 quote_identifier(nspname),
-					 quote_identifier(relname));
-	res = SPI_execute(query, false, 0);
-	if (res != SPI_OK_UTILITY)
-		elog(ERROR, "SPI failure: %d", res);
+	(void) CreateTrigger(tgstmt, NULL, relid, InvalidOid,
+						 InvalidOid, InvalidOid, true /* tgisinternal */);
 
-	/*
-	 * If this is inside manually replicated DDL, the
-	 * bdr_queue_ddl_commands will skip queueing the CREATE TRIGGER
-	 * command, so we have to do it ourselves.
-	 *
-	 * XXX: The whole in_bdr_replicate_ddl_command concept is not very nice
-	 */
-	if (in_bdr_replicate_ddl_command)
-		bdr_queue_ddl_command("CREATE TRIGGER", query);
-
-	SPI_finish();
+	/* Make the new trigger visible within this session */
+	CommandCounterIncrement();
 }
 
 /*
@@ -424,10 +426,9 @@ bdr_internal_create_truncate_trigger(PG_FUNCTION_ARGS)
 {
 	Oid relid = PG_GETARG_OID(0);
 	Relation rel = heap_open(relid, AccessExclusiveLock);
-	const char * relname = RelationGetRelationName(rel);
-	char * nspname = get_namespace_name(RelationGetNamespace(rel));
-	bdr_create_truncate_trigger(relname, nspname);
-	pfree(nspname);
+	char *schemaname = get_namespace_name(RelationGetNamespace(rel));
+	bdr_create_truncate_trigger(schemaname, RelationGetRelationName(rel), relid);
+	pfree(schemaname);
 	heap_close(rel, AccessExclusiveLock);
 	PG_RETURN_VOID();
 }
@@ -446,26 +447,17 @@ Datum
 bdr_truncate_trigger_add(PG_FUNCTION_ARGS)
 {
 	EventTriggerData   *trigdata;
-	char			   *skip_ddl;
 
 	if (!CALLED_AS_EVENT_TRIGGER(fcinfo))  /* internal error */
 		elog(ERROR, "not fired by event trigger manager");
 
 	/*
-	 * If we're currently replaying something from a remote node, don't queue
-	 * the commands; that would cause recursion.
+	 * Since triggers are created tgisinternal and their creation is
+	 * not replicated or dumped we must create truncate triggers on
+	 * tables even if they're created by a replicated command or
+	 * restore of a dump. Recursion is not a problem since we don't
+	 * queue anything for replication anymore.
 	 */
-	if (replication_origin_id != InvalidRepNodeId)
-		PG_RETURN_VOID();	/* XXX return type? */
-
-	/*
-	 * Similarly, if configured to skip queueing DDL, don't queue.  This is
-	 * mostly used when pg_restore brings a remote node state, so all objects
-	 * will be copied over in the dump anyway.
-	 */
-	skip_ddl = GetConfigOptionByName("bdr.skip_ddl_replication", NULL);
-	if (strcmp(skip_ddl, "on") == 0)
-		PG_RETURN_VOID();
 
 	trigdata = (EventTriggerData *) fcinfo->context;
 
@@ -473,14 +465,20 @@ bdr_truncate_trigger_add(PG_FUNCTION_ARGS)
 		IsA(trigdata->parsetree, CreateStmt))
 	{
 		CreateStmt *stmt = (CreateStmt *)trigdata->parsetree;
-		char * nspname;
+		char *nspname;
 
 		/* Skip temporary and unlogged tables */
 		if (stmt->relation->relpersistence != RELPERSISTENCE_PERMANENT)
 			PG_RETURN_VOID();
 
 		nspname = get_namespace_name(RangeVarGetCreationNamespace(stmt->relation));
-		bdr_create_truncate_trigger(stmt->relation->relname, nspname);
+
+		/*
+		 * By this time the relation has been created so it's safe to
+		 * call RangeVarGetRelid
+		 */
+		bdr_create_truncate_trigger(nspname, stmt->relation->relname, InvalidOid);
+
 		pfree(nspname);
 	}
 

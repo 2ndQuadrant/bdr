@@ -11,8 +11,6 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
  Column |  Type   | Modifiers | Storage | Stats target | Description 
 --------+---------+-----------+---------+--------------+-------------
  val    | integer |           | plain   |              | 
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_tbl_simple_create FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
 \c postgres
 \d+ test_tbl_simple_create
@@ -20,8 +18,6 @@ Triggers:
  Column |  Type   | Modifiers | Storage | Stats target | Description 
 --------+---------+-----------+---------+--------------+-------------
  val    | integer |           | plain   |              | 
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_tbl_simple_create FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
 DROP TABLE test_tbl_simple_create;
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
@@ -81,8 +77,6 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
  val    | integer | not null  | plain   |              | 
 Indexes:
     "test_tbl_simple_pk_pkey" PRIMARY KEY, btree (val)
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_tbl_simple_pk FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
 \c postgres
 \d+ test_tbl_simple_pk
@@ -92,8 +86,6 @@ Triggers:
  val    | integer | not null  | plain   |              | 
 Indexes:
     "test_tbl_simple_pk_pkey" PRIMARY KEY, btree (val)
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_tbl_simple_pk FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
 DROP TABLE test_tbl_simple_pk;
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
@@ -122,8 +114,6 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
  val1   | integer | not null  | plain   |              | 
 Indexes:
     "test_tbl_combined_pk_pkey" PRIMARY KEY, btree (val, val1)
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_tbl_combined_pk FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
 \c postgres
 \d+ test_tbl_combined_pk
@@ -134,8 +124,6 @@ Triggers:
  val1   | integer | not null  | plain   |              | 
 Indexes:
     "test_tbl_combined_pk_pkey" PRIMARY KEY, btree (val, val1)
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_tbl_combined_pk FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
 DROP TABLE test_tbl_combined_pk;
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
@@ -161,8 +149,6 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
  Column |  Type   |                           Modifiers                           | Storage | Stats target | Description 
 --------+---------+---------------------------------------------------------------+---------+--------------+-------------
  val    | integer | not null default nextval('test_tbl_serial_val_seq'::regclass) | plain   |              | 
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_tbl_serial FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
 \c postgres
 \d+ test_tbl_serial
@@ -170,8 +156,6 @@ Triggers:
  Column |  Type   |                           Modifiers                           | Storage | Stats target | Description 
 --------+---------+---------------------------------------------------------------+---------+--------------+-------------
  val    | integer | not null default nextval('test_tbl_serial_val_seq'::regclass) | plain   |              | 
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_tbl_serial FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
 DROP TABLE test_tbl_serial;
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
@@ -197,8 +181,6 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
  Column |  Type   |                           Modifiers                           | Storage | Stats target | Description 
 --------+---------+---------------------------------------------------------------+---------+--------------+-------------
  val    | integer | not null default nextval('test_tbl_serial_val_seq'::regclass) | plain   |              | 
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_tbl_serial FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
 \c postgres
 \d+ test_tbl_serial
@@ -206,8 +188,6 @@ Triggers:
  Column |  Type   |                           Modifiers                           | Storage | Stats target | Description 
 --------+---------+---------------------------------------------------------------+---------+--------------+-------------
  val    | integer | not null default nextval('test_tbl_serial_val_seq'::regclass) | plain   |              | 
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_tbl_serial FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
 CREATE TABLE test_tbl_serial_pk(val SERIAL PRIMARY KEY);
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
@@ -224,8 +204,6 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
  val    | integer | not null default nextval('test_tbl_serial_pk_val_seq'::regclass) | plain   |              | 
 Indexes:
     "test_tbl_serial_pk_pkey" PRIMARY KEY, btree (val)
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_tbl_serial_pk FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
 \c postgres
 \d+ test_tbl_serial_pk
@@ -235,8 +213,6 @@ Triggers:
  val    | integer | not null default nextval('test_tbl_serial_pk_val_seq'::regclass) | plain   |              | 
 Indexes:
     "test_tbl_serial_pk_pkey" PRIMARY KEY, btree (val)
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_tbl_serial_pk FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
 DROP TABLE test_tbl_serial_pk;
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
@@ -265,8 +241,6 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
  val1   | integer | not null                                                                  | plain   |              | 
 Indexes:
     "test_tbl_serial_combined_pk_pkey" PRIMARY KEY, btree (val, val1)
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_tbl_serial_combined_pk FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
 \c postgres
 \d+ test_tbl_serial_combined_pk
@@ -277,8 +251,6 @@ Triggers:
  val1   | integer | not null                                                                  | plain   |              | 
 Indexes:
     "test_tbl_serial_combined_pk_pkey" PRIMARY KEY, btree (val, val1)
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_tbl_serial_combined_pk FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
 CREATE TABLE test_tbl_create_index (val int, val2 int);
 CREATE UNIQUE INDEX test1_idx ON test_tbl_create_index(val);
@@ -299,8 +271,6 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
 Indexes:
     "test1_idx" UNIQUE, btree (val)
     "test2_idx" btree (lower(val2::text))
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_tbl_create_index FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
 \c regression
 \d+ test_tbl_create_index
@@ -312,8 +282,6 @@ Triggers:
 Indexes:
     "test1_idx" UNIQUE, btree (val)
     "test2_idx" btree (lower(val2::text))
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_tbl_create_index FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
 DROP INDEX test1_idx;
 DROP INDEX test2_idx;
@@ -330,8 +298,6 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
 --------+---------+-----------+---------+--------------+-------------
  val    | integer |           | plain   |              | 
  val2   | integer |           | plain   |              | 
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_tbl_create_index FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
 \c postgres
 \d+ test_tbl_create_index
@@ -340,8 +306,6 @@ Triggers:
 --------+---------+-----------+---------+--------------+-------------
  val    | integer |           | plain   |              | 
  val2   | integer |           | plain   |              | 
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_tbl_create_index FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
 CREATE INDEX test1_idx ON test_tbl_create_index(val, val2);
 CREATE INDEX test2_idx ON test_tbl_create_index USING gist (val, UPPER(val2::text));
@@ -361,8 +325,6 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
 Indexes:
     "test1_idx" btree (val, val2)
     "test2_idx" gist (val, upper(val2::text))
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_tbl_create_index FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
 \c regression
 \d+ test_tbl_create_index
@@ -374,8 +336,6 @@ Triggers:
 Indexes:
     "test1_idx" btree (val, val2)
     "test2_idx" gist (val, upper(val2::text))
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_tbl_create_index FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
 DROP INDEX test1_idx;
 DROP INDEX CONCURRENTLY test2_idx;
@@ -392,8 +352,6 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
 --------+---------+-----------+---------+--------------+-------------
  val    | integer |           | plain   |              | 
  val2   | integer |           | plain   |              | 
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_tbl_create_index FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
 \c postgres
 \d+ test_tbl_create_index
@@ -402,8 +360,6 @@ Triggers:
 --------+---------+-----------+---------+--------------+-------------
  val    | integer |           | plain   |              | 
  val2   | integer |           | plain   |              | 
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_tbl_create_index FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
 CREATE INDEX CONCURRENTLY test1_idx ON test_tbl_create_index(val, val2);
 CREATE UNIQUE INDEX CONCURRENTLY test2_idx ON test_tbl_create_index (lower(val2::text));
@@ -423,8 +379,6 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
 Indexes:
     "test2_idx" UNIQUE, btree (lower(val2::text))
     "test1_idx" btree (val, val2)
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_tbl_create_index FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
 \c regression
 \d+ test_tbl_create_index
@@ -436,8 +390,6 @@ Triggers:
 Indexes:
     "test2_idx" UNIQUE, btree (lower(val2::text))
     "test1_idx" btree (val, val2)
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_tbl_create_index FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
 DROP INDEX CONCURRENTLY test1_idx;
 DROP INDEX CONCURRENTLY test2_idx;
@@ -456,8 +408,6 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
 --------+-----------+-----------+----------+--------------+-------------
  val    | integer[] |           | extended |              | 
  val1   | text[]    |           | extended |              | 
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_simple_create_with_arrays_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
 \c postgres
 \d+ test_simple_create_with_arrays_tbl
@@ -466,8 +416,6 @@ Triggers:
 --------+-----------+-----------+----------+--------------+-------------
  val    | integer[] |           | extended |              | 
  val1   | text[]    |           | extended |              | 
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_simple_create_with_arrays_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
 DROP TABLE test_simple_create_with_arrays_tbl;
 CREATE TYPE test_t AS ENUM('a','b','c');
@@ -485,8 +433,6 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
 --------+--------+-----------+---------+--------------+-------------
  val    | test_t |           | plain   |              | 
  val1   | test_t |           | plain   |              | 
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_simple_create_with_enums_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
 \c regression
 \d+ test_simple_create_with_enums_tbl
@@ -495,8 +441,6 @@ Triggers:
 --------+--------+-----------+---------+--------------+-------------
  val    | test_t |           | plain   |              | 
  val1   | test_t |           | plain   |              | 
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_simple_create_with_enums_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
 DROP TABLE test_simple_create_with_enums_tbl;
 DROP TYPE test_t;
@@ -537,8 +481,6 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
 --------+--------+-----------+----------+--------------+-------------
  val    | test_t |           | extended |              | 
  val1   | test_t |           | extended |              | 
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_simple_create_with_composites_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
 \c regression
 \d+ test_simple_create_with_composites_tbl
@@ -547,8 +489,6 @@ Triggers:
 --------+--------+-----------+----------+--------------+-------------
  val    | test_t |           | extended |              | 
  val1   | test_t |           | extended |              | 
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_simple_create_with_composites_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
 DROP TABLE test_simple_create_with_composites_tbl;
 DROP TYPE test_t;
@@ -600,8 +540,6 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
 --------+------+----------------------------+----------+--------------+-------------
  f1     | text |                            | extended |              | 
  f2     | date | default '01-02-2014'::date | plain    |              | 
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_tbl_inh_chld1 FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 Inherits: test_tbl_inh_parent
 Child tables: test_tbl_inh_chld3
 
@@ -610,8 +548,6 @@ Child tables: test_tbl_inh_chld3
 --------+------+----------------------------+----------+--------------+-------------
  f1     | text |                            | extended |              | 
  f2     | date | default '01-02-2014'::date | plain    |              | 
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_tbl_inh_chld2 FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 Inherits: test_tbl_inh_parent
 
                          Table "public.test_tbl_inh_chld3"
@@ -619,8 +555,6 @@ Inherits: test_tbl_inh_parent
 --------+------+----------------------------+----------+--------------+-------------
  f1     | text |                            | extended |              | 
  f2     | date | default '01-02-2014'::date | plain    |              | 
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_tbl_inh_chld3 FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 Inherits: test_tbl_inh_parent,
           test_tbl_inh_chld1
 
@@ -629,8 +563,6 @@ Inherits: test_tbl_inh_parent,
 --------+------+----------------------------+----------+--------------+-------------
  f1     | text |                            | extended |              | 
  f2     | date | default '01-02-2014'::date | plain    |              | 
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_tbl_inh_parent FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 Child tables: test_tbl_inh_chld1,
               test_tbl_inh_chld2,
               test_tbl_inh_chld3
@@ -642,8 +574,6 @@ Child tables: test_tbl_inh_chld1,
 --------+------+----------------------------+----------+--------------+-------------
  f1     | text |                            | extended |              | 
  f2     | date | default '02-01-2014'::date | plain    |              | 
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_tbl_inh_chld1 FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 Inherits: test_tbl_inh_parent
 Child tables: test_tbl_inh_chld3
 
@@ -652,8 +582,6 @@ Child tables: test_tbl_inh_chld3
 --------+------+----------------------------+----------+--------------+-------------
  f1     | text |                            | extended |              | 
  f2     | date | default '02-01-2014'::date | plain    |              | 
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_tbl_inh_chld2 FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 Inherits: test_tbl_inh_parent
 
                          Table "public.test_tbl_inh_chld3"
@@ -661,8 +589,6 @@ Inherits: test_tbl_inh_parent
 --------+------+----------------------------+----------+--------------+-------------
  f1     | text |                            | extended |              | 
  f2     | date | default '02-01-2014'::date | plain    |              | 
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_tbl_inh_chld3 FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 Inherits: test_tbl_inh_parent,
           test_tbl_inh_chld1
 
@@ -671,8 +597,6 @@ Inherits: test_tbl_inh_parent,
 --------+------+----------------------------+----------+--------------+-------------
  f1     | text |                            | extended |              | 
  f2     | date | default '02-01-2014'::date | plain    |              | 
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_tbl_inh_parent FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 Child tables: test_tbl_inh_chld1,
               test_tbl_inh_chld2,
               test_tbl_inh_chld3
@@ -705,8 +629,6 @@ Rules:
     ON INSERT TO test_tbl_inh_parent
    WHERE new.f1 ~~ '%2%'::text DO INSTEAD  INSERT INTO test_tbl_inh_chld2 (f1, f2)
   VALUES (new.f1, new.f2)
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_tbl_inh_parent FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 Child tables: test_tbl_inh_chld1,
               test_tbl_inh_chld2,
               test_tbl_inh_chld3
@@ -727,8 +649,6 @@ Rules:
     ON INSERT TO test_tbl_inh_parent
    WHERE new.f1 ~~ '%2%'::text DO INSTEAD  INSERT INTO test_tbl_inh_chld2 (f1, f2)
   VALUES (new.f1, new.f2)
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_tbl_inh_parent FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 Child tables: test_tbl_inh_chld1,
               test_tbl_inh_chld2,
               test_tbl_inh_chld3
@@ -784,8 +704,6 @@ CREATE TABLE tbl_showfillfactor (name char(500), unique (name) with (fillfactor=
  name   | character(500) |           | extended |              | 
 Indexes:
     "tbl_showfillfactor_name_key" UNIQUE CONSTRAINT, btree (name) WITH (fillfactor=65)
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON tbl_showfillfactor FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 Options: fillfactor=75
 
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
@@ -803,8 +721,6 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
  name   | character(500) |           | extended |              | 
 Indexes:
     "tbl_showfillfactor_name_key" UNIQUE CONSTRAINT, btree (name) WITH (fillfactor=65)
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON tbl_showfillfactor FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 Options: fillfactor=75
 
 --- AGGREGATE ---

@@ -16,18 +16,3 @@ CREATE TABLE some_local_tbl(id serial primary key, key text unique not null, dat
 INSERT INTO some_local_tbl(key, data) VALUES('key1', 'data1');
 INSERT INTO some_local_tbl(key, data) VALUES('key2', NULL);
 INSERT INTO some_local_tbl(key, data) VALUES('key3', 'data3');
--- At this time we create the truncation trigger even though BDR
--- hasn't been activated yet.
-\d+ some_local_tbl
-                                             Table "public.some_local_tbl"
- Column |  Type   |                          Modifiers                          | Storage  | Stats target | Description 
---------+---------+-------------------------------------------------------------+----------+--------------+-------------
- id     | integer | not null default nextval('some_local_tbl_id_seq'::regclass) | plain    |              | 
- key    | text    | not null                                                    | extended |              | 
- data   | text    |                                                             | extended |              | 
-Indexes:
-    "some_local_tbl_pkey" PRIMARY KEY, btree (id)
-    "some_local_tbl_key_key" UNIQUE CONSTRAINT, btree (key)
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON some_local_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
-

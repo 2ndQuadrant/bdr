@@ -10,8 +10,6 @@
 Indexes:
     "some_local_tbl_pkey" PRIMARY KEY, btree (id)
     "some_local_tbl_key_key" UNIQUE CONSTRAINT, btree (key)
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON some_local_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
 SELECT * FROM some_local_tbl ORDER BY id;
  id | key  | data  
@@ -32,8 +30,6 @@ SELECT * FROM some_local_tbl ORDER BY id;
 Indexes:
     "some_local_tbl_pkey" PRIMARY KEY, btree (id)
     "some_local_tbl_key_key" UNIQUE CONSTRAINT, btree (key)
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON some_local_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
 SELECT * FROM some_local_tbl ORDER BY id;
  id | key  | data  

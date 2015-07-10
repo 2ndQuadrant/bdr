@@ -13,8 +13,6 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
  Column  |  Type   |                       Modifiers                        | Storage | Stats target | Description 
 ---------+---------+--------------------------------------------------------+---------+--------------+-------------
  test_id | integer | not null default nextval('test_test_id_seq'::regclass) | plain   |              | 
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
 SELECT relname, relkind FROM pg_class WHERE relname = 'test_test_id_seq';
      relname      | relkind 
@@ -52,8 +50,6 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
                        Table "public.test"
  Column | Type | Modifiers | Storage | Stats target | Description 
 --------+------+-----------+---------+--------------+-------------
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
 SELECT relname, relkind FROM pg_class WHERE relname = 'test_test_id_seq';
  relname | relkind 
@@ -76,8 +72,6 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
  Column  |  Type   |                       Modifiers                        | Storage | Stats target | Description 
 ---------+---------+--------------------------------------------------------+---------+--------------+-------------
  test_id | integer | not null default nextval('test_test_id_seq'::regclass) | plain   |              | 
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
 ALTER TABLE test ADD CONSTRAINT test_pkey PRIMARY KEY (test_id);
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
@@ -95,8 +89,6 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
  test_id | integer | not null default nextval('test_test_id_seq'::regclass) | plain   |              | 
 Indexes:
     "test_pkey" PRIMARY KEY, btree (test_id)
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
 DROP TABLE test;
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
@@ -386,8 +378,6 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
  Column |  Type   |               Modifiers               | Storage | Stats target | Description 
 --------+---------+---------------------------------------+---------+--------------+-------------
  a      | integer | default nextval('test_seq'::regclass) | plain   |              | 
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
 \c postgres
 \d+ test_tbl
@@ -395,8 +385,6 @@ Triggers:
  Column |  Type   |               Modifiers               | Storage | Stats target | Description 
 --------+---------+---------------------------------------+---------+--------------+-------------
  a      | integer | default nextval('test_seq'::regclass) | plain   |              | 
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
 DROP SEQUENCE test_seq CASCADE;
 NOTICE:  drop cascades to default for table test_tbl column a
@@ -412,8 +400,6 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
  Column |  Type   | Modifiers | Storage | Stats target | Description 
 --------+---------+-----------+---------+--------------+-------------
  a      | integer |           | plain   |              | 
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
 \c regression
 \d+ test_tbl
@@ -421,8 +407,6 @@ Triggers:
  Column |  Type   | Modifiers | Storage | Stats target | Description 
 --------+---------+-----------+---------+--------------+-------------
  a      | integer |           | plain   |              | 
-Triggers:
-    truncate_trigger AFTER TRUNCATE ON test_tbl FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 
 DROP TABLE test_tbl;
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
