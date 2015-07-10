@@ -7,11 +7,11 @@
  </indexterm>
 
  <sect1 id="settings-prerequisite" xreflabel="PostgreSQL settings for BDR/UDR">
-  <title>Prerequisite postgres parameters</title>
+  <title>Prerequisite &postgres; parameters</title>
 
   <para>
-   &bdr; and &udr; require a couple of postgres settings to be set to
-   specific values.
+   &bdr; and &udr; require certain &postgres; settings to be set to
+   appropriate values.
   </para>
 
   <para>
