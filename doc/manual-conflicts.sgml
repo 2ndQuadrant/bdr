@@ -68,7 +68,12 @@
     The most common conflicts are row conflicts where two operations affect a
     row with the same key in ways they could not do on a single node. &bdr; can
     detect most of those and apply last-update-wins conflict handling or invoke
-    a user-defined conflict handler.
+    a user-defined conflict handler. For the time based conflict handlers to
+    function correctly all nodes in the cluster must share the same time source.
+    If you have a conflict when the time on two nodes is out of sync the conflict
+    may never be able to resolved because the last update time will never match
+    even after the handler has run. This will manifest itself as row updates only
+    syncing in one direction.
    </para>
 
    <para>
