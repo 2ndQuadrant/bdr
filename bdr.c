@@ -909,6 +909,10 @@ bdr_maintain_schema(bool update_extensions)
 Datum
 bdr_apply_pause(PG_FUNCTION_ARGS)
 {
+	/*
+	 * It's safe to pause without grabbing the segment lock;
+	 * an overlapping resume won't do any harm.
+	 */
 	BdrWorkerCtl->pause_apply = true;
 	PG_RETURN_VOID();
 }
@@ -916,7 +920,27 @@ bdr_apply_pause(PG_FUNCTION_ARGS)
 Datum
 bdr_apply_resume(PG_FUNCTION_ARGS)
 {
+	int i;
+
+	LWLockAcquire(BdrWorkerCtl->lock, LW_SHARED);
 	BdrWorkerCtl->pause_apply = false;
+
+	/*
+	 * To get apply workers to notice immediately we have to set all their
+	 * latches. This will also force config reloads, but that's cheap and
+	 * harmless.
+	 */
+	for (i = 0; i < bdr_max_workers; i++)
+	{
+		BdrWorker *w = &BdrWorkerCtl->slots[i];
+		if (w->worker_type == BDR_WORKER_APPLY)
+		{
+			BdrApplyWorker *apply = &w->data.apply;
+			SetLatch(apply->proclatch);
+		}
+	}
+
+	LWLockRelease(BdrWorkerCtl->lock);
 	PG_RETURN_VOID();
 }
 

@@ -2495,18 +2495,16 @@ bdr_apply_work(PGconn* streamConn)
 		 * flag in shmem. We don't pause until the end of the current
 		 * transaction, to avoid sleeping with locks held.
 		 *
-		 * XXX With the 1s timeout below, we don't risk delaying the
-		 * resumption too much. But it would be better to use a global
-		 * latch that can be set by pg_bdr_apply_resume(), and not have
-		 * to wake up so often.
+		 * Sleep for 5 minutes before re-checking. We shouldn't really
+		 * need to since we set the proc latch on resume, but it doesn't
+		 * hurt to be careful.
 		 */
-
 		while (BdrWorkerCtl->pause_apply && !IsTransactionState())
 		{
 			ResetLatch(&MyProc->procLatch);
 			rc = WaitLatch(&MyProc->procLatch,
 						   WL_TIMEOUT | WL_LATCH_SET | WL_POSTMASTER_DEATH,
-						   1000L);
+						   300000L);
 
 			if (rc & WL_POSTMASTER_DEATH)
 				proc_exit(1);

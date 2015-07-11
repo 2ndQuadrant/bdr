@@ -36,7 +36,14 @@ SELECT bdr.bdr_apply_resume();
 \ccc regression
 
 INSERT INTO pause_test(x) VALUES ('after resume');
+
+-- The pause latch timeout is 5 minutes. To make sure that setting
+-- the latch is doing its job and unpausing before timeout, expect
+-- resume to take effect well before then.
+BEGIN;
+SET LOCAL statement_timeout = '60s';
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+COMMIT;
 
 \cc postgres
 
