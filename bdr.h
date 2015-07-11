@@ -180,6 +180,13 @@ typedef struct BdrApplyWorker
 
 	/* Request that the remote forward all changes from other nodes */
 	bool forward_changesets;
+
+	/*
+	 * The apply worker's latch from the PROC array, for use from other backends
+	 *
+	 * Must only be accessed with the bdr worker shmem control segment lock held.
+	 */
+	Latch			*proclatch;
 } BdrApplyWorker;
 
 /*
@@ -196,7 +203,11 @@ typedef struct BdrPerdbWorker
 
 	size_t			seq_slot;
 
-	/* The perdb worker's latch from the PROC array, for use from other backends */
+	/*
+	 * The perdb worker's latch from the PROC array, for use from other backends
+	 *
+	 * Must only be accessed with the bdr worker shmem control segment lock held.
+	 */
 	Latch			*proclatch;
 
 	/* Oid of the database the worker is attached to - populated after start */

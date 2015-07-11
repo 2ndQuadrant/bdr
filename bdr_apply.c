@@ -2268,6 +2268,74 @@ log_tuple(const char *format, TupleDesc desc, HeapTuple tup)
 #endif
 
 /*
+ * When the apply worker's latch is set it reloads its configuration
+ * from the database, checking for new replication sets, connection
+ * strings, etc.
+ *
+ * At this time many changes simply force the apply worker to exit and restart,
+ * since we'd have to reconnect to apply most kinds of change anyway.
+ */
+static void
+bdr_apply_reload_config()
+{
+	BdrConnectionConfig *new_apply_config;
+
+	/* Fetch our config from the DB */
+	new_apply_config = bdr_get_connection_config(
+		bdr_apply_worker->remote_sysid,
+		bdr_apply_worker->remote_timeline,
+		bdr_apply_worker->remote_dboid,
+		false);
+
+	Assert(new_apply_config->sysid == bdr_apply_worker->remote_sysid &&
+		   new_apply_config->timeline == bdr_apply_worker->remote_timeline &&
+		   new_apply_config->dboid == bdr_apply_worker->remote_dboid);
+
+	/*
+	 * Got default remote connection info, read also local defaults.
+	 * Otherwise we would be using replication sets and apply delay from the
+	 * remote node instead of the local one.
+	 *
+	 * Note: this is slightly hacky and we should probably use the bdr_nodes
+	 * for this instead.
+	 */
+	if (!new_apply_config->origin_is_my_id &&
+		!new_apply_config->is_unidirectional)
+	{
+		BdrConnectionConfig *cfg =
+			bdr_get_connection_config(GetSystemIdentifier(), ThisTimeLineID,
+									  MyDatabaseId, false);
+
+		new_apply_config->apply_delay = cfg->apply_delay;
+		pfree(new_apply_config->replication_sets);
+		new_apply_config->replication_sets = pstrdup(cfg->replication_sets);
+		bdr_free_connection_config(cfg);
+	}
+
+	if (bdr_apply_config == NULL)
+	{
+		/* First run, carry on loading */
+		bdr_apply_config = new_apply_config;
+	}
+	else
+	{
+		/* If the DSN or replication sets changed we must restart */
+		if (strcmp(bdr_apply_config->dsn, new_apply_config->dsn) != 0)
+		{
+			elog(DEBUG1, "Apply worker exiting to apply new DSN configuration");
+			proc_exit(1);
+		}
+
+		if (strcmp(bdr_apply_config->replication_sets, new_apply_config->replication_sets) != 0)
+		{
+			elog(DEBUG1, "Apply worker exiting to apply new replication set configuration");
+			proc_exit(1);
+		}
+
+	}
+}
+
+/*
  * The actual main loop of a BDR apply worker.
  */
 static void
@@ -2323,6 +2391,17 @@ bdr_apply_work(PGconn* streamConn)
 		{
 			got_SIGHUP = false;
 			ProcessConfigFile(PGC_SIGHUP);
+		}
+
+		if (rc & WL_LATCH_SET)
+		{
+			/*
+			 * Apply worker latch was set. This could be an attempt to resume
+			 * apply that wasn't paused in the first place, or could be a
+			 * request to reload our config. It's safe to reload, so just do
+			 * so.
+			 */
+			bdr_apply_reload_config();
 		}
 
 		if (rc & WL_SOCKET_READABLE)
@@ -2431,6 +2510,17 @@ bdr_apply_work(PGconn* streamConn)
 
 			if (rc & WL_POSTMASTER_DEATH)
 				proc_exit(1);
+
+			if (rc & WL_LATCH_SET)
+			{
+				/*
+				 * Setting the apply worker latch causes a recheck
+				 * of pause state, but it could also be an attempt
+				 * to reload the worker's configuration. Check whether
+				 * anything has changed.
+				 */
+				bdr_apply_reload_config();
+			}
 		}
 		MemoryContextResetAndDeleteChildren(MessageContext);
 	}
@@ -2463,6 +2553,16 @@ bdr_apply_main(Datum main_arg)
 
 	Assert(MyDatabaseId == bdr_apply_worker->dboid);
 
+	/*
+	 * Store our proclatch in our shmem segment.
+	 *
+	 * This must be protected by a lock so that nobody tries to
+	 * set our latch field while we're writing to it.
+	 */
+	LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
+	bdr_apply_worker->proclatch = &MyProc->procLatch;
+	LWLockRelease(BdrWorkerCtl->lock);
+
 	/* Check if we decided to kill off this connection */
 	StartTransactionCommand();
 	SPI_connect();
@@ -2481,36 +2581,7 @@ bdr_apply_main(Datum main_arg)
 	}
 
 	/* Read our connection configuration from the database */
-	bdr_apply_config = bdr_get_connection_config(
-		bdr_apply_worker->remote_sysid,
-		bdr_apply_worker->remote_timeline,
-		bdr_apply_worker->remote_dboid,
-		false);
-
-	Assert(bdr_apply_config->sysid == bdr_apply_worker->remote_sysid &&
-		   bdr_apply_config->timeline == bdr_apply_worker->remote_timeline &&
-		   bdr_apply_config->dboid == bdr_apply_worker->remote_dboid);
-
-	/*
-	 * Got default remote connection info, read also local defaults.
-	 * Otherwise we would be using replication sets and apply delay from the
-	 * remote node instead of the local one.
-	 *
-	 * Note: this is slightly hacky and we should probably use the bdr_nodes
-	 * for this instead.
-	 */
-	if (!bdr_apply_config->origin_is_my_id &&
-		!bdr_apply_config->is_unidirectional)
-	{
-		BdrConnectionConfig *cfg =
-			bdr_get_connection_config(GetSystemIdentifier(), ThisTimeLineID,
-									  MyDatabaseId, false);
-
-		bdr_apply_config->apply_delay = cfg->apply_delay;
-		pfree(bdr_apply_config->replication_sets);
-		bdr_apply_config->replication_sets = pstrdup(cfg->replication_sets);
-		bdr_free_connection_config(cfg);
-	}
+	bdr_apply_reload_config();
 
 	CurrentResourceOwner = ResourceOwnerCreate(NULL, "bdr apply top-level resource owner");
 	bdr_saved_resowner = CurrentResourceOwner;

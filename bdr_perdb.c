@@ -572,15 +572,16 @@ bdr_maintain_db_workers(void)
 
 		/*
 		 * Is there already a worker registered for this connection?
-		 *
-		 * TODO DYNCONF Each apply worker should have its latch set and respond
-		 * by checking to see whether it needs to apply any new configuration.
 		 */
-		if (find_apply_worker_slot(target_sysid, target_timeline, target_dboid, NULL) != -1)
+		if (find_apply_worker_slot(target_sysid, target_timeline, target_dboid, &worker) != -1)
 		{
 			elog(DEBUG2, "Skipping registration of worker for node "BDR_LOCALID_FORMAT" on db oid=%u: already registered",
 				 target_sysid, target_timeline, target_dboid,
 				 EMPTY_REPLICATION_NAME, MyDatabaseId);
+
+			/* Notify the worker that its config could have changed */
+			SetLatch(worker->data.apply.proclatch);
+
 			LWLockRelease(BdrWorkerCtl->lock);
 			continue;
 		}
