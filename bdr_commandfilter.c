@@ -919,11 +919,11 @@ bdr_commandfilter(Node *parsetree,
 
 		case T_AlterExtensionStmt:
 			/* XXX: we could support some of these */
-			error_unsupported_command(completionTag);
+			error_unsupported_command(CreateCommandTag(parsetree));
 			break;
 
 		case T_AlterExtensionContentsStmt:
-			error_unsupported_command(completionTag);
+			error_unsupported_command(CreateCommandTag(parsetree));
 			break;
 
 		case T_CreateFdwStmt:
@@ -934,7 +934,7 @@ bdr_commandfilter(Node *parsetree,
 		case T_AlterUserMappingStmt:
 		case T_DropUserMappingStmt:
 			/* XXX: we should probably support all of these at some point */
-			error_unsupported_command(completionTag);
+			error_unsupported_command(CreateCommandTag(parsetree));
 			break;
 
 		case T_CompositeTypeStmt:	/* CREATE TYPE (composite) */
@@ -967,14 +967,14 @@ bdr_commandfilter(Node *parsetree,
 
 		case T_RefreshMatViewStmt:
 			/* XXX: might make sense to support or not */
-			error_unsupported_command(completionTag);
+			error_unsupported_command(CreateCommandTag(parsetree));
 			break;
 
 		case T_CreateTrigStmt:
 			break;
 
 		case T_CreatePLangStmt:
-			error_unsupported_command(completionTag);
+			error_unsupported_command(CreateCommandTag(parsetree));
 			break;
 
 		case T_CreateDomainStmt:
