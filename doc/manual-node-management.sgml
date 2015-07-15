@@ -104,6 +104,12 @@
    <para>
     See also: <xref linkend="functions-node-mgmt">, <xref linkend="command-bdr-init-copy">.
    </para>
+
+   <para>
+    To view the status of the cluster then interrogate this table:- <xref linkend="bdr.bdr_nodes">.
+   </para>
+
+
   </sect2>
 
   <sect2 id="node-management-joining-bdr" xreflabel="Joining or creating a BDR node">
