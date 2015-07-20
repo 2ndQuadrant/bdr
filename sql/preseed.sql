@@ -19,3 +19,8 @@ CREATE TABLE some_local_tbl(id serial primary key, key text unique not null, dat
 INSERT INTO some_local_tbl(key, data) VALUES('key1', 'data1');
 INSERT INTO some_local_tbl(key, data) VALUES('key2', NULL);
 INSERT INTO some_local_tbl(key, data) VALUES('key3', 'data3');
+
+ALTER TABLE some_local_tbl ADD COLUMN col_to_drop text;
+UPDATE some_local_tbl SET col_to_drop = 'dropped';
+INSERT INTO some_local_tbl(key,data,col_to_drop) VALUES ('key4', 'data4', 'dropme');
+ALTER TABLE some_local_tbl DROP COLUMN col_to_drop;
