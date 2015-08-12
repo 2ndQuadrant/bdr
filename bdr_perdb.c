@@ -579,8 +579,16 @@ bdr_maintain_db_workers(void)
 				 target_sysid, target_timeline, target_dboid,
 				 EMPTY_REPLICATION_NAME, MyDatabaseId);
 
-			/* Notify the worker that its config could have changed */
-			SetLatch(worker->data.apply.proclatch);
+			/*
+			 * Notify the worker that its config could have changed.
+			 *
+			 * The latch is assigned after the worker starts, so it might be
+			 * unset if the worker slot was created but it's still in early
+			 * startup. If that's the case it hasn't read its config yet
+			 * anyway, so we don't have to set the latch.
+			 */
+			if (worker->data.apply.proclatch != NULL)
+				SetLatch(worker->data.apply.proclatch);
 
 			LWLockRelease(BdrWorkerCtl->lock);
 			continue;
