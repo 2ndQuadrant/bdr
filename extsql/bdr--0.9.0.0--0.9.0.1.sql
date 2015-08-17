@@ -417,9 +417,13 @@ BEGIN
                 ERRCODE = 'object_not_in_prerequisite_state';
         END IF;
 
-        IF connectback_nodeinfo.sysid <> localid.sysid
-           OR connectback_nodeinfo.timeline <> localid.timeline
-           OR connectback_nodeinfo.dboid <> localid.dboid
+        IF (connectback_nodeinfo.sysid, connectback_nodeinfo.timeline, connectback_nodeinfo.dboid)
+          IS DISTINCT FROM
+           (localid.sysid, localid.timeline, localid.dboid)
+          AND
+           (connectback_nodeinfo.sysid, connectback_nodeinfo.timeline, connectback_nodeinfo.dboid)
+          IS DISTINCT FROM
+           (NULL, NULL, NULL) -- Returned by old versions' dummy functions
         THEN
             RAISE USING
                 MESSAGE = 'node identity for node_external_dsn does not match current node when connecting back via remote',

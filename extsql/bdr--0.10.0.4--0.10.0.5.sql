@@ -236,11 +236,24 @@ BEGIN
         IF (remote_nodeinfo_r.sysid, remote_nodeinfo_r.timeline, remote_nodeinfo_r.dboid)
             IS DISTINCT FROM
            (remote_sysid, remote_timeline, remote_dboid)
+            AND
+           (remote_sysid, remote_timeline, remote_dboid)
+            IS DISTINCT FROM
+           (NULL, NULL, NULL)
         THEN
-            -- This just shouldn't happen, so no fancy error
+            -- This just shouldn't happen, so no fancy error.
+            -- The all-NULLs case only arises when we're connecting to a 0.7.x
+            -- peer, where we can't get the sysid etc from SQL.
             RAISE USING
                 MESSAGE = 'Replication and non-replication connections to remote node reported different node id';
         END IF;
+
+        -- In case they're NULL because of bdr_get_remote_nodeinfo
+        -- due to an old upstream
+        remote_sysid := remote_nodeinfo_r.sysid;
+        remote_timeline := remote_nodeinfo_r.timeline;
+        remote_dboid := remote_nodeinfo_r.dboid;
+
     END IF;
 
     -- Create local node record if needed
