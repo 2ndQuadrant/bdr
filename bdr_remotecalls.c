@@ -519,8 +519,6 @@ bdr_test_remote_connectback_internal(PGconn *conn,
 		struct remote_node_info *ri, const char *my_dsn)
 {
 	PGresult		*res;
-	int				i;
-	char			*remote_bdr_version_str;
 	const char *	mydsn_values[1];
 	Oid				mydsn_types[1] = { TEXTOID };
 
@@ -569,28 +567,52 @@ bdr_test_remote_connectback_internal(PGconn *conn,
 	if (PQntuples(res) != 1)
 		elog(ERROR, "Got %d tuples instead of expected 1", PQntuples(res));
 
-	for (i = 0; i < 8; i++)
+	ri->sysid_str = NULL;
+	ri->sysid = 0;
+	ri->timeline = 0;
+	ri->dboid = InvalidOid;
+	ri->variant = NULL;
+	ri->version = NULL;
+	ri->version_num = 0;
+	ri->min_remote_version_num = 0;
+	ri->is_superuser = true;
+
+	if (!PQgetisnull(res, 0, 0))
 	{
-		if (PQgetisnull(res, 0, i))
-			elog(ERROR, "Unexpectedly null field %s", PQfname(res, i));
+		ri->sysid_str = pstrdup(PQgetvalue(res, 0, 0));
+
+		if (sscanf(ri->sysid_str, UINT64_FORMAT, &ri->sysid) != 1)
+			elog(ERROR, "could not parse sysid %s", ri->sysid_str);
 	}
 
-	ri->sysid_str = pstrdup(PQgetvalue(res, 0, 0));
+	if (!PQgetisnull(res, 0, 1))
+	{
+		ri->timeline = DatumGetObjectId(
+				DirectFunctionCall1(oidin, CStringGetDatum(PQgetvalue(res, 0, 1))));
+	}
 
-	if (sscanf(ri->sysid_str, UINT64_FORMAT, &ri->sysid) != 1)
-		elog(ERROR, "could not parse sysid %s", ri->sysid_str);
+	if (!PQgetisnull(res, 0, 2))
+	{
+		ri->dboid = DatumGetObjectId(
+				DirectFunctionCall1(oidin, CStringGetDatum(PQgetvalue(res, 0, 2))));
+	}
 
-	ri->timeline = DatumGetObjectId(
-			DirectFunctionCall1(oidin, CStringGetDatum(PQgetvalue(res, 0, 1))));
-	ri->dboid = DatumGetObjectId(
-			DirectFunctionCall1(oidin, CStringGetDatum(PQgetvalue(res, 0, 2))));
+	if (PQgetisnull(res, 0, 3))
+		elog(ERROR, "variant should never be null");
 	ri->variant = pstrdup(PQgetvalue(res, 0, 3));
-	remote_bdr_version_str = PQgetvalue(res, 0, 4);
-	ri->version = pstrdup(remote_bdr_version_str);
-	ri->version_num = atoi(PQgetvalue(res, 0, 5));
-	ri->min_remote_version_num =  atoi(PQgetvalue(res, 0, 6));
-	ri->is_superuser = DatumGetBool(
-			DirectFunctionCall1(boolin, CStringGetDatum(PQgetvalue(res, 0, 7))));
+
+	if (!PQgetisnull(res, 0, 4))
+		ri->version = pstrdup(PQgetvalue(res, 0, 4));
+
+	if (!PQgetisnull(res, 0, 5))
+		ri->version_num = atoi(PQgetvalue(res, 0, 5));
+
+	if (!PQgetisnull(res, 0, 6))
+		ri->min_remote_version_num =  atoi(PQgetvalue(res, 0, 6));
+
+	if (!PQgetisnull(res, 0, 7))
+		ri->is_superuser = DatumGetBool(
+				DirectFunctionCall1(boolin, CStringGetDatum(PQgetvalue(res, 0, 7))));
 
 	PQclear(res);
 }
@@ -633,13 +655,41 @@ bdr_test_remote_connectback(PG_FUNCTION_ARGS)
 
 		bdr_test_remote_connectback_internal(conn, &ri, my_dsn);
 
-		values[0] = CStringGetTextDatum(ri.sysid_str);
-		values[1] = ObjectIdGetDatum(ri.timeline);
-		values[2] = ObjectIdGetDatum(ri.dboid);
-		values[3] = CStringGetTextDatum(ri.variant);
-		values[4] = CStringGetTextDatum(ri.version);
-		values[5] = Int32GetDatum(ri.version_num);
-		values[6] = Int32GetDatum(ri.min_remote_version_num);
+		if (ri.sysid_str != NULL)
+			values[0] = CStringGetTextDatum(ri.sysid_str);
+		else
+			isnull[0] = true;
+
+		if (ri.timeline != 0)
+			values[1] = ObjectIdGetDatum(ri.timeline);
+		else
+			isnull[1] = true;
+
+		if (ri.dboid != InvalidOid)
+			values[2] = ObjectIdGetDatum(ri.dboid);
+		else
+			isnull[2] = true;
+
+		if (ri.variant != NULL)
+			values[3] = CStringGetTextDatum(ri.variant);
+		else
+			isnull[3] = true;
+
+		if (ri.version != NULL)
+			values[4] = CStringGetTextDatum(ri.version);
+		else
+			isnull[4] = true;
+
+		if (ri.version_num != 0)
+			values[5] = Int32GetDatum(ri.version_num);
+		else
+			isnull[5] = true;
+
+		if (ri.min_remote_version_num != 0)
+			values[6] = Int32GetDatum(ri.min_remote_version_num);
+		else
+			isnull[6] = true;
+
 		values[7] = BoolGetDatum(ri.is_superuser);
 
 		returnTuple = heap_form_tuple(tupleDesc, values, isnull);
