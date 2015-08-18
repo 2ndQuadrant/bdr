@@ -509,6 +509,8 @@ CREATE TABLE bdr.bdr_connections(
 	PRIMARY KEY (conn_sysid, conn_timeline, conn_dboid, conn_origin_sysid, conn_origin_timeline, conn_origin_dboid)
 );
 
+SELECT pg_catalog.pg_extension_config_dump('bdr_connections', '');
+
 -- Modify bdr.bdr_nodes
 --
 -- 0.7.x ignores the new columns, but they must exist for 0.9.x rows to replicate
