@@ -67,34 +67,28 @@ UPDATE pg_class
 SET relname = 'bdr_missing_pk_renamed'
 WHERE relname = 'bdr_missing_pk';
 
-SELECT
-  n.nspname AS "Schema", c.relname AS "Name"
-FROM
-  pg_catalog.pg_class c
-  LEFT JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-WHERE
-  c.relkind = 'r'
-  AND c.relname LIKE 'bdr_missing_pk%'
-  AND n.nspname = 'public'
-  AND pg_catalog.pg_get_userbyid(c.relowner) = current_user
+SELECT n.nspname as "Schema",
+  c.relname as "Name"
+FROM pg_catalog.pg_class c
+     LEFT JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+WHERE c.relkind = 'r'
+  AND n.nspname !~ '^pg_toast'
+  AND c.relname ~ '^(bdr_missing_pk.*)$'
   AND pg_catalog.pg_table_is_visible(c.oid)
-ORDER BY n.nspname, c.relname;
+ORDER BY 1,2;
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
 
 \c :readdb2
 -- The catalog change should not replicate
-SELECT
-  n.nspname AS "Schema", c.relname AS "Name"
-FROM
-  pg_catalog.pg_class c
-  LEFT JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-WHERE
-  c.relkind = 'r'
-  AND c.relname LIKE 'bdr_missing_pk%'
-  AND n.nspname = 'public'
-  AND pg_catalog.pg_get_userbyid(c.relowner) = current_user
+SELECT n.nspname as "Schema",
+  c.relname as "Name"
+FROM pg_catalog.pg_class c
+     LEFT JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+WHERE c.relkind = 'r'
+  AND n.nspname !~ '^pg_toast'
+  AND c.relname ~ '^(bdr_missing_pk.*)$'
   AND pg_catalog.pg_table_is_visible(c.oid)
-ORDER BY n.nspname, c.relname;
+ORDER BY 1,2;
 
 \c :writedb1
 UPDATE pg_class
