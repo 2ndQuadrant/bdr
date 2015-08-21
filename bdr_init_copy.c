@@ -1038,7 +1038,7 @@ get_remote_info(char* remote_connstr)
 			break;
 		}
 
-		ri->replication_sets[i] = pstrdup(PQgetvalue(res, i, 0));
+		ri->replication_sets[i] = pstrdup(PQgetvalue(res, 0, 0));
 
 		PQclear(res);
 		PQfinish(remote_conn);
