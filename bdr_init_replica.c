@@ -756,7 +756,17 @@ perform_pointless_transaction(PGconn *conn, BDRNodeInfo *node)
 {
 	PGresult   *res;
 
-	res = PQexec(conn, "CREATE TEMP TABLE bdr_init(a int) ON COMMIT DROP");
+	res = PQexec(conn, "BEGIN");
+	Assert(PQresultStatus(res) == PGRES_COMMAND_OK);
+	PQclear(res);
+
+	/* This forces a real xid to be allocated even though we do no work */
+	res = PQexec(conn, "SELECT txid_current()");
+	Assert(PQresultStatus(res) == PGRES_TUPLES_OK);
+	PQclear(res);
+
+	/* BDR will still replicate the BEGIN and COMMIT of the empty tx */
+	res = PQexec(conn, "COMMIT");
 	Assert(PQresultStatus(res) == PGRES_COMMAND_OK);
 	PQclear(res);
 }
