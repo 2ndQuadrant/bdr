@@ -1039,6 +1039,13 @@ bdr_init_replica(BDRNodeInfo *local_node)
 
 			bdr_get_remote_nodeinfo_internal(nonrepl_init_conn, &ri);
 
+			if (ri.sysid == 0 && ri.timeline == 0 && ri.dboid == InvalidOid)
+			{
+				ereport(ERROR,
+						(errmsg("Could not get peer (timeline,dboid,sysid) over non-replication connection"),
+						 errdetail("Peer BDR version %s too old?", ri.version)));
+			}
+
 			/* Launch the catchup worker and wait for it to finish */
 			elog(DEBUG1, "launching catchup mode apply worker");
 			bdr_catchup_to_lsn(&ri, min_remote_lsn);
