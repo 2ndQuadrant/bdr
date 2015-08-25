@@ -592,6 +592,9 @@ $$;
 CREATE FUNCTION bdr_get_local_nodeid( sysid OUT text, timeline OUT oid, dboid OUT oid)
 RETURNS record LANGUAGE c AS 'MODULE_PATHNAME';
 
+CREATE FUNCTION bdr_variant() RETURNS text LANGUAGE sql
+AS $$ SELECT TEXT 'BDR'; $$;
+
 -- The 0.9.x internal_node_join will work verbatim. We ignore
 -- the bdr.bdr_connections_changed call, but still replicate it.
 CREATE FUNCTION bdr.internal_node_join(
