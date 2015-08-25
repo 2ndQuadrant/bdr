@@ -162,6 +162,13 @@ bdr_parse_bool(DefElem *elem, bool *res)
 }
 
 static void
+bdr_parse_str(DefElem *elem, char **res)
+{
+	bdr_parse_notnull(elem, "string");
+	*res = pstrdup(strVal(elem->arg));
+}
+
+static void
 bdr_req_param(const char *param)
 {
 	ereport(ERROR,
@@ -336,6 +343,26 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 			data->client_db_encoding = pstrdup(strVal(elem->arg));
 		else if (strcmp(elem->defname, "forward_changesets") == 0)
 			bdr_parse_bool(elem, &data->forward_changesets);
+		else if (strcmp(elem->defname, "bdr_variant") == 0)
+		{
+			char *bdr_variant;
+			bdr_parse_str(elem, &bdr_variant);
+			if (strcmp(bdr_variant, "BDR") != 0)
+				elog(ERROR, "Unsupported bdr_variant %s", bdr_variant);
+		}
+		else if (strcmp(elem->defname, "unidirectional") == 0)
+		{
+			bool unidirectional;
+			bdr_parse_bool(elem, &unidirectional);
+			if (unidirectional)
+				elog(ERROR, "Unidirectional connections not supported");
+		}
+		else if (strcmp(elem->defname, "replication_sets") == 0)
+		{
+			char *replication_sets;
+			bdr_parse_str(elem, &replication_sets);
+			elog(WARNING, "Ignored replication_sets parameter with value %s", replication_sets);
+		}
 		else
 		{
 			ereport(ERROR,
