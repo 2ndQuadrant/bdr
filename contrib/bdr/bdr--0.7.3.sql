@@ -589,5 +589,8 @@ BEGIN
 END;
 $$;
 
+CREATE FUNCTION bdr_get_local_nodeid( sysid OUT text, timeline OUT oid, dboid OUT oid)
+RETURNS record LANGUAGE c AS 'MODULE_PATHNAME';
+
 SET bdr.permit_unsafe_ddl_commands = false;
 RESET search_path;

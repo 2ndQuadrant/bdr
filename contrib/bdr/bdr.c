@@ -121,10 +121,12 @@ static void bdr_worker_shmem_create_workers(void);
 Datum bdr_apply_pause(PG_FUNCTION_ARGS);
 Datum bdr_apply_resume(PG_FUNCTION_ARGS);
 Datum bdr_version(PG_FUNCTION_ARGS);
+Datum bdr_get_local_nodeid(PG_FUNCTION_ARGS);
 
 PG_FUNCTION_INFO_V1(bdr_apply_pause);
 PG_FUNCTION_INFO_V1(bdr_apply_resume);
 PG_FUNCTION_INFO_V1(bdr_version);
+PG_FUNCTION_INFO_V1(bdr_get_local_nodeid);
 
 
 /*
@@ -1872,4 +1874,29 @@ Datum
 bdr_version(PG_FUNCTION_ARGS)
 {
 	PG_RETURN_TEXT_P(cstring_to_text(BDR_VERSION_STR));
+}
+
+
+Datum
+bdr_get_local_nodeid(PG_FUNCTION_ARGS)
+{
+	Datum		values[3];
+	bool		isnull[3] = {false, false, false};
+	TupleDesc	tupleDesc;
+	HeapTuple	returnTuple;
+	char		sysid_str[33];
+
+	if (get_call_result_type(fcinfo, NULL, &tupleDesc) != TYPEFUNC_COMPOSITE)
+		elog(ERROR, "return type must be a row type");
+
+	snprintf(sysid_str, sizeof(sysid_str), UINT64_FORMAT, GetSystemIdentifier());
+	sysid_str[sizeof(sysid_str)-1] = '\0';
+
+	values[0] = CStringGetTextDatum(sysid_str);
+	values[1] = ObjectIdGetDatum(ThisTimeLineID);
+	values[2] = ObjectIdGetDatum(MyDatabaseId);
+
+	returnTuple = heap_form_tuple(tupleDesc, values, isnull);
+
+	PG_RETURN_DATUM(HeapTupleGetDatum(returnTuple));
 }
