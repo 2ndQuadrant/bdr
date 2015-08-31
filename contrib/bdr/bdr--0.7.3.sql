@@ -526,7 +526,10 @@ CREATE FUNCTION node_name_gen_tg() RETURNS trigger
 LANGUAGE plpgsql AS
 $$
 BEGIN
-  NEW.node_name := format('bdr07_%s_%s_%s', NEW.node_sysid, NEW.node_timeline, NEW.node_dboid);
+  IF new.node_name IS NULL
+  THEN
+    NEW.node_name := format('bdr07_%s_%s_%s', NEW.node_sysid, NEW.node_timeline, NEW.node_dboid);
+  END IF;
   RETURN NEW;
 END;
 $$;
