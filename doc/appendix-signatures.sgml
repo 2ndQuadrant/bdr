@@ -21,7 +21,7 @@
  </para>
 
  <para>
-  The BDR / 9.4 RPM releases key key is in turn signed by
+  The BDR / 9.4 RPM releases key is in turn signed by
   <ulink url="http://packages.2ndquadrant.com/2NDQUADRANT-PACKAGING-MASTER-KEY.asc">
   the 2ndQuadrant master packaging/releases key with key ID
   <literal>0x2B11E054</literal></ulink>. You can <ulink
