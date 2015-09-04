@@ -166,8 +166,9 @@
    in the <literal>PATH</literal> environment variable, e.g.:
    <programlisting>
     cd /path/to/bdr-plugin-source/
-    PATH=/path/to/install:"$PATH" ./configure
+    PATH=/path/to/postgres/install/bin:"$PATH" ./configure
     make -j4 -s all
+    make -s install
    </programlisting>
   </para>
  </sect2>
