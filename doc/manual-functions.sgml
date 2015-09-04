@@ -212,6 +212,13 @@
         must be fully schema-qualified (e.g. <literal>public.mytable</literal>
         not just <literal>mytable</literal>), otherwise the error <literal>no
         schema has been selected to create in</literal> will be emitted.
+        Additionally, this function <emphasis>does not acquire the global
+        DDL lock</emphasis> so care must be taken to ensure that concurrent
+        DDL is not run on multiple nodes. <emphasis>Do not use this to
+        enqueue <literal>ALTER TABLE</literal>, <literal>DROP TABLE</literal>
+        etc on a &bdr; system</emphasis> as committed but not yet applied
+        changes from other nodes might fail to apply after the change,
+        breaking replication.
        </entry>
       </row>
 
