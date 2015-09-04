@@ -15,6 +15,28 @@
   See also: <xref linkend="upgrade">.
  </para>
 
+ <sect1 id="release-0.9.3">
+  <title>Release 0.9.3</title>
+
+  <para>
+   Version 0.9.3 is a maintenance release focused on stability.
+  </para>
+
+  <para>
+   Significant improvements to &bdr; and &udr; in this release include:
+   <itemizedlist>
+    <listitem><para>Fix bdr_internal_sequence_reset_cache on UDR (#132)</para></listitem>
+    <listitem><para>Ignore bdr.bdr_connections rows where node is dropped (#97, #50, #126)</para></listitem>
+    <listitem><para>Compatibility improvements for upgrading from 0.7.3</para></listitem>
+   </itemizedlist>
+  </para>
+
+  <para>
+   There are no compatibility-affecting changes in this release.
+  </para>
+
+ </sect1>
+
  <sect1 id="release-0.9.2">
   <title>Release 0.9.2</title>
 
