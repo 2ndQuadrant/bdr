@@ -286,7 +286,7 @@ void
 bdr_fetch_sysid_via_node_id(RepNodeId node_id, uint64 *sysid, TimeLineID *tli,
 							Oid *dboid)
 {
-	if (node_id == InvalidRepNodeId)
+	if (node_id == InvalidRepNodeId || node_id == DoNotReplicateRepNodeId)
 	{
 		/* It's the local node */
 		*sysid = GetSystemIdentifier();
