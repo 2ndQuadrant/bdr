@@ -982,7 +982,8 @@
          <listitem>
           <para>
            <literal>ALTER COLUMN ... SET (..)</literal> - is not
-           supported at the moment.
+           supported at the moment. Note however that ALTER COLUMN ... SET
+           [NOT] NULL is supported.
           </para>
          </listitem>
 
