@@ -575,7 +575,7 @@ usage(void)
 	printf(_("  -n, --node-name=NAME    name of the newly created node\n"));
 	printf(_("  --replication-sets=SETS comma separated list of replication set names to use\n"));
 	printf(_("  -s, --stop              stop the server once the initialization is done\n"));
-	printf(_("	-v                      increase logging verbosity\n"));
+	printf(_("  -v                      increase logging verbosity\n"));
 	printf(_("\nConfiguration files override:\n"));
 	printf(_("  --hba-conf              path to the new pg_hba.conf\n"));
 	printf(_("  --postgresql-conf       path to the new postgresql.conf\n"));
