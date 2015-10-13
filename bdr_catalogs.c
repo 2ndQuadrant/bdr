@@ -360,6 +360,11 @@ bdr_fetch_node_id_via_sysid(uint64 sysid, TimeLineID tli, Oid dboid)
  * If both an entry with conn_origin for this node and one with null
  * conn_origin are found, only the one specific to this node is returned,
  * as it takes precedence over any generic configuration entry.
+ *
+ * Connections for nodes with state 'k'illed are not returned.
+ * Connections in other states are, since we should fail (and retry)
+ * until they're ready to accept slot creation. Connections with
+ * no corresponding bdr.bdr_nodes row also get ignored.
  */
 List*
 bdr_read_connection_configs()
@@ -394,12 +399,17 @@ bdr_read_connection_configs()
 							 "  conn_is_unidirectional, "
 							 "  conn_origin_dboid <> 0 AS origin_is_my_id "
 							 "FROM bdr.bdr_connections "
+							 "INNER JOIN bdr.bdr_nodes "
+							 "  ON (conn_sysid = node_sysid AND "
+							 "      conn_timeline = node_timeline AND "
+							 "      conn_dboid = node_dboid) "
 							 "WHERE (conn_origin_sysid = '0' "
 							 "  AND  conn_origin_timeline = 0 "
 							 "  AND  conn_origin_dboid = 0) "
 							 "   OR (conn_origin_sysid = $1 "
 							 "  AND  conn_origin_timeline = $2 "
 							 "  AND  conn_origin_dboid = $3) "
+							 "  AND node_status <> 'k' "
 							 "ORDER BY conn_sysid, conn_timeline, conn_dboid, "
 							 "         conn_origin_sysid ASC NULLS LAST, "
 							 "         conn_timeline ASC NULLS LAST, "
