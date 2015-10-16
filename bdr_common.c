@@ -33,3 +33,13 @@ bdr_slot_name(Name slot_name, uint64 sysid, TimeLineID tlid,
 			 EMPTY_REPLICATION_NAME);
 	NameStr(*slot_name)[NAMEDATALEN-1] = '\0';
 }
+
+void
+bdr_repident_name(Name ident_name, uint64 sysid, TimeLineID tlid,
+				  Oid dboid, Oid local_dboid)
+{
+	snprintf(NameStr(*ident_name), NAMEDATALEN, BDR_NODE_ID_FORMAT,
+			 sysid, tlid, dboid, local_dboid,
+			 EMPTY_REPLICATION_NAME);
+	NameStr(*ident_name)[NAMEDATALEN-1] = '\0';
+}

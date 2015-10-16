@@ -327,13 +327,21 @@ bdr_parse_slot_name(const char *sname, uint64 *remote_sysid, TimeLineID *remote_
 RepNodeId
 bdr_fetch_node_id_via_sysid(uint64 sysid, TimeLineID tli, Oid dboid)
 {
-	char		ident[256];
+	NameData	ident_name;
+	bdr_repident_name(&ident_name, sysid, tli, dboid, MyDatabaseId);
+	return GetReplicationIdentifier(NameStr(ident_name), false);
+}
 
-	snprintf(ident, sizeof(ident),
-			 BDR_NODE_ID_FORMAT,
-			 sysid, tli, dboid, MyDatabaseId,
-			 "");
-	return GetReplicationIdentifier(ident, false);
+void
+bdr_parse_ident_name(const char *iname, uint64 *remote_sysid, TimeLineID *remote_tli,
+					Oid *remote_dboid, Oid *local_dboid)
+{
+	NameData	replication_name;
+
+	if (sscanf(iname, BDR_NODE_ID_FORMAT,
+			   remote_sysid, remote_tli, remote_dboid, local_dboid,
+			   NameStr(replication_name)) != 4)
+		elog(ERROR, "could not parse replication identifier name: %s", iname);
 }
 
 /*

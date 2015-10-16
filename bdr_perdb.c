@@ -20,6 +20,7 @@
 
 #include "access/xact.h"
 
+#include "catalog/pg_replication_identifier.h"
 #include "catalog/pg_type.h"
 
 #include "commands/dbcommands.h"
@@ -33,6 +34,8 @@
 /* For struct Port only! */
 #include "libpq/libpq-be.h"
 
+#include "replication/replication_identifier.h"
+
 #include "storage/latch.h"
 #include "storage/lwlock.h"
 #include "storage/proc.h"
@@ -43,6 +46,7 @@
 #include "utils/guc.h"
 #include "utils/memutils.h"
 #include "utils/snapmgr.h"
+#include "utils/tqual.h"
 
 PGDLLEXPORT Datum bdr_get_apply_pid(PG_FUNCTION_ARGS);
 
@@ -386,10 +390,20 @@ bdr_maintain_db_workers(void)
 		}
 		else
 		{
-			List *drop = NIL;
+			/* stuff for dropping slots */
+			List *dropslots = NIL;
 			ListCell *dc;
 			bool we_were_dropped;
 			NameData slot_name_dropped; /* slot of the dropped node */
+
+			/* stuff for dropping replication identifiers */
+			List *dropidents = NIL;
+			NameData ident_name_dropped; /* replication identifier of the dropped node */
+			HeapTuple tuple = NULL;
+			Relation rel;
+			SnapshotData SnapshotDirty;
+			SysScanDesc scan;
+			int			i;
 
 			/* if a remote node (got) parted, we can easily drop their slot */
 			bdr_slot_name(&slot_name_dropped,
@@ -400,6 +414,15 @@ bdr_maintain_db_workers(void)
 				node_timeline == ThisTimeLineID &&
 				node_datoid == MyDatabaseId;
 
+			/*
+			 * Scan replication slots and drop either all bdr slots for this db
+			 * (if the local node got parted) or just the slot from the parted
+			 * node (if a peer got parted).
+			 *
+			 * Since we're doing a scan of the table anyway, we can also check
+			 * if the slot from a dropped peer exists and queue it for dropping
+			 * if found.
+			 */
 			LWLockAcquire(ReplicationSlotControlLock, LW_SHARED);
 			for (i = 0; i < max_replication_slots; i++)
 			{
@@ -412,35 +435,122 @@ bdr_maintain_db_workers(void)
 					continue;
 
 				if (we_were_dropped &&
-					s->data.database == MyDatabaseId)
+					s->data.database == MyDatabaseId &&
+					/* only drop slots that are BDR slots */
+					strncmp("bdr_", NameStr(s->data.name), strlen("bdr_")) == 0)
 				{
-					elog(LOG, "need to drop slot %s as we got parted",
+					elog(DEBUG1, "need to drop slot %s as we got parted",
 						 NameStr(s->data.name));
-					drop = lappend(drop, pstrdup(NameStr(s->data.name)));
+					dropslots = lappend(dropslots, pstrdup(NameStr(s->data.name)));
 				}
 
 				if (strcmp(NameStr(s->data.name),
 						   NameStr(slot_name_dropped)) == 0)
 				{
-					elog(LOG, "need to drop slot %s of dropped node",
+					elog(DEBUG1, "need to drop slot %s of dropped node",
 						 NameStr(s->data.name));
-					drop = lappend(drop, pstrdup(NameStr(s->data.name)));
+					dropslots = lappend(dropslots, pstrdup(NameStr(s->data.name)));
 				}
 			}
 			LWLockRelease(ReplicationSlotControlLock);
 
-			foreach(dc, drop)
+			foreach(dc, dropslots)
 			{
 				char *slot_name = (char *) lfirst(dc);
-				elog(LOG, "dropping slot %s due to node part", slot_name);
+				elog(DEBUG1, "dropping slot %s due to node part", slot_name);
 				ReplicationSlotDrop(slot_name);
-				elog(LOG, "dropped slot %s due to node part", slot_name);
+				elog(DEBUG1, "dropped slot %s due to node part", slot_name);
 			}
 
+			list_free_deep(dropslots);
+
+
 			/*
-			 * TODO: It'd be a good idea to set the slot to dead (in contrast
-			 * to being killed) here. That way we wouldn't constantly rescan
-			 * killed nodes.
+			 * Now do much the same thing for replication identifiers, which are
+			 * also a limited resource. Drop all BDR identifiers on this DB if
+			 * we got parted, or drop the peer's if it got parted.
+			 *
+			 * Replication identifiers are in a catalog table so we'll do
+			 * a dirty seqscan of it.
+			 */
+			Assert(IsTransactionState());
+
+			bdr_repident_name(&ident_name_dropped,
+							  node_sysid, node_timeline, node_datoid,
+							  MyDatabaseId);
+
+			InitDirtySnapshot(SnapshotDirty);
+
+			rel = heap_open(ReplicationIdentifierRelationId, ExclusiveLock);
+
+			/* seqscan */
+			scan = systable_beginscan(rel, InvalidOid,
+									  false /* indexOK */,
+									  &SnapshotDirty,
+									  0, NULL);
+
+			while (HeapTupleIsValid(tuple = systable_getnext(scan)))
+			{
+				Form_pg_replication_identifier	ident;
+				char *riname;
+
+				ident = (Form_pg_replication_identifier)GETSTRUCT(tuple);
+				riname = text_to_cstring(&ident->riname);
+
+				/* if it's not a bdr repident, we can just ignore it */
+				if (strncmp("bdr_", riname, strlen("bdr_")) == 0)
+				{
+					/*
+					 * If we got parted, remove all bdr idents. The identifier
+					 * isn't associated with a specific DB by any field,
+					 * so we have to parse its name. yuk.
+					 */
+					uint64 remote_sysid;
+					TimeLineID remote_tli;
+					Oid remote_dboid, local_dboid;
+
+					bdr_parse_ident_name(riname, &remote_sysid, &remote_tli,
+										 &remote_dboid, &local_dboid);
+
+					if (we_were_dropped && local_dboid == MyDatabaseId)
+					{
+						dropidents = lappend(dropidents, riname);
+						continue; /* riname not freed here */
+					}
+					else if (remote_sysid == GetSystemIdentifier() &&
+							 remote_tli == ThisTimeLineID &&
+							 remote_dboid == MyDatabaseId)
+					{
+						/* It's a replication identifier for a killed peer */
+						dropidents = lappend(dropidents, riname);
+						continue; /* riname not freed here */
+					}
+				}
+
+				/* this name is of no further interest */
+				pfree(riname);
+			}
+
+			systable_endscan(scan);
+			CommandCounterIncrement();
+			heap_close(rel, ExclusiveLock);
+
+			foreach(dc, dropidents)
+			{
+				char *ident_name = (char*) lfirst(dc);
+				RepNodeId ident;
+				elog(DEBUG1, "dropping replication identifier %s due to node part", ident_name);
+				ident = GetReplicationIdentifier(ident_name, false);
+				DropReplicationIdentifier(ident);
+				elog(DEBUG1, "dropped replication identifier %s due to node part", ident_name);
+			}
+
+			list_free_deep(dropidents);
+
+			/*
+			 * TODO: It'd be a good idea to set the node status to dead (in
+			 * contrast to being killed) here. That way we wouldn't constantly
+			 * rescan killed nodes.
 			 */
 		}
 

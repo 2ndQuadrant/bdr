@@ -77,9 +77,17 @@ extern void bdr_free_connection_config(BdrConnectionConfig *cfg);
 
 extern void bdr_slot_name(Name slot_name, uint64 sysid, TimeLineID tlid,
 						  Oid dboid, Oid local_dboid);
-extern void bdr_parse_slot_name(const char *name, uint64 *remote_sysid,
+
+extern void bdr_repident_name(Name ident_name, uint64 sysid,
+							  TimeLineID tlid, Oid dboid, Oid local_dboid);
+
+extern void bdr_parse_slot_name(const char *sname, uint64 *remote_sysid,
 								Oid *remote_dboid, TimeLineID *remote_tli,
 								Oid *local_dboid);
+
+extern void bdr_parse_ident_name(const char *iname, uint64 *remote_sysid,
+								 TimeLineID *remote_tli, Oid *remote_dboid,
+								 Oid *local_dboid);
 
 extern int bdr_find_other_exec(const char *argv0, const char *target,
 							   uint32 *version, char *retpath);

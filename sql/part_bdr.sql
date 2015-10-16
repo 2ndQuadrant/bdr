@@ -70,11 +70,15 @@ SELECT * FROM pg_replication_slots;
 
 -- Zero active connections
 SELECT count(*) FROM pg_stat_replication;
--- and the node state for the removed node should show 'k'
+-- the node state for the removed node should show 'k'
 SELECT node_name, node_status FROM bdr.bdr_nodes ORDER BY node_name;
+-- the slots from dropped=>remaining, and remaining=>dropped, are gone
+SELECT slot_name FROM pg_replication_slots ORDER BY slot_name;
+-- and the replication identifiers should be too
+SELECT riname FROM pg_replication_identifier ORDER BY riname;
 
 \c postgres
--- ... on both nodes.
+-- the node state for the removed node should show 'k' on the other node too
 SELECT node_name, node_status FROM bdr.bdr_nodes ORDER BY node_name;
 
 \c regression
