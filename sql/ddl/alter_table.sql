@@ -149,9 +149,15 @@ DROP TABLE test_tbl;
 --- INHERITANCE ---
 \c postgres
 
-CREATE TABLE test_inh_root (id int, val1 varchar, val2 int);
-CREATE TABLE test_inh_chld1 () INHERITS (test_inh_root);
+CREATE TABLE test_inh_root (id int primary key, val1 varchar, val2 int);
+CREATE TABLE test_inh_chld1 (child1col int) INHERITS (test_inh_root);
 CREATE TABLE test_inh_chld2 () INHERITS (test_inh_chld1);
+
+INSERT INTO test_inh_root(id, val1, val2)
+SELECT x, x::text, x%4 FROM generate_series(1,10) x;
+
+INSERT INTO test_inh_chld1(id, val1, val2, child1col)
+SELECT x, x::text, x%4+1, x*2 FROM generate_series(11,20) x;
 
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 \d+ test_inh_root
@@ -161,6 +167,10 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
 \d+ test_inh_root
 \d+ test_inh_chld1
 \d+ test_inh_chld2
+
+SELECT * FROM test_inh_root;
+SELECT * FROM test_inh_chld1;
+SELECT * FROM test_inh_chld2;
 
 SET bdr.permit_unsafe_ddl_commands = true;
 ALTER TABLE test_inh_root ADD CONSTRAINT idchk CHECK (id > 0);
@@ -176,6 +186,48 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
 \d+ test_inh_root
 \d+ test_inh_chld1
 \d+ test_inh_chld2
+
+\c regression
+
+SELECT * FROM test_inh_root;
+SELECT * FROM test_inh_chld1;
+SELECT * FROM test_inh_chld2;
+
+-- Should fail with an ERROR
+ALTER TABLE public.test_inh_chld1 NO INHERIT public.test_inh_root;
+
+-- Will also fail with an ERROR
+SELECT bdr.bdr_replicate_ddl_command('ALTER TABLE public.test_inh_chld1 NO INHERIT public.test_inh_root;');
+
+-- Will be permitted
+BEGIN;
+SET LOCAL bdr.permit_unsafe_ddl_commands = true;
+SELECT bdr.bdr_replicate_ddl_command('ALTER TABLE public.test_inh_chld1 NO INHERIT public.test_inh_root;');
+COMMIT;
+
+SELECT * FROM test_inh_root;
+SELECT * FROM test_inh_chld1;
+SELECT * FROM test_inh_chld2;
+
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+
+\c postgres
+
+SELECT * FROM test_inh_root;
+SELECT * FROM test_inh_chld1;
+SELECT * FROM test_inh_chld2;
+
+DELETE FROM test_inh_root WHERE val2 = 0;
+INSERT INTO test_inh_root(id, val1, val2) VALUES (200, 'root', 1);
+INSERT INTO test_inh_chld1(id, val1, val2, child1col) VALUES (200, 'child', 0, 0);
+
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+
+\c regression
+
+SELECT * FROM test_inh_root;
+SELECT * FROM test_inh_chld1;
+SELECT * FROM test_inh_chld2;
 
 DROP TABLE test_inh_chld2;
 DROP TABLE test_inh_chld1;

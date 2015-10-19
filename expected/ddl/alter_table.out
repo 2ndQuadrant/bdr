@@ -527,9 +527,13 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
 DROP TABLE test_tbl;
 --- INHERITANCE ---
 \c postgres
-CREATE TABLE test_inh_root (id int, val1 varchar, val2 int);
-CREATE TABLE test_inh_chld1 () INHERITS (test_inh_root);
+CREATE TABLE test_inh_root (id int primary key, val1 varchar, val2 int);
+CREATE TABLE test_inh_chld1 (child1col int) INHERITS (test_inh_root);
 CREATE TABLE test_inh_chld2 () INHERITS (test_inh_chld1);
+INSERT INTO test_inh_root(id, val1, val2)
+SELECT x, x::text, x%4 FROM generate_series(1,10) x;
+INSERT INTO test_inh_chld1(id, val1, val2, child1col)
+SELECT x, x::text, x%4+1, x*2 FROM generate_series(11,20) x;
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
  pg_xlog_wait_remote_apply 
 ---------------------------
@@ -541,28 +545,32 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
                           Table "public.test_inh_root"
  Column |       Type        | Modifiers | Storage  | Stats target | Description 
 --------+-------------------+-----------+----------+--------------+-------------
- id     | integer           |           | plain    |              | 
+ id     | integer           | not null  | plain    |              | 
  val1   | character varying |           | extended |              | 
  val2   | integer           |           | plain    |              | 
+Indexes:
+    "test_inh_root_pkey" PRIMARY KEY, btree (id)
 Child tables: test_inh_chld1
 
 \d+ test_inh_chld1
-                         Table "public.test_inh_chld1"
- Column |       Type        | Modifiers | Storage  | Stats target | Description 
---------+-------------------+-----------+----------+--------------+-------------
- id     | integer           |           | plain    |              | 
- val1   | character varying |           | extended |              | 
- val2   | integer           |           | plain    |              | 
+                           Table "public.test_inh_chld1"
+  Column   |       Type        | Modifiers | Storage  | Stats target | Description 
+-----------+-------------------+-----------+----------+--------------+-------------
+ id        | integer           | not null  | plain    |              | 
+ val1      | character varying |           | extended |              | 
+ val2      | integer           |           | plain    |              | 
+ child1col | integer           |           | plain    |              | 
 Inherits: test_inh_root
 Child tables: test_inh_chld2
 
 \d+ test_inh_chld2
-                         Table "public.test_inh_chld2"
- Column |       Type        | Modifiers | Storage  | Stats target | Description 
---------+-------------------+-----------+----------+--------------+-------------
- id     | integer           |           | plain    |              | 
- val1   | character varying |           | extended |              | 
- val2   | integer           |           | plain    |              | 
+                           Table "public.test_inh_chld2"
+  Column   |       Type        | Modifiers | Storage  | Stats target | Description 
+-----------+-------------------+-----------+----------+--------------+-------------
+ id        | integer           | not null  | plain    |              | 
+ val1      | character varying |           | extended |              | 
+ val2      | integer           |           | plain    |              | 
+ child1col | integer           |           | plain    |              | 
 Inherits: test_inh_chld1
 
 \c regression
@@ -570,29 +578,78 @@ Inherits: test_inh_chld1
                           Table "public.test_inh_root"
  Column |       Type        | Modifiers | Storage  | Stats target | Description 
 --------+-------------------+-----------+----------+--------------+-------------
- id     | integer           |           | plain    |              | 
+ id     | integer           | not null  | plain    |              | 
  val1   | character varying |           | extended |              | 
  val2   | integer           |           | plain    |              | 
+Indexes:
+    "test_inh_root_pkey" PRIMARY KEY, btree (id)
 Child tables: test_inh_chld1
 
 \d+ test_inh_chld1
-                         Table "public.test_inh_chld1"
- Column |       Type        | Modifiers | Storage  | Stats target | Description 
---------+-------------------+-----------+----------+--------------+-------------
- id     | integer           |           | plain    |              | 
- val1   | character varying |           | extended |              | 
- val2   | integer           |           | plain    |              | 
+                           Table "public.test_inh_chld1"
+  Column   |       Type        | Modifiers | Storage  | Stats target | Description 
+-----------+-------------------+-----------+----------+--------------+-------------
+ id        | integer           | not null  | plain    |              | 
+ val1      | character varying |           | extended |              | 
+ val2      | integer           |           | plain    |              | 
+ child1col | integer           |           | plain    |              | 
 Inherits: test_inh_root
 Child tables: test_inh_chld2
 
 \d+ test_inh_chld2
-                         Table "public.test_inh_chld2"
- Column |       Type        | Modifiers | Storage  | Stats target | Description 
---------+-------------------+-----------+----------+--------------+-------------
- id     | integer           |           | plain    |              | 
- val1   | character varying |           | extended |              | 
- val2   | integer           |           | plain    |              | 
+                           Table "public.test_inh_chld2"
+  Column   |       Type        | Modifiers | Storage  | Stats target | Description 
+-----------+-------------------+-----------+----------+--------------+-------------
+ id        | integer           | not null  | plain    |              | 
+ val1      | character varying |           | extended |              | 
+ val2      | integer           |           | plain    |              | 
+ child1col | integer           |           | plain    |              | 
 Inherits: test_inh_chld1
+
+SELECT * FROM test_inh_root;
+ id | val1 | val2 
+----+------+------
+  1 | 1    |    1
+  2 | 2    |    2
+  3 | 3    |    3
+  4 | 4    |    0
+  5 | 5    |    1
+  6 | 6    |    2
+  7 | 7    |    3
+  8 | 8    |    0
+  9 | 9    |    1
+ 10 | 10   |    2
+ 11 | 11   |    4
+ 12 | 12   |    1
+ 13 | 13   |    2
+ 14 | 14   |    3
+ 15 | 15   |    4
+ 16 | 16   |    1
+ 17 | 17   |    2
+ 18 | 18   |    3
+ 19 | 19   |    4
+ 20 | 20   |    1
+(20 rows)
+
+SELECT * FROM test_inh_chld1;
+ id | val1 | val2 | child1col 
+----+------+------+-----------
+ 11 | 11   |    4 |        22
+ 12 | 12   |    1 |        24
+ 13 | 13   |    2 |        26
+ 14 | 14   |    3 |        28
+ 15 | 15   |    4 |        30
+ 16 | 16   |    1 |        32
+ 17 | 17   |    2 |        34
+ 18 | 18   |    3 |        36
+ 19 | 19   |    4 |        38
+ 20 | 20   |    1 |        40
+(10 rows)
+
+SELECT * FROM test_inh_chld2;
+ id | val1 | val2 | child1col 
+----+------+------+-----------
+(0 rows)
 
 SET bdr.permit_unsafe_ddl_commands = true;
 ALTER TABLE test_inh_root ADD CONSTRAINT idchk CHECK (id > 0);
@@ -610,30 +667,34 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
                           Table "public.test_inh_root"
  Column |       Type        | Modifiers | Storage  | Stats target | Description 
 --------+-------------------+-----------+----------+--------------+-------------
- id     | integer           |           | plain    |              | 
+ id     | integer           | not null  | plain    |              | 
  val1   | character varying |           | extended |              | 
  val2   | integer           |           | plain    |              | 
+Indexes:
+    "test_inh_root_pkey" PRIMARY KEY, btree (id)
 Child tables: test_inh_chld1
 
 \d+ test_inh_chld1
-                         Table "public.test_inh_chld1"
- Column |       Type        | Modifiers | Storage  | Stats target | Description 
---------+-------------------+-----------+----------+--------------+-------------
- id     | integer           | default 1 | plain    |              | 
- val1   | character varying |           | extended |              | 
- val2   | integer           |           | plain    |              | 
+                               Table "public.test_inh_chld1"
+  Column   |       Type        |     Modifiers      | Storage  | Stats target | Description 
+-----------+-------------------+--------------------+----------+--------------+-------------
+ id        | integer           | not null default 1 | plain    |              | 
+ val1      | character varying |                    | extended |              | 
+ val2      | integer           |                    | plain    |              | 
+ child1col | integer           |                    | plain    |              | 
 Check constraints:
     "idchk" CHECK (id > 0)
 Inherits: test_inh_root
 Child tables: test_inh_chld2
 
 \d+ test_inh_chld2
-                         Table "public.test_inh_chld2"
- Column |       Type        | Modifiers | Storage  | Stats target | Description 
---------+-------------------+-----------+----------+--------------+-------------
- id     | integer           |           | plain    |              | 
- val1   | character varying |           | extended |              | 
- val2   | integer           |           | plain    |              | 
+                           Table "public.test_inh_chld2"
+  Column   |       Type        | Modifiers | Storage  | Stats target | Description 
+-----------+-------------------+-----------+----------+--------------+-------------
+ id        | integer           | not null  | plain    |              | 
+ val1      | character varying |           | extended |              | 
+ val2      | integer           |           | plain    |              | 
+ child1col | integer           |           | plain    |              | 
 Check constraints:
     "idchk" CHECK (id > 0)
 Inherits: test_inh_chld1
@@ -643,33 +704,224 @@ Inherits: test_inh_chld1
                           Table "public.test_inh_root"
  Column |       Type        | Modifiers | Storage  | Stats target | Description 
 --------+-------------------+-----------+----------+--------------+-------------
- id     | integer           |           | plain    |              | 
+ id     | integer           | not null  | plain    |              | 
  val1   | character varying |           | extended |              | 
  val2   | integer           |           | plain    |              | 
+Indexes:
+    "test_inh_root_pkey" PRIMARY KEY, btree (id)
 Child tables: test_inh_chld1
 
 \d+ test_inh_chld1
-                         Table "public.test_inh_chld1"
- Column |       Type        | Modifiers | Storage  | Stats target | Description 
---------+-------------------+-----------+----------+--------------+-------------
- id     | integer           | default 1 | plain    |              | 
- val1   | character varying |           | extended |              | 
- val2   | integer           |           | plain    |              | 
+                               Table "public.test_inh_chld1"
+  Column   |       Type        |     Modifiers      | Storage  | Stats target | Description 
+-----------+-------------------+--------------------+----------+--------------+-------------
+ id        | integer           | not null default 1 | plain    |              | 
+ val1      | character varying |                    | extended |              | 
+ val2      | integer           |                    | plain    |              | 
+ child1col | integer           |                    | plain    |              | 
 Check constraints:
     "idchk" CHECK (id > 0)
 Inherits: test_inh_root
 Child tables: test_inh_chld2
 
 \d+ test_inh_chld2
-                         Table "public.test_inh_chld2"
- Column |       Type        | Modifiers | Storage  | Stats target | Description 
---------+-------------------+-----------+----------+--------------+-------------
- id     | integer           |           | plain    |              | 
- val1   | character varying |           | extended |              | 
- val2   | integer           |           | plain    |              | 
+                           Table "public.test_inh_chld2"
+  Column   |       Type        | Modifiers | Storage  | Stats target | Description 
+-----------+-------------------+-----------+----------+--------------+-------------
+ id        | integer           | not null  | plain    |              | 
+ val1      | character varying |           | extended |              | 
+ val2      | integer           |           | plain    |              | 
+ child1col | integer           |           | plain    |              | 
 Check constraints:
     "idchk" CHECK (id > 0)
 Inherits: test_inh_chld1
+
+\c regression
+SELECT * FROM test_inh_root;
+ id | val1 | val2 
+----+------+------
+  1 | 1    |    1
+  2 | 2    |    2
+  3 | 3    |    3
+  4 | 4    |    0
+  5 | 5    |    1
+  6 | 6    |    2
+  7 | 7    |    3
+  8 | 8    |    0
+  9 | 9    |    1
+ 10 | 10   |    2
+ 11 | 11   |    4
+ 12 | 12   |    1
+ 13 | 13   |    2
+ 14 | 14   |    3
+ 15 | 15   |    4
+ 16 | 16   |    1
+ 17 | 17   |    2
+ 18 | 18   |    3
+ 19 | 19   |    4
+ 20 | 20   |    1
+(20 rows)
+
+SELECT * FROM test_inh_chld1;
+ id | val1 | val2 | child1col 
+----+------+------+-----------
+ 11 | 11   |    4 |        22
+ 12 | 12   |    1 |        24
+ 13 | 13   |    2 |        26
+ 14 | 14   |    3 |        28
+ 15 | 15   |    4 |        30
+ 16 | 16   |    1 |        32
+ 17 | 17   |    2 |        34
+ 18 | 18   |    3 |        36
+ 19 | 19   |    4 |        38
+ 20 | 20   |    1 |        40
+(10 rows)
+
+SELECT * FROM test_inh_chld2;
+ id | val1 | val2 | child1col 
+----+------+------+-----------
+(0 rows)
+
+-- Should fail with an ERROR
+ALTER TABLE public.test_inh_chld1 NO INHERIT public.test_inh_root;
+ERROR:  ALTER TABLE ... [NO] INHERIT may only affect UNLOGGED or TEMPORARY tables when BDR is active; test_inh_chld1 is a regular table
+-- Will also fail with an ERROR
+SELECT bdr.bdr_replicate_ddl_command('ALTER TABLE public.test_inh_chld1 NO INHERIT public.test_inh_root;');
+ERROR:  ALTER TABLE ... [NO] INHERIT may only affect UNLOGGED or TEMPORARY tables when BDR is active; test_inh_chld1 is a regular table
+CONTEXT:  during DDL replay of ddl statement: ALTER TABLE public.test_inh_chld1 NO INHERIT public.test_inh_root;
+-- Will be permitted
+BEGIN;
+SET LOCAL bdr.permit_unsafe_ddl_commands = true;
+SELECT bdr.bdr_replicate_ddl_command('ALTER TABLE public.test_inh_chld1 NO INHERIT public.test_inh_root;');
+ bdr_replicate_ddl_command 
+---------------------------
+ 
+(1 row)
+
+COMMIT;
+SELECT * FROM test_inh_root;
+ id | val1 | val2 
+----+------+------
+  1 | 1    |    1
+  2 | 2    |    2
+  3 | 3    |    3
+  4 | 4    |    0
+  5 | 5    |    1
+  6 | 6    |    2
+  7 | 7    |    3
+  8 | 8    |    0
+  9 | 9    |    1
+ 10 | 10   |    2
+(10 rows)
+
+SELECT * FROM test_inh_chld1;
+ id | val1 | val2 | child1col 
+----+------+------+-----------
+ 11 | 11   |    4 |        22
+ 12 | 12   |    1 |        24
+ 13 | 13   |    2 |        26
+ 14 | 14   |    3 |        28
+ 15 | 15   |    4 |        30
+ 16 | 16   |    1 |        32
+ 17 | 17   |    2 |        34
+ 18 | 18   |    3 |        36
+ 19 | 19   |    4 |        38
+ 20 | 20   |    1 |        40
+(10 rows)
+
+SELECT * FROM test_inh_chld2;
+ id | val1 | val2 | child1col 
+----+------+------+-----------
+(0 rows)
+
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\c postgres
+SELECT * FROM test_inh_root;
+ id | val1 | val2 
+----+------+------
+  1 | 1    |    1
+  2 | 2    |    2
+  3 | 3    |    3
+  4 | 4    |    0
+  5 | 5    |    1
+  6 | 6    |    2
+  7 | 7    |    3
+  8 | 8    |    0
+  9 | 9    |    1
+ 10 | 10   |    2
+(10 rows)
+
+SELECT * FROM test_inh_chld1;
+ id | val1 | val2 | child1col 
+----+------+------+-----------
+ 11 | 11   |    4 |        22
+ 12 | 12   |    1 |        24
+ 13 | 13   |    2 |        26
+ 14 | 14   |    3 |        28
+ 15 | 15   |    4 |        30
+ 16 | 16   |    1 |        32
+ 17 | 17   |    2 |        34
+ 18 | 18   |    3 |        36
+ 19 | 19   |    4 |        38
+ 20 | 20   |    1 |        40
+(10 rows)
+
+SELECT * FROM test_inh_chld2;
+ id | val1 | val2 | child1col 
+----+------+------+-----------
+(0 rows)
+
+DELETE FROM test_inh_root WHERE val2 = 0;
+INSERT INTO test_inh_root(id, val1, val2) VALUES (200, 'root', 1);
+INSERT INTO test_inh_chld1(id, val1, val2, child1col) VALUES (200, 'child', 0, 0);
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\c regression
+SELECT * FROM test_inh_root;
+ id  | val1 | val2 
+-----+------+------
+   1 | 1    |    1
+   2 | 2    |    2
+   3 | 3    |    3
+   5 | 5    |    1
+   6 | 6    |    2
+   7 | 7    |    3
+   9 | 9    |    1
+  10 | 10   |    2
+ 200 | root |    1
+(9 rows)
+
+SELECT * FROM test_inh_chld1;
+ id  | val1  | val2 | child1col 
+-----+-------+------+-----------
+  11 | 11    |    4 |        22
+  12 | 12    |    1 |        24
+  13 | 13    |    2 |        26
+  14 | 14    |    3 |        28
+  15 | 15    |    4 |        30
+  16 | 16    |    1 |        32
+  17 | 17    |    2 |        34
+  18 | 18    |    3 |        36
+  19 | 19    |    4 |        38
+  20 | 20    |    1 |        40
+ 200 | child |    0 |         0
+(11 rows)
+
+SELECT * FROM test_inh_chld2;
+ id | val1 | val2 | child1col 
+----+------+------+-----------
+(0 rows)
 
 DROP TABLE test_inh_chld2;
 DROP TABLE test_inh_chld1;
