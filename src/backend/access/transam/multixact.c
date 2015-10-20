@@ -171,6 +171,8 @@
 #define MULTIXACT_MEMBER_DANGER_THRESHOLD	\
 	(MaxMultiXactOffset - MaxMultiXactOffset / 4)
 
+#define PreviousMultiXactId(xid) \
+	((xid) == FirstMultiXactId ? MaxMultiXactId : (xid) - 1)
 
 /*
  * Links to shared-memory data structures for MultiXact control
@@ -982,10 +984,7 @@ GetNewMultiXactId(int nmembers, MultiXactOffset *offset)
 	 * Note these are pretty much the same protections in GetNewTransactionId.
 	 *----------
 	 */
-	if (!MultiXactIdPrecedes(result, MultiXactState->multiVacLimit) ||
-		!MultiXactState->oldestOffsetKnown ||
-		(MultiXactState->nextOffset - MultiXactState->oldestOffset
-		 > MULTIXACT_MEMBER_SAFE_THRESHOLD))
+	if (!MultiXactIdPrecedes(result, MultiXactState->multiVacLimit))
 	{
 		/*
 		 * For safety's sake, we release MultiXactGenLock while sending
@@ -1001,18 +1000,16 @@ GetNewMultiXactId(int nmembers, MultiXactOffset *offset)
 
 		LWLockRelease(MultiXactGenLock);
 
-		/*
-		 * To avoid swamping the postmaster with signals, we issue the autovac
-		 * request only once per 64K multis generated.  This still gives
-		 * plenty of chances before we get into real trouble.
-		 */
-		if (IsUnderPostmaster && (result % 65536) == 0)
-			SendPostmasterSignal(PMSIGNAL_START_AUTOVAC_LAUNCHER);
-
 		if (IsUnderPostmaster &&
 			!MultiXactIdPrecedes(result, multiStopLimit))
 		{
 			char	   *oldest_datname = get_database_name(oldest_datoid);
+
+			/*
+			 * Immediately kick autovacuum into action as we're already
+			 * in ERROR territory.
+			 */
+			SendPostmasterSignal(PMSIGNAL_START_AUTOVAC_LAUNCHER);
 
 			/* complain even if that DB has disappeared */
 			if (oldest_datname)
@@ -1030,7 +1027,16 @@ GetNewMultiXactId(int nmembers, MultiXactOffset *offset)
 				 errhint("Execute a database-wide VACUUM in that database.\n"
 						 "You might also need to commit or roll back old prepared transactions.")));
 		}
-		else if (!MultiXactIdPrecedes(result, multiWarnLimit))
+
+		/*
+		 * To avoid swamping the postmaster with signals, we issue the autovac
+		 * request only once per 64K multis generated.  This still gives
+		 * plenty of chances before we get into real trouble.
+		 */
+		if (IsUnderPostmaster && (result % 65536) == 0)
+			SendPostmasterSignal(PMSIGNAL_START_AUTOVAC_LAUNCHER);
+
+		if (!MultiXactIdPrecedes(result, multiWarnLimit))
 		{
 			char	   *oldest_datname = get_database_name(oldest_datoid);
 
@@ -1101,6 +1107,10 @@ GetNewMultiXactId(int nmembers, MultiXactOffset *offset)
 	if (MultiXactState->offsetStopLimitKnown &&
 		MultiXactOffsetWouldWrap(MultiXactState->offsetStopLimit, nextOffset,
 								 nmembers))
+	{
+		/* see comment in the corresponding offsets wraparound case */
+		SendPostmasterSignal(PMSIGNAL_START_AUTOVAC_LAUNCHER);
+
 		ereport(ERROR,
 				(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
 				 errmsg("multixact \"members\" limit exceeded"),
@@ -1111,10 +1121,33 @@ GetNewMultiXactId(int nmembers, MultiXactOffset *offset)
 						   MultiXactState->offsetStopLimit - nextOffset - 1),
 				 errhint("Execute a database-wide VACUUM in database with OID %u with reduced vacuum_multixact_freeze_min_age and vacuum_multixact_freeze_table_age settings.",
 						 MultiXactState->oldestMultiXactDB)));
-	else if (MultiXactState->offsetStopLimitKnown &&
-			 MultiXactOffsetWouldWrap(MultiXactState->offsetStopLimit,
-									  nextOffset,
-									  nmembers + MULTIXACT_MEMBERS_PER_PAGE * SLRU_PAGES_PER_SEGMENT * OFFSET_WARN_SEGMENTS))
+	}
+
+	/*
+	 * Check whether we should kick autovacuum into action, to prevent members
+	 * wraparound. NB we use a much larger window to trigger autovacuum than
+	 * just the warning limit. The warning is just a measure of last resort -
+	 * this is in line with GetNewTransactionId's behaviour.
+	 */
+	if (!MultiXactState->oldestOffsetKnown ||
+		(MultiXactState->nextOffset - MultiXactState->oldestOffset
+		 > MULTIXACT_MEMBER_SAFE_THRESHOLD))
+	{
+		/*
+		 * To avoid swamping the postmaster with signals, we issue the autovac
+		 * request only when crossing a segment boundary. With default
+		 * compilation settings that's rougly after 50k members.  This still
+		 * gives plenty of chances before we get into real trouble.
+		 */
+		if ((MXOffsetToMemberPage(nextOffset) / SLRU_PAGES_PER_SEGMENT) !=
+			(MXOffsetToMemberPage(nextOffset + nmembers) / SLRU_PAGES_PER_SEGMENT))
+			SendPostmasterSignal(PMSIGNAL_START_AUTOVAC_LAUNCHER);
+	}
+
+	if (MultiXactState->offsetStopLimitKnown &&
+		MultiXactOffsetWouldWrap(MultiXactState->offsetStopLimit,
+								 nextOffset,
+								 nmembers + MULTIXACT_MEMBERS_PER_PAGE * SLRU_PAGES_PER_SEGMENT * OFFSET_WARN_SEGMENTS))
 		ereport(WARNING,
 				(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
 				 errmsg("database with OID %u must be vacuumed before %d more multixact members are used",
@@ -2681,6 +2714,18 @@ SetOffsetVacuumLimit(bool finish_setup)
 	}
 
 	/*
+	 * If we failed to get the oldest offset this time, but we have a value
+	 * from a previous pass through this function, assess the need for
+	 * autovacuum based on that old value rather than automatically forcing
+	 * it.
+	 */
+	if (prevOldestOffsetKnown && !oldestOffsetKnown)
+	{
+		oldestOffset = prevOldestOffset;
+		oldestOffsetKnown = true;
+	}
+
+	/*
 	 * Do we need an emergency autovacuum?  If we're not sure, assume yes.
 	 */
 	return !oldestOffsetKnown ||
@@ -3033,9 +3078,15 @@ TruncateMultiXact(void)
 
 	SlruScanDirectory(MultiXactMemberCtl, SlruScanDirCbRemoveMembers, &range);
 
-	/* Now we can truncate MultiXactOffset */
+	/*
+	 * Now we can truncate MultiXactOffset.  We step back one multixact to
+	 * avoid passing a cutoff page that hasn't been created yet in the rare
+	 * case that oldestMXact would be the first item on a page and oldestMXact
+	 * == nextMXact.  In that case, if we didn't subtract one, we'd trigger
+	 * SimpleLruTruncate's wraparound detection.
+	 */
 	SimpleLruTruncate(MultiXactOffsetCtl,
-					  MultiXactIdToOffsetPage(oldestMXact));
+				  MultiXactIdToOffsetPage(PreviousMultiXactId(oldestMXact)));
 
 	/*
 	 * Now, and only now, we can advance the stop point for multixact members.

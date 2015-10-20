@@ -1844,11 +1844,32 @@ GetXLogBuffer(XLogRecPtr ptr)
 	endptr = XLogCtl->xlblocks[idx];
 	if (expectedEndPtr != endptr)
 	{
+		XLogRecPtr	initializedUpto;
+
 		/*
-		 * Let others know that we're finished inserting the record up to the
-		 * page boundary.
+		 * Before calling AdvanceXLInsertBuffer(), which can block, let others
+		 * know how far we're finished with inserting the record.
+		 *
+		 * NB: If 'ptr' points to just after the page header, advertise a
+		 * position at the beginning of the page rather than 'ptr' itself. If
+		 * there are no other insertions running, someone might try to flush
+		 * up to our advertised location. If we advertised a position after
+		 * the page header, someone might try to flush the page header, even
+		 * though page might actually not be initialized yet. As the first
+		 * inserter on the page, we are effectively responsible for making
+		 * sure that it's initialized, before we let insertingAt to move past
+		 * the page header.
 		 */
-		WALInsertLockUpdateInsertingAt(expectedEndPtr - XLOG_BLCKSZ);
+		if (ptr % XLOG_BLCKSZ == SizeOfXLogShortPHD &&
+			ptr % XLOG_SEG_SIZE > XLOG_BLCKSZ)
+			initializedUpto = ptr - SizeOfXLogShortPHD;
+		else if (ptr % XLOG_BLCKSZ == SizeOfXLogLongPHD &&
+				 ptr % XLOG_SEG_SIZE < XLOG_BLCKSZ)
+			initializedUpto = ptr - SizeOfXLogLongPHD;
+		else
+			initializedUpto = ptr;
+
+		WALInsertLockUpdateInsertingAt(initializedUpto);
 
 		AdvanceXLInsertBuffer(ptr, false);
 		endptr = XLogCtl->xlblocks[idx];
@@ -2260,9 +2281,9 @@ AdvanceXLInsertBuffer(XLogRecPtr upto, bool opportunistic)
 	LWLockRelease(WALBufMappingLock);
 
 #ifdef WAL_DEBUG
-	if (npages > 0)
+	if (XLOG_DEBUG && npages > 0)
 	{
-		elog(DEBUG1, "initialized %d pages, upto %X/%X",
+		elog(DEBUG1, "initialized %d pages, up to %X/%X",
 			 npages, (uint32) (NewPageEndPtr >> 32), (uint32) NewPageEndPtr);
 	}
 #endif
@@ -6011,6 +6032,10 @@ do { \
 /*
  * Check to see if required parameters are set high enough on this server
  * for various aspects of recovery operation.
+ *
+ * Note that all the parameters which this function tests need to be
+ * listed in Administrator's Overview section in high-availability.sgml.
+ * If you change them, don't forget to update the list.
  */
 static void
 CheckRequiredParameterValues(void)
@@ -11352,6 +11377,16 @@ CheckForStandbyTrigger(void)
 						TriggerFile)));
 
 	return false;
+}
+
+/*
+ * Remove the files signaling a standby promotion request.
+ */
+void
+RemovePromoteSignalFiles(void)
+{
+	unlink(PROMOTE_SIGNAL_FILE);
+	unlink(FALLBACK_PROMOTE_SIGNAL_FILE);
 }
 
 /*

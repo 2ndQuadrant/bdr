@@ -34,7 +34,7 @@
 
 #include "regex/regguts.h"
 
-#include "miscadmin.h"			/* needed by rcancelrequested() */
+#include "miscadmin.h"			/* needed by rcancelrequested/rstacktoodeep */
 
 /*
  * forward declarations, up here so forward datatypes etc. are defined early
@@ -70,6 +70,7 @@ static int	newlacon(struct vars *, struct state *, struct state *, int);
 static void freelacons(struct subre *, int);
 static void rfree(regex_t *);
 static int	rcancelrequested(void);
+static int	rstacktoodeep(void);
 
 #ifdef REG_DEBUG
 static void dump(regex_t *, FILE *);
@@ -152,7 +153,7 @@ static int	push(struct nfa *, struct arc *);
 #define COMPATIBLE	3			/* compatible but not satisfied yet */
 static int	combine(struct arc *, struct arc *);
 static void fixempties(struct nfa *, FILE *);
-static struct state *emptyreachable(struct state *, struct state *);
+static struct state *emptyreachable(struct nfa *, struct state *, struct state *);
 static void replaceempty(struct nfa *, struct state *, struct state *);
 static void cleanup(struct nfa *);
 static void markreachable(struct nfa *, struct state *, struct state *, struct state *);
@@ -228,7 +229,7 @@ struct vars
 	struct subre *tree;			/* subexpression tree */
 	struct subre *treechain;	/* all tree nodes allocated */
 	struct subre *treefree;		/* any free tree nodes */
-	int			ntree;			/* number of tree nodes */
+	int			ntree;			/* number of tree nodes, plus one */
 	struct cvec *cv;			/* interface cvec */
 	struct cvec *cv2;			/* utility cvec */
 	struct subre *lacons;		/* lookahead-constraint vector */
@@ -279,7 +280,8 @@ struct vars
 /* static function list */
 static const struct fns functions = {
 	rfree,						/* regfree insides */
-	rcancelrequested			/* check for cancel request */
+	rcancelrequested,			/* check for cancel request */
+	rstacktoodeep				/* check for stack getting dangerously deep */
 };
 
 
@@ -568,21 +570,26 @@ makesearch(struct vars * v,
 	 * splitting each such state into progress and no-progress states.
 	 */
 
-	/* first, make a list of the states */
+	/* first, make a list of the states reachable from pre and elsewhere */
 	slist = NULL;
 	for (a = pre->outs; a != NULL; a = a->outchain)
 	{
 		s = a->to;
 		for (b = s->ins; b != NULL; b = b->inchain)
+		{
 			if (b->from != pre)
 				break;
+		}
+
+		/*
+		 * We want to mark states as being in the list already by having non
+		 * NULL tmp fields, but we can't just store the old slist value in tmp
+		 * because that doesn't work for the first such state.  Instead, the
+		 * first list entry gets its own address in tmp.
+		 */
 		if (b != NULL && s->tmp == NULL)
 		{
-			/*
-			 * Must be split if not already in the list (fixes bugs 505048,
-			 * 230589, 840258, 504785).
-			 */
-			s->tmp = slist;
+			s->tmp = (slist != NULL) ? slist : s;
 			slist = s;
 		}
 	}
@@ -601,7 +608,7 @@ makesearch(struct vars * v,
 				freearc(nfa, a);
 			}
 		}
-		s2 = s->tmp;
+		s2 = (s->tmp != s) ? s->tmp : NULL;
 		s->tmp = NULL;			/* clean up while we're at it */
 	}
 }
@@ -942,6 +949,7 @@ parseqatom(struct vars * v,
 			NOERR();
 			assert(v->nextvalue > 0);
 			atom = subre(v, 'b', BACKR, lp, rp);
+			NOERR();
 			subno = v->nextvalue;
 			atom->subno = subno;
 			EMPTYARC(lp, rp);	/* temporarily, so there's something */
@@ -1076,6 +1084,7 @@ parseqatom(struct vars * v,
 
 	/* break remaining subRE into x{...} and what follows */
 	t = subre(v, '.', COMBINE(qprefer, atom->flags), lp, rp);
+	NOERR();
 	t->left = atom;
 	atomp = &t->left;
 
@@ -1084,6 +1093,7 @@ parseqatom(struct vars * v,
 	/* split top into prefix and remaining */
 	assert(top->op == '=' && top->left == NULL && top->right == NULL);
 	top->left = subre(v, '=', top->flags, top->begin, lp);
+	NOERR();
 	top->op = '.';
 	top->right = t;
 
@@ -1618,6 +1628,16 @@ subre(struct vars * v,
 {
 	struct subre *ret = v->treefree;
 
+	/*
+	 * Checking for stack overflow here is sufficient to protect parse() and
+	 * its recursive subroutines.
+	 */
+	if (STACK_TOO_DEEP(v->re))
+	{
+		ERR(REG_ETOOBIG);
+		return NULL;
+	}
+
 	if (ret != NULL)
 		v->treefree = ret->left;
 	else
@@ -1928,6 +1948,22 @@ static int
 rcancelrequested(void)
 {
 	return InterruptPending && (QueryCancelPending || ProcDiePending);
+}
+
+/*
+ * rstacktoodeep - check for stack getting dangerously deep
+ *
+ * Return nonzero to fail the operation with error code REG_ETOOBIG,
+ * zero to keep going
+ *
+ * The current implementation is Postgres-specific.  If we ever get around
+ * to splitting the regex code out as a standalone library, there will need
+ * to be some API to let applications define a callback function for this.
+ */
+static int
+rstacktoodeep(void)
+{
+	return stack_is_too_deep();
 }
 
 #ifdef REG_DEBUG

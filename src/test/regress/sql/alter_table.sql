@@ -339,6 +339,10 @@ explain (costs off) select * from nv_parent where d between '2009-08-01'::date a
 alter table nv_child_2011 VALIDATE CONSTRAINT nv_child_2011_d_check;
 explain (costs off) select * from nv_parent where d between '2009-08-01'::date and '2009-08-31'::date;
 
+-- add an inherited NOT VALID constraint
+alter table nv_parent add check (d between '2001-01-01'::date and '2099-12-31'::date) not valid;
+\d nv_child_2009
+-- we leave nv_parent and children around to help test pg_dump logic
 
 -- Foreign key adding test with mixed types
 
@@ -1174,6 +1178,7 @@ insert into anothertab (atcol1, atcol2) values (default, false);
 select * from anothertab;
 
 alter table anothertab alter column atcol1 type boolean; -- fails
+alter table anothertab alter column atcol1 type boolean using atcol1::int; -- fails
 alter table anothertab alter column atcol1 type integer;
 
 select * from anothertab;
@@ -1269,7 +1274,8 @@ DROP TABLE check_fk_presence_1, check_fk_presence_2;
 --
 drop type lockmodes;
 create type lockmodes as enum (
- 'AccessShareLock'
+ 'SIReadLock'
+,'AccessShareLock'
 ,'RowShareLock'
 ,'RowExclusiveLock'
 ,'ShareUpdateExclusiveLock'

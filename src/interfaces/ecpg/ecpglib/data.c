@@ -132,6 +132,13 @@ ecpg_get_data(const PGresult *results, int act_tuple, int act_field, int lineno,
 	int			value_for_indicator = 0;
 	long		log_offset;
 
+	if (sqlca == NULL)
+	{
+		ecpg_raise(lineno, ECPG_OUT_OF_MEMORY,
+				   ECPG_SQLSTATE_ECPG_OUT_OF_MEMORY, NULL);
+		return (false);
+	}
+
 	/*
 	 * If we are running in a regression test, do not log the offset variable,
 	 * it depends on the machine's alignment.
@@ -415,27 +422,13 @@ ecpg_get_data(const PGresult *results, int act_tuple, int act_field, int lineno,
 				case ECPGt_bool:
 					if (pval[0] == 'f' && pval[1] == '\0')
 					{
-						if (offset == sizeof(char))
-							*((char *) (var + offset * act_tuple)) = false;
-						else if (offset == sizeof(int))
-							*((int *) (var + offset * act_tuple)) = false;
-						else
-							ecpg_raise(lineno, ECPG_CONVERT_BOOL,
-									   ECPG_SQLSTATE_DATATYPE_MISMATCH,
-									   NULL);
+						*((bool *) (var + offset * act_tuple)) = false;
 						pval++;
 						break;
 					}
 					else if (pval[0] == 't' && pval[1] == '\0')
 					{
-						if (offset == sizeof(char))
-							*((char *) (var + offset * act_tuple)) = true;
-						else if (offset == sizeof(int))
-							*((int *) (var + offset * act_tuple)) = true;
-						else
-							ecpg_raise(lineno, ECPG_CONVERT_BOOL,
-									   ECPG_SQLSTATE_DATATYPE_MISMATCH,
-									   NULL);
+						*((bool *) (var + offset * act_tuple)) = true;
 						pval++;
 						break;
 					}

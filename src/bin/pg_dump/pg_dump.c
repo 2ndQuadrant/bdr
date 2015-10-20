@@ -172,6 +172,7 @@ static void dumpType(Archive *fout, TypeInfo *tyinfo);
 static void dumpBaseType(Archive *fout, TypeInfo *tyinfo);
 static void dumpEnumType(Archive *fout, TypeInfo *tyinfo);
 static void dumpRangeType(Archive *fout, TypeInfo *tyinfo);
+static void dumpUndefinedType(Archive *fout, TypeInfo *tyinfo);
 static void dumpDomain(Archive *fout, TypeInfo *tyinfo);
 static void dumpCompositeType(Archive *fout, TypeInfo *tyinfo);
 static void dumpCompositeTypeColComments(Archive *fout, TypeInfo *tyinfo);
@@ -515,6 +516,11 @@ main(int argc, char **argv)
 
 			case 'Z':			/* Compression Level */
 				compressLevel = atoi(optarg);
+				if (compressLevel < 0 || compressLevel > 9)
+				{
+					write_msg(NULL, "compression level must be in range 0..9\n");
+					exit_nicely(1);
+				}
 				break;
 
 			case 0:
@@ -1329,11 +1335,6 @@ selectDumpableType(TypeInfo *tyinfo)
 	/* dump only types in dumpable namespaces */
 	if (!tyinfo->dobj.namespace->dobj.dump)
 		tyinfo->dobj.dump = false;
-
-	/* skip undefined placeholder types */
-	else if (!tyinfo->isDefined)
-		tyinfo->dobj.dump = false;
-
 	else
 		tyinfo->dobj.dump = true;
 }
@@ -3280,7 +3281,7 @@ getTypes(Archive *fout, int *numTypes)
 	else if (fout->remoteVersion >= 80300)
 	{
 		appendPQExpBuffer(query, "SELECT tableoid, oid, typname, "
-						  "typnamespace, '{=U}' AS typacl, "
+						  "typnamespace, NULL AS typacl, "
 						  "(%s typowner) AS rolname, "
 						  "typinput::oid AS typinput, "
 						  "typoutput::oid AS typoutput, typelem, typrelid, "
@@ -3295,7 +3296,7 @@ getTypes(Archive *fout, int *numTypes)
 	else if (fout->remoteVersion >= 70300)
 	{
 		appendPQExpBuffer(query, "SELECT tableoid, oid, typname, "
-						  "typnamespace, '{=U}' AS typacl, "
+						  "typnamespace, NULL AS typacl, "
 						  "(%s typowner) AS rolname, "
 						  "typinput::oid AS typinput, "
 						  "typoutput::oid AS typoutput, typelem, typrelid, "
@@ -3309,7 +3310,7 @@ getTypes(Archive *fout, int *numTypes)
 	else if (fout->remoteVersion >= 70100)
 	{
 		appendPQExpBuffer(query, "SELECT tableoid, oid, typname, "
-						  "0::oid AS typnamespace, '{=U}' AS typacl, "
+						  "0::oid AS typnamespace, NULL AS typacl, "
 						  "(%s typowner) AS rolname, "
 						  "typinput::oid AS typinput, "
 						  "typoutput::oid AS typoutput, typelem, typrelid, "
@@ -3325,7 +3326,7 @@ getTypes(Archive *fout, int *numTypes)
 		appendPQExpBuffer(query, "SELECT "
 		 "(SELECT oid FROM pg_class WHERE relname = 'pg_type') AS tableoid, "
 						  "oid, typname, "
-						  "0::oid AS typnamespace, '{=U}' AS typacl, "
+						  "0::oid AS typnamespace, NULL AS typacl, "
 						  "(%s typowner) AS rolname, "
 						  "typinput::oid AS typinput, "
 						  "typoutput::oid AS typoutput, typelem, typrelid, "
@@ -3470,7 +3471,7 @@ getTypes(Archive *fout, int *numTypes)
 			}
 		}
 
-		if (strlen(tyinfo[i].rolname) == 0 && tyinfo[i].isDefined)
+		if (strlen(tyinfo[i].rolname) == 0)
 			write_msg(NULL, "WARNING: owner of data type \"%s\" appears to be invalid\n",
 					  tyinfo[i].dobj.name);
 	}
@@ -4016,7 +4017,7 @@ getAggregates(Archive *fout, int *numAggs)
 				  "CASE WHEN aggbasetype = 0 THEN 0 ELSE 1 END AS pronargs, "
 						  "aggbasetype AS proargtypes, "
 						  "(%s aggowner) AS rolname, "
-						  "'{=X}' AS aggacl "
+						  "NULL AS aggacl "
 						  "FROM pg_aggregate "
 						  "where oid > '%u'::oid",
 						  username_subquery,
@@ -4031,7 +4032,7 @@ getAggregates(Archive *fout, int *numAggs)
 				  "CASE WHEN aggbasetype = 0 THEN 0 ELSE 1 END AS pronargs, "
 						  "aggbasetype AS proargtypes, "
 						  "(%s aggowner) AS rolname, "
-						  "'{=X}' AS aggacl "
+						  "NULL AS aggacl "
 						  "FROM pg_aggregate "
 						  "where oid > '%u'::oid",
 						  username_subquery,
@@ -4175,7 +4176,7 @@ getFuncs(Archive *fout, int *numFuncs)
 		appendPQExpBuffer(query,
 						  "SELECT tableoid, oid, proname, prolang, "
 						  "pronargs, proargtypes, prorettype, "
-						  "'{=X}' AS proacl, "
+						  "NULL AS proacl, "
 						  "0::oid AS pronamespace, "
 						  "(%s proowner) AS rolname "
 						  "FROM pg_proc "
@@ -4191,7 +4192,7 @@ getFuncs(Archive *fout, int *numFuncs)
 						  " WHERE relname = 'pg_proc') AS tableoid, "
 						  "oid, proname, prolang, "
 						  "pronargs, proargtypes, prorettype, "
-						  "'{=X}' AS proacl, "
+						  "NULL AS proacl, "
 						  "0::oid AS pronamespace, "
 						  "(%s proowner) AS rolname "
 						  "FROM pg_proc "
@@ -6026,7 +6027,7 @@ getProcLangs(Archive *fout, int *numProcLangs)
 		/* pg_language has a laninline column */
 		appendPQExpBuffer(query, "SELECT tableoid, oid, "
 						  "lanname, lanpltrusted, lanplcallfoid, "
-						  "laninline, lanvalidator,  lanacl, "
+						  "laninline, lanvalidator, lanacl, "
 						  "(%s lanowner) AS lanowner "
 						  "FROM pg_language "
 						  "WHERE lanispl "
@@ -6038,7 +6039,7 @@ getProcLangs(Archive *fout, int *numProcLangs)
 		/* pg_language has a lanowner column */
 		appendPQExpBuffer(query, "SELECT tableoid, oid, "
 						  "lanname, lanpltrusted, lanplcallfoid, "
-						  "lanvalidator,  lanacl, "
+						  "0 AS laninline, lanvalidator, lanacl, "
 						  "(%s lanowner) AS lanowner "
 						  "FROM pg_language "
 						  "WHERE lanispl "
@@ -6048,7 +6049,9 @@ getProcLangs(Archive *fout, int *numProcLangs)
 	else if (fout->remoteVersion >= 80100)
 	{
 		/* Languages are owned by the bootstrap superuser, OID 10 */
-		appendPQExpBuffer(query, "SELECT tableoid, oid, *, "
+		appendPQExpBuffer(query, "SELECT tableoid, oid, "
+						  "lanname, lanpltrusted, lanplcallfoid, "
+						  "0 AS laninline, lanvalidator, lanacl, "
 						  "(%s '10') AS lanowner "
 						  "FROM pg_language "
 						  "WHERE lanispl "
@@ -6058,27 +6061,47 @@ getProcLangs(Archive *fout, int *numProcLangs)
 	else if (fout->remoteVersion >= 70400)
 	{
 		/* Languages are owned by the bootstrap superuser, sysid 1 */
-		appendPQExpBuffer(query, "SELECT tableoid, oid, *, "
+		appendPQExpBuffer(query, "SELECT tableoid, oid, "
+						  "lanname, lanpltrusted, lanplcallfoid, "
+						  "0 AS laninline, lanvalidator, lanacl, "
 						  "(%s '1') AS lanowner "
 						  "FROM pg_language "
 						  "WHERE lanispl "
 						  "ORDER BY oid",
 						  username_subquery);
 	}
-	else if (fout->remoteVersion >= 70100)
+	else if (fout->remoteVersion >= 70300)
 	{
 		/* No clear notion of an owner at all before 7.4 ... */
-		appendPQExpBufferStr(query, "SELECT tableoid, oid, * FROM pg_language "
-							 "WHERE lanispl "
-							 "ORDER BY oid");
+		appendPQExpBuffer(query, "SELECT tableoid, oid, "
+						  "lanname, lanpltrusted, lanplcallfoid, "
+						  "0 AS laninline, lanvalidator, lanacl, "
+						  "NULL AS lanowner "
+						  "FROM pg_language "
+						  "WHERE lanispl "
+						  "ORDER BY oid");
+	}
+	else if (fout->remoteVersion >= 70100)
+	{
+		appendPQExpBuffer(query, "SELECT tableoid, oid, "
+						  "lanname, lanpltrusted, lanplcallfoid, "
+						"0 AS laninline, 0 AS lanvalidator, NULL AS lanacl, "
+						  "NULL AS lanowner "
+						  "FROM pg_language "
+						  "WHERE lanispl "
+						  "ORDER BY oid");
 	}
 	else
 	{
-		appendPQExpBufferStr(query, "SELECT "
-							 "(SELECT oid FROM pg_class WHERE relname = 'pg_language') AS tableoid, "
-							 "oid, * FROM pg_language "
-							 "WHERE lanispl "
-							 "ORDER BY oid");
+		appendPQExpBuffer(query, "SELECT "
+						  "(SELECT oid FROM pg_class WHERE relname = 'pg_language') AS tableoid, "
+						  "oid, "
+						  "lanname, lanpltrusted, lanplcallfoid, "
+						"0 AS laninline, 0 AS lanvalidator, NULL AS lanacl, "
+						  "NULL AS lanowner "
+						  "FROM pg_language "
+						  "WHERE lanispl "
+						  "ORDER BY oid");
 	}
 
 	res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
@@ -6094,7 +6117,6 @@ getProcLangs(Archive *fout, int *numProcLangs)
 	i_lanname = PQfnumber(res, "lanname");
 	i_lanpltrusted = PQfnumber(res, "lanpltrusted");
 	i_lanplcallfoid = PQfnumber(res, "lanplcallfoid");
-	/* these may fail and return -1: */
 	i_laninline = PQfnumber(res, "laninline");
 	i_lanvalidator = PQfnumber(res, "lanvalidator");
 	i_lanacl = PQfnumber(res, "lanacl");
@@ -6110,22 +6132,10 @@ getProcLangs(Archive *fout, int *numProcLangs)
 		planginfo[i].dobj.name = pg_strdup(PQgetvalue(res, i, i_lanname));
 		planginfo[i].lanpltrusted = *(PQgetvalue(res, i, i_lanpltrusted)) == 't';
 		planginfo[i].lanplcallfoid = atooid(PQgetvalue(res, i, i_lanplcallfoid));
-		if (i_laninline >= 0)
-			planginfo[i].laninline = atooid(PQgetvalue(res, i, i_laninline));
-		else
-			planginfo[i].laninline = InvalidOid;
-		if (i_lanvalidator >= 0)
-			planginfo[i].lanvalidator = atooid(PQgetvalue(res, i, i_lanvalidator));
-		else
-			planginfo[i].lanvalidator = InvalidOid;
-		if (i_lanacl >= 0)
-			planginfo[i].lanacl = pg_strdup(PQgetvalue(res, i, i_lanacl));
-		else
-			planginfo[i].lanacl = pg_strdup("{=U}");
-		if (i_lanowner >= 0)
-			planginfo[i].lanowner = pg_strdup(PQgetvalue(res, i, i_lanowner));
-		else
-			planginfo[i].lanowner = pg_strdup("");
+		planginfo[i].laninline = atooid(PQgetvalue(res, i, i_laninline));
+		planginfo[i].lanvalidator = atooid(PQgetvalue(res, i, i_lanvalidator));
+		planginfo[i].lanacl = pg_strdup(PQgetvalue(res, i, i_lanacl));
+		planginfo[i].lanowner = pg_strdup(PQgetvalue(res, i, i_lanowner));
 
 		if (fout->remoteVersion < 70300)
 		{
@@ -8143,6 +8153,8 @@ dumpType(Archive *fout, TypeInfo *tyinfo)
 		dumpEnumType(fout, tyinfo);
 	else if (tyinfo->typtype == TYPTYPE_RANGE)
 		dumpRangeType(fout, tyinfo);
+	else if (tyinfo->typtype == TYPTYPE_PSEUDO && !tyinfo->isDefined)
+		dumpUndefinedType(fout, tyinfo);
 	else
 		write_msg(NULL, "WARNING: typtype of data type \"%s\" appears to be invalid\n",
 				  tyinfo->dobj.name);
@@ -8407,6 +8419,73 @@ dumpRangeType(Archive *fout, TypeInfo *tyinfo)
 	destroyPQExpBuffer(delq);
 	destroyPQExpBuffer(labelq);
 	destroyPQExpBuffer(query);
+}
+
+/*
+ * dumpUndefinedType
+ *	  writes out to fout the queries to recreate a !typisdefined type
+ *
+ * This is a shell type, but we use different terminology to distinguish
+ * this case from where we have to emit a shell type definition to break
+ * circular dependencies.  An undefined type shouldn't ever have anything
+ * depending on it.
+ */
+static void
+dumpUndefinedType(Archive *fout, TypeInfo *tyinfo)
+{
+	PQExpBuffer q = createPQExpBuffer();
+	PQExpBuffer delq = createPQExpBuffer();
+	PQExpBuffer labelq = createPQExpBuffer();
+	char	   *qtypname;
+
+	qtypname = pg_strdup(fmtId(tyinfo->dobj.name));
+
+	/*
+	 * DROP must be fully qualified in case same name appears in pg_catalog.
+	 */
+	appendPQExpBuffer(delq, "DROP TYPE %s.",
+					  fmtId(tyinfo->dobj.namespace->dobj.name));
+	appendPQExpBuffer(delq, "%s;\n",
+					  qtypname);
+
+	if (binary_upgrade)
+		binary_upgrade_set_type_oids_by_type_oid(fout,
+												 q, tyinfo->dobj.catId.oid);
+
+	appendPQExpBuffer(q, "CREATE TYPE %s;\n",
+					  qtypname);
+
+	appendPQExpBuffer(labelq, "TYPE %s", qtypname);
+
+	if (binary_upgrade)
+		binary_upgrade_extension_member(q, &tyinfo->dobj, labelq->data);
+
+	ArchiveEntry(fout, tyinfo->dobj.catId, tyinfo->dobj.dumpId,
+				 tyinfo->dobj.name,
+				 tyinfo->dobj.namespace->dobj.name,
+				 NULL,
+				 tyinfo->rolname, false,
+				 "TYPE", SECTION_PRE_DATA,
+				 q->data, delq->data, NULL,
+				 NULL, 0,
+				 NULL, NULL);
+
+	/* Dump Type Comments and Security Labels */
+	dumpComment(fout, labelq->data,
+				tyinfo->dobj.namespace->dobj.name, tyinfo->rolname,
+				tyinfo->dobj.catId, 0, tyinfo->dobj.dumpId);
+	dumpSecLabel(fout, labelq->data,
+				 tyinfo->dobj.namespace->dobj.name, tyinfo->rolname,
+				 tyinfo->dobj.catId, 0, tyinfo->dobj.dumpId);
+
+	dumpACL(fout, tyinfo->dobj.catId, tyinfo->dobj.dumpId, "TYPE",
+			qtypname, NULL, tyinfo->dobj.name,
+			tyinfo->dobj.namespace->dobj.name,
+			tyinfo->rolname, tyinfo->typacl);
+
+	destroyPQExpBuffer(q);
+	destroyPQExpBuffer(delq);
+	destroyPQExpBuffer(labelq);
 }
 
 /*
@@ -14048,8 +14127,8 @@ dumpConstraint(Archive *fout, ConstraintInfo *coninfo)
 	{
 		/* CHECK constraint on a table */
 
-		/* Ignore if not to be dumped separately */
-		if (coninfo->separate)
+		/* Ignore if not to be dumped separately, or if it was inherited */
+		if (coninfo->separate && coninfo->conislocal)
 		{
 			/* not ONLY since we want it to propagate to children */
 			appendPQExpBuffer(q, "ALTER TABLE %s\n",
@@ -14769,13 +14848,12 @@ dumpEventTrigger(Archive *fout, EventTriggerInfo *evtinfo)
 	appendPQExpBufferStr(query, fmtId(evtinfo->dobj.name));
 	appendPQExpBufferStr(query, " ON ");
 	appendPQExpBufferStr(query, fmtId(evtinfo->evtevent));
-	appendPQExpBufferStr(query, " ");
 
 	if (strcmp("", evtinfo->evttags) != 0)
 	{
 		appendPQExpBufferStr(query, "\n         WHEN TAG IN (");
 		appendPQExpBufferStr(query, evtinfo->evttags);
-		appendPQExpBufferStr(query, ") ");
+		appendPQExpBufferChar(query, ')');
 	}
 
 	appendPQExpBufferStr(query, "\n   EXECUTE PROCEDURE ");
@@ -15223,6 +15301,7 @@ getExtensionMembership(Archive *fout, ExtensionInfo extinfo[],
 		addObjectDependency(&contable->dataObj->dobj,
 							reftable->dataObj->dobj.dumpId);
 	}
+	PQclear(res);
 	destroyPQExpBuffer(query);
 }
 

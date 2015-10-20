@@ -447,10 +447,14 @@ struct fns
 {
 	void		FUNCPTR(free, (regex_t *));
 	int			FUNCPTR(cancel_requested, (void));
+	int			FUNCPTR(stack_too_deep, (void));
 };
 
 #define CANCEL_REQUESTED(re)  \
 	((*((struct fns *) (re)->re_fns)->cancel_requested) ())
+
+#define STACK_TOO_DEEP(re)	\
+	((*((struct fns *) (re)->re_fns)->stack_too_deep) ())
 
 
 /*
@@ -465,7 +469,7 @@ struct guts
 	size_t		nsub;			/* copy of re_nsub */
 	struct subre *tree;
 	struct cnfa search;			/* for fast preliminary search */
-	int			ntree;			/* number of subre's, less one */
+	int			ntree;			/* number of subre's, plus one */
 	struct colormap cmap;
 	int			FUNCPTR(compare, (const chr *, const chr *, size_t));
 	struct subre *lacons;		/* lookahead-constraint vector */

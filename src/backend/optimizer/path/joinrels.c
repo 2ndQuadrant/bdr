@@ -331,7 +331,7 @@ join_is_legal(PlannerInfo *root, RelOptInfo *rel1, RelOptInfo *rel2,
 	SpecialJoinInfo *match_sjinfo;
 	bool		reversed;
 	bool		unique_ified;
-	bool		is_valid_inner;
+	bool		must_be_leftjoin;
 	bool		lateral_fwd;
 	bool		lateral_rev;
 	ListCell   *l;
@@ -346,12 +346,12 @@ join_is_legal(PlannerInfo *root, RelOptInfo *rel1, RelOptInfo *rel2,
 	/*
 	 * If we have any special joins, the proposed join might be illegal; and
 	 * in any case we have to determine its join type.  Scan the join info
-	 * list for conflicts.
+	 * list for matches and conflicts.
 	 */
 	match_sjinfo = NULL;
 	reversed = false;
 	unique_ified = false;
-	is_valid_inner = true;
+	must_be_leftjoin = false;
 
 	foreach(l, root->join_info_list)
 	{
@@ -402,7 +402,8 @@ join_is_legal(PlannerInfo *root, RelOptInfo *rel1, RelOptInfo *rel2,
 		 * If one input contains min_lefthand and the other contains
 		 * min_righthand, then we can perform the SJ at this join.
 		 *
-		 * Barf if we get matches to more than one SJ (is that possible?)
+		 * Reject if we get matches to more than one SJ; that implies we're
+		 * considering something that's not really valid.
 		 */
 		if (bms_is_subset(sjinfo->min_lefthand, rel1->relids) &&
 			bms_is_subset(sjinfo->min_righthand, rel2->relids))
@@ -467,50 +468,60 @@ join_is_legal(PlannerInfo *root, RelOptInfo *rel1, RelOptInfo *rel2,
 		}
 		else
 		{
-			/*----------
-			 * Otherwise, the proposed join overlaps the RHS but isn't
-			 * a valid implementation of this SJ.  It might still be
-			 * a legal join, however.  If both inputs overlap the RHS,
-			 * assume that it's OK.  Since the inputs presumably got past
-			 * this function's checks previously, they can't overlap the
-			 * LHS and their violations of the RHS boundary must represent
-			 * SJs that have been determined to commute with this one.
-			 * We have to allow this to work correctly in cases like
-			 *		(a LEFT JOIN (b JOIN (c LEFT JOIN d)))
-			 * when the c/d join has been determined to commute with the join
-			 * to a, and hence d is not part of min_righthand for the upper
-			 * join.  It should be legal to join b to c/d but this will appear
-			 * as a violation of the upper join's RHS.
-			 * Furthermore, if one input overlaps the RHS and the other does
-			 * not, we should still allow the join if it is a valid
-			 * implementation of some other SJ.  We have to allow this to
-			 * support the associative identity
-			 *		(a LJ b on Pab) LJ c ON Pbc = a LJ (b LJ c ON Pbc) on Pab
-			 * since joining B directly to C violates the lower SJ's RHS.
-			 * We assume that make_outerjoininfo() set things up correctly
-			 * so that we'll only match to some SJ if the join is valid.
-			 * Set flag here to check at bottom of loop.
-			 *----------
+			/*
+			 * Otherwise, the proposed join overlaps the RHS but isn't a valid
+			 * implementation of this SJ.  But don't panic quite yet: the RHS
+			 * violation might have occurred previously, in one or both input
+			 * relations, in which case we must have previously decided that
+			 * it was OK to commute some other SJ with this one.  If we need
+			 * to perform this join to finish building up the RHS, rejecting
+			 * it could lead to not finding any plan at all.  (This can occur
+			 * because of the heuristics elsewhere in this file that postpone
+			 * clauseless joins: we might not consider doing a clauseless join
+			 * within the RHS until after we've performed other, validly
+			 * commutable SJs with one or both sides of the clauseless join.)
+			 * This consideration boils down to the rule that if both inputs
+			 * overlap the RHS, we can allow the join --- they are either
+			 * fully within the RHS, or represent previously-allowed joins to
+			 * rels outside it.
 			 */
-			if (sjinfo->jointype != JOIN_SEMI &&
-				bms_overlap(rel1->relids, sjinfo->min_righthand) &&
+			if (bms_overlap(rel1->relids, sjinfo->min_righthand) &&
 				bms_overlap(rel2->relids, sjinfo->min_righthand))
-			{
-				/* seems OK */
-				Assert(!bms_overlap(joinrelids, sjinfo->min_lefthand));
-			}
-			else
-				is_valid_inner = false;
+				continue;		/* assume valid previous violation of RHS */
+
+			/*
+			 * The proposed join could still be legal, but only if we're
+			 * allowed to associate it into the RHS of this SJ.  That means
+			 * this SJ must be a LEFT join (not SEMI or ANTI, and certainly
+			 * not FULL) and the proposed join must not overlap the LHS.
+			 */
+			if (sjinfo->jointype != JOIN_LEFT ||
+				bms_overlap(joinrelids, sjinfo->min_lefthand))
+				return false;	/* invalid join path */
+
+			/*
+			 * To be valid, the proposed join must be a LEFT join; otherwise
+			 * it can't associate into this SJ's RHS.  But we may not yet have
+			 * found the SpecialJoinInfo matching the proposed join, so we
+			 * can't test that yet.  Remember the requirement for later.
+			 */
+			must_be_leftjoin = true;
 		}
 	}
 
 	/*
-	 * Fail if violated some SJ's RHS and didn't match to another SJ. However,
-	 * "matching" to a semijoin we are implementing by unique-ification
-	 * doesn't count (think: it's really an inner join).
+	 * Fail if violated any SJ's RHS and didn't match to a LEFT SJ: the
+	 * proposed join can't associate into an SJ's RHS.
+	 *
+	 * Also, fail if the proposed join's predicate isn't strict; we're
+	 * essentially checking to see if we can apply outer-join identity 3, and
+	 * that's a requirement.  (This check may be redundant with checks in
+	 * make_outerjoininfo, but I'm not quite sure, and it's cheap to test.)
 	 */
-	if (!is_valid_inner &&
-		(match_sjinfo == NULL || unique_ified))
+	if (must_be_leftjoin &&
+		(match_sjinfo == NULL ||
+		 match_sjinfo->jointype != JOIN_LEFT ||
+		 !match_sjinfo->lhs_strict))
 		return false;			/* invalid join path */
 
 	/*
@@ -536,7 +547,9 @@ join_is_legal(PlannerInfo *root, RelOptInfo *rel1, RelOptInfo *rel2,
 			if (!bms_is_subset(ljinfo->lateral_lhs, rel1->relids))
 				return false;	/* rel1 can't compute the required parameter */
 			if (match_sjinfo &&
-				(reversed || match_sjinfo->jointype == JOIN_FULL))
+				(reversed ||
+				 unique_ified ||
+				 match_sjinfo->jointype == JOIN_FULL))
 				return false;	/* not implementable as nestloop */
 		}
 		if (bms_is_subset(ljinfo->lateral_rhs, rel1->relids) &&
@@ -549,7 +562,9 @@ join_is_legal(PlannerInfo *root, RelOptInfo *rel1, RelOptInfo *rel2,
 			if (!bms_is_subset(ljinfo->lateral_lhs, rel2->relids))
 				return false;	/* rel2 can't compute the required parameter */
 			if (match_sjinfo &&
-				(!reversed || match_sjinfo->jointype == JOIN_FULL))
+				(!reversed ||
+				 unique_ified ||
+				 match_sjinfo->jointype == JOIN_FULL))
 				return false;	/* not implementable as nestloop */
 		}
 	}

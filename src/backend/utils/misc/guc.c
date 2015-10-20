@@ -2107,7 +2107,7 @@ static struct config_int ConfigureNamesInt[] =
 			GUC_UNIT_XBLOCKS
 		},
 		&XLOGbuffers,
-		-1, -1, INT_MAX,
+		-1, -1, (INT_MAX / XLOG_BLCKSZ),
 		check_wal_buffers, NULL, NULL
 	},
 
@@ -2404,17 +2404,17 @@ static struct config_int ConfigureNamesInt[] =
 		},
 		&autovacuum_freeze_max_age,
 		/* see pg_resetxlog if you change the upper-limit value */
-		200000000, 100000000, 2000000000,
+		200000000, 100000, 2000000000,
 		NULL, NULL, NULL
 	},
 	{
-		/* see varsup.c for why this is PGC_POSTMASTER not PGC_SIGHUP */
+		/* see multixact.c for why this is PGC_POSTMASTER not PGC_SIGHUP */
 		{"autovacuum_multixact_freeze_max_age", PGC_POSTMASTER, AUTOVACUUM,
 			gettext_noop("Multixact age at which to autovacuum a table to prevent multixact wraparound."),
 			NULL
 		},
 		&autovacuum_multixact_freeze_max_age,
-		400000000, 10000000, 2000000000,
+		400000000, 10000, 2000000000,
 		NULL, NULL, NULL
 	},
 	{
@@ -2468,7 +2468,7 @@ static struct config_int ConfigureNamesInt[] =
 			GUC_UNIT_KB,
 		},
 		&ssl_renegotiation_limit,
-		512 * 1024, 0, MAX_KILOBYTES,
+		0, 0, MAX_KILOBYTES,
 		NULL, NULL, NULL
 	},
 
@@ -6642,6 +6642,7 @@ replace_auto_config_value(ConfigVariable **head_p, ConfigVariable **tail_p,
 	item->value = pstrdup(value);
 	item->filename = pstrdup("");		/* new item has no location */
 	item->sourceline = 0;
+	item->ignore = false;
 	item->next = NULL;
 
 	if (*head_p == NULL)
@@ -6789,7 +6790,10 @@ AlterSystemSetConfigFile(AlterSystemStmt *altersysstmt)
 								AutoConfFileName)));
 
 			/* parse it */
-			ParseConfigFp(infile, AutoConfFileName, 0, LOG, &head, &tail);
+			if (!ParseConfigFp(infile, AutoConfFileName, 0, LOG, &head, &tail))
+				ereport(ERROR,
+						(errmsg("could not parse contents of file \"%s\"",
+								AutoConfFileName)));
 
 			FreeFile(infile);
 		}

@@ -91,9 +91,10 @@ extern void HeapTupleSetHintBits(HeapTupleHeader tuple, Buffer buffer,
 extern bool HeapTupleHeaderIsOnlyLocked(HeapTupleHeader tuple);
 
 /*
- * To avoid leaking to much knowledge about reorderbuffer implementation
+ * To avoid leaking too much knowledge about reorderbuffer implementation
  * details this is implemented in reorderbuffer.c not tqual.c.
  */
+struct HTAB;
 extern bool ResolveCminCmaxDuringDecoding(struct HTAB *tuplecid_data,
 							  Snapshot snapshot,
 							  HeapTuple htup,

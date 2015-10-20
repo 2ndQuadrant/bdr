@@ -17,7 +17,7 @@ dnl Read the Autoconf manual for details.
 dnl
 m4_pattern_forbid(^PGAC_)dnl to catch undefined macros
 
-AC_INIT([PostgreSQL], [9.4.4], [pgsql-bugs@postgresql.org])
+AC_INIT([PostgreSQL], [9.4.5], [pgsql-bugs@postgresql.org])
 
 m4_if(m4_defn([m4_PACKAGE_VERSION]), [2.69], [], [m4_fatal([Autoconf version 2.69 is required.
 Untested combinations of 'autoconf' and PostgreSQL versions are not
@@ -456,6 +456,7 @@ elif test "$ICC" = yes; then
 elif test "$PORTNAME" = "aix"; then
   # AIX's xlc has to have strict aliasing turned off too
   PGAC_PROG_CC_CFLAGS_OPT([-qnoansialias])
+  PGAC_PROG_CC_CFLAGS_OPT([-qlonglong])
 elif test "$PORTNAME" = "hpux"; then
   # On some versions of HP-UX, libm functions do not set errno by default.
   # Fix that by using +Olibmerrno if the compiler recognizes it.
@@ -929,6 +930,8 @@ AC_SEARCH_LIBS(shm_open, rt)
 AC_SEARCH_LIBS(shm_unlink, rt)
 # Solaris:
 AC_SEARCH_LIBS(fdatasync, [rt posix4])
+# Required for thread_test.c on Solaris
+AC_SEARCH_LIBS(sched_yield, rt)
 # Required for thread_test.c on Solaris 2.5:
 # Other ports use it too (HP-UX) so test unconditionally
 AC_SEARCH_LIBS(gethostbyname_r, nsl)
@@ -2020,6 +2023,7 @@ AC_DEFINE_UNQUOTED(PG_VERSION_STR,
 tr '.' '	' |
 $AWK '{printf "%d%02d%02d", $1, $2, (NF >= 3) ? $3 : 0}'`"]
 AC_DEFINE_UNQUOTED(PG_VERSION_NUM, $PG_VERSION_NUM, [PostgreSQL version as a number])
+AC_SUBST(PG_VERSION_NUM)
 
 
 # Begin output steps

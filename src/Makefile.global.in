@@ -38,10 +38,26 @@ all:
 # PostgreSQL version number
 VERSION = @PACKAGE_VERSION@
 MAJORVERSION = @PG_MAJORVERSION@
+VERSION_NUM = @PG_VERSION_NUM@
 
-# Support for VPATH builds
-# (PGXS VPATH support is handled separately in pgxs.mk)
-ifndef PGXS
+# Set top_srcdir, srcdir, and VPATH.
+ifdef PGXS
+top_srcdir = $(top_builddir)
+
+# If VPATH is set or Makefile is not in current directory we are building
+# the extension with VPATH so we set the variable here.
+ifdef VPATH
+srcdir = $(VPATH)
+else
+ifeq ($(CURDIR),$(dir $(firstword $(MAKEFILE_LIST))))
+srcdir = .
+VPATH =
+else
+srcdir = $(dir $(firstword $(MAKEFILE_LIST)))
+VPATH = $(srcdir)
+endif
+endif
+else # not PGXS
 vpath_build = @vpath_build@
 abs_top_srcdir = @abs_top_srcdir@
 
@@ -321,6 +337,7 @@ cd $(srcdir) && TESTDIR='$(CURDIR)' PATH="$(bindir):$$PATH" PGPORT='6$(DEF_PGPOR
 endef
 
 define prove_check
+rm -rf $(CURDIR)/tmp_check/log
 $(MKDIR_P) tmp_check/log
 $(MAKE) -C $(top_builddir) DESTDIR='$(CURDIR)'/tmp_check/install install >'$(CURDIR)'/tmp_check/log/install.log 2>&1
 cd $(srcdir) && TESTDIR='$(CURDIR)' PATH="$(CURDIR)/tmp_check/install$(bindir):$$PATH" $(call add_to_path,$(ld_library_path_var),$(CURDIR)/tmp_check/install$(libdir)) top_builddir='$(CURDIR)/$(top_builddir)' PGPORT='6$(DEF_PGPORT)' $(PROVE) $(PG_PROVE_FLAGS) $(PROVE_FLAGS) t/*.pl

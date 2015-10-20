@@ -365,10 +365,10 @@ flatten_rtes_walker(Node *node, PlannerGlobal *glob)
  *
  * In the flat rangetable, we zero out substructure pointers that are not
  * needed by the executor; this reduces the storage space and copying cost
- * for cached plans.  We keep only the alias and eref Alias fields, which
- * are needed by EXPLAIN, and the selectedCols and modifiedCols bitmaps,
- * which are needed for executor-startup permissions checking and for
- * trigger event checking.
+ * for cached plans.  We keep only the ctename, alias and eref Alias fields,
+ * which are needed by EXPLAIN, and the selectedCols and modifiedCols bitmaps,
+ * which are needed for executor-startup permissions checking and for trigger
+ * event checking.
  */
 static void
 add_rte_to_flat_rtable(PlannerGlobal *glob, RangeTblEntry *rte)
@@ -388,6 +388,7 @@ add_rte_to_flat_rtable(PlannerGlobal *glob, RangeTblEntry *rte)
 	newrte->ctecoltypes = NIL;
 	newrte->ctecoltypmods = NIL;
 	newrte->ctecolcollations = NIL;
+	newrte->securityQuals = NIL;
 
 	glob->finalrtable = lappend(glob->finalrtable, newrte);
 
@@ -1055,7 +1056,7 @@ copyVar(Var *var)
  * This is code that is common to all variants of expression-fixing.
  * We must look up operator opcode info for OpExpr and related nodes,
  * add OIDs from regclass Const nodes into root->glob->relationOids, and
- * add catalog TIDs for user-defined functions into root->glob->invalItems.
+ * add PlanInvalItems for user-defined functions into root->glob->invalItems.
  *
  * We assume it's okay to update opcode info in-place.  So this could possibly
  * scribble on the planner's input data structures, but it's OK.

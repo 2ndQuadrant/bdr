@@ -1123,6 +1123,9 @@ make_outerjoininfo(PlannerInfo *root,
 	min_righthand = bms_int_members(bms_union(clause_relids, inner_join_rels),
 									right_rels);
 
+	/*
+	 * Now check previous outer joins for ordering restrictions.
+	 */
 	foreach(l, root->join_info_list)
 	{
 		SpecialJoinInfo *otherinfo = (SpecialJoinInfo *) lfirst(l);
@@ -1162,9 +1165,15 @@ make_outerjoininfo(PlannerInfo *root,
 		 * For a lower OJ in our RHS, if our join condition does not use the
 		 * lower join's RHS and the lower OJ's join condition is strict, we
 		 * can interchange the ordering of the two OJs; otherwise we must add
-		 * the lower OJ's full syntactic relset to min_righthand.  Also, we
-		 * must preserve ordering anyway if either the current join or the
-		 * lower OJ is either a semijoin or an antijoin.
+		 * the lower OJ's full syntactic relset to min_righthand.
+		 *
+		 * Also, if our join condition does not use the lower join's LHS
+		 * either, force the ordering to be preserved.  Otherwise we can end
+		 * up with SpecialJoinInfos with identical min_righthands, which can
+		 * confuse join_is_legal (see discussion in backend/optimizer/README).
+		 *
+		 * Also, we must preserve ordering anyway if either the current join
+		 * or the lower OJ is either a semijoin or an antijoin.
 		 *
 		 * Here, we have to consider that "our join condition" includes any
 		 * clauses that syntactically appeared above the lower OJ and below
@@ -1180,6 +1189,7 @@ make_outerjoininfo(PlannerInfo *root,
 		if (bms_overlap(right_rels, otherinfo->syn_righthand))
 		{
 			if (bms_overlap(clause_relids, otherinfo->syn_righthand) ||
+				!bms_overlap(clause_relids, otherinfo->min_lefthand) ||
 				jointype == JOIN_SEMI ||
 				jointype == JOIN_ANTI ||
 				otherinfo->jointype == JOIN_SEMI ||

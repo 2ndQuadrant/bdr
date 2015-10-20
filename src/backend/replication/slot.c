@@ -195,7 +195,7 @@ ReplicationSlotValidateName(const char *name, int elevel)
 					(errcode(ERRCODE_INVALID_NAME),
 			errmsg("replication slot name \"%s\" contains invalid character",
 				   name),
-					 errhint("Replication slot names may only contain letters, numbers, and the underscore character.")));
+					 errhint("Replication slot names may only contain lower case letters, numbers, and the underscore character.")));
 			return false;
 		}
 	}
@@ -660,7 +660,7 @@ ReplicationSlotsComputeRequiredLSN(void)
 /*
  * Compute the oldest WAL LSN required by *logical* decoding slots..
  *
- * Returns InvalidXLogRecPtr if logical decoding is disabled or no logicals
+ * Returns InvalidXLogRecPtr if logical decoding is disabled or no logical
  * slots exist.
  *
  * NB: this returns a value >= ReplicationSlotsComputeRequiredLSN(), since it
@@ -875,7 +875,7 @@ StartupReplicationSlots(void)
 }
 
 /* ----
- * Manipulation of ondisk state of replication slots
+ * Manipulation of on-disk state of replication slots
  *
  * NB: none of the routines below should take any notice whether a slot is the
  * current one or not, that's all handled a layer above.

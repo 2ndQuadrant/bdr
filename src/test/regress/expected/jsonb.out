@@ -239,6 +239,15 @@ LINE 1: SELECT '{"abc":1,3}'::jsonb;
                ^
 DETAIL:  Expected string, but found "3".
 CONTEXT:  JSON data, line 1: {"abc":1,3...
+-- Recursion.
+SET max_stack_depth = '100kB';
+SELECT repeat('[', 10000)::jsonb;
+ERROR:  stack depth limit exceeded
+HINT:  Increase the configuration parameter "max_stack_depth" (currently 100kB), after ensuring the platform's stack depth limit is adequate.
+SELECT repeat('{"a":', 10000)::jsonb;
+ERROR:  stack depth limit exceeded
+HINT:  Increase the configuration parameter "max_stack_depth" (currently 100kB), after ensuring the platform's stack depth limit is adequate.
+RESET max_stack_depth;
 -- Miscellaneous stuff.
 SELECT 'true'::jsonb;			-- OK
  jsonb 
@@ -1979,7 +1988,7 @@ SELECT count(*) FROM testjsonb WHERE j @> '{"array":["bar"]}';
      3
 (1 row)
 
--- excercise GIN_SEARCH_MODE_ALL
+-- exercise GIN_SEARCH_MODE_ALL
 SELECT count(*) FROM testjsonb WHERE j @> '{}';
  count 
 -------
@@ -2153,7 +2162,7 @@ SELECT count(*) FROM testjsonb WHERE j @> '{"age":25.0}';
      2
 (1 row)
 
--- excercise GIN_SEARCH_MODE_ALL
+-- exercise GIN_SEARCH_MODE_ALL
 SELECT count(*) FROM testjsonb WHERE j @> '{}';
  count 
 -------
