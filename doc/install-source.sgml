@@ -112,9 +112,8 @@
    <para>
     Official BDR release source code is uploaded as tarballs to the
     &bdr; website along with a tarball checksum and a matching GnuPG
-    signature. See
-    <ulink url="http://2ndquadrant.com/bdr">http://2ndquadrant.com/bdr</ulink>
-    for the download information. See <xref linkend="appendix-signatures">
+    signature. Download from
+    <ulink url="http://packages.2ndquadrant.com/postgresql-bdr94-2ndquadrant/tarballs/">http://packages.2ndquadrant.com/postgresql-bdr94-2ndquadrant/tarballs/</ulink>. See <xref linkend="appendix-signatures">
     for information on verifying digital signatures.
    </para>
 
