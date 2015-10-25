@@ -400,6 +400,9 @@ process_remote_insert(StringInfo s)
 	Assert(bdr_apply_worker != NULL);
 
 	rel = read_rel(s, RowExclusiveLock);
+	if (rel == NULL)
+		/* skipped data */
+		return;
 
 	action = pq_getmsgbyte(s);
 	if (action != 'N')
@@ -632,6 +635,9 @@ process_remote_update(StringInfo s)
 	bdr_performing_work();
 
 	rel = read_rel(s, RowExclusiveLock);
+	if (rel == NULL)
+		/* skipped data */
+		return;
 
 	action = pq_getmsgbyte(s);
 
@@ -848,6 +854,9 @@ process_remote_delete(StringInfo s)
 	bdr_performing_work();
 
 	rel = read_rel(s, RowExclusiveLock);
+	if (rel == NULL)
+		/* skipped data */
+		return;
 
 	action = pq_getmsgbyte(s);
 
@@ -1930,9 +1939,25 @@ read_rel(StringInfo s, LOCKMODE mode)
 	relnamelen = pq_getmsgint(s, 2);
 	rv->relname = (char *) pq_getmsgbytes(s, relnamelen);
 
-	relid = RangeVarGetRelidExtended(rv, mode, false, false, NULL, NULL);
+	if (strncmp("pg_temp_", rv->relname, strlen("pg_temp_")) == 0)
+	{
+		/*
+		 * We ignore replicated data for temp relations. This is only sent when
+		 * a table rewrite is being replicated. We don't have anywhere to put
+		 * the data or any way to know which table it came from originally. The
+		 * temp relation won't exist on this node.
+		 *
+		 * So return null, to signal we're going to discard this change.
+		 */
+		elog(WARNING, "discarded row data for temp rel %s", rv->relname);
+		return NULL;
+	}
+	else
+	{
+		relid = RangeVarGetRelidExtended(rv, mode, false, false, NULL, NULL);
 
-	return bdr_heap_open(relid, NoLock);
+		return bdr_heap_open(relid, NoLock);
+	}
 }
 
 /* print the tuple 'tuple' into the StringInfo s */
