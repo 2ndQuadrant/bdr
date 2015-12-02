@@ -47,14 +47,34 @@
    describes all the functionality that the current version of &bdr; officially
    supports.
    </para>
+
    <para>
-    &bdr; is developed by the BDR team at
-    <ulink url="http://2ndquadrant.com">2ndQuadrant</ulink>.
-    Multiple customers contribute funding and other resources to make BDR
-    development possible. 2ndQuadrant continues to fund the ongoing development
-    of BDR to meet internal needs and those of customers.
+    &bdr; was initially developed at
+    <ulink url="http://2ndquadrant.com">2ndQuadrant</ulink>;
+    others have joined the effort.
+    Contributions are appreciated and welcome.
+    Multiple 2ndQuadrant customers contribute funding
+    to make BDR development possible.
+   </para>
+
+   <para>
+    2ndQuadrant, a Platinum sponsor of the PostgreSQL project,
+    continues to develop BDR to meet internal needs and those of customers.
+    2ndQuadrant is also working actively with the PostgreSQL community
+    to integrate BDR into PostgreSQL.
+    Other companies as well as individual developers
+    are welcome to participate in the efforts.
+   </para>
+
+   <para>
+    Multiple technologies emerging from BDR development
+    have already become integral part of core PostgreSQL, such as
+    <ulink url="http://www.postgresql.org/docs/current/static/event-triggers.html">Event Triggers</ulink>,
+    <ulink url="http://www.postgresql.org/docs/current/static/logicaldecoding.html">Logical Decoding</ulink>
+    and <ulink url="https://wiki.postgresql.org/wiki/What's_new_in_PostgreSQL_9.5#Commit_timestamp_tracking">Commit Timestamp</ulink>.
    </para>
   </abstract>
+
   <keywordset>
    <keyword>BDR</keyword>
    <keyword>UDR</keyword>
