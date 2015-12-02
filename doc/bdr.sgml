@@ -68,16 +68,14 @@
 
    <para>
     Multiple technologies emerging from BDR development
-    have already become integral part of core PostgreSQL, such as:
-    <simplelist>
-     <member><ulink url="http://www.postgresql.org/docs/current/static/event-triggers.html">Event Triggers</ulink></member>
-     <member><ulink url="http://www.postgresql.org/docs/current/static/logicaldecoding.html">Logical Decoding</ulink></member>
-     <member><ulink url="http://www.postgresql.org/docs/current/static/logicaldecoding-explanation.html#AEN66500">Replication Slots</ulink></member>
-     <member><ulink url="http://www.postgresql.org/docs/current/static/bgworker.html">Background Workers</ulink></member>
-     <member><ulink url="https://wiki.postgresql.org/wiki/What's_new_in_PostgreSQL_9.5#Commit_timestamp_tracking">Commit Timestamps</ulink></member>
-     <member><ulink url="http://www.postgresql.org/docs/9.5/static/replication-origins.html">Replication Origins</ulink></member>
-     <member><ulink url="http://www.postgresql.org/docs/9.5/static/functions-event-triggers.html#PG-EVENT-TRIGGER-DDL-COMMAND-END-FUNCTIONS">DDL event capture</ulink></member>
-    </simplelist>
+    have already become integral part of core PostgreSQL, such as
+     <ulink url="http://www.postgresql.org/docs/current/static/event-triggers.html">Event Triggers</ulink>,
+     <ulink url="http://www.postgresql.org/docs/current/static/logicaldecoding.html">Logical Decoding</ulink>,
+     <ulink url="http://www.postgresql.org/docs/current/static/logicaldecoding-explanation.html#AEN66500">Replication Slots</ulink>,
+     <ulink url="http://www.postgresql.org/docs/current/static/bgworker.html">Background Workers</ulink>,
+     <ulink url="https://wiki.postgresql.org/wiki/What's_new_in_PostgreSQL_9.5#Commit_timestamp_tracking">Commit Timestamps</ulink>,
+     <ulink url="http://www.postgresql.org/docs/9.5/static/replication-origins.html">Replication Origins</ulink>,
+     <ulink url="http://www.postgresql.org/docs/9.5/static/functions-event-triggers.html#PG-EVENT-TRIGGER-DDL-COMMAND-END-FUNCTIONS">DDL event capture</ulink>.
    </para>
   </abstract>
 
