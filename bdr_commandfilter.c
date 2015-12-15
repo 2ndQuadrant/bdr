@@ -19,6 +19,7 @@
 #include "fmgr.h"
 #include "miscadmin.h"
 
+#include "access/genam.h"
 #include "access/heapam.h"
 #ifdef BUILDING_BDR
 #include "access/seqam.h"
@@ -518,11 +519,12 @@ statement_affects_only_nonpermanent(Node *parsetree)
 				/* Figure out if only temporary objects are affected. */
 
 				/*
-				 * Only do this for temporary relations, not other objects for
-				 * now.
+				 * Only do this for temporary relations and indexes, not
+				 * other objects for now.
 				 */
 				switch (stmt->removeType)
 				{
+					case OBJECT_INDEX:
 					case OBJECT_TABLE:
 					case OBJECT_SEQUENCE:
 					case OBJECT_VIEW:
@@ -562,9 +564,9 @@ statement_affects_only_nonpermanent(Node *parsetree)
 					{
 						Oid tempNamespaceOid, tempRelOid;
 						List* searchPath;
-						bool intempns;
+						bool foundtemprel;
 
-						intempns = false;
+						foundtemprel = false;
 						tempNamespaceOid = LookupExplicitNamespace("pg_temp", true);
 						if (tempNamespaceOid == InvalidOid)
 							return false;
@@ -580,18 +582,27 @@ statement_affects_only_nonpermanent(Node *parsetree)
 								tempRelOid = get_relname_relid(rv->relname, tempNamespaceOid);
 								if (tempRelOid != relOid)
 									break;
-								intempns = true;
+								foundtemprel = true;
 								break;
 							}
 							list_free(searchPath);
 						}
-						if (!intempns)
+						if (!foundtemprel)
 							return false;
 					}
 
-					rel = relation_open(relOid, AccessExclusiveLock);
-					istemp = !ispermanent(rel->rd_rel->relpersistence);
-					relation_close(rel, NoLock);
+					if (stmt->removeType != OBJECT_INDEX)
+					{
+						rel = relation_open(relOid, AccessExclusiveLock);
+						istemp = !ispermanent(rel->rd_rel->relpersistence);
+						relation_close(rel, NoLock);
+					}
+					else
+					{
+						rel = index_open(relOid, AccessExclusiveLock);
+						istemp = !ispermanent(rel->rd_rel->relpersistence);
+						index_close(rel, NoLock);
+					}
 
 					if (!istemp)
 						return false;
