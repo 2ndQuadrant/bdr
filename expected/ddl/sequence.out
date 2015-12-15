@@ -209,7 +209,7 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
 \c regression
 \d+ test_seq
 DROP SEQUENCE test_seq;
-ERROR:  sequence "test_seq" does not exist
+ERROR:  relation "test_seq" does not exist
 -- these should fail
 CREATE SEQUENCE test_seq increment by 10 USING bdr;
 ERROR:  CREATE SEQUENCE ... increment is not supported for bdr sequences
