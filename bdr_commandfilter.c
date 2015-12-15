@@ -42,6 +42,7 @@
 #include "tcop/utility.h"
 
 #include "utils/guc.h"
+#include "utils/lsyscache.h"
 #include "utils/rel.h"
 #include "utils/syscache.h"
 
@@ -516,12 +517,7 @@ statement_affects_only_nonpermanent(Node *parsetree)
 				if (stmt->concurrent)
 					return false;
 
-				/*
-				 * Figure out if only temporary objects are affected - we can
-				 * only guarantee that if they're fully specified,
-				 * i.e. include the schema name in the RV. It'd be much better
-				 * to get away without that requirement
-				 */
+				/* Figure out if only temporary objects are affected. */
 
 				/*
 				 * Only do this for temporary relations, not other objects for
@@ -548,10 +544,6 @@ statement_affects_only_nonpermanent(Node *parsetree)
 					Relation	rel;
 					bool		istemp;
 
-					/* Can't be sure the next lookup will hit the same relation */
-					if (rv->schemaname == NULL)
-						return false;
-
 					relOid = RangeVarGetRelidExtended(rv,
 													  AccessExclusiveLock,
 													  stmt->missing_ok,
@@ -560,6 +552,44 @@ statement_affects_only_nonpermanent(Node *parsetree)
 													  NULL);
 					if (relOid == InvalidOid)
 						continue;
+
+					/*
+					 * If a schema name is not provided, check to see if the session's
+					 * temporary namespace is first in the search_path and if a relation
+					 * with the same Oid is in the current session's "pg_temp" schema. If
+					 * so, we can safely assume that the DROP statement will refer to this
+					 * object, since the pg_temp schema is session-private.
+					 */
+					if (rv->schemaname == NULL)
+					{
+						Oid tempNamespaceOid, tempRelOid;
+						List* searchPath;
+						bool intempns;
+
+						intempns = false;
+						tempNamespaceOid = LookupExplicitNamespace("pg_temp", true);
+						if (tempNamespaceOid == InvalidOid)
+							return false;
+						searchPath = fetch_search_path(true);
+						if (searchPath != NULL)
+						{
+							ListCell* i;
+
+							foreach(i, searchPath)
+							{
+								if (lfirst_oid(i) != tempNamespaceOid)
+									break;
+								tempRelOid = get_relname_relid(rv->relname, tempNamespaceOid);
+								if (tempRelOid != relOid)
+									break;
+								intempns = true;
+								break;
+							}
+							list_free(searchPath);
+						}
+						if (!intempns)
+							return false;
+					}
 
 					rel = relation_open(relOid, AccessExclusiveLock);
 					istemp = !ispermanent(rel->rd_rel->relpersistence);
