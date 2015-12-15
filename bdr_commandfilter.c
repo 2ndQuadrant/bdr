@@ -569,6 +569,11 @@ statement_affects_only_nonpermanent(Node *parsetree)
 				return true;
 				break;
 			}
+		case T_IndexStmt:
+			{
+				IndexStmt *stmt = (IndexStmt *) parsetree;
+				return !ispermanent(stmt->relation->relpersistence);
+			}
 		/* FIXME: Add more types of statements */
 		default:
 			break;
