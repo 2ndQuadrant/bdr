@@ -21,14 +21,14 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "libpq-fe.h"
+#include "libpq-int.h"
+
 #include "postgres_fe.h"
 
 #include "getopt_long.h"
 
 #include "port.h"
-
-#include "libpq-fe.h"
-#include "libpq-int.h"
 
 #include "miscadmin.h"
 
