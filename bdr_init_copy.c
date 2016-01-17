@@ -11,27 +11,28 @@
  * -------------------------------------------------------------------------
  */
 
-#include "postgres_fe.h"
-
-#include "getopt_long.h"
-
-#include "port.h"
-
-#include "libpq-fe.h"
-#include "libpq-int.h"
-
-#include "miscadmin.h"
-
-#include "access/timeline.h"
-
 #include <dirent.h>
 #include <fcntl.h>
 #include <locale.h>
 #include <signal.h>
 #include <time.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+#include "libpq-fe.h"
+#include "libpq-int.h"
+
+#include "postgres_fe.h"
+
+#include "getopt_long.h"
+
+#include "port.h"
+
+#include "miscadmin.h"
+
+#include "access/timeline.h"
 
 #include "bdr_config.h"
 #include "bdr_internal.h"
