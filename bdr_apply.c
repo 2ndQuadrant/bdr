@@ -514,6 +514,8 @@ process_remote_insert(StringInfo s)
 		CHECK_FOR_INTERRUPTS();
 	}
 
+	PushActiveSnapshot(GetTransactionSnapshot());
+
 	/*
 	 * If there's a conflict use the version created later, otherwise do a
 	 * plain insert.
@@ -593,6 +595,8 @@ process_remote_insert(StringInfo s)
 		UserTableUpdateOpenIndexes(estate, newslot);
 		bdr_count_insert();
 	}
+
+	PopActiveSnapshot();
 
 	ExecCloseIndices(estate->es_result_relation_info);
 
