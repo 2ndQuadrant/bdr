@@ -43,6 +43,7 @@
 #include "catalog/pg_ts_config.h"
 #include "catalog/pg_ts_dict.h"
 #include "catalog/pg_type.h"
+#include "catalog/pg_user_mapping.h"
 #include "commands/alter.h"
 #include "commands/dbcommands.h"
 #include "commands/collationcmds.h"
@@ -1349,7 +1350,7 @@ shdepReassignOwned(List *roleids, Oid newrole)
 			switch (sdepForm->classid)
 			{
 				case TypeRelationId:
-					AlterTypeOwnerInternal(sdepForm->objid, newrole, true);
+					AlterTypeOwner_oid(sdepForm->objid, newrole, true);
 					break;
 
 				case NamespaceRelationId:
@@ -1372,6 +1373,10 @@ shdepReassignOwned(List *roleids, Oid newrole)
 					 * Ignore default ACLs; they should be handled by DROP
 					 * OWNED, not REASSIGN OWNED.
 					 */
+					break;
+
+				case UserMappingRelationId:
+					/* ditto */
 					break;
 
 				case ForeignServerRelationId:

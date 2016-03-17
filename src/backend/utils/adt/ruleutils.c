@@ -37,6 +37,7 @@
 #include "commands/tablespace.h"
 #include "executor/spi.h"
 #include "funcapi.h"
+#include "mb/pg_wchar.h"
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
@@ -53,6 +54,7 @@
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
+#include "utils/hsearch.h"
 #include "utils/lsyscache.h"
 #include "utils/rel.h"
 #include "utils/ruleutils.h"
@@ -263,6 +265,15 @@ typedef struct
 #define deparse_columns_fetch(rangetable_index, dpns) \
 	((deparse_columns *) list_nth((dpns)->rtable_columns, (rangetable_index)-1))
 
+/*
+ * Entry in set_rtable_names' hash table
+ */
+typedef struct
+{
+	char		name[NAMEDATALEN];		/* Hash key --- must be first */
+	int			counter;		/* Largest addition used so far for name */
+} NameHashEntry;
+
 
 /* ----------
  * Global data
@@ -307,8 +318,6 @@ static int print_function_arguments(StringInfo buf, HeapTuple proctup,
 static void print_function_rettype(StringInfo buf, HeapTuple proctup);
 static void set_rtable_names(deparse_namespace *dpns, List *parent_namespaces,
 				 Bitmapset *rels_used);
-static bool refname_is_unique(char *refname, deparse_namespace *dpns,
-				  List *parent_namespaces);
 static void set_deparse_for_query(deparse_namespace *dpns, Query *query,
 					  List *parent_namespaces);
 static void set_simple_column_names(deparse_namespace *dpns);
@@ -381,6 +390,8 @@ static void appendContextKeyword(deparse_context *context, const char *str,
 static void removeStringInfoSpaces(StringInfo str);
 static void get_rule_expr(Node *node, deparse_context *context,
 			  bool showimplicit);
+static void get_rule_expr_toplevel(Node *node, deparse_context *context,
+					   bool showimplicit);
 static void get_oper_expr(OpExpr *expr, deparse_context *context);
 static void get_func_expr(FuncExpr *expr, deparse_context *context,
 			  bool showimplicit);
@@ -410,6 +421,7 @@ static Node *processIndirection(Node *node, deparse_context *context,
 static void printSubscripts(ArrayRef *aref, deparse_context *context);
 static char *get_relation_name(Oid relid);
 static char *generate_relation_name(Oid relid, List *namespaces);
+static char *generate_qualified_relation_name(Oid relid);
 static char *generate_function_name(Oid funcid, int nargs,
 					   List *argnames, Oid *argtypes,
 					   bool has_variadic, bool *use_variadic_p);
@@ -1617,7 +1629,9 @@ pg_get_constraintdef_ext(PG_FUNCTION_ARGS)
 															  prettyFlags)));
 }
 
-/* Internal version that returns a palloc'd C string; no pretty-printing */
+/*
+ * Internal version that returns a full ALTER TABLE ... ADD CONSTRAINT command
+ */
 char *
 pg_get_constraintdef_string(Oid constraintId, bool fullCommand)
 {
@@ -1666,10 +1680,16 @@ pg_get_constraintdef_worker(Oid constraintId, bool fullCommand,
 
 	initStringInfo(&buf);
 
-	if (fullCommand && OidIsValid(conForm->conrelid))
+	if (fullCommand)
 	{
-		appendStringInfo(&buf, "ALTER TABLE ONLY %s ADD CONSTRAINT %s ",
-						 generate_relation_name(conForm->conrelid, NIL),
+		/*
+		 * Currently, callers want ALTER TABLE (without ONLY) for CHECK
+		 * constraints, and other types of constraints don't inherit anyway so
+		 * it doesn't matter whether we say ONLY or not.  Someday we might
+		 * need to let callers specify whether to put ONLY in the command.
+		 */
+		appendStringInfo(&buf, "ALTER TABLE %s ADD CONSTRAINT %s ",
+						 generate_qualified_relation_name(conForm->conrelid),
 						 quote_identifier(NameStr(conForm->conname)));
 	}
 
@@ -2193,28 +2213,9 @@ pg_get_serial_sequence(PG_FUNCTION_ARGS)
 
 	if (OidIsValid(sequenceId))
 	{
-		HeapTuple	classtup;
-		Form_pg_class classtuple;
-		char	   *nspname;
 		char	   *result;
 
-		/* Get the sequence's pg_class entry */
-		classtup = SearchSysCache1(RELOID, ObjectIdGetDatum(sequenceId));
-		if (!HeapTupleIsValid(classtup))
-			elog(ERROR, "cache lookup failed for relation %u", sequenceId);
-		classtuple = (Form_pg_class) GETSTRUCT(classtup);
-
-		/* Get the namespace */
-		nspname = get_namespace_name(classtuple->relnamespace);
-		if (!nspname)
-			elog(ERROR, "cache lookup failed for namespace %u",
-				 classtuple->relnamespace);
-
-		/* And construct the result string */
-		result = quote_qualified_identifier(nspname,
-											NameStr(classtuple->relname));
-
-		ReleaseSysCache(classtup);
+		result = generate_qualified_relation_name(sequenceId);
 
 		PG_RETURN_TEXT_P(string_to_text(result));
 	}
@@ -2968,14 +2969,60 @@ static void
 set_rtable_names(deparse_namespace *dpns, List *parent_namespaces,
 				 Bitmapset *rels_used)
 {
+	HASHCTL		hash_ctl;
+	HTAB	   *names_hash;
+	NameHashEntry *hentry;
+	bool		found;
+	int			rtindex;
 	ListCell   *lc;
-	int			rtindex = 1;
 
 	dpns->rtable_names = NIL;
+	/* nothing more to do if empty rtable */
+	if (dpns->rtable == NIL)
+		return;
+
+	/*
+	 * We use a hash table to hold known names, so that this process is O(N)
+	 * not O(N^2) for N names.
+	 */
+	MemSet(&hash_ctl, 0, sizeof(hash_ctl));
+	hash_ctl.keysize = NAMEDATALEN;
+	hash_ctl.entrysize = sizeof(NameHashEntry);
+	hash_ctl.hcxt = CurrentMemoryContext;
+	names_hash = hash_create("set_rtable_names names",
+							 list_length(dpns->rtable),
+							 &hash_ctl,
+							 HASH_ELEM | HASH_CONTEXT);
+	/* Preload the hash table with names appearing in parent_namespaces */
+	foreach(lc, parent_namespaces)
+	{
+		deparse_namespace *olddpns = (deparse_namespace *) lfirst(lc);
+		ListCell   *lc2;
+
+		foreach(lc2, olddpns->rtable_names)
+		{
+			char	   *oldname = (char *) lfirst(lc2);
+
+			if (oldname == NULL)
+				continue;
+			hentry = (NameHashEntry *) hash_search(names_hash,
+												   oldname,
+												   HASH_ENTER,
+												   &found);
+			/* we do not complain about duplicate names in parent namespaces */
+			hentry->counter = 0;
+		}
+	}
+
+	/* Now we can scan the rtable */
+	rtindex = 1;
 	foreach(lc, dpns->rtable)
 	{
 		RangeTblEntry *rte = (RangeTblEntry *) lfirst(lc);
 		char	   *refname;
+
+		/* Just in case this takes an unreasonable amount of time ... */
+		CHECK_FOR_INTERRUPTS();
 
 		if (rels_used && !bms_is_member(rtindex, rels_used))
 		{
@@ -3004,56 +3051,62 @@ set_rtable_names(deparse_namespace *dpns, List *parent_namespaces,
 		}
 
 		/*
-		 * If the selected name isn't unique, append digits to make it so
+		 * If the selected name isn't unique, append digits to make it so, and
+		 * make a new hash entry for it once we've got a unique name.  For a
+		 * very long input name, we might have to truncate to stay within
+		 * NAMEDATALEN.
 		 */
-		if (refname &&
-			!refname_is_unique(refname, dpns, parent_namespaces))
+		if (refname)
 		{
-			char	   *modname = (char *) palloc(strlen(refname) + 32);
-			int			i = 0;
-
-			do
+			hentry = (NameHashEntry *) hash_search(names_hash,
+												   refname,
+												   HASH_ENTER,
+												   &found);
+			if (found)
 			{
-				sprintf(modname, "%s_%d", refname, ++i);
-			} while (!refname_is_unique(modname, dpns, parent_namespaces));
-			refname = modname;
+				/* Name already in use, must choose a new one */
+				int			refnamelen = strlen(refname);
+				char	   *modname = (char *) palloc(refnamelen + 16);
+				NameHashEntry *hentry2;
+
+				do
+				{
+					hentry->counter++;
+					for (;;)
+					{
+						/*
+						 * We avoid using %.*s here because it can misbehave
+						 * if the data is not valid in what libc thinks is the
+						 * prevailing encoding.
+						 */
+						memcpy(modname, refname, refnamelen);
+						sprintf(modname + refnamelen, "_%d", hentry->counter);
+						if (strlen(modname) < NAMEDATALEN)
+							break;
+						/* drop chars from refname to keep all the digits */
+						refnamelen = pg_mbcliplen(refname, refnamelen,
+												  refnamelen - 1);
+					}
+					hentry2 = (NameHashEntry *) hash_search(names_hash,
+															modname,
+															HASH_ENTER,
+															&found);
+				} while (found);
+				hentry2->counter = 0;	/* init new hash entry */
+				refname = modname;
+			}
+			else
+			{
+				/* Name not previously used, need only initialize hentry */
+				hentry->counter = 0;
+			}
 		}
 
 		dpns->rtable_names = lappend(dpns->rtable_names, refname);
 		rtindex++;
 	}
-}
 
-/*
- * refname_is_unique: is refname distinct from all already-chosen RTE names?
- */
-static bool
-refname_is_unique(char *refname, deparse_namespace *dpns,
-				  List *parent_namespaces)
-{
-	ListCell   *lc;
-
-	foreach(lc, dpns->rtable_names)
-	{
-		char	   *oldname = (char *) lfirst(lc);
-
-		if (oldname && strcmp(oldname, refname) == 0)
-			return false;
-	}
-	foreach(lc, parent_namespaces)
-	{
-		deparse_namespace *olddpns = (deparse_namespace *) lfirst(lc);
-		ListCell   *lc2;
-
-		foreach(lc2, olddpns->rtable_names)
-		{
-			char	   *oldname = (char *) lfirst(lc2);
-
-			if (oldname && strcmp(oldname, refname) == 0)
-				return false;
-		}
-	}
-	return true;
+	hash_destroy(names_hash);
 }
 
 /*
@@ -3881,16 +3934,34 @@ make_colname_unique(char *colname, deparse_namespace *dpns,
 					deparse_columns *colinfo)
 {
 	/*
-	 * If the selected name isn't unique, append digits to make it so
+	 * If the selected name isn't unique, append digits to make it so.  For a
+	 * very long input name, we might have to truncate to stay within
+	 * NAMEDATALEN.
 	 */
 	if (!colname_is_unique(colname, dpns, colinfo))
 	{
-		char	   *modname = (char *) palloc(strlen(colname) + 32);
+		int			colnamelen = strlen(colname);
+		char	   *modname = (char *) palloc(colnamelen + 16);
 		int			i = 0;
 
 		do
 		{
-			sprintf(modname, "%s_%d", colname, ++i);
+			i++;
+			for (;;)
+			{
+				/*
+				 * We avoid using %.*s here because it can misbehave if the
+				 * data is not valid in what libc thinks is the prevailing
+				 * encoding.
+				 */
+				memcpy(modname, colname, colnamelen);
+				sprintf(modname + colnamelen, "_%d", i);
+				if (strlen(modname) < NAMEDATALEN)
+					break;
+				/* drop chars from colname to keep all the digits */
+				colnamelen = pg_mbcliplen(colname, colnamelen,
+										  colnamelen - 1);
+			}
 		} while (!colname_is_unique(modname, dpns, colinfo));
 		colname = modname;
 	}
@@ -4641,10 +4712,10 @@ get_values_def(List *values_lists, deparse_context *context)
 
 			/*
 			 * Strip any top-level nodes representing indirection assignments,
-			 * then print the result.
+			 * then print the result.  Whole-row Vars need special treatment.
 			 */
-			get_rule_expr(processIndirection(col, context, false),
-						  context, false);
+			get_rule_expr_toplevel(processIndirection(col, context, false),
+								   context, false);
 		}
 		appendStringInfoChar(buf, ')');
 	}
@@ -5035,7 +5106,8 @@ get_target_list(List *targetList, deparse_context *context,
 		 * the top level of a SELECT list it's not right (the parser will
 		 * expand that notation into multiple columns, yielding behavior
 		 * different from a whole-row Var).  We need to call get_variable
-		 * directly so that we can tell it to do the right thing.
+		 * directly so that we can tell it to do the right thing, and so that
+		 * we can get the attribute name which is the default AS label.
 		 */
 		if (tle->expr && IsA(tle->expr, Var))
 		{
@@ -7524,7 +7596,8 @@ get_rule_expr(Node *node, deparse_context *context,
 						!tupdesc->attrs[i]->attisdropped)
 					{
 						appendStringInfoString(buf, sep);
-						get_rule_expr(e, context, true);
+						/* Whole-row Vars need special treatment here */
+						get_rule_expr_toplevel(e, context, true);
 						sep = ", ";
 					}
 					i++;
@@ -7902,6 +7975,27 @@ get_rule_expr(Node *node, deparse_context *context,
 			elog(ERROR, "unrecognized node type: %d", (int) nodeTag(node));
 			break;
 	}
+}
+
+/*
+ * get_rule_expr_toplevel		- Parse back a toplevel expression
+ *
+ * Same as get_rule_expr(), except that if the expr is just a Var, we pass
+ * istoplevel = true not false to get_variable().  This causes whole-row Vars
+ * to get printed with decoration that will prevent expansion of "*".
+ * We need to use this in contexts such as ROW() and VALUES(), where the
+ * parser would expand "foo.*" appearing at top level.  (In principle we'd
+ * use this in get_target_list() too, but that has additional worries about
+ * whether to print AS, so it needs to invoke get_variable() directly anyway.)
+ */
+static void
+get_rule_expr_toplevel(Node *node, deparse_context *context,
+					   bool showimplicit)
+{
+	if (node && IsA(node, Var))
+		(void) get_variable((Var *) node, 0, true, context);
+	else
+		get_rule_expr(node, context, showimplicit);
 }
 
 
@@ -9379,6 +9473,39 @@ generate_relation_name(Oid relid, List *namespaces)
 }
 
 /*
+ * generate_qualified_relation_name
+ *		Compute the name to display for a relation specified by OID
+ *
+ * As above, but unconditionally schema-qualify the name.
+ */
+static char *
+generate_qualified_relation_name(Oid relid)
+{
+	HeapTuple	tp;
+	Form_pg_class reltup;
+	char	   *relname;
+	char	   *nspname;
+	char	   *result;
+
+	tp = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
+	if (!HeapTupleIsValid(tp))
+		elog(ERROR, "cache lookup failed for relation %u", relid);
+	reltup = (Form_pg_class) GETSTRUCT(tp);
+	relname = NameStr(reltup->relname);
+
+	nspname = get_namespace_name(reltup->relnamespace);
+	if (!nspname)
+		elog(ERROR, "cache lookup failed for namespace %u",
+			 reltup->relnamespace);
+
+	result = quote_qualified_identifier(nspname, relname);
+
+	ReleaseSysCache(tp);
+
+	return result;
+}
+
+/*
  * generate_function_name
  *		Compute the name to display for a function specified by OID,
  *		given that it is being called with the specified actual arg names and
@@ -9613,18 +9740,59 @@ flatten_reloptions(Oid relid)
 								 Anum_pg_class_reloptions, &isnull);
 	if (!isnull)
 	{
-		Datum		sep,
-					txt;
+		StringInfoData buf;
+		Datum	   *options;
+		int			noptions;
+		int			i;
 
-		/*
-		 * We want to use array_to_text(reloptions, ', ') --- but
-		 * DirectFunctionCall2(array_to_text) does not work, because
-		 * array_to_text() relies on flinfo to be valid.  So use
-		 * OidFunctionCall2.
-		 */
-		sep = CStringGetTextDatum(", ");
-		txt = OidFunctionCall2(F_ARRAY_TO_TEXT, reloptions, sep);
-		result = TextDatumGetCString(txt);
+		initStringInfo(&buf);
+
+		deconstruct_array(DatumGetArrayTypeP(reloptions),
+						  TEXTOID, -1, false, 'i',
+						  &options, NULL, &noptions);
+
+		for (i = 0; i < noptions; i++)
+		{
+			char	   *option = TextDatumGetCString(options[i]);
+			char	   *name;
+			char	   *separator;
+			char	   *value;
+
+			/*
+			 * Each array element should have the form name=value.  If the "="
+			 * is missing for some reason, treat it like an empty value.
+			 */
+			name = option;
+			separator = strchr(option, '=');
+			if (separator)
+			{
+				*separator = '\0';
+				value = separator + 1;
+			}
+			else
+				value = "";
+
+			if (i > 0)
+				appendStringInfoString(&buf, ", ");
+			appendStringInfo(&buf, "%s=", quote_identifier(name));
+
+			/*
+			 * In general we need to quote the value; but to avoid unnecessary
+			 * clutter, do not quote if it is an identifier that would not
+			 * need quoting.  (We could also allow numbers, but that is a bit
+			 * trickier than it looks --- for example, are leading zeroes
+			 * significant?  We don't want to assume very much here about what
+			 * custom reloptions might mean.)
+			 */
+			if (quote_identifier(value) == value)
+				appendStringInfoString(&buf, value);
+			else
+				simple_quote_literal(&buf, value);
+
+			pfree(option);
+		}
+
+		result = buf.data;
 	}
 
 	ReleaseSysCache(tuple);

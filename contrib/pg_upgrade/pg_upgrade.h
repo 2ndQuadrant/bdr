@@ -70,7 +70,6 @@ extern char *output_files[];
 
 
 #ifndef WIN32
-#define pg_copy_file		copy_file
 #define pg_mv_file			rename
 #define pg_link_file		link
 #define PATH_SEPARATOR		'/'
@@ -80,7 +79,6 @@ extern char *output_files[];
 #define ECHO_QUOTE	"'"
 #define ECHO_BLANK	""
 #else
-#define pg_copy_file		CopyFile
 #define pg_mv_file			pgrename
 #define pg_link_file		win32_pghardlink
 #define PATH_SEPARATOR		'\\'
@@ -467,7 +465,7 @@ void
 prep_status(const char *fmt,...)
 __attribute__((format(PG_PRINTF_ATTRIBUTE, 1, 2)));
 void		check_ok(void);
-const char *getErrorText(int errNum);
+const char *getErrorText(void);
 unsigned int str2uint(const char *str);
 void		pg_putenv(const char *var, const char *val);
 

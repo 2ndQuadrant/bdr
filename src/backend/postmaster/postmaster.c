@@ -1596,10 +1596,10 @@ ServerLoop(void)
 {
 	fd_set		readmask;
 	int			nSockets;
-	time_t		now,
+	time_t		last_lockfile_recheck_time,
 				last_touch_time;
 
-	last_touch_time = time(NULL);
+	last_lockfile_recheck_time = last_touch_time = time(NULL);
 
 	nSockets = initMasks(&readmask);
 
@@ -1607,6 +1607,7 @@ ServerLoop(void)
 	{
 		fd_set		rmask;
 		int			selres;
+		time_t		now;
 
 		/*
 		 * Wait for a connection request to arrive.
@@ -1749,19 +1750,6 @@ ServerLoop(void)
 		if (StartWorkerNeeded || HaveCrashedWorker)
 			maybe_start_bgworker();
 
-		/*
-		 * Touch Unix socket and lock files every 58 minutes, to ensure that
-		 * they are not removed by overzealous /tmp-cleaning tasks.  We assume
-		 * no one runs cleaners with cutoff times of less than an hour ...
-		 */
-		now = time(NULL);
-		if (now - last_touch_time >= 58 * SECS_PER_MINUTE)
-		{
-			TouchSocketFiles();
-			TouchSocketLockFiles();
-			last_touch_time = now;
-		}
-
 #ifdef HAVE_PTHREAD_IS_THREADED_NP
 
 		/*
@@ -1770,6 +1758,16 @@ ServerLoop(void)
 		 */
 		Assert(pthread_is_threaded_np() == 0);
 #endif
+
+		/*
+		 * Lastly, check to see if it's time to do some things that we don't
+		 * want to do every single time through the loop, because they're a
+		 * bit expensive.  Note that there's up to a minute of slop in when
+		 * these tasks will be performed, since DetermineSleepTime() will let
+		 * us sleep at most that long; except for SIGKILL timeout which has
+		 * special-case logic there.
+		 */
+		now = time(NULL);
 
 		/*
 		 * If we already sent SIGQUIT to children and they are slow to shut
@@ -1787,6 +1785,39 @@ ServerLoop(void)
 			TerminateChildren(SIGKILL);
 			/* reset flag so we don't SIGKILL again */
 			AbortStartTime = 0;
+		}
+
+		/*
+		 * Once a minute, verify that postmaster.pid hasn't been removed or
+		 * overwritten.  If it has, we force a shutdown.  This avoids having
+		 * postmasters and child processes hanging around after their database
+		 * is gone, and maybe causing problems if a new database cluster is
+		 * created in the same place.  It also provides some protection
+		 * against a DBA foolishly removing postmaster.pid and manually
+		 * starting a new postmaster.  Data corruption is likely to ensue from
+		 * that anyway, but we can minimize the damage by aborting ASAP.
+		 */
+		if (now - last_lockfile_recheck_time >= 1 * SECS_PER_MINUTE)
+		{
+			if (!RecheckDataDirLockFile())
+			{
+				ereport(LOG,
+						(errmsg("performing immediate shutdown because data directory lock file is invalid")));
+				kill(MyProcPid, SIGQUIT);
+			}
+			last_lockfile_recheck_time = now;
+		}
+
+		/*
+		 * Touch Unix socket and lock files every 58 minutes, to ensure that
+		 * they are not removed by overzealous /tmp-cleaning tasks.  We assume
+		 * no one runs cleaners with cutoff times of less than an hour ...
+		 */
+		if (now - last_touch_time >= 58 * SECS_PER_MINUTE)
+		{
+			TouchSocketFiles();
+			TouchSocketLockFiles();
+			last_touch_time = now;
 		}
 	}
 }
@@ -4082,6 +4113,14 @@ BackendInitialize(Port *port)
 	else
 		snprintf(remote_ps_data, sizeof(remote_ps_data), "%s(%s)", remote_host, remote_port);
 
+	/*
+	 * Save remote_host and remote_port in port structure (after this, they
+	 * will appear in log_line_prefix data for log messages).
+	 */
+	port->remote_host = strdup(remote_host);
+	port->remote_port = strdup(remote_port);
+
+	/* And now we can issue the Log_connections message, if wanted */
 	if (Log_connections)
 	{
 		if (remote_port[0])
@@ -4094,12 +4133,6 @@ BackendInitialize(Port *port)
 					(errmsg("connection received: host=%s",
 							remote_host)));
 	}
-
-	/*
-	 * save remote_host and remote_port in port structure
-	 */
-	port->remote_host = strdup(remote_host);
-	port->remote_port = strdup(remote_port);
 
 	/*
 	 * If we did a reverse lookup to name, we might as well save the results
@@ -4662,7 +4695,8 @@ SubPostmasterMain(int argc, char *argv[])
 	/*
 	 * If appropriate, physically re-attach to shared memory segment. We want
 	 * to do this before going any further to ensure that we can attach at the
-	 * same address the postmaster used.
+	 * same address the postmaster used.  On the other hand, if we choose not
+	 * to re-attach, we may have other cleanup to do.
 	 */
 	if (strcmp(argv[1], "--forkbackend") == 0 ||
 		strcmp(argv[1], "--forkavlauncher") == 0 ||
@@ -4670,6 +4704,8 @@ SubPostmasterMain(int argc, char *argv[])
 		strcmp(argv[1], "--forkboot") == 0 ||
 		strncmp(argv[1], "--forkbgworker=", 15) == 0)
 		PGSharedMemoryReAttach();
+	else
+		PGSharedMemoryNoReAttach();
 
 	/* autovacuum needs this set before calling InitProcess */
 	if (strcmp(argv[1], "--forkavlauncher") == 0)

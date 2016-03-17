@@ -7,7 +7,9 @@ use strict;
 our $config;
 
 use Cwd;
+use File::Basename;
 use File::Copy;
+use File::Find ();
 
 use Install qw(Install);
 
@@ -16,6 +18,7 @@ my $startdir = getcwd();
 chdir "../../.." if (-d "../../../src/tools/msvc");
 
 my $topdir = getcwd();
+my $tmp_installdir = "$topdir/tmp_install";
 
 require 'src/tools/msvc/config_default.pl';
 require 'src/tools/msvc/config.pl' if (-f 'src/tools/msvc/config.pl');
@@ -31,7 +34,7 @@ if (-e "src/tools/msvc/buildenv.pl")
 
 my $what = shift || "";
 if ($what =~
-/^(check|installcheck|plcheck|contribcheck|ecpgcheck|isolationcheck|upgradecheck)$/i
+/^(check|installcheck|plcheck|contribcheck|ecpgcheck|isolationcheck|upgradecheck|bincheck)$/i
   )
 {
 	$what = uc $what;
@@ -58,7 +61,14 @@ unless ($schedule)
 	$schedule = "parallel" if ($what eq 'CHECK' || $what =~ /PARALLEL/);
 }
 
-$ENV{PERL5LIB} = "$topdir/src/tools/msvc";
+if ($ENV{PERL5LIB})
+{
+	$ENV{PERL5LIB} = "$topdir/src/tools/msvc;$ENV{PERL5LIB}";
+}
+else
+{
+	$ENV{PERL5LIB} = "$topdir/src/tools/msvc";
+}
 
 my $maxconn = "";
 $maxconn = "--max_connections=$ENV{MAX_CONNECTIONS}"
@@ -77,6 +87,7 @@ my %command = (
 	ECPGCHECK      => \&ecpgcheck,
 	CONTRIBCHECK   => \&contribcheck,
 	ISOLATIONCHECK => \&isolationcheck,
+	BINCHECK       => \&bincheck,
 	UPGRADECHECK   => \&upgradecheck,);
 
 my $proc = $command{$what};
@@ -160,6 +171,48 @@ sub isolationcheck
 	system(@args);
 	my $status = $? >> 8;
 	exit $status if $status;
+}
+
+sub tap_check
+{
+	die "Tap tests not enabled in configuration"
+	  unless $config->{tap_tests};
+
+	my $dir = shift;
+	chdir $dir;
+
+	my @args = ( "prove", "--verbose", "t/*.pl");
+
+	# adjust the environment for just this test
+	local %ENV = %ENV;
+	$ENV{PERL5LIB} = "$topdir/src/test/perl;$ENV{PERL5LIB}";
+	$ENV{PG_REGRESS} = "$topdir/$Config/pg_regress/pg_regress";
+
+	$ENV{TESTDIR} = "$dir";
+
+	system(@args);
+	my $status = $? >> 8;
+	return $status;
+}
+
+sub bincheck
+{
+	InstallTemp();
+
+	my $mstat = 0;
+
+	# Find out all the existing TAP tests by looking for t/ directories
+	# in the tree.
+	my @bin_dirs = glob("$topdir/src/bin/*");
+
+	# Process each test
+	foreach my $dir (@bin_dirs)
+	{
+		next unless -d "$dir/t";
+		my $status = tap_check($dir);
+		$mstat ||= $status;
+	}
+	exit $mstat if $mstat;
 }
 
 sub plcheck
@@ -411,6 +464,12 @@ sub GetTests
 		return $1;
 	}
 	return "";
+}
+
+sub InstallTemp
+{
+   print "Setting up temp install\n\n";
+   Install("$tmp_installdir", "all", $config);
 }
 
 sub usage

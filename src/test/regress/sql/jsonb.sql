@@ -7,14 +7,7 @@ SELECT '"abc
 def"'::jsonb;					-- ERROR, unescaped newline in string constant
 SELECT '"\n\"\\"'::jsonb;		-- OK, legal escapes
 SELECT '"\v"'::jsonb;			-- ERROR, not a valid JSON escape
-SELECT '"\u"'::jsonb;			-- ERROR, incomplete escape
-SELECT '"\u00"'::jsonb;			-- ERROR, incomplete escape
-SELECT '"\u000g"'::jsonb;		-- ERROR, g is not a hex digit
-SELECT '"\u0045"'::jsonb;		-- OK, legal escape
-SELECT '"\u0000"'::jsonb;		-- ERROR, we don't support U+0000
--- use octet_length here so we don't get an odd unicode char in the
--- output
-SELECT octet_length('"\uaBcD"'::jsonb::text); -- OK, uppercase and lower case both OK
+-- see json_encoding test for input with unicode escapes
 
 -- Numbers.
 SELECT '1'::jsonb;				-- OK
@@ -371,28 +364,6 @@ SELECT * FROM jsonb_populate_recordset(NULL::jbpop,'[{"a":"blurfl","x":43.2},{"b
 SELECT * FROM jsonb_populate_recordset(row('def',99,NULL)::jbpop,'[{"a":"blurfl","x":43.2},{"b":3,"c":"2012-01-20 10:42:53"}]') q;
 SELECT * FROM jsonb_populate_recordset(row('def',99,NULL)::jbpop,'[{"a":[100,200,300],"x":43.2},{"a":{"z":true},"b":3,"c":"2012-01-20 10:42:53"}]') q;
 
--- handling of unicode surrogate pairs
-
-SELECT octet_length((jsonb '{ "a":  "\ud83d\ude04\ud83d\udc36" }' -> 'a')::text) AS correct_in_utf8;
-SELECT jsonb '{ "a":  "\ud83d\ud83d" }' -> 'a'; -- 2 high surrogates in a row
-SELECT jsonb '{ "a":  "\ude04\ud83d" }' -> 'a'; -- surrogates in wrong order
-SELECT jsonb '{ "a":  "\ud83dX" }' -> 'a'; -- orphan high surrogate
-SELECT jsonb '{ "a":  "\ude04X" }' -> 'a'; -- orphan low surrogate
-
--- handling of simple unicode escapes
-
-SELECT jsonb '{ "a":  "the Copyright \u00a9 sign" }' as correct_in_utf8;
-SELECT jsonb '{ "a":  "dollar \u0024 character" }' as correct_everywhere;
-SELECT jsonb '{ "a":  "dollar \\u0024 character" }' as not_an_escape;
-SELECT jsonb '{ "a":  "null \u0000 escape" }' as fails;
-SELECT jsonb '{ "a":  "null \\u0000 escape" }' as not_an_escape;
-
-SELECT jsonb '{ "a":  "the Copyright \u00a9 sign" }' ->> 'a' as correct_in_utf8;
-SELECT jsonb '{ "a":  "dollar \u0024 character" }' ->> 'a' as correct_everywhere;
-SELECT jsonb '{ "a":  "dollar \\u0024 character" }' ->> 'a' as not_an_escape;
-SELECT jsonb '{ "a":  "null \u0000 escape" }' ->> 'a' as fails;
-SELECT jsonb '{ "a":  "null \\u0000 escape" }' ->> 'a' as not_an_escape;
-
 -- jsonb_to_record and jsonb_to_recordset
 
 select * from jsonb_to_record('{"a":1,"b":"foo","c":"bar"}')
@@ -516,6 +487,26 @@ SELECT '{"a":[1,2,{"c":3,"x":4}],"c":"b"}'::jsonb @> '{"a":[{"c":3}]}';
 SELECT '{"a":[1,2,{"c":3,"x":4}],"c":"b"}'::jsonb @> '{"a":[{"x":4}]}';
 SELECT '{"a":[1,2,{"c":3,"x":4}],"c":"b"}'::jsonb @> '{"a":[{"x":4},3]}';
 SELECT '{"a":[1,2,{"c":3,"x":4}],"c":"b"}'::jsonb @> '{"a":[{"x":4},1]}';
+
+-- check some corner cases for indexed nested containment (bug #13756)
+create temp table nestjsonb (j jsonb);
+insert into nestjsonb (j) values ('{"a":[["b",{"x":1}],["b",{"x":2}]],"c":3}');
+insert into nestjsonb (j) values ('[[14,2,3]]');
+insert into nestjsonb (j) values ('[1,[14,2,3]]');
+create index on nestjsonb using gin(j jsonb_path_ops);
+
+set enable_seqscan = on;
+set enable_bitmapscan = off;
+select * from nestjsonb where j @> '{"a":[[{"x":2}]]}'::jsonb;
+select * from nestjsonb where j @> '{"c":3}';
+select * from nestjsonb where j @> '[[14]]';
+set enable_seqscan = off;
+set enable_bitmapscan = on;
+select * from nestjsonb where j @> '{"a":[[{"x":2}]]}'::jsonb;
+select * from nestjsonb where j @> '{"c":3}';
+select * from nestjsonb where j @> '[[14]]';
+reset enable_seqscan;
+reset enable_bitmapscan;
 
 -- nested object field / array index lookup
 SELECT '{"n":null,"a":1,"b":[1,2],"c":{"1":2},"d":{"1":[2,3]}}'::jsonb -> 'n';

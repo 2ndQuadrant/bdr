@@ -263,6 +263,9 @@ static void binary_upgrade_extension_member(PQExpBuffer upgrade_buffer,
 								const char *objlabel);
 static const char *getAttrName(int attrnum, TableInfo *tblInfo);
 static const char *fmtCopyColumnList(const TableInfo *ti, PQExpBuffer buffer);
+static bool nonemptyReloptions(const char *reloptions);
+static void fmtReloptionsArray(Archive *fout, PQExpBuffer buffer,
+				   const char *reloptions, const char *prefix);
 static char *get_synchronized_snapshot(Archive *fout);
 static PGresult *ExecuteSqlQueryForSingleRow(Archive *fout, char *query);
 static void setupDumpWorker(Archive *AHX, RestoreOptions *ropt);
@@ -1232,12 +1235,53 @@ expand_table_name_patterns(Archive *fout,
 }
 
 /*
+ * checkExtensionMembership
+ *		Determine whether object is an extension member, and if so,
+ *		record an appropriate dependency and set the object's dump flag.
+ *
+ * It's important to call this for each object that could be an extension
+ * member.  Generally, we integrate this with determining the object's
+ * to-be-dumped-ness, since extension membership overrides other rules for that.
+ *
+ * Returns true if object is an extension member, else false.
+ */
+static bool
+checkExtensionMembership(DumpableObject *dobj)
+{
+	ExtensionInfo *ext = findOwningExtension(dobj->catId);
+
+	if (ext == NULL)
+		return false;
+
+	dobj->ext_member = true;
+
+	/* Record dependency so that getDependencies needn't deal with that */
+	addObjectDependency(dobj, ext->dobj.dumpId);
+
+	/*
+	 * Normally, mark the member object as not to be dumped.  But in binary
+	 * upgrades, we still dump the members individually, since the idea is to
+	 * exactly reproduce the database contents rather than replace the
+	 * extension contents with something different.
+	 */
+	if (!binary_upgrade)
+		dobj->dump = false;
+	else
+		dobj->dump = ext->dobj.dump;
+
+	return true;
+}
+
+/*
  * selectDumpableNamespace: policy-setting subroutine
  *		Mark a namespace as to be dumped or not
  */
 static void
 selectDumpableNamespace(NamespaceInfo *nsinfo)
 {
+	if (checkExtensionMembership(&nsinfo->dobj))
+		return;					/* extension membership overrides all else */
+
 	/*
 	 * If specific tables are being dumped, do not dump any complete
 	 * namespaces. If specific namespaces are being dumped, dump just those
@@ -1270,6 +1314,9 @@ selectDumpableNamespace(NamespaceInfo *nsinfo)
 static void
 selectDumpableTable(TableInfo *tbinfo)
 {
+	if (checkExtensionMembership(&tbinfo->dobj))
+		return;					/* extension membership overrides all else */
+
 	/*
 	 * If specific tables are being dumped, dump just those tables; else, dump
 	 * according to the parent namespace's dump flag.
@@ -1332,6 +1379,9 @@ selectDumpableType(TypeInfo *tyinfo)
 		 */
 	}
 
+	if (checkExtensionMembership(&tyinfo->dobj))
+		return;					/* extension membership overrides all else */
+
 	/* dump only types in dumpable namespaces */
 	if (!tyinfo->dobj.namespace->dobj.dump)
 		tyinfo->dobj.dump = false;
@@ -1350,6 +1400,8 @@ selectDumpableType(TypeInfo *tyinfo)
 static void
 selectDumpableDefaultACL(DefaultACLInfo *dinfo)
 {
+	/* Default ACLs can't be extension members */
+
 	if (dinfo->dobj.namespace)
 		dinfo->dobj.dump = dinfo->dobj.namespace->dobj.dump;
 	else
@@ -1368,10 +1420,33 @@ selectDumpableDefaultACL(DefaultACLInfo *dinfo)
 static void
 selectDumpableCast(CastInfo *cast)
 {
+	if (checkExtensionMembership(&cast->dobj))
+		return;					/* extension membership overrides all else */
+
 	if (cast->dobj.catId.oid < (Oid) FirstNormalObjectId)
 		cast->dobj.dump = false;
 	else
 		cast->dobj.dump = include_everything;
+}
+
+/*
+ * selectDumpableProcLang: policy-setting subroutine
+ *		Mark a procedural language as to be dumped or not
+ *
+ * Procedural languages do not belong to any particular namespace.  To
+ * identify built-in languages, we must resort to checking whether the
+ * language's OID is in the range reserved for initdb.
+ */
+static void
+selectDumpableProcLang(ProcLangInfo *plang)
+{
+	if (checkExtensionMembership(&plang->dobj))
+		return;					/* extension membership overrides all else */
+
+	if (plang->dobj.catId.oid < (Oid) FirstNormalObjectId)
+		plang->dobj.dump = false;
+	else
+		plang->dobj.dump = include_everything;
 }
 
 /*
@@ -1402,14 +1477,17 @@ selectDumpableExtension(ExtensionInfo *extinfo)
 static void
 selectDumpableObject(DumpableObject *dobj)
 {
+	if (checkExtensionMembership(dobj))
+		return;					/* extension membership overrides all else */
+
 	/*
-	 * Default policy is to dump if parent namespace is dumpable, or always
-	 * for non-namespace-associated items.
+	 * Default policy is to dump if parent namespace is dumpable, or for
+	 * non-namespace-associated items, dump if we're dumping "everything".
 	 */
 	if (dobj->namespace)
 		dobj->dump = dobj->namespace->dobj.dump;
 	else
-		dobj->dump = true;
+		dobj->dump = include_everything;
 }
 
 /*
@@ -4349,10 +4427,10 @@ getTables(Archive *fout, int *numTables)
 						  "d.refobjid AS owning_tab, "
 						  "d.refobjsubid AS owning_col, "
 						  "(SELECT spcname FROM pg_tablespace t WHERE t.oid = c.reltablespace) AS reltablespace, "
-						  "array_to_string(array_remove(array_remove(c.reloptions,'check_option=local'),'check_option=cascaded'), ', ') AS reloptions, "
+						  "array_remove(array_remove(c.reloptions,'check_option=local'),'check_option=cascaded') AS reloptions, "
 						  "CASE WHEN 'check_option=local' = ANY (c.reloptions) THEN 'LOCAL'::text "
 						  "WHEN 'check_option=cascaded' = ANY (c.reloptions) THEN 'CASCADED'::text ELSE NULL END AS checkoption, "
-						  "array_to_string(array(SELECT 'toast.' || x FROM unnest(tc.reloptions) x), ', ') AS toast_reloptions "
+						  "tc.reloptions AS toast_reloptions "
 						  "FROM pg_class c "
 						  "LEFT JOIN pg_depend d ON "
 						  "(c.relkind = '%c' AND "
@@ -4389,10 +4467,10 @@ getTables(Archive *fout, int *numTables)
 						  "d.refobjid AS owning_tab, "
 						  "d.refobjsubid AS owning_col, "
 						  "(SELECT spcname FROM pg_tablespace t WHERE t.oid = c.reltablespace) AS reltablespace, "
-						  "array_to_string(array_remove(array_remove(c.reloptions,'check_option=local'),'check_option=cascaded'), ', ') AS reloptions, "
+						  "array_remove(array_remove(c.reloptions,'check_option=local'),'check_option=cascaded') AS reloptions, "
 						  "CASE WHEN 'check_option=local' = ANY (c.reloptions) THEN 'LOCAL'::text "
 						  "WHEN 'check_option=cascaded' = ANY (c.reloptions) THEN 'CASCADED'::text ELSE NULL END AS checkoption, "
-						  "array_to_string(array(SELECT 'toast.' || x FROM unnest(tc.reloptions) x), ', ') AS toast_reloptions "
+						  "tc.reloptions AS toast_reloptions "
 						  "FROM pg_class c "
 						  "LEFT JOIN pg_depend d ON "
 						  "(c.relkind = '%c' AND "
@@ -4429,8 +4507,8 @@ getTables(Archive *fout, int *numTables)
 						  "d.refobjid AS owning_tab, "
 						  "d.refobjsubid AS owning_col, "
 						  "(SELECT spcname FROM pg_tablespace t WHERE t.oid = c.reltablespace) AS reltablespace, "
-						"array_to_string(c.reloptions, ', ') AS reloptions, "
-						  "array_to_string(array(SELECT 'toast.' || x FROM unnest(tc.reloptions) x), ', ') AS toast_reloptions "
+						  "c.reloptions AS reloptions, "
+						  "tc.reloptions AS toast_reloptions "
 						  "FROM pg_class c "
 						  "LEFT JOIN pg_depend d ON "
 						  "(c.relkind = '%c' AND "
@@ -4467,8 +4545,8 @@ getTables(Archive *fout, int *numTables)
 						  "d.refobjid AS owning_tab, "
 						  "d.refobjsubid AS owning_col, "
 						  "(SELECT spcname FROM pg_tablespace t WHERE t.oid = c.reltablespace) AS reltablespace, "
-						"array_to_string(c.reloptions, ', ') AS reloptions, "
-						  "array_to_string(array(SELECT 'toast.' || x FROM unnest(tc.reloptions) x), ', ') AS toast_reloptions "
+						  "c.reloptions AS reloptions, "
+						  "tc.reloptions AS toast_reloptions "
 						  "FROM pg_class c "
 						  "LEFT JOIN pg_depend d ON "
 						  "(c.relkind = '%c' AND "
@@ -4504,8 +4582,8 @@ getTables(Archive *fout, int *numTables)
 						  "d.refobjid AS owning_tab, "
 						  "d.refobjsubid AS owning_col, "
 						  "(SELECT spcname FROM pg_tablespace t WHERE t.oid = c.reltablespace) AS reltablespace, "
-						"array_to_string(c.reloptions, ', ') AS reloptions, "
-						  "array_to_string(array(SELECT 'toast.' || x FROM unnest(tc.reloptions) x), ', ') AS toast_reloptions "
+						  "c.reloptions AS reloptions, "
+						  "tc.reloptions AS toast_reloptions "
 						  "FROM pg_class c "
 						  "LEFT JOIN pg_depend d ON "
 						  "(c.relkind = '%c' AND "
@@ -4541,7 +4619,7 @@ getTables(Archive *fout, int *numTables)
 						  "d.refobjid AS owning_tab, "
 						  "d.refobjsubid AS owning_col, "
 						  "(SELECT spcname FROM pg_tablespace t WHERE t.oid = c.reltablespace) AS reltablespace, "
-						"array_to_string(c.reloptions, ', ') AS reloptions, "
+						  "c.reloptions AS reloptions, "
 						  "NULL AS toast_reloptions "
 						  "FROM pg_class c "
 						  "LEFT JOIN pg_depend d ON "
@@ -5000,7 +5078,7 @@ getIndexes(Archive *fout, TableInfo tblinfo[], int numTables)
 				i_conoid,
 				i_condef,
 				i_tablespace,
-				i_options,
+				i_indreloptions,
 				i_relpages;
 	int			ntups;
 
@@ -5057,7 +5135,7 @@ getIndexes(Archive *fout, TableInfo tblinfo[], int numTables)
 							  "c.oid AS conoid, "
 				  "pg_catalog.pg_get_constraintdef(c.oid, false) AS condef, "
 							  "(SELECT spcname FROM pg_catalog.pg_tablespace s WHERE s.oid = t.reltablespace) AS tablespace, "
-							"array_to_string(t.reloptions, ', ') AS options "
+							  "t.reloptions AS indreloptions "
 							  "FROM pg_catalog.pg_index i "
 					  "JOIN pg_catalog.pg_class t ON (t.oid = i.indexrelid) "
 							  "LEFT JOIN pg_catalog.pg_constraint c "
@@ -5088,7 +5166,7 @@ getIndexes(Archive *fout, TableInfo tblinfo[], int numTables)
 							  "c.oid AS conoid, "
 				  "pg_catalog.pg_get_constraintdef(c.oid, false) AS condef, "
 							  "(SELECT spcname FROM pg_catalog.pg_tablespace s WHERE s.oid = t.reltablespace) AS tablespace, "
-							"array_to_string(t.reloptions, ', ') AS options "
+							  "t.reloptions AS indreloptions "
 							  "FROM pg_catalog.pg_index i "
 					  "JOIN pg_catalog.pg_class t ON (t.oid = i.indexrelid) "
 							  "LEFT JOIN pg_catalog.pg_constraint c "
@@ -5115,7 +5193,7 @@ getIndexes(Archive *fout, TableInfo tblinfo[], int numTables)
 							  "c.oid AS conoid, "
 							  "null AS condef, "
 							  "(SELECT spcname FROM pg_catalog.pg_tablespace s WHERE s.oid = t.reltablespace) AS tablespace, "
-							"array_to_string(t.reloptions, ', ') AS options "
+							  "t.reloptions AS indreloptions "
 							  "FROM pg_catalog.pg_index i "
 					  "JOIN pg_catalog.pg_class t ON (t.oid = i.indexrelid) "
 							  "LEFT JOIN pg_catalog.pg_depend d "
@@ -5145,7 +5223,7 @@ getIndexes(Archive *fout, TableInfo tblinfo[], int numTables)
 							  "c.oid AS conoid, "
 							  "null AS condef, "
 							  "(SELECT spcname FROM pg_catalog.pg_tablespace s WHERE s.oid = t.reltablespace) AS tablespace, "
-							  "null AS options "
+							  "null AS indreloptions "
 							  "FROM pg_catalog.pg_index i "
 					  "JOIN pg_catalog.pg_class t ON (t.oid = i.indexrelid) "
 							  "LEFT JOIN pg_catalog.pg_depend d "
@@ -5174,7 +5252,7 @@ getIndexes(Archive *fout, TableInfo tblinfo[], int numTables)
 							  "c.oid AS conoid, "
 							  "null AS condef, "
 							  "NULL AS tablespace, "
-							  "null AS options "
+							  "null AS indreloptions "
 							  "FROM pg_catalog.pg_index i "
 					  "JOIN pg_catalog.pg_class t ON (t.oid = i.indexrelid) "
 							  "LEFT JOIN pg_catalog.pg_depend d "
@@ -5206,7 +5284,7 @@ getIndexes(Archive *fout, TableInfo tblinfo[], int numTables)
 							  "t.oid AS conoid, "
 							  "null AS condef, "
 							  "NULL AS tablespace, "
-							  "null AS options "
+							  "null AS indreloptions "
 							  "FROM pg_index i, pg_class t "
 							  "WHERE t.oid = i.indexrelid "
 							  "AND i.indrelid = '%u'::oid "
@@ -5233,7 +5311,7 @@ getIndexes(Archive *fout, TableInfo tblinfo[], int numTables)
 							  "t.oid AS conoid, "
 							  "null AS condef, "
 							  "NULL AS tablespace, "
-							  "null AS options "
+							  "null AS indreloptions "
 							  "FROM pg_index i, pg_class t "
 							  "WHERE t.oid = i.indexrelid "
 							  "AND i.indrelid = '%u'::oid "
@@ -5262,7 +5340,7 @@ getIndexes(Archive *fout, TableInfo tblinfo[], int numTables)
 		i_conoid = PQfnumber(res, "conoid");
 		i_condef = PQfnumber(res, "condef");
 		i_tablespace = PQfnumber(res, "tablespace");
-		i_options = PQfnumber(res, "options");
+		i_indreloptions = PQfnumber(res, "indreloptions");
 
 		indxinfo = (IndxInfo *) pg_malloc(ntups * sizeof(IndxInfo));
 		constrinfo = (ConstraintInfo *) pg_malloc(ntups * sizeof(ConstraintInfo));
@@ -5281,7 +5359,7 @@ getIndexes(Archive *fout, TableInfo tblinfo[], int numTables)
 			indxinfo[j].indexdef = pg_strdup(PQgetvalue(res, j, i_indexdef));
 			indxinfo[j].indnkeys = atoi(PQgetvalue(res, j, i_indnkeys));
 			indxinfo[j].tablespace = pg_strdup(PQgetvalue(res, j, i_tablespace));
-			indxinfo[j].options = pg_strdup(PQgetvalue(res, j, i_options));
+			indxinfo[j].indreloptions = pg_strdup(PQgetvalue(res, j, i_indreloptions));
 
 			/*
 			 * In pre-7.4 releases, indkeys may contain more entries than
@@ -5840,6 +5918,9 @@ getTriggers(Archive *fout, TableInfo tblinfo[], int numTables)
 
 		tginfo = (TriggerInfo *) pg_malloc(ntups * sizeof(TriggerInfo));
 
+		tbinfo->numTriggers = ntups;
+		tbinfo->triggers = tginfo;
+
 		for (j = 0; j < ntups; j++)
 		{
 			tginfo[j].dobj.objType = DO_TRIGGER;
@@ -5983,6 +6064,9 @@ getEventTriggers(Archive *fout, int *numEventTriggers)
 		evtinfo[i].evttags = pg_strdup(PQgetvalue(res, i, i_evttags));
 		evtinfo[i].evtfname = pg_strdup(PQgetvalue(res, i, i_evtfname));
 		evtinfo[i].evtenabled = *(PQgetvalue(res, i, i_evtenabled));
+
+		/* Decide whether we want to dump it */
+		selectDumpableObject(&(evtinfo[i].dobj));
 	}
 
 	PQclear(res);
@@ -6136,6 +6220,9 @@ getProcLangs(Archive *fout, int *numProcLangs)
 		planginfo[i].lanvalidator = atooid(PQgetvalue(res, i, i_lanvalidator));
 		planginfo[i].lanacl = pg_strdup(PQgetvalue(res, i, i_lanacl));
 		planginfo[i].lanowner = pg_strdup(PQgetvalue(res, i, i_lanowner));
+
+		/* Decide whether we want to dump it */
+		selectDumpableProcLang(&(planginfo[i]));
 
 		if (fout->remoteVersion < 70300)
 		{
@@ -9408,32 +9495,6 @@ dumpShellType(Archive *fout, ShellTypeInfo *stinfo)
 }
 
 /*
- * Determine whether we want to dump definitions for procedural languages.
- * Since the languages themselves don't have schemas, we can't rely on
- * the normal schema-based selection mechanism.  We choose to dump them
- * whenever neither --schema nor --table was given.  (Before 8.1, we used
- * the dump flag of the PL's call handler function, but in 8.1 this will
- * probably always be false since call handlers are created in pg_catalog.)
- *
- * For some backwards compatibility with the older behavior, we forcibly
- * dump a PL if its handler function (and validator if any) are in a
- * dumpable namespace.  That case is not checked here.
- *
- * Also, if the PL belongs to an extension, we do not use this heuristic.
- * That case isn't checked here either.
- */
-static bool
-shouldDumpProcLangs(void)
-{
-	if (!include_everything)
-		return false;
-	/* And they're schema not data */
-	if (dataOnly)
-		return false;
-	return true;
-}
-
-/*
  * dumpProcLang
  *		  writes out to fout the queries to recreate a user-defined
  *		  procedural language
@@ -9483,24 +9544,12 @@ dumpProcLang(Archive *fout, ProcLangInfo *plang)
 
 	/*
 	 * If the functions are dumpable then emit a traditional CREATE LANGUAGE
-	 * with parameters.  Otherwise, dump only if shouldDumpProcLangs() says to
-	 * dump it.
-	 *
-	 * However, for a language that belongs to an extension, we must not use
-	 * the shouldDumpProcLangs heuristic, but just dump the language iff we're
-	 * told to (via dobj.dump).  Generally the support functions will belong
-	 * to the same extension and so have the same dump flags ... if they
-	 * don't, this might not work terribly nicely.
+	 * with parameters.  Otherwise, we'll write a parameterless command, which
+	 * will rely on data from pg_pltemplate.
 	 */
 	useParams = (funcInfo != NULL &&
 				 (inlineInfo != NULL || !OidIsValid(plang->laninline)) &&
 				 (validatorInfo != NULL || !OidIsValid(plang->lanvalidator)));
-
-	if (!plang->dobj.ext_member)
-	{
-		if (!useParams && !shouldDumpProcLangs())
-			return;
-	}
 
 	defqry = createPQExpBuffer();
 	delqry = createPQExpBuffer();
@@ -12357,14 +12406,6 @@ dumpForeignDataWrapper(Archive *fout, FdwInfo *fdwinfo)
 	if (!fdwinfo->dobj.dump || dataOnly)
 		return;
 
-	/*
-	 * FDWs that belong to an extension are dumped based on their "dump"
-	 * field. Otherwise omit them if we are only dumping some specific object.
-	 */
-	if (!fdwinfo->dobj.ext_member)
-		if (!include_everything)
-			return;
-
 	q = createPQExpBuffer();
 	delq = createPQExpBuffer();
 	labelq = createPQExpBuffer();
@@ -12439,7 +12480,7 @@ dumpForeignServer(Archive *fout, ForeignServerInfo *srvinfo)
 	char	   *fdwname;
 
 	/* Skip if not to be dumped */
-	if (!srvinfo->dobj.dump || dataOnly || !include_everything)
+	if (!srvinfo->dobj.dump || dataOnly)
 		return;
 
 	q = createPQExpBuffer();
@@ -13214,8 +13255,12 @@ dumpTableSchema(Archive *fout, TableInfo *tbinfo)
 											 tbinfo->dobj.catId.oid, false);
 
 		appendPQExpBuffer(q, "CREATE VIEW %s", fmtId(tbinfo->dobj.name));
-		if (tbinfo->reloptions && strlen(tbinfo->reloptions) > 0)
-			appendPQExpBuffer(q, " WITH (%s)", tbinfo->reloptions);
+		if (nonemptyReloptions(tbinfo->reloptions))
+		{
+			appendPQExpBufferStr(q, " WITH (");
+			fmtReloptionsArray(fout, q, tbinfo->reloptions, "");
+			appendPQExpBufferChar(q, ')');
+		}
 		result = createViewAsClause(fout, tbinfo);
 		appendPQExpBuffer(q, " AS\n%s", result->data);
 		destroyPQExpBuffer(result);
@@ -13459,21 +13504,22 @@ dumpTableSchema(Archive *fout, TableInfo *tbinfo)
 				appendPQExpBuffer(q, "\nSERVER %s", fmtId(srvname));
 		}
 
-		if ((tbinfo->reloptions && strlen(tbinfo->reloptions) > 0) ||
-		  (tbinfo->toast_reloptions && strlen(tbinfo->toast_reloptions) > 0))
+		if (nonemptyReloptions(tbinfo->reloptions) ||
+			nonemptyReloptions(tbinfo->toast_reloptions))
 		{
 			bool		addcomma = false;
 
 			appendPQExpBufferStr(q, "\nWITH (");
-			if (tbinfo->reloptions && strlen(tbinfo->reloptions) > 0)
+			if (nonemptyReloptions(tbinfo->reloptions))
 			{
 				addcomma = true;
-				appendPQExpBufferStr(q, tbinfo->reloptions);
+				fmtReloptionsArray(fout, q, tbinfo->reloptions, "");
 			}
-			if (tbinfo->toast_reloptions && strlen(tbinfo->toast_reloptions) > 0)
+			if (nonemptyReloptions(tbinfo->toast_reloptions))
 			{
-				appendPQExpBuffer(q, "%s%s", addcomma ? ", " : "",
-								  tbinfo->toast_reloptions);
+				if (addcomma)
+					appendPQExpBufferStr(q, ", ");
+				fmtReloptionsArray(fout, q, tbinfo->toast_reloptions, "toast.");
 			}
 			appendPQExpBufferChar(q, ')');
 		}
@@ -14047,8 +14093,12 @@ dumpConstraint(Archive *fout, ConstraintInfo *coninfo)
 
 			appendPQExpBufferChar(q, ')');
 
-			if (indxinfo->options && strlen(indxinfo->options) > 0)
-				appendPQExpBuffer(q, " WITH (%s)", indxinfo->options);
+			if (nonemptyReloptions(indxinfo->indreloptions))
+			{
+				appendPQExpBufferStr(q, " WITH (");
+				fmtReloptionsArray(fout, q, indxinfo->indreloptions, "");
+				appendPQExpBufferChar(q, ')');
+			}
 
 			if (coninfo->condeferrable)
 			{
@@ -14984,11 +15034,12 @@ dumpRule(Archive *fout, RuleInfo *rinfo)
 	/*
 	 * Apply view's reloptions when its ON SELECT rule is separate.
 	 */
-	if (rinfo->reloptions && strlen(rinfo->reloptions) > 0)
+	if (nonemptyReloptions(rinfo->reloptions))
 	{
-		appendPQExpBuffer(cmd, "ALTER VIEW %s SET (%s);\n",
-						  fmtId(tbinfo->dobj.name),
-						  rinfo->reloptions);
+		appendPQExpBuffer(cmd, "ALTER VIEW %s SET (",
+						  fmtId(tbinfo->dobj.name));
+		fmtReloptionsArray(fout, cmd, rinfo->reloptions, "");
+		appendPQExpBufferStr(cmd, ");\n");
 	}
 
 	/*
@@ -15033,32 +15084,12 @@ dumpRule(Archive *fout, RuleInfo *rinfo)
 /*
  * getExtensionMembership --- obtain extension membership data
  *
- * There are three main parts to this process:
- *
- * 1. Identify objects which are members of extensions
- *
- *    Generally speaking, this is to mark them as *not* being dumped, as most
- *    extension objects are created by the single CREATE EXTENSION command.
- *    The one exception is binary upgrades with pg_upgrade will still dump the
- *    non-table objects.
- *
- * 2. Identify and create dump records for extension configuration tables.
- *
- *    Extensions can mark tables as "configuration", which means that the user
- *    is able and expected to modify those tables after the extension has been
- *    loaded.  For these tables, we dump out only the data- the structure is
- *    expected to be handled at CREATE EXTENSION time, including any indexes or
- *    foriegn keys, which brings us to-
- *
- * 3. Record FK dependencies between configuration tables.
- *
- *    Due to the FKs being created at CREATE EXTENSION time and therefore before
- *    the data is loaded, we have to work out what the best order for reloading
- *    the data is, to avoid FK violations when the tables are restored.  This is
- *    not perfect- we can't handle circular dependencies and if any exist they
- *    will cause an invalid dump to be produced (though at least all of the data
- *    is included for a user to manually restore).  This is currently documented
- *    but perhaps we can provide a better solution in the future.
+ * We need to identify objects that are extension members as soon as they're
+ * loaded, so that we can correctly determine whether they need to be dumped.
+ * Generally speaking, extension member objects will get marked as *not* to
+ * be dumped, as they will be recreated by the single CREATE EXTENSION
+ * command.  However, in binary upgrade mode we still need to dump the members
+ * individually.
  */
 void
 getExtensionMembership(Archive *fout, ExtensionInfo extinfo[],
@@ -15067,15 +15098,13 @@ getExtensionMembership(Archive *fout, ExtensionInfo extinfo[],
 	PQExpBuffer query;
 	PGresult   *res;
 	int			ntups,
+				nextmembers,
 				i;
 	int			i_classid,
 				i_objid,
-				i_refclassid,
-				i_refobjid,
-				i_conrelid,
-				i_confrelid;
-	DumpableObject *dobj,
-			   *refdobj;
+				i_refobjid;
+	ExtensionMemberId *extmembers;
+	ExtensionInfo *ext;
 
 	/* Nothing to do if no extensions */
 	if (numExtensions == 0)
@@ -15088,11 +15117,11 @@ getExtensionMembership(Archive *fout, ExtensionInfo extinfo[],
 
 	/* refclassid constraint is redundant but may speed the search */
 	appendPQExpBufferStr(query, "SELECT "
-						 "classid, objid, refclassid, refobjid "
+						 "classid, objid, refobjid "
 						 "FROM pg_depend "
 						 "WHERE refclassid = 'pg_extension'::regclass "
 						 "AND deptype = 'e' "
-						 "ORDER BY 3,4");
+						 "ORDER BY 3");
 
 	res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
 
@@ -15100,76 +15129,93 @@ getExtensionMembership(Archive *fout, ExtensionInfo extinfo[],
 
 	i_classid = PQfnumber(res, "classid");
 	i_objid = PQfnumber(res, "objid");
-	i_refclassid = PQfnumber(res, "refclassid");
 	i_refobjid = PQfnumber(res, "refobjid");
 
+	extmembers = (ExtensionMemberId *) pg_malloc(ntups * sizeof(ExtensionMemberId));
+	nextmembers = 0;
+
 	/*
+	 * Accumulate data into extmembers[].
+	 *
 	 * Since we ordered the SELECT by referenced ID, we can expect that
 	 * multiple entries for the same extension will appear together; this
 	 * saves on searches.
 	 */
-	refdobj = NULL;
+	ext = NULL;
 
 	for (i = 0; i < ntups; i++)
 	{
 		CatalogId	objId;
-		CatalogId	refobjId;
+		Oid			extId;
 
 		objId.tableoid = atooid(PQgetvalue(res, i, i_classid));
 		objId.oid = atooid(PQgetvalue(res, i, i_objid));
-		refobjId.tableoid = atooid(PQgetvalue(res, i, i_refclassid));
-		refobjId.oid = atooid(PQgetvalue(res, i, i_refobjid));
+		extId = atooid(PQgetvalue(res, i, i_refobjid));
 
-		if (refdobj == NULL ||
-			refdobj->catId.tableoid != refobjId.tableoid ||
-			refdobj->catId.oid != refobjId.oid)
-			refdobj = findObjectByCatalogId(refobjId);
+		if (ext == NULL ||
+			ext->dobj.catId.oid != extId)
+			ext = findExtensionByOid(extId);
 
-		/*
-		 * Failure to find objects mentioned in pg_depend is not unexpected,
-		 * since for example we don't collect info about TOAST tables.
-		 */
-		if (refdobj == NULL)
+		if (ext == NULL)
 		{
-#ifdef NOT_USED
-			fprintf(stderr, "no referenced object %u %u\n",
-					refobjId.tableoid, refobjId.oid);
-#endif
+			/* shouldn't happen */
+			fprintf(stderr, "could not find referenced extension %u\n", extId);
 			continue;
 		}
 
-		dobj = findObjectByCatalogId(objId);
-
-		if (dobj == NULL)
-		{
-#ifdef NOT_USED
-			fprintf(stderr, "no referencing object %u %u\n",
-					objId.tableoid, objId.oid);
-#endif
-			continue;
-		}
-
-		/* Record dependency so that getDependencies needn't repeat this */
-		addObjectDependency(dobj, refdobj->dumpId);
-
-		dobj->ext_member = true;
-
-		/*
-		 * Normally, mark the member object as not to be dumped.  But in
-		 * binary upgrades, we still dump the members individually, since the
-		 * idea is to exactly reproduce the database contents rather than
-		 * replace the extension contents with something different.
-		 */
-		if (!binary_upgrade)
-			dobj->dump = false;
-		else
-			dobj->dump = refdobj->dump;
+		extmembers[nextmembers].catId = objId;
+		extmembers[nextmembers].ext = ext;
+		nextmembers++;
 	}
 
 	PQclear(res);
 
+	/* Remember the data for use later */
+	setExtensionMembership(extmembers, nextmembers);
+
+	destroyPQExpBuffer(query);
+}
+
+/*
+ * processExtensionTables --- deal with extension configuration tables
+ *
+ * There are two parts to this process:
+ *
+ * 1. Identify and create dump records for extension configuration tables.
+ *
+ *	  Extensions can mark tables as "configuration", which means that the user
+ *	  is able and expected to modify those tables after the extension has been
+ *	  loaded.  For these tables, we dump out only the data- the structure is
+ *	  expected to be handled at CREATE EXTENSION time, including any indexes or
+ *	  foreign keys, which brings us to-
+ *
+ * 2. Record FK dependencies between configuration tables.
+ *
+ *	  Due to the FKs being created at CREATE EXTENSION time and therefore before
+ *	  the data is loaded, we have to work out what the best order for reloading
+ *	  the data is, to avoid FK violations when the tables are restored.  This is
+ *	  not perfect- we can't handle circular dependencies and if any exist they
+ *	  will cause an invalid dump to be produced (though at least all of the data
+ *	  is included for a user to manually restore).  This is currently documented
+ *	  but perhaps we can provide a better solution in the future.
+ */
+void
+processExtensionTables(Archive *fout, ExtensionInfo extinfo[],
+					   int numExtensions)
+{
+	PQExpBuffer query;
+	PGresult   *res;
+	int			ntups,
+				i;
+	int			i_conrelid,
+				i_confrelid;
+
+	/* Nothing to do if no extensions */
+	if (numExtensions == 0)
+		return;
+
 	/*
-	 * Now identify extension configuration tables and create TableDataInfo
+	 * Identify extension configuration tables and create TableDataInfo
 	 * objects for them, ensuring their data will be dumped even though the
 	 * tables themselves won't be.
 	 *
@@ -15255,14 +15301,19 @@ getExtensionMembership(Archive *fout, ExtensionInfo extinfo[],
 	}
 
 	/*
-	 * Now that all the TableInfoData objects have been created for all
-	 * the extensions, check their FK dependencies and register them to
-	 * try and dump the data out in an order which they can be restored
-	 * in.
+	 * Now that all the TableInfoData objects have been created for all the
+	 * extensions, check their FK dependencies and register them to try and
+	 * dump the data out in an order that they can be restored in.
 	 *
 	 * Note that this is not a problem for user tables as their FKs are
 	 * recreated after the data has been loaded.
 	 */
+
+	/* Make sure we are in proper schema */
+	selectSourceSchema(fout, "pg_catalog");
+
+	query = createPQExpBuffer();
+
 	printfPQExpBuffer(query,
 			"SELECT conrelid, confrelid "
 			"FROM pg_constraint "
@@ -15856,6 +15907,83 @@ fmtCopyColumnList(const TableInfo *ti, PQExpBuffer buffer)
 
 	appendPQExpBufferChar(buffer, ')');
 	return buffer->data;
+}
+
+/*
+ * Check if a reloptions array is nonempty.
+ */
+static bool
+nonemptyReloptions(const char *reloptions)
+{
+	/* Don't want to print it if it's just "{}" */
+	return (reloptions != NULL && strlen(reloptions) > 2);
+}
+
+/*
+ * Format a reloptions array and append it to the given buffer.
+ *
+ * "prefix" is prepended to the option names; typically it's "" or "toast.".
+ *
+ * Note: this logic should generally match the backend's flatten_reloptions()
+ * (in adt/ruleutils.c).
+ */
+static void
+fmtReloptionsArray(Archive *fout, PQExpBuffer buffer, const char *reloptions,
+				   const char *prefix)
+{
+	char	  **options;
+	int			noptions;
+	int			i;
+
+	if (!parsePGArray(reloptions, &options, &noptions))
+	{
+		write_msg(NULL, "WARNING: could not parse reloptions array\n");
+		if (options)
+			free(options);
+		return;
+	}
+
+	for (i = 0; i < noptions; i++)
+	{
+		char	   *option = options[i];
+		char	   *name;
+		char	   *separator;
+		char	   *value;
+
+		/*
+		 * Each array element should have the form name=value.  If the "=" is
+		 * missing for some reason, treat it like an empty value.
+		 */
+		name = option;
+		separator = strchr(option, '=');
+		if (separator)
+		{
+			*separator = '\0';
+			value = separator + 1;
+		}
+		else
+			value = "";
+
+		if (i > 0)
+			appendPQExpBufferStr(buffer, ", ");
+		appendPQExpBuffer(buffer, "%s%s=", prefix, fmtId(name));
+
+		/*
+		 * In general we need to quote the value; but to avoid unnecessary
+		 * clutter, do not quote if it is an identifier that would not need
+		 * quoting.  (We could also allow numbers, but that is a bit trickier
+		 * than it looks --- for example, are leading zeroes significant?  We
+		 * don't want to assume very much here about what custom reloptions
+		 * might mean.)
+		 */
+		if (strcmp(fmtId(value), value) == 0)
+			appendPQExpBufferStr(buffer, value);
+		else
+			appendStringLiteralAH(buffer, value, fout);
+	}
+
+	if (options)
+		free(options);
 }
 
 /*

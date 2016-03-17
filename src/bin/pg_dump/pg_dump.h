@@ -239,17 +239,17 @@ typedef struct _tableInfo
 	char		relreplident;	/* replica identifier */
 	char	   *reltablespace;	/* relation tablespace */
 	char	   *reloptions;		/* options specified by WITH (...) */
-	char	   *checkoption;	/* WITH CHECK OPTION */
+	char	   *checkoption;	/* WITH CHECK OPTION, if any */
 	char	   *toast_reloptions;		/* WITH options for the TOAST table */
 	bool		hasindex;		/* does it have any indexes? */
 	bool		hasrules;		/* does it have any rules? */
 	bool		hastriggers;	/* does it have any triggers? */
 	bool		hasoids;		/* does it have OIDs? */
-	uint32		frozenxid;		/* for restore frozen xid */
-	uint32		minmxid;		/* for restore min multi xid */
-	Oid			toast_oid;		/* for restore toast frozen xid */
-	uint32		toast_frozenxid;	/* for restore toast frozen xid */
-	uint32		toast_minmxid;	/* for restore toast min multi xid */
+	uint32		frozenxid;		/* table's relfrozenxid */
+	uint32		minmxid;		/* table's relminmxid */
+	Oid			toast_oid;		/* toast table's OID, or 0 if none */
+	uint32		toast_frozenxid;	/* toast table's relfrozenxid, if any */
+	uint32		toast_minmxid;	/* toast table's relminmxid */
 	int			ncheck;			/* # of CHECK expressions */
 	char	   *reloftype;		/* underlying type for typed table */
 	/* these two are set only if table is a sequence owned by a column: */
@@ -289,6 +289,8 @@ typedef struct _tableInfo
 	int			numParents;		/* number of (immediate) parent tables */
 	struct _tableInfo **parents;	/* TableInfos of immediate parents */
 	struct _tableDataInfo *dataObj;		/* TableDataInfo, if dumping its data */
+	int			numTriggers;	/* number of triggers for table */
+	struct _triggerInfo *triggers;		/* array of TriggerInfo structs */
 } TableInfo;
 
 typedef struct _attrDefInfo
@@ -314,7 +316,7 @@ typedef struct _indxInfo
 	TableInfo  *indextable;		/* link to table the index is for */
 	char	   *indexdef;
 	char	   *tablespace;		/* tablespace in which index is stored */
-	char	   *options;		/* options specified by WITH (...) */
+	char	   *indreloptions;	/* options specified by WITH (...) */
 	int			indnkeys;
 	Oid		   *indkeys;
 	bool		indisclustered;
@@ -485,6 +487,16 @@ typedef struct _blobInfo
 	char	   *blobacl;
 } BlobInfo;
 
+/*
+ * We build an array of these with an entry for each object that is an
+ * extension member according to pg_depend.
+ */
+typedef struct _extensionMemberId
+{
+	CatalogId	catId;			/* tableoid+oid of some member object */
+	ExtensionInfo *ext;			/* owning extension */
+} ExtensionMemberId;
+
 /* global decls */
 extern bool force_quotes;		/* double-quotes for identifiers flag */
 extern bool g_verbose;			/* verbose flag */
@@ -528,6 +540,10 @@ extern FuncInfo *findFuncByOid(Oid oid);
 extern OprInfo *findOprByOid(Oid oid);
 extern CollInfo *findCollationByOid(Oid oid);
 extern NamespaceInfo *findNamespaceByOid(Oid oid);
+extern ExtensionInfo *findExtensionByOid(Oid oid);
+
+extern void setExtensionMembership(ExtensionMemberId *extmems, int nextmems);
+extern ExtensionInfo *findOwningExtension(CatalogId catalogId);
 
 extern void simple_oid_list_append(SimpleOidList *list, Oid val);
 extern bool simple_oid_list_member(SimpleOidList *list, Oid val);
@@ -574,6 +590,8 @@ extern ForeignServerInfo *getForeignServers(Archive *fout,
 				  int *numForeignServers);
 extern DefaultACLInfo *getDefaultACLs(Archive *fout, int *numDefaultACLs);
 extern void getExtensionMembership(Archive *fout, ExtensionInfo extinfo[],
+					   int numExtensions);
+extern void processExtensionTables(Archive *fout, ExtensionInfo extinfo[],
 					   int numExtensions);
 extern EventTriggerInfo *getEventTriggers(Archive *fout, int *numEventTriggers);
 
