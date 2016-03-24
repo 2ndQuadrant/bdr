@@ -167,8 +167,7 @@ bdr_get_remote_dboid(const char *conninfo_db)
 	{
 		ereport(FATAL,
 				(errcode(ERRCODE_CONNECTION_FAILURE),
-				 errmsg("could not connect to the primary server: %s",
-						PQerrorMessage(dbConn)),
+				 errmsg("get remote OID: %s", PQerrorMessage(dbConn)),
 				 errdetail("Connection string is '%s'", conninfo_db)));
 	}
 
@@ -277,8 +276,7 @@ bdr_connect(const char *conninfo,
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_CONNECTION_FAILURE),
-				 errmsg("could not connect to the primary server: %s",
-						PQerrorMessage(streamConn)),
+				 errmsg("establish BDR: %s", PQerrorMessage(streamConn)),
 				 errdetail("Connection string is '%s'", conninfo_repl.data)));
 	}
 
