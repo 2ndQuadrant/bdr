@@ -17,7 +17,7 @@ dnl Read the Autoconf manual for details.
 dnl
 m4_pattern_forbid(^PGAC_)dnl to catch undefined macros
 
-AC_INIT([PostgreSQL], [9.4.6], [pgsql-bugs@postgresql.org])
+AC_INIT([PostgreSQL], [9.4.7], [pgsql-bugs@postgresql.org])
 
 m4_if(m4_defn([m4_PACKAGE_VERSION]), [2.69], [], [m4_fatal([Autoconf version 2.69 is required.
 Untested combinations of 'autoconf' and PostgreSQL versions are not
@@ -1291,6 +1291,7 @@ fi
 PGAC_VAR_INT_TIMEZONE
 AC_FUNC_ACCEPT_ARGTYPES
 PGAC_FUNC_GETTIMEOFDAY_1ARG
+PGAC_FUNC_WCSTOMBS_L
 
 # Some versions of libedit contain strlcpy(), setproctitle(), and other
 # symbols that that library has no business exposing to the world.  Pending

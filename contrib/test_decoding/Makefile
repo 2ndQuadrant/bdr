@@ -37,7 +37,8 @@ submake-isolation:
 submake-test_decoding:
 	$(MAKE) -C $(top_builddir)/contrib/test_decoding
 
-REGRESSCHECKS=ddl rewrite toast permissions decoding_in_xact decoding_into_rel binary prepared
+REGRESSCHECKS=ddl xact rewrite toast permissions decoding_in_xact \
+	decoding_into_rel binary prepared
 
 regresscheck: all | submake-regress submake-test_decoding
 	$(MKDIR_P) regression_output
@@ -68,6 +69,6 @@ isolationcheck-install-force: all | submake-isolation submake-test_decoding
 	    --extra-install=contrib/test_decoding \
 	    $(ISOLATIONCHECKS)
 
-PHONY: submake-test_decoding submake-regress check \
+.PHONY: submake-test_decoding submake-regress check \
 	regresscheck regresscheck-install-force \
 	isolationcheck isolationcheck-install-force

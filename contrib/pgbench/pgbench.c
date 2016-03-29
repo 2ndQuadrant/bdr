@@ -204,7 +204,7 @@ typedef struct
 	int			state;			/* state No. */
 	int			cnt;			/* xacts count */
 	int			ecnt;			/* error count */
-	int			listen;			/* 0 indicates that an async query has been
+	int			listen;			/* 1 indicates that an async query has been
 								 * sent */
 	int			sleeping;		/* 1 indicates that the client is napping */
 	bool		throttling;		/* whether nap is for throttling */
@@ -1274,6 +1274,13 @@ top:
 		}
 		INSTR_TIME_SET_CURRENT(end);
 		INSTR_TIME_ACCUM_DIFF(*conn_time, end, start);
+
+		/* Reset session-local state */
+		st->listen = 0;
+		st->sleeping = 0;
+		st->throttling = false;
+		st->is_throttled = false;
+		memset(st->prepared, 0, sizeof(st->prepared));
 	}
 
 	/*
@@ -3231,7 +3238,7 @@ threadRun(void *arg)
 			sock = PQsocket(st->con);
 			if (sock < 0)
 			{
-				fprintf(stderr, "bad socket: %s\n", strerror(errno));
+				fprintf(stderr, "bad socket: %s", PQerrorMessage(st->con));
 				goto done;
 			}
 
@@ -3299,11 +3306,21 @@ threadRun(void *arg)
 			Command   **commands = sql_files[st->use_file];
 			int			prev_ecnt = st->ecnt;
 
-			if (st->con && (FD_ISSET(PQsocket(st->con), &input_mask)
-							|| commands[st->state]->type == META_COMMAND))
+			if (st->con)
 			{
-				if (!doCustom(thread, st, &result->conn_time, logfile, &aggs))
-					remains--;	/* I've aborted */
+				int			sock = PQsocket(st->con);
+
+				if (sock < 0)
+				{
+					fprintf(stderr, "bad socket: %s", PQerrorMessage(st->con));
+					goto done;
+				}
+				if (FD_ISSET(sock, &input_mask) ||
+					commands[st->state]->type == META_COMMAND)
+				{
+					if (!doCustom(thread, st, &result->conn_time, logfile, &aggs))
+						remains--;	/* I've aborted */
+				}
 			}
 
 			if (st->ecnt > prev_ecnt && commands[st->state]->type == META_COMMAND)

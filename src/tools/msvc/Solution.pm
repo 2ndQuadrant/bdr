@@ -301,7 +301,7 @@ s{PG_VERSION_STR "[^"]+"}{__STRINGIFY(x) #x\n#define __STRINGIFY2(z) __STRINGIFY
 	{
 		print "Generating probes.h...\n";
 		system(
-'psed -f src\backend\utils\Gen_dummy_probes.sed src\backend\utils\probes.d > src\include\utils\probes.h'
+'perl src/backend/utils/Gen_dummy_probes.pl src/backend/utils/probes.d > src/include/utils/probes.h'
 		);
 	}
 
@@ -631,6 +631,7 @@ sub GetFakeConfigure
 	$cfg .= ' --enable-integer-datetimes'
 	  if ($self->{options}->{integer_datetimes});
 	$cfg .= ' --enable-nls' if ($self->{options}->{nls});
+	$cfg .= ' --enable-tap-tests' if ($self->{options}->{tap_tests});
 	$cfg .= ' --with-ldap'  if ($self->{options}->{ldap});
 	$cfg .= ' --without-zlib' unless ($self->{options}->{zlib});
 	$cfg .= ' --with-openssl'   if ($self->{options}->{ssl});

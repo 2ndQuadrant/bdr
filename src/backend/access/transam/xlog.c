@@ -3261,7 +3261,7 @@ XLogFileInit(XLogSegNo logsegno, bool *use_existent, bool use_lock)
  *
  * destsegno: identify segment to be created.
  *
- * srcTLI, srclog, srcseg: identify segment to be copied (could be from
+ * srcTLI, srcsegno: identify segment to be copied (could be from
  *		a different timeline)
  *
  * Currently this is only used during recovery, and so there are no locking
@@ -3425,34 +3425,16 @@ InstallXLogFileSegment(XLogSegNo *segno, char *tmppath,
 	}
 
 	/*
-	 * Prefer link() to rename() here just to be really sure that we don't
-	 * overwrite an existing logfile.  However, there shouldn't be one, so
-	 * rename() is an acceptable substitute except for the truly paranoid.
+	 * Perform the rename using link if available, paranoidly trying to avoid
+	 * overwriting an existing file (there shouldn't be one).
 	 */
-#if HAVE_WORKING_LINK
-	if (link(tmppath, path) < 0)
+	if (durable_link_or_rename(tmppath, path, LOG) != 0)
 	{
 		if (use_lock)
 			LWLockRelease(ControlFileLock);
-		ereport(LOG,
-				(errcode_for_file_access(),
-				 errmsg("could not link file \"%s\" to \"%s\" (initialization of log file): %m",
-						tmppath, path)));
+		/* durable_link_or_rename already emitted log message */
 		return false;
 	}
-	unlink(tmppath);
-#else
-	if (rename(tmppath, path) < 0)
-	{
-		if (use_lock)
-			LWLockRelease(ControlFileLock);
-		ereport(LOG,
-				(errcode_for_file_access(),
-				 errmsg("could not rename file \"%s\" to \"%s\" (initialization of log file): %m",
-						tmppath, path)));
-		return false;
-	}
-#endif
 
 	if (use_lock)
 		LWLockRelease(ControlFileLock);
@@ -5436,11 +5418,7 @@ exitArchiveRecovery(TimeLineID endTLI, XLogSegNo endLogSegNo)
 	 * re-enter archive recovery mode in a subsequent crash.
 	 */
 	unlink(RECOVERY_COMMAND_DONE);
-	if (rename(RECOVERY_COMMAND_FILE, RECOVERY_COMMAND_DONE) != 0)
-		ereport(FATAL,
-				(errcode_for_file_access(),
-				 errmsg("could not rename file \"%s\" to \"%s\": %m",
-						RECOVERY_COMMAND_FILE, RECOVERY_COMMAND_DONE)));
+	durable_rename(RECOVERY_COMMAND_FILE, RECOVERY_COMMAND_DONE, FATAL);
 
 	ereport(LOG,
 			(errmsg("archive recovery complete")));
@@ -5862,6 +5840,10 @@ recoveryApplyDelay(XLogRecord *record)
 
 	/* nothing to do if no delay configured */
 	if (recovery_min_apply_delay <= 0)
+		return false;
+
+	/* no delay is applied on a database not yet consistent */
+	if (!reachedConsistency)
 		return false;
 
 	/*
@@ -6632,11 +6614,7 @@ StartupXLOG(void)
 		if (haveBackupLabel)
 		{
 			unlink(BACKUP_LABEL_OLD);
-			if (rename(BACKUP_LABEL_FILE, BACKUP_LABEL_OLD) != 0)
-				ereport(FATAL,
-						(errcode_for_file_access(),
-						 errmsg("could not rename file \"%s\" to \"%s\": %m",
-								BACKUP_LABEL_FILE, BACKUP_LABEL_OLD)));
+			durable_rename(BACKUP_LABEL_FILE, BACKUP_LABEL_OLD, FATAL);
 		}
 
 		/* Check that the GUCs used to generate the WAL allow recovery */
@@ -10744,7 +10722,7 @@ CancelBackup(void)
 	/* remove leftover file from previously canceled backup if it exists */
 	unlink(BACKUP_LABEL_OLD);
 
-	if (rename(BACKUP_LABEL_FILE, BACKUP_LABEL_OLD) == 0)
+	if (durable_rename(BACKUP_LABEL_FILE, BACKUP_LABEL_OLD, DEBUG1) == 0)
 	{
 		ereport(LOG,
 				(errmsg("online backup mode canceled"),
