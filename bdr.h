@@ -45,11 +45,7 @@
 #define BDR_INIT_REPLICA_CMD "bdr_initial_load"
 #define BDR_LIBRARY_NAME "bdr"
 #define BDR_RESTORE_CMD "pg_restore"
-#ifdef BUILDING_UDR
 #define BDR_DUMP_CMD "bdr_dump"
-#else
-#define BDR_DUMP_CMD "pg_dump"
-#endif
 
 #define BDR_SUPERVISOR_DBNAME "bdr_supervisordb"
 
