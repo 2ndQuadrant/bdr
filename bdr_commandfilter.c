@@ -705,7 +705,7 @@ bdr_commandfilter_dbname(const char *dbname)
 {
 	if (strcmp(dbname, BDR_SUPERVISOR_DBNAME) == 0)
 	{
-		ereport(ERROR,
+		ereport(WARNING,
 				(errcode(ERRCODE_RESERVED_NAME),
 				 errmsg("The BDR extension reserves the database name "
 						BDR_SUPERVISOR_DBNAME" for its own use"),
