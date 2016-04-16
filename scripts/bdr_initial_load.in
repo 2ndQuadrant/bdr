@@ -86,7 +86,7 @@ fi
 SNAP=${SNAPSHOT:+"--snapshot $SNAPSHOT"}
 
 errlog "Dumping remote database \"$SOURCE\" with $JOBS concurrent workers to \"$TMPDIR\""
-if ! "$PGDUMP" -T "bdr.bdr_nodes" -T "bdr.bdr_connections" -j $JOBS $SNAP -F d -f $TMPDIR "$SOURCE"; then
+if ! "$PGDUMP" -T "bdr.bdr_nodes" -T "bdr.bdr_connections" --bdr-init-node -j $JOBS $SNAP -F d -f $TMPDIR "$SOURCE"; then
 	errlog "bdr_dump of "$SOURCE" failed, aborting"
 	exit 1
 fi

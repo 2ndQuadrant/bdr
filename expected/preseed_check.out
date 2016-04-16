@@ -11,13 +11,21 @@ Indexes:
     "some_local_tbl_pkey" PRIMARY KEY, btree (id)
     "some_local_tbl_key_key" UNIQUE CONSTRAINT, btree (key)
 
+INSERT INTO some_local_tbl(key, data) VALUES('key4', 'data4');
 SELECT * FROM some_local_tbl ORDER BY id;
  id | key  | data  
 ----+------+-------
   1 | key1 | data1
   2 | key2 | 
   3 | key3 | data3
-(3 rows)
+  4 | key4 | data4
+(4 rows)
+
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+(1 row)
 
 \c postgres
 \d some_local_tbl
@@ -37,5 +45,6 @@ SELECT * FROM some_local_tbl ORDER BY id;
   1 | key1 | data1
   2 | key2 | 
   3 | key3 | data3
-(3 rows)
+  4 | key4 | data4
+(4 rows)
 

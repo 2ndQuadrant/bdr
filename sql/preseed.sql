@@ -15,7 +15,8 @@ END IF;
 END; $DO$;
 
 CREATE SEQUENCE some_local_seq;
-CREATE TABLE some_local_tbl(id serial primary key, key text unique not null, data text);
+CREATE TABLE some_local_tbl(id serial primary key, key text unique not null, to_be_dropped int, data text);
+ALTER TABLE some_local_tbl DROP COLUMN to_be_dropped;
 INSERT INTO some_local_tbl(key, data) VALUES('key1', 'data1');
 INSERT INTO some_local_tbl(key, data) VALUES('key2', NULL);
 INSERT INTO some_local_tbl(key, data) VALUES('key3', 'data3');
