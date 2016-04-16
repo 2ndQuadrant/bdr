@@ -2,16 +2,22 @@
 -- The DB name bdr_supervisordb is reserved by BDR. None
 -- of these commands may be permitted.
 CREATE DATABASE bdr_supervisordb;
-ERROR:  The BDR extension reserves the database name bdr_supervisordb for its own use
+WARNING:  The BDR extension reserves the database name bdr_supervisordb for its own use
 HINT:  Use a different database name
+ERROR:  database "bdr_supervisordb" already exists
 DROP DATABASE bdr_supervisordb;
-ERROR:  The BDR extension reserves the database name bdr_supervisordb for its own use
+WARNING:  The BDR extension reserves the database name bdr_supervisordb for its own use
 HINT:  Use a different database name
+ERROR:  database "bdr_supervisordb" is being accessed by other users
+DETAIL:  There is 1 other session using the database.
 ALTER DATABASE bdr_supervisordb RENAME TO someothername;
-ERROR:  The BDR extension reserves the database name bdr_supervisordb for its own use
+WARNING:  The BDR extension reserves the database name bdr_supervisordb for its own use
 HINT:  Use a different database name
+ERROR:  database "bdr_supervisordb" is being accessed by other users
+DETAIL:  There is 1 other session using the database.
 ALTER DATABASE regression RENAME TO bdr_supervisordb;
-ERROR:  The BDR extension reserves the database name bdr_supervisordb for its own use
+WARNING:  The BDR extension reserves the database name bdr_supervisordb for its own use
 HINT:  Use a different database name
+ERROR:  database "bdr_supervisordb" already exists
 -- Connections to the supervisordb are also prevented, but
 -- cannot be tested here because of #63 at this point.
