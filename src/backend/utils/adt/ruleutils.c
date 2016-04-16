@@ -9812,6 +9812,8 @@ RelationGetColumnDefault(Relation rel, AttrNumber attno, List *dpcontext)
 	char *defstr;
 
 	defval = build_column_default(rel, attno);
+	if (!defval)
+		return "NULL";
 	defstr = deparse_expression_pretty(defval, dpcontext, false, false,
 									   0, 0);
 
