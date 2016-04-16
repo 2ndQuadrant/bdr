@@ -78,8 +78,6 @@
 
 #include "bdr_locks.h"
 
-#ifdef BUILDING_BDR
-
 #include "miscadmin.h"
 
 #include "access/xact.h"
@@ -92,6 +90,7 @@
 
 #include "libpq/pqformat.h"
 
+#include "replication/replication_identifier.h"
 #include "replication/slot.h"
 
 #include "storage/barrier.h"
@@ -107,14 +106,10 @@
 #include "utils/fmgroids.h"
 #include "utils/snapmgr.h"
 
-#endif
-
 /* GUCs */
 bool bdr_permit_ddl_locking = false;
 int bdr_ddl_grace_timeout = 10000;
 
-
-#ifdef BUILDING_BDR
 
 typedef struct BDRLockWaiter {
 	PGPROC	   *proc;
@@ -1618,27 +1613,3 @@ bdr_lock_name_to_type(const char *lock_type)
 	else
 		elog(ERROR, "unknown lock type %s", lock_type);
 }
-
-#else
-
-/* bdr_locks are not used by UDR at the moment */
-void
-bdr_locks_startup()
-{
-}
-
-void
-bdr_locks_shmem_init()
-{
-}
-
-void
-bdr_acquire_ddl_lock(BDRLockType lock_type)
-{
-}
-
-void
-bdr_locks_check_dml(void)
-{
-}
-#endif

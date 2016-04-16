@@ -21,9 +21,7 @@
 
 #include "access/genam.h"
 #include "access/heapam.h"
-#ifdef BUILDING_BDR
 #include "access/seqam.h"
-#endif
 
 #include "catalog/namespace.h"
 
@@ -37,6 +35,8 @@
 #include "libpq/auth.h"
 
 #include "parser/parse_utilcmd.h"
+
+#include "replication/replication_identifier.h"
 
 #include "storage/standby.h"
 
@@ -405,7 +405,6 @@ filter_AlterTableStmt(Node *parsetree,
 static void
 filter_CreateSeqStmt(Node *parsetree)
 {
-#ifdef BUILDING_BDR
 	ListCell	   *param;
 	CreateSeqStmt  *stmt;
 
@@ -424,13 +423,11 @@ filter_CreateSeqStmt(Node *parsetree)
 					 errmsg("CREATE SEQUENCE ... %s is not supported for bdr sequences",
 					defel->defname)));
 	}
-#endif
 }
 
 static void
 filter_AlterSeqStmt(Node *parsetree)
 {
-#ifdef BUILDING_BDR
 	Oid				seqoid;
 	ListCell	   *param;
 	AlterSeqStmt   *stmt;
@@ -476,7 +473,6 @@ filter_AlterSeqStmt(Node *parsetree)
 					 errmsg("ALTER SEQUENCE ... %s is not supported for bdr sequences",
 					defel->defname)));
 	}
-#endif
 }
 
 static void
@@ -840,14 +836,6 @@ bdr_commandfilter(Node *parsetree,
 		default:
 			break;
 	}
-
-#ifdef BUILDING_UDR
-	if (!in_bdr_replicate_ddl_command &&
-		!statement_affects_only_nonpermanent(parsetree))
-		ereport(ERROR,
-				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("DDL commands are not allowed when UDR is active unless bdr.permit_unsafe_ddl_commands is true")));
-#endif /*BUILDING_UDR*/
 
 	/* statements handled directly in standard_ProcessUtility */
 	switch (nodeTag(parsetree))

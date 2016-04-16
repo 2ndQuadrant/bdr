@@ -23,8 +23,6 @@
 
 #include "bdr_internal.h"
 
-#include "bdr_replication_identifier.h"
-
 #include "bdr_version.h"
 
 /* Right now replication_name isn't used; make it easily found for later */
@@ -281,9 +279,6 @@ extern bool bdr_permit_ddl_locking;
 extern bool bdr_permit_unsafe_commands;
 extern bool bdr_skip_ddl_locking;
 extern bool bdr_do_not_replicate;
-#ifdef BUILDING_UDR
-extern bool bdr_conflict_default_apply;
-#endif
 
 /*
  * Header for the shared memory segment ref'd by the BdrWorkerCtl ptr,
@@ -319,7 +314,6 @@ extern Oid	BdrNodesRelid;
 extern Oid	QueuedDDLCommandsRelid;
 extern Oid  BdrConflictHistoryRelId;
 extern Oid  BdrReplicationSetConfigRelid;
-#ifdef BUILDING_BDR
 extern Oid	BdrLocksRelid;
 extern Oid	BdrLocksByOwnerRelid;
 extern Oid	QueuedDropsRelid;
@@ -327,7 +321,6 @@ extern Oid	BdrSequenceValuesRelid;
 extern Oid	BdrSequenceElectionsRelid;
 extern Oid	BdrVotesRelid;
 extern Oid	BdrSeqamOid;
-#endif
 
 /* Structure representing bdr_nodes record */
 typedef struct BDRNodeId
@@ -430,7 +423,6 @@ extern void bdr_conflict_log_table(BdrApplyConflict *conflict);
 
 extern void tuple_to_stringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple);
 
-#ifdef BUILDING_BDR
 /* sequence support */
 extern void bdr_sequencer_shmem_init(int sequencers);
 extern void bdr_sequencer_init(int seq_slot, Size nnodes);
@@ -442,7 +434,6 @@ extern void bdr_sequencer_fill_sequences(void);
 
 extern void bdr_sequencer_wakeup(void);
 extern void bdr_schedule_eoxact_sequencer_wakeup(void);
-#endif
 
 extern int bdr_sequencer_get_next_free_slot(void); //XXX PERDB temp
 

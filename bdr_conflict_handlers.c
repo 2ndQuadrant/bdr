@@ -32,6 +32,8 @@
 
 #include "miscadmin.h"
 
+#include "replication/replication_identifier.h"
+
 #include "utils/builtins.h"
 #include "utils/inval.h"
 #include "utils/lsyscache.h"

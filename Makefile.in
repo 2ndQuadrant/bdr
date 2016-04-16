@@ -95,17 +95,10 @@ OBJS = \
 	bdr_pgutils.o \
 	bdr_relcache.o \
 	bdr_remotecalls.o \
+	bdr_seq.o \
 	bdr_shmem.o \
 	bdr_supervisor.o \
 	bdr_upgrade.o
-
-ifeq "@BUILDING_BDR@" "1"
-OBJS += \
-	bdr_seq.o
-else
-OBJS += \
-	bdr_replication_identifier.o
-endif
 
 DUMPOBJS = pg_dump/pg_dump.o pg_dump/common.o pg_dump/pg_dump_sort.o \
 	pg_dump/pg_backup_archiver.o pg_dump/pg_backup_db.o \
@@ -287,7 +280,6 @@ additional-maintainer-clean: clean
 installcheck: ;
 
 
-ifeq "@BUILDING_BDR@" "1"
 check: regresscheck isolationcheck
 DDLREGRESSCHECKS=ddl/enable_ddl ddl/create ddl/alter_table ddl/extension ddl/function \
 				 ddl/grant ddl/mixed ddl/namespace ddl/read_only ddl/replication_set \
@@ -295,13 +287,6 @@ DDLREGRESSCHECKS=ddl/enable_ddl ddl/create ddl/alter_table ddl/extension ddl/fun
 EXTRAREGRESSCHECKS=dml/sequence
 REGRESSINIT=init_bdr
 REGRESSTEARDOWN=part_bdr
-else
-check: regresscheck
-DDLREGRESSCHECKS=
-EXTRAREGRESSCHECKS=
-REGRESSINIT=init_udr
-REGRESSTEARDOWN=part_udr
-endif
 
 
 REGRESSCHECKS= \
@@ -335,11 +320,7 @@ ISOLATIONCHECKS=\
 REQUIRED_EXTENSIONS="btree_gist"
 REQUIRED_TEST_EXTENSIONS="pg_trgm cube hstore"
 
-ifeq "@BUILDING_BDR@" "1"
 REGRESSCONFIG=bdr_regress_bdr.conf
-else
-REGRESSCONFIG=bdr_regress_udr.conf
-endif
 
 regresscheck: all install
 	[ -e pg_hba.conf ] || ln -s $(bdr_abs_srcdir)/pg_hba.conf .

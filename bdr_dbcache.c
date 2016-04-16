@@ -225,10 +225,5 @@ bdr_is_bdr_activated_db(Oid dboid)
 
 	entry = bdr_dbcache_lookup(dboid, false);
 
-	/*
-	 * FIXME: Right now this isn't going to work for UDR. We need to make it
-	 * set a flag on the source side for it.
-	 */
-
 	return entry->bdr_activated;
 }

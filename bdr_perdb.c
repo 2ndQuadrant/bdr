@@ -680,10 +680,8 @@ out:
 	 * the node count in shared memory.
 	 */
 	bdr_worker_slot->data.perdb.nnodes = nnodes;
-#ifdef BUILDING_BDR
 	bdr_locks_set_nnodes(nnodes);
 	bdr_sequencer_set_nnodes(nnodes);
-#endif
 
 	elog(DEBUG2, "updated worker counts");
 }
@@ -788,13 +786,11 @@ bdr_perdb_worker_main(Datum main_arg)
 	/* Launch the apply workers */
 	bdr_maintain_db_workers();
 
-#ifdef BUILDING_BDR
 	elog(DEBUG1, "BDR starting sequencer on db \"%s\"",
 		 NameStr(perdb->dbname));
 
 	/* initialize sequencer */
 	bdr_sequencer_init(perdb->seq_slot, perdb->nnodes);
-#endif
 
 	while (!got_SIGTERM)
 	{
@@ -806,7 +802,6 @@ bdr_perdb_worker_main(Datum main_arg)
 			ProcessConfigFile(PGC_SIGHUP);
 		}
 
-#ifdef BUILDING_BDR
 		/* check whether we need to start new elections */
 		if (bdr_sequencer_start_elections())
 			wait = false;
@@ -820,7 +815,6 @@ bdr_perdb_worker_main(Datum main_arg)
 
 		/* check all bdr sequences for used up chunks */
 		bdr_sequencer_fill_sequences();
-#endif
 
 		pgstat_report_activity(STATE_IDLE, NULL);
 

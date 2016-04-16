@@ -58,9 +58,9 @@ WHERE orig <> formatted;
 SELECT count(1) FROM (
     SELECT ns.node_name
 	FROM bdr.bdr_nodes LEFT JOIN bdr.bdr_node_slots ns USING (node_name)
-	WHERE ns.node_name <> 'node-pg-provider' -- UDR provider node does not have slot
 ) q
 WHERE node_name IS NULL;
 
 -- Check to see if we can get the local node name
-SELECT bdr.bdr_get_local_node_name() IN ('node-pg', 'node-pg-subscriber');
+SELECT bdr.bdr_get_local_node_name() = 'node-pg';
+

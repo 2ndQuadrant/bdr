@@ -45,6 +45,8 @@
 #include "parser/parse_relation.h"
 #include "parser/parsetree.h"
 
+#include "replication/replication_identifier.h"
+
 #include "storage/bufmgr.h"
 #include "storage/lmgr.h"
 
@@ -67,12 +69,10 @@ static ExecutorStart_hook_type PrevExecutorStart_hook = NULL;
 static bool bdr_always_allow_writes = false;
 bool in_bdr_replicate_ddl_command = false;
 
-#ifdef BUILDING_BDR
 PGDLLEXPORT Datum bdr_queue_ddl_commands(PG_FUNCTION_ARGS);
 PG_FUNCTION_INFO_V1(bdr_queue_ddl_commands);
 PGDLLEXPORT Datum bdr_queue_dropped_objects(PG_FUNCTION_ARGS);
 PG_FUNCTION_INFO_V1(bdr_queue_dropped_objects);
-#endif
 PGDLLEXPORT Datum bdr_replicate_ddl_command(PG_FUNCTION_ARGS);
 PG_FUNCTION_INFO_V1(bdr_replicate_ddl_command);
 PGDLLEXPORT Datum bdr_truncate_trigger_add(PG_FUNCTION_ARGS);
@@ -485,7 +485,6 @@ bdr_truncate_trigger_add(PG_FUNCTION_ARGS)
 	PG_RETURN_VOID();
 }
 
-#ifdef BUILDING_BDR
 /*
  * bdr_queue_ddl_commands
  * 		ddl_command_end event triggger handler for BDR
@@ -751,7 +750,6 @@ bdr_queue_dropped_objects(PG_FUNCTION_ARGS)
 
 	PG_RETURN_VOID();
 }
-#endif /*BUILDING_BDR*/
 
 /*
  * bdr_replicate_ddl_command

@@ -22,9 +22,7 @@
 #include "miscadmin.h"
 #include "pgstat.h"
 
-#ifdef BUILDING_BDR
 #include "access/committs.h"
-#endif
 #include "access/htup_details.h"
 #include "access/relscan.h"
 #include "access/xact.h"
@@ -44,7 +42,7 @@
 #include "parser/parse_type.h"
 
 #include "replication/logical.h"
-#include "bdr_replication_identifier.h"
+#include "replication/replication_identifier.h"
 
 #include "storage/ipc.h"
 #include "storage/lmgr.h"
@@ -68,10 +66,6 @@
 #define VERBOSE_DELETE
 #define VERBOSE_UPDATE
 */
-
-#ifdef BUILDING_UDR
-bool bdr_conflict_default_apply = false;
-#endif
 
 /* Relation oid cache; initialized then left unchanged */
 Oid			QueuedDDLCommandsRelid = InvalidOid;
@@ -117,9 +111,7 @@ static void check_apply_update(BdrConflictType conflict_type,
 							   BdrConflictResolution *resolution);
 
 static void check_bdr_wakeups(BDRRelation *rel);
-#ifdef BUILDING_BDR
 static HeapTuple process_queued_drop(HeapTuple cmdtup);
-#endif
 static void process_queued_ddl_command(HeapTuple cmdtup, bool tx_just_started);
 static bool bdr_performing_work(void);
 
@@ -128,9 +120,7 @@ static void process_remote_commit(StringInfo s);
 static void process_remote_insert(StringInfo s);
 static void process_remote_update(StringInfo s);
 static void process_remote_delete(StringInfo s);
-#ifdef BUILDING_BDR
 static void process_remote_message(StringInfo s);
-#endif
 
 static void get_local_tuple_origin(HeapTuple tuple,
 								   TimestampTz *commit_ts,
@@ -280,9 +270,6 @@ process_remote_commit(StringInfo s)
 	TimestampTz		committime;
 	TimestampTz		end_lsn;
 	int				flags;
-#ifdef BUILDING_UDR
-	XLogRecPtr XactLastCommitEnd;
-#endif
 
 	Assert(bdr_apply_worker != NULL);
 
@@ -303,10 +290,6 @@ process_remote_commit(StringInfo s)
 
 	Assert(commit_lsn == replication_origin_lsn);
 	Assert(committime == replication_origin_timestamp);
-
-#ifdef BUILDING_UDR
-	XactLastCommitEnd = GetXLogInsertRecPtr();
-#endif
 
 	if (started_transaction)
 	{
@@ -340,28 +323,6 @@ process_remote_commit(StringInfo s)
 	 * sure we don't replay the same forwarded commit multiple times.
 	 */
 	AdvanceCachedReplicationIdentifier(end_lsn, XactLastCommitEnd);
-
-	/*
-	 * Catchup mode is not supported in UDR, because we can't sent origin_id
-	 * in 9.4.
-	 */
-#ifdef BUILDING_BDR
-	/*
-	 * If we're in catchup mode, see if the commit is relayed from elsewhere
-	 * and advance the appropriate slot.
-	 */
-	if (remote_origin_id != InvalidRepNodeId &&
-		remote_origin_id != replication_origin_id)
-	{
-		/*
-		 * The row isn't from the immediate upstream; advance the slot of the
-		 * node it originally came from so we start replay of that node's
-		 * change data at the right place.
-		 */
-		AdvanceReplicationIdentifier(remote_origin_id, remote_origin_lsn,
-									 XactLastCommitEnd);
-	}
-#endif
 
 	CurrentResourceOwner = bdr_saved_resowner;
 
@@ -630,13 +591,7 @@ process_remote_insert(StringInfo s)
 		if (relid == QueuedDDLCommandsRelid)
 			process_queued_ddl_command(ht, started_tx);
 		if (relid == QueuedDropsRelid)
-#ifdef BUILDING_BDR
 			process_queued_drop(ht);
-#else
-			ereport(ERROR,
-					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					 errmsg("drop queue is not supported by this build")));
-#endif
 
 		qrel = heap_open(QueuedDDLCommandsRelid, RowExclusiveLock);
 
@@ -1047,7 +1002,6 @@ process_remote_delete(StringInfo s)
 static void
 get_local_tuple_origin(HeapTuple tuple, TimestampTz *commit_ts, RepNodeId *node_id)
 {
-#ifdef BUILDING_BDR
 	TransactionId	xmin;
 	CommitExtraData	node_id_raw;
 
@@ -1056,13 +1010,8 @@ get_local_tuple_origin(HeapTuple tuple, TimestampTz *commit_ts, RepNodeId *node_
 
 	TransactionIdGetCommitTsData(xmin, commit_ts, &node_id_raw);
 	*node_id = node_id_raw;
-#else
-	TIMESTAMP_NOBEGIN(*commit_ts);
-	*node_id = InvalidRepNodeId;
-#endif
 }
 
-#ifdef BUILDING_BDR
 /*
  * Last update wins conflict handling.
  */
@@ -1152,21 +1101,6 @@ bdr_conflict_last_update_wins(RepNodeId local_node_id,
 	}
 }
 
-#else
-
-static void
-bdr_conflict_default_apply_resolve(bool *perform_update, bool *log_update,
-								   BdrConflictResolution *resolution)
-{
-	*perform_update = bdr_conflict_default_apply;
-	/* For UDR conflicts are never expected so they should always be logged. */
-	*log_update = true;
-	*resolution = bdr_conflict_default_apply ?
-						BdrConflictResolution_DefaultApplyChange :
-						BdrConflictResolution_DefaultSkipChange;
-}
-#endif /*BUILDING_BDR*/
-
 /*
  * Check whether a remote insert or update conflicts with the local row
  * version.
@@ -1212,19 +1146,6 @@ check_apply_update(BdrConflictType conflict_type,
 		*perform_update = true;
 		return;
 	}
-
-#ifdef BUILDING_UDR
-	/*
-	 * In UDR we can't correctly detect UPDATE/UPDATE conflicts as we don't
-	 * have origin_id which means every UPDATE looks like conflict so let's
-	 * just ignore them here.
-	 */
-	if (conflict_type == BdrConflictType_UpdateUpdate)
-	{
-		*perform_update = true;
-		return;
-	}
-#endif
 
 	/*
 	 * Decide whether to keep the remote or local tuple based on a conflict
@@ -1277,7 +1198,6 @@ check_apply_update(BdrConflictType conflict_type,
 		 */
 	}
 
-#ifdef BUILDING_BDR
 	/* Use last update wins conflict handling. */
 	bdr_conflict_last_update_wins(local_node_id,
 								  replication_origin_id,
@@ -1285,13 +1205,8 @@ check_apply_update(BdrConflictType conflict_type,
 								  replication_origin_timestamp,
 								  perform_update, log_update,
 								  resolution);
-#else
-	bdr_conflict_default_apply_resolve(perform_update, log_update,
-									   resolution);
-#endif
 }
 
-#ifdef BUILDING_BDR
 static void
 process_remote_message(StringInfo s)
 {
@@ -1428,7 +1343,6 @@ process_remote_message(StringInfo s)
 	if (!transactional)
 		AdvanceCachedReplicationIdentifier(lsn, InvalidXLogRecPtr);
 }
-#endif /* BUILDING_BDR */
 
 
 static void
@@ -1581,7 +1495,6 @@ process_queued_ddl_command(HeapTuple cmdtup, bool tx_just_started)
 }
 
 
-#ifdef BUILDING_BDR
 /*
  * ugly hack: Copied struct from dependency.c - there doesn't seem to be a
  * supported way of iterating ObjectAddresses otherwise.
@@ -1852,7 +1765,6 @@ process_queued_drop(HeapTuple cmdtup)
 
 	return newtup;
 }
-#endif /* BUILDING_BDR */
 
 static bool
 bdr_performing_work(void)
@@ -1883,12 +1795,10 @@ check_bdr_wakeups(BDRRelation *rel)
 	if (reloid == BdrNodesRelid)
 		bdr_connections_changed(NULL);
 
-#ifdef BUILDING_BDR
 	if (reloid == BdrSequenceValuesRelid ||
 		reloid == BdrSequenceElectionsRelid ||
 		reloid == BdrVotesRelid)
 		bdr_schedule_eoxact_sequencer_wakeup();
-#endif
 }
 
 static void
@@ -2014,7 +1924,6 @@ read_rel(StringInfo s, LOCKMODE mode)
 
 	relid = RangeVarGetRelidExtended(rv, mode, false, false, NULL, NULL);
 
-#ifdef BUILDING_BDR
 	/*
 	 * Acquire sequencer lock if any of the sequencer relations are
 	 * modified. We used to rely on relation locks, but that had problems with
@@ -2024,7 +1933,6 @@ read_rel(StringInfo s, LOCKMODE mode)
 		relid == BdrSequenceElectionsRelid ||
 		relid == BdrVotesRelid)
 		bdr_sequencer_lock();
-#endif
 
 	return bdr_heap_open(relid, NoLock);
 }
@@ -2060,11 +1968,9 @@ bdr_process_remote_action(StringInfo s)
 		case 'D':
 			process_remote_delete(s);
 			break;
-#ifdef BUILDING_BDR
 		case 'M':
 			process_remote_message(s);
 			break;
-#endif
 		default:
 			elog(ERROR, "unknown action of type %c", action);
 	}

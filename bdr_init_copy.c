@@ -41,12 +41,6 @@
 
 #define LLOGCDIR "pg_logical/checkpoints"
 
-#ifdef BUILDING_BDR
-#define RIINTERFACE_PREFIX "pg_catalog.pg_"
-#else
-#define RIINTERFACE_PREFIX "bdr.bdr_"
-#endif
-
 typedef struct RemoteInfo {
 	uint64		sysid;
 	TimeLineID	tlid;
@@ -734,7 +728,6 @@ set_sysid(uint64 sysid)
 static void
 remove_unwanted_files(void)
 {
-#ifdef BUILDING_BDR
 	DIR				*lldir;
 	struct dirent	*llde;
 	PQExpBuffer		 llpath = createPQExpBuffer();
@@ -784,7 +777,6 @@ remove_unwanted_files(void)
 		die(_("Could not close directory \"%s\": %s\n"),
 			LLOGCDIR, strerror(errno));
 	}
-#endif
 }
 
 /*
@@ -955,24 +947,6 @@ get_remote_info(char* remote_connstr)
 
 	ri->numdbs = PQntuples(res);
 
-	/*
-	 * If no databases were found, UDR will just subscribe to the database
-	 * provided as the remote connection string commandline parameter.
-	 */
-#ifdef BUILDING_UDR
-	if (ri->numdbs == 0)
-	{
-		PQclear(res);
-
-		res = PQexec(remote_conn, "SELECT d.oid, d.datname "
-					 "FROM pg_catalog.pg_database d "
-					 "WHERE d.datname = current_database();");
-		if (PQresultStatus(res) != PGRES_TUPLES_OK)
-			die(_("Could fetch remote database list: %s"), PQerrorMessage(remote_conn));
-
-		ri->numdbs = PQntuples(res);
-	}
-#endif
 	ri->dboids = (Oid *) pg_malloc(ri->numdbs * sizeof(Oid));
 	ri->dbnames = (char **) pg_malloc(ri->numdbs * sizeof(char *));
 
@@ -1017,11 +991,9 @@ get_remote_info(char* remote_connstr)
 			die(_("Could fetch replication set info from database %s: %s"),
 				dbname, PQerrorMessage(remote_conn));
 
-#ifdef BUILDING_BDR
 		/* No nodes found? */
 		if (PQntuples(res) == 0)
 			die(_("The remote node is not configured as a BDR node.\n"));
-#endif
 
 		/*
 		 * Node has different replication sets on different nodes,
@@ -1162,7 +1134,6 @@ void
 initialize_node_entry(PGconn *conn, NodeInfo *ni, char* node_name, Oid dboid,
 					  char *remote_connstr, char *local_connstr)
 {
-#ifdef BUILDING_BDR
 	PQExpBuffer		query = createPQExpBuffer();
 	PGresult	   *res;
 
@@ -1185,7 +1156,6 @@ initialize_node_entry(PGconn *conn, NodeInfo *ni, char* node_name, Oid dboid,
 
 	PQclear(res);
 	destroyPQExpBuffer(query);
-#endif
 }
 
 /*
@@ -1208,7 +1178,7 @@ remove_unwanted_data(PGconn *conn)
 	PQclear(res);
 
 	/* Remove replication identifiers. */
-	res = PQexec(conn, "SELECT "RIINTERFACE_PREFIX"replication_identifier_drop(riname) FROM "RIINTERFACE_PREFIX"replication_identifier;");
+	res = PQexec(conn, "SELECT pg_catalog.pg_replication_identifier_drop(riname) FROM pg_catalog.pg_replication_identifier;");
 	if (PQresultStatus(res) != PGRES_TUPLES_OK)
 	{
 		PQclear(res);
@@ -1257,7 +1227,7 @@ initialize_replication_identifier(PGconn *conn, NodeInfo *ni, Oid dboid, char *r
 	snprintf(remote_ident, sizeof(remote_ident), BDR_NODE_ID_FORMAT,
 				ni->remote_sysid, ni->remote_tlid, dboid, dboid, "");
 
-	printfPQExpBuffer(query, "SELECT "RIINTERFACE_PREFIX"replication_identifier_create('%s')",
+	printfPQExpBuffer(query, "SELECT pg_catalog.pg_replication_identifier_create('%s')",
 					 remote_ident);
 
 	res = PQexec(conn, query->data);
@@ -1272,7 +1242,7 @@ initialize_replication_identifier(PGconn *conn, NodeInfo *ni, Oid dboid, char *r
 
 	if (remote_lsn)
 	{
-		printfPQExpBuffer(query, "SELECT "RIINTERFACE_PREFIX"replication_identifier_advance('%s', '%s', '0/0')",
+		printfPQExpBuffer(query, "SELECT pg_catalog.pg_replication_identifier_advance('%s', '%s', '0/0')",
 						 remote_ident, remote_lsn);
 
 		res = PQexec(conn, query->data);
@@ -1338,21 +1308,11 @@ bdr_node_start(PGconn *conn, char *node_name, char *remote_connstr,
 	printfPQExpBuffer(repsets, "{%s}", replication_sets);
 
 	/* Add the node to the cluster. */
-#ifdef BUILDING_BDR
-	/* FIXME */
 	printfPQExpBuffer(query, "SELECT bdr.bdr_group_join(%s, %s, %s, replication_sets := %s);",
 					  PQescapeLiteral(conn, node_name, strlen(node_name)),
 					  PQescapeLiteral(conn, local_connstr, strlen(local_connstr)),
 					  PQescapeLiteral(conn, remote_connstr, strlen(remote_connstr)),
 					  PQescapeLiteral(conn, repsets->data, repsets->len));
-#else
-	/* FIXME */
-	printfPQExpBuffer(query, "SELECT bdr.bdr_subscribe(%s, %s, %s, replication_sets := %s);",
-					  PQescapeLiteral(conn, node_name, strlen(node_name)),
-					  PQescapeLiteral(conn, remote_connstr, strlen(remote_connstr)),
-					  PQescapeLiteral(conn, local_connstr, strlen(local_connstr)),
-					  PQescapeLiteral(conn, repsets->data, repsets->len));
-#endif
 
 	res = PQexec(conn, query->data);
 	if (PQresultStatus(res) != PGRES_TUPLES_OK)

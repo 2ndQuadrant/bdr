@@ -24,10 +24,8 @@
 #include "pgstat.h"
 #include "port.h"
 
-#ifdef BUILDING_BDR
 #include "access/committs.h"
 #include "access/seqam.h"
-#endif
 #include "access/heapam.h"
 #include "access/xact.h"
 
@@ -45,6 +43,8 @@
 #include "nodes/execnodes.h"
 
 #include "postmaster/bgworker.h"
+
+#include "replication/replication_identifier.h"
 
 #include "storage/ipc.h"
 #include "storage/latch.h"
@@ -650,12 +650,10 @@ _PG_init(void)
 					(errcode(ERRCODE_CONFIG_FILE_ERROR),
 					 errmsg("bdr can only be loaded via shared_preload_libraries")));
 
-#ifdef BUILDING_BDR
 		if (!commit_ts_enabled)
 			ereport(ERROR,
 					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 					 errmsg("bdr requires \"track_commit_timestamp\" to be enabled")));
-#endif
 	}
 
 	/*
@@ -695,17 +693,6 @@ _PG_init(void)
 							 PGC_SIGHUP,
 							 0,
 							 NULL, NULL, NULL);
-
-#ifdef BUILDING_UDR
-	DefineCustomBoolVariable("bdr.conflict_default_apply",
-							 "Apply conflicting changes by default",
-							 NULL,
-							 &bdr_conflict_default_apply,
-							 true,
-							 PGC_SIGHUP,
-							 0,
-							 NULL, NULL, NULL);
-#endif
 
 	DefineCustomBoolVariable("bdr.permit_ddl_locking",
 							 "Allow commands that can acquire the global "
@@ -883,7 +870,6 @@ bdr_maintain_schema(bool update_extensions)
 		bdr_lookup_relid("bdr_conflict_history", schema_oid);
 	BdrReplicationSetConfigRelid  =
 		bdr_lookup_relid("bdr_replication_set_config", schema_oid);
-#ifdef BUILDING_BDR
 	BdrSequenceValuesRelid =
 		bdr_lookup_relid("bdr_sequence_values", schema_oid);
 	BdrSequenceElectionsRelid =
@@ -897,7 +883,6 @@ bdr_maintain_schema(bool update_extensions)
 	BdrLocksByOwnerRelid =
 		bdr_lookup_relid("bdr_global_locks_byowner", schema_oid);
 	BdrSeqamOid = get_seqam_oid("bdr", false);
-#endif
 
 	bdr_conflict_handlers_init();
 

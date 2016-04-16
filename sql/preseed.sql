@@ -3,7 +3,6 @@
  * cloned. The results are checked, after the clone, in preseed_check.sql.
  */
 
--- Unfortunately the cloned DB currently isn't the same between bdr and udr
 SELECT current_setting('bdrtest.origdb') AS origdb
 \gset
 \c :origdb

@@ -590,8 +590,6 @@ PACKAGE_URL='http://2ndquadrant.com/en/resources/bdr/'
 ac_subst_vars='LTLIBOBJS
 LIBOBJS
 vpath_build
-BUILDING_BDR
-BUILDING_UDR
 PATH
 OBJEXT
 EXEEXT
@@ -655,9 +653,7 @@ CFLAGS
 LDFLAGS
 LIBS
 CPPFLAGS
-PATH
-BUILDING_UDR
-BUILDING_BDR'
+PATH'
 
 
 # Initialize some variables set by options.
@@ -1280,10 +1276,6 @@ Some influential environment variables:
   CPPFLAGS    (Objective) C/C++ preprocessor flags, e.g. -I<include dir> if
               you have headers in a nonstandard directory <include dir>
   PATH        PATH for target PostgreSQL install pg_config
-  BUILDING_UDR
-              Compile UDR only
-  BUILDING_BDR
-              Compile BDR (requires patched PostgreSQL 9.4
 
 Use these variables to override the choices made by `configure' or to help
 it to find libraries and programs with nonstandard names/locations.
@@ -2747,30 +2739,8 @@ done
 
 
 
-
-
 if test "$ac_cv_header_replication_replication_identifier_h" != 'yes'; then
-   { $as_echo "$as_me:${as_lineno-$LINENO}: postgres-bdr patches missing, forcing UDR build" >&5
-$as_echo "$as_me: postgres-bdr patches missing, forcing UDR build" >&6;}
-   BUILDING_UDR=1
-
-
-$as_echo "#define BUILDING_UDR 1" >>confdefs.h
-
-   if test "$enable_bdr" = "yes"; then
-     as_fn_error $? "--enable-bdr=yes specified, but suitably patched PostgreSQL not found" "$LINENO" 5
-   fi
-else
-   { $as_echo "$as_me:${as_lineno-$LINENO}: building against appropriately patched PostgreSQL" >&5
-$as_echo "$as_me: building against appropriately patched PostgreSQL" >&6;}
-   BUILDING_BDR=1
-
-
-$as_echo "#define BUILDING_BDR 1" >>confdefs.h
-
-   if test "$enable_bdr" = "no"; then
-     as_fn_error $? "--enable-bdr=no specified, but compiling against BDR-patched PostgreSQL" "$LINENO" 5
-   fi
+   as_fn_error $? "BDR can be built only against postgres-bdr" "$LINENO" 5
 fi;
 
 

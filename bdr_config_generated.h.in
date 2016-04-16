@@ -2,12 +2,6 @@
 
 /* Do not include directly, use bdr_config.h instead. */
 
-/* 'Building BDR' */
-#undef BUILDING_BDR
-
-/* 'Building UDR' */
-#undef BUILDING_UDR
-
 /* Define to 1 if you have the <replication/replication_identifier.h> header
    file. */
 #undef HAVE_REPLICATION_REPLICATION_IDENTIFIER_H

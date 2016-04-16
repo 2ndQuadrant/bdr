@@ -27,6 +27,8 @@
 
 #include "tcop/tcopprot.h"
 
+#include "replication/replication_identifier.h"
+
 #include "utils/builtins.h"
 #include "utils/guc.h"
 #include "utils/json.h"

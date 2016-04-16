@@ -27,9 +27,9 @@
 
 #include "executor/spi.h"
 
-#include "bdr_replication_identifier.h"
-
 #include "nodes/makefuncs.h"
+
+#include "replication/replication_identifier.h"
 
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"

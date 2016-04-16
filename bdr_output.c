@@ -41,6 +41,7 @@
 
 #include "replication/logical.h"
 #include "replication/output_plugin.h"
+#include "replication/replication_identifier.h"
 #include "replication/slot.h"
 #include "replication/walsender_private.h"
 
@@ -87,10 +88,6 @@ typedef struct
 	Oid bdr_schema_oid;
 	Oid bdr_conflict_handlers_reloid;
 	Oid bdr_locks_reloid;
-#ifdef BUILDING_UDR
-	Oid bdr_replication_identifier_reloid;
-	Oid bdr_replication_identifier_pos_reloid;
-#endif
 
 	int num_replication_sets;
 	char **replication_sets;
@@ -107,12 +104,10 @@ static void pg_decode_commit_txn(LogicalDecodingContext *ctx,
 static void pg_decode_change(LogicalDecodingContext *ctx,
 				 ReorderBufferTXN *txn, Relation rel,
 				 ReorderBufferChange *change);
-#ifdef BUILDING_BDR
 static void pg_decode_message(LogicalDecodingContext *ctx,
 							  ReorderBufferTXN *txn, XLogRecPtr message_lsn,
 							  bool transactional, Size sz,
 							  const char *message);
-#endif
 
 /* private prototypes */
 static void write_rel(StringInfo out, Relation rel);
@@ -129,9 +124,7 @@ _PG_output_plugin_init(OutputPluginCallbacks *cb)
 	cb->begin_cb = pg_decode_begin_txn;
 	cb->change_cb = pg_decode_change;
 	cb->commit_cb = pg_decode_commit_txn;
-#ifdef BUILDING_BDR
 	cb->message_cb = pg_decode_message;
-#endif
 	cb->shutdown_cb = pg_decode_shutdown;
 }
 
@@ -385,10 +378,6 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 
 	data->bdr_conflict_handlers_reloid = InvalidOid;
 	data->bdr_locks_reloid = InvalidOid;
-#ifdef BUILDING_UDR
-	data->bdr_replication_identifier_reloid = InvalidOid;
-	data->bdr_replication_identifier_pos_reloid = InvalidOid;
-#endif
 	data->bdr_schema_oid = InvalidOid;
 	data->num_replication_sets = -1;
 
@@ -543,15 +532,6 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 		if (data->client_db_encoding == NULL)
 			bdr_req_param("db_encoding");
 
-#ifdef BUILDING_UDR
-		/* Can't do bidirectional connection on UDR. */
-		if (!data->client_unidirectional)
-			ereport(ERROR,
-					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					 errmsg("UDR only supports unidirectional connections")));
-
-#endif
-
 		/* check incompatibilities we cannot work around */
 		if (strcmp(data->client_db_encoding, GetDatabaseEncodingName()) != 0)
 			elog(ERROR, "mismatching encodings are not yet supported");
@@ -633,13 +613,6 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 			data->bdr_locks_reloid =
 				get_relname_relid("bdr_global_locks", schema_oid);
 			Assert(data->bdr_locks_reloid != InvalidOid); /* FIXME */
-
-#ifdef BUILDING_UDR
-			data->bdr_replication_identifier_reloid =
-				get_relname_relid("bdr_replication_identifier", schema_oid);
-			data->bdr_replication_identifier_pos_reloid =
-				get_relname_relid("bdr_replication_identifier_pos", schema_oid);
-#endif
 		}
 		else
 			elog(WARNING, "cache lookup for schema bdr failed");
@@ -691,11 +664,7 @@ static inline bool
 should_forward_changeset(LogicalDecodingContext *ctx, BdrOutputData *data,
 						 ReorderBufferTXN *txn)
 {
-#ifdef BUILDING_BDR
 	return txn->origin_id == InvalidRepNodeId || data->forward_changesets;
-#else
-	return true;
-#endif
 }
 
 static inline bool
@@ -706,11 +675,6 @@ should_forward_change(LogicalDecodingContext *ctx, BdrOutputData *data,
 	if (RelationGetRelid(r->rel) == data->bdr_conflict_handlers_reloid ||
 		RelationGetRelid(r->rel) == data->bdr_locks_reloid)
 		return false;
-#ifdef BUILDING_UDR
-	if (RelationGetRelid(r->rel) == data->bdr_replication_identifier_reloid ||
-		RelationGetRelid(r->rel) == data->bdr_replication_identifier_pos_reloid)
-		return false;
-#endif
 
 	/*
 	 * Quite ugly, but there's no neat way right now: Flush replication set
@@ -762,22 +726,13 @@ pg_decode_begin_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *txn)
 	OutputPluginPrepareWrite(ctx, true);
 	pq_sendbyte(ctx->out, 'B');		/* BEGIN */
 
-	/*
-	 * Vanialla Postgres does not provide origin id so UDR
-	 * can't set transaction origin (same applies to the other
-	 * ifdef in this function).
-	 */
-#ifdef BUILDING_BDR
+
 	/*
 	 * Are we forwarding changesets from other nodes? If so, we must include
 	 * the origin node ID and LSN in BEGIN records.
-	 *
-	 * Note: the 9.4 does not provide origin_id so we don't support
-	 * forwarded changesets in UDR yet.
 	 */
 	if (data->forward_changesets)
 		flags |= BDR_OUTPUT_TRANSACTION_HAS_ORIGIN;
-#endif
 
 	/* send the flags field its self */
 	pq_sendint(ctx->out, flags, 4);
@@ -787,7 +742,6 @@ pg_decode_begin_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *txn)
 	pq_sendint64(ctx->out, txn->commit_time);
 	pq_sendint(ctx->out, txn->xid, 4);
 
-#ifdef BUILDING_BDR
 	/* and optional data selected above */
 	if (flags & BDR_OUTPUT_TRANSACTION_HAS_ORIGIN)
 	{
@@ -809,7 +763,6 @@ pg_decode_begin_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *txn)
 		pq_sendint(ctx->out, origin_dboid, 4);
 		pq_sendint64(ctx->out, txn->origin_lsn);
 	}
-#endif
 
 	OutputPluginWrite(ctx, true);
 	return;
@@ -1125,7 +1078,6 @@ write_tuple(BdrOutputData *data, StringInfo out, Relation rel,
 	}
 }
 
-#ifdef BUILDING_BDR
 static void
 pg_decode_message(LogicalDecodingContext *ctx,
 				  ReorderBufferTXN *txn, XLogRecPtr lsn,
@@ -1143,4 +1095,3 @@ pg_decode_message(LogicalDecodingContext *ctx,
 	pq_sendbytes(ctx->out, message, sz);
 	OutputPluginWrite(ctx, true);
 }
-#endif

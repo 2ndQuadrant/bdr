@@ -38,7 +38,7 @@
 
 #include "executor/spi.h"
 
-#include "bdr_replication_identifier.h"
+#include "replication/replication_identifier.h"
 #include "replication/walreceiver.h"
 
 #include "postmaster/bgworker.h"
@@ -62,25 +62,6 @@ static void bdr_init_exec_dump_restore(BDRNodeInfo *node,
 									   char *snapshot);
 
 static void bdr_catchup_to_lsn(remote_node_info *ri, XLogRecPtr target_lsn);
-
-/*
- * Make sure remote node has BDR activated (insert the security label).
- *
- * This is only needed for UDR.
- */
-static void
-bdr_remote_activate(PGconn *pgconn)
-{
-	PGresult		   *res;
-
-	res = PQexec(pgconn, "SELECT bdr.internal_update_seclabel()");
-	if (PQresultStatus(res) != PGRES_TUPLES_OK)
-	{
-		elog(FATAL, "bdr: Failed to activate remote node during bdr init: state %s: %s\n",
-			 PQresStatus(PQresultStatus(res)), PQresultErrorMessage(res));
-	}
-	PQclear(res);
-}
 
 static XLogRecPtr
 bdr_get_remote_lsn(PGconn *conn)
@@ -826,6 +807,9 @@ bdr_init_replica(BDRNodeInfo *local_node)
 			local_node->id.dboid,
 			true);
 
+	if (!local_conn_config)
+		elog(ERROR, "cannot find local BDR connection configurations");
+
 	elog(DEBUG1, "init_replica init from remote %s",
 		 local_node->init_from_dsn);
 
@@ -924,14 +908,6 @@ bdr_init_replica(BDRNodeInfo *local_node)
 			bdr_nodes_set_local_status(status);
 
 			/*
-			 * This is unidirectional subscribe, let the other node know that
-			 * it should behave as BDR node (as it might be UDR node which does
-			 * not require init).
-			 */
-			if (local_conn_config == NULL)
-				bdr_remote_activate(nonrepl_init_conn);
-
-			/*
 			 * Now establish our slot on the target node, so we can replay
 			 * changes from that node. It'll be used in catchup mode.
 			 */
@@ -978,14 +954,11 @@ bdr_init_replica(BDRNodeInfo *local_node)
 			pfree(init_snapshot);
 
 			/*
-			 * This is group join, copy the state (bdr_nodes and
-			 * bdr_connections) over from the init node to our node.
+			 * Copy the state (bdr_nodes and bdr_connections) over from the
+			 * init node to our node.
 			 */
-			if (local_conn_config != NULL)
-			{
-				elog(DEBUG1, "syncing bdr_nodes and bdr_connections");
-				bdr_sync_nodes(nonrepl_init_conn, local_node);
-			}
+			elog(DEBUG1, "syncing bdr_nodes and bdr_connections");
+			bdr_sync_nodes(nonrepl_init_conn, local_node);
 
 			status = 'c';
 			bdr_nodes_set_local_status(status);
@@ -1070,15 +1043,9 @@ bdr_init_replica(BDRNodeInfo *local_node)
 		 * the other end to connect back to us and make a slot, and will
 		 * cause the other nodes to do the same when they receive the new
 		 * row.
-		 *
-		 * It makes no sense to do this with UDR, where the peer doesn't
-		 * connect back to us.
 		 */
-		if (local_conn_config != NULL)
-		{
-			elog(DEBUG1, "inserting our connection into into remote end");
-			bdr_insert_remote_conninfo(nonrepl_init_conn, local_conn_config);
-		}
+		elog(DEBUG1, "inserting our connection into into remote end");
+		bdr_insert_remote_conninfo(nonrepl_init_conn, local_conn_config);
 
 		/*
 		 * Wait for all outbound and inbound slot creation to be complete.
@@ -1086,11 +1053,6 @@ bdr_init_replica(BDRNodeInfo *local_node)
 		 * The inbound slots aren't yet required to relay local writes to
 		 * remote nodes, but they'll be used to write our catchup
 		 * confirmation request WAL message, so we need them to exist.
-		 *
-		 * This makes no sense on UDR, where the init target doesn't
-		 * connect back to us and no other inbound or outbound connections
-		 * exist. It still gets run, but we won't find any inbound
-		 * slots to look for.
 		 */
 		elog(DEBUG1, "waiting for all inbound slots to be created");
 		bdr_init_wait_for_slot_creation();
