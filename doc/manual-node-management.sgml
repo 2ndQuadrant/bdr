@@ -7,7 +7,7 @@
 
  <sect1 id="node-management-joining" xreflabel="Joining or subscribing a node">
   <title>Joining or subscribing a node</title>
-`
+
   <para>
    When a new &bdr; node is joined to an existing &bdr; group,
    node is subscribed to an upstream peer, the system must copy
