@@ -30,7 +30,7 @@
   <title>Node management functions</title>
 
   <para>
-   &bdr; and &udr; use functions to manage the addition and removal
+   &bdr; uses functions to manage the addition and removal
    of nodes and related replication control functions. See
    <xref linkend="node-management"> for more on how to manage &bdr;.
   </para>
@@ -40,10 +40,9 @@
 
    <table>
     <title>Node management functions</title>
-    <tgroup cols="4">
+    <tgroup cols="3">
      <thead>
       <row>
-       <entry>&udr;/&bdr;</entry>
        <entry>Function</entry>
        <entry>Return Type</entry>
        <entry>Description</entry>
@@ -51,32 +50,7 @@
      </thead>
      <tbody>
 
-      <row>
-       <entry>&udr;</entry>
-       <entry>
-        <indexterm>
-         <primary>bdr.bdr_subscribe</primary>
-        </indexterm>
-        <literal><function>bdr.bdr_subscribe(<replaceable>local_node_name</replaceable>, <replaceable>subscribe_to_dsn</replaceable>, <replaceable>node_local_dsn</replaceable>, <replaceable>apply_delay integer DEFAULT NULL</replaceable>, <replaceable>replication_sets text[] DEFAULT ARRAY['default']</replaceable>, <replaceable>synchronize bdr_sync_type DEFAULT 'full'</replaceable>)</function></literal>
-       </entry>
-       <entry>void</entry>
-       <entry>Subscribes to changes made on another node. See <xref linkend="functions-node-mgmt-subscribe">.</entry>
-      </row>
-
-      <row>
-       <entry>&udr;</entry>
-       <entry>
-        <indexterm>
-         <primary>bdr.bdr_unsubscribe</primary>
-        </indexterm>
-        <literal><function>bdr.bdr_unsubscribe(<replaceable>local_node_name</replaceable>)</function></literal>
-       </entry>
-       <entry>void</entry>
-       <entry>Removes a previously created &udr; subscription.</entry>
-      </row>
-
       <row id="function-bdr-group-create" xreflabel="bdr.bdr_group_create">
-       <entry>&bdr;</entry>
        <entry>
         <indexterm>
          <primary>bdr.bdr_group_create</primary>
@@ -90,7 +64,6 @@
       </row>
 
       <row id="function-bdr-group-join" xreflabel="bdr.bdr_group_join">
-       <entry>&bdr;</entry>
        <entry>
         <indexterm>
          <primary>bdr.bdr_group_join</primary>
@@ -105,7 +78,6 @@
       </row>
 
       <row id="function-bdr-part-by-node-names" xreflabel="bdr.bdr_part_by_node_names">
-       <entry>&bdr;</entry>
        <entry>
         <indexterm>
          <primary>bdr.bdr_part_by_node_names</primary>
@@ -122,7 +94,6 @@
       </row>
 
       <row id="function-bdr-node-join-wait-for-ready" xreflabel="bdr.bdr_node_join_wait_for_ready">
-       <entry>&bdr;/&udr;</entry>
        <entry>
         <indexterm>
          <primary>bdr.bdr_node_join_wait_for_ready</primary>
@@ -136,7 +107,6 @@
       </row>
 
       <row>
-       <entry>&bdr;/&udr;</entry>
        <entry>
         <indexterm>
          <primary>bdr.bdr_apply_pause</primary>
@@ -159,7 +129,6 @@
       </row>
 
       <row>
-       <entry>&bdr;/&udr;</entry>
        <entry>
         <indexterm>
          <primary>bdr.bdr_apply_resume</primary>
@@ -174,7 +143,6 @@
       </row>
 
       <row id="function-bdr-apply-is-paused" xreflabel="bdr.bdr_apply_is_paused()">
-       <entry>&bdr;/&udr;</entry>
        <entry>
         <indexterm>
          <primary>bdr.bdr_apply_is_paused</primary>
@@ -191,7 +159,6 @@
       </row>
 
       <row id="function-bdr-replicate-ddl-command" xreflabel="bdr.bdr_replicate_ddl_command">
-       <entry>&bdr;/&udr;</entry>
        <entry>
         <indexterm>
          <primary>bdr.bdr_replicate_ddl_command</primary>
@@ -202,10 +169,8 @@
        <entry>
         Execute the <acronym>SQL</acronym> (usually <acronym>DDL</acronym>)
         <replaceable>cmd</replaceable> on the local node and queue it for
-        extension on all peer nodes. This function is useful mainly for
-        replicating <acronym>DDL</acronym> in an &udr; setup where the
-        transparent <acronym>DDL</acronym> replication is not available.
-        The same limitations apply to this function as to DDL run directly
+        extension on all peer nodes. The same limitations apply to this
+        function as to DDL run directly
         by the user, except that DDL not normally replicated by &bdr;
         will be replicated if run with this function; see
         <xref linkend="ddl-replication">. References to objects in DDL
@@ -223,7 +188,6 @@
       </row>
 
       <row>
-       <entry>&bdr;</entry>
        <entry>
         <indexterm>
          <primary>pg_xlog_wait_remote_apply</primary>
@@ -243,7 +207,6 @@
       </row>
 
       <row>
-       <entry>&bdr;</entry>
        <entry>
         <indexterm>
          <primary>pg_xlog_wait_remote_receive</primary>
@@ -364,15 +327,6 @@
    These examples show libpq connection strings without a host or hostadd.
    </para>
    <para>
-   To subscribe to a UDR group:
-   </para>
-   <programlisting>
-    SELECT bdr.bdr_subscribe(
-       local_node_name := 'udrnode',
-       subscribe_to_dsn := 'port=6000 dbname=udrdemo',
-       node_local_dsn := 'port=6001 dbname=udrdemo');
-   </programlisting>
-   <para>
    To create a &bdr group on 'node1':
    </para>
    <programlisting>
@@ -410,7 +364,6 @@
   <title>Replication Set functions</title>
   <para>
    The following functions exist to manage <xref linkend="replication-sets">.
-   They are used in both &bdr; and &udr; context.
 
    <table>
     <title>Replication Set functions</title>
@@ -465,10 +418,9 @@
 
    <table>
     <title>Conflict handler management functions</title>
-    <tgroup cols="4">
+    <tgroup cols="3">
      <thead>
       <row>
-       <entry>&udr;/&bdr;</entry>
        <entry>Function</entry>
        <entry>Return Type</entry>
        <entry>Description</entry>
@@ -477,7 +429,6 @@
      <tbody>
 
       <row>
-       <entry>&bdr;</entry>
        <entry>
         <indexterm>
          <primary>bdr.bdr_create_conflict_handler</primary>
@@ -489,7 +440,6 @@
       </row>
 
       <row>
-       <entry>&bdr;</entry>
        <entry>
         <literal><function>bdr.bdr_create_conflict_handler(<replaceable>ch_rel</replaceable>, <replaceable>ch_name</replaceable>, <replaceable>ch_proc</replaceable>, <replaceable>ch_type</replaceable>)</function></literal>
        </entry>
@@ -498,7 +448,6 @@
       </row>
 
       <row>
-       <entry>&bdr;</entry>
        <entry>
         <indexterm>
          <primary>bdr.bdr_drop_conflict_handler</primary>
@@ -524,10 +473,9 @@
 
    <table>
     <title>Node information functions</title>
-    <tgroup cols="4">
+    <tgroup cols="3">
      <thead>
       <row>
-       <entry>&udr;/&bdr;</entry>
        <entry>Function</entry>
        <entry>Return Type</entry>
        <entry>Description</entry>
@@ -536,19 +484,6 @@
      <tbody>
 
       <row>
-       <entry>&bdr;/&udr;</entry>
-       <entry>
-        <indexterm>
-         <primary>bdr.bdr_variant</primary>
-        </indexterm>
-        <literal><function>bdr.bdr_variant()</function></literal>
-       </entry>
-       <entry>text</entry>
-       <entry>Returns the text <literal>BDR</literal> if run on a node with the full &bdr; extension installed, or <literal>UDR</literal> if the node has only &udr; capabilities.</entry>
-      </row>
-
-      <row>
-       <entry>&bdr;/&udr;</entry>
        <entry>
         <indexterm>
          <primary>bdr.bdr_version</primary>
@@ -556,11 +491,10 @@
         <literal><function>bdr.bdr_version()</function></literal>
        </entry>
        <entry>text</entry>
-       <entry>Report the &bdr;/&udr; version in human-readable <replaceable>major.minor.rev-yyyy-mm-dd-gitrev</replaceable> text form, with build date and git revision, e.g. <literal>0.9.0-2015-02-08-3f3fb7c</literal>.</entry>
+       <entry>Report the &bdr; version in human-readable <replaceable>major.minor.rev-yyyy-mm-dd-gitrev</replaceable> text form, with build date and git revision, e.g. <literal>0.9.0-2015-02-08-3f3fb7c</literal>.</entry>
       </row>
 
       <row>
-       <entry>&bdr;/&udr;</entry>
        <entry>
         <indexterm>
          <primary>bdr.bdr_version_num</primary>
@@ -568,11 +502,10 @@
         <literal><function>bdr.bdr_version_num()</function></literal>
        </entry>
        <entry>integer</entry>
-       <entry>Report just the &bdr;/&udr; version number in numeric AAAABBCC form, (A: major, B: minor, C: rev) e.g. <literal>0.9.0</literal> is <literal>900</literal> (00000900).</entry>
+       <entry>Report just the &bdr; version number in numeric AAAABBCC form, (A: major, B: minor, C: rev) e.g. <literal>0.9.0</literal> is <literal>900</literal> (00000900).</entry>
       </row>
 
       <row>
-       <entry>&bdr;/&udr;</entry>
        <entry>
         <indexterm>
          <primary>bdr.bdr_min_remote_version_num</primary>
@@ -580,11 +513,10 @@
         <literal><function>bdr.bdr_min_remote_version_num()</function></literal>
        </entry>
        <entry>integer</entry>
-       <entry>Return the oldest version of the &bdr;/&udr; extension that this node can compatibly receive streamed changes from.</entry>
+       <entry>Return the oldest version of the &bdr; extension that this node can compatibly receive streamed changes from.</entry>
       </row>
 
       <row id="functions-bdr-get-local-node-name" xreflabel="bdr.bdr_get_local_node_name()">
-       <entry>&bdr;/&udr;</entry>
        <entry>
         <indexterm>
          <primary>bdr.bdr_get_local_node_name</primary>
@@ -592,11 +524,10 @@
         <literal><function>bdr.bdr_get_local_node_name()</function></literal>
        </entry>
        <entry>text</entry>
-       <entry>Look up the local node in <literal>bdr.bdr_nodes</literal> and return the node name - or null if the node is not a &bdr;/&udr; peer</entry>
+       <entry>Look up the local node in <literal>bdr.bdr_nodes</literal> and return the node name - or null if the node is not a &bdr; peer</entry>
       </row>
 
       <row id="functions-bdr-get-local-node-id" xreflabel="bdr.bdr_get_local_nodeid()">
-       <entry>&bdr;/&udr;</entry>
        <entry>
         <indexterm>
          <primary>bdr.bdr_get_local_nodeid</primary>
@@ -608,7 +539,6 @@
       </row>
 
       <row>
-       <entry>&bdr;/&udr;</entry>
        <entry>
         <indexterm>
          <primary>bdr.bdr_get_remote_nodeinfo</primary>
@@ -620,7 +550,6 @@
       </row>
 
       <row>
-       <entry>&bdr;/&udr;</entry>
        <entry>
         <indexterm>
          <primary>bdr.bdr_test_remote_connectback</primary>
@@ -646,10 +575,9 @@
 
    <table>
     <title>Upgrade functions</title>
-    <tgroup cols="4">
+    <tgroup cols="3">
      <thead>
       <row>
-       <entry>&udr;/&bdr;</entry>
        <entry>Function</entry>
        <entry>Return Type</entry>
        <entry>Description</entry>
@@ -658,7 +586,6 @@
      <tbody>
 
       <row>
-       <entry>&bdr;</entry>
        <entry>
         <indexterm>
          <primary>bdr.bdr_upgrade_to_090</primary>

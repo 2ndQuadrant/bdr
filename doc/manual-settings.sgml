@@ -6,12 +6,11 @@
   <secondary>of the server</secondary>
  </indexterm>
 
- <sect1 id="settings-prerequisite" xreflabel="PostgreSQL settings for BDR/UDR">
+ <sect1 id="settings-prerequisite" xreflabel="PostgreSQL settings for BDR">
   <title>Prerequisite &postgres; parameters</title>
 
   <para>
-   &bdr; and &udr; require certain &postgres; settings to be set to
-   appropriate values.
+   &bdr; require certain &postgres; settings to be set to appropriate values.
   </para>
 
   <para>
@@ -25,8 +24,7 @@
      </term>
      <listitem>
       <para>
-       For both &bdr;
-       and &udr; this has to be set to a big
+       For &bdr; this has to be set to a big
        enough value to have one worker per configured database, and
        one worker per connection.
       </para>
@@ -46,8 +44,7 @@
      </term>
      <listitem>
       <para>
-       For both &bdr;
-       and &udr; this needs to be set big
+       For &bdr; this needs to be set big
        enough so that every connection to this node has a free
        replication slot.
       </para>
@@ -67,8 +64,7 @@
      </term>
      <listitem>
       <para>
-       For both &bdr;
-       and &udr; this needs to be set big
+       For &bdr; this needs to be set big
        enough so that every connection to this node has a free wal
        sender process.
       </para>
@@ -76,7 +72,7 @@
        If a node also does streaming base backups and/or base
        backups using <application>pg_basebackup</application>, the
        value needs to be big enough to accomodate both that
-       and &bdr;/&udr;.
+       and &bdr;.
       </para>
 
       <para>
@@ -95,8 +91,7 @@
      </term>
      <listitem>
       <para>
-       For both &bdr;
-       and &udr; this parameter has to
+       For &bdr; this parameter has to
        include <literal>bdr</literal> as one of the comma separated
        values. The parameter can only be changed at server start.
       </para>
@@ -117,9 +112,7 @@
      <listitem>
       <para>
        To use &bdr; this parameter has to
-       be set to <literal>true</literal>, it can
-       be <literal>false</literal>
-       for &udr;
+       be set to <literal>true</literal>.
       </para>
      </listitem>
     </varlistentry>
@@ -132,8 +125,7 @@
      </term>
      <listitem>
       <para>
-       For both &bdr;
-       and &udr; this parameter has to be
+       For &bdr; this parameter has to be
        set to <literal>logical</literal>.
       </para>
 
@@ -165,8 +157,8 @@
   </para>
  </sect1>
 
- <sect1 id="bdr-configuration-variables" xreflabel="BDR/UDR-specific configuration variables">
-  <title>&bdr;/&udr; specific configuration variables</title>
+ <sect1 id="bdr-configuration-variables" xreflabel="BDR-specific configuration variables">
+  <title>&bdr; specific configuration variables</title>
 
   <para>
    The &bdr; extension exposes a number of configuration parameters via
@@ -221,8 +213,7 @@
       <para>
        This boolean option controls whether
        the <varname>synchronous_commit</varname> setting
-       in &bdr;/&udr;
-       apply workers is enabled. It defaults
+       in &bdr; apply workers is enabled. It defaults
        to <literal>off</literal>.  If set to <literal>off</literal>,
        &bdr; apply workers will perform
        asynchronous commits,

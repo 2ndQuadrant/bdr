@@ -5,7 +5,7 @@
  </indexterm>
 
  <para>
-  Signficant changes to the &bdr; extension (including &udr;) are documented
+  Signficant changes to the &bdr; extension are documented
   in the release notes. Please read the release notes for all versions between
   yours and the version to plan to upgrade to before performing an upgrade,
   as there may be version-specific upgrade steps.
@@ -24,7 +24,7 @@
   </para>
 
   <para>
-   Significant improvements to &bdr; and &udr; in this release include:
+   Significant improvements to &bdr; in this release include:
    <itemizedlist>
     <listitem><para>New nodes created by <application>bdr_init_copy</application> could re-use global sequence values (#101)</para></listitem>
     <listitem><para>Permit DML on <literal>pg_catalog</literal> tables (#102)</para></listitem>
@@ -67,7 +67,7 @@
   </important>
 
   <para>
-   Significant improvements to &bdr; and &udr; in this release include:
+   Significant improvements to &bdr; in this release include:
    <itemizedlist>
     <listitem><para>Fix direction of replication sets (see above)</para></listitem>
     <listitem><para>Fix PK detection on inherited tables (BDR)</para></listitem>

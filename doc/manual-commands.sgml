@@ -5,12 +5,12 @@
  </indexterm>
 
  <para>
-  &bdr;/&udr; provides a number of command-line utilities, which are installed
+  &bdr; provides a number of command-line utilities, which are installed
   to the PostgreSQL <filename>bin</filename> directory when the &bdr; extension
   is installed. The most important is <xref linkend="command-bdr-init-copy">,
   which is used when creating a new node.
  </para>
- 
+
  <para>
   Some of the commands installed are only intended for &bdr;'s internal use and
   are not documented here.
@@ -21,7 +21,7 @@
 
   <para>
    The <application>bdr_init_copy</> command is used to initialize a new
-   &udr;/&bdr; node by making physical copy of an existing node and
+   &bdr; node by making physical copy of an existing node and
    establishing a connection to the node that the clone was made from.
   </para>
 
@@ -273,7 +273,7 @@
 
   <para>
    <application>bdr_initial_load</application> is an internal utility command
-   invoked by &bdr;/&udr; when joining or subscribing. It is not intended for
+   invoked by &bdr; when joining or subscribing. It is not intended for
    end-user use, and may not be present in future versions of the system.
   </para>
 

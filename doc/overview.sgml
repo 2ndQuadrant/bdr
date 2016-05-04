@@ -1,5 +1,5 @@
 <chapter id="overview" xreflabel="Overview">
- <title>&bdr;/&udr; overview</title>
+ <title>&bdr; overview</title>
 
  <para>
   The &bdr; (Bi-Directional Replication) project adds multi-master replication
@@ -9,10 +9,7 @@
  </para>
 
  <para>
-  Because &bdr; requires a modified PostgreSQL 9.4 there is also a &udr;
-  (unidirectional replication) variant available. This version doesn't
-  require a modified version of PostgreSQL but has some limitations
-  that don't apply to &bdr;. See <xref linkend="overview-udr">.
+  Because &bdr; requires a modified PostgreSQL 9.4.
  </para>
 
  <sect1 id="bdr-concepts" xreflabel="Concepts">
@@ -131,8 +128,7 @@
   <para>
    Because &bdr; needs some features that didn't make it into PostgreSQL by the
    time 9.4 was released, it needs a modified PostgreSQL to run. See <xref
-   linkend="install-requirements">. The &udr; variant can run on an unmodified
-   PostgreSQL - see <xref linkend="overview-udr">.
+   linkend="install-requirements">.
   </para>
 
  </sect1>
@@ -142,7 +138,7 @@
   <title>Differences between logical (row level) and physical (block level) replication</title>
 
   <para>
-   &bdr;/&udr; use
+   &bdr; uses
    <ulink url="http://www.postgresql.org/docs/current/static/logicaldecoding.html">&postgres;'s logical decoding feature</ulink>
    to implement a low overhead logical replication solution. It has significant
    advantages - and some disadvantages - when compared to PostgreSQL's older
@@ -165,10 +161,10 @@
   </para>
 
   <para>
-   The major differences between physical replication and logical replication as implemented by &bdr;/&udr; are:
+   The major differences between physical replication and logical replication as implemented by &bdr; are:
    <itemizedlist>
     <listitem>
-     <simpara>Multi-master replication is possible (&bdr; only). All members are writable nodes that replicate changes.</simpara>
+     <simpara>Multi-master replication is possible. All members are writable nodes that replicate changes.</simpara>
     </listitem>
     <listitem>
      <simpara>Data from index writes, <literal>VACUUM</literal>, hint bits, etc are not sent over the network, so bandwidth requirements may be reduced - especially when compared to physical replication with <literal>full_page_writes</literal>.</simpara>
@@ -180,7 +176,7 @@
      <simpara>Temporary tables may be used on replicas.</simpara>
     </listitem>
     <listitem>
-     <simpara>Tables that aren't being replicated from elsewhere may be written to (&udr; and &bdr;).</simpara>
+     <simpara>Tables that aren't being replicated from elsewhere may be written to &bdr;.</simpara>
     </listitem>
     <listitem>
      <simpara>Replication across major versions (e.g. 9.4 to 9.5) is supported.</simpara>
@@ -195,7 +191,7 @@
      <simpara>&bdr;'s logical replication implementation imposes some restrictions on supported DDL (see: <xref linkend="ddl-replication">) that do not apply for physical replication</simpara>
     </listitem>
     <listitem>
-     <simpara>Commands that affect all databases, like <literal>ALTER SYSTEM</literal> or <literal>CREATE ROLE</literal> are <emphasis>not</emphasis> replicated by &bdr;/&udr; and must be managed by the administrator.</simpara>
+     <simpara>Commands that affect all databases, like <literal>ALTER SYSTEM</literal> or <literal>CREATE ROLE</literal> are <emphasis>not</emphasis> replicated by &bdr; and must be managed by the administrator.</simpara>
     </listitem>
     <listitem>
      <simpara>Disk random I/O requirements and flush frequency may be higher than for physical replication.</simpara>
@@ -256,7 +252,7 @@
    <literal>UNLOGGED</literal> tables may be created even on nodes that are
    receiving changes from upstream/peer nodes. Additionally, replication sets
    allow changes to only a subset of tables to be replicated if desired, so some
-   normal tables may be excluded from replication.  This makes &bdr;/&udr; very
+   normal tables may be excluded from replication.  This makes &bdr; very
    useful for use cases where significant work is done on nodes that also
    receive replicated data from elsewhere.
   </para>
@@ -478,78 +474,6 @@
    &bdr;-group-wide generator of unique values for use in synthetic keys.
    Others are discussed in the <xref linkend="conflicts"> section.
   </para>
-
- </sect1>
-
- <sect1 id="overview-udr">
-  <title>UDR: Single-master logical replication</title>
-
-  <para>
-   &udr; (Uni-Directional Replication for PostgreSQL) is a cut-down version of
-   &bdr; that will run on an unmodified version of PostgreSQL 9.4. It is &bdr;
-   with all the features that can't work on unmodified PostgreSQL 9.4 removed.
-  </para>
-
-  <para>
-   Most importantly &udr; can only replicate in one direction, so it doesn't
-   support multi-master. It cannot replicate DDL (schema changes), so users
-   must manually synchronise database schema changes. Unlike &bdr;, there are
-   no row-conflict resolution features in &udr;.
-  </para>
-
-  <para>
-   &udr; is mainly useful for read-replicas and for performing minimal-downtime
-   upgrades to new PostgreSQL versions (or to PostgreSQL 9.4 with &bdr;). It
-   offers some significant advantages over streaming replication and over
-   trigger based solutions; see <xref linkend="logical-vs-physical"> and
-   <xref linkend="bdr-vs-trigger-based">.
-  </para>
-
-  <para>
-   You can get &udr; from the same download locations as &bdr; (and in fact
-   it's the same source code, just with different options).
-  </para>
-
- </sect1>
-
- <sect1 id="usecases-bdr" xreflabel="Primary use-cases for BDR">
-  <title>Primary use-cases for &bdr;</title>
-
-  <para>
-   &bdr; excels in environments where users are distributed across
-   high-latency and/or unreliable network links where conventional
-   tightly-coupled clustering software does not work well.
-  </para>
-
-  <para>
-   It is a particularly good choice where the application writes
-   entirely, or almost entirely, to data that is clustered by
-   user group or location. For example, a department store will
-   write almost exclusively to tables relevant to its branch.
-  </para>
-
-  <!-- XXX FIXME needs more content -->
-
- </sect1>
-
- <sect1 id="usecases-udr" xreflabel="Primary use-cases for UDR">
-  <title>Primary use-cases for &udr;</title>
-
-  <para>
-   If changes are only ever made on one node and the others are just used for
-   read scalability (including temporary tables on standbys), seamless major
-   version upgrades or combining data from different nodes &udr; is sufficient.
-   These scenarios cover a large number of replication scenarios.
-  </para>
-
-  <para>
-   Using &udr; can noticeably reduce the likelihood of application
-   incompatibilities as compared to &bdr;. Only one database will be written
-   to, which prevents conflicts and such. On the other hand, a &bdr; setup can
-   make failover much easier, because there is no need to change the setup.
-  </para>
-
-  <!-- XXX FIXME needs more content -->
 
  </sect1>
 

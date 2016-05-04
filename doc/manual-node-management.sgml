@@ -7,19 +7,10 @@
 
  <sect1 id="node-management-joining" xreflabel="Joining or subscribing a node">
   <title>Joining or subscribing a node</title>
-
+`
   <para>
-   &bdr; and &udr; require different steps for setting up a node
-   because &bdr; replication is all-to-all (mesh), whereas for &udr;
-   replication is unidirectional. Both modes share many of the same concepts as
-   discussed below. The exact commands required differ and are documented below
-   under <xref linkend="node-management-joining-udr"> and <xref
-   linkend="node-management-joining-bdr">.
-  </para>
-
-  <para>
-   When a new &bdr; node is joined to an existing &bdr; group, or when a
-   &udr; node is subscribed to an upstream peer, the system must copy
+   When a new &bdr; node is joined to an existing &bdr; group,
+   node is subscribed to an upstream peer, the system must copy
    the existing data from the peer node(s) to the local node before
    replication can begin. This copy has to be carefully co-ordinated
    so that the local and remote data starts out <emphasis>identical</emphasis>,
@@ -29,8 +20,8 @@
   </para>
 
   <para>
-   There are two ways to join a new &bdr; node or create/subscribe a &udr;
-   node: logical or physical copy.  After the initial copy is done there is no
+   There are two ways to join a new &bdr; node: logical or physical copy.
+   After the initial copy is done there is no
    significant difference between physical or logical initialization of a &bdr;
    node, so the choice is down to which setup method will be quickest and
    easiest for your particular needs.
@@ -38,7 +29,7 @@
 
   <para>
    In a logical copy, a blank database in an existing standalone PostgreSQL
-   instance is enabled for &bdr; or &udr; via <acronym>SQL</acronym>
+   instance is enabled for &bdr; via <acronym>SQL</acronym>
    functions calls. The &bdr; extension makes a connection to an upstream
    node designated by the user and takes a schema and data dump of that node.
    The dump is then applied to the local blank database before replication
@@ -52,8 +43,8 @@
    to clone a user-designated upstream node. This clone is then reconfigured
    and started up as a new node before replication begins. All databases
    on the remote node are copied, though only the specified database is
-   initially activated for &bdr; or &udr;. (Support for multiple database
-   join/subscribe may be added at a later date). After a physical node
+   initially activated for &bdr;. (Support for multiple database
+   join may be added at a later date). After a physical node
    join or subscribe the admin will generally need to separately register
    the new PostgreSQL instance with the operating system to auto-start,
    as PostgreSQL does not do this automatically. You may also need to
@@ -80,31 +71,8 @@
   </para>
 
   <para>
-   For the details, see <xref linkend="node-management-joining-udr"> or
-   <xref linkend="node-management-joining-bdr"> as appropriate.
+   For the details, see <xref linkend="node-management-joining-bdr">.
   </para>
-
-  <sect2 id="node-management-joining-udr" xreflabel="Subscribing a UDR node">
-   <title>Subscribing a &udr; node</title>
-
-   <note>
-    <para>
-     Read <xref linkend="node-management-joining"> before this section.
-    </para>
-   </note>
-
-   <para>
-    The SQL function <xref linkend="functions-node-mgmt-subscribe"> is used to receive
-    changes from the database specified in the function parameters
-    into the current database. Subscribing to another node using this
-    function will automatically copy the existing data in the
-    database subscribed to.
-   </para>
-
-   <para>
-    See also: <xref linkend="functions-node-mgmt">, <xref linkend="command-bdr-init-copy">.
-   </para>
-  </sect2>
 
   <sect2 id="node-management-joining-bdr" xreflabel="Joining or creating a BDR node">
    <title>Joining or creating a &bdr; node</title>
@@ -177,7 +145,7 @@
   <title>Removing a node</title>
 
   <para>
-   Because &bdr; and &udr; can recover from extended node outages it is
+   Because &bdr; can recover from extended node outages it is
    necessary to explicitly tell the system if you are removing a node
    permanently. If you permanently shut down a node and don't tell
    the other nodes then performance will suffer and eventually

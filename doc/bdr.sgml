@@ -9,7 +9,6 @@
           %filelist;
 
           <!ENTITY bdr "<productname>BDR</productname>">
-          <!ENTITY udr "<productname>UDR</productname>">
           <!ENTITY postgres "<productname>PostgreSQL</productname>">
 ]>
 
@@ -81,7 +80,6 @@
 
   <keywordset>
    <keyword>BDR</keyword>
-   <keyword>UDR</keyword>
    <keyword>PostgreSQL</keyword>
    <keyword>replication</keyword>
    <keyword>asynchronous</keyword>

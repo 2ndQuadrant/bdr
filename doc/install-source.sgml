@@ -1,10 +1,10 @@
 <sect1 id="installation-source" xreflabel="Installing from source code">
- <title>Installing &bdr; or &udr; from source</title>
+ <title>Installing &bdr; from source</title>
 
  <sect2 id="installation-source-prereqs">
   <title>Prerequisites for installing from source</title>
   <para>
-   To install either &bdr; or &udr; the prerequisites for compiling
+   To install &bdr; the prerequisites for compiling
    &postgres; must be installed. These are described in &postgres;'s
    documentation
    on <ulink url="http://www.postgresql.org/docs/current/install-requirements.html">build requirements</ulink>
@@ -13,7 +13,7 @@
 
   <para>
    On several systems the prerequisites for compiling &postgres; and
-   &bdr;/&udr; can be installed using simple commands.
+   &bdr; can be installed using simple commands.
 
    <itemizedlist spacing="compact" mark="bullet">
     <listitem>
@@ -169,65 +169,6 @@
     PATH=/path/to/postgres/install/bin:"$PATH" ./configure
     make -j4 -s all
     make -s install
-   </programlisting>
-  </para>
- </sect2>
-
- <sect2 id="installation-udr-source">
-  <title>Installation of &udr; from source</title>
-  <para>
-   Installing &udr; is simpler than installing &bdr;. It compiles
-   against a stock (unmodified) &postgres; 9.4 if the relevant
-   headers are installed. The configure script will automatically
-   check whether the target &postgres; version is modified for &bdr;;
-   if it's the stock (unmodified) version, &udr; will be built
-   instead of &bdr;.
-  </para>
-
-  <para>
-   Most Linux distributions put the required header files in a "dev"
-   or "devel" package. Exactly what to install depends on how you
-   installed PostgreSQL in the first place.
-   <itemizedlist>
-    <listitem>
-     <para>
-      If you installed from apt.postgresql.org packages on
-      Debian/Ubuntu then run:
-      <programlisting>
-       sudo apt-get install postgresql-server-dev-9.4
-      </programlisting>
-     </para>
-    </listitem>
-    <listitem>
-     <para>
-      If you installed from yum.postgresql.org packages on
-      RHEL or CentOS then run:
-      <programlisting>
-       sudo yum install postgresql94-dev
-      </programlisting>
-     </para>
-    </listitem>
-   </itemizedlist>
-  </para>
-
-  <para>
-   To compile &udr; execute its configure script with &postgres;'s
-   <application>pg_config</application> in the <literal>PATH</literal>.
-   <programlisting>
-    cd /path/to/bdr-plugin-source/
-    PATH=/path/to/pg/install:"$PATH" ./configure
-    make -j16 -s all
-   </programlisting>
-   On Debian/Ubuntu systems <application>pg_config</application> is on the default
-   <literal>PATH</literal> so you can just run
-   <programlisting>
-    ./configure
-   </programlisting>
-   On RHEL/CentOS systems you will need to put
-   <filename>/usr/pgsql-9.4/bin</filename> on the
-   <literal>PATH</literal>, e.g.:
-   <programlisting>
-    PATH=/usr/pgsql-9.4/bin:$PATH ./configure
    </programlisting>
   </para>
  </sect2>

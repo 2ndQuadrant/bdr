@@ -1,8 +1,8 @@
- <sect1 id="install-requirements" xreflabel="BDR and UDR requirements">
-  <title>&bdr; / &udr; requirements</title>
+ <sect1 id="install-requirements" xreflabel="BDR requirements">
+  <title>&bdr; requirements</title>
 
   <para>
-   To use logical replication via &bdr; or &udr; you will need PostgreSQL 9.4
+   To use logical replication via &bdr; you will need PostgreSQL 9.4
    or newer. Earlier versions are not supported and will never be supported.
   </para>
 
@@ -24,14 +24,8 @@
    Some of these modifications make small changes to how PostgreSQL stores
    data on disk. As a result the modified PostgreSQL 9.4 used by &bdr; can't
    load data directories from unmodified PostgreSQL and vice versa. Users
-   must dump and reload their database(s) to switch to a &bdr;-capable PostgreSQL,
-   or use &udr; for online-upgrade. See <xref linkend="installation">.
-  </para>
-
-  <para>
-   &udr; runs on standard PostgreSQL 9.4 and is installed like any other
-   extension. It is a cut-down version of BDR that can work with only
-   the features present in PostgreSQL 9.4; see <xref linkend="overview-udr">.
+   must dump and reload their database(s) to switch to a &bdr;-capable
+   PostgreSQL. See <xref linkend="installation">.
   </para>
 
   <para>
