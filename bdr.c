@@ -739,6 +739,24 @@ _PG_init(void)
 							GUC_UNIT_MS,
 							NULL, NULL, NULL);
 
+	DefineCustomIntVariable("bdr.max_ddl_lock_delay",
+							"Sets the maximum delay before canceling queries while waiting for global lock",
+							"If se to -1 max_standby_streaming_delay will be used",
+							&bdr_max_ddl_lock_delay,
+							-1, -1, INT_MAX,
+							PGC_SIGHUP,
+							GUC_UNIT_MS,
+							NULL, NULL, NULL);
+
+	DefineCustomIntVariable("bdr.bdr_ddl_lock_timeout",
+							"Sets the maximum allowed duration of any wait for a global lock",
+							"If se to -1 lock_timeout will be used",
+							&bdr_ddl_lock_timeout,
+							-1, -1, INT_MAX,
+							PGC_SIGHUP,
+							GUC_UNIT_MS,
+							NULL, NULL, NULL);
+
 	/*
 	 * We can't use the temp_tablespace safely for our dumps, because Pg's
 	 * crash recovery is very careful to delete only particularly formatted

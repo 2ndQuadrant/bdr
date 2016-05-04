@@ -108,8 +108,10 @@
 
 /* GUCs */
 bool bdr_permit_ddl_locking = false;
-int bdr_ddl_grace_timeout = 10000;
-
+/* -1 means use max_standby_streaming_delay */
+int bdr_max_ddl_lock_delay = -1;
+/* -1 means use lock_timeout/statement_timeout */
+int bdr_ddl_lock_timeout = -1;
 
 typedef struct BDRLockWaiter {
 	PGPROC	   *proc;
@@ -781,12 +783,23 @@ check_is_my_node(uint64 sysid, TimeLineID tli, Oid datid)
  * Caller is responsible for ensuring that no new writes can be started during
  * the execution of this function.
  */
-static void
+static bool
 cancel_conflicting_transactions(void)
 {
 	VirtualTransactionId *conflict;
-	TimestampTz		endtime = TimestampTzPlusMilliseconds(GetCurrentTimestamp(), bdr_ddl_grace_timeout),
-					waittime = 1000;
+	TimestampTz		killtime,
+					canceltime;
+	int				waittime = 1000;
+
+	killtime = TimestampTzPlusMilliseconds(GetCurrentTimestamp(),
+		bdr_max_ddl_lock_delay > 0 ?
+			bdr_max_ddl_lock_delay : max_standby_streaming_delay);
+
+	if (bdr_ddl_lock_timeout > 0 || LockTimeout > 0)
+		canceltime = TimestampTzPlusMilliseconds(GetCurrentTimestamp(),
+			bdr_ddl_lock_timeout > 0 ? bdr_ddl_lock_timeout : LockTimeout);
+	else
+		TIMESTAMP_NOEND(canceltime);
 
 	conflict = GetConflictingVirtualXIDs(InvalidTransactionId, MyDatabaseId);
 
@@ -808,13 +821,30 @@ cancel_conflicting_transactions(void)
 		}
 
 		/* If here is writing transaction give it time to finish */
-		if (GetCurrentTimestamp() < endtime)
+		if (!TIMESTAMP_IS_NOEND(canceltime) &&
+			GetCurrentTimestamp() < canceltime)
 		{
+			return false;
+		}
+		else if (GetCurrentTimestamp() < killtime)
+		{
+			int	rc;
+
 			/* Increasing backoff interval for wait time with limit of 1s */
 			pg_usleep(waittime);
 			waittime *= 2;
 			if (waittime > 1000000)
 				waittime = 1000000;
+
+			rc = WaitLatch(&MyProc->procLatch,
+						   WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
+						   waittime);
+
+			ResetLatch(&MyProc->procLatch);
+
+			/* emergency bailout if postmaster has died */
+			if (rc & WL_POSTMASTER_DEATH)
+				proc_exit(1);
 		}
 		else
 		{
@@ -833,6 +863,8 @@ cancel_conflicting_transactions(void)
 			elog(DEBUG2, "signaled pid %d to terminate because it conflicts with a global lock requested by another node", p);
 		}
 	}
+
+	return true;
 }
 
 static void
@@ -961,7 +993,11 @@ bdr_process_acquire_ddl_lock(uint64 sysid, TimeLineID tli, Oid datid, BDRLockTyp
 			 * running.
 			 */
 			elog(DEBUG1, "terminating any local processes that conflict with the global lock");
-			cancel_conflicting_transactions();
+			if (!cancel_conflicting_transactions())
+			{
+				elog(DEBUG1, "failed to terminate, declining the lock");
+				goto decline;
+			}
 
 			/*
 			 * We now have to wait till all our local pending changes have been
@@ -1047,8 +1083,6 @@ bdr_process_acquire_ddl_lock(uint64 sysid, TimeLineID tli, Oid datid, BDRLockTyp
 
 		CommitTransactionCommand();
 
-		/* update inmemory lock state */
-		bdr_my_locks_database->lock_type = lock_type;
 		LWLockRelease(bdr_locks_ctl->lock);
 
 		if (lock_type >= BDR_LOCK_WRITE)
@@ -1059,7 +1093,16 @@ bdr_process_acquire_ddl_lock(uint64 sysid, TimeLineID tli, Oid datid, BDRLockTyp
 			 * running.
 			 */
 			elog(DEBUG1, "terminating any local processes that conflict with the global lock");
-			cancel_conflicting_transactions();
+			if (!cancel_conflicting_transactions())
+			{
+				elog(DEBUG1, "failed to terminate, declining the lock");
+				goto decline;
+			}
+
+			/* update inmemory lock state */
+			LWLockAcquire(bdr_locks_ctl->lock, LW_EXCLUSIVE);
+			bdr_my_locks_database->lock_type = lock_type;
+			LWLockRelease(bdr_locks_ctl->lock);
 
 			/*
 			 * We now have to wait till all our local pending changes have been
@@ -1079,6 +1122,11 @@ bdr_process_acquire_ddl_lock(uint64 sysid, TimeLineID tli, Oid datid, BDRLockTyp
 			 * Simple DDL locks that are not conflicting with existing
 			 * transactions can be just confirmed immediatelly.
 			 */
+
+			/* update inmemory lock state */
+			LWLockAcquire(bdr_locks_ctl->lock, LW_EXCLUSIVE);
+			bdr_my_locks_database->lock_type = lock_type;
+			LWLockRelease(bdr_locks_ctl->lock);
 
 			elog(DEBUG1, "non-conflicting lock requested, logging confirmation of this node's acquisition of global lock");
 			bdr_send_confirm_lock();
@@ -1551,24 +1599,42 @@ bdr_locks_check_dml(void)
 		CHECK_FOR_INTERRUPTS();
 
 		/* Probably can't use latch here easily, since init didn't happen yet. */
-		pg_usleep(5000L);
+		pg_usleep(10000L);
 	}
 
-	/* Is this database locked against user initiated ddl? */
+	/* Is this database locked against user initiated dml? */
 	pg_memory_barrier();
-	if (bdr_my_locks_database->lockcount > 0 && !this_xact_acquired_lock)
+	if (bdr_my_locks_database->lockcount > 0 && !this_xact_acquired_lock &&
+		bdr_my_locks_database->lock_type >= BDR_LOCK_WRITE)
 	{
+		TimestampTz		canceltime;
+
 		bdr_locks_addwaiter(MyProc);
+
+		if (bdr_ddl_lock_timeout > 0 || LockTimeout > 0)
+			canceltime = TimestampTzPlusMilliseconds(GetCurrentTimestamp(),
+				bdr_ddl_lock_timeout > 0 ? bdr_ddl_lock_timeout : LockTimeout);
+		else
+			TIMESTAMP_NOEND(canceltime);
 
 		/* Wait for lock to be released. */
 		for (;;)
 		{
 			int rc;
 
+			if (!TIMESTAMP_IS_NOEND(canceltime) &&
+				GetCurrentTimestamp() < canceltime)
+			{
+				ereport(ERROR,
+						(errcode(ERRCODE_LOCK_NOT_AVAILABLE),
+						 errmsg("canceling statement due to global lock timeout")));
+			}
+
 			CHECK_FOR_INTERRUPTS();
 
 			pg_memory_barrier();
-			if (bdr_my_locks_database->lockcount == 0)
+			if (bdr_my_locks_database->lockcount == 0 ||
+				bdr_my_locks_database->lock_type < BDR_LOCK_WRITE)
 				break;
 
 			rc = WaitLatch(&MyProc->procLatch,
