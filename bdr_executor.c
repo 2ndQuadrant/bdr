@@ -68,7 +68,11 @@ static ExecutorStart_hook_type PrevExecutorStart_hook = NULL;
 
 static bool bdr_always_allow_writes = false;
 bool in_bdr_replicate_ddl_command = false;
+static List *bdr_truncated_tables = NIL;
 
+
+PGDLLEXPORT Datum bdr_queue_truncate(PG_FUNCTION_ARGS);
+PG_FUNCTION_INFO_V1(bdr_queue_truncate);
 PGDLLEXPORT Datum bdr_queue_ddl_commands(PG_FUNCTION_ARGS);
 PG_FUNCTION_INFO_V1(bdr_queue_ddl_commands);
 PGDLLEXPORT Datum bdr_queue_dropped_objects(PG_FUNCTION_ARGS);
@@ -481,6 +485,99 @@ bdr_truncate_trigger_add(PG_FUNCTION_ARGS)
 
 		pfree(nspname);
 	}
+
+	PG_RETURN_VOID();
+}
+
+
+/*
+ * Initializes the internal table list.
+ */
+void
+bdr_start_truncate(void)
+{
+	bdr_truncated_tables = NIL;
+}
+
+/*
+ * Write the list of truncated tables to the replication queue.
+ */
+void
+bdr_finish_truncate(void)
+{
+	ListCell	   *lc;
+	char		   *sep = "";
+	StringInfoData	buf;
+
+	/* Nothing to do if the list of truncated table is empty. */
+	if (list_length(bdr_truncated_tables) < 1)
+		return;
+
+	initStringInfo(&buf);
+	appendStringInfoString(&buf, "TRUNCATE TABLE ONLY ");
+
+	foreach (lc, bdr_truncated_tables)
+	{
+		Oid			reloid = lfirst_oid(lc);
+		char	   *relname;
+
+		relname = quote_qualified_identifier(
+			get_namespace_name(get_rel_namespace(reloid)),
+			get_rel_name(reloid));
+
+		appendStringInfoString(&buf, sep);
+		appendStringInfoString(&buf, relname);
+		sep = ", ";
+	}
+
+	bdr_queue_ddl_command("TRUNCATE (automatic)", buf.data);
+
+	list_free(bdr_truncated_tables);
+	bdr_truncated_tables = NIL;
+}
+
+/*
+ * bdr_queue_truncate
+ * 		TRUNCATE trigger
+ *
+ * This function only writes to internal linked list, actual queueing is done
+ * by bdr_finish_truncate().
+ */
+Datum
+bdr_queue_truncate(PG_FUNCTION_ARGS)
+{
+	TriggerData	   *tdata = (TriggerData *) fcinfo->context;
+	MemoryContext	oldcontext;
+
+	if (!CALLED_AS_TRIGGER(fcinfo))	/* internal error */
+		ereport(ERROR,
+				(errcode(ERRCODE_E_R_I_E_TRIGGER_PROTOCOL_VIOLATED),
+				 errmsg("function \"%s\" was not called by trigger manager",
+						"bdr_queue_truncate")));
+
+	if (!TRIGGER_FIRED_BY_TRUNCATE(tdata->tg_event))	/* internal error */
+		elog(ERROR, "function \"%s\" was not called by TRUNCATE",
+			 "bdr_queue_truncate");
+
+	/*
+	 * If the trigger comes from DDL executed by bdr_replicate_ddl_command,
+	 * don't queue it as it would insert duplicate commands into the queue.
+	 */
+	if (in_bdr_replicate_ddl_command)
+		PG_RETURN_VOID();	/* XXX return type? */
+
+	/*
+	 * If we're currently replaying something from a remote node, don't queue
+	 * the commands; that would cause recursion.
+	 */
+	if (replication_origin_id != InvalidRepNodeId)
+		PG_RETURN_VOID();	/* XXX return type? */
+
+	/* Make sure the list change survives the trigger call. */
+	oldcontext = MemoryContextSwitchTo(TopTransactionContext);
+	bdr_truncated_tables = lappend_oid(bdr_truncated_tables,
+									   RelationGetRelid(tdata->tg_relation));
+	MemoryContextSwitchTo(oldcontext);
 
 	PG_RETURN_VOID();
 }

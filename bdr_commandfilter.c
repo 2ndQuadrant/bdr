@@ -1092,12 +1092,18 @@ bdr_commandfilter(Node *parsetree,
 		bdr_acquire_ddl_lock(lock_type);
 
 done:
+	if (nodeTag(parsetree) == T_TruncateStmt)
+		bdr_start_truncate();
+
 	if (next_ProcessUtility_hook)
 		next_ProcessUtility_hook(parsetree, queryString, context, params,
 								 dest, completionTag);
 	else
 		standard_ProcessUtility(parsetree, queryString, context, params,
 								dest, completionTag);
+
+	if (nodeTag(parsetree) == T_TruncateStmt)
+		bdr_finish_truncate();
 }
 
 static void

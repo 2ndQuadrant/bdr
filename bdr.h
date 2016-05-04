@@ -485,6 +485,8 @@ extern void bdr_executor_init(void);
 extern void bdr_executor_always_allow_writes(bool always_allow);
 extern void bdr_queue_ddl_command(char *command_tag, char *command);
 extern void bdr_execute_ddl_command(char *cmdstr, char *perpetrator, bool tx_just_started);
+extern void bdr_start_truncate(void);
+extern void bdr_finish_truncate(void);
 
 extern void bdr_locks_shmem_init(void);
 extern void bdr_locks_check_dml(void);
