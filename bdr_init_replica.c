@@ -267,7 +267,11 @@ bdr_init_exec_dump_restore(BDRNodeInfo *node,
 	 * instead is a bit dodgy.
 	 */
 	appendStringInfoString(&local_dsn,
-						   " options='-c bdr.do_not_replicate=on -c bdr.permit_unsafe_ddl_commands=on -c bdr.skip_ddl_replication=on -c bdr.skip_ddl_locking=on'");
+						   " options='-c bdr.do_not_replicate=on "
+						   " -c bdr.permit_unsafe_ddl_commands=on"
+						   " -c bdr.skip_ddl_replication=on"
+						   " -c bdr.skip_ddl_locking=on"
+						   " -c session_replication_role=replica'");
 
 	tmpdir = palloc(strlen(bdr_temp_dump_directory)+32);
 	sprintf(tmpdir, "%s/postgres-bdr-%s.%d", bdr_temp_dump_directory,

@@ -474,6 +474,13 @@ bdr_bgworker_init(uint32 worker_arg, BdrWorkerType worker_type)
 					bdr_synchronous_commit ? "local" : "off",
 					PGC_BACKEND, PGC_S_OVERRIDE);	/* other context? */
 
+	if (worker_type == BDR_WORKER_APPLY)
+	{
+		/* Run as replica session replication role, this avoids FK checks. */
+		SetConfigOption("session_replication_role", "replica",
+						PGC_SUSET, PGC_S_OVERRIDE);	/* other context? */
+	}
+
 	/*
 	 * Disable function body checks during replay. That's necessary because a)
 	 * the creator of the function might have had it disabled b) the function
