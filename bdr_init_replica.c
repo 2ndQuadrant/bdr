@@ -614,9 +614,8 @@ bdr_init_wait_for_slot_creation()
 {
 	List	   *configs;
 	ListCell   *lc;
-	Name*		slot_names;
-	Size		n_slots;
-	int			tup_idx, arr_idx;
+	ListCell   *next,
+			   *prev;
 
 	elog(INFO, "waiting for all inbound slots to be established");
 
@@ -627,106 +626,92 @@ bdr_init_wait_for_slot_creation()
 	StartTransactionCommand();
 	configs = bdr_read_connection_configs();
 
-	slot_names = (Name*)palloc0(sizeof(Name) * list_length(configs));
-
-	n_slots = 0;
-	foreach(lc, configs)
+	/* Celanup the config list from the ones we are not insterested in. */
+	prev = NULL;
+	for (lc = list_head(configs); lc; lc = next)
 	{
 		BdrConnectionConfig *cfg = lfirst(lc);
-		Name slot_name;
 
-		if (cfg->sysid == GetSystemIdentifier() &&
-			cfg->timeline == ThisTimeLineID &&
-			cfg->dboid == MyDatabaseId)
+		/* We might delete the cell so advance it now. */
+		next = lnext(lc);
+
+		/*
+		 * We won't see an inbound slot from our own node.
+		 * Abn there's no corresponding incoming slot for a unidirectional
+		 * slot.
+		 */
+		if ((cfg->sysid == GetSystemIdentifier() &&
+			 cfg->timeline == ThisTimeLineID &&
+			 cfg->dboid == MyDatabaseId) ||
+			cfg->is_unidirectional)
+
 		{
-			/* We won't see an inbound slot from our own node */
-			continue;
+			configs = list_delete_cell(configs, lc, prev);
+			break;
 		}
-
-		/* There's no corresponding incoming slot for a unidirectional slot */
-		if (cfg->is_unidirectional)
-			continue;
-
-		slot_name = (NameData*) palloc0(sizeof(NameData));
-		bdr_slot_name(slot_name, cfg->sysid, cfg->timeline, cfg->dboid,
-					  MyDatabaseId);
-
-		elog(DEBUG2, "expecting inbound slot named %s", NameStr(*slot_name));
-
-		slot_names[n_slots++] = slot_name;
+		else
+			prev = lc;
 	}
 
 	/*
-	 * Wait for each to be created. There's no useful way to be notified when a
-	 * slot gets created, so just scan all slots to see if all the ones we want
-	 * are present and active. If not, sleep and retry soon.
+	 * Wait for each slot to reach consistent point.
 	 *
-	 * This is a very inefficient approach but for the number of slots we're
-	 * interested in it doesn't matter.
+	 * This works by checking for BDR_WORKER_WALSENDER in the worker array.
+	 * The reason for checking this way is that the worker structure for
+	 * BDR_WORKER_WALSENDER is setup from startup_cb which is called after the
+	 * consistent point was reached.
 	 */
-	SPI_connect();
-
 	while (true)
 	{
-		Datum	values[1] = {MyDatabaseId};
-		Oid		types[1] = {OIDOID};
-		Size	n_slots_found = 0;
+		int	found = 0;
+		int	slotoff;
 
-		SPI_execute_with_args("select slot_name "
-							  "from pg_catalog.pg_replication_slots "
-							  "where plugin = '"BDR_LIBRARY_NAME"' "
-							  "and slot_type = 'logical' "
-							  "and datoid = $1 and active",
-							  1, types, values, NULL, false, 0);
-
-		for (tup_idx = 0; tup_idx < SPI_processed; tup_idx++)
+		foreach(lc, configs)
 		{
-			char	   *slot_name;
+			BdrConnectionConfig *cfg = lfirst(lc);
 
-			slot_name = SPI_getvalue(SPI_tuptable->vals[tup_idx],
-									 SPI_tuptable->tupdesc,
-									 1);
-
-			Assert(slot_name != NULL);
-
-			/*
-			 * Does this slot appear in the array of expected slots and if so,
-			 * have we seen it already?
-			 *
-			 * This is O(m*n) for m existing slots and n expected slots, but
-			 * really, for this many slots, who cares.
-			 */
-			for (arr_idx = 0; arr_idx < n_slots; arr_idx++)
+			if (cfg->sysid == GetSystemIdentifier() &&
+				cfg->timeline == ThisTimeLineID &&
+				cfg->dboid == MyDatabaseId)
 			{
-				if ( strcmp(NameStr(*slot_names[arr_idx]), slot_name) == 0 )
-				{
-					n_slots_found++;
-					break;
-				}
+				/* We won't see an inbound slot from our own node */
+				continue;
 			}
+
+			/* There's no corresponding incoming slot for a unidirectional slot */
+			if (cfg->is_unidirectional)
+				continue;
+
+			LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
+			for (slotoff = 0; slotoff < bdr_max_workers; slotoff++)
+			{
+				BdrWorker  *w = &BdrWorkerCtl->slots[slotoff];
+
+				if (w->worker_type != BDR_WORKER_WALSENDER)
+					continue;
+
+				if (cfg->sysid == w->data.walsnd.remote_sysid &&
+					cfg->timeline == w->data.walsnd.remote_timeline &&
+					cfg->dboid == w->data.walsnd.remote_dboid &&
+					w->worker_proc &&
+					w->worker_proc->databaseId == MyDatabaseId)
+					found ++;
+			}
+			LWLockRelease(BdrWorkerCtl->lock);
 		}
 
-		if (n_slots_found == n_slots)
+		if (found == list_length(configs))
 			break;
 
 		elog(DEBUG2, "found %u of %u expected slots, sleeping",
-			 (uint32)n_slots_found, (uint32)n_slots);
+			 (uint32)found, (uint32)list_length(configs));
 
 		pg_usleep(100000);
 	}
 
-	SPI_finish();
-
 	CommitTransactionCommand();
 
 	elog(INFO, "all inbound slots established");
-
-	/*
-	 * Should this also check all outbound workers are connected? Doing so
-	 * isn't simple - checking for replication identifiers doesn't confirm that
-	 * the connection is active. We'd need to talk to the apply workers or try
-	 * to convey information via pg_stat_activity.
-	 */
 }
 
 /*
