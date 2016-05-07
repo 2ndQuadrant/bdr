@@ -41,6 +41,7 @@
 #include "storage/latch.h"
 #include "storage/lmgr.h"
 #include "storage/proc.h"
+#include "storage/sinvaladt.h"
 
 typedef struct BdrSequencerSlot
 {
@@ -910,6 +911,9 @@ bdr_sequencer_fill_sequence(Oid seqoid, char *seqschema, char *seqname)
 	BdrSequenceValues *curval, *firstval;
 	int i;
 	bool acquired_new = false;
+	LockRelId	heaprelid;
+	LOCKTAG		heaplocktag;
+	VirtualTransactionId *lockholders;
 
 	/* lock page, fill heaptup */
 	init_sequence(seqoid, &elm, &rel);
@@ -997,6 +1001,27 @@ done_with_sequence:
 
 	UnlockReleaseBuffer(buf);
 	heap_close(rel, NoLock);
+
+	/*
+	 * Check for backends who have the sequence open, they might be waiting
+	 * for the voting to finish so let's signal them.
+	 */
+	if (acquired_new)
+	{
+		heaprelid = rel->rd_lockInfo.lockRelId;
+		SET_LOCKTAG_RELATION(heaplocktag, heaprelid.dbId, heaprelid.relId);
+
+		lockholders = GetLockConflicts(&heaplocktag, AccessExclusiveLock);
+
+		while (VirtualTransactionIdIsValid(*lockholders))
+		{
+			PGPROC	   *proc = BackendIdGetProc(lockholders->backendId);
+
+			if (proc)
+				SetLatch(&proc->procLatch);
+			lockholders++;
+		}
+	}
 }
 
 /*
@@ -1092,8 +1117,12 @@ bdr_sequence_alloc(PG_FUNCTION_ARGS)
 	BdrSequenceValues *curval;
 	int			i;
 	bool		wakeup = false;
+	int			retries = 0;
 
 	page = BufferGetPage(buf);
+
+retry:
+
 	seq = (Form_pg_sequence) GETSTRUCT(seqtuple);
 
 	values = fastgetattr(seqtuple, 11, RelationGetDescr(seqrel), &isnull);
@@ -1170,18 +1199,58 @@ bdr_sequence_alloc(PG_FUNCTION_ARGS)
 		break;
 	}
 
+	/*
+	 * XXX: This is hacky and only works with current bdr-pg but we'll need
+	 * sequence rewrite to do things properly anyway so we'll live with it
+	 * for now.
+	 */
 	if (result == 0)
 	{
-		bdr_sequencer_wakeup();
-		bdr_schedule_eoxact_sequencer_wakeup();
+		ItemId		lp;
+		int			rc;
 
-		ereport(ERROR,
-				(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
-				 errmsg("could not find free sequence value for global sequence %s.%s",
-						get_namespace_name(RelationGetNamespace(seqrel)),
-						RelationGetRelationName(seqrel)),
-				 errhint("The sequence is refilling from remote nodes. Try again soon. "
-						 "Check that all nodes are up if the condition persists.")));
+		bdr_sequencer_wakeup();
+		CHECK_FOR_INTERRUPTS();
+
+		/* Give voting chance to progress (10 sleep). */
+		LockBuffer(buf, BUFFER_LOCK_UNLOCK);
+		rc = WaitLatch(&MyProc->procLatch,
+					   WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
+					   10000L);
+		ResetLatch(&MyProc->procLatch);
+		LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
+
+		/* emergency bailout if postmaster has died */
+		if (rc & WL_POSTMASTER_DEATH)
+			proc_exit(1);
+
+		/* Reread the tuple. */
+		page = BufferGetPage(buf);
+		lp = PageGetItemId(page, FirstOffsetNumber);
+		Assert(ItemIdIsNormal(lp));
+
+		/* Note we currently only bother to set these two fields of *seqtuple */
+		seqtuple->t_data = (HeapTupleHeader) PageGetItem(page, lp);
+		seqtuple->t_len = ItemIdGetLength(lp);
+
+		/*
+		 * No point in trying this forever. We waited for a minute by now
+		 * so let's bail.
+		 */
+		if (retries++ > 5)
+		{
+			bdr_schedule_eoxact_sequencer_wakeup();
+
+			ereport(ERROR,
+					(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+					 errmsg("could not find free sequence value for global sequence %s.%s",
+							get_namespace_name(RelationGetNamespace(seqrel)),
+							RelationGetRelationName(seqrel)),
+					 errhint("The sequence is refilling from remote nodes. Try again soon. "
+							 "Check that all nodes are up if the condition persists.")));
+		}
+
+		goto retry;
 	}
 
 	if (wakeup)
