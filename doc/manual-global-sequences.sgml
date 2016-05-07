@@ -217,7 +217,7 @@
   <title>Global sequence voting</title>
 
   <para>
-   Global sequences allocate values in chunks of 1000 sequence numbers.
+   Global sequences allocate values in chunks of 10000 sequence numbers.
   </para>
 
   <para>
@@ -226,15 +226,15 @@
    fixed size of 10 chunks. The second level cache, which is used to fill the
    first level cache, is subject to voting. The size of the second level cache
    defaults to 5 chunks. This means that &bdr; will keep somewhere between
-   10 and 15 thousand sequence numbers cached on each node. If this is not
+   100 and 150 thousand sequence numbers cached on each node. If this is not
    enough (for example, the application is consuming sequences faster in peak
    times), the voting cache size can be adjusted using the following command:
    <programlisting>
     ALTER SEQUENCE sequence_name SET (cache_chunks = 10);
    </programlisting>
-   The above command will change the voting cache to 10 chunks (i.e. 10 thousand
-   sequence numbers). Minimum value for <literal>cache_chunks</literal> is 5
-   and maximum is 100.
+   The above command will change the voting cache to 10 chunks (i.e. 100
+   thousand sequence numbers). Minimum value for
+   <literal>cache_chunks</literal> is 5 and maximum is 100.
   </para>
 
   <note>
