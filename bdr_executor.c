@@ -42,6 +42,7 @@
 #include "nodes/makefuncs.h"
 #include "nodes/parsenodes.h"
 
+#include "parser/parse_func.h"
 #include "parser/parse_relation.h"
 #include "parser/parsetree.h"
 
@@ -397,12 +398,47 @@ static void
 bdr_create_truncate_trigger(char *schemaname, char *relname, Oid relid)
 {
 	CreateTrigStmt *tgstmt;
-	RangeVar *relrv = makeRangeVar(schemaname, relname, -1);
+	RangeVar	   *relrv = makeRangeVar(schemaname, relname, -1);
+	Relation		rel;
+	List		   *funcname;
+
+	if (OidIsValid(relid))
+		rel = heap_open(relid, AccessExclusiveLock);
+	else
+		rel = heap_openrv(relrv, AccessExclusiveLock);
+
+	funcname = list_make2(makeString("bdr"), makeString("queue_truncate"));
+
+
+	/*
+	 * Check for already existing trigger on the table to avoid adding
+	 * duplicate ones.
+	 */
+	if (rel->trigdesc)
+	{
+		Trigger	   *trigger = rel->trigdesc->triggers;
+		int			i;
+		Oid			funcoid = LookupFuncName(funcname, 0, NULL, false);
+
+		for (i = 0; i < rel->trigdesc->numtriggers; i++)
+		{
+			if (!TRIGGER_FOR_TRUNCATE(trigger->tgtype))
+				continue;
+
+			if (trigger->tgfoid == funcoid)
+			{
+				heap_close(rel, AccessExclusiveLock);
+				return;
+			}
+
+			trigger++;
+		}
+	}
 
 	tgstmt = makeNode(CreateTrigStmt);
 	tgstmt->trigname = "truncate_trigger";
 	tgstmt->relation = copyObject(relrv);
-	tgstmt->funcname = list_make2(makeString("bdr"), makeString("queue_truncate"));
+	tgstmt->funcname = funcname;
 	tgstmt->args = NIL;
 	tgstmt->row = false;
 	tgstmt->timing = TRIGGER_TYPE_AFTER;
@@ -414,8 +450,10 @@ bdr_create_truncate_trigger(char *schemaname, char *relname, Oid relid)
 	tgstmt->initdeferred = false;
 	tgstmt->constrrel = NULL;
 
-	(void) CreateTrigger(tgstmt, NULL, relid, InvalidOid,
+	(void) CreateTrigger(tgstmt, NULL, rel->rd_id, InvalidOid,
 						 InvalidOid, InvalidOid, true /* tgisinternal */);
+
+	heap_close(rel, AccessExclusiveLock);
 
 	/* Make the new trigger visible within this session */
 	CommandCounterIncrement();
