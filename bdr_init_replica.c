@@ -626,7 +626,7 @@ bdr_init_wait_for_slot_creation()
 	StartTransactionCommand();
 	configs = bdr_read_connection_configs();
 
-	/* Celanup the config list from the ones we are not insterested in. */
+	/* Cleanup the config list from the ones we are not insterested in. */
 	prev = NULL;
 	for (lc = list_head(configs); lc; lc = next)
 	{
