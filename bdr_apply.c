@@ -91,6 +91,13 @@ static XLogRecPtr		remote_origin_lsn = InvalidXLogRecPtr;
 static RepNodeId		remote_origin_id = InvalidRepNodeId;
 
 /*
+ * A message counter for the xact, for debugging. We don't send
+ * the remote change LSN with messages, so this aids identification
+ * of which change causes an error.
+ */
+static uint32			xact_action_counter;
+
+/*
  * This code only runs within an apply bgworker, so we can stash a pointer to our
  * state in shm in a global for convenient access.
  */
@@ -100,7 +107,16 @@ static BdrConnectionConfig *bdr_apply_config = NULL;
 
 dlist_head bdr_lsn_association = DLIST_STATIC_INIT(bdr_lsn_association);
 
-static BDRRelation *read_rel(StringInfo s, LOCKMODE mode);
+struct ActionErrCallbackArg
+{
+	const char * action_name;
+	const char * remote_nspname;
+	const char * remote_relname;
+	bool is_ddl_or_drop;
+	bool suppress_output;
+};
+
+static BDRRelation *read_rel(StringInfo s, LOCKMODE mode, struct ActionErrCallbackArg *cbarg);
 static void read_tuple_parts(StringInfo s, BDRRelation *rel, BDRTupleData *tup);
 
 static void check_apply_update(BdrConflictType conflict_type,
@@ -134,6 +150,72 @@ static void log_tuple(const char *format, TupleDesc desc, HeapTuple tup);
 #endif
 
 static void
+format_action_description(
+	StringInfo si,
+	const char * action_name,
+	const char * remote_nspname,
+	const char * remote_relname,
+	bool is_ddl_or_drop)
+{
+	appendStringInfoString(si, "apply ");
+	appendStringInfoString(si, action_name);
+
+	if (remote_nspname != NULL
+			&& remote_relname != NULL
+			&& !is_ddl_or_drop)
+	{
+		appendStringInfo(si, " from remote relation %s.%s",
+				remote_nspname, remote_relname);
+	}
+
+	appendStringInfo(si,
+			" in commit %X/%X, xid %u commited at %s (action #%u)",
+			(uint32)(replication_origin_lsn>>32),
+			(uint32)replication_origin_lsn,
+			replication_origin_xid,
+			timestamptz_to_str(replication_origin_timestamp),
+			xact_action_counter);
+
+	if (replication_origin_id != InvalidRepNodeId)
+	{
+		appendStringInfo(si, " from node ("UINT64_FORMAT",%u,%u)",
+				origin_sysid,
+				origin_timeline,
+				origin_dboid);
+	}
+
+	if (remote_origin_id != InvalidRepNodeId)
+	{
+		appendStringInfo(si, " forwarded from commit %X/%X on node ("UINT64_FORMAT",%u,%u)",
+				(uint32)(remote_origin_lsn>>32),
+				(uint32)remote_origin_lsn,
+				remote_origin_sysid,
+				remote_origin_timeline_id,
+				remote_origin_dboid);
+	}
+}
+
+static void
+action_error_callback(void *arg)
+{
+	struct ActionErrCallbackArg *action = (struct ActionErrCallbackArg*)arg;
+	StringInfoData si;
+
+	if (!action->suppress_output)
+	{
+		initStringInfo(&si);
+
+		format_action_description(&si,
+			action->action_name,
+			action->remote_nspname,
+			action->remote_relname,
+			action->is_ddl_or_drop);
+
+		errcontext("%s", si.data);
+	}
+}
+
+static void
 process_remote_begin(StringInfo s)
 {
 	XLogRecPtr		origlsn;
@@ -143,8 +225,18 @@ process_remote_begin(StringInfo s)
 	char			statbuf[100];
 	int				apply_delay = bdr_apply_config->apply_delay;
 	int				flags = 0;
+	ErrorContextCallback errcallback;
+	struct ActionErrCallbackArg cbarg;
 
 	Assert(bdr_apply_worker != NULL);
+
+	xact_action_counter = 1;
+	memset(&cbarg, 0, sizeof(struct ActionErrCallbackArg));
+	cbarg.action_name = "BEGIN";
+	errcallback.callback = action_error_callback;
+	errcallback.arg = &cbarg;
+	errcallback.previous = error_context_stack;
+	error_context_stack = &errcallback;
 
 	started_transaction = false;
 	remote_origin_id = InvalidRepNodeId;
@@ -181,11 +273,9 @@ process_remote_begin(StringInfo s)
 	replication_origin_xid = remote_xid;
 
 	snprintf(statbuf, sizeof(statbuf),
-			"bdr_apply: BEGIN origin(source, orig_lsn, timestamp): %X/%X, %s",
+			"bdr_apply: BEGIN origin(orig_lsn, timestamp): %X/%X, %s",
 			(uint32) (origlsn >> 32), (uint32) origlsn,
 			timestamptz_to_str(committime));
-
-	elog(DEBUG1, "%s", statbuf);
 
 	pgstat_report_activity(STATE_RUNNING, statbuf);
 
@@ -233,6 +323,16 @@ process_remote_begin(StringInfo s)
 		CommitTransactionCommand();
 	}
 
+	if (bdr_trace_replay)
+	{
+		StringInfoData si;
+		initStringInfo(&si);
+		format_action_description(&si, "BEGIN", NULL, NULL, false);
+		cbarg.suppress_output = true;
+		elog(LOG, "TRACE: %s", si.data);
+		cbarg.suppress_output = false;
+	}
+
 	/* don't want the overhead otherwise */
 	if (apply_delay > 0)
 	{
@@ -253,6 +353,9 @@ process_remote_begin(StringInfo s)
 			pg_usleep(usec + (sec * USECS_PER_SEC));
 		}
 	}
+
+	if (error_context_stack == &errcallback)
+		error_context_stack = errcallback.previous;
 }
 
 /*
@@ -270,8 +373,18 @@ process_remote_commit(StringInfo s)
 	TimestampTz		committime;
 	TimestampTz		end_lsn;
 	int				flags;
+	ErrorContextCallback errcallback;
+	struct ActionErrCallbackArg cbarg;
 
 	Assert(bdr_apply_worker != NULL);
+
+	xact_action_counter++;
+	memset(&cbarg, 0, sizeof(struct ActionErrCallbackArg));
+	cbarg.action_name = "COMMIT";
+	errcallback.callback = action_error_callback;
+	errcallback.arg = &cbarg;
+	errcallback.previous = error_context_stack;
+	error_context_stack = &errcallback;
 
 	flags = pq_getmsgint(s, 4);
 
@@ -283,10 +396,15 @@ process_remote_commit(StringInfo s)
 	end_lsn = pq_getmsgint64(s);
 	committime = pq_getmsgint64(s);
 
-	elog(DEBUG1, "COMMIT origin(lsn, end, timestamp): %X/%X, %X/%X, %s",
-		 (uint32) (commit_lsn >> 32), (uint32) commit_lsn,
-		 (uint32) (end_lsn >> 32), (uint32) end_lsn,
-		 timestamptz_to_str(committime));
+	if (bdr_trace_replay)
+	{
+		StringInfoData si;
+		initStringInfo(&si);
+		format_action_description(&si, "COMMIT", NULL, NULL, false);
+		cbarg.suppress_output = true;
+		elog(LOG, "TRACE: %s", si.data);
+		cbarg.suppress_output = false;
+	}
 
 	Assert(commit_lsn == replication_origin_lsn);
 	Assert(committime == replication_origin_timestamp);
@@ -332,6 +450,8 @@ process_remote_commit(StringInfo s)
 	replication_origin_lsn = InvalidXLogRecPtr;
 	replication_origin_timestamp = 0;
 
+	xact_action_counter = 0;
+
 	/*
 	 * Stop replay if we're doing limited replay and we've replayed up to the
 	 * last record we're supposed to process.
@@ -356,6 +476,9 @@ process_remote_commit(StringInfo s)
 		/* Stop gracefully */
 		proc_exit(0);
 	}
+
+	if (error_context_stack == &errcallback)
+		error_context_stack = errcallback.previous;
 }
 
 static void
@@ -374,14 +497,35 @@ process_remote_insert(StringInfo s)
 	ScanKey	   *index_keys;
 	int			i;
 	ItemPointerData conflicting_tid;
+	ErrorContextCallback errcallback;
+	struct ActionErrCallbackArg cbarg;
 
 	ItemPointerSetInvalid(&conflicting_tid);
+
+	xact_action_counter++;
+	memset(&cbarg, 0, sizeof(struct ActionErrCallbackArg));
+	cbarg.action_name = "INSERT";
+	errcallback.callback = action_error_callback;
+	errcallback.arg = &cbarg;
+	errcallback.previous = error_context_stack;
+	error_context_stack = &errcallback;
 
 	started_tx = bdr_performing_work();
 
 	Assert(bdr_apply_worker != NULL);
 
-	rel = read_rel(s, RowExclusiveLock);
+	rel = read_rel(s, RowExclusiveLock, &cbarg);
+
+	if (bdr_trace_replay)
+	{
+		StringInfoData si;
+		initStringInfo(&si);
+		format_action_description(&si, "INSERT",
+				cbarg.remote_nspname, cbarg.remote_relname, false);
+		cbarg.suppress_output = true;
+		elog(LOG, "TRACE: %s", si.data);
+		cbarg.suppress_output = false;
+	}
 
 	action = pq_getmsgbyte(s);
 	if (action != 'N')
@@ -576,6 +720,8 @@ process_remote_insert(StringInfo s)
 		/* there never should be conflicts on these */
 		Assert(!conflict);
 
+		cbarg.is_ddl_or_drop = true;
+
 		/*
 		 * Release transaction bound resources for CONCURRENTLY support.
 		 */
@@ -589,9 +735,15 @@ process_remote_insert(StringInfo s)
 		FreeExecutorState(estate);
 
 		if (relid == QueuedDDLCommandsRelid)
+		{
+			cbarg.action_name = "QUEUED_DDL";
 			process_queued_ddl_command(ht, started_tx);
+		}
 		if (relid == QueuedDropsRelid)
+		{
+			cbarg.action_name = "QUEUED_DROP";
 			process_queued_drop(ht);
+		}
 
 		qrel = heap_open(QueuedDDLCommandsRelid, RowExclusiveLock);
 
@@ -613,6 +765,9 @@ process_remote_insert(StringInfo s)
 	}
 
 	CommandCounterIncrement();
+
+	if (error_context_stack == &errcallback)
+		error_context_stack = errcallback.previous;
 }
 
 static void
@@ -632,10 +787,31 @@ process_remote_update(StringInfo s)
 	ScanKeyData skey[INDEX_MAX_KEYS];
 	HeapTuple	user_tuple = NULL,
 				remote_tuple = NULL;
+	ErrorContextCallback errcallback;
+	struct ActionErrCallbackArg cbarg;
+
+	xact_action_counter++;
+	memset(&cbarg, 0, sizeof(struct ActionErrCallbackArg));
+	cbarg.action_name = "UPDATE";
+	errcallback.callback = action_error_callback;
+	errcallback.arg = &cbarg;
+	errcallback.previous = error_context_stack;
+	error_context_stack = &errcallback;
 
 	bdr_performing_work();
 
-	rel = read_rel(s, RowExclusiveLock);
+	rel = read_rel(s, RowExclusiveLock, &cbarg);
+
+	if (bdr_trace_replay)
+	{
+		StringInfoData si;
+		initStringInfo(&si);
+		format_action_description(&si, "UPDATE",
+				cbarg.remote_nspname, cbarg.remote_relname, false);
+		cbarg.suppress_output = true;
+		elog(LOG, "TRACE: %s", si.data);
+		cbarg.suppress_output = false;
+	}
 
 	action = pq_getmsgbyte(s);
 
@@ -849,6 +1025,9 @@ process_remote_update(StringInfo s)
 	FreeExecutorState(estate);
 
 	CommandCounterIncrement();
+
+	if (error_context_stack == &errcallback)
+		error_context_stack = errcallback.previous;
 }
 
 static void
@@ -863,12 +1042,33 @@ process_remote_delete(StringInfo s)
 	Relation	idxrel;
 	ScanKeyData skey[INDEX_MAX_KEYS];
 	bool		found_old;
+	ErrorContextCallback errcallback;
+	struct ActionErrCallbackArg cbarg;
 
 	Assert(bdr_apply_worker != NULL);
 
+	xact_action_counter++;
+	memset(&cbarg, 0, sizeof(struct ActionErrCallbackArg));
+	cbarg.action_name = "DELETE";
+	errcallback.callback = action_error_callback;
+	errcallback.arg = &cbarg;
+	errcallback.previous = error_context_stack;
+	error_context_stack = &errcallback;
+
 	bdr_performing_work();
 
-	rel = read_rel(s, RowExclusiveLock);
+	rel = read_rel(s, RowExclusiveLock, &cbarg);
+
+	if (bdr_trace_replay)
+	{
+		StringInfoData si;
+		initStringInfo(&si);
+		format_action_description(&si, "DELETE",
+				cbarg.remote_nspname, cbarg.remote_relname, false);
+		cbarg.suppress_output = true;
+		elog(LOG, "TRACE: %s", si.data);
+		cbarg.suppress_output = false;
+	}
 
 	action = pq_getmsgbyte(s);
 
@@ -994,6 +1194,9 @@ process_remote_delete(StringInfo s)
 	FreeExecutorState(estate);
 
 	CommandCounterIncrement();
+
+	if (error_context_stack == &errcallback)
+		error_context_stack = errcallback.previous;
 }
 
 /*
@@ -1491,6 +1694,11 @@ process_queued_ddl_command(HeapTuple cmdtup, bool tx_just_started)
 
 	MemoryContextSwitchTo(oldcontext);
 
+	if (bdr_trace_replay)
+	{
+		elog(LOG, "TRACE: QUEUED_DDL: %s", cmdstr);
+	}
+
 	bdr_execute_ddl_command(cmdstr, perpetrator, tx_just_started);
 }
 
@@ -1508,22 +1716,29 @@ struct ObjectAddresses
 };
 
 static void
-queued_drop_error_callback(void *arg)
+format_drop_objectlist(StringInfo si, ObjectAddresses *addrs)
 {
-	ObjectAddresses *addrs = (ObjectAddresses *) arg;
-	StringInfo s;
 	int i;
-
-	s = makeStringInfo();
 
 	for (i = addrs->numrefs - 1; i >= 0; i--)
 	{
 		ObjectAddress *obj = addrs->refs + i;
 
-		appendStringInfo(s, "\n  * %s", getObjectDescription(obj));
+		appendStringInfo(si, "\n  * %s", getObjectDescription(obj));
 	}
-	errcontext("during DDL replay object drop:%s", s->data);
-	resetStringInfo(s);
+}
+
+static void
+queued_drop_error_callback(void *arg)
+{
+	ObjectAddresses *addrs = (ObjectAddresses *) arg;
+	StringInfoData si;
+	initStringInfo(&si);
+
+	format_drop_objectlist(&si, addrs);
+
+	errcontext("during DDL replay object drop:%s", si.data);
+	resetStringInfo(&si);
 }
 
 static TypeName *
@@ -1748,6 +1963,14 @@ process_queued_drop(HeapTuple cmdtup)
 		add_exact_object_address(&addr, addresses);
 	}
 
+	if (bdr_trace_replay)
+	{
+		StringInfoData si;
+		initStringInfo(&si);
+		format_drop_objectlist(&si, addresses);
+		elog(LOG, "TRACE: QUEUED_DROP: %s", si.data);
+	}
+
 	errcallback.callback = queued_drop_error_callback;
 	errcallback.arg = addresses;
 	errcallback.previous = error_context_stack;
@@ -1907,7 +2130,7 @@ read_tuple_parts(StringInfo s, BDRRelation *rel, BDRTupleData *tup)
 }
 
 static BDRRelation *
-read_rel(StringInfo s, LOCKMODE mode)
+read_rel(StringInfo s, LOCKMODE mode, struct ActionErrCallbackArg *cbarg)
 {
 	int			relnamelen;
 	int			nspnamelen;
@@ -1918,9 +2141,11 @@ read_rel(StringInfo s, LOCKMODE mode)
 
 	nspnamelen = pq_getmsgint(s, 2);
 	rv->schemaname = (char *) pq_getmsgbytes(s, nspnamelen);
+	cbarg->remote_nspname = rv->schemaname;
 
 	relnamelen = pq_getmsgint(s, 2);
 	rv->relname = (char *) pq_getmsgbytes(s, relnamelen);
+	cbarg->remote_relname = rv->relname;
 
 	relid = RangeVarGetRelidExtended(rv, mode, false, false, NULL, NULL);
 

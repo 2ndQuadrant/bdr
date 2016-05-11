@@ -88,6 +88,7 @@ int bdr_max_databases;
 static bool bdr_skip_ddl_replication;
 bool bdr_skip_ddl_locking;
 bool bdr_do_not_replicate;
+bool bdr_trace_replay;
 
 PG_MODULE_MAGIC;
 
@@ -787,6 +788,14 @@ _PG_init(void)
 							 bdr_do_not_replicate_check_hook,
 							 bdr_do_not_replicate_assign_hook,
 							 NULL);
+
+	DefineCustomBoolVariable("bdr.trace_replay",
+							 "Log each remote action as it is received",
+							 NULL,
+							 &bdr_trace_replay,
+							 false, PGC_SIGHUP,
+							 0,
+							 NULL, NULL, NULL);
 
 	EmitWarningsOnPlaceholders("bdr");
 

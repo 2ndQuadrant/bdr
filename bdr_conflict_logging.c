@@ -536,7 +536,7 @@ bdr_conflict_log_serverlog(BdrApplyConflict *conflict)
 	StringInfoData	s_key;
 	char		   *resolution_name;
 
-#define CONFLICT_MSG_PREFIX "CONFLICT: remote %s on relation %s.%s originating at node " UINT64_FORMAT ":%u:%u at ts %s;"
+#define CONFLICT_MSG_PREFIX "CONFLICT: remote %s:"
 
 	/* Create text representation of the PKEY tuple */
 	initStringInfo(&s_key);
@@ -549,14 +549,12 @@ bdr_conflict_log_serverlog(BdrApplyConflict *conflict)
 	{
 		case BdrConflictType_InsertInsert:
 		case BdrConflictType_UpdateUpdate:
+		case BdrConflictType_InsertUpdate:
 			ereport(LOG,
 					(errcode(ERRCODE_INTEGRITY_CONSTRAINT_VIOLATION),
-					 errmsg(CONFLICT_MSG_PREFIX " row was previously updated at node " UINT64_FORMAT ":%u. Resolution: %s; PKEY:%s",
-							BdrConflictType_InsertInsert ? "INSERT" : "UPDATE",
-							conflict->object_schema, conflict->object_name,
-							conflict->remote_sysid, conflict->remote_tli,
-							conflict->remote_dboid,
-							timestamptz_to_str(conflict->remote_commit_time),
+					 errmsg(CONFLICT_MSG_PREFIX " row was previously %s at node " UINT64_FORMAT ":%u. Resolution: %s; PKEY:%s",
+							conflict->conflict_type == BdrConflictType_UpdateUpdate ? "UPDATE" : "INSERT",
+							conflict->conflict_type == BdrConflictType_InsertInsert ? "INSERTed" : "UPDATEd",
 							conflict->local_tuple_origin_sysid,
 							conflict->local_tuple_origin_tli,
 							resolution_name,
@@ -567,17 +565,10 @@ bdr_conflict_log_serverlog(BdrApplyConflict *conflict)
 			ereport(LOG,
 					(errcode(ERRCODE_INTEGRITY_CONSTRAINT_VIOLATION),
 					 errmsg(CONFLICT_MSG_PREFIX " could not find existing row. Resolution: %s; PKEY:%s",
-							BdrConflictType_UpdateDelete ? "UPDATE" : "DELETE",
-							conflict->object_schema, conflict->object_name,
-							conflict->remote_sysid, conflict->remote_tli,
-							conflict->remote_dboid,
-							timestamptz_to_str(conflict->remote_commit_time),
+							conflict->conflict_type == BdrConflictType_UpdateDelete ? "UPDATE" : "DELETE",
 							resolution_name,
 							s_key.data)));
 
-			break;
-		case BdrConflictType_InsertUpdate:
-			/* XXX? */
 			break;
 		case BdrConflictType_UnhandledTxAbort:
 			/* XXX? */

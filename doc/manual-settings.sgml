@@ -405,6 +405,36 @@
       </listitem>
      </varlistentry>
 
+     <varlistentry id="guc-bdr-trace-replay" xreflabel="bdr.trace_replay">
+      <term><varname>bdr.trace_replay</varname> (<type>boolean</type>)
+       <indexterm>
+        <primary><varname>bdr.trace_replay</varname> configuration parameter</primary>
+       </indexterm>
+      </term>
+      <listitem>
+       <para>
+        When <literal>on</literal>, emits a log message for each remote action
+        processed by a BDR downstream apply worker. The message records the
+        change type, the table affected, the number of changes since xact
+        start, the xact's commit lsn, commit time, the upstream node and which
+        node it was forwarded from if any. Queued DDL commands and table drops
+        are also printed. The additional logging has a performance impact and
+        should not be enabled when not required.
+       </para>
+       <para>
+        Changes take effect on server configuration reload, a restart is not
+        required.
+       </para>
+       <note>
+        <para>
+         Row field contents are not shown. Recompile BDR with
+         <literal>VERBOSE_INSERT</literal>, <literal>VERBOSE_UPDATE</literal>
+         and <literal>VERBOSE_DELETE</literal> defined if you want row values.
+        </para>
+       </note>
+      </listitem>
+     </varlistentry>
+
     </variablelist>
    </para>
   </sect2>
