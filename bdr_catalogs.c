@@ -333,8 +333,9 @@ bdr_nodes_set_local_status(char status)
 }
 
 /*
- * Given a node's local RepNodeId, get its globally unique identifier
- * (sysid, timeline id, database oid)
+ * Given a node's local RepNodeId, get its globally unique identifier (sysid,
+ * timeline id, database oid). Ignore identifiers local to databases other than
+ * the active DB.
  */
 void
 bdr_fetch_sysid_via_node_id(RepNodeId node_id, uint64 *sysid, TimeLineID *tli,
@@ -364,6 +365,14 @@ bdr_fetch_sysid_via_node_id(RepNodeId node_id, uint64 *sysid, TimeLineID *tli,
 				   NameStr(replication_name)) != 4)
 			elog(ERROR, "could not parse sysid: %s", riname);
 		pfree(riname);
+
+		if (local_dboid != MyDatabaseId)
+		{
+			ereport(ERROR,
+					(errmsg("lookup failed for replication identifier %u"),
+					 errmsg("Replication identifier %u exists but is owned by another BDR node in the same PostgreSQL instance, with dboid %u. Current node oid is %u.",
+					 		node_id, local_dboid, MyDatabaseId)));
+		}
 
 		*sysid = remote_sysid;
 		*tli = remote_tli;

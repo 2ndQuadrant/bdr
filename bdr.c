@@ -57,6 +57,7 @@
 #include "utils/guc.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
+#include "utils/pg_lsn.h"
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
 #include "utils/timestamp.h"
@@ -111,6 +112,7 @@ PGDLLEXPORT Datum bdr_terminate_walsender_workers_byname(PG_FUNCTION_ARGS);
 PGDLLEXPORT Datum bdr_terminate_apply_workers_byname(PG_FUNCTION_ARGS);
 PGDLLEXPORT Datum bdr_terminate_walsender_workers(PG_FUNCTION_ARGS);
 PGDLLEXPORT Datum bdr_terminate_apply_workers(PG_FUNCTION_ARGS);
+PGDLLEXPORT Datum bdr_skip_changes_upto(PG_FUNCTION_ARGS);
 
 PG_FUNCTION_INFO_V1(bdr_apply_pause);
 PG_FUNCTION_INFO_V1(bdr_apply_resume);
@@ -126,6 +128,10 @@ PG_FUNCTION_INFO_V1(bdr_terminate_walsender_workers_byname);
 PG_FUNCTION_INFO_V1(bdr_terminate_apply_workers_byname);
 PG_FUNCTION_INFO_V1(bdr_terminate_walsender_workers);
 PG_FUNCTION_INFO_V1(bdr_terminate_apply_workers);
+PG_FUNCTION_INFO_V1(bdr_skip_changes_upto);
+
+static bool bdr_terminate_workers_byid(uint64 sysid, TimeLineID timeline,
+	Oid dboid, BdrWorkerType worker_type);
 
 static const struct config_enum_entry bdr_trace_ddl_locks_level_options[] = {
 	{"debug", DDL_LOCK_TRACE_DEBUG, false},
@@ -1158,6 +1164,70 @@ bdr_parse_version(const char * bdr_version_str,
 	return major * 10000 + minor * 100 + rev;
 }
 
+Datum
+bdr_skip_changes_upto(PG_FUNCTION_ARGS)
+{
+	const char	*remote_sysid_str = text_to_cstring(PG_GETARG_TEXT_P(0));
+	Oid			remote_tli = PG_GETARG_OID(1);
+	Oid			remote_dboid = PG_GETARG_OID(2);
+	XLogRecPtr	upto_lsn = PG_GETARG_LSN(3);
+	uint64		remote_sysid;
+	RepNodeId   nodeid;
+
+	if (!bdr_permit_unsafe_commands)
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("skipping changes is unsafe and will cause replicas to be out of sync"),
+				 errhint("Set bdr.permit_unsafe_ddl_commands if you are sure you want to do this")));
+
+	if (upto_lsn == InvalidXLogRecPtr)
+		ereport(ERROR,
+				(errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+				 errmsg("Target LSN must be nonzero")));
+
+	if (sscanf(remote_sysid_str, UINT64_FORMAT, &remote_sysid) != 1)
+		elog(ERROR, "Parsing of remote sysid as uint64 failed");
+
+	if (remote_sysid == GetSystemIdentifier()
+		&& remote_tli == ThisTimeLineID
+		&& remote_dboid == MyDatabaseId)
+		elog(ERROR, "the passed ID is for the local node, can't skip changes from self");
+
+	/* Only ever matches a replnode id owned by the local BDR node */
+	nodeid = bdr_fetch_node_id_via_sysid(remote_sysid,
+			(TimeLineID)remote_tli, remote_dboid);
+
+	if (nodeid == InvalidRepNodeId)
+		ereport(ERROR,
+				(errcode(ERRCODE_UNDEFINED_OBJECT),
+				 errmsg("no replication identifier found for node")));
+
+	Assert(nodeid != DoNotReplicateRepNodeId);
+
+	AdvanceReplicationIdentifier(nodeid, upto_lsn, XactLastCommitEnd);
+
+	/*
+	 * The peer won't notice the replication identifier advance, we need to
+	 * tell it to re-check its configuration. While we do support re-reading
+	 * configuration via bdr.bdr_connections_changed() that only cares about
+	 * changes to bdr_connections, and this is a replication identifier update.
+	 * Since we also want the change to take effect promptly, just kill the
+	 * relevant apply worker.
+	 */
+	if (!bdr_terminate_workers_byid(remote_sysid, remote_tli, remote_dboid, BDR_WORKER_APPLY))
+	{
+		ereport(WARNING,
+				(errmsg("advanced replay position but couldn't signal apply worker"),
+				 errhint("check if the apply worker for the target node is running and terminate it manually")));
+	}
+
+	PG_RETURN_VOID();
+}
+
+/*
+ * Terminate the worker with the identified role and remote peer that
+ * is operating on the current database.
+ */
 static bool
 bdr_terminate_workers_byid(uint64 sysid, TimeLineID timeline, Oid dboid, BdrWorkerType worker_type)
 {

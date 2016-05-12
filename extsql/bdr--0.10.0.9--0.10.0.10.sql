@@ -26,6 +26,11 @@ IS 'terminate walsender connected to the node with the given identity';
 COMMENT ON FUNCTION terminate_apply_workers(sysid text, timeline oid, dboid oid)
 IS 'terminate apply workers connected to the node with the given identity';
 
+CREATE OR REPLACE FUNCTION bdr.skip_changes_upto(from_sysid text,
+    from_timeline oid, from_dboid oid, upto_lsn pg_lsn)
+RETURNS void
+LANGUAGE c AS 'MODULE_PATHNAME','bdr_skip_changes_upto';
+
 RESET bdr.permit_unsafe_ddl_commands;
 RESET bdr.skip_ddl_replication;
 RESET search_path;
