@@ -79,6 +79,7 @@ Oid   BdrLocksRelid;
 Oid   BdrLocksByOwnerRelid;
 Oid   BdrReplicationSetConfigRelid;
 Oid   BdrSeqamOid;
+Oid   BdrSupervisorDbOid = InvalidOid;
 
 /* GUC storage */
 static bool bdr_synchronous_commit;
@@ -888,6 +889,7 @@ bdr_maintain_schema(bool update_extensions)
 	BdrLocksByOwnerRelid =
 		bdr_lookup_relid("bdr_global_locks_byowner", schema_oid);
 	BdrSeqamOid = get_seqam_oid("bdr", false);
+	BdrSupervisorDbOid = bdr_get_supervisordb_oid(false);
 #endif
 
 	bdr_conflict_handlers_init();

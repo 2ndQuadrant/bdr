@@ -13,5 +13,32 @@ HINT:  Use a different database name
 ALTER DATABASE regression RENAME TO bdr_supervisordb;
 ERROR:  The BDR extension reserves the database name bdr_supervisordb for its own use
 HINT:  Use a different database name
--- Connections to the supervisordb are also prevented, but
--- cannot be tested here because of #63 at this point.
+-- We can connect to the supervisor db...
+\c bdr_supervisordb
+SET log_statement = 'all';
+ERROR:  No commands may be run on the BDR supervisor database
+-- We actually did connect
+SELECT current_database();
+ current_database 
+------------------
+ bdr_supervisordb
+(1 row)
+
+-- And do read-only work
+SELECT 1;
+ ?column? 
+----------
+        1
+(1 row)
+
+-- but not do anything interesting
+CREATE TABLE create_fails(id integer);
+ERROR:  No commands may be run on the BDR supervisor database
+\d
+      List of relations
+ Schema | Name | Type | Owner 
+--------+------+------+-------
+(0 rows)
+
+-- except vacuum
+VACUUM;

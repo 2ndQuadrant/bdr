@@ -319,6 +319,7 @@ extern Oid	BdrSequenceValuesRelid;
 extern Oid	BdrSequenceElectionsRelid;
 extern Oid	BdrVotesRelid;
 extern Oid	BdrSeqamOid;
+extern Oid  BdrSupervisorDbOid;
 #endif
 
 /* Structure representing bdr_nodes record */
@@ -485,6 +486,8 @@ PGDLLEXPORT extern void bdr_supervisor_worker_main(Datum main_arg);
 
 extern void bdr_bgworker_init(uint32 worker_arg, BdrWorkerType worker_type);
 extern void bdr_supervisor_register(void);
+
+extern Oid bdr_get_supervisordb_oid(bool missing_ok);
 
 extern void bdr_sighup(SIGNAL_ARGS);
 extern void bdr_sigterm(SIGNAL_ARGS);

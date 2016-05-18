@@ -192,6 +192,8 @@ bdr_supervisor_rescan_dbs()
 		 *
 		 * FIXME: Currently if a database is renamed, you'll have to restart
 		 * PostgreSQL before BDR notices.
+		 *
+		 * The oid-based bgworker API in 9.5 would allow this to be fixed.
 		 */
 		label_dbname = get_database_name(sec->objoid);
 
@@ -293,6 +295,23 @@ bdr_supervisor_createdb()
 	CommitTransactionCommand();
 
 	Assert(dboid != InvalidOid);
+}
+
+Oid
+bdr_get_supervisordb_oid(bool missingok)
+{
+	Oid			dboid;
+
+	dboid = get_database_oid(BDR_SUPERVISOR_DBNAME, true);
+
+	if (dboid == InvalidOid && !missingok)
+	{
+		/* We'll get relaunched soon, so just die rather than having a wait-and-test loop here */
+		elog(DEBUG1, "exiting because BDR supervisor database "BDR_SUPERVISOR_DBNAME" does not yet exist");
+		proc_exit(1);
+	}
+
+	return dboid;
 }
 
 
