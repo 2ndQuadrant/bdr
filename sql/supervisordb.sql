@@ -11,5 +11,21 @@ ALTER DATABASE bdr_supervisordb RENAME TO someothername;
 
 ALTER DATABASE regression RENAME TO bdr_supervisordb;
 
--- Connections to the supervisordb are also prevented, but
--- cannot be tested here because of #63 at this point.
+-- We can connect to the supervisor db...
+\c bdr_supervisordb
+
+SET log_statement = 'all';
+
+-- We actually did connect
+SELECT current_database();
+
+-- And do read-only work
+SELECT 1;
+
+-- but not do anything interesting
+CREATE TABLE create_fails(id integer);
+
+\d
+
+-- except vacuum
+VACUUM;

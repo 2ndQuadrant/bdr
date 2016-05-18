@@ -705,7 +705,7 @@ bdr_commandfilter_dbname(const char *dbname)
 {
 	if (strcmp(dbname, BDR_SUPERVISOR_DBNAME) == 0)
 	{
-		ereport(WARNING,
+		ereport(ERROR,
 				(errcode(ERRCODE_RESERVED_NAME),
 				 errmsg("The BDR extension reserves the database name "
 						BDR_SUPERVISOR_DBNAME" for its own use"),
@@ -727,6 +727,19 @@ bdr_commandfilter(Node *parsetree,
 	/* don't filter in single user mode */
 	if (!IsUnderPostmaster)
 		goto done;
+
+	/* Only permit VACUUM on the supervisordb, if it exists */
+	if (BdrSupervisorDbOid == InvalidOid)
+		BdrSupervisorDbOid = bdr_get_supervisordb_oid(true);
+		
+	if (BdrSupervisorDbOid != InvalidOid
+		&& MyDatabaseId == BdrSupervisorDbOid
+		&& nodeTag(parsetree) != T_VacuumStmt)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("No commands may be run on the BDR supervisor database")));
+	}
 
 	/* extension contents aren't individually replicated */
 	if (creating_extension)
@@ -1119,8 +1132,11 @@ bdr_ClientAuthentication_hook(Port *port, int status)
 		 * This check won't catch execution attempts by bgworkers, but as currently
 		 * database_name isn't set for those. They'd better just know better.  It's
 		 * relatively harmless to run things in the supervisor database anyway.
+		 *
+		 * Make it a warning because of #154. Tools like vacuumdb -a like to
+		 * connect to all DBs.
 		 */
-		ereport(ERROR,
+		ereport(WARNING,
 				(errcode(ERRCODE_RESERVED_NAME),
 				 errmsg("The BDR extension reserves the database "
 						BDR_SUPERVISOR_DBNAME" for its own use"),
