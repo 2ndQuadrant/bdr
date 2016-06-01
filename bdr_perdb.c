@@ -719,6 +719,7 @@ bdr_perdb_worker_main(Datum main_arg)
 
 	appendStringInfo(&si, BDR_LOCALID_FORMAT": %s", BDR_LOCALID_FORMAT_ARGS, "perdb");
 	SetConfigOption("application_name", si.data, PGC_USERSET, PGC_S_SESSION);
+	SetConfigOption("lock_timeout", "10000", PGC_USERSET, PGC_S_SESSION);
 
 	CurrentResourceOwner = ResourceOwnerCreate(NULL, "bdr seq top-level resource owner");
 	bdr_saved_resowner = CurrentResourceOwner;
