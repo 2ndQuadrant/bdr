@@ -253,6 +253,8 @@ pg_get_replication_slots(PG_FUNCTION_ARGS)
 		else
 			values[i++] = database;
 
+		values[i++] = BoolGetDatum(active_pid != 0);
+
 		if (xmin != InvalidTransactionId)
 			values[i++] = TransactionIdGetDatum(xmin);
 		else
@@ -267,8 +269,6 @@ pg_get_replication_slots(PG_FUNCTION_ARGS)
 			values[i++] = LSNGetDatum(restart_lsn);
 		else
 			nulls[i++] = true;
-
-		values[i++] = BoolGetDatum(active_pid != 0);
 
 		if (active_pid != 0)
 			values[i++] = Int32GetDatum(active_pid);
