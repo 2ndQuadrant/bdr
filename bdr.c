@@ -91,6 +91,7 @@ bool bdr_skip_ddl_locking;
 bool bdr_do_not_replicate;
 bool bdr_trace_replay;
 int bdr_trace_ddl_locks_level;
+char *bdr_extra_apply_connection_options;
 
 PG_MODULE_MAGIC;
 
@@ -279,9 +280,15 @@ bdr_connect(const char *conninfo,
 
 	initStringInfo(&conninfo_repl);
 
-	appendStringInfo(&conninfo_repl, "%s %s fallback_application_name='%s'",
-			conninfo, "replication=database",
+	appendStringInfo(&conninfo_repl, "replication=database "
+									 "fallback_application_name='%s' ",
 			(appname == NULL ? "bdr" : NameStr(*appname)));
+
+	appendStringInfoString(&conninfo_repl, bdr_default_apply_connection_options);
+	appendStringInfoChar(&conninfo_repl, ' ');
+	appendStringInfoString(&conninfo_repl, bdr_extra_apply_connection_options);
+	appendStringInfoChar(&conninfo_repl, ' ');
+	appendStringInfoString(&conninfo_repl, conninfo);
 
 	streamConn = PQconnectdb(conninfo_repl.data);
 	if (PQstatus(streamConn) != CONNECTION_OK)
@@ -817,6 +824,15 @@ _PG_init(void)
 							 PGC_SIGHUP,
 							 0,
 							 NULL, NULL, NULL);
+
+	DefineCustomStringVariable("bdr.extra_apply_connection_options",
+							   "connection options to add to all peer node connections",
+							   NULL,
+							   &bdr_extra_apply_connection_options,
+							   "",
+							   PGC_SIGHUP,
+							   0,
+							   NULL, NULL, NULL);
 
 	EmitWarningsOnPlaceholders("bdr");
 

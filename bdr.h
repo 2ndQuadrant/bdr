@@ -297,6 +297,14 @@ extern int bdr_max_ddl_lock_delay;
 extern int bdr_ddl_lock_timeout;
 extern bool bdr_trace_replay;
 extern int bdr_trace_ddl_locks_level;
+extern char *bdr_extra_apply_connection_options;
+
+static const char * const bdr_default_apply_connection_options =
+        "connect_timeout=30 "
+        "keepalives=1 "
+        "keepalives_idle=20 "
+        "keepalives_interval=20 "
+        "keepalives_count=5 ";
 
 /*
  * Header for the shared memory segment ref'd by the BdrWorkerCtl ptr,

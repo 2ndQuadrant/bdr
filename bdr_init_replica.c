@@ -249,9 +249,14 @@ bdr_init_exec_dump_restore(BDRNodeInfo *node,
 	}
 
 
+	appendStringInfoString(&origin_dsn, bdr_default_apply_connection_options);
+	appendStringInfoChar(&origin_dsn, ' ');
+	appendStringInfoString(&origin_dsn, bdr_extra_apply_connection_options);
+	appendStringInfoChar(&origin_dsn, ' ');
+	appendStringInfoString(&origin_dsn, node->init_from_dsn);
 	appendStringInfo(&origin_dsn,
-					 "%s fallback_application_name='"BDR_LOCALID_FORMAT": init_replica dump'",
-					 node->init_from_dsn, BDR_LOCALID_FORMAT_ARGS);
+					 " fallback_application_name='"BDR_LOCALID_FORMAT": init_replica dump'",
+					 BDR_LOCALID_FORMAT_ARGS);
 
 	appendStringInfo(&local_dsn,
 					 "%s fallback_application_name='"BDR_LOCALID_FORMAT": init_replica restore'",

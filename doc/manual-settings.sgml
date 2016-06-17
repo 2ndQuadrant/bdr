@@ -470,6 +470,45 @@
       </listitem>
      </varlistentry>
 
+     <varlistentry id="guc-bdr-extra-apply-connection-options" xreflabel="bdr.extra_apply_connection_options">
+      <term><varname>bdr.extra_apply_connection_options</varname> (<type>boolean</type>)
+       <indexterm>
+        <primary><varname>bdr.extra_apply_connection_options</varname> configuration parameter</primary>
+       </indexterm>
+      </term>
+      <listitem>
+       <para>
+        Add connection parameters to all connections made by BDR nodes to their peers. This is useful
+        for configuring keepalives, SSL modes, etc. Settings given in an individual node's configured
+        connection string will override these options and BDR's built-in connection options.
+       </para>
+       <note>
+        <para>
+         BDR automatically sets a fallback application name and enables more
+         aggressive keepalives:
+         <programlisting>
+connect_timeout=30
+keepalives=1
+keepalives_idle=20
+keepalives_interval=20
+keepalives_count=5
+         </programlisting>
+         You may override these settings with this option, e.g.:
+<programlisting>
+bdr.extra_apply_connection_options = 'keepalives=0'
+</programlisting>
+         It is not recommended to turn keepalives off unless you are having
+         problems with apply of a large, long running transaction running to
+         completion on an erratic network.
+        </para>
+       </note>
+       <para>
+        Changes take effect on server configuration reload, a restart is not
+        required.
+       </para>
+      </listitem>
+     </varlistentry>
+
     </variablelist>
    </para>
   </sect2>

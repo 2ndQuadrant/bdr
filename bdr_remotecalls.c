@@ -67,9 +67,14 @@ bdr_connect_nonrepl(const char *connstring, const char *appnamesuffix)
 	StringInfoData	dsn;
 
 	initStringInfo(&dsn);
+	appendStringInfoString(&dsn, bdr_default_apply_connection_options);
+	appendStringInfoChar(&dsn, ' ');
+	appendStringInfoString(&dsn, bdr_extra_apply_connection_options);
+	appendStringInfoChar(&dsn, ' ');
+	appendStringInfoString(&dsn, connstring);
 	appendStringInfo(&dsn,
-					"%s fallback_application_name='"BDR_LOCALID_FORMAT":%s'",
-					connstring, BDR_LOCALID_FORMAT_ARGS, appnamesuffix);
+					" fallback_application_name='"BDR_LOCALID_FORMAT":%s'",
+					BDR_LOCALID_FORMAT_ARGS, appnamesuffix);
 
 	/*
 	 * Test to see if there's an entry in the remote's bdr.bdr_nodes for our
