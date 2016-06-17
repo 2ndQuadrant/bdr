@@ -262,7 +262,7 @@ ReplicationSlotCreate(const char *name, bool db_specific,
 	 * be doing that.  So it's safe to initialize the slot.
 	 */
 	Assert(!slot->in_use);
-	Assert(!slot->active);
+	Assert(slot->active_pid == 0);
 	slot->data.persistency = persistency;
 	slot->data.xmin = InvalidTransactionId;
 	slot->effective_xmin = InvalidTransactionId;
@@ -292,8 +292,8 @@ ReplicationSlotCreate(const char *name, bool db_specific,
 		volatile ReplicationSlot *vslot = slot;
 
 		SpinLockAcquire(&slot->mutex);
-		Assert(!vslot->active);
-		vslot->active = true;
+		Assert(vslot->active_pid == 0);
+		vslot->active_pid = MyProcPid;
 		SpinLockRelease(&slot->mutex);
 		MyReplicationSlot = slot;
 	}
@@ -315,7 +315,7 @@ ReplicationSlotAcquire(const char *name)
 {
 	ReplicationSlot *slot = NULL;
 	int			i;
-	bool		active = false;
+	int			active_pid = 0;
 
 	Assert(MyReplicationSlot == NULL);
 
@@ -332,8 +332,9 @@ ReplicationSlotAcquire(const char *name)
 			volatile ReplicationSlot *vslot = s;
 
 			SpinLockAcquire(&s->mutex);
-			active = vslot->active;
-			vslot->active = true;
+			active_pid = vslot->active_pid;
+			if (active_pid == 0)
+				vslot->active_pid = MyProcPid;
 			SpinLockRelease(&s->mutex);
 			slot = s;
 			break;
@@ -346,10 +347,11 @@ ReplicationSlotAcquire(const char *name)
 		ereport(ERROR,
 				(errcode(ERRCODE_UNDEFINED_OBJECT),
 				 errmsg("replication slot \"%s\" does not exist", name)));
-	if (active)
+	if (active_pid != 0)
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_IN_USE),
-				 errmsg("replication slot \"%s\" is already active", name)));
+				 errmsg("replication slot \"%s\" is already active for pid %d",
+						name, active_pid)));
 
 	/* We made this slot active, so it's ours now. */
 	MyReplicationSlot = slot;
@@ -364,7 +366,7 @@ ReplicationSlotRelease(void)
 {
 	ReplicationSlot *slot = MyReplicationSlot;
 
-	Assert(slot != NULL && slot->active);
+	Assert(slot != NULL && slot->active_pid != 0);
 
 	if (slot->data.persistency == RS_EPHEMERAL)
 	{
@@ -381,7 +383,7 @@ ReplicationSlotRelease(void)
 		volatile ReplicationSlot *vslot = slot;
 
 		SpinLockAcquire(&slot->mutex);
-		vslot->active = false;
+		vslot->active_pid = 0;
 		SpinLockRelease(&slot->mutex);
 	}
 
@@ -461,7 +463,7 @@ ReplicationSlotDropAcquired(void)
 		bool		fail_softly = slot->data.persistency == RS_EPHEMERAL;
 
 		SpinLockAcquire(&slot->mutex);
-		vslot->active = false;
+		vslot->active_pid = 0;
 		SpinLockRelease(&slot->mutex);
 
 		ereport(fail_softly ? WARNING : ERROR,
@@ -478,7 +480,7 @@ ReplicationSlotDropAcquired(void)
 	 * scanning the array.
 	 */
 	LWLockAcquire(ReplicationSlotControlLock, LW_EXCLUSIVE);
-	slot->active = false;
+	slot->active_pid = 0;
 	slot->in_use = false;
 	LWLockRelease(ReplicationSlotControlLock);
 
@@ -750,7 +752,7 @@ ReplicationSlotsCountDBSlots(Oid dboid, int *nslots, int *nactive)
 		/* count slots with spinlock held */
 		SpinLockAcquire(&s->mutex);
 		(*nslots)++;
-		if (s->active)
+		if (s->active_pid != 0)
 			(*nactive)++;
 		SpinLockRelease(&s->mutex);
 	}
@@ -1228,7 +1230,7 @@ RestoreSlotFromDisk(const char *name)
 		slot->candidate_restart_valid = InvalidXLogRecPtr;
 
 		slot->in_use = true;
-		slot->active = false;
+		slot->active_pid = 0;
 
 		restored = true;
 		break;
