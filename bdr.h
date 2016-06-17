@@ -108,6 +108,20 @@ typedef struct BDRConflictHandler
 	uint64		timeframe;
 }	BDRConflictHandler;
 
+/* How detailed logging of DDL locks is */
+enum BdrDDLLockTraceLevel {
+	/* Everything */
+	DDL_LOCK_TRACE_DEBUG,
+	/* Report acquire/release on peers, not just node doing DDL */
+	DDL_LOCK_TRACE_PEERS,
+	/* When locks are acquired/released */
+	DDL_LOCK_TRACE_ACQUIRE_RELEASE,
+	/* Only statements requesting DDL lock */
+	DDL_LOCK_TRACE_STATEMENT,
+	/* No DDL lock tracing */
+	DDL_LOCK_TRACE_NONE
+};
+
 /*
  * This structure is for caching relation specific information, such as
  * conflict handlers.
@@ -282,6 +296,7 @@ extern bool bdr_do_not_replicate;
 extern int bdr_max_ddl_lock_delay;
 extern int bdr_ddl_lock_timeout;
 extern bool bdr_trace_replay;
+extern int bdr_trace_ddl_locks_level;
 
 /*
  * Header for the shared memory segment ref'd by the BdrWorkerCtl ptr,

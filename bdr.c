@@ -90,6 +90,7 @@ static bool bdr_skip_ddl_replication;
 bool bdr_skip_ddl_locking;
 bool bdr_do_not_replicate;
 bool bdr_trace_replay;
+int bdr_trace_ddl_locks_level;
 
 PG_MODULE_MAGIC;
 
@@ -116,6 +117,15 @@ PG_FUNCTION_INFO_V1(bdr_variant);
 PG_FUNCTION_INFO_V1(bdr_get_local_nodeid);
 PG_FUNCTION_INFO_V1(bdr_parse_slot_name_sql);
 PG_FUNCTION_INFO_V1(bdr_format_slot_name_sql);
+
+static const struct config_enum_entry bdr_trace_ddl_locks_level_options[] = {
+	{"debug", DDL_LOCK_TRACE_DEBUG, false},
+	{"peers", DDL_LOCK_TRACE_PEERS, false},
+	{"acquire_release", DDL_LOCK_TRACE_ACQUIRE_RELEASE, false},
+	{"statement", DDL_LOCK_TRACE_STATEMENT, false},
+	{"none", DDL_LOCK_TRACE_NONE, false},
+	{NULL, 0, false}
+};
 
 void
 bdr_sigterm(SIGNAL_ARGS)
@@ -795,6 +805,16 @@ _PG_init(void)
 							 NULL,
 							 &bdr_trace_replay,
 							 false, PGC_SIGHUP,
+							 0,
+							 NULL, NULL, NULL);
+
+	DefineCustomEnumVariable("bdr.trace_ddl_locks_level",
+							 "Log DDL locking activity at this log level",
+							 NULL,
+							 &bdr_trace_ddl_locks_level,
+							 DDL_LOCK_TRACE_STATEMENT,
+							 bdr_trace_ddl_locks_level_options,
+							 PGC_SIGHUP,
 							 0,
 							 NULL, NULL, NULL);
 
