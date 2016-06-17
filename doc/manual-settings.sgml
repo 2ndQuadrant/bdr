@@ -480,7 +480,9 @@
        <para>
         Add connection parameters to all connections made by BDR nodes to their peers. This is useful
         for configuring keepalives, SSL modes, etc. Settings given in an individual node's configured
-        connection string will override these options and BDR's built-in connection options.
+        connection string will override these options and BDR's built-in connection options. See
+	<ulink url="https://www.postgresql.org/docs/9.4/static/libpq-connect.html#LIBPQ-CONNSTRING">
+	libpq connection strings</ulink>.
        </para>
        <note>
         <para>
