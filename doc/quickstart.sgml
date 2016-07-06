@@ -40,11 +40,11 @@
     system with valuable data on it.</emphasis>
     To install the latest stable release, run:
     <screen>
-    <prompt>$</prompt> curl -s "http://git.postgresql.org/gitweb/?p=2ndquadrant_bdr.git;a=blob_plain;f=scripts/bdr_quickstart.sh;hb=bdr-plugin/REL0_9_STABLE" | bash
+    <prompt>$</prompt> curl -s "https://git.postgresql.org/gitweb/?p=2ndquadrant_bdr.git;a=blob_plain;f=scripts/bdr_quickstart.sh;hb=bdr-plugin/REL0_9_STABLE" | bash
     </screen>
     For the latest development version, instead try
     <screen>
-    <prompt>$</prompt> curl -s "http://git.postgresql.org/gitweb/?p=2ndquadrant_bdr.git;a=blob_plain;f=scripts/bdr_quickstart.sh;hb=bdr-plugin/next" | bash
+    <prompt>$</prompt> curl -s "https://git.postgresql.org/gitweb/?p=2ndquadrant_bdr.git;a=blob_plain;f=scripts/bdr_quickstart.sh;hb=bdr-plugin/next" | bash
     </screen>
     In either case, when the install finishes, the script prints:
     </para>
