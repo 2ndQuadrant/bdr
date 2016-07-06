@@ -81,7 +81,7 @@ clone_or_update() {
         echo "Cloning $GITREF sources from git://git.postgresql.org/git/2ndquadrant_bdr.git"
         echo "This may take some time depending on the speed of your connection."
 
-        if ! git clone -b "$GITREF"  git://git.postgresql.org/git/2ndquadrant_bdr.git $SRCDIR; then
+        if ! git clone -b "$GITREF" --depth=1 git://git.postgresql.org/git/2ndquadrant_bdr.git $SRCDIR; then
             echo "The git clone of the BDR repository failed. Network issues?"
             echo "Try running the script again. If it fails again, look at the git "
             echo "output to see what went wrong."
