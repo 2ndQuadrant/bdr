@@ -307,6 +307,7 @@ filter_AlterTableStmt(Node *parsetree,
 					break;
 
 				case AT_AddIndexConstraint:
+					/* no deparse support */
 					error_on_persistent_rv(astmt->relation,
 										   "ALTER TABLE ... ADD CONSTRAINT USING INDEX",
 							               lockmode,
