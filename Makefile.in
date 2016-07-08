@@ -372,7 +372,7 @@ git-dist: clean
 	echo $(GITHASH) > .distgitrev
 	git name-rev --tags --name-only `cat .distgitrev` > .distgittag
 	git ls-tree -r -t --full-tree HEAD --name-only |\
-	  tar cjf "${distdir}.tar.bz2" --transform="s|^|${distdir}/|" -T - \
+	  tar cjf "${distdir}.tar.bz2" --no-recursion --transform="s|^|${distdir}/|" -T - \
 	    .distgitrev .distgittag
 	echo >&2 "Prepared ${distdir}.tar.bz2 for rev=`cat .distgitrev`, tag=`cat .distgittag`"
 	rm -f .distgitrev .distgittag
