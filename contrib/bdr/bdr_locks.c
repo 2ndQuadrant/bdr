@@ -499,6 +499,12 @@ bdr_acquire_ddl_lock(void)
 	if (this_xact_acquired_lock)
 		return;
 
+	if (bdr_skip_ddl_locking)
+	{
+		elog(WARNING, "skipping DDL locking");
+		return;
+	}
+
 	initStringInfo(&s);
 
 	bdr_locks_find_my_database(false);
