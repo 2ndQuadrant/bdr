@@ -34,3 +34,4 @@ lib*.pc
 /pgsql.sln.cache
 /Debug/
 /Release/
+/contrib/bdr/scripts/bdr_initial_load
