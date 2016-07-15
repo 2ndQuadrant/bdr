@@ -107,6 +107,10 @@ PGDLLEXPORT Datum bdr_variant(PG_FUNCTION_ARGS);
 PGDLLEXPORT Datum bdr_get_local_nodeid(PG_FUNCTION_ARGS);
 PGDLLEXPORT Datum bdr_parse_slot_name_sql(PG_FUNCTION_ARGS);
 PGDLLEXPORT Datum bdr_format_slot_name_sql(PG_FUNCTION_ARGS);
+PGDLLEXPORT Datum bdr_terminate_walsender_workers_byname(PG_FUNCTION_ARGS);
+PGDLLEXPORT Datum bdr_terminate_apply_workers_byname(PG_FUNCTION_ARGS);
+PGDLLEXPORT Datum bdr_terminate_walsender_workers(PG_FUNCTION_ARGS);
+PGDLLEXPORT Datum bdr_terminate_apply_workers(PG_FUNCTION_ARGS);
 
 PG_FUNCTION_INFO_V1(bdr_apply_pause);
 PG_FUNCTION_INFO_V1(bdr_apply_resume);
@@ -118,6 +122,10 @@ PG_FUNCTION_INFO_V1(bdr_variant);
 PG_FUNCTION_INFO_V1(bdr_get_local_nodeid);
 PG_FUNCTION_INFO_V1(bdr_parse_slot_name_sql);
 PG_FUNCTION_INFO_V1(bdr_format_slot_name_sql);
+PG_FUNCTION_INFO_V1(bdr_terminate_walsender_workers_byname);
+PG_FUNCTION_INFO_V1(bdr_terminate_apply_workers_byname);
+PG_FUNCTION_INFO_V1(bdr_terminate_walsender_workers);
+PG_FUNCTION_INFO_V1(bdr_terminate_apply_workers);
 
 static const struct config_enum_entry bdr_trace_ddl_locks_level_options[] = {
 	{"debug", DDL_LOCK_TRACE_DEBUG, false},
@@ -1148,4 +1156,94 @@ bdr_parse_version(const char * bdr_version_str,
 		*o_subrev = subrev;
 
 	return major * 10000 + minor * 100 + rev;
+}
+
+static bool
+bdr_terminate_workers_byid(uint64 sysid, TimeLineID timeline, Oid dboid, BdrWorkerType worker_type)
+{
+	int			pid = 0;
+	BdrWorker * worker;
+
+	/*
+	 * Right now there can only be one worker for any given remote, so we don't really have
+	 * to deal with multiple workers at all.
+	 */
+	LWLockAcquire(BdrWorkerCtl->lock, LW_SHARED);
+	worker = bdr_worker_get_entry(sysid, timeline, dboid, worker_type);
+
+	if (worker != NULL && worker->worker_proc != NULL)
+		pid = worker->worker_proc->pid;
+
+	LWLockRelease(BdrWorkerCtl->lock);
+
+	if (pid == 0)
+		return false;
+
+	/*
+	 * We could call kill() directly but this way we do the permissions checks,
+	 * get pgroup handling, etc. It means we look the pid up in PGPROC again,
+	 * but that's harmless enough. There's an unavoidable race with pid
+	 * recycling no matter what we do and it's no worse whether or not we go
+	 * via pg_terminate_backend.
+	 */
+	return DatumGetBool(DirectFunctionCall1(pg_terminate_backend, Int32GetDatum(pid)));
+}
+
+Datum
+bdr_terminate_apply_workers(PG_FUNCTION_ARGS)
+{
+	const char *sysid_str	= text_to_cstring(PG_GETARG_TEXT_P(0));
+	uint64		sysid;
+	TimeLineID	timeline	= PG_GETARG_OID(1);
+	Oid			dboid		= PG_GETARG_OID(2);
+
+	if (sscanf(sysid_str, UINT64_FORMAT, &sysid) != 1)
+		elog(ERROR, "couldn't parse sysid as uint64");
+
+	PG_RETURN_BOOL(bdr_terminate_workers_byid(sysid, timeline, dboid, BDR_WORKER_APPLY));
+}
+
+Datum
+bdr_terminate_walsender_workers(PG_FUNCTION_ARGS)
+{
+	const char *sysid_str	= text_to_cstring(PG_GETARG_TEXT_P(0));
+	uint64		sysid;
+	TimeLineID	timeline	= PG_GETARG_OID(1);
+	Oid			dboid		= PG_GETARG_OID(2);
+
+	if (sscanf(sysid_str, UINT64_FORMAT, &sysid) != 1)
+		elog(ERROR, "couldn't parse sysid as uint64");
+
+	PG_RETURN_BOOL(bdr_terminate_workers_byid(sysid, timeline, dboid, BDR_WORKER_WALSENDER));
+}
+
+Datum
+bdr_terminate_apply_workers_byname(PG_FUNCTION_ARGS)
+{
+	const char *node_name = text_to_cstring(PG_GETARG_TEXT_P(0));
+	TimeLineID	timeline;
+	Oid			dboid;
+	uint64		sysid;
+
+	if (!bdr_get_node_identity_by_name(node_name, &sysid, &timeline, &dboid))
+		ereport(ERROR,
+				(errmsg("named node not found in bdr.bdr_nodes")));
+
+	PG_RETURN_BOOL(bdr_terminate_workers_byid(sysid, timeline, dboid, BDR_WORKER_APPLY));
+
+}
+
+Datum
+bdr_terminate_walsender_workers_byname(PG_FUNCTION_ARGS)
+{
+	const char *node_name = text_to_cstring(PG_GETARG_TEXT_P(0));
+	TimeLineID	timeline;
+	Oid			dboid;
+	uint64		sysid;
+
+	if (!bdr_get_node_identity_by_name(node_name, &sysid, &timeline, &dboid))
+		ereport(ERROR,
+				(errmsg("named node not found in bdr.bdr_nodes")));
+
+	PG_RETURN_BOOL(bdr_terminate_workers_byid(sysid, timeline, dboid, BDR_WORKER_WALSENDER));
 }

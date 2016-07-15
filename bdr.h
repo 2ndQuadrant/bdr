@@ -501,6 +501,10 @@ extern void bdr_worker_shmem_acquire(BdrWorkerType worker_type,
 extern void bdr_worker_shmem_release(void);
 
 extern bool bdr_is_bdr_activated_db(Oid dboid);
+extern BdrWorker *bdr_worker_get_entry(uint64 sysid,
+									   TimeLineID timeline,
+									   Oid dboid,
+									   BdrWorkerType worker_type);
 
 /* forbid commands we do not support currently (or never will) */
 extern void init_bdr_commandfilter(void);
@@ -550,6 +554,9 @@ extern void bdr_nodes_set_local_status(char status);
 
 extern Oid GetSysCacheOidError(int cacheId, Datum key1, Datum key2, Datum key3,
 							   Datum key4);
+
+extern bool bdr_get_node_identity_by_name(const char *node_name, uint64 *sysid,
+										  TimeLineID *timeline, Oid *dboid);
 
 #define GetSysCacheOidError2(cacheId, key1, key2) \
 	GetSysCacheOidError(cacheId, key1, key2, 0, 0)
