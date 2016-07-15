@@ -10,6 +10,7 @@ CREATE OR REPLACE FUNCTION bdr.queue_truncate()
 
 ALTER EVENT TRIGGER bdr_truncate_trigger_add ENABLE ALWAYS;
 
+
 RESET bdr.permit_unsafe_ddl_commands;
 RESET bdr.skip_ddl_replication;
 RESET search_path;

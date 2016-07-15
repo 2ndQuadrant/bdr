@@ -23,6 +23,7 @@
 
 #include "storage/ipc.h"
 #include "storage/lwlock.h"
+#include "storage/proc.h"
 #include "storage/shmem.h"
 
 /* shortcut for finding the the worker shmem block */
@@ -326,4 +327,60 @@ bdr_worker_shmem_release(void)
 		bdr_worker_shmem_free(bdr_worker_slot, NULL);
 
 	bdr_worker_slot = NULL;
+}
+
+/*
+ * Look up a walsender or apply worker in the current database by its peer
+ * sysid/timeline/dboid tuple and return a pointer to its BdrWorker struct,
+ * or NULL if not found.
+ *
+ * The caller must hold the BdrWorkerCtl lock in at least share mode.
+ */
+BdrWorker*
+bdr_worker_get_entry(uint64 sysid, TimeLineID timeline, Oid dboid, BdrWorkerType worker_type)
+{
+	BdrWorker *worker = NULL;
+	int i;
+
+	Assert(LWLockHeldByMe(BdrWorkerCtl->lock));
+
+	if (!(worker_type == BDR_WORKER_APPLY || worker_type == BDR_WORKER_WALSENDER))
+		ereport(ERROR,
+				(errmsg_internal("attempt to get non-peer-specific worker of type %u by peer identity",
+								 worker_type)));
+
+	for (i = 0; i < bdr_max_workers; i++)
+	{
+		worker = &BdrWorkerCtl->slots[i];
+
+		if (worker->worker_type != worker_type
+		    || worker->worker_proc == NULL
+		    || worker->worker_proc->databaseId != MyDatabaseId)
+		{
+			continue;
+		}
+
+		if (worker->worker_type == BDR_WORKER_APPLY)
+		{
+			const BdrApplyWorker * const w = &worker->data.apply;
+			if (w->remote_sysid == sysid
+				&& w->remote_timeline == timeline
+				&& w->remote_dboid == dboid)
+				break;
+		}
+		else if (worker->worker_type == BDR_WORKER_WALSENDER)
+		{
+			const BdrWalsenderWorker * const w = &worker->data.walsnd;
+			if (w->remote_sysid == sysid
+				&& w->remote_timeline == timeline
+				&& w->remote_dboid == dboid)
+				break;
+		}
+		else
+		{
+			Assert(false); /* unreachable */
+		}
+	}
+
+	return worker;
 }

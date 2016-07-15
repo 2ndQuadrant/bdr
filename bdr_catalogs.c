@@ -200,6 +200,65 @@ bdr_nodes_get_local_info(uint64 sysid, TimeLineID tli, Oid dboid)
 	return node;
 }
 
+/*
+ * Quick lookup in bdr nodes to map a node name to an identity tuple. Returns
+ * true if found, false if not.
+ */
+bool
+bdr_get_node_identity_by_name(const char *node_name, uint64 *sysid, TimeLineID *timeline, Oid *dboid)
+{
+	HeapTuple	tuple = NULL;
+	Relation	rel;
+	RangeVar   *rv;
+	SysScanDesc scan;
+	ScanKeyData	key[1];
+	bool		found = false;
+
+	rv = makeRangeVar("bdr", "bdr_nodes", -1);
+	rel = heap_openrv(rv, RowExclusiveLock);
+
+	ScanKeyInit(&key[0],
+				5, /* node_name attno */
+				BTEqualStrategyNumber, F_TEXTEQ,
+				CStringGetTextDatum(node_name));
+
+	scan = systable_beginscan(rel, 0, true, NULL, 1, key);
+
+	tuple = systable_getnext(scan);
+
+	if (HeapTupleIsValid(tuple))
+	{
+		bool		isnull;
+		TupleDesc	desc = RelationGetDescr(rel);
+		Datum		d;
+
+		const char *sysid_str;
+
+		d = fastgetattr(tuple, 1, desc, &isnull);
+		if (isnull)
+			elog(ERROR, "bdr.bdr_nodes.sysid is NULL; shouldn't happen");
+		sysid_str = TextDatumGetCString(d);
+
+		if (sscanf(sysid_str, UINT64_FORMAT, sysid) != 1)
+			elog(ERROR, "bdr.bdr_nodes.sysid didn't parse to integer; shouldn't happen");
+
+		*timeline = DatumGetObjectId(fastgetattr(tuple, 2, desc, &isnull));
+		if (isnull)
+			elog(ERROR, "bdr.bdr_nodes.timeline is NULL; shouldn't happen");
+			
+		*dboid = DatumGetObjectId(fastgetattr(tuple, 3, desc, &isnull));
+		if (isnull)
+			elog(ERROR, "bdr.bdr_nodes.dboid is NULL; shouldn't happen");
+
+		found = true;
+	}
+
+	systable_endscan(scan);
+	heap_close(rel, RowExclusiveLock);
+
+	return found;
+}
+
 /* Free the BDRNodeInfo pointer including its properties. */
 void
 bdr_bdr_node_free(BDRNodeInfo *node)
