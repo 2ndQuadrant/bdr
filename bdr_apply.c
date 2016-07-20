@@ -243,6 +243,7 @@ process_remote_begin(StringInfo s)
 
 	flags = pq_getmsgint(s, 4);
 
+	/* This is the _commit_ LSN even though we're in BEGIN */
 	origlsn = pq_getmsgint64(s);
 	Assert(origlsn != InvalidXLogRecPtr);
 	committime = pq_getmsgint64(s);
