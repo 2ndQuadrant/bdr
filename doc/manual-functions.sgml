@@ -201,6 +201,9 @@
         in <literal>pg_stat_replication</literal> has replayed WAL up to at least
         <replaceable>lsn</replaceable>. Typically used with
         <function>pg_current_xlog_insert_location()</function> as the target LSN.
+        Note that currently disconnected peers will <emphasis>not</emphasis> be waited for; this
+        function cannot be used to verify that all peers are caught up, only all currently
+        connected peers.
         (This function was added to PostgreSQL 9.4 by the BDR patches and is not part
          of the BDR extension as such.)
        </entry>
@@ -221,6 +224,131 @@
        </entry>
       </row>
 
+      <row>
+       <entry>
+        <indexterm>
+         <primary>bdr.terminate_apply_workers(text,oid,oid)</primary>
+        </indexterm>
+        <literal><function>bdr.terminate_apply_workers(<replaceable>sysid text</replaceable>, <replaceable>timeline oid</replaceable>, <replaceable>dboid oid</replaceable>)</function></literal>
+       </entry>
+       <entry>boolean</entry>
+       <entry>
+        Terminate any downstream (apply) BDR workers that are connected to
+        the upstream peer with the identified
+        (<literal>sysid</literal>,<literal>timeline</literal>,<literal>dboid</literal>)
+        tuple. Returns true if a terminate signal was successfully sent. The worker may not
+        yet have exited; check <literal>pg_stat_activity</literal>.
+       </entry>
+      </row>
+
+      <row>
+       <entry>
+        <indexterm>
+         <primary>bdr.terminate_walsender_workers(text,oid,oid)</primary>
+        </indexterm>
+        <literal><function>bdr.terminate_walsender_workers(<replaceable>sysid text</replaceable>, <replaceable>timeline oid</replaceable>, <replaceable>dboid oid</replaceable>)</function></literal>
+       </entry>
+       <entry>boolean</entry>
+       <entry>
+        Terminate any upstream (walsender) BDR workers that are connected to
+        the downstream peer with the identified
+        (<literal>sysid</literal>,<literal>timeline</literal>,<literal>dboid</literal>)
+        tuple. Returns true if a terminate signal was successfully sent. The worker may not
+        yet have exited; check <literal>pg_stat_activity</literal>.
+       </entry>
+      </row>
+
+      <row>
+       <entry>
+        <indexterm>
+         <primary>bdr.terminate_apply_workers(text)</primary>
+        </indexterm>
+        <literal><function>bdr.terminate_apply_workers(<replaceable>node_name text</replaceable>)</function></literal>
+       </entry>
+       <entry>boolean</entry>
+       <entry>
+        Same as <literal>bdr.terminate_apply_workers(text,oid,oid)</literal> but instead of a node
+        identity tuple this function looks up the node in <literal>bdr.bdr_nodes</literal> by node
+        name.
+       </entry>
+      </row>
+
+      <row>
+       <entry>
+        <indexterm>
+         <primary>bdr.terminate_walsender_workers(text)</primary>
+        </indexterm>
+        <literal><function>bdr.terminate_walsender_workers(<replaceable>node_name text</replaceable>)</function></literal>
+       </entry>
+       <entry>boolean</entry>
+       <entry>
+        Same as <literal>bdr.terminate_walsender_workers(text,oid,oid)</literal> but instead of a node
+        identity tuple this function looks up the node in <literal>bdr.bdr_nodes</literal> by node
+        name.
+       </entry>
+      </row>
+
+      <row>
+       <entry>
+        <indexterm>
+         <primary>bdr.skip_changes_upto</primary>
+        </indexterm>
+        <literal><function>bdr.skip_changes_upto(<replaceable>sysid text</replaceable>, <replaceable>timeline oid</replaceable>, <replaceable>dboid oid</replaceable>, <replaceable>skip_to_lsn pg_lsn</replaceable>)</function></literal>
+       </entry>
+       <entry>void</entry>
+       <entry>
+        <para>
+         Discard (skip over) changes not yet replayed from the peer with identity
+         (<replaceable>sysid</replaceable>,<replaceable>timeline</replaceable>,<replaceable>dboid</replaceable>),
+         resuming replay at the first commit after <replaceable>skip_to_lsn</replaceable>. A commit exactly at
+         the specified LSN is skipped, not replayed.
+        </para>
+        <warning>
+         <para>
+          This function is <emphasis>very dangerous</emphasis>. Improper use can completely break your
+          replication setup, and almost any use will cause your cluster nodes to become inconsistent
+          with each other. It is intended only for recovery from situations where replication is broken
+          by un-replayable DDL or similar.
+         </para>
+        </warning>
+        <para>
+         Use the <link
+         linkend="guc-bdr-trace-replay"><literal>bdr.trace_replay</literal></link>
+         setting to enable replay tracing and find the problem change to skip,
+         or look at the error context emitted in log messages if there's an
+         error. You may need to set <literal>log_error_verbosity =
+         verbose</literal> in <filename>postgresql.conf</filename> to see the
+         full error context. Skip to the commit LSN reported in the error, like
+         <literal>"in commit 0123/ABCD0123"</literal>.
+        </para>
+        <para>
+         Because the change is still committed on the node it originated from
+         and possibly on other nodes, to restore consistency you'll have to
+         perform some transactions manually with <link
+         linkend="guc-bdr-do-not-replicate"><literal>bdr.do_not_replicate</literal></link>,
+         <link
+         linkend="guc-bdr-permit-unsafe-ddl-commands"><literal>bdr.permit_unsafe_ddl_commands</literal></link>
+         and/or <link
+         linkend="guc-bdr-skip-ddl-replication"><literal>bdr.skip_ddl_replication</literal></link>
+         options set to restore consistency by manually undoing the operations
+         on some nodes or manually applying them on the other nodes.
+        </para>
+        <note>
+         <para>
+         BDR still cares about dropped columns in tables, so if you dropped a
+         column in one node then skipped the drop in another, you
+         <emphasis>must</emphasis> manually drop the column in the one you
+         skipped it in; adding the column back on the other side does
+         <emphasis>not</emphasis> have the same effect because BDR uses the
+         underlying column attribute numbers from
+         <literal>pg_catalog.pg_attribute</literal>, not column names, to
+         replicate... and those numbers change when you drop and re-create a
+         column.
+        </para>
+       </note>
+       </entry>
+      </row>
+
      </tbody>
     </tgroup>
    </table>
@@ -234,91 +362,12 @@
    </indexterm>
 
    <para>
-    The function <function>bdr.bdr_subscribe</> will create unidirectional
-    connection between the local node and <parameter>subscribe_to_dsn</> node.
+    The function <function>bdr.bdr_subscribe</> has been removed from BDR. For
+    uni-directional replication, look at the
+    <ulink url="http://2ndquadrant.com/pglogical">pglogical project</ulink>
+    project or tools like Londiste.
    </para>
 
-   <para>
-    Since: version 0.9.0.
-   </para>
-
-   <para>
-    The parameters are:
-    <variablelist>
-     <varlistentry>
-      <term><replaceable>local_node_name</replaceable></term>
-      <listitem>
-       <para>
-        A string specifying the name of the new node (for identification
-        purposes).
-       </para>
-      </listitem>
-     </varlistentry>
-
-     <varlistentry>
-      <term><replaceable>subscribe_to_dsn</replaceable></term>
-      <listitem>
-       <para>
-        Connection string of the remote node from which replication should be
-        started.
-       </para>
-      </listitem>
-     </varlistentry>
-
-     <varlistentry>
-      <term><replaceable>node_local_dsn</replaceable></term>
-      <listitem>
-       <para>
-        <emphasis>Public</> connection string to the new local node. It is
-        used during initialization.
-       </para>
-      </listitem>
-     </varlistentry>
-
-     <varlistentry>
-      <term><replaceable>apply_delay</replaceable> (optional)</term>
-      <listitem>
-       <para>
-        Time (in milliseconds), the node will wait before applying changes
-        incoming from from the remote node.
-       </para>
-      </listitem>
-     </varlistentry>
-
-     <varlistentry>
-      <term><replaceable>replication_sets</replaceable> (optional)</term>
-      <listitem>
-       <para>
-        Text array of replication sets which should be replicated to the local
-        node. Note that you need to assign individual tables to the
-        replication sets on the <emphasis>remote</> node.
-       </para>
-      </listitem>
-     </varlistentry>
-
-     <varlistentry>
-      <term><replaceable>synchronize</replaceable> (optional)</term>
-      <listitem>
-       <para>
-        What to synchronize (copy) during the node initialization. Currently
-        supported values are <literal>full</> (the default) which means do
-        full schema and data copy and <literal>none</> which means don't copy
-        anything. Note that this can cause apply failures if the schemas of
-        nodes differ.
-       </para>
-       <para>
-        If objects (tables, functions, types, views, etc) already exist on the
-        local node, i.e. the node calling this function, and have the same names
-        as objects on the upstream node being subscribed to, the subscribe may
-        fail. This failure will be visible in the logs but will not result
-        in any error being sent to the client that invoked the subscribe
-        function. Use <function>bdr.bdr_unsubscribe</function> to remove a
-        failed subscription.
-       </para>
-      </listitem>
-     </varlistentry>
-    </variablelist>
-   </para>
   </sect2>
 
   <sect2 id="functions-node-mgmt-examples" xreflabel="Node management function examples">
