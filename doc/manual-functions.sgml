@@ -426,7 +426,7 @@
      </thead>
      <tbody>
 
-      <row id="function-bdr-table-set-replication-sets">
+      <row id="function-bdr-table-set-replication-sets" xreflabel="bdr.table_set_replication_sets">
        <entry>
         <indexterm>
          <primary>bdr.table_set_replication_sets</primary>
@@ -435,12 +435,16 @@
        </entry>
        <entry>void</entry>
        <entry>
-         Sets the replication sets of a table. The previous assignment will
-         be overwritten.
+	 Sets the replication sets of a table. The previous assignment will be
+	 overwritten (not merged or added to). Setting a table's replication
+	 sets does <emphasis>not</emphasis> cause the table to be synchronized
+	 to nodes that will newly start receiving changes to the table, nor
+	 does it cause it to be emptied on nodes that will newly stop receiving
+	 changes. See <xref linkend="replication-sets-concepts">.
        </entry>
       </row>
 
-      <row id="function-bdr-table-get-replication-sets">
+      <row id="function-bdr-table-get-replication-sets" xreflabel="bdr.table_get_replication_sets">
        <entry>
         <indexterm>
          <primary>bdr.table_get_replication_sets</primary>
@@ -450,6 +454,77 @@
        <entry>text[]</entry>
        <entry>
         Returns the replication sets the specified table is part of.
+       </entry>
+      </row>
+
+      <row id="function-bdr-connection-set-replication-sets-byname" xreflabel="bdr.connection_set_replication_sets">
+       <entry>
+        <indexterm>
+         <primary>bdr.connection_set_replication_sets</primary>
+        </indexterm>
+        <literal><function>bdr.connection_set_replication_sets(<replaceable>replication_sets text[]</replaceable>, <replaceable>node_name text</replaceable>)</function></literal>
+       </entry>
+       <entry>void</entry>
+       <entry>
+	 Sets the replication sets of the default connection for the named
+	 node. The previous assignment will be overwritten. Any override
+	 connections for individual nodes (where the
+	 <literal>origin_sysid</literal> etc in
+	 <literal>bdr.bdr_connections</literal> are nonzero) are left unchanged;
+	 a warning will be emitted if any are present.
+       </entry>
+      </row>
+
+      <row id="function-bdr-connection-get-replication-sets-byname" xreflabel="bdr.connection_get_replication_sets">
+       <entry>
+        <indexterm>
+         <primary>bdr.connection_get_replication_sets(text)</primary>
+        </indexterm>
+        <literal><function>bdr.connection_get_replication_sets(<replaceable>node_name text</replaceable>)</function></literal>
+       </entry>
+       <entry>text[]</entry>
+       <entry>
+	Returns the replication sets configured for the the default connection
+	to the named node.  Any override connections for individual nodes
+	(where the <literal>origin_sysid</literal> etc in
+	<literal>bdr.bdr_connections</literal> are nonzero) are ignored and
+	a warning is issued if any are present.
+       </entry>
+      </row>
+
+      <row id="function-bdr-connection-set-replication-sets-byid" xreflabel="bdr.connection_set_replication_sets">
+       <entry>
+        <indexterm>
+         <primary>bdr.connection_set_replication_sets(text[],text)</primary>
+        </indexterm>
+        <literal><function>bdr.connection_set_replication_sets(<replaceable>replication_sets text[]</replaceable>, <replaceable>sysid text</replaceable>, <replaceable>timeline oid</replaceable>, <replaceable>dboid oid</replaceable>, <replaceable>origin_sysid text default '0'</replaceable>, <replaceable>origin_timeline oid default 0</replaceable>, <replaceable>origin_dboid oid default 0</replaceable>)</function></literal>
+       </entry>
+       <entry>void</entry>
+       <entry>
+	 Sets the replication sets of the connection with the given (sysid,
+	 timeline, dboid) identity tuple. If no (origin_sysid, origin_timeline,
+	 origin_dboid) are specified, the default connection for the node is
+	 modified. Otherwise the override connection for the given node is
+	 updated instead. In almost all cases it's simpler to just use the
+	 node-name variant; this is for advanced uses.
+       </entry>
+      </row>
+
+      <row id="function-bdr-connection-get-replication-sets-byid" xreflabel="bdr.connection_get_replication_sets">
+       <entry>
+        <indexterm>
+         <primary>bdr.connection_get_replication_sets</primary>
+        </indexterm>
+        <literal><function>bdr.connection_get_replication_sets(<replaceable>sysid text</replaceable>, <replaceable>timeline oid</replaceable>, <replaceable>dboid oid</replaceable>, <replaceable>origin_sysid text default '0'</replaceable>, <replaceable>origin_timeline oid default 0</replaceable>, <replaceable>origin_dboid oid default 0</replaceable>)</function></literal>
+       </entry>
+       <entry>text[]</entry>
+       <entry>
+	 Returns the replication sets of the connection with the given (sysid,
+	 timeline, dboid) identity tuple. If no (origin_sysid, origin_timeline,
+	 origin_dboid) are specified, the default connection for the node is
+	 returned. Otherwise the override connection for the given node is
+	 returned instead. In almost all cases it's simpler to just use the
+	 node-name variant; this is for advanced uses.
        </entry>
       </row>
 
