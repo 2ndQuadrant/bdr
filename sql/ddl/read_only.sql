@@ -11,10 +11,10 @@ SELECT bdr.bdr_node_set_read_only(node_name, true) FROM bdr.bdr_nodes;
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
 
 -- errors
-CREATE TABLE test(a int);
+CREATE TABLE readonly_test_shoulderror(a int);
 
 SELECT bdr.bdr_replicate_ddl_command($$
-        CREATE TABLE public.test (
+        CREATE TABLE public.readonly_test_shoulderror (
                 data text
         );
 $$);
