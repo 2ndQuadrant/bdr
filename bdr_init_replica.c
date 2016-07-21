@@ -642,14 +642,10 @@ bdr_init_wait_for_slot_creation()
 
 		/*
 		 * We won't see an inbound slot from our own node.
-		 * Abn there's no corresponding incoming slot for a unidirectional
-		 * slot.
 		 */
-		if ((cfg->sysid == GetSystemIdentifier() &&
+		if (cfg->sysid == GetSystemIdentifier() &&
 			 cfg->timeline == ThisTimeLineID &&
-			 cfg->dboid == MyDatabaseId) ||
-			cfg->is_unidirectional)
-
+			 cfg->dboid == MyDatabaseId)
 		{
 			configs = list_delete_cell(configs, lc, prev);
 			break;
@@ -682,10 +678,6 @@ bdr_init_wait_for_slot_creation()
 				/* We won't see an inbound slot from our own node */
 				continue;
 			}
-
-			/* There's no corresponding incoming slot for a unidirectional slot */
-			if (cfg->is_unidirectional)
-				continue;
 
 			LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
 			for (slotoff = 0; slotoff < bdr_max_workers; slotoff++)

@@ -337,6 +337,7 @@ extern bool in_bdr_replicate_ddl_command;
 /* cached oids, setup by bdr_maintain_schema() */
 extern Oid	BdrSchemaOid;
 extern Oid	BdrNodesRelid;
+extern Oid	BdrConnectionsRelid;
 extern Oid	QueuedDDLCommandsRelid;
 extern Oid  BdrConflictHistoryRelId;
 extern Oid  BdrReplicationSetConfigRelid;

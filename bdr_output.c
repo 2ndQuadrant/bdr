@@ -84,7 +84,6 @@ typedef struct
 	bool client_float8_byval;
 	bool client_int_datetime;
 	char *client_db_encoding;
-	bool client_unidirectional;
 	Oid bdr_schema_oid;
 	Oid bdr_conflict_handlers_reloid;
 	Oid bdr_locks_reloid;
@@ -242,10 +241,6 @@ bdr_ensure_node_ready(BdrOutputData *data)
 	BDRNodeInfo *remote_node;
 	NameData dbname;
 	char *tmp_dbname;
-
-	/* Unidirectional connections don't require any checks atm. */
-	if (data->client_unidirectional)
-		return;
 
 	/* We need dbname valid outside this transaction, so copy it */
 	tmp_dbname = get_database_name(MyDatabaseId);
@@ -427,7 +422,12 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 		else if (strcmp(elem->defname, "forward_changesets") == 0)
 			bdr_parse_bool(elem, &data->forward_changesets);
 		else if (strcmp(elem->defname, "unidirectional") == 0)
-			bdr_parse_bool(elem, &data->client_unidirectional);
+		{
+			bool is_unidirectional;
+			bdr_parse_bool(elem, &is_unidirectional);
+			if (is_unidirectional)
+				elog(ERROR, "support for unidirectional connections has been removed");
+		}
 		else if (strcmp(elem->defname, "replication_sets") == 0)
 		{
 			int i;

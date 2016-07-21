@@ -2016,7 +2016,7 @@ check_bdr_wakeups(BDRRelation *rel)
 		return;
 
 	/* has the node/connection state been changed on another system? */
-	if (reloid == BdrNodesRelid)
+	if (reloid == BdrNodesRelid || reloid == BdrConnectionsRelid)
 		bdr_connections_changed(NULL);
 
 	if (reloid == BdrSequenceValuesRelid ||
@@ -2435,8 +2435,7 @@ bdr_apply_reload_config()
 	 * Note: this is slightly hacky and we should probably use the bdr_nodes
 	 * for this instead.
 	 */
-	if (!new_apply_config->origin_is_my_id &&
-		!new_apply_config->is_unidirectional)
+	if (!new_apply_config->origin_is_my_id)
 	{
 		BdrConnectionConfig *cfg =
 			bdr_get_connection_config(GetSystemIdentifier(), ThisTimeLineID,
@@ -2797,8 +2796,6 @@ bdr_apply_main(Datum main_arg)
 	appendStringInfo(&query, ", db_encoding '%s'", GetDatabaseEncodingName());
 	if (bdr_apply_worker->forward_changesets)
 		appendStringInfo(&query, ", forward_changesets 't'");
-	if (bdr_apply_config->is_unidirectional)
-		appendStringInfo(&query, ", unidirectional 't'");
 
 	appendStringInfoChar(&query, ')');
 

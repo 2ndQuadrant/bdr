@@ -75,6 +75,7 @@ extern Oid			origin_dboid;
 ResourceOwner bdr_saved_resowner;
 Oid   BdrSchemaOid = InvalidOid;
 Oid   BdrNodesRelid = InvalidOid;
+Oid   BdrConnectionsRelid = InvalidOid;
 Oid   BdrConflictHistoryRelId = InvalidOid;
 Oid   BdrLocksRelid = InvalidOid;
 Oid   BdrLocksByOwnerRelid = InvalidOid;
@@ -949,6 +950,8 @@ bdr_maintain_schema(bool update_extensions)
 	BdrSchemaOid = schema_oid;
 	BdrNodesRelid =
 		bdr_lookup_relid("bdr_nodes", schema_oid);
+	BdrConnectionsRelid =
+		bdr_lookup_relid("bdr_connections", schema_oid);
 	QueuedDDLCommandsRelid =
 		bdr_lookup_relid("bdr_queued_commands", schema_oid);
 	BdrConflictHistoryRelId =
