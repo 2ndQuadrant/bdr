@@ -114,6 +114,7 @@ PGDLLEXPORT Datum bdr_terminate_apply_workers_byname(PG_FUNCTION_ARGS);
 PGDLLEXPORT Datum bdr_terminate_walsender_workers(PG_FUNCTION_ARGS);
 PGDLLEXPORT Datum bdr_terminate_apply_workers(PG_FUNCTION_ARGS);
 PGDLLEXPORT Datum bdr_skip_changes_upto(PG_FUNCTION_ARGS);
+PGDLLEXPORT Datum bdr_pause_worker_management(PG_FUNCTION_ARGS);
 
 PG_FUNCTION_INFO_V1(bdr_apply_pause);
 PG_FUNCTION_INFO_V1(bdr_apply_resume);
@@ -130,6 +131,7 @@ PG_FUNCTION_INFO_V1(bdr_terminate_apply_workers_byname);
 PG_FUNCTION_INFO_V1(bdr_terminate_walsender_workers);
 PG_FUNCTION_INFO_V1(bdr_terminate_apply_workers);
 PG_FUNCTION_INFO_V1(bdr_skip_changes_upto);
+PG_FUNCTION_INFO_V1(bdr_pause_worker_management);
 
 static bool bdr_terminate_workers_byid(uint64 sysid, TimeLineID timeline,
 	Oid dboid, BdrWorkerType worker_type);
@@ -1319,4 +1321,31 @@ bdr_terminate_walsender_workers_byname(PG_FUNCTION_ARGS)
 				(errmsg("named node not found in bdr.bdr_nodes")));
 
 	PG_RETURN_BOOL(bdr_terminate_workers_byid(sysid, timeline, dboid, BDR_WORKER_WALSENDER));
+}
+
+/*
+ * This function is used for debugging and tests, mainly to make unit tests more
+ * predictable. It pauses BDR worker management and stops new worker launches
+ * until unpaused.
+ *
+ * The pause applies across all BDR nodes on the current instance. When unpaused,
+ * the caller should signal bdr_connections_changed() on every node.
+ *
+ * This function is intentionally undocumented and isn't for normal use.
+ */
+Datum
+bdr_pause_worker_management(PG_FUNCTION_ARGS)
+{
+	bool pause = PG_GETARG_BOOL(0);
+
+	if (pause && !bdr_permit_unsafe_commands)
+		elog(ERROR, "this function is for internal test use only");
+
+	LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
+	BdrWorkerCtl->worker_management_paused = pause;
+	LWLockRelease(BdrWorkerCtl->lock);
+
+	elog(LOG, "BDR worker management %s", pause ? "paused" : "unpaused");
+
+	PG_RETURN_VOID();
 }

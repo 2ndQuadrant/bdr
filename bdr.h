@@ -320,6 +320,8 @@ typedef struct BdrWorkerControl
 	bool		 pause_apply;
 	/* Is this the first startup of the supervisor? */
 	bool		 is_supervisor_restart;
+	/* Pause worker management (used in testing) */
+	bool		worker_management_paused;
 	/* Latch for the supervisor worker */
 	Latch		*supervisor_latch;
 	/* Array members, of size bdr_max_workers */

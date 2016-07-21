@@ -239,6 +239,15 @@ bdr_maintain_db_workers(void)
 
 	Assert(!LWLockHeldByMe(BdrWorkerCtl->lock));
 
+	if (BdrWorkerCtl->worker_management_paused)
+	{
+		/*
+		 * We're going to ignore this worker update check by request (used
+		 * mainly for testing). We'll notice changes when our latch is next
+		 * set.
+		 */
+		return;
+	}
 
 	snprintf(sysid_str, sizeof(sysid_str), UINT64_FORMAT, GetSystemIdentifier());
 	sysid_str[sizeof(sysid_str)-1] = '\0';

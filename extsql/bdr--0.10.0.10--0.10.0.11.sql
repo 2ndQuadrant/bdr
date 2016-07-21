@@ -142,6 +142,13 @@ BEGIN
 END;
 $$;
 
+CREATE FUNCTION bdr._test_pause_worker_management(boolean)
+RETURNS void
+LANGUAGE c AS 'MODULE_PATHNAME','bdr_pause_worker_management';
+
+COMMENT ON FUNCTION bdr._test_pause_worker_management(boolean)
+IS 'BDR-internal function for test use only';
+
 RESET bdr.permit_unsafe_ddl_commands;
 RESET bdr.skip_ddl_replication;
 RESET search_path;
