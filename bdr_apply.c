@@ -2693,6 +2693,11 @@ bdr_apply_main(Datum main_arg)
 	 * set our latch field while we're writing to it.
 	 */
 	LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
+	if (BdrWorkerCtl->worker_management_paused)
+	{
+		elog(ERROR, "BDR worker management is currently paused, apply worker exiting. Retry later.");
+		LWLockRelease(BdrWorkerCtl->lock);
+	}
 	bdr_apply_worker->proclatch = &MyProc->procLatch;
 	LWLockRelease(BdrWorkerCtl->lock);
 

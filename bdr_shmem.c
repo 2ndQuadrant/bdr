@@ -165,6 +165,8 @@ bdr_worker_shmem_startup(void)
 		BdrWorkerCtl->lock = LWLockAssign();
 		/* Assigned on supervisor launch */
 		BdrWorkerCtl->supervisor_latch = NULL;
+		/* Worker management starts unpaused */
+		BdrWorkerCtl->worker_management_paused = false;
 
 		/*
 		 * The postmaster keeps track of a generation number for BDR workers

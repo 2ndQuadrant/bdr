@@ -1,9 +1,45 @@
 -- We're one instance with two databases so we should
 -- have two walsenders and two apply workers.
-SELECT count(pid) FROM pg_stat_activity WHERE application_name LIKE 'bdr (%): apply';
- count 
--------
-     2
+CREATE FUNCTION wait_for_nwalsenders(nsenders integer)
+RETURNS void
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  WHILE (SELECT count(1) FROM pg_stat_get_wal_senders() s) != nsenders
+  LOOP
+    PERFORM pg_sleep(0.2);
+    PERFORM pg_stat_clear_snapshot();
+  END LOOP;
+END;
+$$;
+CREATE FUNCTION wait_for_nworkers(nsenders integer)
+RETURNS void
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  WHILE (SELECT count(1) FROM pg_stat_activity WHERE application_name LIKE 'bdr (%): apply') != nsenders
+  LOOP
+    PERFORM pg_sleep(0.2);
+    PERFORM pg_stat_clear_snapshot();
+  END LOOP;
+END;
+$$;
+SELECT wait_for_nwalsenders(2);
+ wait_for_nwalsenders 
+----------------------
+ 
+(1 row)
+
+SELECT wait_for_nworkers(2);
+ wait_for_nworkers 
+-------------------
+ 
+(1 row)
+
+BEGIN; SET LOCAL bdr.permit_unsafe_ddl_commands = true; SELECT bdr._test_pause_worker_management(true); COMMIT;
+ _test_pause_worker_management 
+-------------------------------
+ 
 (1 row)
 
 -- Must report 't' for all except our own
@@ -19,24 +55,31 @@ ORDER BY node_name;
 (2 rows)
 
 -- One worker should vanish and not have restarted because of the timer
-SELECT count(pid) FROM pg_stat_activity WHERE application_name LIKE 'bdr (%): apply';
- count 
--------
-     1
-(1 row)
-
--- Reconnect... (would like a faster way to do this?)
-SELECT pg_sleep(12);
- pg_sleep 
-----------
+SELECT wait_for_nworkers(1);
+ wait_for_nworkers 
+-------------------
  
 (1 row)
 
--- Should have two walsenders
-SELECT count(pid) from pg_stat_replication WHERE application_name LIKE 'bdr (%):receive';
- count 
--------
-     2
+-- Wait for reconnect. No need for bdr_connections_changed()
+-- since this'll just stop the apply workers quitting as soon
+-- as they launch.
+BEGIN; SET LOCAL bdr.permit_unsafe_ddl_commands = true; SELECT bdr._test_pause_worker_management(false); COMMIT;
+ _test_pause_worker_management 
+-------------------------------
+ 
+(1 row)
+
+SELECT wait_for_nworkers(2);
+ wait_for_nworkers 
+-------------------
+ 
+(1 row)
+
+BEGIN; SET LOCAL bdr.permit_unsafe_ddl_commands = true; SELECT bdr._test_pause_worker_management(true); COMMIT;
+ _test_pause_worker_management 
+-------------------------------
+ 
 (1 row)
 
 -- terminate walsenders, this time by ID
@@ -52,23 +95,22 @@ ORDER BY node_name;
 (2 rows)
 
 -- One left
-SELECT count(pid) from pg_stat_replication WHERE application_name LIKE 'bdr (%):receive';
- count 
--------
-     1
-(1 row)
-
--- Then allow reconnect before continuing tests
-SELECT pg_sleep(12);
- pg_sleep 
-----------
+SELECT wait_for_nwalsenders(1);
+ wait_for_nwalsenders 
+----------------------
  
 (1 row)
 
--- Really back?
-SELECT count(pid) from pg_stat_replication WHERE application_name LIKE 'bdr (%):receive';
- count 
--------
-     2
+-- OK, let them come back up
+BEGIN; SET LOCAL bdr.permit_unsafe_ddl_commands = true; SELECT bdr._test_pause_worker_management(false); COMMIT;
+ _test_pause_worker_management 
+-------------------------------
+ 
+(1 row)
+
+SELECT wait_for_nwalsenders(2);
+ wait_for_nwalsenders 
+----------------------
+ 
 (1 row)
 
