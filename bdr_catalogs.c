@@ -369,7 +369,7 @@ bdr_fetch_sysid_via_node_id(RepNodeId node_id, uint64 *sysid, TimeLineID *tli,
 		if (local_dboid != MyDatabaseId)
 		{
 			ereport(ERROR,
-					(errmsg("lookup failed for replication identifier %u"),
+					(errmsg("lookup failed for replication identifier %u", node_id),
 					 errmsg("Replication identifier %u exists but is owned by another BDR node in the same PostgreSQL instance, with dboid %u. Current node oid is %u.",
 					 		node_id, local_dboid, MyDatabaseId)));
 		}
@@ -459,7 +459,6 @@ bdr_read_connection_configs()
 							 "  conn_sysid, conn_timeline, conn_dboid, "
 							 "  conn_dsn, conn_apply_delay, "
 							 "  conn_replication_sets, "
-							 "  conn_is_unidirectional, "
 							 "  conn_origin_dboid <> 0 AS origin_is_my_id "
 							 "FROM bdr.bdr_connections "
 							 "INNER JOIN bdr.bdr_nodes "
@@ -473,6 +472,7 @@ bdr_read_connection_configs()
 							 "  AND  conn_origin_timeline = $2 "
 							 "  AND  conn_origin_dboid = $3) "
 							 "  AND node_status <> 'k' "
+							 "  AND NOT conn_is_unidirectional "
 							 "ORDER BY conn_sysid, conn_timeline, conn_dboid, "
 							 "         conn_origin_sysid ASC NULLS LAST, "
 							 "         conn_timeline ASC NULLS LAST, "
@@ -530,12 +530,6 @@ bdr_read_connection_configs()
 								  &isnull);
 		Assert(!isnull);
 		cfg->dboid = DatumGetObjectId(tmp_datum);
-
-		tmp_datum = SPI_getbinval(tuple, SPI_tuptable->tupdesc,
-								  getattno("conn_is_unidirectional"),
-								  &isnull);
-		Assert(!isnull);
-		cfg->is_unidirectional = DatumGetBool(tmp_datum);
 
 		tmp_datum = SPI_getbinval(tuple, SPI_tuptable->tupdesc,
 								  getattno("origin_is_my_id"),

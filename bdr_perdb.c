@@ -450,7 +450,7 @@ bdr_maintain_db_workers(void)
 	/* If our own node is dead, don't start new connections to other nodes */
 	if (our_status == 'k')
 	{
-		elog(LOG, "FIXME: skipping");
+		elog(LOG, "this node has been parted, not starting connections");
 		goto out;
 	}
 
@@ -513,8 +513,7 @@ bdr_maintain_db_workers(void)
 		TimeLineID				target_timeline;
 		Oid						target_dboid;
 		char*					tmp_sysid;
-		bool					origin_is_my_id,
-								conn_is_unidirectional;
+		bool					origin_is_my_id;
 		char					node_status;
 
 		tuple = SPI_tuptable->vals[i];
@@ -541,7 +540,13 @@ bdr_maintain_db_workers(void)
 								   getattno("conn_is_unidirectional"),
 								   &isnull);
 		Assert(!isnull);
-		conn_is_unidirectional = DatumGetBool(temp_datum);
+		if (DatumGetBool(temp_datum))
+		{
+			ereport(WARNING,
+					(errmsg("unidirectional connection to ("UINT64_FORMAT",%u,%u) ignored; UDR support has been removed",
+					 target_sysid, target_timeline, target_dboid)));
+			continue;
+		}
 
 		temp_datum = SPI_getbinval(tuple, SPI_tuptable->tupdesc,
 								   getattno("origin_is_my_id"),
@@ -555,14 +560,14 @@ bdr_maintain_db_workers(void)
 		Assert(!isnull);
 		node_status = DatumGetChar(temp_datum);
 
-		elog(DEBUG1, "Found bdr_connections entry for "BDR_LOCALID_FORMAT" (origin specific: %d, unidirectional: %d, status: %c)",
+		elog(DEBUG1, "Found bdr_connections entry for "BDR_LOCALID_FORMAT" (origin specific: %d, status: %c)",
 			 target_sysid, target_timeline, target_dboid,
 			 EMPTY_REPLICATION_NAME,
-			 (int) origin_is_my_id, (int) conn_is_unidirectional, node_status);
+			 (int) origin_is_my_id, node_status);
 
 		if(node_status == 'k')
 		{
-			elog(LOG, "skip registration as killed");
+			elog(DEBUG2, "skipping registration of conn as killed");
 			continue;
 		}
 
@@ -593,6 +598,8 @@ bdr_maintain_db_workers(void)
 			LWLockRelease(BdrWorkerCtl->lock);
 			continue;
 		}
+
+		/* We're going to resister a new worker for this connection */
 
 		/* Set the display name in 'ps' etc */
 		snprintf(bgw.bgw_name, BGW_MAXLEN,

@@ -41,12 +41,6 @@ typedef struct BdrConnectionConfig
 	 */
 	bool origin_is_my_id;
 
-	/*
-	 * Is this connection unidirectional, or should we expect a reciprocal
-	 * inbound connection and slot?
-	 */
-	bool is_unidirectional;
-
 	char *dsn;
 
 	int   apply_delay;
