@@ -15,7 +15,19 @@
 #include "lib/ilist.h"
 
 #define EMPTY_REPLICATION_NAME ""
+
+/*
+ * The format used for slot names
+ *
+ * params: local_dboid, remote_sysid, remote_timeline, remote_dboid, replname
+ */
 #define BDR_SLOT_NAME_FORMAT "bdr_%u_"UINT64_FORMAT"_%u_%u__%s"
+
+/*
+ * The format used for replication identifiers (riident, replident)
+ *
+ * params: remote_sysid, remote_timeline, remote_dboid, local_dboid, replname
+ */
 #define BDR_NODE_ID_FORMAT "bdr_"UINT64_FORMAT"_%u_%u_%u_%s"
 
 #ifdef __GNUC__
@@ -71,7 +83,15 @@ extern void bdr_free_connection_config(BdrConnectionConfig *cfg);
 
 extern void bdr_slot_name(Name slot_name, uint64 sysid, TimeLineID tlid,
 						  Oid dboid, Oid local_dboid);
+
+extern char* bdr_replident_name(uint64 remote_sysid,
+	TimeLineID remote_timeline, Oid remote_dboid, Oid local_dboid);
+
 extern void bdr_parse_slot_name(const char *name, uint64 *remote_sysid,
+								Oid *remote_dboid, TimeLineID *remote_tli,
+								Oid *local_dboid);
+
+extern void bdr_parse_replident_name(const char *name, uint64 *remote_sysid,
 								Oid *remote_dboid, TimeLineID *remote_tli,
 								Oid *local_dboid);
 

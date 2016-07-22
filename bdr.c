@@ -108,7 +108,9 @@ PGDLLEXPORT Datum bdr_min_remote_version_num(PG_FUNCTION_ARGS);
 PGDLLEXPORT Datum bdr_variant(PG_FUNCTION_ARGS);
 PGDLLEXPORT Datum bdr_get_local_nodeid(PG_FUNCTION_ARGS);
 PGDLLEXPORT Datum bdr_parse_slot_name_sql(PG_FUNCTION_ARGS);
+PGDLLEXPORT Datum bdr_parse_replident_name_sql(PG_FUNCTION_ARGS);
 PGDLLEXPORT Datum bdr_format_slot_name_sql(PG_FUNCTION_ARGS);
+PGDLLEXPORT Datum bdr_format_replident_name_sql(PG_FUNCTION_ARGS);
 PGDLLEXPORT Datum bdr_terminate_walsender_workers_byname(PG_FUNCTION_ARGS);
 PGDLLEXPORT Datum bdr_terminate_apply_workers_byname(PG_FUNCTION_ARGS);
 PGDLLEXPORT Datum bdr_terminate_walsender_workers(PG_FUNCTION_ARGS);
@@ -125,7 +127,9 @@ PG_FUNCTION_INFO_V1(bdr_min_remote_version_num);
 PG_FUNCTION_INFO_V1(bdr_variant);
 PG_FUNCTION_INFO_V1(bdr_get_local_nodeid);
 PG_FUNCTION_INFO_V1(bdr_parse_slot_name_sql);
+PG_FUNCTION_INFO_V1(bdr_parse_replident_name_sql);
 PG_FUNCTION_INFO_V1(bdr_format_slot_name_sql);
+PG_FUNCTION_INFO_V1(bdr_format_replident_name_sql);
 PG_FUNCTION_INFO_V1(bdr_terminate_walsender_workers_byname);
 PG_FUNCTION_INFO_V1(bdr_terminate_apply_workers_byname);
 PG_FUNCTION_INFO_V1(bdr_terminate_walsender_workers);
@@ -238,27 +242,14 @@ bdr_build_ident_and_slotname(uint64 remote_sysid, TimeLineID remote_tlid,
 		Oid remote_dboid, char **out_replication_identifier,
 		Name out_slot_name)
 {
-	StringInfoData	replication_identifier;
-
-	initStringInfo(&replication_identifier);
-
 	Assert(MyDatabaseId != InvalidOid);
 	Assert(remote_dboid != InvalidOid);
 
-	/*
-	 * Build slot name identifying the local node to the remote end.
-	 */
 	bdr_slot_name(out_slot_name, GetSystemIdentifier(), ThisTimeLineID, MyDatabaseId,
 				  remote_dboid);
 
-	/*
-	 * Build replication identifier.
-	 */
-	appendStringInfo(&replication_identifier, BDR_NODE_ID_FORMAT,
-			 remote_sysid, remote_tlid, remote_dboid, MyDatabaseId,
-			 EMPTY_REPLICATION_NAME);
-
-	*out_replication_identifier = replication_identifier.data;
+	*out_replication_identifier = bdr_replident_name(remote_sysid, remote_tlid,
+			remote_dboid, MyDatabaseId);
 }
 
 /*
@@ -1109,6 +1100,41 @@ bdr_parse_slot_name_sql(PG_FUNCTION_ARGS)
 }
 
 Datum
+bdr_parse_replident_name_sql(PG_FUNCTION_ARGS)
+{
+	const char 	*replident_name = text_to_cstring(PG_GETARG_TEXT_P(0));
+	Datum		values[5];
+	bool		isnull[5] = {false, false, false, false, false};
+	TupleDesc	tupleDesc;
+	HeapTuple	returnTuple;
+	char		remote_sysid_str[33];
+	uint64		remote_sysid;
+	TimeLineID	remote_tli;
+	Oid			remote_dboid;
+	Oid			local_dboid;
+
+	if (get_call_result_type(fcinfo, NULL, &tupleDesc) != TYPEFUNC_COMPOSITE)
+		elog(ERROR, "return type must be a row type");
+
+	bdr_parse_replident_name(replident_name, &remote_sysid, &remote_tli,
+			&remote_dboid, &local_dboid);
+
+	snprintf(remote_sysid_str, sizeof(remote_sysid_str),
+			UINT64_FORMAT, remote_sysid);
+	remote_sysid_str[sizeof(remote_sysid_str)-1] = '\0';
+
+	values[0] = CStringGetTextDatum(remote_sysid_str);
+	values[1] = ObjectIdGetDatum(remote_tli);
+	values[2] = ObjectIdGetDatum(remote_dboid);
+	values[3] = ObjectIdGetDatum(local_dboid);
+	values[4] = CStringGetTextDatum(EMPTY_REPLICATION_NAME);
+
+	returnTuple = heap_form_tuple(tupleDesc, values, isnull);
+
+	PG_RETURN_DATUM(HeapTupleGetDatum(returnTuple));
+}
+
+Datum
 bdr_format_slot_name_sql(PG_FUNCTION_ARGS)
 {
 	const char	*remote_sysid_str = text_to_cstring(PG_GETARG_TEXT_P(0));
@@ -1131,6 +1157,29 @@ bdr_format_slot_name_sql(PG_FUNCTION_ARGS)
 			remote_dboid, local_dboid);
 
 	PG_RETURN_NAME(slot_name);
+}
+
+Datum
+bdr_format_replident_name_sql(PG_FUNCTION_ARGS)
+{
+	const char	*remote_sysid_str = text_to_cstring(PG_GETARG_TEXT_P(0));
+	Oid			remote_tli = PG_GETARG_OID(1);
+	Oid			remote_dboid = PG_GETARG_OID(2);
+	Oid			local_dboid = PG_GETARG_OID(3);
+	const char	*replication_name = NameStr(*PG_GETARG_NAME(4));
+	uint64		remote_sysid;
+	char*		replident_name;
+
+	if (strlen(replication_name) != 0)
+		elog(ERROR, "Non-empty replication_name is not yet supported");
+
+	if (sscanf(remote_sysid_str, UINT64_FORMAT, &remote_sysid) != 1)
+		elog(ERROR, "Parsing of remote sysid as uint64 failed");
+
+	replident_name = bdr_replident_name(remote_sysid, remote_tli,
+			remote_dboid, local_dboid);
+
+	PG_RETURN_TEXT_P(cstring_to_text(replident_name));
 }
 
 
