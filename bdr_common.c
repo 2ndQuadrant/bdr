@@ -20,7 +20,6 @@
 
 #include "bdr_internal.h"
 
-
 /*
  * Format slot name string from node identifiers.
  */

@@ -380,6 +380,30 @@ bdr_fetch_sysid_via_node_id(RepNodeId node_id, uint64 *sysid, TimeLineID *tli,
 	}
 }
 
+/*
+ * Get node identifiers from a replication identifier (replident, riident) name
+ * 
+ * This isn't in bdr_common.c because it uses elog().
+ */
+void
+bdr_parse_replident_name(const char *sname, uint64 *remote_sysid, TimeLineID *remote_tli,
+					Oid *remote_dboid, Oid *local_dboid)
+{
+	NameData	replication_name;
+
+	if (sscanf(sname, BDR_NODE_ID_FORMAT,
+			   remote_sysid, remote_tli, remote_dboid, local_dboid,
+			   NameStr(replication_name)) != 4)
+	{
+		elog(ERROR, "could not parse slot name: %s", sname);
+	}
+}
+
+/*
+ * Get node identifiers from a slot name
+ *
+ * This isn't in bdr_common.c because it uses elog().
+ */
 void
 bdr_parse_slot_name(const char *sname, uint64 *remote_sysid, TimeLineID *remote_tli,
 					Oid *remote_dboid, Oid *local_dboid)
@@ -389,7 +413,30 @@ bdr_parse_slot_name(const char *sname, uint64 *remote_sysid, TimeLineID *remote_
 	if (sscanf(sname, BDR_SLOT_NAME_FORMAT,
 			   local_dboid, remote_sysid, remote_tli, remote_dboid,
 			   NameStr(replication_name)) != 4)
+	{
 		elog(ERROR, "could not parse slot name: %s", sname);
+	}
+}
+
+/*
+ * Format a replication origin / replication identifier (riident, replident)
+ * name from a (sysid,timeline,dboid tuple).
+ *
+ * This isn't in bdr_common.c because it uses StringInfo.
+ */
+char*
+bdr_replident_name(uint64 remote_sysid, TimeLineID remote_timeline, Oid remote_dboid, Oid local_dboid)
+{
+	StringInfoData si;
+
+	initStringInfo(&si);
+
+	appendStringInfo(&si, BDR_NODE_ID_FORMAT,
+			 remote_sysid, remote_timeline, remote_dboid, local_dboid,
+			 EMPTY_REPLICATION_NAME);
+
+	/* stringinfo's data is palloc'd, can be returned directly */
+	return si.data;
 }
 
 RepNodeId

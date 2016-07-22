@@ -124,3 +124,14 @@ WARNING:  Node node-pg is in state k not expected 'r'. Attempting to remove anyw
  
 (1 row)
 
+-- Strip BDR from this node entirely
+SELECT bdr.remove_bdr_from_local_node(true);
+WARNING:  forcing deletion of possibly active BDR node
+NOTICE:  node forced to parted state, now removing
+NOTICE:  removing BDR from node
+NOTICE:  BDR removed from this node. You can now DROP EXTENSION bdr and, if this is the last BDR node on this PostgreSQL instance, remove bdr from shared_preload_libraries.
+ remove_bdr_from_local_node 
+----------------------------
+ 
+(1 row)
+
