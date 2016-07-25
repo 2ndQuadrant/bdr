@@ -26,6 +26,7 @@
 #include "catalog/indexing.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_namespace.h"
+#include "catalog/pg_proc.h"
 #include "catalog/pg_trigger.h"
 
 #include "commands/event_trigger.h"
@@ -401,6 +402,8 @@ bdr_create_truncate_trigger(char *schemaname, char *relname, Oid relid)
 	RangeVar	   *relrv = makeRangeVar(schemaname, relname, -1);
 	Relation		rel;
 	List		   *funcname;
+	ObjectAddress	tgaddr, procaddr;
+	int				nfound;
 
 	if (OidIsValid(relid))
 		rel = heap_open(relid, AccessExclusiveLock);
@@ -450,8 +453,44 @@ bdr_create_truncate_trigger(char *schemaname, char *relname, Oid relid)
 	tgstmt->initdeferred = false;
 	tgstmt->constrrel = NULL;
 
-	(void) CreateTrigger(tgstmt, NULL, rel->rd_id, InvalidOid,
-						 InvalidOid, InvalidOid, true /* tgisinternal */);
+	tgaddr.objectId = CreateTrigger(tgstmt, NULL, rel->rd_id, InvalidOid,
+									InvalidOid, InvalidOid,
+									true /* tgisinternal */);
+
+	tgaddr.classId = TriggerRelationId;
+	tgaddr.objectSubId = 0;
+
+	/*
+	 * The trigger was created with a 'n'ormal dependency on
+	 * bdr.queue_truncate(), which will cause DROP EXTENSION bdr to fail with
+	 * something like:
+	 *
+	 *   trigger truncate_trigger_26908 on table sometable depends on function bdr.queue_truncate()
+	 *
+	 * We want the trigger to bdr dropped if EITHER the BDR extension is dropped
+	 * (thus so is bdr.queue_truncate()) OR if the table the trigger is attached
+	 * to is dropped, so we want an automatic dependency on the target table.
+	 * CreateTrigger doesn't offer this directly and we'd rather not cause an
+	 * API break by adding a param, so just twiddle the created dependency.
+	 */
+
+	procaddr.classId = ProcedureRelationId;
+	procaddr.objectId = LookupFuncName(list_make2(makeString("bdr"), makeString("queue_truncate")), 0, NULL, false);
+	procaddr.objectSubId = 0;
+
+	/* We need to be able to see the pg_depend entry to delete it */
+	CommandCounterIncrement();
+
+	if ((nfound = deleteDependencyRecordsForClass(tgaddr.classId, tgaddr.objectId, ProcedureRelationId, 'n')) != 1)
+	{
+		ereport(ERROR,
+				(errmsg_internal("expected exectly one 'n'ormal dependency from a newly created trigger to a pg_proc entry, got %u", nfound)));
+	}
+
+	recordDependencyOn(&tgaddr, &procaddr, DEPENDENCY_AUTO);
+
+	/* We should also record that the trigger is part of the extension */
+	recordDependencyOnCurrentExtension(&tgaddr, false);
 
 	heap_close(rel, AccessExclusiveLock);
 
