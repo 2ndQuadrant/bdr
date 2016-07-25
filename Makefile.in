@@ -326,6 +326,7 @@ REGRESSCHECKS= \
 	catalog \
 	terminate \
 	skipchanges \
+	pgstatreplicationslots \
 	$(DDLREGRESSCHECKS) \
 	dml/basic dml/contrib dml/delete_pk dml/extended dml/missing_pk dml/toasted \
 	$(EXTRAREGRESSCHECKS) \
