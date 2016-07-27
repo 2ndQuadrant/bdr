@@ -368,9 +368,9 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION bdr.remove_bdr_from_local_node(boolean) FROM public;
+REVOKE ALL ON FUNCTION bdr.remove_bdr_from_local_node(boolean, boolean) FROM public;
 
-COMMENT ON FUNCTION bdr.remove_bdr_from_local_node(boolean)
+COMMENT ON FUNCTION bdr.remove_bdr_from_local_node(boolean, boolean)
 IS 'Remove all BDR security labels, slots, replication origins, replication sets, etc from the local node, and turn all global sequences into local sequences';
 
 RESET bdr.permit_unsafe_ddl_commands;
