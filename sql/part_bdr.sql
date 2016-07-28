@@ -7,6 +7,9 @@ CREATE SCHEMA "some $SCHEMA";
 CREATE TABLE "some $SCHEMA"."table table table" ("a column" integer);
 CREATE SEQUENCE "some $SCHEMA"."some ""sequence"" name" USING bdr;
 
+-- Dropping the BDR extension isn't allowed while BDR is active
+DROP EXTENSION bdr;
+
 -- Initial state
 SELECT node_name, node_status FROM bdr.bdr_nodes ORDER BY node_name;
 
@@ -89,6 +92,10 @@ SELECT node_name, node_status FROM bdr.bdr_nodes ORDER BY node_name;
 -- If we try to part the same node again its state won't be 'r'
 -- so a warning will be generated.
 SELECT bdr.bdr_part_by_node_names(ARRAY['node-pg']);
+
+-- BDR is parted, but not fully removed, so don't allow the extension
+-- to be dropped yet.
+DROP EXTENSION bdr;
 
 -- Strip BDR from this node entirely and convert global sequences to local.
 SELECT bdr.remove_bdr_from_local_node(true, true);

@@ -715,6 +715,42 @@ bdr_commandfilter_dbname(const char *dbname)
 }
 
 static void
+prevent_drop_extension_bdr(DropStmt *stmt)
+{
+	ListCell   *cell;
+
+	/* Only interested in DROP EXTENSION */
+	if (stmt->removeType != OBJECT_EXTENSION)
+		return;
+
+	/* Check to see if the BDR extension is being dropped */
+	foreach(cell, stmt->objects)
+	{
+		ObjectAddress address;
+		List	   *objname = lfirst(cell);
+		Relation	relation = NULL;
+
+		/* Get an ObjectAddress for the object. */
+		address = get_object_address(stmt->removeType,
+									 objname, NULL,
+									 &relation,
+									 AccessExclusiveLock,
+									 stmt->missing_ok);
+
+		if (!OidIsValid(address.objectId))
+			continue;
+
+		/* for an extension the object name is unqualified */
+		Assert(list_length(objname) == 1);
+
+		if (strcmp(strVal(linitial(objname)), "bdr") == 0)
+			ereport(ERROR,
+					(errmsg("Dropping the BDR extension is prohibited while BDR is active"),
+					 errhint("Part this node with bdr.part_by_node_names(...) first, or if appropriate use bdr.remove_bdr_from_local_node(...)")));
+	}
+}
+
+static void
 bdr_commandfilter(Node *parsetree,
 				  const char *queryString,
 				  ProcessUtilityContext context,
@@ -857,6 +893,8 @@ bdr_commandfilter(Node *parsetree,
 		case T_DropStmt:
 			{
 				DropStmt   *stmt = (DropStmt *) parsetree;
+
+				prevent_drop_extension_bdr(stmt);
 
 				if (EventTriggerSupportsObjectType(stmt->removeType))
 					break;

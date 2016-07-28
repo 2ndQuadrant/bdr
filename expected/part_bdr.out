@@ -4,6 +4,10 @@
 CREATE SCHEMA "some $SCHEMA";
 CREATE TABLE "some $SCHEMA"."table table table" ("a column" integer);
 CREATE SEQUENCE "some $SCHEMA"."some ""sequence"" name" USING bdr;
+-- Dropping the BDR extension isn't allowed while BDR is active
+DROP EXTENSION bdr;
+ERROR:  Dropping the BDR extension is prohibited while BDR is active
+HINT:  Part this node with bdr.part_by_node_names(...) first, or if appropriate use bdr.remove_bdr_from_local_node(...)
 -- Initial state
 SELECT node_name, node_status FROM bdr.bdr_nodes ORDER BY node_name;
     node_name    | node_status 
@@ -129,6 +133,11 @@ WARNING:  Node node-pg is in state k not expected 'r'. Attempting to remove anyw
  
 (1 row)
 
+-- BDR is parted, but not fully removed, so don't allow the extension
+-- to be dropped yet.
+DROP EXTENSION bdr;
+ERROR:  Dropping the BDR extension is prohibited while BDR is active
+HINT:  Part this node with bdr.part_by_node_names(...) first, or if appropriate use bdr.remove_bdr_from_local_node(...)
 -- Strip BDR from this node entirely and convert global sequences to local.
 SELECT bdr.remove_bdr_from_local_node(true, true);
 WARNING:  forcing deletion of possibly active BDR node
