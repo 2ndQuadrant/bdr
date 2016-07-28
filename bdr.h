@@ -45,8 +45,6 @@
 #define BDR_RESTORE_CMD "pg_restore"
 #define BDR_DUMP_CMD "bdr_dump"
 
-#define BDR_SUPERVISOR_DBNAME "bdr_supervisordb"
-
 /*
  * Don't include libpq here, msvc infrastructure requires linking to libpq
  * otherwise.
@@ -318,8 +316,6 @@ typedef struct BdrWorkerControl
 	uint16       worker_generation;
 	/* Set/unset by bdr_apply_pause()/_replay(). */
 	bool		 pause_apply;
-	/* Is this the first startup of the supervisor? */
-	bool		 is_supervisor_restart;
 	/* Pause worker management (used in testing) */
 	bool		worker_management_paused;
 	/* Latch for the supervisor worker */
@@ -350,7 +346,6 @@ extern Oid	BdrSequenceValuesRelid;
 extern Oid	BdrSequenceElectionsRelid;
 extern Oid	BdrVotesRelid;
 extern Oid	BdrSeqamOid;
-extern Oid  BdrSupervisorDbOid;
 
 /* Structure representing bdr_nodes record */
 typedef struct BDRNodeId
@@ -530,8 +525,6 @@ PGDLLEXPORT extern void bdr_supervisor_worker_main(Datum main_arg);
 
 extern void bdr_bgworker_init(uint32 worker_arg, BdrWorkerType worker_type);
 extern void bdr_supervisor_register(void);
-
-extern Oid bdr_get_supervisordb_oid(bool missing_ok);
 
 extern void bdr_sighup(SIGNAL_ARGS);
 extern void bdr_sigterm(SIGNAL_ARGS);

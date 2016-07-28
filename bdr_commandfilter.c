@@ -54,8 +54,6 @@
 
 static ProcessUtility_hook_type next_ProcessUtility_hook = NULL;
 
-static ClientAuthentication_hook_type next_ClientAuthentication_hook = NULL;
-
 /* GUCs */
 bool bdr_permit_unsafe_commands = false;
 
@@ -702,19 +700,6 @@ allowed_on_read_only_node(Node *parsetree)
 }
 
 static void
-bdr_commandfilter_dbname(const char *dbname)
-{
-	if (strcmp(dbname, BDR_SUPERVISOR_DBNAME) == 0)
-	{
-		ereport(ERROR,
-				(errcode(ERRCODE_RESERVED_NAME),
-				 errmsg("The BDR extension reserves the database name "
-						BDR_SUPERVISOR_DBNAME" for its own use"),
-				 errhint("Use a different database name")));
-	}
-}
-
-static void
 bdr_commandfilter(Node *parsetree,
 				  const char *queryString,
 				  ProcessUtilityContext context,
@@ -728,19 +713,6 @@ bdr_commandfilter(Node *parsetree,
 	/* don't filter in single user mode */
 	if (!IsUnderPostmaster)
 		goto done;
-
-	/* Only permit VACUUM on the supervisordb, if it exists */
-	if (BdrSupervisorDbOid == InvalidOid)
-		BdrSupervisorDbOid = bdr_get_supervisordb_oid(true);
-		
-	if (BdrSupervisorDbOid != InvalidOid
-		&& MyDatabaseId == BdrSupervisorDbOid
-		&& nodeTag(parsetree) != T_VacuumStmt)
-	{
-		ereport(ERROR,
-				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("No commands may be run on the BDR supervisor database")));
-	}
 
 	/* extension contents aren't individually replicated */
 	if (creating_extension)
@@ -815,37 +787,6 @@ bdr_commandfilter(Node *parsetree,
 		case T_CheckPointStmt:
 		case T_ReindexStmt:
 			goto done;
-
-		default:
-			break;
-	}
-
-	/*
-	 * We stop people from creating a DB named BDR_SUPERVISOR_DBNAME if the BDR
-	 * extension is installed because we reserve that name, even if BDR isn't
-	 * actually active.
-	 *
-	 */
-	switch (nodeTag(parsetree))
-	{
-		case T_CreatedbStmt:
-			bdr_commandfilter_dbname(((CreatedbStmt*)parsetree)->dbname);
-			goto done;
-		case T_DropdbStmt:
-			bdr_commandfilter_dbname(((DropdbStmt*)parsetree)->dbname);
-			goto done;
-		case T_RenameStmt:
-			/*
-			 * ALTER DATABASE ... RENAME TO ... is actually a RenameStmt not an
-			 * AlterDatabaseStmt. It's handled here for the database target only
-			 * then falls through for the other rename object type.
-			 */
-			if (((RenameStmt*)parsetree)->renameType == OBJECT_DATABASE)
-			{
-				bdr_commandfilter_dbname(((RenameStmt*)parsetree)->subname);
-				bdr_commandfilter_dbname(((RenameStmt*)parsetree)->newname);
-			}
-			break;
 
 		default:
 			break;
@@ -1120,42 +1061,10 @@ done:
 		bdr_finish_truncate();
 }
 
-static void
-bdr_ClientAuthentication_hook(Port *port, int status)
-{
-	if (MyProcPort->database_name != NULL
-		&& strcmp(MyProcPort->database_name, BDR_SUPERVISOR_DBNAME) == 0)
-	{
-
-		/*
-		 * No commands may be executed under the supervisor database.
-		 *
-		 * This check won't catch execution attempts by bgworkers, but as currently
-		 * database_name isn't set for those. They'd better just know better.  It's
-		 * relatively harmless to run things in the supervisor database anyway.
-		 *
-		 * Make it a warning because of #154. Tools like vacuumdb -a like to
-		 * connect to all DBs.
-		 */
-		ereport(WARNING,
-				(errcode(ERRCODE_RESERVED_NAME),
-				 errmsg("The BDR extension reserves the database "
-						BDR_SUPERVISOR_DBNAME" for its own use"),
-				 errhint("Use a different database")));
-	}
-
-	if (next_ClientAuthentication_hook)
-		next_ClientAuthentication_hook(port, status);
-}
-
-
 /* Module load */
 void
 init_bdr_commandfilter(void)
 {
 	next_ProcessUtility_hook = ProcessUtility_hook;
 	ProcessUtility_hook = bdr_commandfilter;
-
-	next_ClientAuthentication_hook = ClientAuthentication_hook;
-	ClientAuthentication_hook = bdr_ClientAuthentication_hook;
 }
