@@ -87,6 +87,7 @@ typedef struct
 	Oid bdr_schema_oid;
 	Oid bdr_conflict_handlers_reloid;
 	Oid bdr_locks_reloid;
+	Oid bdr_conflict_history_reloid;
 
 	int num_replication_sets;
 	char **replication_sets;
@@ -371,6 +372,7 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 
 	opt->output_type = OUTPUT_PLUGIN_BINARY_OUTPUT;
 
+	data->bdr_conflict_history_reloid = InvalidOid;
 	data->bdr_conflict_handlers_reloid = InvalidOid;
 	data->bdr_locks_reloid = InvalidOid;
 	data->bdr_schema_oid = InvalidOid;
@@ -610,9 +612,17 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 				elog(DEBUG1, "bdr.bdr_conflict_handlers OID set to %u",
 					 data->bdr_conflict_handlers_reloid);
 
+			data->bdr_conflict_history_reloid =
+				get_relname_relid("bdr_conflict_history", schema_oid);
+
+			if (data->bdr_conflict_history_reloid == InvalidOid)
+				elog(ERROR, "cache lookup for relation bdr.bdr_conflict_history failed");
+
 			data->bdr_locks_reloid =
 				get_relname_relid("bdr_global_locks", schema_oid);
-			Assert(data->bdr_locks_reloid != InvalidOid); /* FIXME */
+
+			if (data->bdr_locks_reloid == InvalidOid)
+				elog(ERROR, "cache lookup for relation bdr.bdr_locks failed");
 		}
 		else
 			elog(WARNING, "cache lookup for schema bdr failed");
@@ -680,7 +690,8 @@ should_forward_change(LogicalDecodingContext *ctx, BdrOutputData *data,
 {
 	/* internal bdr relations that may not be replicated */
 	if (RelationGetRelid(r->rel) == data->bdr_conflict_handlers_reloid ||
-		RelationGetRelid(r->rel) == data->bdr_locks_reloid)
+		RelationGetRelid(r->rel) == data->bdr_locks_reloid ||
+		RelationGetRelid(r->rel) == data->bdr_conflict_history_reloid)
 		return false;
 
 	/*
