@@ -51,6 +51,7 @@ lib*.pc
 /extsql/bdr--0.[89].?.?.sql
 /extsql/bdr--0.1?.0.?.sql
 /extsql/bdr--0.1?.0.??.sql
+/extsql/bdr--1.0.?.?.sql
 /Makefile.global
 /doc/Makefile
 # Packages
