@@ -42,6 +42,12 @@ SELECT bdr.bdr_part_by_node_names(ARRAY['node-pg']);
  
 (1 row)
 
+SELECT bdr.bdr_is_active_in_db();
+ bdr_is_active_in_db 
+---------------------
+ t
+(1 row)
+
 -- Wait 'till all connections gone...
 DO
 $$
@@ -138,6 +144,12 @@ WARNING:  Node node-pg is in state k not expected 'r'. Attempting to remove anyw
 DROP EXTENSION bdr;
 ERROR:  Dropping the BDR extension is prohibited while BDR is active
 HINT:  Part this node with bdr.part_by_node_names(...) first, or if appropriate use bdr.remove_bdr_from_local_node(...)
+SELECT bdr.bdr_is_active_in_db();
+ bdr_is_active_in_db 
+---------------------
+ t
+(1 row)
+
 -- Strip BDR from this node entirely and convert global sequences to local.
 SELECT bdr.remove_bdr_from_local_node(true, true);
 WARNING:  forcing deletion of possibly active BDR node
@@ -147,6 +159,12 @@ NOTICE:  BDR removed from this node. You can now DROP EXTENSION bdr and, if this
  remove_bdr_from_local_node 
 ----------------------------
  
+(1 row)
+
+SELECT bdr.bdr_is_active_in_db();
+ bdr_is_active_in_db 
+---------------------
+ f
 (1 row)
 
 -- Should be able to drop the extension now

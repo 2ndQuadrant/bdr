@@ -28,6 +28,8 @@ SELECT node_name, node_status FROM bdr.bdr_nodes ORDER BY node_name;
 -- This part should successfully remove the node
 SELECT bdr.bdr_part_by_node_names(ARRAY['node-pg']);
 
+SELECT bdr.bdr_is_active_in_db();
+
 -- Wait 'till all connections gone...
 DO
 $$
@@ -97,8 +99,12 @@ SELECT bdr.bdr_part_by_node_names(ARRAY['node-pg']);
 -- to be dropped yet.
 DROP EXTENSION bdr;
 
+SELECT bdr.bdr_is_active_in_db();
+
 -- Strip BDR from this node entirely and convert global sequences to local.
 SELECT bdr.remove_bdr_from_local_node(true, true);
+
+SELECT bdr.bdr_is_active_in_db();
 
 -- Should be able to drop the extension now
 --

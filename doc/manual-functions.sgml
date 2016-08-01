@@ -129,6 +129,22 @@
        </entry>
       </row>
 
+      <row id="function-bdr-is-active-in-db" xreflabel="bdr.bdr_is_active_in_db()">
+       <entry>
+        <indexterm>
+         <primary>bdr.bdr_is_active_in_db</primary>
+        </indexterm>
+        <literal><function>bdr.bdr_is_active_in_db()</function></literal>
+       </entry>
+       <entry>boolean</entry>
+       <entry>
+        Report whether the current database has BDR active. Will be true if BDR is
+        configured, whether or not there are active connections or any peer nodes
+        added yet. Also true on a parted node until/unless
+        <xref linkend="function-bdr-remove-bdr-from-local-node"> is called.
+       </entry>
+      </row>
+
       <row>
        <entry>
         <indexterm>

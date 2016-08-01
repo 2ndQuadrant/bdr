@@ -1398,3 +1398,12 @@ bdr_pause_worker_management(PG_FUNCTION_ARGS)
 
 	PG_RETURN_VOID();
 }
+
+/*
+ * Report whether BDR is active on the DB.
+ */
+Datum
+bdr_is_active_in_db(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_BOOL(bdr_is_bdr_activated_db(MyDatabaseId));
+}

@@ -1,4 +1,10 @@
 \c postgres
+SELECT bdr.bdr_is_active_in_db();
+ bdr_is_active_in_db 
+---------------------
+ f
+(1 row)
+
 SELECT bdr.bdr_group_create(
 	local_node_name := 'node-pg',
 	node_external_dsn := 'dbname=postgres',
@@ -12,13 +18,31 @@ HINT:  Drop the secondary unique constraint(s), change the table(s) to UNLOGGED 
  
 (1 row)
 
+SELECT bdr.bdr_is_active_in_db();
+ bdr_is_active_in_db 
+---------------------
+ t
+(1 row)
+
 SELECT bdr.bdr_node_join_wait_for_ready();
  bdr_node_join_wait_for_ready 
 ------------------------------
  
 (1 row)
 
+SELECT bdr.bdr_is_active_in_db();
+ bdr_is_active_in_db 
+---------------------
+ t
+(1 row)
+
 \c regression
+SELECT bdr.bdr_is_active_in_db();
+ bdr_is_active_in_db 
+---------------------
+ f
+(1 row)
+
 SELECT bdr.bdr_group_join(
 	local_node_name := 'node-regression',
 	node_external_dsn := 'dbname=regression',
@@ -31,10 +55,22 @@ SELECT bdr.bdr_group_join(
  
 (1 row)
 
+SELECT bdr.bdr_is_active_in_db();
+ bdr_is_active_in_db 
+---------------------
+ t
+(1 row)
+
 SELECT bdr.bdr_node_join_wait_for_ready();
  bdr_node_join_wait_for_ready 
 ------------------------------
  
+(1 row)
+
+SELECT bdr.bdr_is_active_in_db();
+ bdr_is_active_in_db 
+---------------------
+ t
 (1 row)
 
 -- Make sure we see two slots and two active connections
