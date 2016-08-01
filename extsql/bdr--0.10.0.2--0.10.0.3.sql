@@ -3,7 +3,10 @@ SET bdr.permit_unsafe_ddl_commands = true;
 SET bdr.skip_ddl_replication = true;
 
 -- Read-only node support
-ALTER TABLE bdr.bdr_nodes ADD COLUMN node_read_only boolean DEFAULT false;
+--
+-- Existing entries are left null.
+ALTER TABLE bdr.bdr_nodes ADD COLUMN node_read_only boolean;
+ALTER TABLE bdr.bdr_nodes ALTER COLUMN node_read_only DEFAULT false;
 
 CREATE FUNCTION bdr.bdr_node_set_read_only(
     node_name text,

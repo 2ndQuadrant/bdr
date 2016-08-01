@@ -1,2 +1,3 @@
--- There are no extension schema changes in this release,
--- it just relabels 0.10.0.11 to 1.0.0.0
+CREATE FUNCTION bdr.bdr_is_active_in_db()
+RETURNS boolean LANGUAGE c
+AS 'MODULE_PATHNAME','bdr_is_active_in_db';
