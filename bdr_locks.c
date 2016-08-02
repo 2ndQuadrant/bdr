@@ -33,7 +33,7 @@
  *       it'll ERROR out, as this indicates another node already holds or is
  *       trying to acquire the global DDL lock.
  *
- *	  2) It sends out a 'acquire_lock' message to all other nodes.
+ *    2) It sends out a 'acquire_lock' message to all other nodes.
  *
  *    3) When another node receives a 'acquire_lock' message it checks whether
  *       the local ddl lock is already held. If so it'll send a 'decline_lock'
@@ -43,10 +43,11 @@
  *       held it'll be acquired and an entry into the 'bdr_global_locks' table
  *       will be made marking the lock to be in the 'catchup' phase.
  *
- *    5) All concurrent user transactions will be cancelled.
+ *    5) All concurrent user transactions will be cancelled (after a grace period,
+ *       and if DML write cancel is required for this lock type).
  *
- *	  6) A 'request_replay_confirm' message will be sent to all other nodes
- *	     containing a lsn that has to be replayed.
+ *    6) A 'request_replay_confirm' message will be sent to all other nodes
+ *       containing a lsn that has to be replayed.
  *
  *    7) When a 'request_replay_confirm' message is received, a
  *       'replay_confirm' message will be sent back.
