@@ -4,12 +4,84 @@
   <primary>Upgrading BDR</primary>
  </indexterm>
 
- <para>
-  Documentation for the process of upgrading &bdr; from 0.7.x or 0.8.x to the current-at-time-of-writing 0.9.x release is currently under development.
- </para>
- 
- <para>
-  See also: <xref linkend="functions-upgrade">.
- </para>
+ <sect1>
+  <title>Upgrading BDR 0.9.x to 1.0</title>
+
+  <para>
+   Upgrading BDR 0.9.x to 1.0 may be done without a full outage maintenance
+   window. Each node will need to be restarted, but this can be done with
+   rolling restarts to preserve system availability. Normal loads may continue
+   to run on the nodes, but DDL should be avoided since the global DDL lock
+   may not be acquired while one or more nodes are unreachable.
+  </para>
+
+  <para>
+   BDR 1.0.0 cannot join a BDR 0.9.3 group, so upgrades may not be performed
+   by adding new nodes and retiring the old ones. Attempting to join 1.0.0 to
+   a 0.9.3 node will fail.
+  </para>
+
+  <para>
+   BDR cannot be downgraded from 1.0.0 to a 0.9.x release since the BDR
+   extension catalogs have changed.
+  </para>
+
+  <para>
+   To upgrade 0.9.x to 10.0.0 the extension must be updated and the database
+   server restarted. You may complete the upgrade steps on one node before
+   starting on the next node or perform the steps in parallel across all nodes
+   at once.
+   <itemizedlist>
+    <listitem><para>If the node is not yet running at least BDR-postgres 9.4.8, install BDR-postgres 9.4.8</para></listitem>
+    <listitem><para>Stop the node by shutting down PostgreSQL</para></listitem>
+    <listitem><para>Install the BDR 1.0 extension from packages or source code</para></listitem>
+    <listitem><para>Start the node by starting PostgreSQL again</para></listitem>
+   </itemizedlist>
+   It is <emphasis>not</emphasis> necessary to <literal>ALTER EXTENSION bdr</literal>
+   after starting back up. The BDR extension self-upgrades during startup when a new
+   version is detected. A PostgreSQL restart <emphasis>must</emphasis> be
+   performed; if you attempt to upgrade the extension without a restart BDR
+   will not work because the BDR version loaded in
+   <literal>shared_preload_libraries</literal> will not match the extension
+   schema and catalogs.
+  </para>
+
+  <para>
+   You may install the bdr-patched PostgreSQL and BDR extension updates from source code
+   or packages, just like an initial install. You should use the same method you
+   used for the intial install; don't try to switch from source code to packages
+   or vice versa.
+  </para>
+
+  <para>
+   No post-upgrade steps are required.
+  </para>
+
+  <para>
+   To check that the upgrade has completed successfully, on each node:
+   <programlisting>
+   SELECT bdr.bdr_version(), (SELECT extversion FROM pg_extension WHERE extname = 'bdr') AS extversion
+   </programlisting>
+   and confirm that both version numbers shown are 1.0.0. Typical output looks like:
+   <programlisting>
+   bdr_testdb=# SELECT bdr.bdr_version(), (SELECT extversion FROM pg_extension WHERE extname = 'bdr') AS extversion;
+          bdr_version        | extversion 
+   --------------------------+------------
+    1.0.0-2016-08-01-3b785b4 | 1.0.0.0
+   (1 row)
+   </programlisting>
+  </para>
+
+ </sect1>
+
+ <sect1>
+  <title>Upgrading 0.8.x to 1.0</title>
+
+  <para>
+   First, upgrade to 0.9.3, then follow the 0.9.3 to 1.0.0 upgrade steps given above.
+   See the manual for 0.9.3 for upgrade steps.
+  </para>
+
+ </sect1>
 
 </chapter>
