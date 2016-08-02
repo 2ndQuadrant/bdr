@@ -53,7 +53,8 @@
    Otherwise it is possible that a row being replicated contains data
    for a row that has been dropped, or has no data for a row that is
    marked <literal>NOT NULL</literal>. More complex cases also exist.  To handle
-   this problem, &bdr; acquires a so-called DDL lock the first time in a
+   this problem, &bdr; acquires a so-called <link
+   linkend="ddl-replication-locking">DDL lock</link> the first time in a
    transaction where schema changes are made.
   </para>
 
@@ -69,60 +70,178 @@
 
   <para>
    This means that schema changes, unlike with data changes, can
-   only be performed while all configured nodes are reachable. If DDL
-   has to be performed while a node is down, it has to be removed from
+   only be performed while all configured nodes are reachable and keeping
+   up reasonably well with the current write rate. If DDL absolutely must
+   be performed while a node is down, it has to be removed from
    the configuration (using <xref linkend="function-bdr-part-by-node-names">)
-   first.
+   first. (Once removed, a node cannot be added back; it must be decomissioned
+   and a new node joined in its place.)
   </para>
 
-  <para>
-   DDL is a heavier weight operation than on standalone
-   PostgreSQL. Performing DDL on any node will cancel (abort) currently running
-   transactions <emphasis>on all nodes</emphasis> with an <literal>ERROR</literal>,
-   and will reject new DML (<literal>INSERT</literal>,
-   <literal>UPDATE</literal> and <literal>DELETE</literal> on all nodes with
-   an <literal>ERROR</literal> with <literal>SQLSTATE</literal>
-   <literal>55P03</literal>:
-   <programlisting>
-    ERROR: Database is locked against DDL operations
-   </programlisting>
-   This continues until the DDL operation has replicated to all nodes, been
-   applied, and all nodes have confirmed to the DDL originator that the changes
-   have been applied. <emphasis>All DDL and DML will <literal>ERROR</literal>,
-   even if it does not affect the objects the currently in-progress DDL
-   is modifying.</emphasis>
-  </para>
+  <sect2 id="ddl-replication-locking">
+   <title>The DDL lock</title>
 
-  <para>
-   Because DDL is disruptive in &bdr;, transactions can't do DDL
-   that requires a heavy global lock by default. This is controlled
-   by the <xref linkend="guc-bdr-permit-ddl-locking"> setting. If
-   set to <literal>false</literal> (the default), any command that would
-   acquire the global DDL lock is rejected with an
-   <literal>ERROR</literal> instead. This helps prevent unintended global
-   DDL lock acquisitions.
-  </para>
+    <para>
+     DDL is a heavier weight operation than on standalone
+     PostgreSQL. Performing DDL on any node will acquire a "global DDL lock". 
+     This causes new transactions that attempt write operations <emphasis>on any
+     node</emphasis> to pause (block) until the DDL lock is released or canceled.
+     Existing write transactions will be given a grace period (controlled by
+     <xref linkend="guc-bdr-max_ddl_lock_delay">) to complete and aborted
+     (canceled) if they don't complete within the grace period, with the error:
+     <programlisting>
+FATAL:  terminating connection due to conflict with recovery
+DETAIL:  User was holding a relation lock for too long.
+     </programlisting>
+    </para>
 
-  <para>
-   To minimise the impact of DDL, transactions performing DDL should be short,
-   should not be combined with lots of row changes, and should avoid long
-   running foreign key lookups.
-  </para>
+    <para>
+     New writes continue to be blocked until the DDL operation has replicated to
+     all nodes, been applied, and all nodes have confirmed to the DDL originator
+     that the changes have been applied. Or until the transaction performing the
+     DDL is canceled (aborted) by the user or administrator. <emphasis>All
+     writes will be blocked, even if it does not affect the objects the
+     currently in-progress DDL is modifying.</emphasis>
+    </para>
 
-  <para>
-   If DDL is holding the system up for too long, it is possible and safe to
-   cancel the DDL on the originating node like you would cancel any other
-   statement, e.g. with <literal>Control-C</literal> in
-   <application>psql</application> or with
-   <function>pg_cancel_backend</function>.
-  </para>
+    <para>
+     While <emphasis>any</emphasis> transaction on any node holds the DDL lock,
+     all DDL from any other transaction on any node will immediately
+     <literal>ERROR</literal> with an error like:
+     <programlisting>
+ERROR:  database is locked against ddl by another node
+HINT:  Node (6313760193895071967,1,16385) in the cluster is already performing DDL
+     </programlisting>
+     There is no grace period for conflicting DDL (schema changes), only DML (row
+     writes).
+    </para>
 
-  <para>
-   Once the DDL operation has committed on the originating node, you cannot
-   cancel or abort it. You must wait for it to apply successfully on all
-   other nodes and for them to replay confirmation. This is why it is important
-   to keep DDL transactions short and fast.
-  </para>
+    <para>
+     If the transaction holding the DDL lock is taking too long to complete,
+     or the DDL lock acquisition is getting stuck because of replication
+     delays or down nodes, you can cancel the transaction that's acquiring the
+     lock. Just <function>pg_terminate_backend()</function> the backend
+     that's taking/holding the DDL lock. It's all crash-safe.
+    </para>
+
+    <sect3 id="ddl-replication-locking-howworks" xreflabel="How DDL locking works">
+     <title>How the DDL lock works</title>
+
+     <para>
+      If you don't care how the global DDL lock works you can skip this section,
+      but understanding it will be useful when you're diagnosing issues.
+     </para>
+
+     <para>
+      There are two levels to the DDL lock: the global DDL lock, which only one node
+      at a time may hold, and the local DDL lock, which each node has separately.
+      When the global DDL lock is held then all the local DDL locks are held too.
+     </para>
+
+     <para>
+      The (somewhat simplified) process of DDL lock acquision is:
+     </para>
+
+     <orderedlist>
+      <listitem><para>A normal user backend attempts something that requires the DDL lock</para></listitem>
+      <listitem><para>The BDR command filter notices that the DDL lock is needed, pauses the user's command, and requests that the local BDR node acquire the global DDL lock</para></listitem>
+      <listitem><para>The local BDR node acquires its own local DDL lock. It will now reject any incoming lock requests from other nodes, cancel write transactions if needed, and pause new write transactions if needed.</para></listitem>
+      <listitem><para>The local DDL node writes a message in its replicaiton stream to ask every other node to take their local DDL locks and reply to confirm they've done so</para></listitem>
+      <listitem><para>Every node that gets the request acquires the local DDL lock to prevent concurrent DDL and writes, then checks with every other node to see that they've all replayed all outstanding changes from each other</para></listitem>
+      <listitem><para>When a node confirms all its peers have fully replayed its pending replication stream it replies to the lock requestor to say the lock is granted</para></listitem>
+      <listitem><para>When all peers have confirmed lock acquisition, the requesting node knows it now holds the global DDL lock</para></listitem>
+      <listitem><para>The requesting node makes the required schema changes</para></listitem>
+      <listitem><para>The requesting node writes the fact that it's done with the DDL lock to its WAL in the form of a lock release message</para></listitem>
+      <listitem><para>The requesting node releases its local DDL lock and resumes normal write operations</para></listitem>
+      <listitem><para>The other nodes replay the lock release message and release their local DDL locks, resuming normal write operations</para></listitem>
+     </orderedlist>
+
+     <para>
+      Critically, this means that <emphasis>every BDR node must complete a
+      two-way communication with every other BDR node before the DDL lock can
+      be granted</emphasis>. This communication is done via the replication
+      stream, so replication lag and delays, network slowness or outages, etc
+      in turn delay the DDL locking process. While the system is in the process
+      of acquiring the DDL lock, many nodes will hold their local DDL locks and
+      will be rejecting other DDL requests or, if the lock mode requires,
+      rejecting writes.
+     </para>
+
+     <para>
+      This means that schema changes and anything else that takes the DDL
+      lock should only be performed when all nodes are reachable and there
+      isn't a big replication delay between any pair of nodes.
+     </para>
+
+     <para>
+      It also means that if the system gets stuck waiting for a down node,
+      everything stops while we wait.
+     </para>
+     
+     <para>
+      If the DDL lock request is canceled by the requesting node, all the other
+      reachable nodes will release their locks. So if your system is hung up
+      on a DDL lock request that's making no progress you can just cancel the
+      statement that's requesting the DDL lock and everything will resume normal
+      operation.
+     </para>
+
+    </sect3>
+
+  </sect2>
+
+  <sect2 id="ddl-replication-safety" xreflabel="Minimisng impact of DDL">
+   <title>Minimising the impact of DDL</title>
+
+    <para>
+     To minimise the impact of DDL, transactions performing DDL should be short,
+     should not be combined with lots of row changes, and should avoid long
+     running foreign key lookups.
+    </para>
+
+    <para>
+     If DDL is holding the system up for too long, it is possible and safe to
+     cancel the DDL on the originating node like you would cancel any other
+     statement, e.g. with <literal>Control-C</literal> in
+     <application>psql</application> or with
+     <function>pg_cancel_backend</function>.
+    </para>
+
+    <para>
+     Once the DDL operation has committed on the originating node, you cannot
+     cancel or abort it. You must wait for it to apply successfully on all
+     other nodes and for them to replay confirmation. This is why it is important
+     to keep DDL transactions short and fast.
+    </para>
+
+    <para>
+     Because DDL is disruptive in &bdr;, it's possible to configure the system
+     so that transactions can't do DDL
+     that requires a heavy global lock by default. This is controlled
+     by the <xref linkend="guc-bdr-permit-ddl-locking"> setting. If
+     set to <literal>false</literal>, any command that would
+     acquire the global DDL lock is rejected with an
+     <literal>ERROR</literal> instead. This helps prevent unintended global
+     DDL lock acquisitions. You can make this the default for a database,
+     user or group with
+     <programlisting>
+ ALTER ROLE username SET bdr.permit_ddl_locking = false;
+     </programlisting>
+     or
+     <programlisting>
+ ALTER DATABASE dbname SET bdr.permit_ddl_locking = false;
+     </programlisting>
+     or set it globally in <filename>postgresql.conf</filename>. Then
+     when you intend to perform disruptive DDL, explicitly permit it:
+     <programlisting>
+BEGIN;
+SET LOCAL bdr.permit_ddl_locking = true;
+-- Do your schema changes here
+COMMIT;
+     </programlisting>
+    </para>
+
+  </sect2>
 
  </sect1>
 

@@ -88,7 +88,7 @@ SELECT count(1) FROM (
 WHERE node_name IS NULL;
  count 
 -------
-     0
+     1
 (1 row)
 
 -- Check to see if we can get the local node name

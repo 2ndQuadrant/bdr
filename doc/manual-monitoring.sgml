@@ -235,6 +235,46 @@
 
  </sect1>
 
+ <sect1 id="monitoring-ddl-lock" xreflabel="Monitoring global DDL locks">
+  <title>Monitoring global DDL locks</title>
+
+  <para>
+   The global DDL lock, used in <xref linkend="ddl-replication">, can cancel and/or
+   block concurrent writes and other DDL. So it can be important to determine what
+   is taking the lock, whether it holds it or is still trying to acquire it, and
+   how long it's been trying or has held the lock.
+  </para>
+
+  <para>
+   DDL locking activity can be traced using the <xref
+   linkend="guc-bdr-trace-ddl-locks-level"> setting using the PostgreSQL
+   log files, which provides the most complete and useful way to see DDL
+   locking activity. It is strongly recommended that you enable DDL lock
+   tracing.
+  </para>
+
+  <para>
+   The <xref linkend="catalog-bdr-global-locks"> catalog also provides some
+   visibility into DDL locking state. When a DDL lock is held, the node that
+   holds the DDL lock will <emphasis>not</emphasis> have any row in this table.
+   The other nodes will all have single-row entries like:
+   <programlisting>
+bdr_testdb=# select * from bdr.bdr_global_locks ;
+locktype |    owning_sysid     | owning_timeline | owning_datid | owner_created_lock_at |   acquired_sysid    | acquired_timeline | acquired_datid | acquired_lock_at |  state   
+----------+---------------------+-----------------+--------------+-----------------------+---------------------+-------------------+----------------+------------------+----------
+ ddl_lock | 6313760379784308337 |               1 |        16385 | 1DC11/2CEB874C        | 6313760193895071967 |                 1 |          16385 |                  | acquired
+ (1 row)
+   </programlisting>
+   which indicate the node that holds the lock or is trying to acquire the lock.
+  </para>
+
+  <para>
+   See <xref linkend="ddl-replication-locking"> for more detail on how the
+   global DDL lock works.
+  </para>
+
+ </sect1>
+
  <sect1 id="monitoring-conflict-stats" xreflabel="Monitoring conflicts">
   <title>Monitoring conflicts</title>
 

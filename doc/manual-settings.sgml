@@ -270,6 +270,99 @@
      </listitem>
     </varlistentry>
 
+     <varlistentry id="guc-bdr-max_ddl_lock_delay" xreflabel="bdr.max_ddl_lock_delay">
+      <term><varname>bdr.max_ddl_lock_delay</varname> (<type>milliseconds</type>)
+       <indexterm>
+        <primary><varname>bdr.max_ddl_lock_delay</varname> configuration parameter</primary>
+       </indexterm>
+      </term>
+      <listitem>
+       <para>
+        Controls how long a DDL lock attempt can wait for concurrent write transactions
+	to commit or roll back before it forcibly aborts them.
+	<literal>-1</literal> (the default) uses the value of
+	<literal>max_standby_streaming_delay</literal>. Can be set with time units
+	like <literal>'10s'</literal>. See <xref linkend="ddl-replication-locking">.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry id="guc-bdr-ddl-lock-timeout" xreflabel="bdr.ddl_lock_timeout">
+      <term><varname>bdr.ddl_lock_timeout</varname> (<type>milliseconds</type>)
+       <indexterm>
+        <primary><varname>bdr.ddl_lock_timeout</varname> configuration parameter</primary>
+       </indexterm>
+      </term>
+      <listitem>
+       <para>
+	Controls how long a DDL lock attempt can wait to acquire the lock. The
+	default value <literal>-1</literal> (the default) uses the value of
+	<literal>lock_timeout</literal>. Can be set with time units like
+	<literal>'10s'</literal>. See <xref linkend="ddl-replication-locking">.
+	Note that once the DDL lock is acquired and the DDL operation begins
+	this timer stops ticking; it doesn't limit the overall duration a DDL
+	lock may be held, only how long a transaction can wait for one to
+	be acquired. To limit overall duration use a
+	<literal>statement_timeout</literal>.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry id="guc-bdr-permit-ddl-locking" xreflabel="bdr.permit_ddl_locking">
+      <term><varname>bdr.permit_ddl_locking</varname> (<type>boolean</type>)
+       <indexterm>
+        <primary><varname>bdr.permit_ddl_locking</varname> configuration parameter</primary>
+       </indexterm>
+      </term>
+      <listitem>
+       <para>
+        Allow sessions to run DDL commands that acquire the global DDL lock. See
+        <xref linkend="ddl-replication"> for details on the DDL lock. Setting this
+        to off by default means that unintended DDL that can be disruptive to
+        production is prevented.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry id="guc-bdr-trace-ddl-locks-level" xreflabel="bdr.trace_ddl_locks_level">
+      <term><varname>bdr.trace_ddl_locks_level</varname> (<type>boolean</type>)
+       <indexterm>
+        <primary><varname>bdr.trace_ddl_locks_level</varname> configuration parameter</primary>
+       </indexterm>
+      </term>
+      <listitem>
+       <para>
+        Override the default debug log level for BDR DDL locking (used in 
+	<xref linkend="ddl-replication">) so that
+        DDL-lock related messages are emitted at the LOG debug level instead.
+        This can be used to trace DDL locking activity on the system without
+        having to configure the extremely verbose DEBUG1 or DEBUG2 log levels
+        for the whole server.
+       </para>
+       <para>
+        In increasing order of verbosity, settings are <literal>none</literal>,
+        <literal>statement</literal>, <literal>acquire_release</literal>,
+        <literal>peers</literal> and <literal>debug</literal>. At <literal>
+        none</literal> level DDL lock messages are only emitted at DEBUG1 and
+        lower server log levels. <literal>statement</literal> adds
+        <literal>LOG</literal> output whenever a statement causes an attempt to
+        acquire a DDL lock. <literal>acquire_release</literal> also records
+        when the lock is actually acquired and when it's subsequently released,
+        or if it's declined, and records when peer nodes apply a remote DDL lock.
+        <literal>peer</literal> adds more detail about the negotiation between
+        peer nodes for DDL locks, and <literal>debug</literal> forces everything
+        DDL-lock-related to be logged at <literal>LOG</literal> level.
+       </para>
+       <para>
+        Changes take effect on server configuration reload, a restart is not
+        required.
+       </para>
+       <para>
+        See also <xref linkend="monitoring-ddl-lock">.
+       </para>
+      </listitem>
+     </varlistentry>
+
    </variablelist>
 
   </para>
@@ -317,22 +410,6 @@
          replication setups.
         </para>
        </warning>
-      </listitem>
-     </varlistentry>
-
-     <varlistentry id="guc-bdr-permit-ddl-locking" xreflabel="bdr.permit_ddl_locking">
-      <term><varname>bdr.permit_ddl_locking</varname> (<type>boolean</type>)
-       <indexterm>
-        <primary><varname>bdr.permit_ddl_locking</varname> configuration parameter</primary>
-       </indexterm>
-      </term>
-      <listitem>
-       <para>
-        Allow sessions to run DDL commands that acquire the global DDL lock. See
-        <xref linkend="ddl-replication"> for details on the DDL lock. Setting this
-        to off by default means that unintended DDL that can be disruptive to
-        production is prevented.
-       </para>
       </listitem>
      </varlistentry>
 
@@ -432,41 +509,6 @@
          and <literal>VERBOSE_DELETE</literal> defined if you want row values.
         </para>
        </note>
-      </listitem>
-     </varlistentry>
-
-     <varlistentry id="guc-bdr-trace-ddl-locks-level" xreflabel="bdr.trace_ddl_locks_level">
-      <term><varname>bdr.trace_ddl_locks_level</varname> (<type>boolean</type>)
-       <indexterm>
-        <primary><varname>bdr.trace_ddl_locks_level</varname> configuration parameter</primary>
-       </indexterm>
-      </term>
-      <listitem>
-       <para>
-        Override the default debug log level for BDR DDL locking so that
-        DDL-lock related messages are emitted at the LOG debug level instead.
-        This can be used to trace DDL locking activity on the system without
-        having to configure the extremely verbose DEBUG1 or DEBUG2 log levels
-        for the whole server.
-       </para>
-       <para>
-        In increasing order of verbosity, settings are <literal>none</literal>,
-        <literal>statement</literal>, <literal>acquire_release</literal>,
-        <literal>peers</literal> and <literal>debug</literal>. At <literal>
-        none</literal> level DDL lock messages are only emitted at DEBUG1 and
-        lower server log levels. <literal>statement</literal> adds
-        <literal>LOG</literal> output whenever a statement causes an attempt to
-        acquire a DDL lock. <literal>acquire_release</literal> also records
-        when the lock is actually acquired and when it's subsequently released,
-        or if it's declined, and records when peer nodes apply a remote DDL lock.
-        <literal>peer</literal> adds more detail about the negotiation between
-        peer nodes for DDL locks, and <literal>debug</literal> forces everything
-        DDL-lock-related to be logged at <literal>LOG</literal> level.
-       </para>
-       <para>
-        Changes take effect on server configuration reload, a restart is not
-        required.
-       </para>
       </listitem>
      </varlistentry>
 

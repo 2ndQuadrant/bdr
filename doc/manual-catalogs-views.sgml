@@ -50,6 +50,76 @@
 
  </sect1>
 
+ <sect1 id="catalog-bdr-connections" xreflabel="bdr.bdr_connections">
+  <title>bdr.bdr_connections</title>
+
+  <para>
+   The <literal>bdr.bdr_connections</literal> table keeps track of the
+   connection strings used for each node to connect to each other node.
+  </para>
+
+  <warning>
+   <para>
+    Do not directly modify <literal>bdr.bdr_connections</literal>. Use the provided
+    node management functions instead. See <xref linkend="functions-node-mgmt">.
+   </para>
+  </warning>
+
+  <!-- TODO: column definitions, copy from wiki -->
+
+ </sect1>
+
+ <sect1 id="catalog-bdr-node-slots" xreflabel="bdr.bdr_node_slots">
+  <title>bdr.bdr_node_slots</title>
+
+  <para>
+   The <literal>bdr.bdr_node_slots</literal> view provides a convenient
+   way to see which replication slots map to which nodes on a machine,
+   as well as the current activity of those replication slots.
+  </para>
+
+  <para>
+   It is a convenience join on <literal>bdr.bdr_nodes</literal>,
+   <literal>pg_catalog.pg_stat_replication</literal>
+   and <literal>bdr.pg_replication_slots</literal>, showing
+   which nodes have which slots, their current walsender activity
+   and their replay positions.
+  </para>
+
+  <para>
+   The columns are all the same as the corresponding columns in the
+   originating tables. An example listing might look like:
+   <programlisting>
+ node_name |                slot_name                | slot_restart_lsn | slot_confirmed_lsn | walsender_active | walsender_pid | sent_location | write_location | flush_location | replay_location 
+-----------+-----------------------------------------+------------------+--------------------+------------------+---------------+---------------+----------------+----------------+-----------------
+ nodeA     | bdr_16385_6313760193895071967_1_16385__ | 0/1A7E680        | 0/1A7E6B8          | t                |         12359 | 0/1A7E6B8     | 0/1A7E6B8      | 0/1A7E6B8      | 0/1A7E6B8
+ nodeC     | bdr_16385_6313760468754622756_1_16385__ | 0/1A7E680        | 0/1A7E6B8          | t                |         12360 | 0/1A7E6B8     | 0/1A7E6B8      | 0/1A7E6B8      | 0/1A7E6B8
+(2 rows)
+   </programlisting>
+   Note that <literal>slot_restart_lsn</literal> and
+   <literal>slot_confirmed_lsn</literal> are the <literal>restart_lsn</literal>
+   and <literal>confirmed_flush_lsn</literal> properties from
+   <literal>pg_replication_slots</literal>. The other lsn properties are from
+   <literal>pg_stat_replication</literal> and, along with the
+   <literal>walsender_pid</literal>, will be null if there's no currently
+   active replication connection for this slot.
+  </para>
+
+  <para>
+   If you want more detail from any of the joined tables, either modify the underlying
+   query obtained with <literal>SELECT pg_get_viewdef('bdr.bdr_node_slots')</literal>
+   or (preferably) join on the table(s) of interest to add more columns, using the node
+   name, slot name, or pid as the key as appropriate.
+  </para>
+
+  <para>
+   For more on the use of this view, see <xref linkend="monitoring">.
+  </para>
+
+  <!-- TODO: column definitions, copy from wiki -->
+
+ </sect1>
+
  <sect1 id="catalog-pg-stat-bdr" xreflabel="bdr.pg_stat_bdr">
   <title>bdr.pg_stat_bdr</title>
 
@@ -101,7 +171,7 @@
 
  </sect1>
 
- <sect1 id="catalog-bdr-repliation-set-config" xreflabel="bdr.bdr_replication_set_config">
+ <sect1 id="catalog-bdr-replication-set-config" xreflabel="bdr.bdr_replication_set_config">
   <title>bdr.bdr_replication_set_config</title>
 
   <para>
@@ -110,6 +180,137 @@
    and <literal>DELETE</literal> operations so that it selectively replicates only one or more
    operation types. See <xref linkend="replication-sets-changetype">.
   </para>
+
+ </sect1>
+
+ <sect1 id="catalog-bdr-conflict-handlers" xreflabel="bdr.bdr_conflict_handlers">
+  <title>bdr.bdr_conflict_handlers</title>
+
+  <para>
+   <literal>bdr.bdr_conflict_handlers</literal> manages user-defined conflict handlers;
+   see <xref linkend="conflicts-user-defined-handlers">. Do not modify this table
+   directly.
+  </para>
+
+  <!-- TODO: column definitions, example content -->
+ </sect1>
+
+ <sect1 id="catalog-bdr-global-locks" xreflabel="bdr.bdr_global_locks">
+  <title>bdr.bdr_global_locks</title>
+
+  <para>
+   <literal>bdr.bdr_global_locks</literal> is an implementation detail for BDR's global
+   DDL locking mechanism. See <xref linkend="ddl-replication"> and <xref linkend="monitoring">.
+   <emphasis>Do not modify this table directly.</emphasis>
+  </para>
+
+  <para>
+   Note that a <literal>state</literal> of <literal>acquired</literal> only indicates
+   successful acquisition of the lock <emphasis>on this node</emphasis>; other nodes
+   may still be trying to acquire their local DDL lock in response to a global
+   DDL lock request, so it might not be granted yet. Details on how this table
+   works can be found in the comments at the start of the source file
+   <filename>bdr_locks.c</filename>.
+  </para>
+
+  <para>
+   See <xref linkend="ddl-replication-locking"> for more detail on how the
+   global DDL lock works.
+  </para>
+
+ </sect1>
+
+ <sect1 id="catalog-bdr-queued-commands" xreflabel="bdr.bdr_queued_commands">
+  <title>bdr.bdr_queued_commands</title>
+
+  <para>
+   <literal>bdr.bdr_queued_commands</literal> is a BDR internal implementation
+   table used for <xref linkend="ddl-replication">.  Do not modify this table
+   directly.
+  </para>
+
+  <para>
+   Every DDL operation (except table/sequence drops) that's captured and
+   replicated is inserted in this table, as is every operation manually queued
+   via <function>bdr.bdr_queue_ddl_commands()</function>. Inspecting this table
+   can be useful to determine what schema changes were made when and by whom.
+  </para>
+
+  <!-- TODO: column definitions, example content -->
+ </sect1>
+
+ <sect1 id="catalog-bdr-queued-drops" xreflabel="bdr.bdr_queued_drops">
+  <title>bdr.bdr_queued_drops</title>
+
+  <para>
+   <literal>bdr.bdr_queued_drops</literal> is a BDR internal implementation
+   table used for <xref linkend="ddl-replication">.  Do not modify this table
+   directly.
+  </para>
+
+  <para>
+   Every table/sequence drop operation that's captured and replicated is
+   inserted in this table.  Inspecting this table can be useful to determine
+   what schema changes were made when and by whom.
+  </para>
+
+  <!-- TODO: column definitions, example content -->
+ </sect1>
+
+ <sect1 id="catalog-bdr-sequence-values" xreflabel="bdr.bdr_sequence_values">
+  <title>bdr.bdr_sequence_values</title>
+
+  <para>
+   <literal>bdr.bdr_sequence_values</literal> is a BDR internal implementation
+   table used for <xref linkend="global-sequences">.  Do not modify this table
+   directly.
+  </para>
+
+  <para>
+   This table keeps track of which global sequence chunks (value ranges) have
+   been allocated to which nodes. It does <emphasis>not</emphasis> show which
+   sequence chunks have been used up. (That knowledge is only kept track of by
+   the local sequence on a node its self in the opaque binary
+   <literal>amdata</literal> field of the sequence, so it's not really
+   accessible).
+  </para>
+
+  <para>
+   You should never need to access this table.
+  </para>
+
+ </sect1>
+
+ <sect1 id="catalog-bdr-sequence-elections" xreflabel="bdr.bdr_sequence_elections">
+  <title>bdr.bdr_sequence_elections</title>
+
+  <para>
+   <literal>bdr.bdr_sequence_elections</literal> is a BDR internal implementation
+   table used for <xref linkend="global-sequences">.  Do not modify this table
+   directly. It's used when making decisions about which new sequence chunks
+   to hand out to which nodes.
+  </para>
+
+  <para>
+   You should never need to access this table.
+  </para>
+
+ </sect1>
+
+ <sect1 id="catalog-bdr-votes" xreflabel="bdr.bdr_votes">
+  <title>bdr.bdr_votes</title>
+
+  <para>
+   <literal>bdr.bdr_votes</literal> is a BDR internal implementation
+   table used for <xref linkend="global-sequences">.  Do not modify this table
+   directly. It's used when making decisions about which new sequence chunks
+   to hand out to which nodes.
+  </para>
+
+  <para>
+   You should never need to access this table.
+  </para>
+
  </sect1>
 
 </chapter>
