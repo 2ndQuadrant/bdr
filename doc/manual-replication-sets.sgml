@@ -80,6 +80,16 @@
     release).
    </para>
   </note>
+
+  <warning>
+   <para>
+    Currently <literal>TRUNCATE</literal> is <emphasis>always</emphasis> replicated,
+    even if a table is not a member of any active replication set. Use
+    <literal>DELETE FROM tablename;</literal>
+    if this is not desired.
+   </para>
+  </warning>
+
  </sect1>
 
  <sect1 id="replication-sets-creation" xreflabel="Creating replication sets">
@@ -174,6 +184,56 @@
    which replication sets the node replays from to skip that set, since
    node replication set memberships take immediate effect).
   </para>
+ </sect1>
+
+ <sect1 id="replication-sets-changetype" xreflabel="Change-type replication sets">
+  <title>Change-type replication sets</title>
+
+  <para>
+   In addition to table- and node-level replication set control, it's also
+   possible to configure which <emphasis>operations</emphasis> replication sets
+   replicate.  A replication set can be configured to replicate only
+   <literal>INSERT</literal>s, for example. New rows inserted in the table will
+   be replicated, but <literal>UPDATE</literal>s of existing rows will not be,
+   and when a row is <literal>DELETE</literal>d the remote copies of the row
+   won't be deleted. Obviously this creates node-to-node inconsistencies, so
+   it must be used with extreme caution.
+  </para>
+
+  <para>
+   The main use of operation-level replication set control is maintaining
+   archive and DW nodes, where data removed from other nodes is retained on the
+   archive/DW node.
+  </para>
+
+  <para>
+   Operation-level replication set control is a low-level advanced feature that
+   doesn't yet have any management functions for it. To customise which operations
+   a replication set syncs, <literal>INSERT</literal> a row into
+   <literal>bdr.bdr_replication_set_config</literal>, like:
+   <programlisting>
+    INSERT INTO bdr.bdr_replication_set_config(set_name, replicate_inserts, replicate_updates, replicate_deletes)
+    VALUES ('set_name', 't', 't', 't');
+   </programlisting>
+   Adjust the replication flags as desired for the intended replication set
+   function.
+  </para>
+
+  <para>
+   Like all replication set changes, changes to the operations replicated by
+   a replication set take effect only for new data changes; no
+   already-replicated rows will be retroactively changed.
+  </para>
+
+  <warning>
+   <para>
+    Currently the <literal>TRUNCATE</literal> operation is
+    <emphasis>always</emphasis> replicated, even if a table is not a member of
+    any active replication set. Use <literal>DELETE FROM tablename;</literal>
+    if this is not desired.
+   </para>
+  </warning>
+
  </sect1>
 
 </chapter>

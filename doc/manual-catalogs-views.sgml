@@ -82,7 +82,8 @@
   <para>
    <literal>bdr.bdr_conflict_history</literal> contains an entry for each
    conflict generated in the system while <xref linkend="conflicts-logging">
-   is enabled.
+   is enabled. Unless conflict logging to table is enabled this table
+   will always be empty.
   </para>
 
   <para>
@@ -98,6 +99,17 @@
 
   <!-- TODO: colun definitions, example content -->
 
+ </sect1>
+
+ <sect1 id="catalog-bdr-repliation-set-config" xreflabel="bdr.bdr_replication_set_config">
+  <title>bdr.bdr_replication_set_config</title>
+
+  <para>
+   <literal>bdr.bdr_replication_set_config</literal> can be used to override the default
+   replication set behaviour of replicating <literal>INSERT</literal>, <literal>UPDATE</literal>
+   and <literal>DELETE</literal> operations so that it selectively replicates only one or more
+   operation types. See <xref linkend="replication-sets-changetype">.
+  </para>
  </sect1>
 
 </chapter>
