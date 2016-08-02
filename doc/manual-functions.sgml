@@ -59,7 +59,29 @@
        </entry>
        <entry>void</entry>
        <entry>
-        Create the first node in a future cluster of bdr nodes.
+	Create the first node in a future cluster of bdr nodes. May be run on
+	an empty database or one with existing data. An existing database may
+	be a previously standalone normal PostgreSQL databaseor an ex-BDR
+	database cleaned with <xref linkend="function-bdr-remove-bdr-from-local-node">.
+	The "dsn" (data source name) parameters are <ulink
+	url="https://www.postgresql.org/docs/9.4/static/libpq-connect.html#LIBPQ-CONNSTRING">libpq
+	connection strings</ulink>.
+	<replaceable>node_external_dsn</replaceable> is an arbitrary node name,
+	which must be unique across the BDR group.
+	<replaceable>node_external_dsn</replaceable> must be a connection
+	string other nodes can use to connect to this node. It must embed any
+	required passwords unless passwordless authentication is required or a
+	suitable <filename>.pgpass</filename> file is created in the postgres
+	home directory. If specified, <replaceable>node_local_dsn</replaceable>
+	should be a local loopback or unix socket connection string that the
+	node can use to connect to its self; this is only used during initial
+	setup to make the database restore faster. <replaceable>apply_delay</replaceable>
+	allows you to slow down transaction apply, and is mainly for debugging.
+	<replaceable>replication_sets</replaceable> is the collection of replication
+	sets this node should receive.
+	See <xref linkend="node-management-joining"> for details on node
+	joining and creation, and <xref linkend="replication-sets"> for more on
+	how replication sets work.
        </entry>
       </row>
 
@@ -72,8 +94,24 @@
        </entry>
        <entry>void</entry>
        <entry>
-        Join this database to a cluster of existing bdr nodes. This
-        will initiate connections to and from all nother nodes.
+	Join this database to a cluster of existing bdr nodes. This will
+	initiate connections to and from all nother nodes. The function returns
+	immediately, without waiting for the join process to complete, and only
+	starts work when the calling transaction commits.
+	<xref linkend="function-bdr-node-join-wait-for-ready"> may be used to
+	wait until join completes. If there are problems with the join, check
+	the PostgreSQL logs on both systems for more information. The parameters
+	are the same as <function>bdr.bdr_group_create()</function> except for
+	the additional required parameter <replaceable>join_using_dsn</replaceable>.
+	This must be the libpq connection string of the node to initialize from,
+	i.e. the other node's <replaceable>node_external_dsn</replaceable>.
+	Any node may be chosen as the join target, but if possible a node with
+	a fast and reliable network link to the new node should be preferred.
+	Note that <function>bdr.bdr_group_join()</function> can <emphasis>not</emphasis>
+	"re-join" a node you removed with <function>bdr.bdr_part_by_node_names()</function>.
+	See <xref linkend="node-management-joining"> for details on node
+	joining and creation, and <xref linkend="replication-sets"> for more on
+	how replication sets work.
        </entry>
       </row>
 
@@ -257,7 +295,7 @@
        </entry>
        <entry>void</entry>
        <entry>
-        Same as <function>pg_xlog_wait_remote_receive(...)</function>, but
+        Same as <function>pg_xlog_wait_remote_apply(...)</function>, but
         returns as soon as the remote confirms it has received the changes, not
         necessarily applied them.
        </entry>

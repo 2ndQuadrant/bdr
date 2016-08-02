@@ -5,8 +5,9 @@
 
 set -e -u
 
-BDR_PG_REF="bdr-pg/REL9_4_STABLE"
-BDR_PLUGIN_REF="bdr-plugin/next"
+BDR_PG_REF="${BDR_PG_REF:-bdr-pg/REL9_4_STABLE}"
+BDR_PLUGIN_REF="${BDR_PLUGIN_REF:-bdr-plugin/REL1_0_STABLE}"
+GIT_URL="${GIT_URL:-https://github.com/2ndQuadrant/bdr.git}"
 
 # If you have an existing local BDR checkout you can put it here to speed the
 # clone or set it in the environment:
@@ -78,10 +79,10 @@ clone_or_update() {
         fi
 
     else
-        echo "Cloning $GITREF sources from git://git.postgresql.org/git/2ndquadrant_bdr.git"
+        echo "Cloning $GITREF sources from $GIT_URL"
         echo "This may take some time depending on the speed of your connection."
 
-        if ! git clone -b "$GITREF"  git://git.postgresql.org/git/2ndquadrant_bdr.git $SRCDIR; then
+        if ! git clone -b "$GITREF"  "$GIT_URL" $SRCDIR; then
             echo "The git clone of the BDR repository failed. Network issues?"
             echo "Try running the script again. If it fails again, look at the git "
             echo "output to see what went wrong."
@@ -105,8 +106,10 @@ cd $BASEDIR
 clone_or_update bdr-pg-src "$BDR_PG_REF"
 pushd bdr-pg-src
 ./configure --prefix=$BASEDIR/bdr 2>&1 | tee -a "$LOGFILE"
-make install 2>&1 | tee -a "$LOGFILE"
-make -C contrib install 2>&1 | tee -a "$LOGFILE"
+make -s | tee -a "$LOGFILE"
+make -s install 2>&1 | tee -a "$LOGFILE"
+make -s -C contrib 2>&1 | tee -a "$LOGFILE"
+make -s -C contrib install 2>&1 | tee -a "$LOGFILE"
 popd
 
 echo "PostgreSQL for BDR compiled and installed."
@@ -114,8 +117,9 @@ echo "Preparing BDR extension..."
 
 clone_or_update bdr-plugin-src "$BDR_PLUGIN_REF"
 pushd bdr-plugin-src
-PATH=$BASEDIR/bdr/bin:$PATH ./configure
-make install
+PATH=$BASEDIR/bdr/bin:$PATH ./configure 2>&1 | tee -a "$LOGFILE"
+make -s 2>&1 | tee -a "$LOGFILE"
+make -s install 2>&1 | tee -a "$LOGFILE"
 popd
 
 echo
@@ -127,7 +131,10 @@ echo "Installed to $BASEDIR/bdr"
 echo
 echo "Now add it to your PATH:"
 echo "    export PATH=$BASEDIR/bdr/bin:\$PATH"
-echo "and carry on with the quickstart at https://wiki.postgresql.org/wiki/BDR_User_Guide"
+echo "and carry on with the quickstart in the documentation."
+echo
+echo "WARNING: this is just a toy BDR install for testing and experimentation!"
+echo
 echo "---------------------------"
 
 trap "" EXIT

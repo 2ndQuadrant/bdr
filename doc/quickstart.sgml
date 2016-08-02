@@ -7,17 +7,29 @@
  </para>
 
  <para>
-  These instructions are not suitable for a production install, as
-  they neglect security considerations, proper system administration
-  procedure, etc. If you're trying to set up a production &bdr;
-  install, read the rest of the &bdr; manual, starting with <xref
-  linkend="installation">.
+  These instructions are not suitable for a production install, as they neglect
+  security considerations, proper system administration procedure, etc. The
+  instructions also <emphasis>assume everything is all on one host</emphasis>
+  so all the <filename>pg_hba.conf</filename> examples etc show localhost. If
+  you're trying to set up a production &bdr; install, read the rest of the
+  &bdr; manual, starting with <xref linkend="installation"> and <xref
+  linkend="functions-node-mgmt">.
  </para>
+
+ <note>
+  <para>
+   BDR uses <ulink
+   url="https://www.postgresql.org/docs/9.4/static/libpq-connect.html#LIBPQ-CONNSTRING">libpq
+   connection strings</ulink> throughout. The term "DSN" (for "data source
+   name") refers to a libpq connection string.
+  </para>
+ </note>
 
  <para>
   For this Quick Start example, we are setting up a two node cluster with two
   PostgreSQL instances on the same server. We are using the terms node and instance
-  interchangeably.
+  interchangeably because there's one node per PostgreSQL instance in this case, and
+  in most typical BDR setups.
  </para>
 
   <para>
@@ -40,13 +52,9 @@
     system with valuable data on it.</emphasis>
     To install the latest stable release, run:
     <screen>
-    <prompt>$</prompt> curl -s "http://git.postgresql.org/gitweb/?p=2ndquadrant_bdr.git;a=blob_plain;f=scripts/bdr_quickstart.sh;hb=bdr-plugin/REL0_9_STABLE" | bash
+    <prompt>$</prompt> curl -s "https://raw.githubusercontent.com/2ndQuadrant/bdr/bdr-plugin/REL1_0_STABLE/scripts/bdr_quickstart.sh" | bash
     </screen>
-    For the latest development version, instead try
-    <screen>
-    <prompt>$</prompt> curl -s "http://git.postgresql.org/gitweb/?p=2ndquadrant_bdr.git;a=blob_plain;f=scripts/bdr_quickstart.sh;hb=bdr-plugin/next" | bash
-    </screen>
-    In either case, when the install finishes, the script prints:
+    When the install finishes, the script prints:
     </para>
     <programlisting>
     ---------------------------
@@ -57,7 +65,7 @@
 
     Now add it to your PATH:
       export PATH=/home/myuser/2ndquadrant_bdr/bdr/bin:$PATH
-    and carry on with the quickstart at https://wiki.postgresql.org/wiki/BDR_Quick_Start
+    and carry on with the quickstart instructions.
      ---------------------------
     </programlisting>
 
@@ -220,7 +228,7 @@
     <programlisting>
     SELECT bdr.bdr_group_create(
       local_node_name := 'node1',
-      node_external_dsn := 'port=5598 dbname=bdrdemo'
+      node_external_dsn := 'port=5598 dbname=bdrdemo host=localhost'
 );
     </programlisting>
     <para>
@@ -244,8 +252,8 @@
     <programlisting>
     SELECT bdr.bdr_group_join(
       local_node_name := 'node2',
-      node_external_dsn := 'port=5599 dbname=bdrdemo',
-      join_using_dsn := 'port=5598 dbname=bdrdemo'
+      node_external_dsn := 'port=5599 dbname=bdrdemo host=localhost',
+      join_using_dsn := 'port=5598 dbname=bdrdemo host=localhost'
 );
     </programlisting>
     <para>

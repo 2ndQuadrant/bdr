@@ -5,8 +5,8 @@
   <primary>Node Management</primary>
  </indexterm>
 
- <sect1 id="node-management-joining" xreflabel="Joining or subscribing a node">
-  <title>Joining or subscribing a node</title>
+ <sect1 id="node-management-joining" xreflabel="Joining a node">
+  <title>Joining a node</title>
 
   <para>
    When a new &bdr; node is joined to an existing &bdr; group,
@@ -87,9 +87,11 @@
     For &bdr; every node has to have a connection to every other node. To make
     configuration easy, when a new node joins it automatically configures all
     existing nodes to connect to it. For this reason, every node, including
-    the first &bdr; node created, must know the PostgreSQL connection string
-    (sometimes referred to as a <acronym>DSN</acronym>) that other nodes
-    can use to connect to it.
+    the first &bdr; node created, must know the <ulink
+    url="https://www.postgresql.org/docs/9.4/static/libpq-connect.html#LIBPQ-CONNSTRING">
+    PostgreSQL connection string</ulink>
+    (sometimes referred to as a <acronym>DSN</acronym>, for "data source name")
+    that other nodes can use to connect to it.
    </para>
 
    <para>
