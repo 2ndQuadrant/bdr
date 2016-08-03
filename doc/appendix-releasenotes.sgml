@@ -15,6 +15,89 @@
   See also: <xref linkend="upgrade">.
  </para>
 
+ <sect1 id="release-1.0.0">
+  <title>Release 1.0.0</title>
+
+  <para>
+   The 1.0.0 release improves schema change DDL locking, the documentation,
+   managment tools, and more. It is <link linkend="upgrade">a straightforward
+   upgrade for 0.9.x users</link>.
+  </para>
+
+  <para>
+   The most important changes are:
+   <itemizedlist>
+    <listitem><para>improvements to DDL locking to reduce its operational impact by allowing write transactions a grace period before cancellation, blocking new write transactions instead of ERRORing, and allowing many DDL operations to avoid blocking row writes at all</para></listitem>
+    <listitem><para>the removal of UDR</para></listitem>
+    <listitem><para>a fix for dropped column handling when cloning new nodes via bdr_node_join</para></listitem>
+    <listitem><para>global sequence improvements to reduce the chance of ERRORs when rapidly consuming sequence values</para></listitem>
+   </itemizedlist>
+  </para>
+
+  <para>
+   There are important compatibility changes in this release. BDR 1.0 removes
+   UDR. If you need one-way replication on unpatched community PostgreSQL
+   9.4/9.5/9.6, use <ulink url="2ndquadrant.com/pglogical">pglogical</ulink>
+   instead. BDR 1.0 is also fully not interoperable with 0.9.x; it cannot join
+   a 0.9.x group and 0.9.x cannot join a 1.0 group.
+  </para>
+
+  <para>
+   Changes in release:
+  </para>
+
+  <para>
+   <itemizedlist>
+    <listitem><para>Fix handling of dropped columns during logical node init to prevent "tuple natts mismatch" errors (git 9323f3, #113, #114)</para></listitem>
+    <listitem><para>Remove UDR</para></listitem>
+    <listitem><para>Wait up to a minute for new sequence values from an exhausted global sequence before ERRORing (git f7e9b4)</para></listitem>
+    <listitem><para>Don't acquire global DDL lock for non-schema-qualified temp table DROPs (#124)</para></listitem>
+    <listitem><para>Add a grace period before killing all write transactions when acquiring DDL lock, configured by bdr.max_ddl_lock_delay (git 0e02cc27, 91a0d2505)</para></listitem>
+    <listitem><para>Make DML wait when DDL lock held, instead of ERRORing (git b754c0c4)</para></listitem>
+    <listitem><para>Add a DDL-lock-specific timeout, bdr.bdr_ddl_lock_timeout (git 91a0d2505)</para></listitem>
+    <listitem><para>Add a new DDL lock type that only blocks other DDL, not DML (insert/update/delete) (git 10b331fe, 6d2a09fb)</para></listitem>
+    <listitem><para>Cache more values for global sequences, make cache size configurable with cache_chunks reloption (git 071e94)</para></listitem>
+    <listitem><para>Ensure sequence cache is never re-used after physical node copy (#101)</para></listitem>
+    <listitem><para>Increase default sequence chunk size to 10k (git ff0726)</para></listitem>
+    <listitem><para>Expand node part/join sanity checks and error messages (git 6c58df and others)</para></listitem>
+    <listitem><para>Permit DML on pg_catalog tables (#102) </para></listitem>
+    <listitem><para>Create BDR's internal TRUNCATE triggers as internal triggers (git 0c96b9ff, #62)</para></listitem>
+    <listitem><para>Apply workers notice replication set changes and DSN changes without manual termination/restart (git 7faf648e)</para></listitem>
+    <listitem><para>Make bdr_apply_resume() take immediate effect (git 72eb77) </para></listitem>
+    <listitem><para>Ignore dangling bdr_connections rows without a corresponding bdr_nodes entry (git 509848, #50, #97, #126)</para></listitem>
+    <listitem><para>Don't acquire the global DDL lock when creating or dropping indexes on temporary tables (git aebd93, courtesy of Michael Allen) </para></listitem>
+    <listitem><para>Fix crash on insert into a table with an expression index (git 06f52b, courtesy of Abdul Yadi)</para></listitem>
+    <listitem><para>Make bdr_supervisordb checks less strict to fix vacuumdb -a and other tools (git dba912, #154)</para></listitem>
+    <listitem><para>Group multiple replicated TRUNCATEs into a single command to fix TRUNCATE with foreign keys or TRUNCATE CASCADE (git fcdf1b, #48)</para></listitem>
+    <listitem><para>Add management functions for connection replication sets</para></listitem>
+    <listitem><para>Add low level apply/replay tracing via bdr.trace_replay (git 4feb4004b, #185) </para></listitem>
+    <listitem><para>Add DDL lock tracing/logging via bdr.trace_ddl_locks_level (git beee79dd4)</para></listitem>
+    <listitem><para>Allow specification of connection options for all BDR connections with bdr.extra_apply_connection_options (git 491f5e90a, #173)</para></listitem>
+    <listitem><para>Enable TCP keepalives by default on apply worker (#173)</para></listitem>
+    <listitem><para>Backport access to 'pid' and 'confirmed_flush_lsn' columns of pg_replication_slots from 9.5 and 9.6 via new bdr.pg_replication_slots view (#186).</para></listitem>
+    <listitem><para>Add functions to terminate apply and walsender workers (bdr_terminate_walsender_workers and bdr_terminate_apply_workers)</para></listitem>
+    <listitem><para>Add a function to allow BDR workers to skip over changes (#181)</para></listitem>
+    <listitem><para>Add functions to control replication sets configured for a connection</para></listitem>
+    <listitem><para>Add a function to completely remove BDR from a node, bdr.remove_bdr_from_local_node()</para></listitem>
+    <listitem><para>Extensive documentation updates</para></listitem>
+   </itemizedlist>
+  </para>
+
+  <para>
+   The biggest changes are around <xref linkend="ddl-replication-locking">.
+  </para>
+
+ </sect1>
+
+ <sect1 id="release-0.9.3">
+  <title>Release 0.9.3</title>
+
+  <para>
+   The 0.9.3 release adds a few minor fixes and improves compatibility with
+   BDR 0.7.x for upgrades. It is not a required update.
+  </para>
+ </sect1>
+
  <sect1 id="release-0.9.2">
   <title>Release 0.9.2</title>
 
