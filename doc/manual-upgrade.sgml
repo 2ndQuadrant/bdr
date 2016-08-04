@@ -27,6 +27,15 @@
   </para>
 
   <para>
+   Before or at the same time as upgrading the BDR plugin to 1.0.0, make sure
+   to upgrade bdr-pg to at least 9.4.8-2. This will be done automatically if
+   you've installed BDR from packages. If you're installing from source,
+   make sure to install the latest <literal>bdr-pg/REL9_4_STABLE</literal>
+   branch (at least as new as tag <literal>bdr-pg/REL9_4_8-2</literal>).
+   Downloading and installing the latest bdr-pg tarball will be fine.
+  </para>
+
+  <para>
    To upgrade 0.9.x to 10.0.0 the extension must be updated and the database
    server restarted. You may complete the upgrade steps on one node before
    starting on the next node or perform the steps in parallel across all nodes
