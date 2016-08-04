@@ -270,7 +270,7 @@
      </listitem>
     </varlistentry>
 
-     <varlistentry id="guc-bdr-max_ddl_lock_delay" xreflabel="bdr.max_ddl_lock_delay">
+     <varlistentry id="guc-bdr-max-ddl-lock-delay" xreflabel="bdr.max_ddl_lock_delay">
       <term><varname>bdr.max_ddl_lock_delay</varname> (<type>milliseconds</type>)
        <indexterm>
         <primary><varname>bdr.max_ddl_lock_delay</varname> configuration parameter</primary>

@@ -87,7 +87,7 @@
      This causes new transactions that attempt write operations <emphasis>on any
      node</emphasis> to pause (block) until the DDL lock is released or canceled.
      Existing write transactions will be given a grace period (controlled by
-     <xref linkend="guc-bdr-max_ddl_lock_delay">) to complete and aborted
+     <xref linkend="guc-bdr-max-ddl-lock-delay">) to complete and aborted
      (canceled) if they don't complete within the grace period, with the error:
      <programlisting>
 FATAL:  terminating connection due to conflict with recovery
