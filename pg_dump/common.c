@@ -13,8 +13,11 @@
  *
  *-------------------------------------------------------------------------
  */
+#include "postgres_fe.h"
+
 #include "pg_backup_archiver.h"
 #include "pg_backup_utils.h"
+#include "pg_dump.h"
 
 #include <ctype.h>
 

@@ -23,6 +23,7 @@
  *
  *-------------------------------------------------------------------------
  */
+#include "postgres_fe.h"
 
 #include "compress_io.h"
 #include "parallel.h"

@@ -14,7 +14,7 @@
 #ifndef PG_DUMP_H
 #define PG_DUMP_H
 
-#include "postgres_fe.h"
+#include "pg_backup.h"
 
 /*
  * pg_dump uses two different mechanisms for identifying database objects:

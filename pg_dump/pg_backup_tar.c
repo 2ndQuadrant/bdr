@@ -27,6 +27,7 @@
  *
  *-------------------------------------------------------------------------
  */
+#include "postgres_fe.h"
 
 #include "pg_backup.h"
 #include "pg_backup_archiver.h"

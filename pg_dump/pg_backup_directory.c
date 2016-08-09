@@ -32,6 +32,7 @@
  *
  *-------------------------------------------------------------------------
  */
+#include "postgres_fe.h"
 
 #include "compress_io.h"
 #include "pg_backup_utils.h"
