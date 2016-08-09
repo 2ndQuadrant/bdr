@@ -25,6 +25,8 @@
 #ifndef __PG_BACKUP_ARCHIVE__
 #define __PG_BACKUP_ARCHIVE__
 
+#include "compat.h"
+
 #include "postgres_fe.h"
 
 #include <time.h>

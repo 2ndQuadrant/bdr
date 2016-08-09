@@ -16,6 +16,7 @@
 #ifndef DUMPUTILS_H
 #define DUMPUTILS_H
 
+#include "compat.h"
 #include "libpq-fe.h"
 #include "pqexpbuffer.h"
 
