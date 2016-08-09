@@ -79,7 +79,7 @@ DATA_built = \
 	extsql/bdr--1.0.0.0.sql
 
 DOCS = bdr.conf.sample README.bdr
-SCRIPTS = scripts/bdr_initial_load bdr_init_copy bdr_resetxlog bdr_dump
+SCRIPTS = scripts/bdr_initial_load bdr_init_copy bdr_dump
 
 PG_CPPFLAGS = -I$(libpq_srcdir)
 SHLIB_LINK = $(libpq)
@@ -266,10 +266,6 @@ extsql/bdr--1.0.0.0.sql: extsql/bdr--0.10.0.11.sql extsql/bdr--0.10.0.11--1.0.0.
 	mkdir -p extsql
 	cat $^ > $@
 
-
-bdr_resetxlog: pg_resetxlog.o
-	$(CC) $(CFLAGS) $^ $(LDFLAGS) $(LDFLAGS_EX) $(libpq_pgport) $(LIBS) -o $@$(X)
-
 pg_dump_dir:
 	mkdir -p pg_dump
 
@@ -279,7 +275,7 @@ bdr_dump: pg_dump_dir $(DUMPOBJS)
 doc:
 	$(MAKE) -C doc all
 
-all: all-lib bdr_init_copy bdr_resetxlog bdr_dump
+all: all-lib bdr_init_copy bdr_dump
 
 world: all doc
 
@@ -295,7 +291,6 @@ additional-clean:
 	rm -rf scripts/bdr_initial_load
 	rm -f bdr_dump$(X) $(DUMPOBJS)
 	rm -f extsql/bdr--0.[89].0.[0-9].sql
-	rm -f bdr_resetxlog$(X) pg_resetxlog.o
 	$(MAKE) -C doc clean
 
 additional-maintainer-clean: clean

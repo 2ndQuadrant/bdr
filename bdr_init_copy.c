@@ -703,11 +703,11 @@ set_sysid(uint64 sysid)
 {
 	int			 ret;
 	PQExpBuffer  cmd = createPQExpBuffer();
-	char		*exec_path = find_other_exec_or_die(argv0, "bdr_resetxlog", "bdr_resetxlog (PostgreSQL) " PG_VERSION "\n");
+	char		*exec_path = find_other_exec_or_die(argv0, "pg_resetxlog", "pg_resetxlog (PostgreSQL) " PG_VERSION "\n");
 
 	appendPQExpBuffer(cmd, "%s \"-s "UINT64_FORMAT"\" \"%s\"", exec_path, sysid, data_dir);
 
-	print_msg(VERBOSITY_DEBUG, _("Running bdr_resetxlog: %s.\n"), cmd->data);
+	print_msg(VERBOSITY_DEBUG, _("Running pg_resetxlog: %s.\n"), cmd->data);
 	ret = system(cmd->data);
 
 	destroyPQExpBuffer(cmd);
@@ -715,11 +715,11 @@ set_sysid(uint64 sysid)
 	if (WIFEXITED(ret) && WEXITSTATUS(ret) == 0)
 		return;
 	if (WIFEXITED(ret))
-		die(_("bdr_resetxlog failed with exit status %d, cannot continue.\n"), WEXITSTATUS(ret));
+		die(_("pg_resetxlog failed with exit status %d, cannot continue.\n"), WEXITSTATUS(ret));
 	else if (WIFSIGNALED(ret))
-		die(_("bdr_resetxlog exited with signal %d, cannot continue"), WTERMSIG(ret));
+		die(_("pg_resetxlog exited with signal %d, cannot continue"), WTERMSIG(ret));
 	else
-		die(_("bdr_resetxlog exited for an unknown reason (system() returned %d)"), ret);
+		die(_("pg_resetxlog exited for an unknown reason (system() returned %d)"), ret);
 }
 
 /*
