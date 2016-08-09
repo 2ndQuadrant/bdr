@@ -236,16 +236,16 @@ main(int argc, char *argv[])
 
 
 static void
-run_vacuum_command(PGconn *conn, const char *sql, bool echo, const char *dbname, const char *table, const char *progname)
+run_vacuum_command(PGconn *conn, const char *sql, bool echo, const char *table, const char *progname)
 {
 	if (!executeMaintenanceCommand(conn, sql, echo))
 	{
 		if (table)
 			fprintf(stderr, _("%s: vacuuming of table \"%s\" in database \"%s\" failed: %s"),
-					progname, table, dbname, PQerrorMessage(conn));
+					progname, table, PQdb(conn), PQerrorMessage(conn));
 		else
 			fprintf(stderr, _("%s: vacuuming of database \"%s\" failed: %s"),
-					progname, dbname, PQerrorMessage(conn));
+					progname, PQdb(conn), PQerrorMessage(conn));
 		PQfinish(conn);
 		exit(1);
 	}
@@ -348,7 +348,7 @@ vacuum_one_database(const char *dbname, bool full, bool verbose, bool and_analyz
 					fflush(stdout);
 				}
 				executeCommand(conn, stage_commands[i], progname, echo);
-				run_vacuum_command(conn, sql.data, echo, dbname, table, progname);
+				run_vacuum_command(conn, sql.data, echo, table, progname);
 			}
 		}
 		else
@@ -361,12 +361,12 @@ vacuum_one_database(const char *dbname, bool full, bool verbose, bool and_analyz
 				fflush(stdout);
 			}
 			executeCommand(conn, stage_commands[stage], progname, echo);
-			run_vacuum_command(conn, sql.data, echo, dbname, table, progname);
+			run_vacuum_command(conn, sql.data, echo, table, progname);
 		}
 
 	}
 	else
-		run_vacuum_command(conn, sql.data, echo, dbname, NULL, progname);
+		run_vacuum_command(conn, sql.data, echo, NULL, progname);
 
 	PQfinish(conn);
 	termPQExpBuffer(&sql);
@@ -382,12 +382,15 @@ vacuum_all_databases(bool full, bool verbose, bool and_analyze, bool analyze_onl
 {
 	PGconn	   *conn;
 	PGresult   *result;
+	PQExpBufferData connstr;
 	int			stage;
 
 	conn = connectMaintenanceDatabase(maintenance_db, host, port,
 									  username, prompt_password, progname);
 	result = executeQuery(conn, "SELECT datname FROM pg_database WHERE datallowconn ORDER BY 1;", progname, echo);
 	PQfinish(conn);
+
+	initPQExpBuffer(&connstr);
 
 	/* If analyzing in stages, then run through all stages.  Otherwise just
 	 * run once, passing -1 as the stage. */
@@ -407,12 +410,17 @@ vacuum_all_databases(bool full, bool verbose, bool and_analyze, bool analyze_onl
 				fflush(stdout);
 			}
 
-			vacuum_one_database(dbname, full, verbose, and_analyze, analyze_only,
-								analyze_in_stages, stage,
+			resetPQExpBuffer(&connstr);
+			appendPQExpBuffer(&connstr, "dbname=");
+			appendConnStrVal(&connstr, PQgetvalue(result, i, 0));
+
+			vacuum_one_database(connstr.data, full, verbose, and_analyze,
+								analyze_only, analyze_in_stages, stage,
 							freeze, NULL, host, port, username, prompt_password,
 								progname, echo, quiet);
 		}
 	}
+	termPQExpBuffer(&connstr);
 
 	PQclear(result);
 }

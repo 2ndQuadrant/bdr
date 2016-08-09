@@ -778,13 +778,14 @@ ReorderBufferCommitChild(ReorderBuffer *rb, TransactionId xid,
 		elog(ERROR, "subxact logged without previous toplevel record");
 
 	/*
-	 * Pass the our base snapshot to the parent transaction if it doesn't have
+	 * Pass our base snapshot to the parent transaction if it doesn't have
 	 * one, or ours is older. That can happen if there are no changes in the
 	 * toplevel transaction but in one of the child transactions. This allows
-	 * the parent to simply use it's base snapshot initially.
+	 * the parent to simply use its base snapshot initially.
 	 */
-	if (txn->base_snapshot == NULL ||
-		txn->base_snapshot_lsn > subtxn->base_snapshot_lsn)
+	if (subtxn->base_snapshot != NULL &&
+		(txn->base_snapshot == NULL ||
+		 txn->base_snapshot_lsn > subtxn->base_snapshot_lsn))
 	{
 		txn->base_snapshot = subtxn->base_snapshot;
 		txn->base_snapshot_lsn = subtxn->base_snapshot_lsn;
@@ -931,7 +932,7 @@ ReorderBufferIterTXNInit(ReorderBuffer *rb, ReorderBufferTXN *txn)
 		{
 			ReorderBufferChange *cur_change;
 
-			if (txn->nentries != txn->nentries_mem)
+			if (cur_txn->nentries != cur_txn->nentries_mem)
 				ReorderBufferRestoreChanges(rb, cur_txn,
 											&state->entries[off].fd,
 											&state->entries[off].segno);

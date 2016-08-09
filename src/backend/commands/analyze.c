@@ -617,10 +617,13 @@ do_analyze_rel(Relation onerel, VacuumStmt *vacstmt,
 	/*
 	 * Report ANALYZE to the stats collector, too.  However, if doing
 	 * inherited stats we shouldn't report, because the stats collector only
-	 * tracks per-table stats.
+	 * tracks per-table stats.  Reset the changes_since_analyze counter only
+	 * if we analyzed all columns; otherwise, there is still work for
+	 * auto-analyze to do.
 	 */
 	if (!inh)
-		pgstat_report_analyze(onerel, totalrows, totaldeadrows);
+		pgstat_report_analyze(onerel, totalrows, totaldeadrows,
+							  (vacstmt->va_cols == NIL));
 
 	/* If this isn't part of VACUUM ANALYZE, let index AMs do cleanup */
 	if (!(vacstmt->options & VACOPT_VACUUM))
@@ -2099,8 +2102,11 @@ compute_minimal_stats(VacAttrStatsP stats,
 
 		if (nmultiple == 0)
 		{
-			/* If we found no repeated values, assume it's a unique column */
-			stats->stadistinct = -1.0;
+			/*
+			 * If we found no repeated non-null values, assume it's a unique
+			 * column; but be sure to discount for any nulls we found.
+			 */
+			stats->stadistinct = -1.0 * (1.0 - stats->stanullfrac);
 		}
 		else if (track_cnt < track_max && toowide_cnt == 0 &&
 				 nmultiple == track_cnt)
@@ -2447,8 +2453,11 @@ compute_scalar_stats(VacAttrStatsP stats,
 
 		if (nmultiple == 0)
 		{
-			/* If we found no repeated values, assume it's a unique column */
-			stats->stadistinct = -1.0;
+			/*
+			 * If we found no repeated non-null values, assume it's a unique
+			 * column; but be sure to discount for any nulls we found.
+			 */
+			stats->stadistinct = -1.0 * (1.0 - stats->stanullfrac);
 		}
 		else if (toowide_cnt == 0 && nmultiple == ndistinct)
 		{
@@ -2752,7 +2761,7 @@ compute_scalar_stats(VacAttrStatsP stats,
 		else
 			stats->stawidth = stats->attrtype->typlen;
 		/* Assume all too-wide values are distinct, so it's a unique column */
-		stats->stadistinct = -1.0;
+		stats->stadistinct = -1.0 * (1.0 - stats->stanullfrac);
 	}
 	else if (null_cnt > 0)
 	{
