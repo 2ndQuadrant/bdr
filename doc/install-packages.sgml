@@ -55,14 +55,14 @@
 
     <programlisting>
      # RHEL/CentOS users only:
-     sudo yum install http://packages.2ndquadrant.com/postgresql-bdr94-2ndquadrant/yum-repo-rpms/postgresql-bdr94-2ndquadrant-redhat-1.0-2.noarch.rpm
+     sudo yum install http://packages.2ndquadrant.com/postgresql-bdr94-2ndquadrant/yum-repo-rpms/postgresql-bdr94-2ndquadrant-redhat-1.0-3.noarch.rpm
     </programlisting>
 
     Fedora users should download and install the Fedora RPM for Fedora 19 and 20, or run:
 
     <programlisting>
      # Fedora users only
-     sudo yum install http://packages.2ndquadrant.com/postgresql-bdr94-2ndquadrant/yum-repo-rpms/postgresql-bdr94-2ndquadrant-fedora-1.0-2.noarch.rpm
+     sudo yum install http://packages.2ndquadrant.com/postgresql-bdr94-2ndquadrant/yum-repo-rpms/postgresql-bdr94-2ndquadrant-fedora-1.0-3.noarch.rpm
     </programlisting>
    </para>
 
