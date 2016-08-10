@@ -31,7 +31,7 @@
     <listitem><para>improvements to DDL locking to reduce its operational impact by allowing write transactions a grace period before cancellation, blocking new write transactions instead of ERRORing, and allowing many DDL operations to avoid blocking row writes at all</para></listitem>
     <listitem><para>the removal of UDR</para></listitem>
     <listitem><para>a fix for dropped column handling when cloning new nodes via bdr_node_join</para></listitem>
-    <listitem><para>global sequence improvements to reduce the chance of ERRORs when rapidly consuming sequence values</para></listitem>
+    <listitem><para>global sequence improvements to improve behavior when rapidly consuming sequence values</para></listitem>
    </itemizedlist>
   </para>
 
@@ -40,7 +40,9 @@
    UDR. If you need one-way replication on unpatched community PostgreSQL
    9.4/9.5/9.6, use <ulink url="2ndquadrant.com/pglogical">pglogical</ulink>
    instead. BDR 1.0 is also fully not interoperable with 0.9.x; it cannot join
-   a 0.9.x group and 0.9.x cannot join a 1.0 group.
+   a 0.9.x group and 0.9.x cannot join a 1.0 group. However individual nodes
+   in the existing 0.9.x cluster can be upgraded to 1.0 one by one, keeping
+   the cluster as a whole available during the process.
   </para>
 
   <para>
