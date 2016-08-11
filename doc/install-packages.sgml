@@ -183,7 +183,7 @@
 
    <para>
     To install &bdr; from DEBs you first need to add the BDR
-    repository to your sever.
+    repository to your server.
    </para>
 
    <note>
@@ -194,19 +194,22 @@
    </note>
 
    <para>
-    Create <filename>/etc/apt/sources.list.d/2ndquadrant.list</> with following
-    contents. Note that the distributions are called
-    <literal>codename-2ndquadrant</>. In the example, replace
-    <literal>wheezy</> with the actual distribution you are using:
-    <programlisting>
-     deb http://apt.postgresql.org/pub/repos/apt/ wheezy-pgdg main
-    </programlisting>
-    (You may determine the codename of your distribution by running lsb_release
-    -c).
+    First, <ulink url="https://wiki.postgresql.org/wiki/Apt">install and enable
+    the PostgreSQL apt repository for PGDG</ulink>. This repository is required by
+    the Debian BDR packages.
    </para>
 
    <para>
-    Import the repository key from http://packages.2ndquadrant.com/bdr/apt/AA7A6805.asc,
+    Next, create <filename>/etc/apt/sources.list.d/2ndquadrant.list</> with the
+    repository URL below, changing <replaceable>wheezy</replaceable> to the codename
+    of the Debian/Ubuntu version you are using, as obtained with <literal>lsb_release -c</literal>:
+    <programlisting>
+      deb http://packages.2ndquadrant.com/bdr/apt/ <replaceable>wheezy</replaceable>-2ndquadrant main
+    </programlisting>
+   </para>
+
+   <para>
+    Import the repository key from <ulink url="http://packages.2ndquadrant.com/bdr/apt/AA7A6805.asc">http://packages.2ndquadrant.com/bdr/apt/AA7A6805.asc</ulink>,
     update the package lists, and start installing packages:
     <programlisting>
      wget --quiet -O - http://packages.2ndquadrant.com/bdr/apt/AA7A6805.asc | sudo apt-key add -
@@ -265,7 +268,7 @@
      you should run:
      <programlisting>
       sudo apt-get update
-      sudo apt-get install postgresql-bdr-9.4
+      sudo apt-get install postgresql-bdr-9.4 postgresql-bdr-9.4-bdr-plugin
      </programlisting>
     </para>
 
