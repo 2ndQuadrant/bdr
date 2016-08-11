@@ -51,18 +51,18 @@
    </note>
 
    <para>
-    RHEL and CentOS users should download and install <ulink url="http://packages.2ndquadrant.com/postgresql-bdr94-2ndquadrant/yum-repo-rpms/postgresql-bdr94-2ndquadrant-redhat-1.0-2.noarch.rpm">the RHEL RPM for versions 5, 6, and 7</ulink>, or run:
+    RHEL and CentOS users should download and install the appropriate repo rpm:
 
     <programlisting>
      # RHEL/CentOS users only:
-     sudo yum install http://packages.2ndquadrant.com/postgresql-bdr94-2ndquadrant/yum-repo-rpms/postgresql-bdr94-2ndquadrant-redhat-1.0-3.noarch.rpm
+     sudo yum install http://packages.2ndquadrant.com/postgresql-bdr94-2ndquadrant/yum-repo-rpms/postgresql-bdr94-2ndquadrant-redhat-latest.noarch.rpm
     </programlisting>
 
     Fedora users should download and install the Fedora RPM for Fedora 19 and 20, or run:
 
     <programlisting>
      # Fedora users only
-     sudo yum install http://packages.2ndquadrant.com/postgresql-bdr94-2ndquadrant/yum-repo-rpms/postgresql-bdr94-2ndquadrant-fedora-1.0-3.noarch.rpm
+     sudo yum install http://packages.2ndquadrant.com/postgresql-bdr94-2ndquadrant/yum-repo-rpms/postgresql-bdr94-2ndquadrant-fedora-latest.noarch.rpm
     </programlisting>
    </para>
 
