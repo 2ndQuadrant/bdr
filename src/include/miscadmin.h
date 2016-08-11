@@ -28,6 +28,13 @@
 
 #define PG_BACKEND_VERSIONSTR "postgres (PostgreSQL) " PG_VERSION "\n"
 
+/*
+ * When we issue a new release of BDR-pg on a single Pg release,
+ * we increment BDR_PG_REV so we can tell. This constant also tells
+ * us that we're on BDR-patched Pg.
+ */
+#define BDR_PG_REV 1
+
 #define InvalidPid				(-1)
 
 
