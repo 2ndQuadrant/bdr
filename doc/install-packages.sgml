@@ -186,13 +186,6 @@
     repository to your server.
    </para>
 
-   <note>
-    <para>
-     The packages are signed with 2ndQuadrant's master packaging/releases
-     signing key. See <xref linkend="appendix-signatures">.
-    </para>
-   </note>
-
    <para>
     First, <ulink url="https://wiki.postgresql.org/wiki/Apt">install and enable
     the PostgreSQL apt repository for PGDG</ulink>. This repository is required by
@@ -216,6 +209,13 @@
      sudo apt-get update
     </programlisting>
    </para>
+
+   <note>
+    <para>
+     The package signing key is signed with 2ndQuadrant's master packaging/releases
+     signing key. See <xref linkend="appendix-signatures">.
+    </para>
+   </note>
 
   </sect3>
 
