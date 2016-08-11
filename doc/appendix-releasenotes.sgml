@@ -21,7 +21,7 @@
   <para>
    The 1.0.0 release improves schema change DDL locking, the documentation,
    managment tools, and more. It is <link linkend="upgrade">a straightforward
-   upgrade for 0.9.x users</link>, however they should upgrade to bdr-pg 9.4.8-2
+   upgrade for 0.9.x users</link>, however they should upgrade to bdr-pg 9.4.9
    before upgrading to bdr-plugin 1.0.0.
   </para>
 
