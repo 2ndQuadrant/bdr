@@ -70,7 +70,7 @@
     have already become integral part of core PostgreSQL, such as
      <ulink url="http://www.postgresql.org/docs/current/static/event-triggers.html">Event Triggers</ulink>,
      <ulink url="http://www.postgresql.org/docs/current/static/logicaldecoding.html">Logical Decoding</ulink>,
-     <ulink url="http://www.postgresql.org/docs/current/static/logicaldecoding-explanation.html#AEN66500">Replication Slots</ulink>,
+     <ulink url="http://www.postgresql.org/docs/current/static/logicaldecoding-explanation.html">Replication Slots</ulink>,
      <ulink url="http://www.postgresql.org/docs/current/static/bgworker.html">Background Workers</ulink>,
      <ulink url="https://wiki.postgresql.org/wiki/What's_new_in_PostgreSQL_9.5#Commit_timestamp_tracking">Commit Timestamps</ulink>,
      <ulink url="http://www.postgresql.org/docs/9.5/static/replication-origins.html">Replication Origins</ulink>,
