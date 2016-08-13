@@ -11,6 +11,11 @@
  <title>Legal Notice</title>
 
  <para>
+  <productname>Postgres BDR</productname> is Copyright &copy; 2013-2016
+  by the PostgreSQL Global Development Group.
+ </para>
+
+ <para>
   <productname>PostgreSQL</productname> is Copyright &copy; 1996-2016
   by the PostgreSQL Global Development Group.
  </para>
