@@ -185,7 +185,7 @@
 (define %generate-legalnotice-link% #t)
 (define %html-ext%              ".html")
 (define %root-filename%         "index")
-(define %link-mailto-url%       (string-append "mailto: bdr@2ndquadrant.com"))
+(define %link-mailto-url%       (string-append "mailto: bdr-list@2ndquadrant.com"))
 (define %use-id-as-filename%    #t)
 (define website-build           #f)
 (define %stylesheet%            (if website-build "/resources/docs.css" "website-docs.css"))
