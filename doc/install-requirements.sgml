@@ -16,21 +16,21 @@
    <note>
     <simpara>
       All the new features required have been submitted for inclusion in
-      PostgreSQL 9.5. Many have already been accepted and included. If all the
-      functionality &bdr; requires is added to PostgreSQL 9.5 then the need for
+      PostgreSQL. Many have already been accepted and included. If all the
+      functionality &bdr; requires is added to PostgreSQL then the need for
       a modified PostgreSQL will go away in the next version.
     </simpara>
    </note>
-   Some of these modifications make small changes to how PostgreSQL stores
-   data on disk. As a result the modified PostgreSQL 9.4 used by &bdr; can't
+   Some of these modifications make small changes to PostgreSQL data
+   directory. As a result the modified PostgreSQL 9.4 used by &bdr; can't
    load data directories from unmodified PostgreSQL and vice versa. Users
    must dump and reload their database(s) to switch to a &bdr;-capable
    PostgreSQL. See <xref linkend="installation">.
   </para>
 
   <para>
-   As of the time of writing, the upcoming PostgreSQL 9.5 release is not yet
-   supported. Neither is Microsoft Windows. Support for both will be added
+   As of the time of writing, PostgreSQL versions after 9.4 are not yet
+   supported. Neither is Microsoft Windows. Support for both may be added
    in later releases; please check the
    <ulink url="http://2ndquadrant.com/BDR">&bdr; website</ulink> for
    the latest information.
