@@ -5,7 +5,15 @@
 
 CREATE SCHEMA "some $SCHEMA";
 CREATE TABLE "some $SCHEMA"."table table table" ("a column" integer);
-CREATE SEQUENCE "some $SCHEMA"."some ""sequence"" name" USING bdr;
+
+-- Also for dependency testing, a global sequence if supported
+DO LANGUAGE plpgsql $$
+BEGIN
+  IF bdr.have_global_sequences() THEN
+    EXECUTE $DDL$CREATE SEQUENCE "some $SCHEMA"."some ""sequence"" name" USING bdr;$DDL$;
+  END IF;
+END;
+$$;
 
 -- Dropping the BDR extension isn't allowed while BDR is active
 DROP EXTENSION bdr;
@@ -77,8 +85,8 @@ $$
 LANGUAGE plpgsql;
 
 -- There should now be zero slots and no connections to them
-SELECT * FROM pg_stat_replication;
-SELECT * FROM pg_replication_slots;
+SELECT pid, application_name, state, sent_location, write_location, flush_location, replay_location, sync_state  FROM pg_stat_replication;
+SELECT slot_name, plugin, slot_type, datoid, database, active, xmin, catalog_xmin, restart_lsn, confirmed_flush_lsn FROM bdr.pg_replication_slots;
 
 -- Zero active connections
 SELECT count(*) FROM pg_stat_replication;

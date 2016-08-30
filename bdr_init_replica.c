@@ -38,7 +38,7 @@
 
 #include "executor/spi.h"
 
-#include "replication/replication_identifier.h"
+#include "replication/origin.h"
 #include "replication/walreceiver.h"
 
 #include "postmaster/bgworker.h"
@@ -562,7 +562,7 @@ bdr_init_make_other_slots()
 		uint64 sysid;
 		TimeLineID timeline;
 		Oid dboid;
-		RepNodeId replication_identifier;
+		RepOriginId replication_identifier;
 		char *snapshot;
 
 		if (cfg->sysid == GetSystemIdentifier() &&
@@ -750,10 +750,10 @@ bdr_init_replica(BDRNodeInfo *local_node)
 	/*
 	 * The local SPI transaction we're about to perform must do any writes as a
 	 * local transaction, not as a changeset application from a remote node.
-	 * That allows rows to be replicated to other nodes. So no replication_origin_id
+	 * That allows rows to be replicated to other nodes. So no replorigin_session_origin
 	 * may be set.
 	 */
-	Assert(replication_origin_id == InvalidRepNodeId);
+	Assert(replorigin_session_origin == InvalidRepOriginId);
 
 	/*
 	 * Before starting workers we must determine if we need to copy initial
@@ -882,7 +882,7 @@ bdr_init_replica(BDRNodeInfo *local_node)
 			uint64		remote_sysid;
 			TimeLineID  remote_timeline;
 			Oid			remote_dboid;
-			RepNodeId	repnodeid;
+			RepOriginId	repnodeid;
 
 			elog(INFO, "initializing node");
 

@@ -24,8 +24,7 @@
 #include "pgstat.h"
 #include "port.h"
 
-#include "access/committs.h"
-#include "access/seqam.h"
+#include "access/commit_ts.h"
 #include "access/heapam.h"
 #include "access/xact.h"
 
@@ -44,10 +43,11 @@
 
 #include "postmaster/bgworker.h"
 
-#include "replication/replication_identifier.h"
+#include "replication/origin.h"
 
 #include "storage/ipc.h"
 #include "storage/latch.h"
+#include "storage/lmgr.h"
 #include "storage/lwlock.h"
 #include "storage/proc.h"
 #include "storage/shmem.h"
@@ -80,7 +80,6 @@ Oid   BdrConflictHistoryRelId = InvalidOid;
 Oid   BdrLocksRelid = InvalidOid;
 Oid   BdrLocksByOwnerRelid = InvalidOid;
 Oid   BdrReplicationSetConfigRelid = InvalidOid;
-Oid   BdrSeqamOid = InvalidOid;
 Oid   BdrSupervisorDbOid = InvalidOid;
 
 /* GUC storage */
@@ -117,6 +116,7 @@ PGDLLEXPORT Datum bdr_terminate_walsender_workers(PG_FUNCTION_ARGS);
 PGDLLEXPORT Datum bdr_terminate_apply_workers(PG_FUNCTION_ARGS);
 PGDLLEXPORT Datum bdr_skip_changes_upto(PG_FUNCTION_ARGS);
 PGDLLEXPORT Datum bdr_pause_worker_management(PG_FUNCTION_ARGS);
+PGDLLEXPORT Datum bdr_is_active_in_db(PG_FUNCTION_ARGS);
 
 PG_FUNCTION_INFO_V1(bdr_apply_pause);
 PG_FUNCTION_INFO_V1(bdr_apply_resume);
@@ -136,6 +136,10 @@ PG_FUNCTION_INFO_V1(bdr_terminate_walsender_workers);
 PG_FUNCTION_INFO_V1(bdr_terminate_apply_workers);
 PG_FUNCTION_INFO_V1(bdr_skip_changes_upto);
 PG_FUNCTION_INFO_V1(bdr_pause_worker_management);
+PG_FUNCTION_INFO_V1(bdr_is_active_in_db);
+
+static int bdr_get_worker_pid_byid(uint64 sysid, TimeLineID timeline,
+	Oid dboid, BdrWorkerType worker_type);
 
 static bool bdr_terminate_workers_byid(uint64 sysid, TimeLineID timeline,
 	Oid dboid, BdrWorkerType worker_type);
@@ -378,7 +382,7 @@ bdr_connect(const char *conninfo,
  */
 static void
 bdr_create_slot(PGconn *streamConn, Name slot_name,
-				char *remote_ident, RepNodeId *replication_identifier,
+				char *remote_ident, RepOriginId *replication_identifier,
 				char **snapshot)
 {
 	StringInfoData query;
@@ -410,7 +414,7 @@ bdr_create_slot(PGconn *streamConn, Name slot_name,
 	}
 
 	/* acquire new local identifier, but don't commit */
-	*replication_identifier = CreateReplicationIdentifier(remote_ident);
+	*replication_identifier = replorigin_create(remote_ident);
 
 	/* now commit local identifier */
 	CommitTransactionCommand();
@@ -557,7 +561,7 @@ PGconn*
 bdr_establish_connection_and_slot(const char *dsn,
 	const char *application_name_suffix, Name out_slot_name, uint64 *out_sysid,
 	TimeLineID* out_timeline, Oid *out_dboid,
-	RepNodeId *out_replication_identifier, char **out_snapshot)
+	RepOriginId *out_replication_identifier, char **out_snapshot)
 {
 	PGconn		*streamConn;
 	bool		tx_started = false;
@@ -594,7 +598,7 @@ bdr_establish_connection_and_slot(const char *dsn,
 		tx_started = true;
 		StartTransactionCommand();
 	}
-	*out_replication_identifier = GetReplicationIdentifier(remote_ident, true);
+	*out_replication_identifier = replorigin_by_name(remote_ident, true);
 	if (tx_started)
 		CommitTransactionCommand();
 
@@ -658,9 +662,9 @@ bdr_do_not_replicate_assign_hook(bool newvalue, void *extra)
 {
 	/* Mark these transactions as not to be replicated to other nodes */
 	if (newvalue)
-		replication_origin_id = DoNotReplicateRepNodeId;
+		replorigin_session_origin = DoNotReplicateId;
 	else
-		replication_origin_id = InvalidRepNodeId;
+		replorigin_session_origin = InvalidRepOriginId;
 }
 
 
@@ -684,7 +688,7 @@ _PG_init(void)
 					(errcode(ERRCODE_CONFIG_FILE_ERROR),
 					 errmsg("bdr can only be loaded via shared_preload_libraries")));
 
-		if (!commit_ts_enabled)
+		if (!track_commit_timestamp)
 			ereport(ERROR,
 					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 					 errmsg("bdr requires \"track_commit_timestamp\" to be enabled")));
@@ -951,20 +955,15 @@ bdr_maintain_schema(bool update_extensions)
 		bdr_lookup_relid("bdr_conflict_history", schema_oid);
 	BdrReplicationSetConfigRelid  =
 		bdr_lookup_relid("bdr_replication_set_config", schema_oid);
-	BdrSequenceValuesRelid =
-		bdr_lookup_relid("bdr_sequence_values", schema_oid);
-	BdrSequenceElectionsRelid =
-		bdr_lookup_relid("bdr_sequence_elections", schema_oid);
-	BdrVotesRelid =
-		bdr_lookup_relid("bdr_votes", schema_oid);
 	QueuedDropsRelid =
 		bdr_lookup_relid("bdr_queued_drops", schema_oid);
 	BdrLocksRelid =
 		bdr_lookup_relid("bdr_global_locks", schema_oid);
 	BdrLocksByOwnerRelid =
 		bdr_lookup_relid("bdr_global_locks_byowner", schema_oid);
-	BdrSeqamOid = get_seqam_oid("bdr", false);
 	BdrSupervisorDbOid = bdr_get_supervisordb_oid(false);
+
+	bdr_maintain_seq_schema(schema_oid);
 
 	bdr_conflict_handlers_init();
 
@@ -1218,6 +1217,14 @@ bdr_parse_version(const char * bdr_version_str,
 	return major * 10000 + minor * 100 + rev;
 }
 
+static void
+bdr_skip_changes_upto_cleanup(int code, Datum arg)
+{
+	LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
+	BdrWorkerCtl->worker_management_paused = false;
+	LWLockRelease(BdrWorkerCtl->lock);
+}
+
 Datum
 bdr_skip_changes_upto(PG_FUNCTION_ARGS)
 {
@@ -1226,7 +1233,7 @@ bdr_skip_changes_upto(PG_FUNCTION_ARGS)
 	Oid			remote_dboid = PG_GETARG_OID(2);
 	XLogRecPtr	upto_lsn = PG_GETARG_LSN(3);
 	uint64		remote_sysid;
-	RepNodeId   nodeid;
+	RepOriginId   nodeid;
 
 	if (!bdr_permit_unsafe_commands)
 		ereport(ERROR,
@@ -1251,39 +1258,86 @@ bdr_skip_changes_upto(PG_FUNCTION_ARGS)
 	nodeid = bdr_fetch_node_id_via_sysid(remote_sysid,
 			(TimeLineID)remote_tli, remote_dboid);
 
-	if (nodeid == InvalidRepNodeId)
+	if (nodeid == InvalidRepOriginId)
 		ereport(ERROR,
 				(errcode(ERRCODE_UNDEFINED_OBJECT),
 				 errmsg("no replication identifier found for node")));
 
-	Assert(nodeid != DoNotReplicateRepNodeId);
-
-	AdvanceReplicationIdentifier(nodeid, upto_lsn, XactLastCommitEnd);
+	Assert(nodeid != DoNotReplicateId);
 
 	/*
-	 * The peer won't notice the replication identifier advance, we need to
-	 * tell it to re-check its configuration. While we do support re-reading
-	 * configuration via bdr.bdr_connections_changed() that only cares about
-	 * changes to bdr_connections, and this is a replication identifier update.
-	 * Since we also want the change to take effect promptly, just kill the
-	 * relevant apply worker.
+	 * If there's a local apply worker using this origin we must terminate it
+	 * before trying to advance the ID, otherwise we'll fail to advance it.
+	 *
+	 * We have to pause worker management so the terminated worker doesn't get
+	 * restarted before we continue. We also need to make sure we re-enable
+	 * worker management on exit. We don't try to stop someone else re-enabling
+	 * worker management at this time; at worst, we'll just fail to advance the
+	 * replication identifier with an error.
 	 */
-	if (!bdr_terminate_workers_byid(remote_sysid, remote_tli, remote_dboid, BDR_WORKER_APPLY))
+	LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
+	BdrWorkerCtl->worker_management_paused = true;
+	LWLockRelease(BdrWorkerCtl->lock);
+
+	PG_ENSURE_ERROR_CLEANUP(bdr_skip_changes_upto_cleanup, (Datum)0);
 	{
-		ereport(WARNING,
-				(errmsg("advanced replay position but couldn't signal apply worker"),
-				 errhint("check if the apply worker for the target node is running and terminate it manually")));
+		/*
+		 * We can't advance the replication identifier until we terminate any
+		 * apply worker that might currently hold it at a session level.
+		 *
+		 * There's no way to ask an apply worker to release its session
+		 * identifier. The best thing we can do is terminate the worker
+		 * and wait for it to exit. Because we're blocked worker management
+		 * it can't be relaunched until we give the go-ahead.
+		 */
+		bdr_terminate_workers_byid(remote_sysid, remote_tli, remote_dboid, BDR_WORKER_APPLY);
+
+		/*
+		 * The worker is signaled, but if it was actually running it might not
+		 * have exited yet, and we need it to release its hold on the
+		 * replication origin. Wait until it does.
+		 */
+		while (bdr_get_worker_pid_byid(remote_sysid, remote_tli, remote_dboid, BDR_WORKER_APPLY) != 0)
+		{
+			int ret = WaitLatch(&MyProc->procLatch,
+							WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
+							500);
+
+			if (ret & WL_POSTMASTER_DEATH)
+				proc_exit(1);
+
+			ResetLatch(&MyProc->procLatch);
+		}
+
+#if BDR_VERSION_NUM/100 >= 906
+		/*
+		 * We need a RowExclusiveLock on pg_replication_origin per docs for
+		 * replorigin_advance(...).
+		 */
+		LockRelationOid(ReplicationOriginRelationId, RowExclusiveLock);
+#endif
+
+		replorigin_advance(nodeid, upto_lsn, XactLastCommitEnd, false, true);
+
+#if BDR_VERSION_NUM/100 >= 906
+		UnlockRelationOid(ReplicationOriginRelationId, RowExclusiveLock);
+#endif
 	}
+	PG_END_ENSURE_ERROR_CLEANUP(bdr_skip_changes_upto_cleanup, (Datum)0);
+
+	LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
+	BdrWorkerCtl->worker_management_paused = false;
+	LWLockRelease(BdrWorkerCtl->lock);
 
 	PG_RETURN_VOID();
 }
 
 /*
- * Terminate the worker with the identified role and remote peer that
- * is operating on the current database.
+ * Look up bdr worker by sysid/timeline/dboid and get its pid if it is running,
+ * or 0 if not.
  */
-static bool
-bdr_terminate_workers_byid(uint64 sysid, TimeLineID timeline, Oid dboid, BdrWorkerType worker_type)
+static int
+bdr_get_worker_pid_byid(uint64 sysid, TimeLineID timeline, Oid dboid, BdrWorkerType worker_type)
 {
 	int			pid = 0;
 	BdrWorker * worker;
@@ -1299,6 +1353,18 @@ bdr_terminate_workers_byid(uint64 sysid, TimeLineID timeline, Oid dboid, BdrWork
 		pid = worker->worker_proc->pid;
 
 	LWLockRelease(BdrWorkerCtl->lock);
+
+	return pid;
+}
+
+/*
+ * Terminate the worker with the identified role and remote peer that
+ * is operating on the current database.
+ */
+static bool
+bdr_terminate_workers_byid(uint64 sysid, TimeLineID timeline, Oid dboid, BdrWorkerType worker_type)
+{
+	int pid = bdr_get_worker_pid_byid(sysid, timeline, dboid, worker_type);
 
 	if (pid == 0)
 		return false;

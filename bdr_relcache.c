@@ -20,6 +20,8 @@
 #include "access/heapam.h"
 #include "access/xact.h"
 
+#include "catalog/pg_class.h"
+
 #include "commands/seclabel.h"
 
 #include "utils/builtins.h"
@@ -29,6 +31,7 @@
 #include "utils/jsonapi.h"
 #include "utils/json.h"
 #include "utils/jsonb.h"
+#include "utils/rel.h"
 
 static HTAB *BDRRelcacheHash = NULL;
 

@@ -2,6 +2,11 @@
 # Makefile.in
 # @configure_input@
 
+# configure output
+BDR_PGVERCOMPAT_INCDIR=@BDR_PGVERCOMPAT_INCDIR@
+HAVE_SEQAM=@HAVE_SEQAM@
+# end configure output
+
 bdr_subdir = .
 bdr_top_builddir = .
 
@@ -10,78 +15,21 @@ MODULE_big = bdr
 EXTENSION = bdr
 
 DATA = \
-	extsql/bdr--0.7--0.7.1.sql \
-	extsql/bdr--0.7.1--0.8.0.sql \
-	extsql/bdr--0.8.0.sql \
-	extsql/bdr--0.8.0--0.8.0.1.sql \
-	extsql/bdr--0.8.0.1--0.8.0.2.sql \
-	extsql/bdr--0.8.0.2--0.8.0.3.sql \
-	extsql/bdr--0.8.0.3--0.8.0.4.sql \
-	extsql/bdr--0.8.0.4--0.8.0.5.sql \
-	extsql/bdr--0.8.0.5--0.8.0.6.sql \
-	extsql/bdr--0.8.0.6--0.8.0.7.sql \
-	extsql/bdr--0.8.0.7--0.9.0.0.sql \
-	extsql/bdr--0.9.0.0--0.9.0.1.sql \
-	extsql/bdr--0.9.0.1--0.9.0.2.sql \
-	extsql/bdr--0.9.0.2--0.9.0.3.sql \
-	extsql/bdr--0.9.0.3--0.9.0.4.sql \
-	extsql/bdr--0.9.0.4--0.9.0.5.sql \
-	extsql/bdr--0.9.0.4--0.10.0.0.sql \
-	extsql/bdr--0.9.0.5--0.10.0.0.sql \
-	extsql/bdr--0.9.0.5--0.9.1.0.sql \
-	extsql/bdr--0.9.1.0--0.9.2.0.sql \
-	extsql/bdr--0.9.1.0--0.10.0.0.sql \
-	extsql/bdr--0.9.2.0--0.10.0.0.sql \
-	extsql/bdr--0.9.2.0--0.9.3.0.sql \
-	extsql/bdr--0.9.3.0--0.10.0.0.sql \
-	extsql/bdr--0.10.0.0--0.10.0.1.sql \
-	extsql/bdr--0.10.0.1--0.10.0.2.sql \
-	extsql/bdr--0.10.0.2--0.10.0.3.sql  \
-	extsql/bdr--0.10.0.3--0.10.0.4.sql \
-	extsql/bdr--0.10.0.4--0.10.0.5.sql \
-	extsql/bdr--0.10.0.5--0.10.0.6.sql \
-	extsql/bdr--0.10.0.6--0.10.0.7.sql \
-	extsql/bdr--0.10.0.7--0.10.0.8.sql \
-	extsql/bdr--0.10.0.8--0.10.0.9.sql \
-	extsql/bdr--0.10.0.9--0.10.0.10.sql \
-	extsql/bdr--0.10.0.10--0.10.0.11.sql \
-	extsql/bdr--0.10.0.11--1.0.0.0.sql
-
-DATA_built = \
-	extsql/bdr--0.8.0.1.sql \
-	extsql/bdr--0.8.0.2.sql \
-	extsql/bdr--0.8.0.3.sql \
-	extsql/bdr--0.8.0.4.sql \
-	extsql/bdr--0.8.0.5.sql \
-	extsql/bdr--0.8.0.6.sql \
-	extsql/bdr--0.8.0.7.sql \
-	extsql/bdr--0.9.0.0.sql \
-	extsql/bdr--0.9.0.1.sql \
-	extsql/bdr--0.9.0.2.sql \
-	extsql/bdr--0.9.0.3.sql \
-	extsql/bdr--0.9.0.4.sql \
-	extsql/bdr--0.9.0.5.sql \
-	extsql/bdr--0.9.1.0.sql \
-	extsql/bdr--0.9.2.0.sql \
-	extsql/bdr--0.9.3.0.sql \
-	extsql/bdr--0.10.0.0.sql \
-	extsql/bdr--0.10.0.1.sql \
-	extsql/bdr--0.10.0.2.sql \
-	extsql/bdr--0.10.0.3.sql \
-	extsql/bdr--0.10.0.4.sql \
-	extsql/bdr--0.10.0.5.sql \
-	extsql/bdr--0.10.0.6.sql \
-	extsql/bdr--0.10.0.7.sql \
-	extsql/bdr--0.10.0.8.sql \
-	extsql/bdr--0.10.0.9.sql \
-	extsql/bdr--0.10.0.10.sql \
-	extsql/bdr--0.10.0.11.sql \
 	extsql/bdr--1.0.0.0.sql
 
-DOCS = bdr.conf.sample README.bdr
-SCRIPTS = scripts/bdr_initial_load bdr_init_copy bdr_dump
+# Add upgrade scripts above, like
+# 	extsql/bdr--1.0.0.0--1.0.0.1.sql
+#
+# and generated files below like:
 
-PG_CPPFLAGS = -I$(libpq_srcdir)
+#DATA_built = \
+#	extsql/bdr--1.0.0.1.sql
+
+DOCS = bdr.conf.sample README.bdr
+SCRIPTS = bdr_init_copy bdr_dump
+SCRIPTS_built = scripts/bdr_initial_load
+
+PG_CPPFLAGS = -I$(BDR_PGVERCOMPAT_INCDIR) -I$(libpq_srcdir) -Wmissing-prototypes -Wmissing-declarations -Werror
 SHLIB_LINK = $(libpq)
 
 OBJS = \
@@ -105,10 +53,35 @@ OBJS = \
 	bdr_pgutils.o \
 	bdr_relcache.o \
 	bdr_remotecalls.o \
-	bdr_seq.o \
 	bdr_shmem.o \
 	bdr_supervisor.o \
 	bdr_upgrade.o
+
+ifeq ($(HAVE_SEQAM),1)
+OBJS += bdr_seq.o
+REGRESS_COMPAT :=
+DDLTESTS := \
+	ddl_enable_ddl \
+	ddl_create \
+	ddl_alter_table \
+	ddl_extension \
+	ddl_function \
+	ddl_grant \
+	ddl_mixed \
+	ddl_namespace \
+	ddl_read_only \
+	ddl_replication_set \
+	ddl_sequence \
+	ddl_view \
+	ddl_disable_ddl
+
+SEQTESTS := dml_sequence
+else
+OBJS += bdr_seq_stub.o
+REGRESS_COMPAT := compat96
+DDLTESTS :=
+SEQTESTS :=
+endif
 
 DUMPOBJS = pg_dump/pg_dump.o pg_dump/common.o pg_dump/pg_dump_sort.o \
 	pg_dump/pg_backup_archiver.o pg_dump/pg_backup_db.o \
@@ -149,122 +122,11 @@ scripts/bdr_initial_load: scripts/bdr_initial_load.in
 	sed -e "s/BDR_VERSION/$(BDR_VERSION)/" -e "s/PG_VERSION/$(VERSION)/" $< > $@
 	@chmod +x $@
 
-extsql/bdr--0.8.0.1.sql: extsql/bdr--0.8.0.sql extsql/bdr--0.8.0--0.8.0.1.sql
-	mkdir -p extsql
-	cat $^ > $@
-
-extsql/bdr--0.8.0.2.sql: extsql/bdr--0.8.0.1.sql extsql/bdr--0.8.0.1--0.8.0.2.sql \
-	extsql/bdr--0.8.0.1--0.8.0.2.sql
-	mkdir -p extsql
-	cat $^ > $@
-
-extsql/bdr--0.8.0.3.sql: extsql/bdr--0.8.0.2.sql extsql/bdr--0.8.0.2--0.8.0.3.sql
-	mkdir -p extsql
-	cat $^ > $@
-
-extsql/bdr--0.8.0.4.sql: extsql/bdr--0.8.0.3.sql extsql/bdr--0.8.0.3--0.8.0.4.sql
-	mkdir -p extsql
-	cat $^ > $@
-
-extsql/bdr--0.8.0.5.sql: extsql/bdr--0.8.0.4.sql extsql/bdr--0.8.0.4--0.8.0.5.sql
-	mkdir -p extsql
-	cat $^ > $@
-
-extsql/bdr--0.8.0.6.sql: extsql/bdr--0.8.0.5.sql extsql/bdr--0.8.0.5--0.8.0.6.sql
-	mkdir -p extsql
-	cat $^ > $@
-
-extsql/bdr--0.8.0.7.sql: extsql/bdr--0.8.0.6.sql extsql/bdr--0.8.0.6--0.8.0.7.sql
-	mkdir -p extsql
-	cat $^ > $@
-
-extsql/bdr--0.9.0.0.sql: extsql/bdr--0.8.0.7.sql extsql/bdr--0.8.0.7--0.9.0.0.sql
-	mkdir -p extsql
-	cat $^ > $@
-
-extsql/bdr--0.9.0.1.sql: extsql/bdr--0.9.0.0.sql extsql/bdr--0.9.0.0--0.9.0.1.sql
-	mkdir -p extsql
-	cat $^ > $@
-
-extsql/bdr--0.9.0.2.sql: extsql/bdr--0.9.0.1.sql extsql/bdr--0.9.0.1--0.9.0.2.sql
-	mkdir -p extsql
-	cat $^ > $@
-
-extsql/bdr--0.9.0.3.sql: extsql/bdr--0.9.0.2.sql extsql/bdr--0.9.0.2--0.9.0.3.sql
-	mkdir -p extsql
-	cat $^ > $@
-
-extsql/bdr--0.9.0.4.sql: extsql/bdr--0.9.0.3.sql extsql/bdr--0.9.0.3--0.9.0.4.sql
-	mkdir -p extsql
-	cat $^ > $@
-
-extsql/bdr--0.9.0.5.sql: extsql/bdr--0.9.0.4.sql extsql/bdr--0.9.0.4--0.9.0.5.sql
-	mkdir -p extsql
-	cat $^ > $@
-
-extsql/bdr--0.9.1.0.sql: extsql/bdr--0.9.0.5.sql extsql/bdr--0.9.0.5--0.9.1.0.sql
-	mkdir -p extsql
-	cat $^ > $@
-
-extsql/bdr--0.9.2.0.sql: extsql/bdr--0.9.1.0.sql extsql/bdr--0.9.1.0--0.9.2.0.sql
-	mkdir -p extsql
-	cat $^ > $@
-
-extsql/bdr--0.9.3.0.sql: extsql/bdr--0.9.2.0.sql extsql/bdr--0.9.2.0--0.9.3.0.sql
-	mkdir -p extsql
-	cat $^ > $@
-
-extsql/bdr--0.10.0.0.sql: extsql/bdr--0.9.3.0.sql extsql/bdr--0.9.3.0--0.10.0.0.sql
-	mkdir -p extsql
-	cat $^ > $@
-
-extsql/bdr--0.10.0.1.sql: extsql/bdr--0.10.0.0.sql extsql/bdr--0.10.0.0--0.10.0.1.sql
-	mkdir -p extsql
-	cat $^ > $@
-
-extsql/bdr--0.10.0.2.sql: extsql/bdr--0.10.0.1.sql extsql/bdr--0.10.0.1--0.10.0.2.sql
-	mkdir -p extsql
-	cat $^ > $@
-
-extsql/bdr--0.10.0.3.sql: extsql/bdr--0.10.0.2.sql extsql/bdr--0.10.0.2--0.10.0.3.sql
-	mkdir -p extsql
-	cat $^ > $@
-
-extsql/bdr--0.10.0.4.sql: extsql/bdr--0.10.0.3.sql extsql/bdr--0.10.0.3--0.10.0.4.sql
-	mkdir -p extsql
-	cat $^ > $@
-
-extsql/bdr--0.10.0.5.sql: extsql/bdr--0.10.0.4.sql extsql/bdr--0.10.0.4--0.10.0.5.sql
-	mkdir -p extsql
-	cat $^ > $@
-
-extsql/bdr--0.10.0.6.sql: extsql/bdr--0.10.0.5.sql extsql/bdr--0.10.0.5--0.10.0.6.sql
-	mkdir -p extsql
-	cat $^ > $@
-
-extsql/bdr--0.10.0.7.sql: extsql/bdr--0.10.0.6.sql extsql/bdr--0.10.0.6--0.10.0.7.sql
-	mkdir -p extsql
-	cat $^ > $@
-
-extsql/bdr--0.10.0.8.sql: extsql/bdr--0.10.0.7.sql extsql/bdr--0.10.0.7--0.10.0.8.sql
-	mkdir -p extsql
-	cat $^ > $@
-
-extsql/bdr--0.10.0.9.sql: extsql/bdr--0.10.0.8.sql extsql/bdr--0.10.0.8--0.10.0.9.sql
-	mkdir -p extsql
-	cat $^ > $@
-
-extsql/bdr--0.10.0.10.sql: extsql/bdr--0.10.0.9.sql extsql/bdr--0.10.0.9--0.10.0.10.sql
-	mkdir -p extsql
-	cat $^ > $@
-
-extsql/bdr--0.10.0.11.sql: extsql/bdr--0.10.0.10.sql extsql/bdr--0.10.0.10--0.10.0.11.sql
-	mkdir -p extsql
-	cat $^ > $@
-
-extsql/bdr--1.0.0.0.sql: extsql/bdr--0.10.0.11.sql extsql/bdr--0.10.0.11--1.0.0.0.sql
-	mkdir -p extsql
-	cat $^ > $@
+# Add rules to generate new extension scripts here, like:
+#
+#extsql/bdr--1.0.0.1.sql: extsql/bdr--1.0.0.0.sql extsql/bdr--1.0.0.0--1.0.0.1.sql
+#	mkdir -p extsql
+#	cat $^ > $@
 
 pg_dump_dir:
 	mkdir -p pg_dump
@@ -307,18 +169,12 @@ installcheck: ;
 
 
 check: regresscheck isolationcheck
-DDLREGRESSCHECKS=ddl/enable_ddl ddl/create ddl/alter_table ddl/extension ddl/function \
-				 ddl/grant ddl/mixed ddl/namespace ddl/read_only ddl/replication_set \
-				 ddl/sequence ddl/view ddl/disable_ddl
-EXTRAREGRESSCHECKS=dml/sequence
-REGRESSINIT=init_bdr
-REGRESSTEARDOWN=part_bdr
-
 
 REGRESSCHECKS= \
 	init \
 	preseed \
-	$(REGRESSINIT) \
+	init_bdr \
+	$(REGRESS_COMPAT) \
 	preseed_check \
 	supervisordb \
 	upgrade \
@@ -328,10 +184,15 @@ REGRESSCHECKS= \
 	terminate \
 	skipchanges \
 	pgreplicationslots \
-	$(DDLREGRESSCHECKS) \
-	dml/basic dml/contrib dml/delete_pk dml/extended dml/missing_pk dml/toasted \
-	$(EXTRAREGRESSCHECKS) \
-	$(REGRESSTEARDOWN)
+	$(DDLTESTS) \
+	dml_basic \
+	dml_contrib \
+	dml_delete_pk \
+	dml_extended \
+	dml_missing_pk \
+	dml_toasted \
+	$(SEQTESTS) \
+	part_bdr
 
 
 ISOLATIONCHECKS=\
@@ -362,6 +223,7 @@ regresscheck: all install
 		--testbinary src/test/regress/pg_regress \
 		$(REGRESSCHECKS)
 
+ifeq ($(MAJORVERSION),9.4)
 isolationcheck: all install
 	mkdir -p results/isolation
 
@@ -369,6 +231,11 @@ isolationcheck: all install
 		--testbinary src/test/isolation/pg_isolation_regress \
 		--dbname node1,node2,node3 \
 		$(ISOLATIONCHECKS)
+else
+# pg_isolation_regress doesn't get installed by 96, only by 94bdr
+isolationcheck:
+	@echo "Cannot run isolation tests except on 9.4bdr"
+endif
 
 bdr_pgbench_check: bdr_pgbench_check.sh
 	sed -e 's,@bindir@,$(bindir),g' \

@@ -41,7 +41,7 @@
 
 #include "replication/logical.h"
 #include "replication/output_plugin.h"
-#include "replication/replication_identifier.h"
+#include "replication/origin.h"
 #include "replication/slot.h"
 #include "replication/walsender_private.h"
 
@@ -104,10 +104,31 @@ static void pg_decode_commit_txn(LogicalDecodingContext *ctx,
 static void pg_decode_change(LogicalDecodingContext *ctx,
 				 ReorderBufferTXN *txn, Relation rel,
 				 ReorderBufferChange *change);
+
 static void pg_decode_message(LogicalDecodingContext *ctx,
+							  ReorderBufferTXN *txn,
+							  XLogRecPtr message_lsn,
+							  bool transactional,
+							  const char *prefix,
+							  Size sz,
+							  const char *message);
+
+#if PG_VERSION_NUM < 90600
+/*
+ * We need an adapter from 9.6's logical messages to those in 9.4bdr, which lack
+ * a prefix and have a different signature.
+ */
+static void pg_decode_message_94bdr(LogicalDecodingContext *ctx,
 							  ReorderBufferTXN *txn, XLogRecPtr message_lsn,
 							  bool transactional, Size sz,
-							  const char *message);
+							  const char *message)
+{
+	/* Call the 9.6 callback, faking up the prefix */
+	pg_decode_message(ctx, txn, message_lsn,
+					  transactional, BDR_LOGICAL_MSG_PREFIX, sz, message);
+}
+
+#endif /* PG_VERSION_NUM < 90600 */
 
 /* private prototypes */
 static void write_rel(StringInfo out, Relation rel);
@@ -124,7 +145,11 @@ _PG_output_plugin_init(OutputPluginCallbacks *cb)
 	cb->begin_cb = pg_decode_begin_txn;
 	cb->change_cb = pg_decode_change;
 	cb->commit_cb = pg_decode_commit_txn;
+#if PG_VERSION_NUM < 90600
+	cb->message_cb = pg_decode_message_94bdr;
+#else
 	cb->message_cb = pg_decode_message;
+#endif
 	cb->shutdown_cb = pg_decode_shutdown;
 }
 
@@ -681,7 +706,7 @@ static inline bool
 should_forward_changeset(LogicalDecodingContext *ctx, BdrOutputData *data,
 						 ReorderBufferTXN *txn)
 {
-	return txn->origin_id == InvalidRepNodeId || data->forward_changesets;
+	return txn->origin_id == InvalidRepOriginId || data->forward_changesets;
 }
 
 static inline bool
@@ -764,7 +789,7 @@ pg_decode_begin_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *txn)
 	if (flags & BDR_OUTPUT_TRANSACTION_HAS_ORIGIN)
 	{
 		/*
-		 * The RepNodeId in txn->origin_id is our local identifier for the
+		 * The RepOriginId in txn->origin_id is our local identifier for the
 		 * origin node, but it's not valid outside our node. It must be
 		 * converted into the (sysid, tlid, dboid) that uniquely identifies the
 		 * node globally so that can be sent.
@@ -1099,17 +1124,17 @@ write_tuple(BdrOutputData *data, StringInfo out, Relation rel,
 static void
 pg_decode_message(LogicalDecodingContext *ctx,
 				  ReorderBufferTXN *txn, XLogRecPtr lsn,
-				  bool transactional, Size sz,
-				  const char *message)
+				  bool transactional, const char *prefix,
+				  Size sz, const char *message)
 {
-	/*
-	 * TODO: at some point we'll need several channels and filtering here..
-	 */
-	OutputPluginPrepareWrite(ctx, true);
-	pq_sendbyte(ctx->out, 'M');	/* message follows */
-	pq_sendbyte(ctx->out, transactional);
-	pq_sendint64(ctx->out, lsn);
-	pq_sendint(ctx->out, sz, 4);
-	pq_sendbytes(ctx->out, message, sz);
-	OutputPluginWrite(ctx, true);
+	if (strcmp(prefix, BDR_LOGICAL_MSG_PREFIX) == 0)
+	{
+		OutputPluginPrepareWrite(ctx, true);
+		pq_sendbyte(ctx->out, 'M');	/* message follows */
+		pq_sendbyte(ctx->out, transactional);
+		pq_sendint64(ctx->out, lsn);
+		pq_sendint(ctx->out, sz, 4);
+		pq_sendbytes(ctx->out, message, sz);
+		OutputPluginWrite(ctx, true);
+	}
 }

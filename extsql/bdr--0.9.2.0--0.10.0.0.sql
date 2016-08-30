@@ -1,2 +1,0 @@
--- This file exists only to tell the extension infrastructure
--- that no changes are required.

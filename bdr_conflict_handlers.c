@@ -32,7 +32,7 @@
 
 #include "miscadmin.h"
 
-#include "replication/replication_identifier.h"
+#include "replication/origin.h"
 
 #include "utils/builtins.h"
 #include "utils/inval.h"
@@ -40,6 +40,7 @@
 #include "utils/memutils.h"
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
+#include "utils/rel.h"
 
 PG_FUNCTION_INFO_V1(bdr_create_conflict_handler);
 PG_FUNCTION_INFO_V1(bdr_drop_conflict_handler);
@@ -236,7 +237,7 @@ bdr_create_conflict_handler(PG_FUNCTION_ARGS)
 		elog(ERROR, "expected SPI state %u, got %u", SPI_OK_INSERT, ret);
 
 	if (SPI_processed != 1)
-		elog(ERROR, "expected one processed row, got %u", SPI_processed);
+		elog(ERROR, "expected one processed row, got "UINT64_FORMAT, (uint64)SPI_processed);
 
 	/*
 	 * set up the dependency relation with ourselves as "dependent"
@@ -258,7 +259,7 @@ bdr_create_conflict_handler(PG_FUNCTION_ARGS)
 	/*
 	 * last: INSERT to queued_commands for replication if not replaying
 	 */
-	if (replication_origin_id == InvalidRepNodeId)
+	if (replorigin_session_origin == InvalidRepOriginId)
 	{
 		StringInfoData query;
 		char	   *proc_name = format_procedure_qualified(proc_oid);
@@ -302,7 +303,7 @@ bdr_create_conflict_handler(PG_FUNCTION_ARGS)
 		if (ret != SPI_OK_INSERT)
 			elog(ERROR, "expected SPI state %u, got %u", SPI_OK_INSERT, ret);
 		if (SPI_processed != 1)
-			elog(ERROR, "expected one processed row, got %u", SPI_processed);
+			elog(ERROR, "expected one processed row, got "UINT64_FORMAT, (uint64)SPI_processed);
 	}
 
 	if (SPI_finish() != SPI_OK_FINISH)
@@ -406,7 +407,7 @@ bdr_drop_conflict_handler(PG_FUNCTION_ARGS)
 	/*
 	 * last: INSERT to queued_commands for replication if not replaying
 	 */
-	if (replication_origin_id == InvalidRepNodeId)
+	if (replorigin_session_origin == InvalidRepOriginId)
 	{
 		StringInfoData query;
 		char	   *quoted_ch_name = quote_literal_cstr(ch_name);

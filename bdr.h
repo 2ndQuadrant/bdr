@@ -47,6 +47,8 @@
 
 #define BDR_SUPERVISOR_DBNAME "bdr_supervisordb"
 
+#define BDR_LOGICAL_MSG_PREFIX "bdr"
+
 /*
  * Don't include libpq here, msvc infrastructure requires linking to libpq
  * otherwise.
@@ -313,7 +315,7 @@ static const char * const bdr_default_apply_connection_options =
 typedef struct BdrWorkerControl
 {
 	/* Must hold this lock when writing to BdrWorkerControl members */
-	LWLockId     lock;
+	LWLockId	lock;
 	/* Worker generation number, incremented on postmaster restart */
 	uint16       worker_generation;
 	/* Set/unset by bdr_apply_pause()/_replay(). */
@@ -346,10 +348,6 @@ extern Oid  BdrReplicationSetConfigRelid;
 extern Oid	BdrLocksRelid;
 extern Oid	BdrLocksByOwnerRelid;
 extern Oid	QueuedDropsRelid;
-extern Oid	BdrSequenceValuesRelid;
-extern Oid	BdrSequenceElectionsRelid;
-extern Oid	BdrVotesRelid;
-extern Oid	BdrSeqamOid;
 extern Oid  BdrSupervisorDbOid;
 
 /* Structure representing bdr_nodes record */
@@ -378,13 +376,11 @@ typedef struct BDRNodeInfo
 
 extern Oid bdr_lookup_relid(const char *relname, Oid schema_oid);
 
-extern void bdr_sequencer_set_nnodes(Size nnodes);
-
 
 /* apply support */
-extern void bdr_fetch_sysid_via_node_id(RepNodeId node_id, uint64 *sysid,
+extern void bdr_fetch_sysid_via_node_id(RepOriginId node_id, uint64 *sysid,
 										TimeLineID *tli, Oid *remote_dboid);
-extern RepNodeId bdr_fetch_node_id_via_sysid(uint64 sysid, TimeLineID tli, Oid dboid);
+extern RepOriginId bdr_fetch_node_id_via_sysid(uint64 sysid, TimeLineID tli, Oid dboid);
 
 /* Index maintenance, heap access, etc */
 extern struct EState * bdr_create_rel_estate(Relation rel);
@@ -444,7 +440,7 @@ extern BdrApplyConflict * bdr_make_apply_conflict(BdrConflictType conflict_type,
 									TransactionId remote_txid,
 									BDRRelation *conflict_relation,
 									struct TupleTableSlot *local_tuple,
-									RepNodeId local_tuple_origin_id,
+									RepOriginId local_tuple_origin_id,
 									struct TupleTableSlot *remote_tuple,
 									struct ErrorData *apply_error);
 
@@ -453,24 +449,9 @@ extern void bdr_conflict_log_table(BdrApplyConflict *conflict);
 
 extern void tuple_to_stringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple);
 
-/* sequence support */
-extern void bdr_sequencer_shmem_init(int sequencers);
-extern void bdr_sequencer_init(int seq_slot, Size nnodes);
-extern void bdr_sequencer_lock(void);
-extern bool bdr_sequencer_vote(void);
-extern void bdr_sequencer_tally(void);
-extern bool bdr_sequencer_start_elections(void);
-extern void bdr_sequencer_fill_sequences(void);
-
-extern void bdr_sequencer_wakeup(void);
-extern void bdr_schedule_eoxact_sequencer_wakeup(void);
-
-extern int bdr_sequencer_get_next_free_slot(void); //XXX PERDB temp
-
-
 /* statistic functions */
 extern void bdr_count_shmem_init(Size nnodes);
-extern void bdr_count_set_current_node(RepNodeId node_id);
+extern void bdr_count_set_current_node(RepOriginId node_id);
 extern void bdr_count_commit(void);
 extern void bdr_count_rollback(void);
 extern void bdr_count_insert(void);
@@ -597,7 +578,7 @@ bdr_establish_connection_and_slot(const char *dsn,
 								  uint64 *out_sysid,
 								  TimeLineID *out_timeline,
 								  Oid *out_dboid,
-								  RepNodeId *out_replication_identifier,
+								  RepOriginId *out_replication_identifier,
 	 							  char **out_snapshot);
 
 extern PGconn* bdr_connect_nonrepl(const char *connstring,
@@ -660,5 +641,10 @@ extern void bdr_test_remote_connectback_internal(PGconn *conn,
  * useful for assertions and debugging.
  */
 extern BdrWorkerType bdr_worker_type;
+
+/*
+ * sequencer support
+ */
+#include "bdr_seq.h"
 
 #endif   /* BDR_H */

@@ -27,7 +27,7 @@
 
 #include "tcop/tcopprot.h"
 
-#include "replication/replication_identifier.h"
+#include "replication/origin.h"
 
 #include "utils/builtins.h"
 #include "utils/guc.h"
@@ -35,6 +35,7 @@
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/pg_lsn.h"
+#include "utils/rel.h"
 #include "utils/syscache.h"
 #include "utils/typcache.h"
 
@@ -285,6 +286,7 @@ tuple_to_stringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple)
 		/* get Datum from tuple */
 		origval = heap_getattr(tuple, natt + 1, tupdesc, &isnull);
 
+		val = (Datum)0;
 		if (isnull)
 			outputstr = "(null)";
 		else if (typisvarlena && VARATT_IS_EXTERNAL_ONDISK(origval))
@@ -611,7 +613,7 @@ bdr_make_apply_conflict(BdrConflictType conflict_type,
 						TransactionId remote_txid,
 						BDRRelation *conflict_relation,
 						TupleTableSlot *local_tuple,
-						RepNodeId local_tuple_origin_id,
+						RepOriginId local_tuple_origin_id,
 						TupleTableSlot *remote_tuple,
 						ErrorData *apply_error)
 {
@@ -645,13 +647,13 @@ bdr_make_apply_conflict(BdrConflictType conflict_type,
 	}
 
 	/* TODO: May make sense to cache the remote sysid in a global too... */
-	bdr_fetch_sysid_via_node_id(replication_origin_id,
+	bdr_fetch_sysid_via_node_id(replorigin_session_origin,
 								&conflict->remote_sysid,
 								&conflict->remote_tli,
 								&conflict->remote_dboid);
-	conflict->remote_commit_time = replication_origin_timestamp;
+	conflict->remote_commit_time = replorigin_session_origin_timestamp;
 	conflict->remote_txid = remote_txid;
-	conflict->remote_commit_lsn = replication_origin_lsn;
+	conflict->remote_commit_lsn = replorigin_session_origin_lsn;
 
 	if (local_tuple != NULL)
 	{
@@ -673,7 +675,7 @@ bdr_make_apply_conflict(BdrConflictType conflict_type,
 		conflict->local_tuple_xmin = InvalidTransactionId;
 	}
 
-	if (local_tuple_origin_id != InvalidRepNodeId)
+	if (local_tuple_origin_id != InvalidRepOriginId)
 	{
 		bdr_fetch_sysid_via_node_id(local_tuple_origin_id,
 									&conflict->local_tuple_origin_sysid,

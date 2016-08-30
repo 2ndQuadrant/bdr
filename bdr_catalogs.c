@@ -29,12 +29,13 @@
 
 #include "nodes/makefuncs.h"
 
-#include "replication/replication_identifier.h"
+#include "replication/origin.h"
 
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
 #include "utils/guc.h"
 #include "utils/memutils.h"
+#include "utils/rel.h"
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
 
@@ -295,7 +296,7 @@ bdr_nodes_set_local_status(char status)
 
 	Assert(status != '\0'); /* Cannot pass \0 */
 	/* Cannot have replication apply state set in this tx */
-	Assert(replication_origin_id == InvalidRepNodeId);
+	Assert(replorigin_session_origin == InvalidRepOriginId);
 
 	if (!IsTransactionState())
 	{
@@ -336,15 +337,15 @@ bdr_nodes_set_local_status(char status)
 }
 
 /*
- * Given a node's local RepNodeId, get its globally unique identifier (sysid,
+ * Given a node's local RepOriginId, get its globally unique identifier (sysid,
  * timeline id, database oid). Ignore identifiers local to databases other than
  * the active DB.
  */
 void
-bdr_fetch_sysid_via_node_id(RepNodeId node_id, uint64 *sysid, TimeLineID *tli,
+bdr_fetch_sysid_via_node_id(RepOriginId node_id, uint64 *sysid, TimeLineID *tli,
 							Oid *dboid)
 {
-	if (node_id == InvalidRepNodeId || node_id == DoNotReplicateRepNodeId)
+	if (node_id == InvalidRepOriginId || node_id == DoNotReplicateId)
 	{
 		/* It's the local node */
 		*sysid = GetSystemIdentifier();
@@ -361,7 +362,7 @@ bdr_fetch_sysid_via_node_id(RepNodeId node_id, uint64 *sysid, TimeLineID *tli,
 		Oid local_dboid;
 		NameData replication_name;
 
-		GetReplicationInfoByIdentifier(node_id, false, &riname);
+		replorigin_by_oid(node_id, false, &riname);
 
 		if (sscanf(riname, BDR_NODE_ID_FORMAT,
 				   &remote_sysid, &remote_tli, &remote_dboid, &local_dboid,
@@ -442,7 +443,7 @@ bdr_replident_name(uint64 remote_sysid, TimeLineID remote_timeline, Oid remote_d
 	return si.data;
 }
 
-RepNodeId
+RepOriginId
 bdr_fetch_node_id_via_sysid(uint64 sysid, TimeLineID tli, Oid dboid)
 {
 	char		ident[256];
@@ -451,7 +452,7 @@ bdr_fetch_node_id_via_sysid(uint64 sysid, TimeLineID tli, Oid dboid)
 			 BDR_NODE_ID_FORMAT,
 			 sysid, tli, dboid, MyDatabaseId,
 			 "");
-	return GetReplicationIdentifier(ident, false);
+	return replorigin_by_name(ident, false);
 }
 
 /*

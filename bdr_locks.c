@@ -91,7 +91,8 @@
 
 #include "libpq/pqformat.h"
 
-#include "replication/replication_identifier.h"
+#include "replication/message.h"
+#include "replication/origin.h"
 #include "replication/slot.h"
 
 #include "storage/barrier.h"
@@ -101,10 +102,10 @@
 #include "storage/procarray.h"
 #include "storage/shmem.h"
 #include "storage/sinvaladt.h"
-#include "storage/standby.h"
 
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
+#include "utils/rel.h"
 #include "utils/snapmgr.h"
 
 #define LOCKTRACE "DDL LOCK TRACE: "
@@ -135,7 +136,7 @@ typedef struct BdrLocksDBState {
 	bool		locked_and_loaded;
 
 	int			lockcount;
-	RepNodeId	lock_holder;
+	RepOriginId	lock_holder;
 
 	BDRLockType	lock_type;
 
@@ -152,9 +153,9 @@ typedef struct BdrLocksDBState {
 } BdrLocksDBState;
 
 typedef struct BdrLocksCtl {
-	LWLock	   *lock;
-	BdrLocksDBState   *dbstate;
-	BDRLockWaiter	  *waiters;
+	LWLockId			lock;
+	BdrLocksDBState    *dbstate;
+	BDRLockWaiter	   *waiters;
 } BdrLocksCtl;
 
 static BdrLocksDBState * bdr_locks_find_database(Oid dbid, bool create);
@@ -211,7 +212,7 @@ bdr_locks_shmem_startup(void)
 	if (!found)
 	{
 		memset(bdr_locks_ctl, 0, bdr_locks_shmem_size());
-		bdr_locks_ctl->lock = LWLockAssign();
+		bdr_locks_ctl->lock = &(GetNamedLWLockTranche("bdr_locks")->lock);
 		bdr_locks_ctl->dbstate = (BdrLocksDBState *) bdr_locks_ctl + sizeof(BdrLocksCtl);
 		bdr_locks_ctl->waiters = (BDRLockWaiter *) bdr_locks_ctl + sizeof(BdrLocksCtl) +
 			mul_size(sizeof(BdrLocksDBState), bdr_max_databases);
@@ -229,7 +230,7 @@ bdr_locks_shmem_init()
 	bdr_locks_ctl = NULL;
 
 	RequestAddinShmemSpace(bdr_locks_shmem_size());
-	RequestAddinLWLocks(1);
+	RequestNamedLWLockTranche("bdr_locks", 1);
 
 	prev_shmem_startup_hook = shmem_startup_hook;
 	shmem_startup_hook = bdr_locks_shmem_startup;
@@ -380,7 +381,7 @@ bdr_locks_startup()
 	bdr_prepare_message(&s, BDR_MESSAGE_START);
 
 	elog(DEBUG1, "sending global lock startup message");
-	lsn = LogStandbyMessage(s.data, s.len, false);
+	lsn = LogLogicalMessage(BDR_LOGICAL_MSG_PREFIX, s.data, s.len, false);
 	resetStringInfo(&s);
 	XLogFlush(lsn);
 
@@ -405,7 +406,7 @@ bdr_locks_startup()
 		bool		isnull[10];
 		const char *state;
 		uint64		sysid;
-		RepNodeId	node_id;
+		RepOriginId	node_id;
 		BDRLockType	lock_type;
 
 		heap_deform_tuple(tuple, RelationGetDescr(rel),
@@ -439,7 +440,7 @@ bdr_locks_startup()
 			wait_for_lsn = GetXLogInsertRecPtr();
 			bdr_prepare_message(&s, BDR_MESSAGE_REQUEST_REPLAY_CONFIRM);
 			pq_sendint64(&s, wait_for_lsn);
-			lsn = LogStandbyMessage(s.data, s.len, false);
+			lsn = LogLogicalMessage(BDR_LOGICAL_MSG_PREFIX, s.data, s.len, false);
 			XLogFlush(lsn);
 			resetStringInfo(&s);
 
@@ -544,7 +545,7 @@ bdr_lock_xact_callback(XactEvent event, void *arg)
 		pq_sendint(&s, MyDatabaseId, 4); /* database */
 		/* no name! locks are db wide */
 
-		lsn = LogStandbyMessage(s.data, s.len, false);
+		lsn = LogLogicalMessage(BDR_LOGICAL_MSG_PREFIX, s.data, s.len, false);
 		XLogFlush(lsn);
 
 		LWLockAcquire(bdr_locks_ctl->lock, LW_EXCLUSIVE);
@@ -723,7 +724,7 @@ bdr_acquire_ddl_lock(BDRLockType lock_type)
 
 	/* lock looks to be free, try to acquire it */
 
-	lsn = LogStandbyMessage(s.data, s.len, false);
+	lsn = LogLogicalMessage(BDR_LOGICAL_MSG_PREFIX, s.data, s.len, false);
 	XLogFlush(lsn);
 
 	END_CRIT_SECTION();
@@ -802,7 +803,7 @@ check_is_my_origin_node(uint64 sysid, TimeLineID tli, Oid datid)
 	Assert(!IsTransactionState());
 
 	StartTransactionCommand();
-	bdr_fetch_sysid_via_node_id(replication_origin_id, &replay_sysid,
+	bdr_fetch_sysid_via_node_id(replorigin_session_origin, &replay_sysid,
 								&replay_tli, &replay_datid);
 	CommitTransactionCommand();
 
@@ -929,7 +930,7 @@ bdr_request_replay_confirmation(void)
 	pq_sendint64(&s, wait_for_lsn);
 
 	LWLockAcquire(bdr_locks_ctl->lock, LW_EXCLUSIVE);
-	lsn = LogStandbyMessage(s.data, s.len, false);
+	lsn = LogLogicalMessage(BDR_LOGICAL_MSG_PREFIX, s.data, s.len, false);
 	XLogFlush(lsn);
 
 	bdr_my_locks_database->replay_confirmed = 0;
@@ -1033,7 +1034,7 @@ bdr_process_acquire_ddl_lock(uint64 sysid, TimeLineID tli, Oid datid, BDRLockTyp
 		/* setup ddl lock */
 		bdr_my_locks_database->lockcount++;
 		bdr_my_locks_database->lock_type = lock_type;
-		bdr_my_locks_database->lock_holder = replication_origin_id;
+		bdr_my_locks_database->lock_holder = replorigin_session_origin;
 		LWLockRelease(bdr_locks_ctl->lock);
 
 		if (lock_type >= BDR_LOCK_WRITE)
@@ -1080,7 +1081,7 @@ bdr_process_acquire_ddl_lock(uint64 sysid, TimeLineID tli, Oid datid, BDRLockTyp
 			 LOCKTRACE "global lock granted to remote node (" BDR_LOCALID_FORMAT ")",
 			 sysid, tli, datid, "");
 	}
-	else if (bdr_my_locks_database->lock_holder == replication_origin_id &&
+	else if (bdr_my_locks_database->lock_holder == replorigin_session_origin &&
 			 lock_type > bdr_my_locks_database->lock_type)
 	{
 		Relation	rel;
@@ -1227,7 +1228,7 @@ decline:
 
 		pq_sendint(&s, lock_type, 4);
 
-		lsn = LogStandbyMessage(s.data, s.len, false);
+		lsn = LogLogicalMessage(BDR_LOGICAL_MSG_PREFIX, s.data, s.len, false);
 		XLogFlush(lsn);
 		resetStringInfo(&s);
 	}
@@ -1311,7 +1312,7 @@ bdr_process_release_ddl_lock(uint64 origin_sysid, TimeLineID origin_tli, Oid ori
 	if (bdr_my_locks_database->lockcount > 0)
 	{
 		bdr_my_locks_database->lockcount--;
-		bdr_my_locks_database->lock_holder = InvalidRepNodeId;
+		bdr_my_locks_database->lock_holder = InvalidRepOriginId;
 		/* XXX: recheck owner of lock */
 	}
 
@@ -1451,7 +1452,7 @@ bdr_process_request_replay_confirm(uint64 sysid, TimeLineID tli,
 	initStringInfo(&s);
 	bdr_prepare_message(&s, BDR_MESSAGE_REPLAY_CONFIRM);
 	pq_sendint64(&s, request_lsn);
-	lsn = LogStandbyMessage(s.data, s.len, false);
+	lsn = LogLogicalMessage(BDR_LOGICAL_MSG_PREFIX, s.data, s.len, false);
 	XLogFlush(lsn);
 
 }
@@ -1492,7 +1493,7 @@ bdr_send_confirm_lock(void)
 
 	pq_sendint(&s, bdr_my_locks_database->lock_type, 4);
 
-	LogStandbyMessage(s.data, s.len, true); /* transactional */
+	LogLogicalMessage(BDR_LOGICAL_MSG_PREFIX, s.data, s.len, true); /* transactional */
 
 	/*
 	 * Update state of lock. Do so in the same xact that confirms the
@@ -1642,7 +1643,7 @@ bdr_locks_process_remote_startup(uint64 sysid, TimeLineID tli, Oid datid)
 		else
 		{
 			bdr_my_locks_database->lockcount--;
-			bdr_my_locks_database->lock_holder = InvalidRepNodeId;
+			bdr_my_locks_database->lock_holder = InvalidRepOriginId;
 			bdr_my_locks_database->lock_type = BDR_LOCK_NOLOCK;
 			bdr_my_locks_database->replay_confirmed = 0;
 			bdr_my_locks_database->replay_confirmed_lsn = InvalidXLogRecPtr;

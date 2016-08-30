@@ -8,7 +8,7 @@ SELECT current_setting('bdrtest.origdb') AS origdb
 \c :origdb
 
 DO $DO$BEGIN
-IF bdr.bdr_variant() = 'BDR' THEN
+IF bdr.have_global_sequences() THEN
     SET default_sequenceam = local;
 END IF;
 END; $DO$;

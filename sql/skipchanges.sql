@@ -1,6 +1,9 @@
 \c regression
 
-CREATE TABLE test_replication(id integer not null primary key, atlsn pg_lsn default pg_current_xlog_insert_location());
+SELECT bdr.bdr_replicate_ddl_command($DDL$
+CREATE TABLE public.test_replication(id integer not null primary key, atlsn pg_lsn default pg_current_xlog_insert_location());
+$DDL$);
+
 INSERT INTO test_replication(id) VALUES (1);
 
 -- Error cases
@@ -14,7 +17,26 @@ SELECT bdr.skip_changes_upto(n.node_sysid, n.node_timeline, n.node_dboid, '0/0')
 FROM bdr.bdr_nodes n
 WHERE (n.node_sysid, n.node_timeline, n.node_dboid) != bdr.bdr_get_local_nodeid();
 
-SELECT bdr.skip_changes_upto('0', 0, 1234, '0/1');
+-- Access a bogus node.
+-- Needs a wrapper because of message differences between 9.4bdr and 9.6
+DO LANGUAGE plpgsql
+$$
+DECLARE
+  errm text;
+BEGIN
+  PERFORM bdr.skip_changes_upto('0', 0, 1234, '0/1');
+EXCEPTION
+  WHEN others THEN
+    GET STACKED DIAGNOSTICS
+       errm = MESSAGE_TEXT;
+    RAISE WARNING 'ERR: "%"', errm;
+    IF errm LIKE '%cache lookup failed for % bdr_0_0_1234_16385_' THEN
+      RAISE EXCEPTION 'Got expected lookup error';
+    ELSE
+      RAISE;
+    END IF;
+END;
+$$;
 
 SELECT bdr.skip_changes_upto(n.node_sysid, n.node_timeline, n.node_dboid, '0/1')
 FROM bdr.bdr_nodes n
@@ -54,7 +76,9 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), 0);
 -- break replication
 BEGIN;
 SET LOCAL bdr.skip_ddl_locking = on;
-DROP TABLE break_me;
+SELECT bdr.bdr_replicate_ddl_command($DDL$
+DROP TABLE public.break_me;
+$DDL$);
 COMMIT;
 
 -- Should never be seen on downstream, since it won't replay past the broken

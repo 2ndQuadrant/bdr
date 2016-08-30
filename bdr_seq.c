@@ -14,6 +14,11 @@
  */
 #include "postgres.h"
 
+#include "bdr_config.h"
+#ifndef HAVE_SEQAM
+#error bdr_seq.h only compiles when sequence access methods are available in Pg
+#endif
+
 #include "bdr.h"
 
 #include "miscadmin.h"
@@ -35,6 +40,7 @@
 #include "utils/guc.h"
 #include "utils/lsyscache.h"
 #include "utils/snapmgr.h"
+#include "utils/syscache.h"
 
 #include "storage/bufmgr.h"
 #include "storage/ipc.h"
@@ -62,13 +68,14 @@ typedef struct BdrSequenceValues {
 	int64		end_value;
 } BdrSequenceValues;
 
-/* Our offset within the shared memory array of registered sequence managers */
-static int  seq_slot = -1;
-
-/* cached relids */
+/* global sequence relids */
+Oid	BdrSeqamOid = InvalidOid;
 Oid	BdrSequenceValuesRelid;		/* bdr_sequence_values */
 Oid	BdrSequenceElectionsRelid;	/* bdr_sequence_elections */
-Oid	BdrVotesRelid;		/* bdr_votes */
+Oid	BdrVotesRelid;				/* bdr_votes */
+
+/* Our offset within the shared memory array of registered sequence managers */
+static int  seq_slot = -1;
 
 static BdrSequencerControl *BdrSequencerCtl = NULL;
 
@@ -1478,4 +1485,78 @@ done_with_sequence:
 	bdr_schedule_eoxact_sequencer_wakeup();
 
 	PG_RETURN_VOID();
+}
+
+
+void
+filter_CreateBdrSeqStmt(CreateSeqStmt *stmt)
+{
+	ListCell	   *param;
+
+	if (stmt->accessMethod == NULL || strcmp(stmt->accessMethod, "bdr") != 0)
+		return;
+
+	foreach(param, stmt->options)
+	{
+		DefElem    *defel = (DefElem *) lfirst(param);
+		if (strcmp(defel->defname, "owned_by") != 0 &&
+			strcmp(defel->defname, "start") != 0)
+			ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 errmsg("CREATE SEQUENCE ... %s is not supported for bdr sequences",
+					defel->defname)));
+	}
+}
+
+void
+filter_AlterBdrSeqStmt(AlterSeqStmt *stmt, Oid seqoid)
+{
+	Oid				seqamid;
+	Form_pg_class	pgcform;
+	ListCell	   *param;
+	HeapTuple		ctup;
+
+	seqamid = get_seqam_oid("bdr", true);
+
+	/* No bdr sequences? */
+	if (seqamid == InvalidOid)
+		return;
+
+	/* Fetch a tuple to check for relam */
+	ctup = SearchSysCache1(RELOID, ObjectIdGetDatum(seqoid));
+	if (!HeapTupleIsValid(ctup))
+		elog(ERROR, "pg_class entry for sequence %u unavailable",
+						seqoid);
+	pgcform = (Form_pg_class) GETSTRUCT(ctup);
+
+	/* Not bdr sequence */
+	if (pgcform->relam != seqamid)
+	{
+		ReleaseSysCache(ctup);
+		return;
+	}
+
+	ReleaseSysCache(ctup);
+
+	foreach(param, stmt->options)
+	{
+		DefElem    *defel = (DefElem *) lfirst(param);
+		if (strcmp(defel->defname, "owned_by") != 0)
+			ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 errmsg("ALTER SEQUENCE ... %s is not supported for bdr sequences",
+					defel->defname)));
+	}
+}
+
+void
+bdr_maintain_seq_schema(Oid schema_oid)
+{
+	BdrVotesRelid =
+		bdr_lookup_relid("bdr_votes", schema_oid);
+	BdrSequenceValuesRelid =
+		bdr_lookup_relid("bdr_sequence_values", schema_oid);
+	BdrSequenceElectionsRelid =
+		bdr_lookup_relid("bdr_sequence_elections", schema_oid);
+	BdrSeqamOid = get_seqam_oid("bdr", false);
 }

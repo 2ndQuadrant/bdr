@@ -125,7 +125,7 @@ DROP FUNCTION public.bdr_get_local_nodeid();
 --
 -- We now have two databases that look like they were running BDR, with
 -- contents in sync at the time of upgrade. The origin replication identifier
--- information is wrong as both have InvalidRepNodeId but we don't really care
+-- information is wrong as both have InvalidRepOriginId but we don't really care
 -- about that. It's as if we deleted bdr.bdr_connections then started the DB
 -- up.
 --

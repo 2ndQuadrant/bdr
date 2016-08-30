@@ -21,7 +21,6 @@
 
 #include "access/genam.h"
 #include "access/heapam.h"
-#include "access/seqam.h"
 
 #include "catalog/namespace.h"
 
@@ -36,7 +35,7 @@
 
 #include "parser/parse_utilcmd.h"
 
-#include "replication/replication_identifier.h"
+#include "replication/origin.h"
 
 #include "storage/standby.h"
 
@@ -406,35 +405,18 @@ filter_AlterTableStmt(Node *parsetree,
 static void
 filter_CreateSeqStmt(Node *parsetree)
 {
-	ListCell	   *param;
 	CreateSeqStmt  *stmt;
 
 	stmt = (CreateSeqStmt *) parsetree;
 
-	if (stmt->accessMethod == NULL || strcmp(stmt->accessMethod, "bdr") != 0)
-		return;
-
-	foreach(param, stmt->options)
-	{
-		DefElem    *defel = (DefElem *) lfirst(param);
-		if (strcmp(defel->defname, "owned_by") != 0 &&
-			strcmp(defel->defname, "start") != 0)
-			ereport(ERROR,
-					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					 errmsg("CREATE SEQUENCE ... %s is not supported for bdr sequences",
-					defel->defname)));
-	}
+	filter_CreateBdrSeqStmt(stmt);
 }
 
 static void
 filter_AlterSeqStmt(Node *parsetree)
 {
 	Oid				seqoid;
-	ListCell	   *param;
 	AlterSeqStmt   *stmt;
-	Oid				seqamid;
-	HeapTuple		ctup;
-	Form_pg_class	pgcform;
 
 	stmt = (AlterSeqStmt *) parsetree;
 
@@ -443,37 +425,7 @@ filter_AlterSeqStmt(Node *parsetree)
 	if (seqoid == InvalidOid)
 		return;
 
-	seqamid = get_seqam_oid("bdr", true);
-
-	/* No bdr sequences? */
-	if (seqamid == InvalidOid)
-		return;
-
-	/* Fetch a tuple to check for relam */
-	ctup = SearchSysCache1(RELOID, ObjectIdGetDatum(seqoid));
-	if (!HeapTupleIsValid(ctup))
-		elog(ERROR, "pg_class entry for sequence %u unavailable",
-						seqoid);
-	pgcform = (Form_pg_class) GETSTRUCT(ctup);
-
-	/* Not bdr sequence */
-	if (pgcform->relam != seqamid)
-	{
-		ReleaseSysCache(ctup);
-		return;
-	}
-
-	ReleaseSysCache(ctup);
-
-	foreach(param, stmt->options)
-	{
-		DefElem    *defel = (DefElem *) lfirst(param);
-		if (strcmp(defel->defname, "owned_by") != 0)
-			ereport(ERROR,
-					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					 errmsg("ALTER SEQUENCE ... %s is not supported for bdr sequences",
-					defel->defname)));
-	}
+	filter_AlterBdrSeqStmt(stmt, seqoid);
 }
 
 static void
@@ -783,7 +735,7 @@ bdr_commandfilter(Node *parsetree,
 		goto done;
 
 	/* don't perform filtering while replaying */
-	if (replication_origin_id != InvalidRepNodeId)
+	if (replorigin_session_origin != InvalidRepOriginId)
 		goto done;
 
 	/*

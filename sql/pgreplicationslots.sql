@@ -4,6 +4,6 @@
 --
 
 SELECT 1
-FROM pg_stat_replication
-INNER JOIN bdr.pg_replication_slots USING (pid)
+FROM pg_stat_replication r
+INNER JOIN bdr.pg_replication_slots s ON (r.pid = s.active_pid)
 WHERE confirmed_flush_lsn IS NOT NULL;

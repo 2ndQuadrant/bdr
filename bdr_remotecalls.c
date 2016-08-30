@@ -29,7 +29,7 @@
 
 #include "executor/spi.h"
 
-#include "replication/replication_identifier.h"
+#include "replication/origin.h"
 #include "replication/walreceiver.h"
 
 #include "postmaster/bgworker.h"

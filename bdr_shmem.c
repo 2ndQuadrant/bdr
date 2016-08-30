@@ -126,7 +126,7 @@ bdr_worker_shmem_init(void)
 	 * tries to allocate or free blocks from this array at once.  There won't
 	 * be enough contention to make anything fancier worth doing.
 	 */
-	RequestAddinLWLocks(1);
+	RequestNamedLWLockTranche("bdr_shmem", 1);
 
 	/*
 	 * Whether this is a first startup or crash recovery, we'll be re-initing
@@ -162,7 +162,7 @@ bdr_worker_shmem_startup(void)
 
 		/* Init shm segment header after postmaster start or restart */
 		memset(BdrWorkerCtl, 0, bdr_worker_shmem_size());
-		BdrWorkerCtl->lock = LWLockAssign();
+		BdrWorkerCtl->lock = &(GetNamedLWLockTranche("bdr_shmem")->lock);
 		/* Assigned on supervisor launch */
 		BdrWorkerCtl->supervisor_latch = NULL;
 		/* Worker management starts unpaused */
@@ -317,6 +317,7 @@ void
 bdr_worker_shmem_release(void)
 {
 	Assert(bdr_worker_type != BDR_WORKER_EMPTY_SLOT);
+	Assert(!LWLockHeldByMe(BdrWorkerCtl->lock));
 
 	LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
 	bdr_worker_slot->worker_pid = 0;

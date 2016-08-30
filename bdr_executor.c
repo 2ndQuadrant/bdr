@@ -47,7 +47,7 @@
 #include "parser/parse_relation.h"
 #include "parser/parsetree.h"
 
-#include "replication/replication_identifier.h"
+#include "replication/origin.h"
 
 #include "storage/bufmgr.h"
 #include "storage/lmgr.h"
@@ -116,7 +116,7 @@ UserTableUpdateIndexes(EState *estate, TupleTableSlot *slot)
 	if (HeapTupleIsHeapOnly(slot->tts_tuple))
 		return;
 
-	ExecOpenIndices(estate->es_result_relation_info);
+	ExecOpenIndices(estate->es_result_relation_info, false);
 	UserTableUpdateOpenIndexes(estate, slot);
 	ExecCloseIndices(estate->es_result_relation_info);
 }
@@ -133,8 +133,9 @@ UserTableUpdateOpenIndexes(EState *estate, TupleTableSlot *slot)
 	if (estate->es_result_relation_info->ri_NumIndices > 0)
 	{
 		recheckIndexes = ExecInsertIndexTuples(slot,
-											   &slot->tts_tuple->t_self,
-											   estate);
+											   		 &slot->tts_tuple->t_self,
+											   		 estate,
+													 false, NULL, NIL);
 
 		if (recheckIndexes != NIL)
 			ereport(ERROR,
@@ -363,12 +364,12 @@ bdr_queue_ddl_command(char *command_tag, char *command)
 	queuedcmds = heap_openrv(rv, RowExclusiveLock);
 	slot = MakeSingleTupleTableSlot(RelationGetDescr(queuedcmds));
 	estate = bdr_create_rel_estate(queuedcmds);
-	ExecOpenIndices(estate->es_result_relation_info);
+	ExecOpenIndices(estate->es_result_relation_info, false);
 
 	/* lsn, queued_at, perpetrator, command_tag, command */
 	values[0] = pg_current_xlog_location(NULL);
 	values[1] = now(NULL);
-	values[2] = PointerGetDatum(cstring_to_text(GetUserNameFromId(GetUserId())));
+	values[2] = PointerGetDatum(cstring_to_text(GetUserNameFromId(GetUserId(), false)));
 	values[3] = CStringGetTextDatum(command_tag);
 	values[4] = CStringGetTextDatum(command);
 	MemSet(nulls, 0, sizeof(nulls));
@@ -404,6 +405,7 @@ bdr_create_truncate_trigger(char *schemaname, char *relname, Oid relid)
 	List		   *funcname;
 	ObjectAddress	tgaddr, procaddr;
 	int				nfound;
+	Oid				fargtypes[1];   /* dummy, see 0a52d378 */
 
 	if (OidIsValid(relid))
 		rel = heap_open(relid, AccessExclusiveLock);
@@ -421,7 +423,7 @@ bdr_create_truncate_trigger(char *schemaname, char *relname, Oid relid)
 	{
 		Trigger	   *trigger = rel->trigdesc->triggers;
 		int			i;
-		Oid			funcoid = LookupFuncName(funcname, 0, NULL, false);
+		Oid			funcoid = LookupFuncName(funcname, 0, &fargtypes[0], false);
 
 		for (i = 0; i < rel->trigdesc->numtriggers; i++)
 		{
@@ -453,12 +455,9 @@ bdr_create_truncate_trigger(char *schemaname, char *relname, Oid relid)
 	tgstmt->initdeferred = false;
 	tgstmt->constrrel = NULL;
 
-	tgaddr.objectId = CreateTrigger(tgstmt, NULL, rel->rd_id, InvalidOid,
-									InvalidOid, InvalidOid,
-									true /* tgisinternal */);
-
-	tgaddr.classId = TriggerRelationId;
-	tgaddr.objectSubId = 0;
+	tgaddr = CreateTrigger(tgstmt, NULL, rel->rd_id, InvalidOid,
+						   InvalidOid, InvalidOid,
+						   true /* tgisinternal */);
 
 	/*
 	 * The trigger was created with a 'n'ormal dependency on
@@ -475,7 +474,7 @@ bdr_create_truncate_trigger(char *schemaname, char *relname, Oid relid)
 	 */
 
 	procaddr.classId = ProcedureRelationId;
-	procaddr.objectId = LookupFuncName(list_make2(makeString("bdr"), makeString("queue_truncate")), 0, NULL, false);
+	procaddr.objectId = LookupFuncName(list_make2(makeString("bdr"), makeString("queue_truncate")), 0, &fargtypes[0], false);
 	procaddr.objectSubId = 0;
 
 	/* We need to be able to see the pg_depend entry to delete it */
@@ -647,7 +646,7 @@ bdr_queue_truncate(PG_FUNCTION_ARGS)
 	 * If we're currently replaying something from a remote node, don't queue
 	 * the commands; that would cause recursion.
 	 */
-	if (replication_origin_id != InvalidRepNodeId)
+	if (replorigin_session_origin != InvalidRepOriginId)
 		PG_RETURN_VOID();	/* XXX return type? */
 
 	/* Make sure the list change survives the trigger call. */
@@ -687,7 +686,7 @@ bdr_queue_ddl_commands(PG_FUNCTION_ARGS)
 	 * If we're currently replaying something from a remote node, don't queue
 	 * the commands; that would cause recursion.
 	 */
-	if (replication_origin_id != InvalidRepNodeId)
+	if (replorigin_session_origin != InvalidRepOriginId)
 		PG_RETURN_VOID();	/* XXX return type? */
 
 	/*
@@ -695,9 +694,23 @@ bdr_queue_ddl_commands(PG_FUNCTION_ARGS)
 	 * mostly used when pg_restore brings a remote node state, so all objects
 	 * will be copied over in the dump anyway.
 	 */
-	skip_ddl = GetConfigOptionByName("bdr.skip_ddl_replication", NULL);
+	skip_ddl = GetConfigOptionByName("bdr.skip_ddl_replication", NULL, false);
 	if (strcmp(skip_ddl, "on") == 0)
 		PG_RETURN_VOID();
+
+	/*
+	 * We don't support DDL replication on bdr9.6 alpha yet. At all.
+	 *
+	 * XXX TODO
+	 */
+	if (PG_VERSION_NUM / 100 == 906)
+	{
+		ereport(DEBUG1,
+			    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("DDL command not replicated due to missing replication support"),
+				 errhint("Use bdr.bdr_replicate_ddl_command(...) instead")));
+		PG_RETURN_VOID();
+	}
 
 	/*
 	 * Connect to SPI early, so that all memory allocated in this routine is
@@ -799,7 +812,7 @@ bdr_queue_dropped_objects(PG_FUNCTION_ARGS)
 	 * If we're currently replaying something from a remote node, don't queue
 	 * the commands; that would cause recursion.
 	 */
-	if (replication_origin_id != InvalidRepNodeId)
+	if (replorigin_session_origin != InvalidRepOriginId)
 		PG_RETURN_VOID();	/* XXX return type? */
 
 	/*
@@ -807,9 +820,24 @@ bdr_queue_dropped_objects(PG_FUNCTION_ARGS)
 	 * mostly used when pg_restore brings a remote node state, so all objects
 	 * will be copied over in the dump anyway.
 	 */
-	skip_ddl = GetConfigOptionByName("bdr.skip_ddl_replication", NULL);
+	skip_ddl = GetConfigOptionByName("bdr.skip_ddl_replication", NULL, false);
 	if (strcmp(skip_ddl, "on") == 0)
 		PG_RETURN_VOID();
+
+	/*
+	 * We don't support DDL replication on bdr9.6 alpha yet. At all. So we should
+	 * not replicate drops either.
+	 *
+	 * XXX TODO
+	 */
+	if (PG_VERSION_NUM / 100 == 906)
+	{
+		ereport(DEBUG1,
+			    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("DROP not replicated due to missing replication support"),
+				 errhint("Use bdr.bdr_replicate_ddl_command(...) instead")));
+		PG_RETURN_VOID();
+	}
 
 	/*
 	 * Connect to SPI early, so that all memory allocated in this routine is
@@ -904,7 +932,7 @@ bdr_queue_dropped_objects(PG_FUNCTION_ARGS)
 		queuedcmds = heap_openrv(rv, RowExclusiveLock);
 		slot = MakeSingleTupleTableSlot(RelationGetDescr(queuedcmds));
 		estate = bdr_create_rel_estate(queuedcmds);
-		ExecOpenIndices(estate->es_result_relation_info);
+		ExecOpenIndices(estate->es_result_relation_info, false);
 
 		/* lsn, queued_at, dropped_objects */
 		values[0] = pg_current_xlog_location(NULL);
@@ -958,7 +986,7 @@ bdr_replicate_ddl_command(PG_FUNCTION_ARGS)
 		bdr_queue_ddl_command("SQL", query);
 
 		/* Execute the query locally. */
-		bdr_execute_ddl_command(query, GetUserNameFromId(GetUserId()), false);
+		bdr_execute_ddl_command(query, GetUserNameFromId(GetUserId(), false), false);
 	PG_CATCH();
 		in_bdr_replicate_ddl_command = false;
 		PG_RE_THROW();

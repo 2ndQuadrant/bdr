@@ -22,7 +22,7 @@
 #include "miscadmin.h"
 #include "pgstat.h"
 
-#include "access/committs.h"
+#include "access/commit_ts.h"
 #include "access/htup_details.h"
 #include "access/relscan.h"
 #include "access/xact.h"
@@ -31,8 +31,10 @@
 #include "catalog/dependency.h"
 #include "catalog/index.h"
 #include "catalog/namespace.h"
+#include "catalog/objectaddress.h"
 #include "catalog/pg_type.h"
 
+#include "executor/executor.h"
 #include "executor/spi.h"
 
 #include "libpq/pqformat.h"
@@ -42,7 +44,7 @@
 #include "parser/parse_type.h"
 
 #include "replication/logical.h"
-#include "replication/replication_identifier.h"
+#include "replication/origin.h"
 
 #include "storage/ipc.h"
 #include "storage/lmgr.h"
@@ -88,7 +90,7 @@ static TimeLineID		remote_origin_timeline_id = 0;
 static Oid				remote_origin_dboid = InvalidOid;
 static XLogRecPtr		remote_origin_lsn = InvalidXLogRecPtr;
 /* The local identifier for the remote's origin, if any. */
-static RepNodeId		remote_origin_id = InvalidRepNodeId;
+static RepOriginId		remote_origin_id = InvalidRepOriginId;
 
 /*
  * A message counter for the xact, for debugging. We don't send
@@ -120,7 +122,7 @@ static BDRRelation *read_rel(StringInfo s, LOCKMODE mode, struct ActionErrCallba
 static void read_tuple_parts(StringInfo s, BDRRelation *rel, BDRTupleData *tup);
 
 static void check_apply_update(BdrConflictType conflict_type,
-							   RepNodeId local_node_id, TimestampTz local_ts,
+							   RepOriginId local_node_id, TimestampTz local_ts,
 							   BDRRelation *rel, HeapTuple local_tuple,
 							   HeapTuple remote_tuple, HeapTuple *new_tuple,
 							   bool *perform_update, bool *log_update,
@@ -140,7 +142,7 @@ static void process_remote_message(StringInfo s);
 
 static void get_local_tuple_origin(HeapTuple tuple,
 								   TimestampTz *commit_ts,
-								   RepNodeId *node_id);
+								   RepOriginId *node_id);
 static void abs_timestamp_difference(TimestampTz start_time,
 									 TimestampTz stop_time,
 									 long *secs, int *microsecs);
@@ -170,13 +172,13 @@ format_action_description(
 
 	appendStringInfo(si,
 			" in commit %X/%X, xid %u commited at %s (action #%u)",
-			(uint32)(replication_origin_lsn>>32),
-			(uint32)replication_origin_lsn,
+			(uint32)(replorigin_session_origin_lsn>>32),
+			(uint32)replorigin_session_origin_lsn,
 			replication_origin_xid,
-			timestamptz_to_str(replication_origin_timestamp),
+			timestamptz_to_str(replorigin_session_origin_timestamp),
 			xact_action_counter);
 
-	if (replication_origin_id != InvalidRepNodeId)
+	if (replorigin_session_origin != InvalidRepOriginId)
 	{
 		appendStringInfo(si, " from node ("UINT64_FORMAT",%u,%u)",
 				origin_sysid,
@@ -184,7 +186,7 @@ format_action_description(
 				origin_dboid);
 	}
 
-	if (remote_origin_id != InvalidRepNodeId)
+	if (remote_origin_id != InvalidRepOriginId)
 	{
 		appendStringInfo(si, " forwarded from commit %X/%X on node ("UINT64_FORMAT",%u,%u)",
 				(uint32)(remote_origin_lsn>>32),
@@ -239,7 +241,7 @@ process_remote_begin(StringInfo s)
 	error_context_stack = &errcallback;
 
 	started_transaction = false;
-	remote_origin_id = InvalidRepNodeId;
+	remote_origin_id = InvalidRepOriginId;
 
 	flags = pq_getmsgint(s, 4);
 
@@ -267,8 +269,8 @@ process_remote_begin(StringInfo s)
 
 
 	/* setup state for commit and conflict detection */
-	replication_origin_lsn = origlsn;
-	replication_origin_timestamp = committime;
+	replorigin_session_origin_lsn = origlsn;
+	replorigin_session_origin_timestamp = committime;
 
 	/* store remote xid for logging and debugging */
 	replication_origin_xid = remote_xid;
@@ -311,7 +313,7 @@ process_remote_begin(StringInfo s)
 
 		/*
 		 * To determine whether the commit was forwarded by the upstream from
-		 * another node, we need to get the local RepNodeId for that node based
+		 * another node, we need to get the local RepOriginId for that node based
 		 * on the (sysid, timelineid, dboid) supplied in catchup mode.
 		 */
 		snprintf(remote_ident, sizeof(remote_ident),
@@ -320,7 +322,7 @@ process_remote_begin(StringInfo s)
 				NameStr(replication_name));
 
 		StartTransactionCommand();
-		remote_origin_id = GetReplicationIdentifier(remote_ident, false);
+		remote_origin_id = replorigin_by_name(remote_ident, false);
 		CommitTransactionCommand();
 	}
 
@@ -340,7 +342,7 @@ process_remote_begin(StringInfo s)
 		current = GetCurrentIntegerTimestamp();
 
 		/* ensure no weirdness due to clock drift */
-		if (current > replication_origin_timestamp)
+		if (current > replorigin_session_origin_timestamp)
 		{
 			long		sec;
 			int			usec;
@@ -348,7 +350,7 @@ process_remote_begin(StringInfo s)
 			current = TimestampTzPlusMilliseconds(current,
 												  -apply_delay);
 
-			TimestampDifference(current, replication_origin_timestamp,
+			TimestampDifference(current, replorigin_session_origin_timestamp,
 								&sec, &usec);
 			/* FIXME: deal with overflow? */
 			pg_usleep(usec + (sec * USECS_PER_SEC));
@@ -407,8 +409,8 @@ process_remote_commit(StringInfo s)
 		cbarg.suppress_output = false;
 	}
 
-	Assert(commit_lsn == replication_origin_lsn);
-	Assert(committime == replication_origin_timestamp);
+	Assert(commit_lsn == replorigin_session_origin_lsn);
+	Assert(committime == replorigin_session_origin_timestamp);
 
 	if (started_transaction)
 	{
@@ -441,15 +443,15 @@ process_remote_commit(StringInfo s)
 	 * another node (per remote_origin_id below). This is necessary to make
 	 * sure we don't replay the same forwarded commit multiple times.
 	 */
-	AdvanceCachedReplicationIdentifier(end_lsn, XactLastCommitEnd);
+	replorigin_session_advance(end_lsn, XactLastCommitEnd);
 
 	CurrentResourceOwner = bdr_saved_resowner;
 
 	bdr_count_commit();
 
 	replication_origin_xid = InvalidTransactionId;
-	replication_origin_lsn = InvalidXLogRecPtr;
-	replication_origin_timestamp = 0;
+	replorigin_session_origin_lsn = InvalidXLogRecPtr;
+	replorigin_session_origin_timestamp = 0;
 
 	xact_action_counter = 0;
 
@@ -559,7 +561,7 @@ process_remote_insert(StringInfo s)
 	/*
 	 * Search for conflicting tuples.
 	 */
-	ExecOpenIndices(estate->es_result_relation_info);
+	ExecOpenIndices(estate->es_result_relation_info, false);
 	relinfo = estate->es_result_relation_info;
 	index_keys = palloc0(relinfo->ri_NumIndices * sizeof(ScanKeyData*));
 	conflicts = palloc0(relinfo->ri_NumIndices * sizeof(ItemPointerData));
@@ -629,7 +631,7 @@ process_remote_insert(StringInfo s)
 	if (conflict)
 	{
 		TimestampTz local_ts;
-		RepNodeId	local_node_id;
+		RepOriginId	local_node_id;
 		bool		apply_update;
 		bool		log_update;
 		HeapTuple	user_tuple = NULL;
@@ -877,7 +879,7 @@ process_remote_update(StringInfo s)
 	if (found_tuple)
 	{
 		TimestampTz local_ts;
-		RepNodeId	local_node_id;
+		RepOriginId	local_node_id;
 		bool		apply_update;
 		bool		log_update;
 		BdrApplyConflict *apply_conflict = NULL; /* Mute compiler */
@@ -991,7 +993,7 @@ process_remote_update(StringInfo s)
 
 		apply_conflict = bdr_make_apply_conflict(
 			BdrConflictType_UpdateDelete, resolution, replication_origin_xid,
-			rel, NULL, InvalidRepNodeId, newslot, NULL /*no error*/);
+			rel, NULL, InvalidRepOriginId, newslot, NULL /*no error*/);
 
 		bdr_conflict_log_serverlog(apply_conflict);
 
@@ -1176,7 +1178,7 @@ process_remote_delete(StringInfo s)
 			BdrConflictType_DeleteDelete,
 			skip ? BdrConflictResolution_ConflictTriggerSkipChange :
 				   BdrConflictResolution_DefaultSkipChange,
-			replication_origin_xid,	rel, NULL, InvalidRepNodeId,
+			replication_origin_xid,	rel, NULL, InvalidRepOriginId,
 			oldslot, NULL /*no error*/);
 
 		bdr_conflict_log_serverlog(apply_conflict);
@@ -1204,10 +1206,10 @@ process_remote_delete(StringInfo s)
  * Get commit timestamp and origin of the tuple
  */
 static void
-get_local_tuple_origin(HeapTuple tuple, TimestampTz *commit_ts, RepNodeId *node_id)
+get_local_tuple_origin(HeapTuple tuple, TimestampTz *commit_ts, RepOriginId *node_id)
 {
 	TransactionId	xmin;
-	CommitExtraData	node_id_raw;
+	RepOriginId	node_id_raw;
 
 	/* refetch tuple, check for old commit ts & origin */
 	xmin = HeapTupleHeaderGetXmin(tuple->t_data);
@@ -1220,8 +1222,8 @@ get_local_tuple_origin(HeapTuple tuple, TimestampTz *commit_ts, RepNodeId *node_
  * Last update wins conflict handling.
  */
 static void
-bdr_conflict_last_update_wins(RepNodeId local_node_id,
-							  RepNodeId remote_node_id,
+bdr_conflict_last_update_wins(RepOriginId local_node_id,
+							  RepOriginId remote_node_id,
 							  TimestampTz local_ts,
 							  TimestampTz remote_ts,
 							  bool *perform_update, bool *log_update,
@@ -1319,7 +1321,7 @@ bdr_conflict_last_update_wins(RepNodeId local_node_id,
  */
 static void
 check_apply_update(BdrConflictType conflict_type,
-				   RepNodeId local_node_id, TimestampTz local_ts,
+				   RepOriginId local_node_id, TimestampTz local_ts,
 				   BDRRelation *rel, HeapTuple local_tuple,
 				   HeapTuple remote_tuple, HeapTuple *new_tuple,
 				   bool *perform_update, bool *log_update,
@@ -1339,7 +1341,7 @@ check_apply_update(BdrConflictType conflict_type,
 
 	*log_update = false;
 
-	if (local_node_id == replication_origin_id)
+	if (local_node_id == replorigin_session_origin)
 	{
 		/*
 		 * If the row got updated twice within a single node, just apply the
@@ -1370,7 +1372,7 @@ check_apply_update(BdrConflictType conflict_type,
 		 * --------------
 		 */
 
-		abs_timestamp_difference(replication_origin_timestamp, local_ts,
+		abs_timestamp_difference(replorigin_session_origin_timestamp, local_ts,
 								 &secs, &microsecs);
 
 		*new_tuple = bdr_conflict_handlers_resolve(rel, local_tuple, remote_tuple,
@@ -1404,9 +1406,9 @@ check_apply_update(BdrConflictType conflict_type,
 
 	/* Use last update wins conflict handling. */
 	bdr_conflict_last_update_wins(local_node_id,
-								  replication_origin_id,
+								  replorigin_session_origin,
 								  local_ts,
-								  replication_origin_timestamp,
+								  replorigin_session_origin_timestamp,
 								  perform_update, log_update,
 								  resolution);
 }
@@ -1545,7 +1547,7 @@ process_remote_message(StringInfo s)
 		elog(LOG, "unknown message type %d", msg_type);
 
 	if (!transactional)
-		AdvanceCachedReplicationIdentifier(lsn, InvalidXLogRecPtr);
+		replorigin_session_advance(lsn, InvalidXLogRecPtr);
 }
 
 
@@ -2019,9 +2021,7 @@ check_bdr_wakeups(BDRRelation *rel)
 	if (reloid == BdrNodesRelid || reloid == BdrConnectionsRelid)
 		bdr_connections_changed(NULL);
 
-	if (reloid == BdrSequenceValuesRelid ||
-		reloid == BdrSequenceElectionsRelid ||
-		reloid == BdrVotesRelid)
+	if (isBdrGlobalSeqRelId(reloid))
 		bdr_schedule_eoxact_sequencer_wakeup();
 }
 
@@ -2155,9 +2155,7 @@ read_rel(StringInfo s, LOCKMODE mode, struct ActionErrCallbackArg *cbarg)
 	 * modified. We used to rely on relation locks, but that had problems with
 	 * deadlocks and interrupting auto-analyze/vacuum.
 	 */
-	if (relid == BdrSequenceValuesRelid ||
-		relid == BdrSequenceElectionsRelid ||
-		relid == BdrVotesRelid)
+	if (isBdrGlobalSeqRelId(relid))
 		bdr_sequencer_lock();
 
 	return bdr_heap_open(relid, NoLock);
@@ -2673,7 +2671,7 @@ bdr_apply_main(Datum main_arg)
 	PGresult   *res;
 	StringInfoData query;
 	char	   *sqlstate;
-	RepNodeId	replication_identifier;
+	RepOriginId	replication_identifier;
 	XLogRecPtr	start_from;
 	NameData	slot_name;
 	char		status;
@@ -2762,14 +2760,14 @@ bdr_apply_main(Datum main_arg)
 	 * tell replication_identifier.c about our identifier so it can cache the
 	 * search in shared memory.
 	 */
-	SetupCachedReplicationIdentifier(replication_identifier);
+	replorigin_session_setup(replication_identifier);
 
 	/*
 	 * Check whether we already replayed something so we don't replay it
 	 * multiple times.
 	 */
 
-	start_from = RemoteCommitFromCachedReplicationIdentifier();
+	start_from = replorigin_session_get_progress(false);
 
 	elog(INFO, "starting up replication from %u at %X/%X",
 		 replication_identifier,
@@ -2817,7 +2815,7 @@ bdr_apply_main(Datum main_arg)
 	}
 	PQclear(res);
 
-	replication_origin_id = replication_identifier;
+	replorigin_session_origin = replication_identifier;
 
 	bdr_conflict_logging_startup();
 

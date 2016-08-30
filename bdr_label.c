@@ -18,6 +18,7 @@
 #include "bdr.h"
 #include "bdr_label.h"
 
+#include "catalog/pg_class.h"
 #include "catalog/pg_database.h"
 #include "commands/dbcommands.h"
 #include "commands/seclabel.h"

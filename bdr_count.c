@@ -23,7 +23,7 @@
 
 #include "nodes/execnodes.h"
 
-#include "replication/replication_identifier.h"
+#include "replication/origin.h"
 
 #include "storage/fd.h"
 #include "storage/ipc.h"
@@ -41,7 +41,7 @@
  */
 typedef struct BdrCountSlot
 {
-	RepNodeId	node_id;
+	RepOriginId	node_id;
 
 	/* we use int64 to make sure we can export to sql, there is uint64 there */
 	int64		nr_commit;
@@ -127,7 +127,7 @@ bdr_count_shmem_init(size_t nnodes)
 
 	RequestAddinShmemSpace(bdr_count_shmem_size());
 	/* lock for slot acquiration */
-	RequestAddinLWLocks(1);
+	RequestNamedLWLockTranche("bdr_count", 1);
 
 	prev_shmem_startup_hook = shmem_startup_hook;
 	shmem_startup_hook = bdr_count_shmem_startup;
@@ -149,7 +149,7 @@ bdr_count_shmem_startup(void)
 	{
 		/* initialize */
 		memset(BdrCountCtl, 0, bdr_count_shmem_size());
-		BdrCountCtl->lock = LWLockAssign();
+		BdrCountCtl->lock = &(GetNamedLWLockTranche("bdr_count"))->lock;
 		bdr_count_unserialize();
 	}
 	LWLockRelease(AddinShmemInitLock);
@@ -177,12 +177,12 @@ bdr_count_shmem_shutdown(int code, Datum arg)
 }
 
 /*
- * Find a statistics slot for a given RepNodeId and setup a local variable
+ * Find a statistics slot for a given RepOriginId and setup a local variable
  * pointing to it so we can quickly find it for the actual statistics
  * manipulation.
  */
 void
-bdr_count_set_current_node(RepNodeId node_id)
+bdr_count_set_current_node(RepOriginId node_id)
 {
 	size_t		i;
 
@@ -206,7 +206,7 @@ bdr_count_set_current_node(RepNodeId node_id)
 	/* ok, get a new slot */
 	for (i = 0; i < bdr_count_nnodes; i++)
 	{
-		if (BdrCountCtl->slots[i].node_id == InvalidRepNodeId)
+		if (BdrCountCtl->slots[i].node_id == InvalidRepOriginId)
 		{
 			MyCountOffsetIdx = i;
 			BdrCountCtl->slots[i].node_id = node_id;
@@ -342,13 +342,13 @@ pg_stat_get_bdr(PG_FUNCTION_ARGS)
 		slot = &BdrCountCtl->slots[current_offset];
 
 		/* no stats here */
-		if (slot->node_id == InvalidRepNodeId)
+		if (slot->node_id == InvalidRepOriginId)
 			continue;
 
 		memset(values, 0, sizeof(values));
 		memset(nulls, 0, sizeof(nulls));
 
-		GetReplicationInfoByIdentifier(slot->node_id, false, &riname);
+		replorigin_by_oid(slot->node_id, false, &riname);
 
 		values[ 0] = ObjectIdGetDatum(slot->node_id);
 		values[ 1] = ObjectIdGetDatum(slot->node_id);
