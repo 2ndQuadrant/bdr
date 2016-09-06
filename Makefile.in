@@ -83,15 +83,34 @@ DDLTESTS :=
 SEQTESTS :=
 endif
 
-DUMPOBJS = pg_dump/pg_dump.o pg_dump/common.o pg_dump/pg_dump_sort.o \
-	pg_dump/pg_backup_archiver.o pg_dump/pg_backup_db.o \
-	pg_dump/pg_backup_custom.o pg_dump/pg_backup_null.o \
-	pg_dump/pg_backup_tar.o pg_dump/pg_backup_directory.o \
-	pg_dump/pg_backup_utils.o pg_dump/parallel.o \
-	pg_dump/compress_io.o pg_dump/dumputils.o \
-	pg_dump/keywords.o pg_dump/kwlookup.o
-
 include Makefile.global
+
+$(info Building against PostgreSQL $(MAJORVERSION))
+
+DUMPOBJS = $(BDR_DUMP_DIR)/pg_dump.o \
+	$(BDR_DUMP_DIR)/common.o \
+	$(BDR_DUMP_DIR)/pg_dump_sort.o \
+	$(BDR_DUMP_DIR)/pg_backup_archiver.o \
+	$(BDR_DUMP_DIR)/pg_backup_db.o \
+	$(BDR_DUMP_DIR)/pg_backup_custom.o \
+	$(BDR_DUMP_DIR)/pg_backup_null.o \
+	$(BDR_DUMP_DIR)/pg_backup_tar.o \
+	$(BDR_DUMP_DIR)/pg_backup_directory.o \
+	$(BDR_DUMP_DIR)/pg_backup_utils.o \
+	$(BDR_DUMP_DIR)/parallel.o \
+	$(BDR_DUMP_DIR)/compress_io.o \
+	$(BDR_DUMP_DIR)/dumputils.o \
+	$(BDR_DUMP_DIR)/keywords.o
+
+ifeq ($(MAJORVERSION),9.6)
+BDR_DUMP_DIR := pg_dump96
+BDR_DUMP_LIBS := -lpgfeutils
+else
+BDR_DUMP_DIR := pg_dump
+BDR_DUMP_LIBS :=
+DUMPOBJS += $(BDR_DUMP_DIR)/kwlookup.o
+endif
+
 
 # Ensure Makefiles are up2date (should we move this to Makefile.global?)
 Makefile: Makefile.in config.status configure
@@ -132,7 +151,7 @@ pg_dump_dir:
 	mkdir -p pg_dump
 
 bdr_dump: pg_dump_dir $(DUMPOBJS)
-	$(CC) $(CFLAGS) $(DUMPOBJS) $(libpq_pgport) $(LDFLAGS) $(LDFLAGS_EX) $(LIBS) -o $@$(X)
+	$(CC) $(CFLAGS) $(DUMPOBJS) $(libpq_pgport) $(LDFLAGS) $(LDFLAGS_EX) $(LIBS) $(BDR_DUMP_LIBS) -o $@$(X)
 
 doc:
 	$(MAKE) -C doc all
