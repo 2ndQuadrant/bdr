@@ -1207,7 +1207,10 @@ bdr_process_acquire_ddl_lock(uint64 sysid, TimeLineID tli, Oid datid, BDRLockTyp
 		LWLockRelease(bdr_locks_ctl->lock);
 decline:
 		ereport(ddl_lock_log_level(DDL_LOCK_TRACE_ACQUIRE_RELEASE),
-				(errmsg(LOCKTRACE "declining remote global lock request, this node is already locked")));
+				(errmsg(LOCKTRACE "declining remote global lock request, this node is already locked by origin=%u at level %s",
+						bdr_my_locks_database->lock_holder,
+						bdr_lock_type_to_name(bdr_my_locks_database->lock_type))));
+
 		bdr_prepare_message(&s, BDR_MESSAGE_DECLINE_LOCK);
 
 		Assert(!IsTransactionState());
