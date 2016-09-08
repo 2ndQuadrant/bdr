@@ -310,6 +310,7 @@ bdr_locks_find_database(Oid dboid, bool create)
 	if (free_off != -1)
 	{
 		BdrLocksDBState *db = &bdr_locks_ctl->dbstate[free_off];
+		memset(db, 0, sizeof(BdrLocksDBState));
 		db->dboid = MyDatabaseId;
 		db->in_use = true;
 		return db;
