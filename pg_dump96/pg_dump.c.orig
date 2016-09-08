@@ -330,7 +330,6 @@ main(int argc, char **argv)
 		 */
 		{"attribute-inserts", no_argument, &dopt.column_inserts, 1},
 		{"binary-upgrade", no_argument, &dopt.binary_upgrade, 1},
-		{"bdr-init-node", no_argument, &dopt.bdr_init_node, 1},
 		{"column-inserts", no_argument, &dopt.column_inserts, 1},
 		{"disable-dollar-quoting", no_argument, &dopt.disable_dollar_quoting, 1},
 		{"disable-triggers", no_argument, &dopt.disable_triggers, 1},
@@ -8208,7 +8207,7 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 bool
 shouldPrintColumn(DumpOptions *dopt, TableInfo *tbinfo, int colno)
 {
-	if (dopt->binary_upgrade || dopt->bdr_init_node)
+	if (dopt->binary_upgrade)
 		return true;
 	return (tbinfo->attislocal[colno] && !tbinfo->attisdropped[colno]);
 }
@@ -15496,7 +15495,7 @@ dumpTableSchema(Archive *fout, TableInfo *tbinfo)
 		 * attislocal correctly, plus fix up any inherited CHECK constraints.
 		 * Analogously, we set up typed tables using ALTER TABLE / OF here.
 		 */
-		if ((dopt->binary_upgrade || dopt->bdr_init_node) &&
+		if (dopt->binary_upgrade &&
 			(tbinfo->relkind == RELKIND_RELATION ||
 			 tbinfo->relkind == RELKIND_FOREIGN_TABLE))
 		{

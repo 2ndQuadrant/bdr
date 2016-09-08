@@ -1,0 +1,39 @@
+--- pg_dump96/pg_dump.c
++++ pg_dump96/pg_dump.c
+@@ -129,6 +129,7 @@ static const CatalogId nilCatalogId = {0, 0};
+ 
+ /* flags for various command-line long options */
+ static int	binary_upgrade = 0;
++static int	bdr_init_node = 0;
+ static int	disable_dollar_quoting = 0;
+ static int	dump_inserts = 0;
+ static int	column_inserts = 0;
+@@ -347,6 +348,7 @@ main(int argc, char **argv)
+ 		 */
+ 		{"attribute-inserts", no_argument, &column_inserts, 1},
+ 		{"binary-upgrade", no_argument, &binary_upgrade, 1},
++		{"bdr-init-node", no_argument, &bdr_init_node, 1},
+ 		{"column-inserts", no_argument, &column_inserts, 1},
+ 		{"disable-dollar-quoting", no_argument, &disable_dollar_quoting, 1},
+ 		{"disable-triggers", no_argument, &disable_triggers, 1},
+@@ -6951,7 +6953,7 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
+ bool
+ shouldPrintColumn(TableInfo *tbinfo, int colno)
+ {
+-	if (binary_upgrade)
++	if (binary_upgrade || bdr_init_node)
+ 		return true;
+ 	return (tbinfo->attislocal[colno] && !tbinfo->attisdropped[colno]);
+ }
+@@ -13557,8 +13559,9 @@ dumpTableSchema(Archive *fout, TableInfo *tbinfo)
+ 		 * attislocal correctly, plus fix up any inherited CHECK constraints.
+ 		 * Analogously, we set up typed tables using ALTER TABLE / OF here.
+ 		 */
+-		if (binary_upgrade && (tbinfo->relkind == RELKIND_RELATION ||
+-							   tbinfo->relkind == RELKIND_FOREIGN_TABLE))
++		if ((binary_upgrade || bdr_init_node) &&
++			(tbinfo->relkind == RELKIND_RELATION ||
++			 tbinfo->relkind == RELKIND_FOREIGN_TABLE))
+ 		{
+ 			for (j = 0; j < tbinfo->numatts; j++)
+ 			{
