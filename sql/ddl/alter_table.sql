@@ -125,6 +125,13 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
 \c regression
 \d+ test_tbl
 
+\c postgres
+\d+ test_tbl
+ALTER TABLE test_tbl RENAME CONSTRAINT test_tbl_pkey TO test_ddl_pk;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+\c regression
+\d+ test_tbl
+
 DROP TABLE test_tbl;
 
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
