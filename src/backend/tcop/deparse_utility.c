@@ -3356,7 +3356,7 @@ deparse_RenameStmt(Oid objectId, Node *parsetree)
 				conTup = SearchSysCache1(CONSTROID, objectId);
 				constrForm = (Form_pg_constraint) GETSTRUCT(conTup);
 				fmtstr = psprintf("ALTER %s %%{identity}D RENAME CONSTRAINT %%{conname}I TO %%{newname}I",
-								  stringify_objtype(node->renameType));
+								  stringify_objtype(node->relationType));
 				renameStmt = new_objtree_VA(fmtstr, 0);
 
 				if (node->relationType == OBJECT_DOMAIN)
