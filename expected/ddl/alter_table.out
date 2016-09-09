@@ -464,6 +464,36 @@ Indexes:
 Indexes:
     "test_tbl_pkey" PRIMARY KEY, btree (pk)
 
+\c postgres
+\d+ test_tbl
+                       Table "public.test_tbl"
+ Column |  Type   | Modifiers | Storage  | Stats target | Description 
+--------+---------+-----------+----------+--------------+-------------
+ pk     | integer | not null  | plain    |              | 
+ foobar | text    | not null  | extended |              | 
+ col2   | text    | not null  | extended |              | 
+Indexes:
+    "test_tbl_pkey" PRIMARY KEY, btree (pk)
+
+ALTER TABLE test_tbl RENAME CONSTRAINT test_tbl_pkey TO test_ddl_pk;
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\c regression
+\d+ test_tbl
+                       Table "public.test_tbl"
+ Column |  Type   | Modifiers | Storage  | Stats target | Description 
+--------+---------+-----------+----------+--------------+-------------
+ pk     | integer | not null  | plain    |              | 
+ foobar | text    | not null  | extended |              | 
+ col2   | text    | not null  | extended |              | 
+Indexes:
+    "test_ddl_pk" PRIMARY KEY, btree (pk)
+
 DROP TABLE test_tbl;
 SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
  pg_xlog_wait_remote_apply 
