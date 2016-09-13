@@ -187,7 +187,7 @@ additional-maintainer-clean: clean
 installcheck: ;
 
 
-check: regresscheck isolationcheck
+check: regresscheck isolationcheck prove_check
 
 REGRESSCHECKS= \
 	init \
@@ -250,10 +250,23 @@ isolationcheck: all install
 		--testbinary src/test/isolation/pg_isolation_regress \
 		--dbname node1,node2,node3 \
 		$(ISOLATIONCHECKS)
+
+prove_installcheck:
+	@echo "No prove / TAP support in 9.4, ignoring prove tests"
+
 else
 # pg_isolation_regress doesn't get installed by 96, only by 94bdr
 isolationcheck:
 	@echo "Cannot run isolation tests except on 9.4bdr"
+
+#$(foreach v, $(.VARIABLES), $(info $(v) = $($(v))))
+#$(error xxx)
+
+prove_installcheck:
+	rm -rf $(CURDIR)/tmp_check/log
+	cd $(srcdir) && TESTDIR='$(CURDIR)' PATH="$(shell $(PG_CONFIG) --bindir):$$PATH" PGPORT='6$(DEF_PGPORT)' top_builddir='$(CURDIR)/$(top_builddir)' PG_REGRESS='$(pgxsdir)/src/test/regress/pg_regress' $(PROVE) $(PG_PROVE_FLAGS) $(PROVE_FLAGS) t/*.pl
+
+.PHONY: prove_installcheck
 endif
 
 bdr_pgbench_check: bdr_pgbench_check.sh
