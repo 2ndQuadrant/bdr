@@ -728,54 +728,61 @@ set_sysid(uint64 sysid)
 static void
 remove_unwanted_files(void)
 {
-	DIR				*lldir;
-	struct dirent	*llde;
-	PQExpBuffer		 llpath = createPQExpBuffer();
-	PQExpBuffer		 filename = createPQExpBuffer();
-
-	printfPQExpBuffer(llpath, "%s/%s", data_dir, LLOGCDIR);
-
-	print_msg(VERBOSITY_DEBUG, _("Removing data from \"%s\" directory.\n"),
-			  llpath->data);
-
 	/*
-	 * Remove stray logical replication checkpoints
+	 * 9.4's pg_basebackup copies pg_logical/checkpoints; 9.6 does
+	 * not.
 	 */
-	lldir = opendir(llpath->data);
-	if (lldir == NULL)
+	if (PG_VERSION_NUM/100 == 904)
 	{
-		die(_("Could not open directory \"%s\": %s\n"),
-			llpath->data, strerror(errno));
-	}
+		DIR				*lldir;
+		struct dirent	*llde;
+		PQExpBuffer		 llpath = createPQExpBuffer();
+		PQExpBuffer		 filename = createPQExpBuffer();
 
-	while (errno = 0, (llde = readdir(lldir)) != NULL)
-	{
-		size_t len = strlen(llde->d_name);
-		if (len > 5 && !strcmp(llde->d_name + len - 5, ".ckpt"))
+		printfPQExpBuffer(llpath, "%s/%s", data_dir, LLOGCDIR);
+
+		print_msg(VERBOSITY_DEBUG, _("Removing data from \"%s\" directory.\n"),
+				  llpath->data);
+
+		/*
+		 * Remove stray logical replication checkpoints
+		 */
+		lldir = opendir(llpath->data);
+		if (lldir == NULL)
 		{
-			printfPQExpBuffer(filename, "%s/%s", llpath->data, llde->d_name);
+			die(_("Could not open directory \"%s\": %s\n"),
+				llpath->data, strerror(errno));
+		}
 
-			if (unlink(filename->data) != 0)
+		while (errno = 0, (llde = readdir(lldir)) != NULL)
+		{
+			size_t len = strlen(llde->d_name);
+			if (len > 5 && !strcmp(llde->d_name + len - 5, ".ckpt"))
 			{
-				die(_("Could not unlink checkpoint file \"%s\": %s\n"),
-					filename->data, strerror(errno));
+				printfPQExpBuffer(filename, "%s/%s", llpath->data, llde->d_name);
+
+				if (unlink(filename->data) != 0)
+				{
+					die(_("Could not unlink checkpoint file \"%s\": %s\n"),
+						filename->data, strerror(errno));
+				}
 			}
 		}
-	}
 
-	destroyPQExpBuffer(llpath);
-	destroyPQExpBuffer(filename);
+		destroyPQExpBuffer(llpath);
+		destroyPQExpBuffer(filename);
 
-	if (errno)
-	{
-		die(_("Could not read directory \"%s\": %s\n"),
-			LLOGCDIR, strerror(errno));
-	}
+		if (errno)
+		{
+			die(_("Could not read directory \"%s\": %s\n"),
+				LLOGCDIR, strerror(errno));
+		}
 
-	if (closedir(lldir))
-	{
-		die(_("Could not close directory \"%s\": %s\n"),
-			LLOGCDIR, strerror(errno));
+		if (closedir(lldir))
+		{
+			die(_("Could not close directory \"%s\": %s\n"),
+				LLOGCDIR, strerror(errno));
+		}
 	}
 }
 

@@ -48,6 +48,11 @@
   </para>
 
   <para>
+   BDR has to temporarily transform into a synchronous cluster to run DDL, so
+   it has to ensure all nodes are up and fully in sync.
+  </para>
+
+  <para>
    To safely manipulate the database schema in an asynchronous
    multimaster setup, all pending changes have to be replicated first.
    Otherwise it is possible that a row being replicated contains data
