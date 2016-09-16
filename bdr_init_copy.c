@@ -445,6 +445,10 @@ main(int argc, char **argv)
 	/*
 	 * Start local node with BDR disabled, and wait until it starts accepting
 	 * connections which means it has caught up to the restore point.
+	 *
+	 * Note that pg_ctl won't return nonzero if postmaster starts then
+	 * immediately exits due to issues like port conflicts. We'll detect that
+	 * in wait_postmaster_connection().
 	 */
 	pg_ctl_ret = run_pg_ctl("start -l \"bdr_init_copy_postgres.log\" -o \"-c shared_preload_libraries=''\"");
 	if (pg_ctl_ret != 0)
@@ -1609,11 +1613,23 @@ wait_postmaster_connection(const char *connstr)
 {
 	PGPing		res;
 	long		pmpid = 0;
+	int			start_seconds_waited = 0;
+	static const int start_seconds_to_wait = 30;
 
 	print_msg(VERBOSITY_VERBOSE, "Waiting for PostgreSQL to accept connections ...");
 
-	/* First wait for Postmaster to come up. */
-	for (;;)
+	/*
+	 * First wait for Postmaster to come up.
+	 *
+	 * It's possible for the postmaster to launch then quit immediately due to
+	 * things like port conflicts. We won't get SIGCHLD for this because pg_ctl
+	 * acts as an intermediary, so we just have to time out. We can't use
+	 * pg_ctl -w because it waits for connection. pg_ctl status doesn't help
+	 * us since it has the same race.
+	 *
+	 * So we just time out after a while.
+	 */
+	while (start_seconds_waited < start_seconds_to_wait)
 	{
 		if ((pmpid = get_pgpid()) != 0 &&
 			postmaster_is_alive((pid_t) pmpid))
@@ -1621,6 +1637,17 @@ wait_postmaster_connection(const char *connstr)
 
 		pg_usleep(1000000);		/* 1 sec */
 		print_msg(VERBOSITY_VERBOSE, ".");
+		start_seconds_waited += 1;
+	}
+
+	if (start_seconds_waited == start_seconds_to_wait)
+	{
+		die(_("\nTimed out waiting for postmaster start after %d seconds, check bdr_init_copy_postgres.log\n"),
+			start_seconds_waited);
+	}
+	else
+	{
+		print_msg(VERBOSITY_VERBOSE, _("\npostmaster started (pid="INT64_FORMAT"), waiting for connection"), pmpid);
 	}
 
 	/* Now wait for Postmaster to either accept connections or die. */
@@ -1823,6 +1850,9 @@ postmaster_is_alive(pid_t pid)
 	 * Don't believe that our own PID or parent shell's PID is the postmaster,
 	 * either.  (Windows hasn't got getppid(), though.)
 	 */
+	if (pid == 0)
+		return false;
+
 	if (pid == getpid())
 		return false;
 #ifndef WIN32
