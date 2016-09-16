@@ -309,7 +309,7 @@ main(int argc, char **argv)
 	if (!local_connstr || !strlen(local_connstr))
 		die(_("Local connection must be specified.\n"));
 
-	logfd = open("bdr_init_copy_postgres.log", O_CREAT | O_RDWR,
+	logfd = open("bdr_init_copy_postgres.log", O_CREAT | O_RDWR | O_TRUNC,
 				 S_IRUSR | S_IWUSR);
 	if (logfd == -1)
 	{
@@ -730,7 +730,7 @@ remove_unwanted_files(void)
 {
 	/*
 	 * 9.4's pg_basebackup copies pg_logical/checkpoints; 9.6 does
-	 * not.
+	 * not since there's no such thing on 9.6.
 	 */
 	if (PG_VERSION_NUM/100 == 904)
 	{
