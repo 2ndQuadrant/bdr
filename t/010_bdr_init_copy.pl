@@ -6,6 +6,8 @@ use PostgresNode;
 use TestLib;
 use Test::More tests => 5;
 
+my $node_b_port = 19995;
+
 my $tempdir = TestLib::tempdir;
 
 my $node_a = get_new_node('main');
@@ -31,7 +33,7 @@ command_fails(
 	[ 'bdr_init_copy', '-D', "$tempdir/backup", "-n", "newnode", '-d', $node_a->connstr('postgres')],
 	'bdr_init_copy fails because of missing local conninfo');
 command_fails(
-	[ 'bdr_init_copy', '-D', "$tempdir/backup", "-n", "newnode", '-d', $node_a->connstr('postgres'), '--local-dbname', 'postgres', '--local-port', '9999'],
+	[ 'bdr_init_copy', '-D', "$tempdir/backup", "-n", "newnode", '-d', $node_a->connstr('postgres'), '--local-dbname', 'postgres', '--local-port', $node_b_port],
 	'bdr_init_copy fails when there is no BDR database');
 
 # Time to bring up BDR
@@ -47,7 +49,29 @@ SELECT bdr.bdr_group_create(
 	);
 });
 
+# The postgresql.conf copied by bdr_init_copy's pg_basebackup invocation will
+# use the same port as node_a . We can't have that, so template a new config file.
+open(my $conf_a, "<", $node_a->data_dir . '/postgresql.conf')
+	or die ("can't open node_a conf file for reading: $!");
+
+open(my $conf_b, ">", "$tempdir/postgresql.conf.b")
+	or die ("can't open node_b conf file for writing: $!");
+
+while (<$conf_a>)
+{
+	if ($_ =~ "^port")
+	{
+		print $conf_b "port = " . $node_b_port . "\n";
+	}
+	else
+	{
+		print $conf_b $_;
+	}
+}
+close($conf_a) or die ("failed to close old postgresql.conf: $!");
+close($conf_b) or die ("failed to close new postgresql.conf: $!");
+
 
 command_ok(
-	[ 'bdr_init_copy', '-D', "$tempdir/backup", "-n", "newnode", '-d', $node_a->connstr('postgres'), '--local-dbname', 'postgres', '--local-port', '9999'],
-	'bdr_init_copy fails when there is no BDR database');
+	[ 'bdr_init_copy', '-v', '-D', "$tempdir/backup", "-n", "newnode", '-d', $node_a->connstr('postgres'), '--local-dbname', 'postgres', '--local-port', $node_b_port, '--postgresql-conf', "$tempdir/postgresql.conf.b"],
+	'bdr_init_copy succeeds');
