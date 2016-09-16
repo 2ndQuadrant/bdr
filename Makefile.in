@@ -187,7 +187,7 @@ additional-maintainer-clean: clean
 installcheck: ;
 
 
-check: regresscheck isolationcheck prove_check
+check: regresscheck isolationcheck prove_installcheck
 
 REGRESSCHECKS= \
 	init \
@@ -263,7 +263,7 @@ isolationcheck:
 #$(error xxx)
 
 prove_installcheck:
-	rm -rf $(CURDIR)/tmp_check/log
+	rm -rf $(CURDIR)/tmp_check/
 	cd $(srcdir) && TESTDIR='$(CURDIR)' PATH="$(shell $(PG_CONFIG) --bindir):$$PATH" PGPORT='6$(DEF_PGPORT)' top_builddir='$(CURDIR)/$(top_builddir)' PG_REGRESS='$(pgxsdir)/src/test/regress/pg_regress' $(PROVE) $(PG_PROVE_FLAGS) $(PROVE_FLAGS) t/*.pl
 
 .PHONY: prove_installcheck
