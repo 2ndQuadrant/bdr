@@ -587,7 +587,9 @@ usage(void)
 	printf(_("  -U, --remote-user=NAME  connect as specified database user to the remote node\n"));
 	printf(_("  --local-dbname=CONNSTR  dbname or connection string for local node\n"));
 	printf(_("  --local-host=HOSTNAME   server host or socket directory for local node\n"));
-	printf(_("  --local-port=PORT       server port number for local node\n"));
+	printf(_("  --local-port=PORT       server port number for local node. Must match\n"));
+	printf(_("                          postgresql.conf, does not set port server is"));
+	printf(_("                          started with."));
 	printf(_("  --local-user=NAME       connect as specified database user to the local node\n"));
 }
 
