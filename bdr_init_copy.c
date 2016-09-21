@@ -504,6 +504,14 @@ main(int argc, char **argv)
 
 	/*
 	 * Individualize the local node by changing the system identifier.
+	 *
+	 * We can't rely on the timeline ID alone, even though it's incremented
+	 * on promotion of the copy, because we can't make sure it's globally
+	 * unique. If node A is copied to node B, then node A is copied to node C,
+	 * both nodes B and C will have the same tlid.
+	 *
+	 * For 9.6 this means using a patched pg_resetxlog since the stock one
+	 * doesn't know how to alter the sysid.
 	 */
 	set_sysid(node_info.local_sysid);
 
@@ -732,11 +740,22 @@ set_sysid(uint64 sysid)
 {
 	int			 ret;
 	PQExpBuffer  cmd = createPQExpBuffer();
-	char		*exec_path = find_other_exec_or_die(argv0, "pg_resetxlog", "pg_resetxlog (PostgreSQL) " PG_VERSION "\n");
+	char		*exec_path, *cmdname;
+
+	if (PG_VERSION_NUM/100 == 904)
+	{
+		exec_path = find_other_exec_or_die(argv0, "pg_resetxlog", "pg_resetxlog (PostgreSQL) " PG_VERSION "\n");
+		cmdname = "pg_resetxlog";
+	}
+	else
+	{
+		exec_path = find_other_exec_or_die(argv0, "bdr_resetxlog", "bdr_resetxlog (PostgreSQL) " PG_VERSION "\n");
+		cmdname = "bdr_resetxlog";
+	}
 
 	appendPQExpBuffer(cmd, "%s \"-s "UINT64_FORMAT"\" \"%s\"", exec_path, sysid, data_dir);
 
-	print_msg(VERBOSITY_DEBUG, _("Running pg_resetxlog: %s.\n"), cmd->data);
+	print_msg(VERBOSITY_DEBUG, _("Running %s: %s.\n"), cmdname, cmd->data);
 	ret = system(cmd->data);
 
 	destroyPQExpBuffer(cmd);
@@ -744,11 +763,11 @@ set_sysid(uint64 sysid)
 	if (WIFEXITED(ret) && WEXITSTATUS(ret) == 0)
 		return;
 	if (WIFEXITED(ret))
-		die(_("pg_resetxlog failed with exit status %d, cannot continue.\n"), WEXITSTATUS(ret));
+		die(_("%s failed with exit status %d, cannot continue.\n"), cmdname, WEXITSTATUS(ret));
 	else if (WIFSIGNALED(ret))
-		die(_("pg_resetxlog exited with signal %d, cannot continue"), WTERMSIG(ret));
+		die(_("%s exited with signal %d, cannot continue"), cmdname, WTERMSIG(ret));
 	else
-		die(_("pg_resetxlog exited for an unknown reason (system() returned %d)"), ret);
+		die(_("%s exited for an unknown reason (system() returned %d)"), cmdname, ret);
 }
 
 /*
