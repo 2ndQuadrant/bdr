@@ -4,13 +4,11 @@ use Cwd;
 use Config;
 use PostgresNode;
 use TestLib;
-use Test::More tests => 5;
-
-my $node_b_port = 19995;
+use Test::More tests => 10;
 
 my $tempdir = TestLib::tempdir;
 
-my $node_a = get_new_node('main');
+my $node_a = get_new_node('node_a');
 
 $node_a->init(hba_permit_replication => 1, allows_streaming => 1);
 $node_a->append_conf('postgresql.conf', q{
@@ -20,6 +18,8 @@ shared_preload_libraries = 'bdr'
 max_replication_slots = 4
 });
 $node_a->start;
+
+my $node_b = get_new_node('node_b');
 
 command_fails(['bdr_init_copy'],
 	'bdr_init_copy needs target directory specified');
@@ -33,7 +33,7 @@ command_fails(
 	[ 'bdr_init_copy', '-D', "$tempdir/backup", "-n", "newnode", '-d', $node_a->connstr('postgres')],
 	'bdr_init_copy fails because of missing local conninfo');
 command_fails(
-	[ 'bdr_init_copy', '-D', "$tempdir/backup", "-n", "newnode", '-d', $node_a->connstr('postgres'), '--local-dbname', 'postgres', '--local-port', $node_b_port],
+	[ 'bdr_init_copy', '-D', "$tempdir/backup", "-n", "newnode", '-d', $node_a->connstr('postgres'), '--local-dbname', 'postgres', '--local-port', $node_b->port],
 	'bdr_init_copy fails when there is no BDR database');
 
 # Time to bring up BDR
@@ -61,7 +61,7 @@ while (<$conf_a>)
 {
 	if ($_ =~ "^port")
 	{
-		print $conf_b "port = " . $node_b_port . "\n";
+		print $conf_b "port = " . $node_b->port . "\n";
 	}
 	else
 	{
@@ -73,5 +73,41 @@ close($conf_b) or die ("failed to close new postgresql.conf: $!");
 
 
 command_ok(
-	[ 'bdr_init_copy', '-v', '-D', "$tempdir/backup", "-n", "newnode", '-d', $node_a->connstr('postgres'), '--local-dbname', 'postgres', '--local-port', $node_b_port, '--postgresql-conf', "$tempdir/postgresql.conf.b"],
+	[ 'bdr_init_copy', '-v', '-D', $node_b->data_dir, "-n", 'node_b', '-d', $node_a->connstr($dbname), '--local-dbname', $dbname, '--local-port', $node_b->port, '--postgresql-conf', "$tempdir/postgresql.conf.b"],
 	'bdr_init_copy succeeds');
+
+# ... but does replication actually work? Is this a live, working cluster?
+my $bdr_version = $node_b->safe_psql($dbname, 'SELECT bdr.bdr_version()');
+diag "BDR version $bdr_version";
+
+is($node_a->safe_psql($dbname, 'SELECT bdr.bdr_is_active_in_db()'), 't',
+	'BDR is active on node_a');
+is($node_b->safe_psql($dbname, 'SELECT bdr.bdr_is_active_in_db()'), 't',
+	'BDR is active on node_b');
+
+$node_b->safe_psql($dbname, q{
+SELECT bdr.bdr_replicate_ddl_command($DDL$
+CREATE TABLE public.reptest(
+	id integer primary key,
+	dummy text
+);
+$DDL$);
+});
+
+$node_a->poll_query_until($dbname, q{
+SELECT EXISTS (
+  SELECT 1 FROM pg_class c INNER JOIN pg_namespace n ON n.nspname = 'public' AND c.relname = 'reptest'
+);
+});
+
+ok($node_b->safe_psql($dbname, "SELECT 'reptest'::regclass"), "reptest table creation replicated");
+
+$node_a->safe_psql($dbname, "INSERT INTO reptest (id, dummy) VALUES (1, '42')");
+
+$node_b->poll_query_until($dbname, q{
+SELECT EXISTS (
+  SELECT 1 FROM reptest
+);
+});
+
+is($node_b->safe_psql($dbname, 'SELECT id, dummy FROM reptest;'), '1|42', "reptest insert successfully replicated");
