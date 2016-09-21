@@ -1257,22 +1257,25 @@ reset_bdr_sequence_cache(PGconn *conn)
 {
 	PGresult	   *res;
 
-	/* Cleanup sequence cache */
-	res = PQexec(conn,
-				 "SELECT\n"
-				 "    bdr.bdr_internal_sequence_reset_cache(pg_class.oid)\n"
-				 "FROM pg_class\n"
-				 "    JOIN pg_seqam ON (pg_seqam.oid = pg_class.relam)\n"
-				 "    JOIN pg_namespace ON (pg_class.relnamespace = pg_namespace.oid)\n"
-				 "WHERE\n"
-				 "    relkind = 'S'\n"
-				 "    AND seqamname = 'bdr'\n");
-	if (PQresultStatus(res) != PGRES_TUPLES_OK)
+	if (PG_VERSION_NUM/100 == 904)
 	{
+		/* Cleanup sequence cache */
+		res = PQexec(conn,
+					 "SELECT\n"
+					 "    bdr.bdr_internal_sequence_reset_cache(pg_class.oid)\n"
+					 "FROM pg_class\n"
+					 "    JOIN pg_seqam ON (pg_seqam.oid = pg_class.relam)\n"
+					 "    JOIN pg_namespace ON (pg_class.relnamespace = pg_namespace.oid)\n"
+					 "WHERE\n"
+					 "    relkind = 'S'\n"
+					 "    AND seqamname = 'bdr'\n");
+		if (PQresultStatus(res) != PGRES_TUPLES_OK)
+		{
+			PQclear(res);
+			die(_("Could not clean sequence cache: %s\n"), PQerrorMessage(conn));
+		}
 		PQclear(res);
-		die(_("Could not clean sequence cache: %s\n"), PQerrorMessage(conn));
 	}
-	PQclear(res);
 }
 
 /*
@@ -1309,8 +1312,14 @@ initialize_replication_identifier(PGconn *conn, NodeInfo *ni, Oid dboid, char *r
 
 	if (remote_lsn)
 	{
-		printfPQExpBuffer(query, "SELECT pg_catalog.pg_replication_%s_advance('%s', '%s', '0/0')",
-						 origin_or_identifier, remote_ident, remote_lsn);
+		/*
+		 * This mess is to handle renaming of pg_replication_identifier_advance
+		 * to pg_replication_origin_advance and removal of the local_lsn param
+		 * in 9.6.
+ 		 */
+		printfPQExpBuffer(query, "SELECT pg_catalog.pg_replication_%s_advance('%s', '%s'%s)",
+						 origin_or_identifier, remote_ident, remote_lsn,
+						 (PG_VERSION_NUM/100 == 94 ? ", '0/0'" : ""));
 
 		res = PQexec(conn, query->data);
 
