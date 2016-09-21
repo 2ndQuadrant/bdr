@@ -33,6 +33,10 @@ if test "$version_num" != '9.4' -a "$version_num" != '9.6'; then
    AC_MSG_ERROR([bdr is not compatible with detected postgres version: $version_num])
 else
    AC_MSG_NOTICE([building against PostgreSQL $version_num])
+   # Even though Makefile.global defines MAJORVERSION for this, we need access to it
+   # before we include Makefile.global in our own Makefile, so set it directly.
+   BDR_PG_MAJORVERSION="$version_num"
+   AC_SUBST(BDR_PG_MAJORVERSION)
 fi;
 
 # add includedir to prerequisites, so tests for headers can succeed

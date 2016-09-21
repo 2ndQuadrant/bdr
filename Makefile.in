@@ -5,6 +5,7 @@
 # configure output
 BDR_PGVERCOMPAT_INCDIR=@BDR_PGVERCOMPAT_INCDIR@
 HAVE_SEQAM=@HAVE_SEQAM@
+BDR_PG_MAJORVERSION=@BDR_PG_MAJORVERSION@
 # end configure output
 
 bdr_subdir = .
@@ -28,6 +29,11 @@ DATA = \
 DOCS = bdr.conf.sample README.bdr
 SCRIPTS = bdr_init_copy bdr_dump
 SCRIPTS_built = scripts/bdr_initial_load
+
+# We can't use Makefile.global's MAJORVERSION here yet
+ifneq ($(BDR_PG_MAJORVERSION),9.4)
+SCRIPTS_built += bdr_resetxlog
+endif
 
 PG_CPPFLAGS = -I$(BDR_PGVERCOMPAT_INCDIR) -I$(libpq_srcdir) -Wmissing-prototypes -Wmissing-declarations -Werror
 SHLIB_LINK = $(libpq)
@@ -111,6 +117,19 @@ BDR_DUMP_LIBS :=
 DUMPOBJS += $(BDR_DUMP_DIR)/kwlookup.o
 endif
 
+ifeq ($(MAJORVERSION),9.6)
+RESETXLOG_OBJS := pg_resetxlog/96/pg_resetxlog.o
+RESETXLOG_LIBS := -lpgfeutils
+
+bdr_resetxlog: $(RESETXLOG_OBJS)
+	$(CC) $(CFLAGS) $(RESETXLOG_OBJS) $(libpq_pgport) $(LDFLAGS) $(LDFLAGS_EX) $(LIBS) -o $@$(X)
+else
+RESETXLOG_OBJS := 
+RESETXLOG_LIBS :=
+
+bdr_resetxlog:
+	@echo "bdr_resetxlog is not built on 9.4"
+endif
 
 # Ensure Makefiles are up2date (should we move this to Makefile.global?)
 Makefile: Makefile.in config.status configure
@@ -171,6 +190,7 @@ additional-clean:
 	rm -rf tmp_check
 	rm -rf scripts/bdr_initial_load
 	rm -f bdr_dump$(X) $(DUMPOBJS)
+	rm -f bdr_resetxlog$(X) $(RESETXLOG_OBJS)
 	rm -f extsql/bdr--0.[89].0.[0-9].sql
 	$(MAKE) -C doc clean
 
