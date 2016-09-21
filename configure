@@ -590,7 +590,9 @@ PACKAGE_URL='http://2ndquadrant.com/en/resources/bdr/'
 ac_subst_vars='LTLIBOBJS
 LIBOBJS
 vpath_build
+BDR_PGVERCOMPAT_INCDIR
 PATH
+HAVE_SEQAM
 OBJEXT
 EXEEXT
 ac_ct_CC
@@ -598,6 +600,7 @@ CPPFLAGS
 LDFLAGS
 CFLAGS
 CC
+BDR_PG_MAJORVERSION
 PG_CONFIG
 SED
 configure_args
@@ -1264,7 +1267,8 @@ Optional Features:
   --disable-FEATURE       do not include FEATURE (same as --enable-FEATURE=no)
   --enable-FEATURE[=ARG]  include FEATURE [ARG=yes]
   --enable-bdr            enable full bi-directional replication for patched
-                          PostgreSQL 9.4 [yes/no/auto] [default=auto]
+                          PostgreSQL 9.4 or stock PostgreSQL 9.6 [yes/no/auto]
+                          [default=auto]
 
 Some influential environment variables:
   PG_CONFIG   Location to find pg_config for target PostgresQL (default PATH)
@@ -1920,11 +1924,15 @@ if test -z "$version_num"; then
   as_fn_error $? "could not detect the PostgreSQL version, wrong or broken pg_config?" "$LINENO" 5
 fi
 
-if test "$version_num" != '9.4' -a "$version_num" != '9.5'; then
+if test "$version_num" != '9.4' -a "$version_num" != '9.6'; then
    as_fn_error $? "bdr is not compatible with detected postgres version: $version_num" "$LINENO" 5
 else
    { $as_echo "$as_me:${as_lineno-$LINENO}: building against PostgreSQL $version_num" >&5
 $as_echo "$as_me: building against PostgreSQL $version_num" >&6;}
+   # Even though Makefile.global defines MAJORVERSION for this, we need access to it
+   # before we include Makefile.global in our own Makefile, so set it directly.
+   BDR_PG_MAJORVERSION="$version_num"
+
 fi;
 
 # add includedir to prerequisites, so tests for headers can succeed
@@ -2722,14 +2730,15 @@ ac_link='$CC -o conftest$ac_exeext $CFLAGS $CPPFLAGS $LDFLAGS conftest.$ac_ext $
 ac_compiler_gnu=$ac_cv_c_compiler_gnu
 
 
-for ac_header in replication/replication_identifier.h
+for ac_header in replication/replication_identifier.h replication/origin.h
 do :
-  ac_fn_c_check_header_compile "$LINENO" "replication/replication_identifier.h" "ac_cv_header_replication_replication_identifier_h" "#include \"postgres.h\"
+  as_ac_Header=`$as_echo "ac_cv_header_$ac_header" | $as_tr_sh`
+ac_fn_c_check_header_compile "$LINENO" "$ac_header" "$as_ac_Header" "#include \"postgres.h\"
 
 "
-if test "x$ac_cv_header_replication_replication_identifier_h" = xyes; then :
+if eval test \"x\$"$as_ac_Header"\" = x"yes"; then :
   cat >>confdefs.h <<_ACEOF
-#define HAVE_REPLICATION_REPLICATION_IDENTIFIER_H 1
+#define `$as_echo "HAVE_$ac_header" | $as_tr_cpp` 1
 _ACEOF
 
 fi
@@ -2737,11 +2746,59 @@ fi
 done
 
 
+for ac_header in access/committs.h access/commit_ts.h
+do :
+  as_ac_Header=`$as_echo "ac_cv_header_$ac_header" | $as_tr_sh`
+ac_fn_c_check_header_compile "$LINENO" "$ac_header" "$as_ac_Header" "#include \"postgres.h\"
+
+"
+if eval test \"x\$"$as_ac_Header"\" = x"yes"; then :
+  cat >>confdefs.h <<_ACEOF
+#define `$as_echo "HAVE_$ac_header" | $as_tr_cpp` 1
+_ACEOF
+
+fi
+
+done
 
 
-if test "$ac_cv_header_replication_replication_identifier_h" != 'yes'; then
-   as_fn_error $? "BDR can be built only against postgres-bdr" "$LINENO" 5
+HAVE_SEQAM=0
+
+for ac_header in access/seqam.h
+do :
+  ac_fn_c_check_header_compile "$LINENO" "access/seqam.h" "ac_cv_header_access_seqam_h" "#include \"postgres.h\"
+
+"
+if test "x$ac_cv_header_access_seqam_h" = xyes; then :
+  cat >>confdefs.h <<_ACEOF
+#define HAVE_ACCESS_SEQAM_H 1
+_ACEOF
+
+$as_echo "#define HAVE_SEQAM 1" >>confdefs.h
+
+     HAVE_SEQAM=1
+fi
+
+done
+
+
+
+
+
+
+if test "$ac_cv_header_replication_origin_h" = 'yes'; then
+   { $as_echo "$as_me:${as_lineno-$LINENO}: building with PostgreSQL 9.6" >&5
+$as_echo "$as_me: building with PostgreSQL 9.6" >&6;}
+   BDR_PGVERCOMPAT_INCDIR="compat/96"
+elif test "$ac_cv_header_replication_replication_identifier_h" == 'yes'; then
+   { $as_echo "$as_me:${as_lineno-$LINENO}: building with PostgreSQL 9.4bdr" >&5
+$as_echo "$as_me: building with PostgreSQL 9.4bdr" >&6;}
+   BDR_PGVERCOMPAT_INCDIR="compat/94bdr"
+else
+   as_fn_error $? "BDR can be built only against postgres-bdr or PostgreSQL 9.6" "$LINENO" 5
 fi;
+
+
 
 
 # check whether we're building inside the source tree.
@@ -2757,6 +2814,8 @@ ac_config_files="$ac_config_files Makefile"
 ac_config_files="$ac_config_files Makefile.global"
 
 ac_config_files="$ac_config_files doc/Makefile"
+
+ac_config_files="$ac_config_files bdr.conf.sample"
 
 ac_config_files="$ac_config_files run_tests"
 
@@ -3456,6 +3515,7 @@ do
     "Makefile") CONFIG_FILES="$CONFIG_FILES Makefile" ;;
     "Makefile.global") CONFIG_FILES="$CONFIG_FILES Makefile.global" ;;
     "doc/Makefile") CONFIG_FILES="$CONFIG_FILES doc/Makefile" ;;
+    "bdr.conf.sample") CONFIG_FILES="$CONFIG_FILES bdr.conf.sample" ;;
     "run_tests") CONFIG_FILES="$CONFIG_FILES run_tests" ;;
     "bdr_config_generated.h") CONFIG_HEADERS="$CONFIG_HEADERS bdr_config_generated.h" ;;
 
