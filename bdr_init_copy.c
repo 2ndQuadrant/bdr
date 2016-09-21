@@ -84,6 +84,7 @@ __attribute__((format(PG_PRINTF_ATTRIBUTE, 2, 3)));
 static int BDR_WARN_UNUSED run_pg_ctl(const char *arg);
 static void run_basebackup(const char *remote_connstr, const char *data_dir);
 static void wait_postmaster_connection(const char *connstr);
+static void wait_for_end_recovery(const char *connstr);
 static void wait_postmaster_shutdown(void);
 
 static char *validate_replication_set_input(char *replication_sets);
@@ -440,6 +441,19 @@ main(int argc, char **argv)
 	}
 	appendPQExpBuffer(recoveryconfcontents, "recovery_target_name = '%s'\n", restore_point_name);
 	appendPQExpBuffer(recoveryconfcontents, "recovery_target_inclusive = true\n");
+	if (PG_VERSION_NUM/100 == 904)
+	{
+		appendPQExpBuffer(recoveryconfcontents, "pause_at_recovery_target = off");
+	}
+	else if (PG_VERSION_NUM/100 == 906)
+	{
+		appendPQExpBuffer(recoveryconfcontents, "recovery_target_action = promote");
+	}
+	else
+	{
+		die(_("Only 9.4bdr and 9.6 are supported"));
+	}
+
 	WriteRecoveryConf(recoveryconfcontents);
 
 	/*
@@ -455,6 +469,15 @@ main(int argc, char **argv)
 		die(_("postgres startup for restore point catchup failed with %d. See bdr_init_copy_postgres.log."), pg_ctl_ret);
 
 	wait_postmaster_connection(local_connstr);
+
+	/*
+	 * The postmaster is in standby mode and has caught up. Now we have to
+	 * promote it so we can perform read/write transactions and wait for
+	 * it to notice that it has been promoted.
+	 *
+	 * When pg_is_in_recovery() no longer returns true, we're ready.
+	 */
+	wait_for_end_recovery(local_connstr);
 
 	/*
 	 * Clean any per-node data that were copied by pg_basebackup.
@@ -1179,6 +1202,7 @@ static void
 remove_unwanted_data(PGconn *conn)
 {
 	PGresult	   *res;
+	const char	   *dropident_sql;
 
 	/* Remove any BDR security labels. */
 	res = PQexec(conn, "DELETE FROM pg_catalog.pg_shseclabel WHERE provider = 'bdr';");
@@ -1190,12 +1214,17 @@ remove_unwanted_data(PGconn *conn)
 	}
 	PQclear(res);
 
+	if (PG_VERSION_NUM/100 == 94)
+		dropident_sql = "SELECT pg_catalog.pg_replication_identifier_drop(riname) FROM pg_catalog.pg_replication_identifier;";
+	else
+		dropident_sql = "SELECT pg_catalog.pg_replication_origin_drop(roname) FROM pg_catalog.pg_replication_origin;";
+
 	/* Remove replication identifiers. */
-	res = PQexec(conn, "SELECT pg_catalog.pg_replication_identifier_drop(riname) FROM pg_catalog.pg_replication_identifier;");
+	res = PQexec(conn, dropident_sql);
 	if (PQresultStatus(res) != PGRES_TUPLES_OK)
 	{
 		PQclear(res);
-		die(_("Could not remove existing replication identifiers: %s\n"), PQerrorMessage(conn));
+		die(_("Could not remove existing replication origins: %s\n"), PQerrorMessage(conn));
 	}
 	PQclear(res);
 }
@@ -1236,34 +1265,40 @@ initialize_replication_identifier(PGconn *conn, NodeInfo *ni, Oid dboid, char *r
 	PGresult   *res;
 	char		remote_ident[256];
 	PQExpBuffer query = createPQExpBuffer();
+	const char *origin_or_identifier;
 
 	snprintf(remote_ident, sizeof(remote_ident), BDR_NODE_ID_FORMAT,
 				ni->remote_sysid, ni->remote_tlid, dboid, dboid, "");
 
-	printfPQExpBuffer(query, "SELECT pg_catalog.pg_replication_identifier_create('%s')",
-					 remote_ident);
+	if (PG_VERSION_NUM/100 == 94)
+		origin_or_identifier = "identifier";
+	else
+		origin_or_identifier = "origin";
+
+	printfPQExpBuffer(query, "SELECT pg_catalog.pg_replication_%s_create('%s')",
+					 origin_or_identifier, remote_ident);
 
 	res = PQexec(conn, query->data);
 
 	if (PQresultStatus(res) != PGRES_TUPLES_OK)
 	{
-		die(_("Could not create replication indentifier \"%s\": status %s: %s\n"),
-			 query->data,
+		die(_("Could not create replication %s \"%s\": status %s: %s\n"),
+			 origin_or_identifier, query->data,
 			 PQresStatus(PQresultStatus(res)), PQresultErrorMessage(res));
 	}
 	PQclear(res);
 
 	if (remote_lsn)
 	{
-		printfPQExpBuffer(query, "SELECT pg_catalog.pg_replication_identifier_advance('%s', '%s', '0/0')",
-						 remote_ident, remote_lsn);
+		printfPQExpBuffer(query, "SELECT pg_catalog.pg_replication_%s_advance('%s', '%s', '0/0')",
+						 origin_or_identifier, remote_ident, remote_lsn);
 
 		res = PQexec(conn, query->data);
 
 		if (PQresultStatus(res) != PGRES_TUPLES_OK)
 		{
-			die(_("Could not advance replication indentifier \"%s\": status %s: %s\n"),
-				 query->data,
+			die(_("Could not advance replication %s \"%s\": status %s: %s\n"),
+				 origin_or_identifier, query->data,
 				 PQresStatus(PQresultStatus(res)), PQresultErrorMessage(res));
 		}
 		PQclear(res);
@@ -1608,7 +1643,7 @@ appendPQExpBufferConnstrValue(PQExpBuffer buf, const char *str)
 
 
 /*
- * Find the pgport and try a connection
+ * Find the pgport and try a connection until it reports not in recovery
  */
 static void
 wait_postmaster_connection(const char *connstr)
@@ -1652,7 +1687,10 @@ wait_postmaster_connection(const char *connstr)
 		print_msg(VERBOSITY_VERBOSE, _("\npostmaster started (pid="INT64_FORMAT"), waiting for connection"), pmpid);
 	}
 
-	/* Now wait for Postmaster to either accept connections or die. */
+	/*
+	 * Now wait for Postmaster to either accept r/w (non-recovery) connections
+	 * or die.
+	 */
 	for (;;)
 	{
 		res = PQping(connstr);
@@ -1669,12 +1707,62 @@ wait_postmaster_connection(const char *connstr)
 		if (!postmaster_is_alive((pid_t) pmpid))
 			break;
 
+		
+
 		/* No response; wait */
 		pg_usleep(1000000);		/* 1 sec */
 		print_msg(VERBOSITY_VERBOSE, ".");
 	}
 
 	print_msg(VERBOSITY_VERBOSE, "\n");
+}
+
+static void
+wait_for_end_recovery(const char *connstr)
+{
+	PGconn *conn = connectdb((char*)connstr);
+
+	print_msg(VERBOSITY_VERBOSE, _("Waiting for PostgreSQL to become read/write"));
+
+	for (;;)
+	{
+		PGresult   *res;
+		char*		inrecovery;
+
+		res = PQexec(conn, "SELECT pg_catalog.pg_is_in_recovery()");
+
+		if (PQresultStatus(res) != PGRES_TUPLES_OK)
+		{
+			die(_("error while waiting for database to become read/write: %s: %s\n"),
+				 PQresStatus(PQresultStatus(res)), PQresultErrorMessage(res));
+		}
+
+		if (PQntuples(res) != 1 || PQnfields(res) != 1 || PQgetisnull(res, 0, 0))
+		{
+			die(gettext_noop("nonsensical result from pg_is_in_recovery()"));
+		}
+
+		inrecovery = PQgetvalue(res, 0, 0);
+		if (inrecovery[0] == 'f')
+		{
+			break;
+		}
+		else if (inrecovery[0] != 't')
+		{
+			die(gettext_noop("nonsensical result from pg_is_in_recovery, expected t|f, got %s"),
+				inrecovery);
+		}
+
+		PQclear(res);
+
+		/* Keep waiting */
+		pg_usleep(1000000);		/* 1 sec */
+		print_msg(VERBOSITY_VERBOSE, ".");
+	}
+
+	PQfinish(conn);
+
+	print_msg(VERBOSITY_VERBOSE, " ready\n");
 }
 
 /*
