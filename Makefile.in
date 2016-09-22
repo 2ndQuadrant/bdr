@@ -279,10 +279,20 @@ else
 isolationcheck:
 	@echo "Cannot run isolation tests except on 9.4bdr"
 
-#$(foreach v, $(.VARIABLES), $(info $(v) = $($(v))))
-#$(error xxx)
+#
+# To run prove, we need to install a couple of things that are not
+# usually coped from the Pg source tree to the install tree, namely
+# all of src/test/perl needs to be copied to lib/postgresql/pgxs/src/test/perl/PostgresNode.pm .
+#
+# This isn't done by Pg's install command, which doesn't know how to install them. So you'll have
+# to copy them manually or patch your postgres tree to install them:
+#
+#   https://www.postgresql.org/message-id/CAMsr%2BYFXv%2B2qne6xJW7z_25mYBtktRX5rpkrgrb%2BDRgQ_FxgHQ@mail.gmail.com
+#
+$(pgxsdir)/src/test/perl/PostgresNode.pm:
+	@[ -e $(pgxsdir)/src/test/perl/PostgresNode.pm ] || ( echo -e "----ERROR----\nCan't run prove_installcheck, copy src/test/perl/* to $(pgxsdir)/src/test/perl/ and retry\n-------------" && exit 1)
 
-prove_installcheck:
+prove_installcheck: $(pgxsdir)/src/test/perl/PostgresNode.pm
 	rm -rf $(CURDIR)/tmp_check/
 	cd $(srcdir) && TESTDIR='$(CURDIR)' PATH="$(shell $(PG_CONFIG) --bindir):$$PATH" PGPORT='6$(DEF_PGPORT)' top_builddir='$(CURDIR)/$(top_builddir)' PG_REGRESS='$(pgxsdir)/src/test/regress/pg_regress' $(PROVE) $(PG_PROVE_FLAGS) $(PROVE_FLAGS) t/*.pl
 
