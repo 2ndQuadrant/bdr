@@ -29,8 +29,7 @@ EXCEPTION
   WHEN others THEN
     GET STACKED DIAGNOSTICS
        errm = MESSAGE_TEXT;
-    RAISE WARNING 'ERR: "%"', errm;
-    IF errm LIKE '%cache lookup failed for % bdr_0_0_1234_16385_' THEN
+    IF errm LIKE '%cache lookup failed for %bdr_0_0_%' THEN
       RAISE EXCEPTION 'Got expected lookup error';
     ELSE
       RAISE;

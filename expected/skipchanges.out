@@ -31,16 +31,15 @@ EXCEPTION
   WHEN others THEN
     GET STACKED DIAGNOSTICS
        errm = MESSAGE_TEXT;
-    RAISE WARNING 'ERR: "%"', errm;
-    IF errm LIKE '%cache lookup failed for % bdr_0_0_1234_16385_' THEN
+    IF errm LIKE '%cache lookup failed for %bdr_0_0_%' THEN
       RAISE EXCEPTION 'Got expected lookup error';
     ELSE
       RAISE;
     END IF;
 END;
 $$;
-WARNING:  ERR: "cache lookup failed for replication identifier named bdr_0_0_1234_16385_"
 ERROR:  Got expected lookup error
+CONTEXT:  PL/pgSQL function inline_code_block line 11 at RAISE
 SELECT bdr.skip_changes_upto(n.node_sysid, n.node_timeline, n.node_dboid, '0/1')
 FROM bdr.bdr_nodes n
 WHERE (n.node_sysid, n.node_timeline, n.node_dboid) = bdr.bdr_get_local_nodeid();
