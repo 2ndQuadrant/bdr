@@ -15496,7 +15496,7 @@ dumpTableSchema(Archive *fout, TableInfo *tbinfo)
 		 * attislocal correctly, plus fix up any inherited CHECK constraints.
 		 * Analogously, we set up typed tables using ALTER TABLE / OF here.
 		 */
-		if ((dopt->binary_upgrade || dopt->bdr_init_node) &&
+		if (dopt->binary_upgrade &&
 			(tbinfo->relkind == RELKIND_RELATION ||
 			 tbinfo->relkind == RELKIND_FOREIGN_TABLE))
 		{
@@ -15585,7 +15585,7 @@ dumpTableSchema(Archive *fout, TableInfo *tbinfo)
 								  tbinfo->reloftype);
 			}
 
-			appendPQExpBufferStr(q, "\n-- For binary upgrade, set heap's relfrozenxid and relminmxid\n");
+			appendPQExpBufferStr(q, "\n-- For binary upgrade, set heap's relnfrozenxid and relminmxid\n");
 			appendPQExpBuffer(q, "UPDATE pg_catalog.pg_class\n"
 							  "SET relfrozenxid = '%u', relminmxid = '%u'\n"
 							  "WHERE oid = ",
@@ -15602,6 +15602,38 @@ dumpTableSchema(Archive *fout, TableInfo *tbinfo)
 								  "WHERE oid = '%u';\n",
 								  tbinfo->toast_frozenxid,
 								  tbinfo->toast_minmxid, tbinfo->toast_oid);
+			}
+		}
+
+		/* Some of the binary compatibility is needed for bdr as well. */
+		if (dopt->bdr_init_node && tbinfo->relkind == RELKIND_RELATION)
+		{
+			for (j = 0; j < tbinfo->numatts; j++)
+			{
+				if (tbinfo->attisdropped[j])
+				{
+					appendPQExpBufferStr(q, "\n-- For bdr init, recreate dropped column.\n");
+					appendPQExpBuffer(q, "UPDATE pg_catalog.pg_attribute\n"
+									  "SET attlen = %d, "
+									  "attalign = '%c', attbyval = false\n"
+									  "WHERE attname = ",
+									  tbinfo->attlen[j],
+									  tbinfo->attalign[j]);
+					appendStringLiteralAH(q, tbinfo->attnames[j], fout);
+					appendPQExpBufferStr(q, "\n  AND attrelid = ");
+					appendStringLiteralAH(q, fmtId(tbinfo->dobj.name), fout);
+					appendPQExpBufferStr(q, "::pg_catalog.regclass;\n");
+
+					if (tbinfo->relkind == RELKIND_RELATION)
+						appendPQExpBuffer(q, "ALTER TABLE ONLY %s ",
+										  fmtId(tbinfo->dobj.name));
+					else
+						appendPQExpBuffer(q, "ALTER FOREIGN TABLE %s ",
+										  fmtId(tbinfo->dobj.name));
+
+					appendPQExpBuffer(q, "DROP COLUMN %s;\n",
+									  fmtId(tbinfo->attnames[j]));
+				}
 			}
 		}
 
