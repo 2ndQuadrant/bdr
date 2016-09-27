@@ -16,15 +16,11 @@ MODULE_big = bdr
 EXTENSION = bdr
 
 DATA = \
-	extsql/bdr--1.0.0.0.sql
+	extsql/bdr--1.0.0.0.sql \
+ 	extsql/bdr--1.0.0.0--1.1.0.0.sql
 
-# Add upgrade scripts above, like
-# 	extsql/bdr--1.0.0.0--1.0.0.1.sql
-#
-# and generated files below like:
-
-#DATA_built = \
-#	extsql/bdr--1.0.0.1.sql
+DATA_built = \
+	extsql/bdr--1.1.0.0.sql
 
 DOCS = bdr.conf.sample README.bdr
 SCRIPTS = bdr_init_copy bdr_dump
@@ -42,6 +38,8 @@ OBJS = \
 	bdr.o \
 	bdr_apply.o \
 	bdr_dbcache.o \
+	bdr_ddlrep.o \
+	bdr_ddlrep_truncate.o \
 	bdr_perdb.o \
 	bdr_catalogs.o \
 	bdr_conflict_handlers.o \
@@ -64,7 +62,7 @@ OBJS = \
 	bdr_upgrade.o
 
 ifeq ($(HAVE_SEQAM),1)
-OBJS += bdr_seq.o
+OBJS += bdr_seq.o bdr_ddlrep_deparse.o
 REGRESS_COMPAT :=
 DDLTESTS := \
 	ddl_enable_ddl \
@@ -85,7 +83,20 @@ SEQTESTS := dml_sequence
 else
 OBJS += bdr_seq_stub.o
 REGRESS_COMPAT := compat96
-DDLTESTS :=
+# Can't run ddl_sequence on 9.6
+DDLTESTS := \
+	ddl_enable_ddl \
+	ddl_create \
+	ddl_alter_table \
+	ddl_extension \
+	ddl_function \
+	ddl_grant \
+	ddl_mixed \
+	ddl_namespace \
+	ddl_read_only \
+	ddl_replication_set \
+	ddl_view \
+	ddl_disable_ddl
 SEQTESTS :=
 endif
 
@@ -160,11 +171,9 @@ scripts/bdr_initial_load: scripts/bdr_initial_load.in
 	sed -e "s/BDR_VERSION/$(BDR_VERSION)/" -e "s/PG_VERSION/$(VERSION)/" $< > $@
 	@chmod +x $@
 
-# Add rules to generate new extension scripts here, like:
-#
-#extsql/bdr--1.0.0.1.sql: extsql/bdr--1.0.0.0.sql extsql/bdr--1.0.0.0--1.0.0.1.sql
-#	mkdir -p extsql
-#	cat $^ > $@
+extsql/bdr--1.1.0.0.sql: extsql/bdr--1.0.0.0.sql extsql/bdr--1.0.0.0--1.1.0.0.sql
+	mkdir -p extsql
+	cat $^ > $@
 
 pg_dump_dir:
 	mkdir -p pg_dump

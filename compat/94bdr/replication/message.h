@@ -1,5 +1,5 @@
-#ifndef BDR_REPLICATION_MESSAGE_H
-#define BDR_REPLICATION_MESSAGE_H
+#ifndef BDR_REPLICATION_MESSAGE_COMPAT_H
+#define BDR_REPLICATION_MESSAGE_COMPAT_H
 
 /*
  * 9.6 got logical WAL messages in commit but of course they have a totally

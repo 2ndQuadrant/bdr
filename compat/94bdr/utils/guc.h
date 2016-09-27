@@ -1,5 +1,5 @@
-#ifndef BDR_UTILS_GUC_H
-#define BDR_UTILS_GUC_H
+#ifndef BDR_UTILS_GUC_COMPAT_H
+#define BDR_UTILS_GUC_COMPAT_H
 
 #include_next "utils/guc.h"
 

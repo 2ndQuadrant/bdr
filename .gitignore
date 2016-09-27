@@ -66,6 +66,7 @@ lib*.pc
 /extsql/bdr--0.9.3.0.sql
 /extsql/bdr--1.0.0.[1-9].sql
 /extsql/bdr--1.0.[1-9].[0-9].sql
+/extsql/bdr--1.1.0.0.sql
 /Makefile.global
 /doc/Makefile
 /bdr.conf.sample

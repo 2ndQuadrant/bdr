@@ -1,5 +1,5 @@
-#ifndef BDR_COMMANDS_TRIGGER_H
-#define BDR_COMMANDS_TRIGGER_H
+#ifndef BDR_COMPAT_COMMANDS_TRIGGER_H
+#define BDR_COMPAT_COMMANDS_TRIGGER_H
 
 #include_next "commands/trigger.h"
 

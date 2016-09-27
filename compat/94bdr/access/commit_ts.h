@@ -1,5 +1,5 @@
-#ifndef BDR_COMPAT_COMMITTS_H
-#define BDR_COMPAT_COMMITTS_H
+#ifndef BDR_COMPAT_ACCESS_COMMITTS_H
+#define BDR_COMPAT_ACCESS_COMMITTS_H
 
 #include "access/committs.h"
 

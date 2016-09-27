@@ -439,10 +439,34 @@ LANGUAGE C
 AS 'MODULE_PATHNAME'
 ;
 
-CREATE OR REPLACE FUNCTION bdr.bdr_queue_ddl_commands()
-RETURNS event_trigger
-LANGUAGE C
-AS 'MODULE_PATHNAME';
+DO
+LANGUAGE plpgsql
+$$
+BEGIN
+	IF (current_setting('server_version_num')::int / 100) = 904 THEN
+		-- We only use the event trigger on 9.4bdr, since 9.6 lacks
+		-- ddl deparse.
+		CREATE OR REPLACE FUNCTION bdr.bdr_queue_ddl_commands()
+		RETURNS event_trigger
+		LANGUAGE C
+		AS 'MODULE_PATHNAME';
+
+		CREATE EVENT TRIGGER bdr_queue_ddl_commands
+		ON ddl_command_end
+		EXECUTE PROCEDURE bdr.bdr_queue_ddl_commands();
+
+		CREATE OR REPLACE FUNCTION bdr.queue_dropped_objects()
+		RETURNS event_trigger
+		LANGUAGE C
+		AS 'MODULE_PATHNAME', 'bdr_queue_dropped_objects';
+
+		CREATE EVENT TRIGGER queue_drops
+		ON sql_drop
+		EXECUTE PROCEDURE bdr.queue_dropped_objects();
+	END IF;
+
+END;
+$$;
 
 CREATE OR REPLACE FUNCTION bdr.bdr_truncate_trigger_add()
 RETURNS event_trigger
@@ -472,15 +496,6 @@ CREATE TABLE bdr.bdr_queued_drops (
 );
 REVOKE ALL ON TABLE bdr_queued_drops FROM PUBLIC;
 SELECT pg_catalog.pg_extension_config_dump('bdr_queued_drops', '');
-
-CREATE OR REPLACE FUNCTION bdr.queue_dropped_objects()
-RETURNS event_trigger
-LANGUAGE C
-AS 'MODULE_PATHNAME', 'bdr_queue_dropped_objects';
-
-CREATE EVENT TRIGGER queue_drops
-ON sql_drop
-EXECUTE PROCEDURE bdr.queue_dropped_objects();
 
 CREATE OR REPLACE FUNCTION bdr.bdr_apply_pause()
 RETURNS VOID
@@ -2121,10 +2136,6 @@ FROM
  LEFT JOIN pg_catalog.pg_stat_replication r ON (r.pid = s.active_pid)
 WHERE ps.local_dboid = (select oid from pg_database where datname = current_database())
   AND s.plugin = 'bdr';
-
-CREATE EVENT TRIGGER bdr_queue_ddl_commands
-ON ddl_command_end
-EXECUTE PROCEDURE bdr.bdr_queue_ddl_commands();
 
 CREATE EVENT TRIGGER bdr_truncate_trigger_add
 ON ddl_command_end

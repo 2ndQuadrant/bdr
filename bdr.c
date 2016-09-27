@@ -87,7 +87,7 @@ static bool bdr_synchronous_commit;
 int bdr_default_apply_delay;
 int bdr_max_workers;
 int bdr_max_databases;
-static bool bdr_skip_ddl_replication;
+bool bdr_skip_ddl_replication;
 bool bdr_skip_ddl_locking;
 bool bdr_do_not_replicate;
 bool bdr_trace_replay;

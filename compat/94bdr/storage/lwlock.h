@@ -1,5 +1,5 @@
-#ifndef BDR_STORAGE_LWLOCK_H
-#define BDR_STORAGE_LWLOCK_H
+#ifndef BDR_STORAGE_LWLOCK_COMPAT_H
+#define BDR_STORAGE_LWLOCK_COMPAT_H
 
 #include_next "storage/lwlock.h"
 

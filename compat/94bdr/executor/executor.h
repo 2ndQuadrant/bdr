@@ -1,5 +1,5 @@
-#ifndef PGVERSION_COMPAT_H
-#define PGVERSION_COMPAT_H
+#ifndef BDR_EXECUTOR_EXECUTOR_COMPAT_H
+#define BDR_EXECUTOR_EXECUTOR_COMPAT_H
 
 #include_next "executor/executor.h"
 

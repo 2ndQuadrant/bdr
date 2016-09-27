@@ -16,6 +16,7 @@
 #include "utils/resowner.h"
 #include "storage/latch.h"
 #include "storage/lock.h"
+#include "tcop/utility.h"
 
 #include "libpq-fe.h"
 
@@ -294,6 +295,7 @@ extern bool bdr_conflict_logging_include_tuples;
 extern bool bdr_permit_ddl_locking;
 extern bool bdr_permit_unsafe_commands;
 extern bool bdr_skip_ddl_locking;
+extern bool bdr_skip_ddl_replication;
 extern bool bdr_do_not_replicate;
 extern int bdr_max_ddl_lock_delay;
 extern int bdr_ddl_lock_timeout;
@@ -496,10 +498,17 @@ extern void bdr_commandfilter_always_allow_ddl(bool always_allow);
 
 extern void bdr_executor_init(void);
 extern void bdr_executor_always_allow_writes(bool always_allow);
-extern void bdr_queue_ddl_command(char *command_tag, char *command);
-extern void bdr_execute_ddl_command(char *cmdstr, char *perpetrator, bool tx_just_started);
+extern void bdr_queue_ddl_command(const char *command_tag, const char *command, const char *search_path);
+extern void bdr_execute_ddl_command(char *cmdstr, char *perpetrator, char *search_path, bool tx_just_started);
 extern void bdr_start_truncate(void);
 extern void bdr_finish_truncate(void);
+
+typedef struct ParamListInfoData* ParamListInfo;
+typedef struct _DestReceiver DestReceiver;
+
+extern void bdr_capture_ddl(Node *parsetree, const char *queryString,
+							ProcessUtilityContext context, ParamListInfo params,
+							DestReceiver *dest, const char *completionTag);
 
 extern void bdr_locks_shmem_init(void);
 extern void bdr_locks_check_dml(void);

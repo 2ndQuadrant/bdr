@@ -623,6 +623,9 @@ bdr_acquire_ddl_lock(BDRLockType lock_type)
 	/* We don't support other types of the lock yet. */
 	Assert(lock_type == BDR_LOCK_DDL || lock_type == BDR_LOCK_WRITE);
 
+	/* shouldn't be called with ddl locking disabled */
+	Assert(!bdr_skip_ddl_locking);
+
 	bdr_locks_find_my_database(false);
 
 	/* No need to do anything if already holding requested lock. */

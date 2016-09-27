@@ -1,5 +1,5 @@
-#ifndef BDR_ACCESS_XLOGDEFS_H
-#define BDR_ACCESS_XLOGDEFS_H
+#ifndef BDR_COMPAT_ACCESS_XLOGDEFS_H
+#define BDR_COMPAT_ACCESS_XLOGDEFS_H
 
 #include_next "access/xlogdefs.h"
 

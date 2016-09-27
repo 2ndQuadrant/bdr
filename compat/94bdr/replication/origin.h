@@ -1,5 +1,5 @@
-#ifndef BDR_REPLICATION_ORIGIN_H
-#define BDR_REPLICATION_ORIGIN_H
+#ifndef BDR_REPLICATION_ORIGIN_COMPAT_H
+#define BDR_REPLICATION_ORIGIN_COMPAT_H
 
 /*
  * Compatibility adapter for 9.4bdr's replication/replication_identifier.h to 

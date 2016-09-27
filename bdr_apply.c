@@ -1558,13 +1558,15 @@ queued_command_error_callback(void *arg)
 }
 
 void
-bdr_execute_ddl_command(char *cmdstr, char *perpetrator, bool tx_just_started)
+bdr_execute_ddl_command(char *cmdstr, char *perpetrator, char *search_path,
+						bool tx_just_started)
 {
 	List	   *commands;
 	ListCell   *command_i;
 	bool		isTopLevel;
 	MemoryContext oldcontext;
 	ErrorContextCallback errcallback;
+	int			guc_nestlevel;
 
 	oldcontext = MemoryContextSwitchTo(MessageContext);
 
@@ -1572,6 +1574,17 @@ bdr_execute_ddl_command(char *cmdstr, char *perpetrator, bool tx_just_started)
 	errcallback.arg = cmdstr;
 	errcallback.previous = error_context_stack;
 	error_context_stack = &errcallback;
+
+	guc_nestlevel = NewGUCNestLevel();
+
+    /* Force everything in the query to be fully qualified. */
+	(void) set_config_option("search_path", search_path,
+							 PGC_USERSET, PGC_S_SESSION,
+							 GUC_ACTION_SAVE, true, 0
+#if PG_VERSION_NUM >= 90500
+							 , false
+#endif
+							 );
 
 	commands = pg_parse_query(cmdstr);
 
@@ -1600,8 +1613,7 @@ bdr_execute_ddl_command(char *cmdstr, char *perpetrator, bool tx_just_started)
 
 		/*
 		 * Set the current role to the user that executed the command on the
-		 * origin server.  NB: there is no need to reset this afterwards, as
-		 * the value will be gone with our transaction.
+		 * origin server.
 		 */
 		SetConfigOption("role", perpetrator, PGC_INTERNAL, PGC_S_OVERRIDE);
 
@@ -1642,8 +1654,12 @@ bdr_execute_ddl_command(char *cmdstr, char *perpetrator, bool tx_just_started)
 	 */
 	if (error_context_stack == &errcallback)
 		error_context_stack = errcallback.previous;
+
+	/* Restore the old search_path */
+	AtEOXact_GUC(false, guc_nestlevel);
 }
 
+#include <unistd.h>
 
 static void
 process_queued_ddl_command(HeapTuple cmdtup, bool tx_just_started)
@@ -1654,6 +1670,7 @@ process_queued_ddl_command(HeapTuple cmdtup, bool tx_just_started)
 	char	   *cmdstr;
 	bool		isnull;
 	char       *perpetrator;
+	char	   *search_path;
 	MemoryContext oldcontext;
 
 	/* ----
@@ -1695,6 +1712,14 @@ process_queued_ddl_command(HeapTuple cmdtup, bool tx_just_started)
 
 	cmdstr = TextDatumGetCString(datum);
 
+	datum = heap_getattr(cmdtup, 6,
+						 RelationGetDescr(cmdsrel),
+						 &isnull);
+	if (isnull)
+		elog(ERROR, "null search_path for \"%s\" command tuple", command_tag);
+
+	search_path = TextDatumGetCString(datum);
+
 	/* close relation, command execution might end/start xact */
 	heap_close(cmdsrel, NoLock);
 
@@ -1705,7 +1730,7 @@ process_queued_ddl_command(HeapTuple cmdtup, bool tx_just_started)
 		elog(LOG, "TRACE: QUEUED_DDL: %s", cmdstr);
 	}
 
-	bdr_execute_ddl_command(cmdstr, perpetrator, tx_just_started);
+	bdr_execute_ddl_command(cmdstr, perpetrator, search_path, tx_just_started);
 }
 
 

@@ -58,7 +58,7 @@ const char *drop_handler_get_tbl_oid_sql =
 
 const char *handler_queued_table_sql =
 "INSERT INTO bdr.bdr_queued_commands (lsn, queued_at, perpetrator, command_tag, command)\n" \
-"   VALUES (pg_current_xlog_location(), NOW(), CURRENT_USER, 'SELECT', $1)";
+"   VALUES (pg_current_xlog_location(), NOW(), CURRENT_USER, 'SELECT', $1, '')";
 
 const char *get_conflict_handlers_for_table_sql =
 "SELECT ch_fun::regprocedure, ch_type::text ch_type, ch_timeframe FROM bdr.bdr_conflict_handlers" \

@@ -58,7 +58,10 @@ static ClientAuthentication_hook_type next_ClientAuthentication_hook = NULL;
 /* GUCs */
 bool bdr_permit_unsafe_commands = false;
 
-static void error_unsupported_command(const char *cmdtag) __attribute__((noreturn));
+static void error_unsupported_command(const char *cmdtag);
+
+static int bdr_ddl_nestlevel = 0;
+static bool bdr_in_extension = false;
 
 /*
 * Check the passed rangevar, locking it and looking it up in the cache
@@ -99,6 +102,9 @@ error_on_persistent_rv(RangeVar *rv,
 static void
 error_unsupported_command(const char *cmdtag)
 {
+	if (bdr_permit_unsafe_commands)
+		return;
+
 	ereport(ERROR,
 			(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 			 errmsg("%s is not supported when bdr is active",
@@ -124,6 +130,9 @@ filter_CreateStmt(Node *parsetree,
 	bool		with_oids = default_with_oids;
 
 	stmt = (CreateStmt *) parsetree;
+
+	if (bdr_permit_unsafe_commands)
+		return;
 
 	if (stmt->ofTypename != NULL)
 		error_unsupported_command("CREATE TABLE ... OF TYPE");
@@ -180,6 +189,9 @@ filter_AlterTableStmt(Node *parsetree,
 	List	   *stmts;
 	Oid			relid;
 	LOCKMODE	lockmode;
+
+	if (bdr_permit_unsafe_commands)
+		return;
 
 	astmt = (AlterTableStmt *) parsetree;
 	hasInvalid = false;
@@ -407,6 +419,9 @@ filter_CreateSeqStmt(Node *parsetree)
 {
 	CreateSeqStmt  *stmt;
 
+	if (bdr_permit_unsafe_commands)
+		return;
+
 	stmt = (CreateSeqStmt *) parsetree;
 
 	filter_CreateBdrSeqStmt(stmt);
@@ -417,6 +432,9 @@ filter_AlterSeqStmt(Node *parsetree)
 {
 	Oid				seqoid;
 	AlterSeqStmt   *stmt;
+
+	if (bdr_permit_unsafe_commands)
+		return;
 
 	stmt = (AlterSeqStmt *) parsetree;
 
@@ -433,6 +451,9 @@ filter_CreateTableAs(Node *parsetree)
 {
 	CreateTableAsStmt *stmt;
 	stmt = (CreateTableAsStmt *) parsetree;
+
+	if (bdr_permit_unsafe_commands)
+		return;
 
 	if (ispermanent(stmt->into->rel->relpersistence))
 		error_unsupported_command(CreateCommandTag(parsetree));
@@ -656,6 +677,9 @@ allowed_on_read_only_node(Node *parsetree)
 static void
 bdr_commandfilter_dbname(const char *dbname)
 {
+	if (bdr_permit_unsafe_commands)
+		return;
+
 	if (strcmp(dbname, BDR_SUPERVISOR_DBNAME) == 0)
 	{
 		ereport(ERROR,
@@ -670,6 +694,9 @@ static void
 prevent_drop_extension_bdr(DropStmt *stmt)
 {
 	ListCell   *cell;
+
+	if (bdr_permit_unsafe_commands)
+		return;
 
 	/* Only interested in DROP EXTENSION */
 	if (stmt->removeType != OBJECT_EXTENSION)
@@ -710,14 +737,20 @@ bdr_commandfilter(Node *parsetree,
 				  DestReceiver *dest,
 				  char *completionTag)
 {
+	bool incremented_nestlevel = false;
+	bool affects_only_nonpermanent = false;
+	bool entered_extension = false;
+
 	/* take strongest lock by default. */
 	BDRLockType	lock_type = BDR_LOCK_WRITE;
+
+	elog(LOG, "processing %s: %s in statement %s", context == PROCESS_UTILITY_TOPLEVEL ? "toplevel" : "query", CreateCommandTag(parsetree), queryString);
 
 	/* don't filter in single user mode */
 	if (!IsUnderPostmaster)
 		goto done;
 
-	/* Only permit VACUUM on the supervisordb, if it exists */
+	/* Permit only VACUUM on the supervisordb, if it exists */
 	if (BdrSupervisorDbOid == InvalidOid)
 		BdrSupervisorDbOid = bdr_get_supervisordb_oid(true);
 		
@@ -734,7 +767,7 @@ bdr_commandfilter(Node *parsetree,
 	if (creating_extension)
 		goto done;
 
-	/* don't perform filtering while replaying */
+	/* don't perform filtering or replication while replaying */
 	if (replorigin_session_origin != InvalidRepOriginId)
 		goto done;
 
@@ -743,7 +776,20 @@ bdr_commandfilter(Node *parsetree,
 	 * calls might require transaction access.
 	 */
 	if (nodeTag(parsetree) == T_TransactionStmt)
+	{
+		TransactionStmt *stmt = (TransactionStmt*)parsetree;
+		if (PG_VERSION_NUM >= 90600 &&
+			context != PROCESS_UTILITY_TOPLEVEL &&
+			(stmt->kind == TRANS_STMT_COMMIT ||
+			 stmt->kind == TRANS_STMT_PREPARE ||
+			 stmt->kind == TRANS_STMT_COMMIT_PREPARED))
+		{
+			ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 errmsg("9.6BDR does not support multi-statement strings containing explicit COMMIT")));
+		}
 		goto done;
+	}
 
 	/* don't filter if this database isn't using bdr */
 	if (!bdr_is_bdr_activated_db(MyDatabaseId))
@@ -756,53 +802,103 @@ bdr_commandfilter(Node *parsetree,
 				 errmsg("Cannot run %s on read-only BDR node.",
 						CreateCommandTag(parsetree))));
 
-	/* don't filter if explicitly told so */
-	if (bdr_permit_unsafe_commands)
-		goto done;
-
 	/* commands we skip (for now) */
 	switch (nodeTag(parsetree))
 	{
+		/* These are purely local and don't need replication */
 		case T_PlannedStmt:
 		case T_ClosePortalStmt:
 		case T_FetchStmt:
-		case T_DoStmt:
-		case T_CreateTableSpaceStmt:
-		case T_DropTableSpaceStmt:
-		case T_AlterTableSpaceOptionsStmt:
-		case T_TruncateStmt:
-		case T_CommentStmt: /* XXX: we could replicate these */;
-		case T_CopyStmt:
 		case T_PrepareStmt:
-		case T_ExecuteStmt:
 		case T_DeallocateStmt:
-		case T_GrantStmt: /* XXX: we could replicate some of these these */;
-		case T_GrantRoleStmt:
-		case T_AlterDatabaseStmt:
-		case T_AlterDatabaseSetStmt:
 		case T_NotifyStmt:
 		case T_ListenStmt:
 		case T_UnlistenStmt:
 		case T_LoadStmt:
-		case T_ClusterStmt: /* XXX: we could replicate these */;
-		case T_VacuumStmt:
 		case T_ExplainStmt:
-		case T_AlterSystemStmt:
 		case T_VariableSetStmt:
 		case T_VariableShowStmt:
 		case T_DiscardStmt:
-		case T_CreateEventTrigStmt:
-		case T_AlterEventTrigStmt:
-		case T_CreateRoleStmt:
-		case T_AlterRoleStmt:
-		case T_AlterRoleSetStmt:
-		case T_DropRoleStmt:
-		case T_ReassignOwnedStmt:
 		case T_LockStmt:
 		case T_ConstraintsSetStmt:
 		case T_CheckPointStmt:
 		case T_ReindexStmt:
+		case T_VacuumStmt:
+		case T_ClusterStmt:
 			goto done;
+
+		/* We replicate the results of a DO block, not the block its self */
+		case T_DoStmt:
+			goto done;
+
+		/*
+		 * Tablespaces can differ over nodes and aren't replicated. They're global
+		 * objects anyway.
+		 */
+		case T_CreateTableSpaceStmt:
+		case T_DropTableSpaceStmt:
+		case T_AlterTableSpaceOptionsStmt:
+			goto done;
+
+		/*
+		 * We treat properties of the database its self as node-specific and don't
+		 * try to replicate GUCs set on the database, etc.
+		 *
+		 * Same with event triggers, and event triggers don't support capturing
+		 * event triggers so 9.4bdr can't replicate them. 9.6 could.
+		 */
+		case T_AlterDatabaseStmt:
+		case T_AlterDatabaseSetStmt:
+		case T_CreateEventTrigStmt:
+		case T_AlterEventTrigStmt:
+			goto done;
+
+		/* Handled by truncate triggers elsewhere */
+		case T_TruncateStmt: 
+			goto done;
+
+		/* We could replicate some of these: */
+		case T_GrantStmt:
+		case T_ReassignOwnedStmt:
+			goto done;
+
+		/* We replicate the rows changed, not the statements, for these */
+		case T_CopyStmt:
+		case T_ExecuteStmt:
+			goto done;
+
+		/*
+		 * These affect global objects, which we don't replicate
+		 * changes to.
+		 *
+		 * The ProcessUtility_hook runs on all DBs, but we have no way
+		 * to enqueue such statements onto the DDL command queue. We'd
+		 * also have to make sure they replicated only once if there was
+		 * more than one local node.
+		 *
+		 * This may be possible using generic logical WAL messages, writing
+		 * a message from one DB that's replayed on another DB, but only if
+		 * a new variant of LogLogicalMessage is added to allow the target
+		 * db oid to be specified.
+		 */
+		case T_GrantRoleStmt:
+		case T_AlterSystemStmt:
+		case T_CreateRoleStmt:
+		case T_AlterRoleStmt:
+		case T_AlterRoleSetStmt:
+		case T_DropRoleStmt:
+			goto done;
+		
+		/*
+		 * Can't replicate on 9.4 due to lack of deparse support,
+		 * could replicate on 9.6.
+		 */
+		case T_CommentStmt:
+#if PG_VERSION_NUM >= 90600
+			break;
+#else
+			goto done;
+#endif
 
 		default:
 			break;
@@ -832,8 +928,8 @@ bdr_commandfilter(Node *parsetree,
 			{
 				bdr_commandfilter_dbname(((RenameStmt*)parsetree)->subname);
 				bdr_commandfilter_dbname(((RenameStmt*)parsetree)->newname);
+				goto done;
 			}
-			break;
 
 		default:
 			break;
@@ -848,7 +944,7 @@ bdr_commandfilter(Node *parsetree,
 
 				prevent_drop_extension_bdr(stmt);
 
-				if (EventTriggerSupportsObjectType(stmt->removeType))
+				if (PG_VERSION_NUM >= 90600 || EventTriggerSupportsObjectType(stmt->removeType))
 					break;
 				else
 					goto done;
@@ -857,7 +953,7 @@ bdr_commandfilter(Node *parsetree,
 			{
 				RenameStmt *stmt = (RenameStmt *) parsetree;
 
-				if (EventTriggerSupportsObjectType(stmt->renameType))
+				if (PG_VERSION_NUM >= 90600 || EventTriggerSupportsObjectType(stmt->renameType))
 					break;
 				else
 					goto done;
@@ -866,7 +962,7 @@ bdr_commandfilter(Node *parsetree,
 			{
 				AlterObjectSchemaStmt *stmt = (AlterObjectSchemaStmt *) parsetree;
 
-				if (EventTriggerSupportsObjectType(stmt->objectType))
+				if (PG_VERSION_NUM >= 90600 || EventTriggerSupportsObjectType(stmt->objectType))
 					break;
 				else
 					goto done;
@@ -877,7 +973,7 @@ bdr_commandfilter(Node *parsetree,
 
 				lock_type = BDR_LOCK_DDL;
 
-				if (EventTriggerSupportsObjectType(stmt->objectType))
+				if (PG_VERSION_NUM >= 90600 || EventTriggerSupportsObjectType(stmt->objectType))
 					break;
 				else
 					goto done;
@@ -938,7 +1034,15 @@ bdr_commandfilter(Node *parsetree,
 
 				stmt = (IndexStmt *) parsetree;
 
-				if (stmt->whereClause && stmt->unique)
+#if PG_VERSION_NUM >= 90600
+				/* FIXME disallow CREATE INDEX CONCURRENTLY for now */
+				if (stmt->concurrent && !bdr_permit_unsafe_commands)
+					error_on_persistent_rv(stmt->relation,
+										   "CREATE INDEX CONCURRENTLY",
+										   AccessExclusiveLock, false);
+#endif
+
+				if (stmt->whereClause && stmt->unique && !bdr_permit_unsafe_commands)
 					error_on_persistent_rv(stmt->relation,
 										   "CREATE UNIQUE INDEX ... WHERE",
 										   AccessExclusiveLock, false);
@@ -1036,6 +1140,15 @@ bdr_commandfilter(Node *parsetree,
 			break;
 
 		case T_DropStmt:
+#if PG_VERSION_NUM >= 90600
+			/* FIXME disallow DROP INDEX CONCURRENTLY for now */
+			{
+				DropStmt   *stmt = (DropStmt *) parsetree;
+
+				if (stmt->removeType == OBJECT_INDEX && stmt->concurrent && !bdr_permit_unsafe_commands)
+					elog(ERROR, "DROP INDEX CONCURRENTLY not supported by 9.6bdr yet");
+			}
+#endif
 			break;
 
 		case T_RenameStmt:
@@ -1085,29 +1198,181 @@ bdr_commandfilter(Node *parsetree,
 				error_unsupported_command(CreateCommandTag(parsetree));
 				break;
 			}
+
 		default:
-			elog(ERROR, "unrecognized node type: %d",
-				 (int) nodeTag(parsetree));
+			/*
+			 * It's not practical to let the compiler yell about missing cases
+			 * here as there are just too many node types that can never appear
+			 * as ProcessUtility targets. So just ERROR if we missed one.
+			 */
+			if (!bdr_permit_unsafe_commands)
+				elog(ERROR, "unrecognized node type: %d", (int) nodeTag(parsetree));
 			break;
 	}
 
 	/* now lock other nodes in the bdr flock against ddl */
-	if (!bdr_skip_ddl_locking && !statement_affects_only_nonpermanent(parsetree))
+	affects_only_nonpermanent = statement_affects_only_nonpermanent(parsetree);
+	if (!bdr_skip_ddl_locking && !affects_only_nonpermanent)
 		bdr_acquire_ddl_lock(lock_type);
 
-done:
-	if (nodeTag(parsetree) == T_TruncateStmt)
-		bdr_start_truncate();
+	/*
+	 * On 9.6 we capture DDL straight from ProcessUtility_hook, bypassing
+	 * event triggers entirely.
+	 *
+	 * If the command rolls back so will our queue table inserts.
+	 *
+	 * If a later utility hook causes the command to be silently skipped,
+	 * it'd better do the same on the peers otherwise we'll have a mess.
+	 *
+	 * Many top level DDL statements trigger subsequent actions that also invoke
+	 * ProcessUtility_hook. We don't want to explicitly replicate these since
+	 * running the original statement on the destination will trigger them to
+	 * run there too. So we need nesting protection.
+	 *
+	 * FIXME: affects_only_nonpermanent isn't the right test here, since
+	 * 9.4bdr replicated DDL to UNLOGGED tables. We should only skip TEMPORARY
+	 * tables.
+	 *
+	 * We don't capture DDL if we're running explicitly queued DDL via
+	 * bdr_replicate_ddl_command(), since we'd otherwise send it twice.
+	 */
+	if (!affects_only_nonpermanent && !bdr_skip_ddl_replication &&
+		!bdr_in_extension && !in_bdr_replicate_ddl_command &&
+		bdr_ddl_nestlevel == 0)
+	{
+		/*
+		 * We have a big mess here, because ProcessUtility_hook gets called
+		 * once per parsetree, with the whole query string. If the query string
+		 * has multiple statements we're in a mess because we can't split them
+		 * out.  We can't accept one then reject another.
+		 *
+		 * Also if the multi-statement has explicit commit in it, we might have
+		 * already committed an OK one when we find out that the same
+		 * multi-statement string has a disallowed one later. We can't
+		 * replicate just the successful part.
+		 *
+		 * For now, disallow DDL in multi-statements entirely. We must also
+		 * disallow explicit commit in multi-statement, which is done earlier.
+		 *
+		 * To make this work we'll have to disallow commit in a
+		 * multi-statement, disallow DML mixed with DDL, and make sure to
+		 * capture each multi-statement exactly once.
+		 *
+		 * This will greatly upset applications that do multi-statement DDL
+		 * from scripts, so it's very much interim. It also breaks DDL in DO
+		 * blocks and functions even though they should be OK, because they're
+		 * not toplevel and we can't tell them apart from multi-statements.
+		 * FIXME.
+		 */
+		if (PG_VERSION_NUM >= 90600 && context != PROCESS_UTILITY_TOPLEVEL)
+			ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 errmsg("DDL command attempted inside function or multi-statement string"),
+					 errdetail("9.6BDR does not support transparent DDL replication for "
+					 		   "multi-statement strings or function bodies containing DDL "
+							   "commands. Problem statement has tag [%s] in SQL string: %s",
+							   CreateCommandTag(parsetree), queryString),
+					 errhint("Use bdr.bdr_replicate_ddl_command(...) instead")));
 
-	if (next_ProcessUtility_hook)
-		next_ProcessUtility_hook(parsetree, queryString, context, params,
-								 dest, completionTag);
+		Assert(bdr_ddl_nestlevel >= 0);
+
+		/*
+		 * On 9.4bdr calling next_ProcessUtility_hook will execute the DDL, which
+		 * will fire an event trigger, which in turn calls
+		 * bdr_queue_ddl_commands(...) to queue the command. So we only do
+		 * actual work on 9.6 where we need to capture the DDL text.
+		 */
+		if (PG_VERSION_NUM >= 90600)
+			bdr_capture_ddl(parsetree, queryString, context, params, dest, CreateCommandTag(parsetree));
+
+		elog(DEBUG1, "DDLREP: Entering level %d DDL block. Toplevel command is %s", bdr_ddl_nestlevel, queryString);
+		incremented_nestlevel = true;
+		bdr_ddl_nestlevel ++;
+	}
 	else
-		standard_ProcessUtility(parsetree, queryString, context, params,
-								dest, completionTag);
+	{
+		elog(DEBUG1, "DDLREP: At ddl level %d ignoring non-persistent cmd %s", bdr_ddl_nestlevel, queryString);
+	}
+	
+
+done:
+	switch (nodeTag(parsetree))
+	{
+		case T_TruncateStmt:
+			bdr_start_truncate();
+			break;
+		/*
+		 * To avoid replicating commands inside create/alter/drop extension, we
+		 * have to set global state that reentrant calls to ProcessUtility_hook
+		 * will see so they can skip the command - bdr_in_extension. We also
+		 * need to know to unset it when this outer invocation of
+		 * ProcessUtility_hook ends.
+		 */
+		case T_DropStmt:
+			if (((DropStmt *) parsetree)->removeType != OBJECT_EXTENSION)
+				break;
+		case T_CreateExtensionStmt:
+		case T_AlterExtensionStmt:
+		case T_AlterExtensionContentsStmt:
+			Assert(!bdr_in_extension);
+			bdr_in_extension = true;
+			entered_extension = true;
+			break;
+		default:
+			break;
+	}
+
+	PG_TRY();
+	{
+		if (next_ProcessUtility_hook)
+			next_ProcessUtility_hook(parsetree, queryString, context, params,
+									 dest, completionTag);
+		else
+			standard_ProcessUtility(parsetree, queryString, context, params,
+									dest, completionTag);
+	}
+	PG_CATCH();
+	{
+		/*
+		 * We don't have to do any truncate cleanup here. The next
+		 * bdr_start_truncate() will deal with it.
+		 *
+		 * We do have to handle nest level unrolling.
+		 */
+		if (incremented_nestlevel)
+		{
+			bdr_ddl_nestlevel --;
+			Assert(bdr_ddl_nestlevel >= 0);
+			elog(DEBUG1, "DDLREP: Exiting level %d in exception ", bdr_ddl_nestlevel);
+		}
+
+		/* Error was during extension creation */
+		if (entered_extension)
+		{
+			Assert(bdr_in_extension);
+			bdr_in_extension = false;
+		}
+
+		PG_RE_THROW();
+	}
+	PG_END_TRY();
 
 	if (nodeTag(parsetree) == T_TruncateStmt)
 		bdr_finish_truncate();
+
+	if (entered_extension)
+	{
+		Assert(bdr_in_extension);
+		bdr_in_extension = false;
+	}
+
+	if (incremented_nestlevel)
+	{
+		bdr_ddl_nestlevel --;
+		Assert(bdr_ddl_nestlevel >= 0);
+		elog(DEBUG1, "DDLREP: Exiting level %d block normally", bdr_ddl_nestlevel);
+	}
+	Assert(bdr_ddl_nestlevel >= 0);
 }
 
 static void
