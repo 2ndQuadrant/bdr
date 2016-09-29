@@ -1636,7 +1636,10 @@ bdr_execute_ddl_command(char *cmdstr, char *perpetrator, bool tx_just_started)
 		MemoryContextSwitchTo(oldcontext);
 	}
 
-	/* protect against stack resets during CONCURRENTLY processing */
+	/*
+	 * To protect against stack resets during CONCURRENTLY processing,
+	 * only restore the errcontext if it's how we left it.
+	 */
 	if (error_context_stack == &errcallback)
 		error_context_stack = errcallback.previous;
 }
