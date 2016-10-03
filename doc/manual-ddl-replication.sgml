@@ -788,6 +788,20 @@ COMMIT;
       </listitem>
      </varlistentry>
 
+     <varlistentry id="ddl-createh-materialized-view">
+      <term><varname>CREATE MATERIALIZED VIEW</varname>
+       <indexterm>
+        <primary><varname>CREATE MATERIALIZED VIEW</varname></primary>
+       </indexterm>
+      </term>
+      <listitem>
+       <para>
+        <literal>CREATE MATERIALIZED VIEW</literal> currently is
+        prohibited.
+       </para>
+      </listitem>
+     </varlistentry>
+
      <varlistentry id="ddl-refresh-materialized-view">
       <term><varname>REFRESH MATERIALIZED VIEW</varname>
        <indexterm>
