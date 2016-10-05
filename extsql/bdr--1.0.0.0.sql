@@ -1,5 +1,5 @@
 --\echo Use "CREATE EXTENSION bdr" to load this file. \quit
-
+--
 --
 -- You might read this extension script and wonder why we create so much
 -- then drop it again, or ALTER it, etc. This matters, and you should
@@ -21,6 +21,14 @@
 --
 -- So be careful what you change. In fact, preferably change nothing.
 -- That's why we have extension upgrade scripts.
+--
+
+--
+-- This script is a simplified and edited version of the concatenation of all
+-- BDR scripts from 0.7.x to 1.0 inclusive. It does NOT produce exactly the
+-- same results as running them because this version is updated with
+-- compatibility fixes for 9.6 support. However, those fixes only matter when
+-- running on 9.6, where there can be no older version of the extension.
 --
 
 -- We must be able to use exclusion constraints for global sequences

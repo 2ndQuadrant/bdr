@@ -2,6 +2,16 @@ SET LOCAL search_path = bdr;
 SET bdr.permit_unsafe_ddl_commands = true;
 SET bdr.skip_ddl_replication = true;
 
+DO
+LANGUAGE plpgsql
+$$
+BEGIN
+    IF (current_setting('server_version_num')::int / 100) <> 904 THEN
+        RAISE EXCEPTION 'This extension script version only supports postgres-bdr 9.4';
+    END IF;
+END;
+$$;
+
 --
 -- This is the same file as extsql/bdr--0.10.0.5--0.10.0.6.sql
 -- in 0.10.0. It's safe to run twice.

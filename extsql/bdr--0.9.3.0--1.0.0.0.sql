@@ -4,6 +4,16 @@ SET LOCAL search_path = bdr;
 SET bdr.permit_unsafe_ddl_commands = true;
 SET bdr.skip_ddl_replication = true;
 
+DO
+LANGUAGE plpgsql
+$$
+BEGIN
+    IF (current_setting('server_version_num')::int / 100) <> 904 THEN
+        RAISE EXCEPTION 'This extension script version only supports postgres-bdr 9.4';
+    END IF;
+END;
+$$;
+
 DO $$
 BEGIN
 	PERFORM 1
