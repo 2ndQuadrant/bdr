@@ -1,4 +1,7 @@
 --\echo Use "CREATE EXTENSION bdr" to load this file. \quit
+--
+-- This extension script adds compatibility for 9.6 DDL replication
+--
 
 SET LOCAL bdr.permit_unsafe_ddl_commands = true;
 SET LOCAL bdr.skip_ddl_replication = true;
