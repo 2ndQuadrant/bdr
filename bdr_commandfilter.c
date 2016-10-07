@@ -857,11 +857,6 @@ bdr_commandfilter(Node *parsetree,
 		case T_TruncateStmt: 
 			goto done;
 
-		/* We could replicate some of these: */
-		case T_GrantStmt:
-		case T_ReassignOwnedStmt:
-			goto done;
-
 		/* We replicate the rows changed, not the statements, for these */
 		case T_CopyStmt:
 		case T_ExecuteStmt:
@@ -891,10 +886,20 @@ bdr_commandfilter(Node *parsetree,
 		
 		/*
 		 * Can't replicate on 9.4 due to lack of deparse support,
-		 * could replicate on 9.6.
+		 * could replicate on 9.6. Does not need DDL lock.
 		 */
 		case T_CommentStmt:
+		case T_ReassignOwnedStmt:
 #if PG_VERSION_NUM >= 90600
+			lock_type = BDR_LOCK_NOLOCK;
+			break;
+#else
+			goto done;
+#endif
+
+		case T_GrantStmt:
+#if PG_VERSION_NUM >= 90600
+			lock_type = BDR_LOCK_NOLOCK;
 			break;
 #else
 			goto done;
@@ -1212,7 +1217,7 @@ bdr_commandfilter(Node *parsetree,
 
 	/* now lock other nodes in the bdr flock against ddl */
 	affects_only_nonpermanent = statement_affects_only_nonpermanent(parsetree);
-	if (!bdr_skip_ddl_locking && !affects_only_nonpermanent)
+	if (!bdr_skip_ddl_locking && !affects_only_nonpermanent && lock_type != BDR_LOCK_NOLOCK)
 		bdr_acquire_ddl_lock(lock_type);
 
 	/*
@@ -1230,8 +1235,12 @@ bdr_commandfilter(Node *parsetree,
 	 * run there too. So we need nesting protection.
 	 *
 	 * FIXME: affects_only_nonpermanent isn't the right test here, since
-	 * 9.4bdr replicated DDL to UNLOGGED tables. We should only skip TEMPORARY
-	 * tables.
+	 * 9.4bdr replicated DDL to UNLOGGED tables. We should only skip
+	 * TEMPORARY tables. However, we must make sure that what we skip is
+	 * 100% consistent so we never attempt to (say) skip a CREATE TEMPORARY
+	 * TABLE then replicate a CREATE INDEX that applies to that table.
+	 * Event triggers take care of this, but we're not using them because
+	 * of the lack of deparse.
 	 *
 	 * We don't capture DDL if we're running explicitly queued DDL via
 	 * bdr_replicate_ddl_command(), since we'd otherwise send it twice.
