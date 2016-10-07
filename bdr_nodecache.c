@@ -200,3 +200,24 @@ bdr_local_node_status(void)
 
 	return node->status;
 }
+
+/*
+ * Get 16-bit node sequence ID, or
+ * -1 if no node or no sequence assigned.
+ */
+int32
+bdr_local_node_seq_id(void)
+{
+	BDRNodeId		nodeid;
+	BDRNodeInfo	   *node;
+
+	nodeid.sysid = GetSystemIdentifier();
+	nodeid.timeline = ThisTimeLineID;
+	nodeid.dboid = MyDatabaseId;
+	node = bdr_nodecache_lookup(nodeid, true);
+
+	if (node == NULL)
+		return -1;
+
+	return node->seq_id;
+}

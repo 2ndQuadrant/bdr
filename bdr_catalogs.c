@@ -195,6 +195,12 @@ bdr_nodes_get_local_info(uint64 sysid, TimeLineID tli, Oid dboid)
 		/* Readonly will be null on upgrade from an older BDR */
 		if (isnull)
 			node->read_only = false;
+
+		node->seq_id = DatumGetInt16(fastgetattr(tuple, 9, desc, &isnull));
+		/* seq_id will be null if seq2 not in use or on upgrade */
+		if (isnull)
+			node->seq_id = -1;
+
 		node->valid = true;
 	}
 

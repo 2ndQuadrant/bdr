@@ -374,6 +374,9 @@ typedef struct BDRNodeInfo
 	char	   *init_from_dsn;
 
 	bool		read_only;
+
+	/* sequence ID if assigned or -1 if null in nodes table */
+	int			seq_id;
 } BDRNodeInfo;
 
 extern Oid bdr_lookup_relid(const char *relname, Oid schema_oid);
@@ -570,9 +573,10 @@ bdr_copytable(PGconn *copyfrom_conn, PGconn *copyto_conn,
 		const char * copyfrom_query, const char *copyto_query);
 
 /* local node info cache (bdr_nodecache.c) */
-void bdr_nodecache_invalidate(void);
-bool bdr_local_node_read_only(void);
-char bdr_local_node_status(void);
+extern void bdr_nodecache_invalidate(void);
+extern bool bdr_local_node_read_only(void);
+extern char bdr_local_node_status(void);
+extern int32 bdr_local_node_seq_id(void);
 
 /* helpers shared by multiple worker types */
 extern struct pg_conn* bdr_connect(const char *conninfo, Name appname,

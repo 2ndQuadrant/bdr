@@ -57,6 +57,7 @@ OBJS = \
 	bdr_pgutils.o \
 	bdr_relcache.o \
 	bdr_remotecalls.o \
+	bdr_seq2.o \
 	bdr_shmem.o \
 	bdr_supervisor.o \
 	bdr_upgrade.o
@@ -232,6 +233,7 @@ REGRESSCHECKS= \
 	terminate \
 	skipchanges \
 	pgreplicationslots \
+	seq2 \
 	$(DDLTESTS) \
 	dml_basic \
 	dml_contrib \

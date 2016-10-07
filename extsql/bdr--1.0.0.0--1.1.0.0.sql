@@ -63,6 +63,13 @@ BEGIN
 END;
 $$;
 
+ALTER TABLE bdr.bdr_nodes
+  ADD COLUMN node_seq_id smallint;
+
+CREATE FUNCTION bdr.global_seq_nextval(regclass)
+RETURNS bigint
+LANGUAGE c STRICT VOLATILE AS 'MODULE_PATHNAME','global_seq_nextval_oid';
+
 RESET bdr.permit_unsafe_ddl_commands;
 RESET bdr.skip_ddl_replication;
 RESET search_path;
