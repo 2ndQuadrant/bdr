@@ -10,17 +10,6 @@
 #ifndef BDR_LOCKS_H
 #define BDR_LOCKS_H
 
-typedef enum BdrMessageType
-{
-	BDR_MESSAGE_START = 0, /* bdr started */
-	BDR_MESSAGE_ACQUIRE_LOCK = 1,
-	BDR_MESSAGE_RELEASE_LOCK = 2,
-	BDR_MESSAGE_CONFIRM_LOCK = 3,
-	BDR_MESSAGE_DECLINE_LOCK = 4,
-	BDR_MESSAGE_REQUEST_REPLAY_CONFIRM = 5,
-	BDR_MESSAGE_REPLAY_CONFIRM = 6
-} BdrMessageType;
-
 typedef enum BDRLockType
 {
 	BDR_LOCK_NOLOCK = 0,	/* no lock (not used) */
@@ -44,5 +33,10 @@ void bdr_process_decline_ddl_lock(uint64 origin_sysid, TimeLineID origin_tli, Oi
 void bdr_process_request_replay_confirm(uint64 sysid, TimeLineID tli, Oid datid, XLogRecPtr lsn);
 void bdr_process_replay_confirm(uint64 sysid, TimeLineID tli, Oid datid, XLogRecPtr lsn);
 void bdr_locks_process_remote_startup(uint64 sysid, TimeLineID tli, Oid datid);
+
+extern bool bdr_locks_process_message(int msg_type, bool transactional,
+									  XLogRecPtr lsn, uint64 origin_sysid,
+									  TimeLineID origin_tlid, Oid origin_datid,
+									  StringInfo message);
 
 #endif

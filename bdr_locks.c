@@ -78,6 +78,7 @@
 #include "bdr.h"
 
 #include "bdr_locks.h"
+#include "bdr_messaging.h"
 
 #include "miscadmin.h"
 
@@ -160,7 +161,6 @@ typedef struct BdrLocksCtl {
 
 static BdrLocksDBState * bdr_locks_find_database(Oid dbid, bool create);
 static void bdr_locks_find_my_database(bool create);
-static void bdr_prepare_message(StringInfo s, BdrMessageType message_type);
 
 static char *bdr_lock_type_to_name(BDRLockType lock_type);
 static BDRLockType bdr_lock_name_to_type(const char *lock_type);
@@ -350,7 +350,6 @@ bdr_locks_startup()
 	SysScanDesc		scan;
 	Snapshot		snap;
 	HeapTuple		tuple;
-	XLogRecPtr		lsn;
 	StringInfoData	s;
 
 	Assert(IsUnderPostmaster);
@@ -381,9 +380,7 @@ bdr_locks_startup()
 	bdr_prepare_message(&s, BDR_MESSAGE_START);
 
 	elog(DEBUG1, "sending global lock startup message");
-	lsn = LogLogicalMessage(BDR_LOGICAL_MSG_PREFIX, s.data, s.len, false);
-	resetStringInfo(&s);
-	XLogFlush(lsn);
+	bdr_send_message(&s, false);
 
 	/* reacquire all old ddl locks in table */
 	StartTransactionCommand();
@@ -440,9 +437,7 @@ bdr_locks_startup()
 			wait_for_lsn = GetXLogInsertRecPtr();
 			bdr_prepare_message(&s, BDR_MESSAGE_REQUEST_REPLAY_CONFIRM);
 			pq_sendint64(&s, wait_for_lsn);
-			lsn = LogLogicalMessage(BDR_LOGICAL_MSG_PREFIX, s.data, s.len, false);
-			XLogFlush(lsn);
-			resetStringInfo(&s);
+			bdr_send_message(&s, false);
 
 			bdr_my_locks_database->lock_holder = node_id;
 			bdr_my_locks_database->lockcount++;
@@ -504,22 +499,111 @@ bdr_locks_set_nnodes(Size nnodes)
 	bdr_my_locks_database->nnodes = nnodes;
 }
 
-
-static void
-bdr_prepare_message(StringInfo s, BdrMessageType message_type)
+/*
+ * Handle a WAL message destined for bdr_locks.
+ *
+ * Note that we don't usually pq_getmsgend(), instead ignoring any trailing
+ * data. Future versions may add extra fields.
+ */
+bool
+bdr_locks_process_message(int msg_type, bool transactional, XLogRecPtr lsn,
+						  uint64 origin_sysid, TimeLineID origin_tlid, Oid  origin_datid,
+						  StringInfo message)
 {
-	/* channel */
-	pq_sendint(s, strlen("bdr"), 4);
-	pq_sendbytes(s, "bdr", strlen("bdr"));
-	/* message type */
-	pq_sendint(s, message_type, 4);
-	/* node identifier */
-	pq_sendint64(s, GetSystemIdentifier()); /* sysid */
-	pq_sendint(s, ThisTimeLineID, 4); /* tli */
-	pq_sendint(s, MyDatabaseId, 4); /* database */
-	pq_sendint(s, 0, 4); /* name, always empty for now */
+	bool handled = true;
 
-	/* caller's data will follow */
+	if (msg_type == BDR_MESSAGE_START)
+	{
+		bdr_locks_process_remote_startup(
+			origin_sysid, origin_tlid, origin_datid);
+	}
+	else if (msg_type == BDR_MESSAGE_ACQUIRE_LOCK)
+	{
+		int			lock_type;
+
+		if (message->cursor == message->len) 		/* Old proto */
+			lock_type = BDR_LOCK_WRITE;
+		else
+			lock_type = pq_getmsgint(message, 4);
+		bdr_process_acquire_ddl_lock(origin_sysid, origin_tlid, origin_datid,
+									 lock_type);
+	}
+	else if (msg_type == BDR_MESSAGE_RELEASE_LOCK)
+	{
+		uint64		lock_sysid;
+		TimeLineID	lock_tlid;
+		Oid			lock_datid;
+
+		lock_sysid = pq_getmsgint64(message);
+		lock_tlid = pq_getmsgint(message, 4);
+		lock_datid = pq_getmsgint(message, 4);
+
+		bdr_process_release_ddl_lock(origin_sysid, origin_tlid, origin_datid,
+									 lock_sysid, lock_tlid, lock_datid);
+	}
+	else if (msg_type == BDR_MESSAGE_CONFIRM_LOCK)
+	{
+		uint64		lock_sysid;
+		TimeLineID	lock_tlid;
+		Oid			lock_datid;
+		int			lock_type;
+
+		lock_sysid = pq_getmsgint64(message);
+		lock_tlid = pq_getmsgint(message, 4);
+		lock_datid = pq_getmsgint(message, 4);
+
+		if (message->cursor == message->len) 		/* Old proto */
+			lock_type = BDR_LOCK_WRITE;
+		else
+			lock_type = pq_getmsgint(message, 4);
+
+		bdr_process_confirm_ddl_lock(origin_sysid, origin_tlid, origin_datid,
+									 lock_sysid, lock_tlid, lock_datid,
+									 lock_type);
+	}
+	else if (msg_type == BDR_MESSAGE_DECLINE_LOCK)
+	{
+		uint64		lock_sysid;
+		TimeLineID	lock_tlid;
+		Oid			lock_datid;
+		int			lock_type;
+
+		lock_sysid = pq_getmsgint64(message);
+		lock_tlid = pq_getmsgint(message, 4);
+		lock_datid = pq_getmsgint(message, 4);
+
+		if (message->cursor == message->len) 		/* Old proto */
+			lock_type = BDR_LOCK_WRITE;
+		else
+			lock_type = pq_getmsgint(message, 4);
+
+		bdr_process_decline_ddl_lock(origin_sysid, origin_tlid, origin_datid,
+									 lock_sysid, lock_tlid, lock_datid,
+									 lock_type);
+	}
+	else if (msg_type == BDR_MESSAGE_REQUEST_REPLAY_CONFIRM)
+	{
+		XLogRecPtr confirm_lsn;
+		confirm_lsn = pq_getmsgint64(message);
+
+		bdr_process_request_replay_confirm(origin_sysid, origin_tlid,
+										   origin_datid, confirm_lsn);
+	}
+	else if (msg_type == BDR_MESSAGE_REPLAY_CONFIRM)
+	{
+		XLogRecPtr confirm_lsn;
+		confirm_lsn = pq_getmsgint64(message);
+
+		bdr_process_replay_confirm(origin_sysid, origin_tlid, origin_datid,
+								   confirm_lsn);
+	}
+	else
+	{
+		elog(LOG, "unknown message type %d", msg_type);
+		handled = false;
+	}
+
+	return handled;
 }
 
 static void
@@ -530,7 +614,6 @@ bdr_lock_xact_callback(XactEvent event, void *arg)
 
 	if (event == XACT_EVENT_ABORT || event == XACT_EVENT_COMMIT)
 	{
-		XLogRecPtr lsn;
 		StringInfoData s;
 
 		elog(ddl_lock_log_level(DDL_LOCK_TRACE_ACQUIRE_RELEASE), LOCKTRACE "releasing owned ddl lock on xact %s",
@@ -545,8 +628,7 @@ bdr_lock_xact_callback(XactEvent event, void *arg)
 		pq_sendint(&s, MyDatabaseId, 4); /* database */
 		/* no name! locks are db wide */
 
-		lsn = LogLogicalMessage(BDR_LOGICAL_MSG_PREFIX, s.data, s.len, false);
-		XLogFlush(lsn);
+		bdr_send_message(&s, false);
 
 		LWLockAcquire(bdr_locks_ctl->lock, LW_EXCLUSIVE);
 		if (bdr_my_locks_database->lockcount > 0)
@@ -566,6 +648,9 @@ bdr_lock_xact_callback(XactEvent event, void *arg)
 		LWLockRelease(bdr_locks_ctl->lock);
 	}
 }
+
+
+
 
 static void
 register_xact_callback()
@@ -613,7 +698,6 @@ locks_begin_scan(Relation rel, Snapshot snap, uint64 sysid, TimeLineID tli, Oid 
 void
 bdr_acquire_ddl_lock(BDRLockType lock_type)
 {
-	XLogRecPtr	lsn;
 	StringInfoData s;
 
 	Assert(IsTransactionState());
@@ -726,9 +810,7 @@ bdr_acquire_ddl_lock(BDRLockType lock_type)
 	bdr_my_locks_database->lock_type = lock_type;
 
 	/* lock looks to be free, try to acquire it */
-
-	lsn = LogLogicalMessage(BDR_LOGICAL_MSG_PREFIX, s.data, s.len, false);
-	XLogFlush(lsn);
+	bdr_send_message(&s, false);
 
 	END_CRIT_SECTION();
 
@@ -923,8 +1005,7 @@ static void
 bdr_request_replay_confirmation(void)
 {
 	StringInfoData	s;
-	XLogRecPtr		lsn,
-					wait_for_lsn;
+	XLogRecPtr		wait_for_lsn;
 
 	initStringInfo(&s);
 
@@ -933,14 +1014,11 @@ bdr_request_replay_confirmation(void)
 	pq_sendint64(&s, wait_for_lsn);
 
 	LWLockAcquire(bdr_locks_ctl->lock, LW_EXCLUSIVE);
-	lsn = LogLogicalMessage(BDR_LOGICAL_MSG_PREFIX, s.data, s.len, false);
-	XLogFlush(lsn);
+	bdr_send_message(&s, false);
 
 	bdr_my_locks_database->replay_confirmed = 0;
 	bdr_my_locks_database->replay_confirmed_lsn = wait_for_lsn;
 	LWLockRelease(bdr_locks_ctl->lock);
-
-	resetStringInfo(&s);
 }
 
 /*
@@ -1206,7 +1284,6 @@ bdr_process_acquire_ddl_lock(uint64 sysid, TimeLineID tli, Oid datid, BDRLockTyp
 		uint64		replay_sysid;
 		TimeLineID	replay_tli;
 		Oid			replay_datid;
-		XLogRecPtr	lsn;
 
 		LWLockRelease(bdr_locks_ctl->lock);
 decline:
@@ -1231,9 +1308,7 @@ decline:
 
 		pq_sendint(&s, lock_type, 4);
 
-		lsn = LogLogicalMessage(BDR_LOGICAL_MSG_PREFIX, s.data, s.len, false);
-		XLogFlush(lsn);
-		resetStringInfo(&s);
+		bdr_send_message(&s, false);
 	}
 }
 
@@ -1438,7 +1513,6 @@ void
 bdr_process_request_replay_confirm(uint64 sysid, TimeLineID tli,
 								   Oid datid, XLogRecPtr request_lsn)
 {
-	XLogRecPtr lsn;
 	StringInfoData s;
 
 	Assert(bdr_worker_type == BDR_WORKER_APPLY);
@@ -1455,8 +1529,7 @@ bdr_process_request_replay_confirm(uint64 sysid, TimeLineID tli,
 	initStringInfo(&s);
 	bdr_prepare_message(&s, BDR_MESSAGE_REPLAY_CONFIRM);
 	pq_sendint64(&s, request_lsn);
-	lsn = LogLogicalMessage(BDR_LOGICAL_MSG_PREFIX, s.data, s.len, false);
-	XLogFlush(lsn);
+	bdr_send_message(&s, false);
 
 }
 
@@ -1496,7 +1569,7 @@ bdr_send_confirm_lock(void)
 
 	pq_sendint(&s, bdr_my_locks_database->lock_type, 4);
 
-	LogLogicalMessage(BDR_LOGICAL_MSG_PREFIX, s.data, s.len, true); /* transactional */
+	bdr_send_message(&s, true); /* transactional */
 
 	/*
 	 * Update state of lock. Do so in the same xact that confirms the
