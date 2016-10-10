@@ -296,82 +296,56 @@ bdr_ensure_node_ready(BdrOutputData *data)
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("bdr output plugin: slot usage rejected, node killed")));
+				 errmsg("bdr output plugin: slot usage rejected, remote node is killed")));
 	}
 
 	/*
 	 * Complain if node isn't ready,
-	 * i.e. state is fully 'r'eady, or waiting for inbound sl'o't creation.
 	 */
-	/* TODO: Allow soft error so caller can sleep and recheck? */
-	if (our_status != 'r' && our_status != 'o')
+	switch (our_status)
 	{
-		const char * const base_msg =
-			"bdr output plugin: slot creation rejected, bdr.bdr_nodes entry for local node (sysid=" UINT64_FORMAT
-			", timelineid=%u, dboid=%u): %s";
-		switch (our_status)
-		{
-			case 'r':
-			case 'o':
-				break; /* unreachable */
-			case '\0':
-			case 'b':
-				/*
-				 * Can't allow replay when BDR hasn't started yet, as
-				 * replica init might still need to run, causing a dump to
-				 * be applied, catchup from a remote node, etc.
-				 *
-				 * If there's no init_replica set, the bdr extension will
-				 * create a bdr.bdr_nodes entry with 'r' state shortly
-				 * after it starts, so we won't hit this.
-				 */
-				ereport(ERROR,
-						(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-						 errmsg(base_msg, sysid, ThisTimeLineID, MyDatabaseId,
-								"does not exist"),
-						 errdetail("BDR is not active on this database or is still initializing."),
-						 errhint("Add bdr to shared_preload_libraries and check logs for bdr startup errors.")));
-				break;
-			case 'c':
-				/*
-				 * Can't allow replay while still catching up. We get the
-				 * real origin node ID and LSN over the protocol in catchup
-				 * mode, but changes are written to WAL with the ID and LSN
-				 * of the immediate origin node. So if we cascade them to
-				 * another node now, they'll incorrectly see the immediate
-				 * origin node ID and LSN, not the true original ones.
-				 *
-				 * It should be possible to lift this restriction later,
-				 * if we write the original node id and lsn in WAL.
-				 */
-				ereport(ERROR,
-						(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-						 errmsg(base_msg, sysid, ThisTimeLineID, MyDatabaseId,
-								"status='c', bdr still starting up: catching up from remote node"),
-						 errhint("Monitor pg_stat_replication on the remote node, watch the logs and wait until the node has caught up")));
-				break;
-			case 'i':
-				/*
-				 * Can't allow replay while still applying a dump because the
-				 * origin_id and origin_lsn are not preserved on the dump, so
-				 * we'd replay all the changes. If the connections are from
-				 * nodes that already have that data (or the origin node),
-				 * that'll create a right mess.
-				 */
-				ereport(ERROR,
-						(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-						 errmsg(base_msg, sysid, ThisTimeLineID, MyDatabaseId,
-								"status='i', bdr still starting up: applying initial dump of remote node"),
-						 errhint("Monitor pg_stat_activity and the logs, wait until the node has caught up")));
-				break;
-			case 'k':
-				elog(ERROR, "node is exiting");
-				break;
+		case 'r':
+		case 'o':
+			break; /* node ready or creating outbound slots */
+		case '\0':
+		case 'b':
+			/* This isn't a BDR node yet. */
+			ereport(ERROR,
+					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+					 errmsg("bdr output plugin: slot creation rejected, bdr.bdr_nodes entry for local node (sysid="UINT64_FORMAT", timelineid=%u, dboid=%u) does not exist",
+							sysid, ThisTimeLineID, MyDatabaseId),
+					 errdetail("BDR is not active on this database."),
+					 errhint("Add bdr to shared_preload_libraries and check logs for bdr startup errors.")));
+			break;
+		case 'c':
+			/*
+			 * When in catchup mode we write rows with their true origin,
+			 * so it's safe to create and use a slot now. Just to be
+			 * careful the join code will refuse to use an upstream that
+			 * isn't in 'r'eady state.
+			 *
+			 * Locally originated changes will still be replayed to peers
+			 * (but we should set readonly mode to prevent them entirely).
+			 */
+			break;
+		case 'i':
+			/*
+			 * We used to refuse to create a slot before/during apply of
+			 * base backup. Now we have bdr.do_not_replicate set
+			 * DoNotReplicateId when restoring so it's safe to do so since
+			 * we can't replicate the backup to peers anymore.
+			 *
+			 * Locally originated changes will still be replayed to peers
+			 * (but we should set readonly mode to prevent them entirely).
+			 */
+			break;
+		case 'k':
+			elog(ERROR, "node is exiting");
+			break;
 
-			default:
-				elog(ERROR, "Unhandled case status=%c", our_status);
-				break;
-		}
+		default:
+			elog(ERROR, "Unhandled case status=%c", our_status);
+			break;
 	}
 }
 

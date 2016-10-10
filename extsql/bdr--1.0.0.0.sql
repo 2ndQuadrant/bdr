@@ -403,7 +403,7 @@ COMMENT ON TABLE bdr_nodes IS 'All known nodes in this BDR group.';
 COMMENT ON COLUMN bdr_nodes.node_sysid IS 'system_identifier from the control file of the node';
 COMMENT ON COLUMN bdr_nodes.node_timeline IS 'timeline ID of this node';
 COMMENT ON COLUMN bdr_nodes.node_dboid IS 'local database oid on the cluster (node_sysid, node_timeline)';
-COMMENT ON COLUMN bdr_nodes.node_status IS 'Readiness of the node: [i]nitializing, [c]atchup, [r]eady. Doesn''t indicate connected/disconnected.';
+COMMENT ON COLUMN bdr_nodes.node_status IS 'Readiness of the node: [b]eginning setup, [i]nitializing, [c]atchup, creating [o]utbound slots, [r]eady, [k]illed. Doesn''t indicate connected/disconnected.';
 
 -- We don't exclude bdr_nodes with pg_extension_config_dump
 -- because this is a global table that's sync'd between nodes.

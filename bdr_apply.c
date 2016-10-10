@@ -287,7 +287,7 @@ process_remote_begin(StringInfo s)
 
 	/*
 	 * If we're in catchup mode, see if this transaction is relayed from
-	 * elsewhere and advance the appropriate slot.
+	 * elsewhere and advance the appropriate replication origin.
 	 */
 	if (flags & BDR_OUTPUT_TRANSACTION_HAS_ORIGIN)
 	{
