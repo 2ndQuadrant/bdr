@@ -954,7 +954,7 @@ BEGIN
             ERRCODE = 'feature_not_supported';
     END IF;
 
-    -- Assert that we have a bdr_nodes entry with state = i on this node
+    -- Assert that the joining node has a bdr_nodes entry with state = i on this join-target node
     SELECT INTO status
     FROM bdr.bdr_nodes
     WHERE node_sysid = sysid

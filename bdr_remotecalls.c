@@ -417,14 +417,49 @@ bdr_get_remote_nodeinfo_internal(PGconn *conn, struct remote_node_info *ri)
 		ri->dboid = DatumGetObjectId(InvalidOid);
 	}
 
+	/*
+	 * If we can identify which row is the remote node over SQL, get the
+	 * bdr.bdr_nodes status entry for the remote peer.
+	 */
+	if (ri->sysid_str != NULL)
+	{
+		res = PQexec(conn, "SELECT node_status FROM bdr.bdr_nodes WHERE (node_sysid, node_timeline, node_dboid) = bdr.bdr_get_local_nodeid()");
+
+		if (PQresultStatus(res) != PGRES_TUPLES_OK)
+		{
+			ereport(ERROR,
+					(errmsg("getting remote node status failed"),
+					errdetail("with: %s",
+						PQerrorMessage(conn))));
+		}
+
+		Assert(PQnfields(res) == 1);
+
+		if (PQntuples(res) == 0)
+		{
+			ri->node_status = '\0';
+		}
+		else if (PQntuples(res) == 1)
+		{
+			if (PQgetisnull(res, 0, 0))
+				elog(ERROR, "Unexpectedly null field node_status in bdr.bdr_nodes");
+
+			ri->node_status = PQgetvalue(res, 0, 0)[0];
+		}
+		else
+			elog(ERROR, "got more than one bdr.bdr_nodes row matching local nodeid"); /* shouldn't happen */
+
+		PQclear(res);
+	}
+
 }
 
 Datum
 bdr_get_remote_nodeinfo(PG_FUNCTION_ARGS)
 {
 	const char *remote_node_dsn = text_to_cstring(PG_GETARG_TEXT_P(0));
-	Datum		values[8];
-	bool		isnull[8] = {false, false, false, false, false, false, false, false};
+	Datum		values[9];
+	bool		isnull[9] = {false, false, false, false, false, false, false, false, false};
 	TupleDesc	tupleDesc;
 	HeapTuple	returnTuple;
 	PGconn		*conn;
@@ -462,6 +497,10 @@ bdr_get_remote_nodeinfo(PG_FUNCTION_ARGS)
 		values[5] = Int32GetDatum(ri.version_num);
 		values[6] = Int32GetDatum(ri.min_remote_version_num);
 		values[7] = BoolGetDatum(ri.is_superuser);
+		if (ri.node_status == '\0')
+			isnull[8] = true;
+		else
+			values[8] = CharGetDatum(ri.node_status);
 
 		returnTuple = heap_form_tuple(tupleDesc, values, isnull);
 

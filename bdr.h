@@ -638,6 +638,7 @@ typedef struct remote_node_info
 	int version_num;
 	int min_remote_version_num;
 	bool is_superuser;
+	char node_status;
 } remote_node_info;
 
 extern void bdr_get_remote_nodeinfo_internal(PGconn *conn, remote_node_info *ri);
