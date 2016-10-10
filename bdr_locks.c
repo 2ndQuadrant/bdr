@@ -17,16 +17,27 @@
  *    Because DDL locks have to acquired inside transactions the inter node
  *    communication can't be done via a queue table streamed out via logical
  *    decoding - other nodes would only see the result once the the
- *    transaction commits... Instead the 'messaging' feature is used which
- *    allows to inject transactional and nontransactional messages in the
- *    changestream.
+ *    transaction commits. We don't have autonomous tx's or suspendable tx's
+ *    so we can't do a tx while another is in progress. Instead the 'messaging'
+ *    feature is used which allows to inject transactional and nontransactional
+ *    messages in the changestream. (We could instead make an IPC request to
+ *    another worker to do the required transaction, but since we have
+ *    non-transactional messaging it's simpler to use it).
  *
  *    There are really two levels of DDL lock - the global lock that only
  *    one node can hold, and individual local DDL locks on each node. If
  *    a node holds the global DDL lock then it owns the local DDL locks on each
  *    node.
  *
- *    DDL lock acquiration basically works like this:
+ *    Note that the DDL locking process flushes the queues of all edges in the
+ *    node graph, not just those between the acquiring node and its peers. If
+ *    node A requests the lock, then it must have fully replayed from B and C
+ *    and vice versa. But B and C must also have fully replayed each others'
+ *    outstanding replication queues. This ensures that no row changes that
+ *    might conflict with the DDL can be in flight anywhere.
+ *
+ *
+ *    DDL lock acquisition basically works like this:
  *
  *    1) A utility command notices that it needs the global ddl lock and the local
  *       node doesn't already hold it. If there already is a local ddl lock
@@ -35,16 +46,20 @@
  *
  *    2) It sends out a 'acquire_lock' message to all other nodes.
  *
+ *
+ *    Now, on each other node:
+ *
  *    3) When another node receives a 'acquire_lock' message it checks whether
  *       the local ddl lock is already held. If so it'll send a 'decline_lock'
  *       message back causing the lock acquiration to fail.
  *
  *    4) If a 'acquire_lock' message is received and the local DDL lock is not
  *       held it'll be acquired and an entry into the 'bdr_global_locks' table
- *       will be made marking the lock to be in the 'catchup' phase.
+ *       will be made marking the lock to be in the 'catchup' phase. (Note that
+ *       no such entry appears on the node that *requested* the global lock).
  *
- *    5) All concurrent user transactions will be cancelled (after a grace period,
- *       and if DML write cancel is required for this lock type).
+ *    5) All concurrent user transactions will be cancelled (after a grace
+ *       period, and if DML write cancel is required for this lock type).
  *
  *    6) A 'request_replay_confirm' message will be sent to all other nodes
  *       containing a lsn that has to be replayed.
@@ -52,13 +67,35 @@
  *    7) When a 'request_replay_confirm' message is received, a
  *       'replay_confirm' message will be sent back.
  *
- *    8) Once all other nodes have replied with 'replay_confirm' the DDL lock
+ *    8) Once all other nodes have replied with 'replay_confirm' the local DDL lock
  *       has been successfully acquired on the node reading the 'acquire_lock'
  *       message (from 3)). The corresponding bdr_global_locks entry will be
  *       updated to the 'acquired' state and a 'confirm_lock' message will be sent out.
  *
- *    9) Once all nodes have replied with 'confirm_lock' messages the ddl lock
- *       has been acquired.
+ *
+ *    On the node requesting the global lock:
+ *
+ *    9) Apply workers receive confirm_lock and decline_lock messages and tally
+ *       them in the local DB's BdrLocksDBState in shared memory.
+ *
+ *    In the user backend that tried to get the lock:
+ *
+ *    10a) Once all nodes have replied with 'confirm_lock' messages the global
+ *         ddl lock has been acquired.
+ *
+ *      or
+ *
+ *    10b) If any 'decline_lock' message is received, the global lock acquisition
+ *        has failed. Abort the acquiring transaction.
+ *
+ *    11) Send a release_lock message.
+ *
+ *
+ *    on all peers:
+ *
+ *    12) When 'release_lock' is received, release local DDL lock and remove
+ *        entry from global locks table. Ignore if not acquired.
+ *
  *
  *    There's some additional complications to handle crash safety:
  *
@@ -67,6 +104,12 @@
  *    Then the bdr_global_locks table is read. All existing locks are
  *    acquired. If a lock still is in 'catchup' phase the lock acquiration
  *    process is re-started at step 6)
+ *
+ *    Because only one decline is sufficient to stop a DDL lock acquisition,
+ *    it's likely that two concurrent attempts to acquire the DDL lock from
+ *    different nodes will both fail as each declines the other's request, or
+ *    one or more of their peers acquire locks in different orders. Apps that
+ *    do DDL from multiple nodes must be prepared to retry DDL.
  *
  * IDENTIFICATION
  *		bdr_locks.c
@@ -382,7 +425,10 @@ bdr_locks_startup()
 	elog(DEBUG1, "sending global lock startup message");
 	bdr_send_message(&s, false);
 
-	/* reacquire all old ddl locks in table */
+	/*
+	 * reacquire all old ddl locks (held by other nodes) in
+	 * bdr.bdr_global_locks table.
+	 */
 	StartTransactionCommand();
 	snap = RegisterSnapshot(GetLatestSnapshot());
 	rel = heap_open(BdrLocksRelid, RowExclusiveLock);
@@ -833,7 +879,12 @@ bdr_acquire_ddl_lock(BDRLockType lock_type)
 
 		LWLockAcquire(bdr_locks_ctl->lock, LW_EXCLUSIVE);
 
-		/* check for confirmations in shared memory */
+		/*
+		 * check for confirmations in shared memory.
+		 *
+		 * Even one decline is enough to prevent lock acquisition so bail
+		 * immediately if we see one.
+		 */
 		if (bdr_my_locks_database->acquire_declined > 0)
 		{
 			elog(ddl_lock_log_level(DDL_LOCK_TRACE_ACQUIRE_RELEASE), LOCKTRACE "acquire declined by another node");
@@ -878,6 +929,10 @@ bdr_acquire_ddl_lock(BDRLockType lock_type)
 	LWLockRelease(bdr_locks_ctl->lock);
 }
 
+/*
+ * True if the passed nodeid is the node this apply worker replays
+ * changes from.
+ */
 static bool
 check_is_my_origin_node(uint64 sysid, TimeLineID tli, Oid datid)
 {
@@ -886,6 +941,7 @@ check_is_my_origin_node(uint64 sysid, TimeLineID tli, Oid datid)
 	Oid replay_datid;
 
 	Assert(!IsTransactionState());
+	Assert(bdr_worker_type == BDR_WORKER_APPLY);
 
 	StartTransactionCommand();
 	bdr_fetch_sysid_via_node_id(replorigin_session_origin, &replay_sysid,
@@ -899,6 +955,9 @@ check_is_my_origin_node(uint64 sysid, TimeLineID tli, Oid datid)
 	return true;
 }
 
+/*
+ * True if the passed nodeid is the local node.
+ */
 static bool
 check_is_my_node(uint64 sysid, TimeLineID tli, Oid datid)
 {
@@ -1032,10 +1091,6 @@ bdr_process_acquire_ddl_lock(uint64 sysid, TimeLineID tli, Oid datid, BDRLockTyp
 	StringInfoData	s;
 	const char *lock_name = bdr_lock_type_to_name(lock_type);
 
-	Assert(!IsTransactionState());
-	Assert(bdr_worker_type == BDR_WORKER_APPLY);
-
-	/* Don't care about locks acquired locally. Already held. */
 	if (!check_is_my_origin_node(sysid, tli, datid))
 		return;
 
@@ -1047,6 +1102,10 @@ bdr_process_acquire_ddl_lock(uint64 sysid, TimeLineID tli, Oid datid, BDRLockTyp
 
 	initStringInfo(&s);
 
+	/*
+	 * To prevent two concurrent apply workers from granting the DDL lock at
+	 * the same time, lock out the control segment.
+	 */
 	LWLockAcquire(bdr_locks_ctl->lock, LW_EXCLUSIVE);
 
 	if (bdr_my_locks_database->lockcount == 0)
@@ -1102,8 +1161,12 @@ bdr_process_acquire_ddl_lock(uint64 sysid, TimeLineID tli, Oid datid, BDRLockTyp
 		{
 			if (geterrcode() == ERRCODE_UNIQUE_VIOLATION)
 			{
-				elog(ddl_lock_log_level(DDL_LOCK_TRACE_DEBUG),
-					 LOCKTRACE "declining global lock because a conflicting global lock exists in bdr_global_locks");
+			    /*
+				 * Shouldn't happen since we take the control segment lock before checking
+				 * lockcount, and increment lockcount before releasing it.
+				 */
+				elog(WARNING,
+					 "declining global lock because a conflicting global lock exists in bdr_global_locks");
 				AbortOutOfAnyTransaction();
 				goto decline;
 			}
@@ -1329,8 +1392,6 @@ bdr_process_release_ddl_lock(uint64 origin_sysid, TimeLineID origin_tli, Oid ori
 	Latch		   *latch;
 	StringInfoData	s;
 
-	Assert(bdr_worker_type == BDR_WORKER_APPLY);
-
 	if (!check_is_my_origin_node(origin_sysid, origin_tli, origin_datid))
 		return;
 
@@ -1352,6 +1413,7 @@ bdr_process_release_ddl_lock(uint64 origin_sysid, TimeLineID origin_tli, Oid ori
 	snap = RegisterSnapshot(GetLatestSnapshot());
 	rel = heap_open(BdrLocksRelid, RowExclusiveLock);
 
+	/* Find any bdr_locks entry for the releasing peer */
 	scan = locks_begin_scan(rel, snap, origin_sysid, origin_tli, origin_datid);
 
 	while ((tuple = systable_getnext(scan)) != NULL)
@@ -1369,13 +1431,17 @@ bdr_process_release_ddl_lock(uint64 origin_sysid, TimeLineID origin_tli, Oid ori
 
 	/*
 	 * Note that it's not unexpected to receive release requests for locks
-	 * this node hasn't acquired. It e.g. happens if lock acquisition failed
-	 * halfway through.
+	 * this node hasn't acquired. We'll only get a release from a node that
+	 * previously sent an acquire message, but if we rejected the acquire
+	 * from that node we don't keep any record of the rejection.
+	 *
+	 * Another cause is if we already committed removal of this lock locally
+	 * but crashed before advancing the replication origin, so we replay it
+	 * again on recovery.
 	 */
-
 	if (!found)
 	{
-		ereport(WARNING,
+		ereport(DEBUG1,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("Did not find global lock entry locally for a remotely released global lock"),
 				 errdetail("node ("BDR_LOCALID_FORMAT") sent a release message but the lock isn't held locally",
@@ -1428,8 +1494,6 @@ bdr_process_confirm_ddl_lock(uint64 origin_sysid, TimeLineID origin_tli, Oid ori
 {
 	Latch *latch;
 
-	Assert(bdr_worker_type == BDR_WORKER_APPLY);
-
 	if (!check_is_my_origin_node(origin_sysid, origin_tli, origin_datid))
 		return;
 
@@ -1463,8 +1527,9 @@ bdr_process_confirm_ddl_lock(uint64 origin_sysid, TimeLineID origin_tli, Oid ori
 }
 
 /*
- * Another node has declined a lock. If it was us, change shared memory state
- * and wakeup the user backend that tried to acquire the lock.
+ * Another node has declined a lock. If it was a lock requested by us, change
+ * shared memory state and wakeup the user backend that tried to acquire the
+ * lock.
  *
  * Runs in the apply worker.
  */
@@ -1474,8 +1539,6 @@ bdr_process_decline_ddl_lock(uint64 origin_sysid, TimeLineID origin_tli, Oid ori
 							 BDRLockType lock_type)
 {
 	Latch *latch;
-
-	Assert(bdr_worker_type == BDR_WORKER_APPLY);
 
 	/* don't care if another database has been declined a lock */
 	if (!check_is_my_origin_node(origin_sysid, origin_tli, origin_datid))
@@ -1514,8 +1577,6 @@ bdr_process_request_replay_confirm(uint64 sysid, TimeLineID tli,
 								   Oid datid, XLogRecPtr request_lsn)
 {
 	StringInfoData s;
-
-	Assert(bdr_worker_type == BDR_WORKER_APPLY);
 
 	if (!check_is_my_origin_node(sysid, tli, datid))
 		return;
@@ -1630,8 +1691,6 @@ bdr_process_replay_confirm(uint64 sysid, TimeLineID tli,
 						   Oid datid, XLogRecPtr request_lsn)
 {
 	bool quorum_reached = false;
-
-	Assert(bdr_worker_type == BDR_WORKER_APPLY);
 
 	if (!check_is_my_origin_node(sysid, tli, datid))
 		return;
