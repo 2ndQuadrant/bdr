@@ -257,6 +257,15 @@ BEGIN
 END;
 $body$;
 
+CREATE FUNCTION bdr.acquire_global_lock(lockmode text)
+RETURNS void LANGUAGE c VOLATILE STRICT
+AS 'MODULE_PATHNAME','bdr_acquire_global_lock_sql';
+
+REVOKE ALL ON FUNCTION bdr.acquire_global_lock(text) FROM public;
+
+COMMENT ON FUNCTION bdr.acquire_global_lock(text) IS
+'Acquire bdr global lock ("ddl lock") in specified mode';
+
 RESET bdr.permit_unsafe_ddl_commands;
 RESET bdr.skip_ddl_replication;
 RESET search_path;

@@ -226,6 +226,10 @@ static BdrLocksDBState *bdr_my_locks_database = NULL;
 static bool this_xact_acquired_lock = false;
 
 
+/* SQL function to explcitly acquire global DDL lock */
+PGDLLIMPORT extern Datum bdr_acquire_global_lock_sql(PG_FUNCTION_ARGS);
+PG_FUNCTION_INFO_V1(bdr_acquire_global_lock_sql);
+
 
 static size_t
 bdr_locks_shmem_size(void)
@@ -927,6 +931,56 @@ bdr_acquire_ddl_lock(BDRLockType lock_type)
 		BDR_LOCALID_FORMAT_ARGS);
 
 	LWLockRelease(bdr_locks_ctl->lock);
+}
+
+Datum
+bdr_acquire_global_lock_sql(PG_FUNCTION_ARGS)
+{
+	char *mode = text_to_cstring(PG_GETARG_TEXT_P(0));
+
+	bdr_acquire_ddl_lock(bdr_lock_type_from_char(mode));
+
+	PG_RETURN_VOID();
+}
+
+/*
+ * Return string name of a bdr lock mode. Caller must not free the string.
+ */
+char*
+bdr_lock_type_to_char(BDRLockType mode)
+{
+	switch (mode)
+	{
+		case BDR_LOCK_NOLOCK:
+			return "none";
+		case BDR_LOCK_DDL:
+			return "ddl";
+		case BDR_LOCK_WRITE:
+			return "write";
+	}
+	elog(ERROR, "unreachable");
+}
+
+/*
+ * Convert string name of BDR lock mode to enum, or error
+ * on invalid name.
+ *
+ * Yes, this duplicates Pg's enums, but they're a pain to work with from C.
+ */
+BDRLockType
+bdr_lock_type_from_char(char *mode)
+{
+	if (strcmp(mode, "none") == 0)
+		return BDR_LOCK_NOLOCK;
+	else if (strcmp(mode, "ddl") == 0)
+		return BDR_LOCK_DDL;
+	else if (strcmp(mode, "write") == 0)
+		return BDR_LOCK_WRITE;
+	else
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("BDR global lock mode '%s' not valid", mode),
+				 errhint("valid modes are 'none', 'ddl', 'write'")));
 }
 
 /*

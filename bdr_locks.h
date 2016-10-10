@@ -39,4 +39,7 @@ extern bool bdr_locks_process_message(int msg_type, bool transactional,
 									  TimeLineID origin_tlid, Oid origin_datid,
 									  StringInfo message);
 
+extern char* bdr_lock_type_to_char(BDRLockType mode);
+extern BDRLockType bdr_lock_type_from_char(char *mode);
+
 #endif
