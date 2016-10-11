@@ -87,7 +87,7 @@ static const uint32 bdr_count_version = 2;
 static BdrCountControl *BdrCountCtl = NULL;
 
 /* how many nodes have we built shmem for */
-static size_t bdr_count_nnodes = 0;
+static Size bdr_count_nnodes = 0;
 
 /* offset in the BdrCountControl->slots "our" backend is in */
 static int	MyCountOffsetIdx = -1;
@@ -119,11 +119,12 @@ bdr_count_shmem_size(void)
 }
 
 void
-bdr_count_shmem_init(size_t nnodes)
+bdr_count_shmem_init(int nnodes)
 {
 	Assert(process_shared_preload_libraries_in_progress);
 
-	bdr_count_nnodes = nnodes;
+	Assert(nnodes >= 0);
+	bdr_count_nnodes = (Size)nnodes;
 
 	RequestAddinShmemSpace(bdr_count_shmem_size());
 	/* lock for slot acquiration */

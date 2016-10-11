@@ -79,7 +79,7 @@ bdr_register_perdb_worker(const char * dbname)
 			dbname, NAMEDATALEN);
 	NameStr(perdb->dbname)[NAMEDATALEN-1] = '\0';
 	/* Nodecount is set when apply workers are registered */
-	perdb->nnodes = 0;
+	perdb->nnodes = -1;
 	perdb->seq_slot = bdr_sequencer_get_next_free_slot();
 
 	/*

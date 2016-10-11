@@ -226,7 +226,7 @@ bdr_maintain_db_workers(void)
 {
 	BackgroundWorker	bgw;
 	int					i, ret;
-	Size				nnodes = 0;
+	int					nnodes = 0;
 #define BDR_CON_Q_NARGS 3
 	Oid					argtypes[BDR_CON_Q_NARGS] = { TEXTOID, OIDOID, OIDOID };
 	Datum				values[BDR_CON_Q_NARGS];
@@ -729,7 +729,7 @@ bdr_perdb_worker_main(Datum main_arg)
 
 	perdb = &bdr_worker_slot->data.perdb;
 
-	perdb->nnodes = 0;
+	perdb->nnodes = -1;
 
 	elog(DEBUG1, "per-db worker for node " BDR_LOCALID_FORMAT " starting", BDR_LOCALID_FORMAT_ARGS);
 

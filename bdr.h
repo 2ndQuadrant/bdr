@@ -209,8 +209,14 @@ typedef struct BdrPerdbWorker
 	/* local database name to connect to */
 	NameData		dbname;
 
-	/* number of outgoing connections from this database */
-	Size			nnodes;
+	/*
+	 * Number of 'r'eady peer nodes not including self. -1 if not initialized
+	 * yet.
+	 *
+	 * Note that we may have more connections than this due to nodes that are
+	 * still joining, or fewer due to nodes that are beginning to part.
+	 */
+	int			nnodes;
 
 	size_t			seq_slot;
 
@@ -457,7 +463,7 @@ extern void bdr_conflict_log_table(BdrApplyConflict *conflict);
 extern void tuple_to_stringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple);
 
 /* statistic functions */
-extern void bdr_count_shmem_init(Size nnodes);
+extern void bdr_count_shmem_init(int nnodes);
 extern void bdr_count_set_current_node(RepOriginId node_id);
 extern void bdr_count_commit(void);
 extern void bdr_count_rollback(void);

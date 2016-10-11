@@ -18,7 +18,7 @@ typedef enum BDRLockType
 } BDRLockType;
 
 void bdr_locks_startup(void);
-void bdr_locks_set_nnodes(Size nnodes);
+void bdr_locks_set_nnodes(int nnodes);
 void bdr_acquire_ddl_lock(BDRLockType lock_type);
 void bdr_process_acquire_ddl_lock(uint64 sysid, TimeLineID tli, Oid datid,
 								  BDRLockType lock_type);

@@ -19,10 +19,10 @@ isBdrGlobalSeqRelId(Oid relid)
 		   relid == BdrVotesRelid;
 }
 
-extern void bdr_sequencer_set_nnodes(Size nnodes);
+extern void bdr_sequencer_set_nnodes(int nnodes);
 
 extern void bdr_sequencer_shmem_init(int sequencers);
-extern void bdr_sequencer_init(int seq_slot, Size nnodes);
+extern void bdr_sequencer_init(int seq_slot, int nnodes);
 extern void bdr_sequencer_lock(void);
 extern bool bdr_sequencer_vote(void);
 extern void bdr_sequencer_tally(void);

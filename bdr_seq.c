@@ -52,7 +52,7 @@
 typedef struct BdrSequencerSlot
 {
 	Oid			database_oid;
-	Size		nnodes;
+	int			nnodes;
 	Latch	   *proclatch;
 } BdrSequencerSlot;
 
@@ -556,16 +556,19 @@ bdr_schedule_eoxact_sequencer_wakeup(void)
 }
 
 void
-bdr_sequencer_set_nnodes(Size nnodes)
+bdr_sequencer_set_nnodes(int nnodes)
 {
 	BdrSequencerSlot *slot = &BdrSequencerCtl->slots[seq_slot];
+	Assert(nnodes >= 0);
 	slot->nnodes = nnodes;
 }
 
 void
-bdr_sequencer_init(int new_seq_slot, Size nnodes)
+bdr_sequencer_init(int new_seq_slot, int nnodes)
 {
 	BdrSequencerSlot *slot;
+
+	Assert(nnodes => 0);
 
 	Assert(seq_slot == -1);
 	seq_slot = new_seq_slot;

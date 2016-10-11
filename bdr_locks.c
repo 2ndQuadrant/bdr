@@ -174,7 +174,7 @@ typedef struct BdrLocksDBState {
 	Oid			dboid;
 
 	/* number of nodes we're connected to */
-	Size		nnodes;
+	int			nnodes;
 
 	/* has startup progressed far enough to allow writes? */
 	bool		locked_and_loaded;
@@ -415,7 +415,7 @@ bdr_locks_startup()
 	slist_init(&bdr_my_locks_database->waiters);
 
 	/* We haven't yet established how many nodes we're connected to. */
-	bdr_my_locks_database->nnodes = 0;
+	bdr_my_locks_database->nnodes = -1;
 
 	initStringInfo(&s);
 
@@ -514,10 +514,11 @@ bdr_locks_startup()
 }
 
 void
-bdr_locks_set_nnodes(Size nnodes)
+bdr_locks_set_nnodes(int nnodes)
 {
 	Assert(IsBackgroundWorker);
 	Assert(bdr_my_locks_database != NULL);
+	Assert(nnodes >= 0);
 
 	/*
 	 * XXX DYNCONF No protection against node addition during DDL lock acquire
@@ -784,7 +785,7 @@ bdr_acquire_ddl_lock(BDRLockType lock_type)
 					 errhint("See the 'DDL replication' chapter of the documentation.")));
 		}
 
-		if (bdr_my_locks_database->nnodes == 0)
+		if (bdr_my_locks_database->nnodes < 0)
 		{
 			ereport(ERROR,
 					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
@@ -1570,7 +1571,7 @@ bdr_process_confirm_ddl_lock(uint64 origin_sysid, TimeLineID origin_tli, Oid ori
 	latch = bdr_my_locks_database->requestor;
 
 	elog(ddl_lock_log_level(DDL_LOCK_TRACE_DEBUG),
-		 LOCKTRACE "received global lock confirmation number %d/%zu from ("BDR_LOCALID_FORMAT")",
+		 LOCKTRACE "received global lock confirmation number %d/%d from ("BDR_LOCALID_FORMAT")",
 		 bdr_my_locks_database->acquire_confirmed, bdr_my_locks_database->nnodes,
 		 origin_sysid, origin_tli, origin_datid, "");
 
@@ -1766,7 +1767,7 @@ bdr_process_replay_confirm(uint64 sysid, TimeLineID tli,
 		bdr_my_locks_database->replay_confirmed++;
 
 		elog(ddl_lock_log_level(DDL_LOCK_TRACE_DEBUG),
-			 LOCKTRACE "confirming replay %u/%zu",
+			 LOCKTRACE "confirming replay %d/%d",
 			 bdr_my_locks_database->replay_confirmed,
 			 bdr_my_locks_database->nnodes);
 
