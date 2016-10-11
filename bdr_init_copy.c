@@ -1192,6 +1192,22 @@ initialize_node_entry(PGconn *conn, NodeInfo *ni, char* node_name, Oid dboid,
 	PQExpBuffer		query = createPQExpBuffer();
 	PGresult	   *res;
 
+	res = PQexec(conn,
+		"DO LANGUAGE plpgsql $$\n"
+		"BEGIN\n"
+		"	IF EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'acquire_global_lock' AND pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'bdr')) THEN\n"
+		"		PERFORM bdr.acquire_global_lock('ddl');\n"
+		"	END IF;\n"
+		"END; $$;\n");
+
+	if (PQresultStatus(res) != PGRES_COMMAND_OK)
+	{
+		PQclear(res);
+		die(_("Failed to acquire global DDL lock before inserting row into bdr.bdr_nodes: %s\n"), PQerrorMessage(conn));
+	}
+
+	PQclear(res);
+
 	printfPQExpBuffer(query, "INSERT INTO bdr.bdr_nodes"
 							 " (node_status, node_sysid, node_timeline,"
 							 "	node_dboid, node_name, node_init_from_dsn,"

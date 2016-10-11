@@ -520,34 +520,32 @@ bdr_locks_set_nnodes(int nnodes)
 	Assert(bdr_my_locks_database != NULL);
 	Assert(nnodes >= 0);
 
-	/*
-	 * XXX DYNCONF No protection against node addition during DDL lock acquire
-	 *
-	 * Node counts are currently grabbed straight from the perdb worker's shmem
-	 * and could change whenever someone adds a worker, with no locking or
-	 * protection.
-	 *
-	 * We could acquire the local DDL lock before setting the nodecount, which
-	 * would cause requests from other nodes to get rejected and cause other
-	 * local tx's to fail to request the global DDL lock. However, we'd have to
-	 * acquire it when we committed to adding the new worker, which happens in
-	 * a user backend, and release it from the perdb worker once the new worker
-	 * is registered. Fragile.
-	 *
-	 * Doing so also fails to solve the other half of the problem, which is
-	 * that DDL locking expects there to be one bdr walsender for each apply
-	 * worker, i.e. each connection should be reciprocal. We could connect to
-	 * the other end and register a connection back to us, but that's getting
-	 * complicated for what's always going to be a temporary option before a
-	 * full part/join protocol is added.
-	 *
-	 * So we're just going to cross our fingers. Worst case is that DDL locking
-	 * gets stuck and we have to restart all the nodes.
-	 *
-	 * The full part/join protocol will solve this by acquiring the DDL lock
-	 * before joining.
-	 */
+	LWLockAcquire(bdr_locks_ctl->lock, LW_EXCLUSIVE);
+	if (bdr_my_locks_database->nnodes < nnodes && !bdr_my_locks_database->lockcount)
+	{
+		/*
+		 * Because we take the ddl lock before setting node_status = r now, and
+		 * we only count ready nodes in the node count, it should only be
+		 * possible for the node count to increase when the DDL lock is held.
+		 *
+		 * If there are older BDR nodes that don't take the DDL lock before
+		 * joining this protection doesn't apply, so we can only warn about it.
+		 * Unless there's a lock acquisition in progress (which we don't
+		 * actually know from here) it's harmless anyway.
+		 *
+		 * A corresponding nodecount decrease without the DDL lock held is
+		 * normal. Node part doesn't take the DDL lock, but it's careful
+		 * to reject any in-progress DDL lock attempt or release any held
+		 * lock.
+		 */
+		ereport(WARNING,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("number of nodes increased %d => %d while local DDL lock not held",
+						bdr_my_locks_database->nnodes, nnodes),
+				 errhint("this should only happen during an upgrade from an older BDR version")));
+	}
 	bdr_my_locks_database->nnodes = nnodes;
+	LWLockRelease(bdr_locks_ctl->lock);
 }
 
 /*

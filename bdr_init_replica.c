@@ -23,6 +23,7 @@
 #include <sys/stat.h>
 
 #include "bdr.h"
+#include "bdr_locks.h"
 
 #include "fmgr.h"
 #include "funcapi.h"
@@ -53,6 +54,7 @@
 #include "utils/builtins.h"
 #include "utils/memutils.h"
 #include "utils/pg_lsn.h"
+#include "utils/snapmgr.h"
 #include "utils/syscache.h"
 
 
@@ -478,6 +480,10 @@ bdr_sync_nodes(PGconn *remote_conn, BDRNodeInfo *local_node)
 	PQfinish(local_conn);
 }
 
+/*
+ * Insert the bdr.bdr_nodes and bdr.bdr_connections entries for our node in the
+ * remote peer, if they don't already exist.
+ */
 static void
 bdr_insert_remote_conninfo(PGconn *conn, BdrConnectionConfig *myconfig)
 {
@@ -712,6 +718,123 @@ bdr_init_wait_for_slot_creation()
 }
 
 /*
+ * Explicitly ttake the DDL lock on a remote peer.
+ *
+ * Can run standalone or in an existing tx, doesn't care about tx state.
+ *
+ * Does nothing if the remote peer doesn't support explicit DDL lock requests.
+ *
+ * ERRORs if the lock attempt fails. Caller should be prepared to retry
+ * the attempt or the whole operations containing it.
+ */
+static void
+bdr_ddl_lock_remote(PGconn *conn, BDRLockType mode)
+{
+	PGresult	*res;
+
+	/* Currently only supports BDR_LOCK_DDL mode 'cos I'm lazy */
+	if (mode != BDR_LOCK_DDL)
+		elog(ERROR, "remote DDL locking only supports mode = 'ddl'");
+
+	res = PQexec(conn,
+		"DO LANGUAGE plpgsql $$\n"
+		"BEGIN\n"
+		"	IF EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'acquire_global_lock' AND pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'bdr')) THEN\n"
+		"		PERFORM bdr.acquire_global_lock('ddl');\n"
+		"	END IF;\n"
+		"END; $$;\n");
+
+	if (PQresultStatus(res) != PGRES_COMMAND_OK)
+	{
+		PQclear(res);
+		elog(ERROR, "Failed to acquire global DDL lock on remote peer: %s\n", PQerrorMessage(conn));
+	}
+
+	PQclear(res);
+}
+
+/*
+ * While holding the global ddl lock on the remote, update bdr.bdr_nodes
+ * status to 'r' on the join target. See callsite for more info.
+ *
+ * This function can leave a tx open and aborted on failure, but the
+ * caller is assumed to just close the conn on failure anyway.
+ */
+static void
+bdr_nodes_set_remote_status_ready(PGconn *conn)
+{
+	PGresult   *res;
+	char	   *values[3];
+	char		local_sysid[32], local_timeline[32], local_dboid[32];
+	
+	res = PQexec(conn, "BEGIN ISOLATION LEVEL READ COMMITTED;");
+	if (PQresultStatus(res) != PGRES_COMMAND_OK)
+	{
+		PQclear(res);
+		elog(ERROR, "Failed to start tx on remote peer: %s\n", PQerrorMessage(conn));
+	}
+
+	bdr_ddl_lock_remote(conn, BDR_LOCK_DDL);
+
+	snprintf(local_sysid, sizeof(local_sysid), UINT64_FORMAT, GetSystemIdentifier());
+	snprintf(local_timeline, sizeof(local_timeline), "%u", ThisTimeLineID);
+	snprintf(local_dboid, sizeof(local_dboid), "%u", MyDatabaseId);
+	values[0] = &local_sysid[0];
+	values[1] = &local_timeline[0];
+	values[2] = &local_dboid[0];
+
+	res = PQexecParams(conn,
+				 "UPDATE bdr.bdr_nodes SET node_status = 'r' \n"
+				 "WHERE (node_sysid, node_timeline, node_dboid) = ($1, $2, $3)",
+				 3, NULL, (const char **)values, NULL, NULL, 0);
+
+	if (PQresultStatus(res) != PGRES_COMMAND_OK)
+	{
+		PQclear(res);
+		elog(ERROR, "failed to update my bdr.bdr_nodes entry on remote server: %s\n", PQerrorMessage(conn));
+	}
+
+	res = PQexec(conn, "COMMIT;");
+	if (PQresultStatus(res) != PGRES_COMMAND_OK)
+	{
+		PQclear(res);
+		elog(ERROR, "Failed to start tx on remote peer: %s\n", PQerrorMessage(conn));
+	}
+}
+
+/*
+ * Idle until our local node status goes 'r'
+ */
+static void
+bdr_wait_for_local_node_ready()
+{
+	char status = '\0';
+
+	while (status != 'r')
+	{
+		int	rc;
+
+		rc = WaitLatch(&MyProc->procLatch,
+					   WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
+					   1000);
+
+		ResetLatch(&MyProc->procLatch);
+
+		/* emergency bailout if postmaster has died */
+		if (rc & WL_POSTMASTER_DEATH)
+			proc_exit(1);
+		
+		StartTransactionCommand();
+		SPI_connect();
+		PushActiveSnapshot(GetTransactionSnapshot());
+		status = bdr_nodes_get_local_status(GetSystemIdentifier(), ThisTimeLineID, MyDatabaseId);
+		PopActiveSnapshot();
+		SPI_finish();
+		CommitTransactionCommand();
+	};
+}
+
+/*
  * TODO DYNCONF perform_pointless_transaction
  *
  * This is temporary code to be removed when the full part/join protocol is
@@ -894,6 +1017,15 @@ bdr_init_replica(BDRNodeInfo *local_node)
 			bdr_nodes_set_local_status(status);
 
 			/*
+			 * Force the node to read-only while we initialize. This is
+			 * persistent, so it'll stay read only through restarts and retries
+			 * until we finish init.
+			 */
+			StartTransactionCommand();
+			bdr_node_set_read_only_internal(local_node->name, true, true);
+			CommitTransactionCommand();
+
+			/*
 			 * Now establish our slot on the target node, so we can replay
 			 * changes from that node. It'll be used in catchup mode.
 			 */
@@ -965,18 +1097,34 @@ bdr_init_replica(BDRNodeInfo *local_node)
 			 * if we switched to replaying from these slots now.  We'll be
 			 * advancing them in catchup mode until they overtake their current
 			 * position before switching to replaying from them directly.
+			 *
+			 * Note that while we create slots on the peers, they don't have
+			 * bdr_connections or bdr_nodes entries for us yet, so we aren't
+			 * counted in DDL locking votes. We aren't replaying from the
+			 * peers yet so we won't see DDL lock requests or replies.
 			 */
 			bdr_init_make_other_slots();
 
 			/*
+			 *
+			 * There's a small data desync risk here if an extremely laggy peer
+			 * who commits a transaction before we create our slot on it, then
+			 * the transaction isn't replicated to the join target node until
+			 * we exit catchup mode. Acquiring the DDL lock before exiting
+			 * catchup mode will fix this, since it forces all tx's committed
+			 * before the DDL lock to be replicated to all peers. At this point
+			 * we've created our slots so new tx's are guaranteed to be captured.
+			 *
+			 * TODO: This doesn't actually have to be a DDL lock. A round of
+			 * replay confirmations is sufficient. But the only way we have to
+			 * do that right now is a DDL lock.
+			 */
+			elog(DEBUG3, "forcing all peers to flush pending transactions");
+			bdr_ddl_lock_remote(nonrepl_init_conn, BDR_LOCK_DDL);
+
+			/*
 			 * Enter catchup mode and wait until we've replayed up to the LSN
 			 * the remote was at when we started catchup.
-			 *
-			 * TODO: It's possible that this step can lose transactions that
-			 * were committed on a 3rd party node before we made our slot on it
-			 * but not replicated to the init target node until after we exit
-			 * catchup mode. If we acquire the DDL lock during join we can know
-			 * that can't happen, so we should do that.
 			 */
 			elog(DEBUG3, "getting LSN to replay to in catchup mode");
 			min_remote_lsn = bdr_get_remote_lsn(nonrepl_init_conn);
@@ -1021,14 +1169,23 @@ bdr_init_replica(BDRNodeInfo *local_node)
 		 * Doing so ensures that we will replay our own bdr.bdr_nodes changes
 		 * from the target node and also makes sure we stay more up-to-date,
 		 * reducing slot lag on other nodes.
+		 *
+		 * We now start seeing DDL lock requests from peers, but they still
+		 * don't expect us to reply or really know about us yet.
 		 */
 		bdr_maintain_db_workers();
 
 		/*
 		 * Insert our connection info on the remote end. This will prompt
 		 * the other end to connect back to us and make a slot, and will
-		 * cause the other nodes to do the same when they receive the new
-		 * row.
+		 * cause the other nodes to do the same when the new nodes and
+		 * connections rows are replicated to them.
+		 *
+		 * We're still staying out of DDL locking. Our bdr_nodes entry on the
+		 * peer is still in 'i' state and won't be counted in DDL locking
+		 * quorum votes. To make sure we don't throw off voting we must
+		 * ensure that we do not reply to DDL locking requests received
+		 * from peers past this point. (TODO XXX FIXME)
 		 */
 		elog(DEBUG1, "inserting our connection into into remote end");
 		bdr_insert_remote_conninfo(nonrepl_init_conn, local_conn_config);
@@ -1044,18 +1201,43 @@ bdr_init_replica(BDRNodeInfo *local_node)
 		bdr_init_wait_for_slot_creation();
 
 		/*
+		 * To make sure that we don't cause issues with any concurrent DDL
+		 * locking operation that may be in progress on the BDR group we're
+		 * joining we acquire the DDL lock on the target when we update our
+		 * nodes entry to 'r'eady state. When peers see our node go ready
+		 * they'll start counting it in tallies, so we must have full
+		 * bi-directional communication. The new nodes row will be immediately
+		 * followed by a DDL lock release message generated when its tx
+		 * commits.
+		 *
+		 * It's fine that during this replay phase some nodes know about us and
+		 * some don't. Those that don't yet know about us still have the local
+		 * DDL lock held and will reject DDL lock requests from other peers.
+		 * Those that do know about us will properly count us when tallying
+		 * lock replies or replay confirmations. Nodes that haven't released
+		 * their DDL lock won't send us any DDL lock requests or replay
+		 * confirmations so we don't have to worry that they don't count us
+		 * in their total node count yet.
+		 *
+		 * If we crash here we'll repeat this phase, but it's all idempotent so
+		 * that's fine.
+		 *
+		 * TODO FIXME XXX: ensure we only count 'r'eady nodes in total of
+		 * nodes. (Will need 'p'arting soon too).
+		 */
+		bdr_nodes_set_remote_status_ready(nonrepl_init_conn);
+		status = 'r';
+
+		/*
 		 * We now have inbound and outbound slots for all nodes, and
 		 * we're caught up to a reasonably recent state from the target
 		 * node thanks to the dump and catchup mode operation.
-		 *
-		 * Set the node state to 'r'eady and allow writes.
-		 *
-		 * TODO: Before we can really be sure we're ready we should be
-		 * sending a replay confirmation request and waiting for all
-		 * nodes to reply, so we know we have full communication.
 		 */
-		status = 'r';
-		bdr_nodes_set_local_status(status);
+		bdr_wait_for_local_node_ready();
+		StartTransactionCommand();
+		bdr_node_set_read_only_internal(local_node->name, false, true);
+		CommitTransactionCommand();
+
 		elog(INFO, "finished init_replica, ready to enter normal replication");
 	}
 	PG_END_ENSURE_ERROR_CLEANUP(bdr_cleanup_conn_close,

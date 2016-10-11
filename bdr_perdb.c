@@ -580,7 +580,19 @@ bdr_maintain_db_workers(void)
 			continue;
 		}
 
-		nnodes++;
+		/*
+		 * We're only interested in counting 'r'eady nodes since nodes that're
+		 * still coming up don't participate in DDL locking, global sequence
+		 * voting, etc.
+		 *
+		 * It's OK to count it even if the apply worker doesn't exist right
+		 * now or there's no incoming walsender yet.  For the node to have
+		 * entered 'r'eady state we must've already successfully created slots
+		 * on it, and it on us, so we're going to successfully exchange DDL
+		 * lock messages etc when we get our workers sorted out.
+		 */
+		if (node_status == 'r')
+			nnodes++;
 
 		LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
 
@@ -691,9 +703,12 @@ out:
 	 * Now we need to tell the lock manager and the sequence
 	 * manager about the changed node count.
 	 *
-	 * There's no truly safe way to do this without a proper
-	 * part/join protocol, so all we're going to do is update
-	 * the node count in shared memory.
+	 * Now that node join takes the DDL lock and part is careful to wait
+	 * until it completes, the node count should only change when it's
+	 * safe. In particular it should only go up when the DDL lock is held.
+	 *
+	 * There's no such protection for 9.4bdr global sequences, which
+	 * could have voting issues when the nodecount changes.
 	 */
 	bdr_worker_slot->data.perdb.nnodes = nnodes;
 	bdr_locks_set_nnodes(nnodes);
