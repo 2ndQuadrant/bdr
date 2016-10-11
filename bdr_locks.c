@@ -1076,7 +1076,6 @@ cancel_conflicting_transactions(void)
 			int	rc;
 
 			/* Increasing backoff interval for wait time with limit of 1s */
-			pg_usleep(waittime);
 			waittime *= 2;
 			if (waittime > 1000000)
 				waittime = 1000000;
