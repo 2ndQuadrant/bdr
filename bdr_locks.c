@@ -521,7 +521,7 @@ bdr_locks_set_nnodes(int nnodes)
 	Assert(nnodes >= 0);
 
 	LWLockAcquire(bdr_locks_ctl->lock, LW_EXCLUSIVE);
-	if (bdr_my_locks_database->nnodes < nnodes && !bdr_my_locks_database->lockcount)
+	if (bdr_my_locks_database->nnodes < nnodes && bdr_my_locks_database->nnodes > 0 && !bdr_my_locks_database->lockcount)
 	{
 		/*
 		 * Because we take the ddl lock before setting node_status = r now, and
