@@ -160,11 +160,32 @@ bdr_nodecache_lookup(BDRNodeId nodeid, bool missing_ok)
 												   nodeinfo->init_from_dsn);
 	entry->read_only = nodeinfo->read_only;
 
+	if (nodeinfo->name)
+		entry->name = MemoryContextStrdup(CacheMemoryContext,
+										  nodeinfo->name);
+
 	entry->valid = true;
 
 	bdr_bdr_node_free(nodeinfo);
 
 	return entry;
+}
+
+const char *
+bdr_local_node_name(void)
+{
+	BDRNodeId		nodeid;
+	BDRNodeInfo	   *node;
+
+	nodeid.sysid = GetSystemIdentifier();
+	nodeid.timeline = ThisTimeLineID;
+	nodeid.dboid = MyDatabaseId;
+	node = bdr_nodecache_lookup(nodeid, true);
+
+	if (node == NULL)
+		return false;
+
+	return node->name;
 }
 
 bool

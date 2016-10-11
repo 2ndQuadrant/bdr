@@ -368,6 +368,8 @@ typedef struct BDRNodeInfo
 	/* is this entry valid */
 	bool		valid;
 
+	char	   *name;
+
 	char		status;
 
 	char	   *local_dsn;
@@ -577,6 +579,7 @@ extern void bdr_nodecache_invalidate(void);
 extern bool bdr_local_node_read_only(void);
 extern char bdr_local_node_status(void);
 extern int32 bdr_local_node_seq_id(void);
+extern const char *bdr_local_node_name(void);
 
 /* helpers shared by multiple worker types */
 extern struct pg_conn* bdr_connect(const char *conninfo, Name appname,

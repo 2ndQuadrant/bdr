@@ -173,7 +173,7 @@ bdr_nodes_get_local_info(uint64 sysid, TimeLineID tli, Oid dboid)
 	{
 		bool		isnull;
 		TupleDesc	desc = RelationGetDescr(rel);
-		Datum		dsn;
+		Datum		tmp;
 
 		node = palloc0(sizeof(BDRNodeInfo));
 		node->id.sysid = sysid;
@@ -183,13 +183,19 @@ bdr_nodes_get_local_info(uint64 sysid, TimeLineID tli, Oid dboid)
 		if (isnull)
 			elog(ERROR, "bdr.bdr_nodes.status NULL; shouldn't happen");
 
-		dsn = fastgetattr(tuple, 6, desc, &isnull);
-		if (!isnull)
-			node->local_dsn = pstrdup(TextDatumGetCString(dsn));
+		tmp = fastgetattr(tuple, 5, desc, &isnull);
+		if (isnull)
+			node->name = NULL;
+		else
+			node->name = pstrdup(TextDatumGetCString(tmp));
 
-		dsn = fastgetattr(tuple, 7, desc, &isnull);
+		tmp = fastgetattr(tuple, 6, desc, &isnull);
 		if (!isnull)
-			node->init_from_dsn = pstrdup(TextDatumGetCString(dsn));
+			node->local_dsn = pstrdup(TextDatumGetCString(tmp));
+
+		tmp = fastgetattr(tuple, 7, desc, &isnull);
+		if (!isnull)
+			node->init_from_dsn = pstrdup(TextDatumGetCString(tmp));
 
 		node->read_only = DatumGetBool(fastgetattr(tuple, 8, desc, &isnull));
 		/* Readonly will be null on upgrade from an older BDR */
