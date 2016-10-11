@@ -308,26 +308,30 @@ retry:
 	return found;
 }
 
-/*
- * Set node_read_only field in bdr_nodes entry for given node.
- *
- * This has to be C function to avoid being subject to the executor read-only
- * filtering.
- */
-Datum
-bdr_node_set_read_only(PG_FUNCTION_ARGS)
+void
+bdr_node_set_read_only_internal(char *node_name, bool read_only, bool force)
 {
-	text   *node_name = PG_GETARG_TEXT_PP(0);
-	bool	read_only = PG_GETARG_BOOL(1);
-
 	HeapTuple tuple = NULL;
 	Relation rel;
 	RangeVar	   *rv;
 	SnapshotData SnapshotDirty;
 	SysScanDesc scan;
 	ScanKeyData key;
+	char status;
 
 	Assert(IsTransactionState());
+
+	/*
+	 * We don't allow the user to clear read-only status
+	 * while the local node is initing.
+	 */
+ 	status = bdr_local_node_status();
+	if ((status != 'r' && status != 'k') && !force)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("local node is still starting up, cannot change read-only status.")));
+	}
 
 	InitDirtySnapshot(SnapshotDirty);
 
@@ -337,7 +341,7 @@ bdr_node_set_read_only(PG_FUNCTION_ARGS)
 	ScanKeyInit(&key,
 				get_attnum(rel->rd_id, "node_name"),
 				BTEqualStrategyNumber, F_TEXTEQ,
-				PointerGetDatum(node_name));
+				PointerGetDatum(cstring_to_text(node_name)));
 
 	scan = systable_beginscan(rel, InvalidOid,
 							  true,
@@ -369,7 +373,7 @@ bdr_node_set_read_only(PG_FUNCTION_ARGS)
 		CatalogUpdateIndexes(rel, newtuple);
 	}
 	else
-		elog(ERROR, "Node %s not found.", text_to_cstring(node_name));
+		elog(ERROR, "Node %s not found.", node_name);
 
 	systable_endscan(scan);
 
@@ -379,6 +383,21 @@ bdr_node_set_read_only(PG_FUNCTION_ARGS)
 	heap_close(rel, RowExclusiveLock);
 
 	bdr_connections_changed(NULL);
+}
+
+/*
+ * Set node_read_only field in bdr_nodes entry for given node.
+ *
+ * This has to be C function to avoid being subject to the executor read-only
+ * filtering.
+ */
+Datum
+bdr_node_set_read_only(PG_FUNCTION_ARGS)
+{
+	char   *node_name = text_to_cstring(PG_GETARG_TEXT_PP(0));
+	bool	read_only = PG_GETARG_BOOL(1);
+
+	bdr_node_set_read_only_internal(node_name, read_only, false);
 
 	PG_RETURN_VOID();
 }

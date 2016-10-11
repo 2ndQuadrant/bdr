@@ -581,6 +581,8 @@ extern char bdr_local_node_status(void);
 extern int32 bdr_local_node_seq_id(void);
 extern const char *bdr_local_node_name(void);
 
+extern void bdr_node_set_read_only_internal(char *node_name, bool read_only, bool force);
+
 /* helpers shared by multiple worker types */
 extern struct pg_conn* bdr_connect(const char *conninfo, Name appname,
 								   uint64* remote_sysid_i,
