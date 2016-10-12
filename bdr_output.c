@@ -262,7 +262,7 @@ bdr_ensure_node_ready(BdrOutputData *data)
 	int spi_ret;
 	const uint64 sysid = GetSystemIdentifier();
 	char our_status;
-	char remote_status;
+	BdrNodeStatus remote_status;
 	BDRNodeInfo *our_node;
 	BDRNodeInfo *remote_node;
 	NameData dbname;
@@ -292,7 +292,7 @@ bdr_ensure_node_ready(BdrOutputData *data)
 
 	SPI_finish();
 
-	if (remote_status == 'k')
+	if (remote_status == BDR_NODE_STATUS_KILLED)
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
@@ -304,11 +304,11 @@ bdr_ensure_node_ready(BdrOutputData *data)
 	 */
 	switch (our_status)
 	{
-		case 'r':
-		case 'o':
+		case BDR_NODE_STATUS_READY:
+		case BDR_NODE_STATUS_CREATING_OUTBOUND_SLOTS:
 			break; /* node ready or creating outbound slots */
-		case '\0':
-		case 'b':
+		case BDR_NODE_STATUS_NONE:
+		case BDR_NODE_STATUS_BEGINNING_INIT:
 			/* This isn't a BDR node yet. */
 			ereport(ERROR,
 					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
@@ -317,7 +317,7 @@ bdr_ensure_node_ready(BdrOutputData *data)
 					 errdetail("BDR is not active on this database."),
 					 errhint("Add bdr to shared_preload_libraries and check logs for bdr startup errors.")));
 			break;
-		case 'c':
+		case BDR_NODE_STATUS_CATCHUP:
 			/*
 			 * When in catchup mode we write rows with their true origin,
 			 * so it's safe to create and use a slot now. Just to be
@@ -328,7 +328,7 @@ bdr_ensure_node_ready(BdrOutputData *data)
 			 * (but we should set readonly mode to prevent them entirely).
 			 */
 			break;
-		case 'i':
+		case BDR_NODE_STATUS_COPYING_INITIAL_DATA:
 			/*
 			 * We used to refuse to create a slot before/during apply of
 			 * base backup. Now we have bdr.do_not_replicate set
@@ -339,7 +339,7 @@ bdr_ensure_node_ready(BdrOutputData *data)
 			 * (but we should set readonly mode to prevent them entirely).
 			 */
 			break;
-		case 'k':
+		case BDR_NODE_STATUS_KILLED:
 			elog(ERROR, "node is exiting");
 			break;
 

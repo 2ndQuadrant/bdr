@@ -38,6 +38,31 @@
 #define BDR_NORETURN
 #endif
 
+typedef enum BdrNodeStatus {
+	BDR_NODE_STATUS_NONE = '\0',
+	BDR_NODE_STATUS_BEGINNING_INIT = 'b',
+	BDR_NODE_STATUS_COPYING_INITIAL_DATA = 'i',
+	BDR_NODE_STATUS_CATCHUP = 'c',
+	BDR_NODE_STATUS_CREATING_OUTBOUND_SLOTS = 'o',
+	BDR_NODE_STATUS_READY = 'r',
+	BDR_NODE_STATUS_KILLED = 'k',
+	BDR_NODE_STATUS_PARTING = 'p',
+	BDR_NODE_STATUS_PARTED = 'P',
+} BdrNodeStatus;
+
+/*
+ * Because C doesn't let us do literal string concatentation
+ * with "char", provide versions as SQL literals too.
+ */
+#define BDR_NODE_STATUS_BEGINNING_INIT_S "'b'"
+#define BDR_NODE_STATUS_COPYING_INITIAL_DATA_S "'i'"
+#define BDR_NODE_STATUS_CATCHUP_S "'c'"
+#define BDR_NODE_STATUS_CREATING_OUTBOUND_SLOTS_S "'o'"
+#define BDR_NODE_STATUS_READY_S "'r'"
+#define BDR_NODE_STATUS_KILLED_S "'k'"
+#define BDR_NODE_STATUS_PARTING_S "'p'"
+#define BDR_NODE_STATUS_PARTED_S "'P'"
+
 /* A configured BDR connection from bdr_connections */
 typedef struct BdrConnectionConfig
 {

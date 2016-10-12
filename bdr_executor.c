@@ -317,7 +317,7 @@ bdr_node_set_read_only_internal(char *node_name, bool read_only, bool force)
 	SnapshotData SnapshotDirty;
 	SysScanDesc scan;
 	ScanKeyData key;
-	char status;
+	BdrNodeStatus status;
 
 	Assert(IsTransactionState());
 
@@ -326,7 +326,7 @@ bdr_node_set_read_only_internal(char *node_name, bool read_only, bool force)
 	 * while the local node is initing.
 	 */
  	status = bdr_local_node_status();
-	if ((status != 'r' && status != 'k') && !force)
+	if ((status != BDR_NODE_STATUS_READY && status != BDR_NODE_STATUS_KILLED) && !force)
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),

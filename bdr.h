@@ -62,6 +62,10 @@ struct EState; /* from nodes/execnodes.h */
 struct ScanKeyData; /* from access/skey.h for ScanKey */
 enum LockTupleMode; /* from access/heapam.h */
 
+typedef enum BdrNodeStatus BdrNodeStatus;
+
+
+
 /*
  * Flags to indicate which fields are present in a begin record sent by the
  * output plugin.
@@ -376,7 +380,7 @@ typedef struct BDRNodeInfo
 
 	char	   *name;
 
-	char		status;
+	BdrNodeStatus status;
 
 	char	   *local_dsn;
 	char	   *init_from_dsn;
@@ -549,12 +553,12 @@ extern int bdr_parse_version(const char * bdr_version_str, int *o_major,
 							 int *o_minor, int *o_rev, int *o_subrev);
 
 /* manipulation of bdr catalogs */
-extern char bdr_nodes_get_local_status(uint64 sysid, TimeLineID tli,
+extern BdrNodeStatus bdr_nodes_get_local_status(uint64 sysid, TimeLineID tli,
 									   Oid dboid);
 extern BDRNodeInfo * bdr_nodes_get_local_info(uint64 sysid, TimeLineID tli,
 										  Oid dboid);
 extern void bdr_bdr_node_free(BDRNodeInfo *node);
-extern void bdr_nodes_set_local_status(char status);
+extern void bdr_nodes_set_local_status(BdrNodeStatus status);
 
 extern Oid GetSysCacheOidError(int cacheId, Datum key1, Datum key2, Datum key3,
 							   Datum key4);

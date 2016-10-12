@@ -784,7 +784,7 @@ bdr_nodes_set_remote_status_ready(PGconn *conn)
 	values[2] = &local_dboid[0];
 
 	res = PQexecParams(conn,
-				 "UPDATE bdr.bdr_nodes SET node_status = 'r' \n"
+				 "UPDATE bdr.bdr_nodes SET node_status = "BDR_NODE_STATUS_READY_S" \n"
 				 "WHERE (node_sysid, node_timeline, node_dboid) = ($1, $2, $3)",
 				 3, NULL, (const char **)values, NULL, NULL, 0);
 
@@ -808,9 +808,9 @@ bdr_nodes_set_remote_status_ready(PGconn *conn)
 static void
 bdr_wait_for_local_node_ready()
 {
-	char status = '\0';
+	BdrNodeStatus status = BDR_NODE_STATUS_NONE;
 
-	while (status != 'r')
+	while (status != BDR_NODE_STATUS_READY)
 	{
 		int	rc;
 
@@ -831,6 +831,13 @@ bdr_wait_for_local_node_ready()
 		PopActiveSnapshot();
 		SPI_finish();
 		CommitTransactionCommand();
+
+		if (status == BDR_NODE_STATUS_KILLED || status == BDR_NODE_STATUS_PARTING || status == BDR_NODE_STATUS_PARTED)
+		{
+			ereport(ERROR,
+					(errcode(ERRCODE_OPERATOR_INTERVENTION),
+					 errmsg("The local node has been parted from the BDR group (status=%c)", status)));
+		}
 	};
 }
 
@@ -857,7 +864,7 @@ perform_pointless_transaction(PGconn *conn, BDRNodeInfo *node)
 void
 bdr_init_replica(BDRNodeInfo *local_node)
 {
-	char				status;
+	BdrNodeStatus		status;
 	PGconn			   *nonrepl_init_conn;
 	StringInfoData		dsn;
 	BdrConnectionConfig *local_conn_config;
@@ -866,7 +873,7 @@ bdr_init_replica(BDRNodeInfo *local_node)
 
 	status = local_node->status;
 
-	Assert(status != 'r');
+	Assert(status != BDR_NODE_STATUS_READY);
 
 	elog(DEBUG2, "bdr_init_replica");
 
@@ -886,7 +893,7 @@ bdr_init_replica(BDRNodeInfo *local_node)
 	 */
 	if (local_node->init_from_dsn == NULL)
 	{
-		if (status != 'b')
+		if (status != BDR_NODE_STATUS_BEGINNING_INIT)
 		{
 			/*
 			 * Even though there's no init_replica worker, the local bdr.bdr_nodes table
@@ -905,7 +912,7 @@ bdr_init_replica(BDRNodeInfo *local_node)
 		 * XXX: is this actually a good idea?
 		 */
 		elog(DEBUG2, "init_replica: Marking as root/standalone node");
-		bdr_nodes_set_local_status('r');
+		bdr_nodes_set_local_status(BDR_NODE_STATUS_READY);
 
 		return;
 	}
@@ -932,14 +939,14 @@ bdr_init_replica(BDRNodeInfo *local_node)
 
 		switch (status)
 		{
-			case 'b':
+			case BDR_NODE_STATUS_BEGINNING_INIT:
 				elog(DEBUG2, "initializing from clean state");
 				break;
 
-			case 'r':
+			case BDR_NODE_STATUS_READY:
 				elog(ERROR, "unexpected state");
 
-			case 'c':
+			case BDR_NODE_STATUS_CATCHUP:
 				/*
 				 * We were in catchup mode when we died. We need to resume catchup
 				 * mode up to the expected LSN before switching over.
@@ -956,11 +963,11 @@ bdr_init_replica(BDRNodeInfo *local_node)
 				elog(DEBUG2, "dump applied, need to continue catchup");
 				break;
 
-			case 'o':
+			case BDR_NODE_STATUS_CREATING_OUTBOUND_SLOTS:
 				elog(DEBUG2, "dump applied and catchup completed, need to continue slot creation");
 				break;
 
-			case 'i':
+			case BDR_NODE_STATUS_COPYING_INITIAL_DATA:
 				/*
 				 * A previous init attempt seems to have failed.
 				 * Clean up, then fall through to start setup
@@ -997,7 +1004,7 @@ bdr_init_replica(BDRNodeInfo *local_node)
 				break;
 		}
 
-		if (status == 'b')
+		if (status == BDR_NODE_STATUS_BEGINNING_INIT)
 		{
 			char	   *init_snapshot = NULL;
 			PGconn	   *init_repl_conn = NULL;
@@ -1009,11 +1016,7 @@ bdr_init_replica(BDRNodeInfo *local_node)
 
 			elog(INFO, "initializing node");
 
-			/*
-			 * We're starting from scratch or have cleaned up a previous failed
-			 * attempt.
-			 */
-			status = 'i';
+			status = BDR_NODE_STATUS_COPYING_INITIAL_DATA;
 			bdr_nodes_set_local_status(status);
 
 			/*
@@ -1078,14 +1081,14 @@ bdr_init_replica(BDRNodeInfo *local_node)
 			elog(DEBUG1, "syncing bdr_nodes and bdr_connections");
 			bdr_sync_nodes(nonrepl_init_conn, local_node);
 
-			status = 'c';
+			status = BDR_NODE_STATUS_CATCHUP;
 			bdr_nodes_set_local_status(status);
 			elog(DEBUG1, "dump and apply finished, preparing for catchup replay");
 		}
 
-		Assert(status != 'b');
+		Assert(status != BDR_NODE_STATUS_BEGINNING_INIT);
 
-		if (status == 'c')
+		if (status == BDR_NODE_STATUS_CATCHUP)
 		{
 			XLogRecPtr min_remote_lsn;
 			remote_node_info ri;
@@ -1156,13 +1159,13 @@ bdr_init_replica(BDRNodeInfo *local_node)
 			 * We're done with catchup. The next phase is inserting our
 			 * conninfo, so set status=o
 			 */
-			status = 'o';
+			status = BDR_NODE_STATUS_CREATING_OUTBOUND_SLOTS;
 			bdr_nodes_set_local_status(status);
 			elog(DEBUG1, "catchup worker finished, requesting slot creation");
 		}
 
 		/* To reach here we must be waiting for slot creation */
-		Assert(status == 'o');
+		Assert(status == BDR_NODE_STATUS_CREATING_OUTBOUND_SLOTS);
 
 		/*
 		 * It is now safe to start apply workers, as we've finished catchup.
@@ -1226,7 +1229,7 @@ bdr_init_replica(BDRNodeInfo *local_node)
 		 * nodes. (Will need 'p'arting soon too).
 		 */
 		bdr_nodes_set_remote_status_ready(nonrepl_init_conn);
-		status = 'r';
+		status = BDR_NODE_STATUS_READY;
 
 		/*
 		 * We now have inbound and outbound slots for all nodes, and
@@ -1243,7 +1246,7 @@ bdr_init_replica(BDRNodeInfo *local_node)
 	PG_END_ENSURE_ERROR_CLEANUP(bdr_cleanup_conn_close,
 							PointerGetDatum(&nonrepl_init_conn));
 
-	Assert(status == 'r');
+	Assert(status == BDR_NODE_STATUS_READY);
 
 	PQfinish(nonrepl_init_conn);
 }

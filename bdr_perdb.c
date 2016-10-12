@@ -281,12 +281,15 @@ bdr_maintain_db_workers(void)
 
 	/*
 	 * First check whether any existing processes to/from this database need
-	 * to be killed of because of the node status.
+	 * to be killed off because of the node status.
+	 *
+	 * We have three main states for nodes being removed: 'p'arting,
+	 * 'P'arted, and 'k'illed.
 	 */
 	ret = SPI_execute(
 		"SELECT node_sysid, node_timeline, node_dboid\n"
 		"FROM bdr.bdr_nodes\n"
-		"WHERE bdr_nodes.node_status = 'k'",
+		"WHERE bdr_nodes.node_status = "BDR_NODE_STATUS_KILLED_S,
 		false, 0);
 
 	if (ret != SPI_OK_SELECT)
@@ -348,7 +351,7 @@ bdr_maintain_db_workers(void)
 				 * to-be-killed node or connecting to it.
 				 */
 
-				if (our_status == 'k' && w->worker_proc->databaseId == node_datoid)
+				if (our_status == BDR_NODE_STATUS_KILLED && w->worker_proc->databaseId == node_datoid)
 				{
 					/*
 					 * NB: It's sufficient to check the database oid, the
@@ -367,7 +370,7 @@ bdr_maintain_db_workers(void)
 			{
 				BdrWalsenderWorker *walsnd = &w->data.walsnd;
 
-				if (our_status == 'k' && w->worker_proc->databaseId == node_datoid)
+				if (our_status == BDR_NODE_STATUS_KILLED && w->worker_proc->databaseId == node_datoid)
 					kill_proc = true;
 				else if (walsnd->remote_sysid == node_sysid &&
 						 walsnd->remote_timeline == node_timeline &&
@@ -457,7 +460,7 @@ bdr_maintain_db_workers(void)
 	}
 
 	/* If our own node is dead, don't start new connections to other nodes */
-	if (our_status == 'k')
+	if (our_status == BDR_NODE_STATUS_KILLED)
 	{
 		elog(LOG, "this node has been parted, not starting connections");
 		goto out;
@@ -468,6 +471,9 @@ bdr_maintain_db_workers(void)
 	 *
 	 * If an entry with our origin (sysid,tlid,dboid) exists, treat that as
 	 * overriding the generic one.
+	 *
+	 * Connections with no corresponding nodes entry will be ignored
+	 * (excluded by the join).
 	 */
 	values[0] = CStringGetTextDatum(sysid_str);
 	values[1] = ObjectIdGetDatum(ThisTimeLineID);
@@ -523,7 +529,7 @@ bdr_maintain_db_workers(void)
 		Oid						target_dboid;
 		char*					tmp_sysid;
 		bool					origin_is_my_id;
-		char					node_status;
+		BdrNodeStatus			node_status;
 
 		tuple = SPI_tuptable->vals[i];
 
@@ -574,7 +580,7 @@ bdr_maintain_db_workers(void)
 			 EMPTY_REPLICATION_NAME,
 			 (int) origin_is_my_id, node_status);
 
-		if(node_status == 'k')
+		if(node_status == BDR_NODE_STATUS_KILLED)
 		{
 			elog(DEBUG2, "skipping registration of conn as killed");
 			continue;
@@ -591,7 +597,7 @@ bdr_maintain_db_workers(void)
 		 * on it, and it on us, so we're going to successfully exchange DDL
 		 * lock messages etc when we get our workers sorted out.
 		 */
-		if (node_status == 'r')
+		if (node_status == BDR_NODE_STATUS_READY)
 			nnodes++;
 
 		LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
@@ -805,8 +811,8 @@ bdr_perdb_worker_main(Datum main_arg)
 		/*
 		 * Do we need to init the local DB from a remote node?
 		 */
-		if (local_node->status != 'r' /* initialized */
-			&& local_node->status != 'k' /* kill */)
+		if (local_node->status != BDR_NODE_STATUS_READY
+			&& local_node->status != BDR_NODE_STATUS_KILLED)
 			bdr_init_replica(local_node);
 
 		bdr_bdr_node_free(local_node);

@@ -73,7 +73,7 @@ GetSysCacheOidError(int cacheId,
  *
  * SPI must be initialized, and you must be in a running transaction.
  */
-char
+BdrNodeStatus
 bdr_nodes_get_local_status(uint64 sysid, TimeLineID tli, Oid dboid)
 {
 	int			spi_ret;
@@ -124,7 +124,7 @@ bdr_nodes_get_local_status(uint64 sysid, TimeLineID tli, Oid dboid)
 	if (isnull)
 		elog(ERROR, "bdr.bdr_nodes.status NULL; shouldn't happen");
 
-	return status;
+	return (BdrNodeStatus)status;
 }
 
 /*
@@ -179,7 +179,7 @@ bdr_nodes_get_local_info(uint64 sysid, TimeLineID tli, Oid dboid)
 		node->id.sysid = sysid;
 		node->id.timeline = tli;
 		node->id.dboid = dboid;
-		node->status = DatumGetChar(fastgetattr(tuple, 4, desc, &isnull));
+		node->status = (BdrNodeStatus)DatumGetChar(fastgetattr(tuple, 4, desc, &isnull));
 		if (isnull)
 			elog(ERROR, "bdr.bdr_nodes.status NULL; shouldn't happen");
 
@@ -297,7 +297,7 @@ bdr_bdr_node_free(BDRNodeInfo *node)
  * sysid, tlid and dboid input but can only set the status of the local node.
  */
 void
-bdr_nodes_set_local_status(char status)
+bdr_nodes_set_local_status(BdrNodeStatus status)
 {
 	int			spi_ret;
 	Oid			argtypes[] = { CHAROID, TEXTOID, OIDOID, OIDOID };
@@ -306,7 +306,7 @@ bdr_nodes_set_local_status(char status)
 	bool		tx_started = false;
 	bool		spi_pushed;
 
-	Assert(status != '\0'); /* Cannot pass \0 */
+	Assert(status != BDR_NODE_STATUS_NONE); /* Cannot pass \0 */
 	/* Cannot have replication apply state set in this tx */
 	Assert(replorigin_session_origin == InvalidRepOriginId);
 
@@ -322,7 +322,7 @@ bdr_nodes_set_local_status(char status)
 			 GetSystemIdentifier());
 	sysid_str[sizeof(sysid_str)-1] = '\0';
 
-	values[0] = CharGetDatum(status);
+	values[0] = CharGetDatum((char)status);
 	values[1] = CStringGetTextDatum(sysid_str);
 	values[2] = ObjectIdGetDatum(ThisTimeLineID);
 	values[3] = ObjectIdGetDatum(MyDatabaseId);
@@ -534,7 +534,7 @@ bdr_read_connection_configs()
 							 "   OR (conn_origin_sysid = $1 "
 							 "  AND  conn_origin_timeline = $2 "
 							 "  AND  conn_origin_dboid = $3) "
-							 "  AND node_status <> 'k' "
+							 "  AND node_status <> "BDR_NODE_STATUS_KILLED_S" "
 							 "  AND NOT conn_is_unidirectional "
 							 "ORDER BY conn_sysid, conn_timeline, conn_dboid, "
 							 "         conn_origin_sysid ASC NULLS LAST, "
