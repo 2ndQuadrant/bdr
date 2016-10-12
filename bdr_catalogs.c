@@ -42,6 +42,10 @@
 static int getattno(const char *colname);
 static char* bdr_textarr_to_identliststr(ArrayType *textarray);
 
+Datum bdr_node_status_to_char(PG_FUNCTION_ARGS);
+Datum bdr_node_status_from_char(PG_FUNCTION_ARGS);
+PG_FUNCTION_INFO_V1(bdr_node_status_to_char);
+PG_FUNCTION_INFO_V1(bdr_node_status_from_char);
 
 /* GetSysCacheOid equivalent that errors out if nothing is found */
 Oid
@@ -794,4 +798,65 @@ stringify_my_node_identity(char *sysid_str, Size sysid_str_size,
 	return stringify_node_identity(sysid_str, sysid_str_size, timeline_str,
 			timeline_str_size, dboid_str, dboid_str_size,
 			GetSystemIdentifier(), ThisTimeLineID, MyDatabaseId);
+}
+
+Datum
+bdr_node_status_from_char(PG_FUNCTION_ARGS)
+{
+	BdrNodeStatus status = (BdrNodeStatus)PG_GETARG_CHAR(0);
+	const char *result = NULL;
+
+#define BDR_NODE_STATUS_TOSTR(teststatus) \
+	case teststatus: \
+		result = #teststatus; \
+		break;
+
+	switch (status)
+	{
+		BDR_NODE_STATUS_TOSTR(BDR_NODE_STATUS_NONE)
+		BDR_NODE_STATUS_TOSTR(BDR_NODE_STATUS_BEGINNING_INIT)
+		BDR_NODE_STATUS_TOSTR(BDR_NODE_STATUS_COPYING_INITIAL_DATA)
+		BDR_NODE_STATUS_TOSTR(BDR_NODE_STATUS_CATCHUP)
+		BDR_NODE_STATUS_TOSTR(BDR_NODE_STATUS_CREATING_OUTBOUND_SLOTS)
+		BDR_NODE_STATUS_TOSTR(BDR_NODE_STATUS_READY)
+		BDR_NODE_STATUS_TOSTR(BDR_NODE_STATUS_KILLED)
+		BDR_NODE_STATUS_TOSTR(BDR_NODE_STATUS_PARTING)
+		BDR_NODE_STATUS_TOSTR(BDR_NODE_STATUS_PARTED)
+	};
+
+	Assert(result != NULL);
+
+	PG_RETURN_TEXT_P(cstring_to_text(pstrdup(result)));
+}
+
+Datum
+bdr_node_status_to_char(PG_FUNCTION_ARGS)
+{
+	char *status = text_to_cstring(PG_GETARG_TEXT_P(0));
+	BdrNodeStatus result;
+
+#define BDR_NODE_STATUS_FROMSTR(teststatus) \
+	if (strcmp(status, #teststatus) == 0) \
+	{ \
+		result = teststatus; \
+		continue; \
+	}
+
+	do
+	{
+		BDR_NODE_STATUS_FROMSTR(BDR_NODE_STATUS_NONE)
+		BDR_NODE_STATUS_FROMSTR(BDR_NODE_STATUS_BEGINNING_INIT)
+		BDR_NODE_STATUS_FROMSTR(BDR_NODE_STATUS_COPYING_INITIAL_DATA)
+		BDR_NODE_STATUS_FROMSTR(BDR_NODE_STATUS_CATCHUP)
+		BDR_NODE_STATUS_FROMSTR(BDR_NODE_STATUS_CREATING_OUTBOUND_SLOTS)
+		BDR_NODE_STATUS_FROMSTR(BDR_NODE_STATUS_READY)
+		BDR_NODE_STATUS_FROMSTR(BDR_NODE_STATUS_KILLED)
+		BDR_NODE_STATUS_FROMSTR(BDR_NODE_STATUS_PARTING)
+		BDR_NODE_STATUS_FROMSTR(BDR_NODE_STATUS_PARTED)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("The string '%s' isn't recognised as a BDR status", status)));
+	} while (false);
+
+	PG_RETURN_CHAR((char)result);
 }

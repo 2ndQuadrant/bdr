@@ -224,6 +224,7 @@ REGRESSCHECKS= \
 	init \
 	preseed \
 	init_bdr \
+	status \
 	$(REGRESS_COMPAT) \
 	preseed_check \
 	supervisordb \

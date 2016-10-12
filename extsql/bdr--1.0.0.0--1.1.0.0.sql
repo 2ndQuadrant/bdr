@@ -70,6 +70,12 @@ CREATE FUNCTION bdr.global_seq_nextval(regclass)
 RETURNS bigint
 LANGUAGE c STRICT VOLATILE AS 'MODULE_PATHNAME','global_seq_nextval_oid';
 
+CREATE FUNCTION bdr.node_status_from_char("char")
+RETURNS text LANGUAGE c STRICT STABLE AS 'MODULE_PATHNAME','bdr_node_status_from_char';
+
+CREATE FUNCTION bdr.node_status_to_char(text)
+RETURNS "char" LANGUAGE c STRICT STABLE AS 'MODULE_PATHNAME','bdr_node_status_to_char';
+
 -- Add "node_status" to remote_nodeinfo result
 DROP FUNCTION bdr.bdr_get_remote_nodeinfo(
 	dsn text, sysid OUT text, timeline OUT oid, dboid OUT oid,
@@ -196,7 +202,7 @@ BEGIN
 
         END IF;
 
-		IF remote_nodeinfo.node_status IS DISTINCT FROM 'r' THEN
+		IF remote_nodeinfo.node_status IS DISTINCT FROM bdr.node_status_to_char('BDR_NODE_STATUS_READY') THEN
 			RAISE USING
 				MESSAGE = 'remote node does not appear to be a fully running BDR node',
 				DETAIL = format($$The dsn '%s' connects successfully but the target node has bdr.bdr_nodes node_status=%s instead of expected 'r'$$, remote_nodeinfo.node_status),
@@ -249,7 +255,8 @@ BEGIN
         ) VALUES (
             local_node_name,
             localid.sysid, localid.timeline, localid.dboid,
-            'b', node_local_dsn, remote_dsn
+            bdr.node_status_to_char('BDR_NODE_STATUS_BEGINNING_INIT'),
+			node_local_dsn, remote_dsn
         );
     END IF;
 

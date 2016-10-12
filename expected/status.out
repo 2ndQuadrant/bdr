@@ -1,0 +1,18 @@
+SELECT
+  c::"char" AS status_char,
+  bdr.node_status_from_char(c::"char") AS status_str,
+  bdr.node_status_to_char(bdr.node_status_from_char(c::"char")) AS roundtrip_char
+FROM (VALUES ('b'),('i'),('c'),('o'),('r'),('k'),('p'),('P')) x(c)
+ORDER BY c;
+ status_char |               status_str                | roundtrip_char 
+-------------+-----------------------------------------+----------------
+ b           | BDR_NODE_STATUS_BEGINNING_INIT          | b
+ c           | BDR_NODE_STATUS_CATCHUP                 | c
+ i           | BDR_NODE_STATUS_COPYING_INITIAL_DATA    | i
+ k           | BDR_NODE_STATUS_KILLED                  | k
+ o           | BDR_NODE_STATUS_CREATING_OUTBOUND_SLOTS | o
+ p           | BDR_NODE_STATUS_PARTING                 | p
+ P           | BDR_NODE_STATUS_PARTED                  | P
+ r           | BDR_NODE_STATUS_READY                   | r
+(8 rows)
+
