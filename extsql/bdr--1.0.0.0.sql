@@ -1397,7 +1397,7 @@ BEGIN
           AND c.oid IS NULL
     LOOP
         RAISE WARNING USING
-            MESSAGE = 'Table %I.%I has no PRIMARY KEY',
+            MESSAGE = format('Table %I.%I has no PRIMARY KEY', t.nspname, t.relname),
             HINT = 'Tables without a PRIMARY KEY cannot be UPDATEd or DELETEd from, only INSERTed into. Add a PRIMARY KEY.';
     END LOOP;
 
