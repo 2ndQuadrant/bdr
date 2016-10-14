@@ -568,7 +568,7 @@ bdr_sequencer_init(int new_seq_slot, int nnodes)
 {
 	BdrSequencerSlot *slot;
 
-	Assert(nnodes => 0);
+	Assert(nnodes >= 0);
 
 	Assert(seq_slot == -1);
 	seq_slot = new_seq_slot;
