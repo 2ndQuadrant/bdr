@@ -665,6 +665,51 @@ bdr_do_not_replicate_assign_hook(bool newvalue, void *extra)
 		replication_origin_id = InvalidRepNodeId;
 }
 
+/*
+ * We restrict the "unsafe" BDR settings so they can only be set in a
+ * few contexts. Report whether this is such a context.
+ */
+static bool
+bdr_guc_source_ok_for_unsafe(GucSource source)
+{
+	switch (source)
+	{
+		case PGC_S_DEFAULT:				/* hard-wired default ("boot_val") */
+		case PGC_S_DYNAMIC_DEFAULT:		/* default computed during initialization */
+		case PGC_S_ENV_VAR:				/* postmaster environment variable */
+		case PGC_S_FILE:					/* postgresql.conf */
+		case PGC_S_ARGV:					/* postmaster command line */
+		case PGC_S_GLOBAL:				/* global in-database setting */
+		case PGC_S_DATABASE:				/* per-database setting */
+		case PGC_S_USER:					/* per-user setting */
+		case PGC_S_DATABASE_USER:		/* per-user-and-database setting */
+			return false;
+
+		case PGC_S_CLIENT:				/* from client connection request */
+		case PGC_S_OVERRIDE:				/* special case to forcibly set default */
+		case PGC_S_INTERACTIVE:			/* dividing line for error reporting */
+		case PGC_S_TEST:					/* test per-database or per-user setting */
+		case PGC_S_SESSION:				/* SET command */
+			return true;
+	}
+	elog(ERROR, "unreachable");
+}
+
+static bool
+bdr_permit_unsafe_guc_check_hook(bool *newvalue, void **extra, GucSource source)
+{
+	if (*newvalue && !bdr_guc_source_ok_for_unsafe(source))
+	{
+		/* guc.c will report an error, we just provide some more explanation first */
+		ereport(WARNING,
+				(errmsg("unsafe BDR configuration options can not be set globally"),
+				 errdetail("The bdr options bdr.permit_unsafe_ddl_commands, bdr.skip_ddl_locking and bdr.skip_ddl_replication should only be enabled with a SET or SET LOCAL command in a SQL session or set in client connection options."),
+				 errhint("See the manual for information on these options. Using them without care can break replication. Use them only with SET LOCAL inside a transaction.")));
+		return false;
+	}
+
+	return true;
+}
 
 /*
  * Entrypoint of this module - called at shared_preload_libraries time in the
@@ -746,7 +791,7 @@ _PG_init(void)
 							 &bdr_permit_unsafe_commands,
 							 false, PGC_SUSET,
 							 0,
-							 NULL, NULL, NULL);
+							 bdr_permit_unsafe_guc_check_hook, NULL, NULL);
 
 	DefineCustomBoolVariable("bdr.skip_ddl_replication",
 							 "Internal. Set during local restore during init_replica only",
@@ -755,7 +800,7 @@ _PG_init(void)
 							 false,
 							 PGC_SUSET,
 							 0,
-							 NULL, NULL, NULL);
+							 bdr_permit_unsafe_guc_check_hook, NULL, NULL);
 
 	DefineCustomBoolVariable("bdr.skip_ddl_locking",
 							 "Don't acquire global DDL locks while performing DDL.",
@@ -764,7 +809,7 @@ _PG_init(void)
 							 false,
 							 PGC_SUSET,
 							 0,
-							 NULL, NULL, NULL);
+							 bdr_permit_unsafe_guc_check_hook, NULL, NULL);
 
 	DefineCustomIntVariable("bdr.default_apply_delay",
 							"default replication apply delay, can be overwritten per connection",

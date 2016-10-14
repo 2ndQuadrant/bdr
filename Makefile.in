@@ -324,6 +324,7 @@ REGRESSTEARDOWN=part_bdr
 REGRESSCHECKS= \
 	init \
 	preseed \
+	guc \
 	$(REGRESSINIT) \
 	preseed_check \
 	supervisordb \
