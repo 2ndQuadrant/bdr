@@ -99,6 +99,7 @@ PG_MODULE_MAGIC;
 
 void		_PG_init(void);
 
+PGDLLEXPORT Datum bdr_is_active_in_db(PG_FUNCTION_ARGS);
 PGDLLEXPORT Datum bdr_apply_pause(PG_FUNCTION_ARGS);
 PGDLLEXPORT Datum bdr_apply_resume(PG_FUNCTION_ARGS);
 PGDLLEXPORT Datum bdr_apply_is_paused(PG_FUNCTION_ARGS);
@@ -118,6 +119,7 @@ PGDLLEXPORT Datum bdr_terminate_apply_workers(PG_FUNCTION_ARGS);
 PGDLLEXPORT Datum bdr_skip_changes_upto(PG_FUNCTION_ARGS);
 PGDLLEXPORT Datum bdr_pause_worker_management(PG_FUNCTION_ARGS);
 
+PG_FUNCTION_INFO_V1(bdr_is_active_in_db);
 PG_FUNCTION_INFO_V1(bdr_apply_pause);
 PG_FUNCTION_INFO_V1(bdr_apply_resume);
 PG_FUNCTION_INFO_V1(bdr_apply_is_paused);
