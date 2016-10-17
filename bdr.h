@@ -295,6 +295,38 @@ typedef struct BdrWorker
 
 } BdrWorker;
 
+/*
+ * Attribute numbers for bdr.bdr_nodes and bdr.bdr_connections
+ *
+ * This must only ever be appended to, since modifications that change attnos
+ * will break upgrades. It must match the column attnos reported by the regression
+ * tests in results/schema.out .
+ */
+typedef enum BdrNodesAttno {
+	BDR_NODES_ATT_SYSID = 1,
+	BDR_NODES_ATT_TIMELINE = 2,
+	BDR_NODES_ATT_DBOID = 3,
+	BDR_NODES_ATT_STATUS = 4,
+	BDR_NODES_ATT_NAME = 5,
+	BDR_NODES_ATT_LOCAL_DSN = 6,
+	BDR_NODES_ATT_INIT_FROM_DSN = 7,
+	BDR_NODES_ATT_READ_ONLY = 8,
+	BDR_NODES_ATT_SEQ_ID = 9
+} BdrNodesAttno;
+
+typedef enum BdrConnectionsAttno {
+	BDR_CONN_ATT_SYSID = 1,
+	BDR_CONN_ATT_TIMELINE = 2,
+	BDR_CONN_ATT_DBOID = 3,
+	BDR_CONN_ATT_ORIGIN_SYSID = 4,
+	BDR_CONN_ATT_ORIGIN_TIMELINE = 5,
+	BDR_CONN_ATT_ORIGIN_DBOID = 6,
+	BDR_CONN_ATT_IS_UNIDIRECTIONAL = 7,
+	BDR_CONN_DSN = 8,
+	BDR_CONN_APPLY_DELAY = 9,
+	BDR_CONN_REPLICATION_SETS = 10
+} BdrConnectionsAttno;
+
 /* GUCs */
 extern int	bdr_default_apply_delay;
 extern int bdr_max_workers;

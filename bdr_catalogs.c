@@ -122,7 +122,7 @@ bdr_nodes_get_local_status(uint64 sysid, TimeLineID tli, Oid dboid)
 	if (SPI_processed == 0)
 		return '\0';
 
-	status = DatumGetChar(SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1,
+	status = DatumGetChar(SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, BDR_NODES_ATT_STATUS,
 						  &isnull));
 
 	if (isnull)

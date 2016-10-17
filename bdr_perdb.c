@@ -313,18 +313,18 @@ bdr_maintain_db_workers(void)
 
 		tuple = SPI_tuptable->vals[i];
 
-		node_sysid_s = SPI_getvalue(tuple, SPI_tuptable->tupdesc, 1);
+		node_sysid_s = SPI_getvalue(tuple, SPI_tuptable->tupdesc, BDR_NODES_ATT_SYSID);
 
 		if (sscanf(node_sysid_s, UINT64_FORMAT, &node_sysid) != 1)
 			elog(ERROR, "Parsing sysid uint64 from %s failed", node_sysid_s);
 
 		node_timeline = DatumGetObjectId(
-			SPI_getbinval(tuple, SPI_tuptable->tupdesc, 2,
+			SPI_getbinval(tuple, SPI_tuptable->tupdesc, BDR_NODES_ATT_TIMELINE,
 						  &isnull));
 		Assert(!isnull);
 
 		node_datoid = DatumGetObjectId(
-			SPI_getbinval(tuple, SPI_tuptable->tupdesc, 3,
+			SPI_getbinval(tuple, SPI_tuptable->tupdesc, BDR_NODES_ATT_DBOID,
 						  &isnull));
 		Assert(!isnull);
 

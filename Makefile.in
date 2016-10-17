@@ -226,6 +226,7 @@ REGRESSCHECKS= \
 	init_bdr \
 	status \
 	guc \
+	schema \
 	$(REGRESS_COMPAT) \
 	preseed_check \
 	supervisordb \
