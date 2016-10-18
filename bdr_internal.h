@@ -45,9 +45,7 @@ typedef enum BdrNodeStatus {
 	BDR_NODE_STATUS_CATCHUP = 'c',
 	BDR_NODE_STATUS_CREATING_OUTBOUND_SLOTS = 'o',
 	BDR_NODE_STATUS_READY = 'r',
-	BDR_NODE_STATUS_KILLED = 'k',
-	BDR_NODE_STATUS_PARTING = 'p',
-	BDR_NODE_STATUS_PARTED = 'P',
+	BDR_NODE_STATUS_KILLED = 'k'
 } BdrNodeStatus;
 
 /*
@@ -60,8 +58,6 @@ typedef enum BdrNodeStatus {
 #define BDR_NODE_STATUS_CREATING_OUTBOUND_SLOTS_S "'o'"
 #define BDR_NODE_STATUS_READY_S "'r'"
 #define BDR_NODE_STATUS_KILLED_S "'k'"
-#define BDR_NODE_STATUS_PARTING_S "'p'"
-#define BDR_NODE_STATUS_PARTED_S "'P'"
 
 /* A configured BDR connection from bdr_connections */
 typedef struct BdrConnectionConfig

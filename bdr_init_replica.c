@@ -832,7 +832,7 @@ bdr_wait_for_local_node_ready()
 		SPI_finish();
 		CommitTransactionCommand();
 
-		if (status == BDR_NODE_STATUS_KILLED || status == BDR_NODE_STATUS_PARTING || status == BDR_NODE_STATUS_PARTED)
+		if (status == BDR_NODE_STATUS_KILLED)
 		{
 			ereport(ERROR,
 					(errcode(ERRCODE_OPERATOR_INTERVENTION),

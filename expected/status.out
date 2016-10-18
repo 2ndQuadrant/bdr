@@ -11,8 +11,6 @@ ORDER BY c;
  i           | BDR_NODE_STATUS_COPYING_INITIAL_DATA    | i
  k           | BDR_NODE_STATUS_KILLED                  | k
  o           | BDR_NODE_STATUS_CREATING_OUTBOUND_SLOTS | o
- p           | BDR_NODE_STATUS_PARTING                 | p
- P           | BDR_NODE_STATUS_PARTED                  | P
  r           | BDR_NODE_STATUS_READY                   | r
 (8 rows)
 
