@@ -644,7 +644,7 @@ process_remote_insert(StringInfo s)
 		 */
 		check_apply_update(BdrConflictType_InsertInsert,
 						   local_node_id, local_ts, rel,
-						   oldslot->tts_tuple, NULL, &user_tuple,
+						   oldslot->tts_tuple, newslot->tts_tuple, &user_tuple,
 						   &apply_update, &log_update, &resolution);
 
 		/*
