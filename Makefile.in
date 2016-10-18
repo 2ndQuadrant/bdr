@@ -330,13 +330,14 @@ REGRESSCHECKS= \
 	supervisordb \
 	upgrade \
 	identifier \
+	pgreplicationslots \
 	pause \
 	catalog \
 	terminate \
 	skipchanges \
-	pgreplicationslots \
-	$(DDLREGRESSCHECKS) \
 	dml/basic dml/contrib dml/delete_pk dml/extended dml/missing_pk dml/toasted \
+	conflicts_2node \
+	$(DDLREGRESSCHECKS) \
 	$(EXTRAREGRESSCHECKS) \
 	$(REGRESSTEARDOWN)
 
