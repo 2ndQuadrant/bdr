@@ -1249,7 +1249,7 @@ remove_unwanted_data(PGconn *conn)
 	}
 	PQclear(res);
 
-	if (PG_VERSION_NUM/100 == 94)
+	if (PG_VERSION_NUM/100 == 904)
 		dropident_sql = "SELECT pg_catalog.pg_replication_identifier_drop(riname) FROM pg_catalog.pg_replication_identifier;";
 	else
 		dropident_sql = "SELECT pg_catalog.pg_replication_origin_drop(roname) FROM pg_catalog.pg_replication_origin;";
@@ -1308,7 +1308,7 @@ initialize_replication_identifier(PGconn *conn, NodeInfo *ni, Oid dboid, char *r
 	snprintf(remote_ident, sizeof(remote_ident), BDR_NODE_ID_FORMAT,
 				ni->remote_sysid, ni->remote_tlid, dboid, dboid, "");
 
-	if (PG_VERSION_NUM/100 == 94)
+	if (PG_VERSION_NUM/100 == 904)
 		origin_or_identifier = "identifier";
 	else
 		origin_or_identifier = "origin";
@@ -1335,7 +1335,7 @@ initialize_replication_identifier(PGconn *conn, NodeInfo *ni, Oid dboid, char *r
  		 */
 		printfPQExpBuffer(query, "SELECT pg_catalog.pg_replication_%s_advance('%s', '%s'%s)",
 						 origin_or_identifier, remote_ident, remote_lsn,
-						 (PG_VERSION_NUM/100 == 94 ? ", '0/0'" : ""));
+						 (PG_VERSION_NUM/100 == 904 ? ", '0/0'" : ""));
 
 		res = PQexec(conn, query->data);
 
