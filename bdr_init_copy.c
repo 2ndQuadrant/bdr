@@ -84,6 +84,7 @@ __attribute__((format(PG_PRINTF_ATTRIBUTE, 2, 3)));
 static int BDR_WARN_UNUSED run_pg_ctl(const char *arg);
 static void run_basebackup(const char *remote_connstr, const char *data_dir);
 static void wait_postmaster_connection(const char *connstr);
+static void wait_for_end_recovery(const char *connstr);
 static void wait_postmaster_shutdown(void);
 
 static char *validate_replication_set_input(char *replication_sets);
@@ -309,7 +310,7 @@ main(int argc, char **argv)
 	if (!local_connstr || !strlen(local_connstr))
 		die(_("Local connection must be specified.\n"));
 
-	logfd = open("bdr_init_copy_postgres.log", O_CREAT | O_RDWR,
+	logfd = open("bdr_init_copy_postgres.log", O_CREAT | O_RDWR | O_TRUNC,
 				 S_IRUSR | S_IWUSR);
 	if (logfd == -1)
 	{
@@ -440,17 +441,43 @@ main(int argc, char **argv)
 	}
 	appendPQExpBuffer(recoveryconfcontents, "recovery_target_name = '%s'\n", restore_point_name);
 	appendPQExpBuffer(recoveryconfcontents, "recovery_target_inclusive = true\n");
+	if (PG_VERSION_NUM/100 == 904)
+	{
+		appendPQExpBuffer(recoveryconfcontents, "pause_at_recovery_target = off");
+	}
+	else if (PG_VERSION_NUM/100 == 906)
+	{
+		appendPQExpBuffer(recoveryconfcontents, "recovery_target_action = promote");
+	}
+	else
+	{
+		die(_("Only 9.4bdr and 9.6 are supported"));
+	}
+
 	WriteRecoveryConf(recoveryconfcontents);
 
 	/*
 	 * Start local node with BDR disabled, and wait until it starts accepting
 	 * connections which means it has caught up to the restore point.
+	 *
+	 * Note that pg_ctl won't return nonzero if postmaster starts then
+	 * immediately exits due to issues like port conflicts. We'll detect that
+	 * in wait_postmaster_connection().
 	 */
 	pg_ctl_ret = run_pg_ctl("start -l \"bdr_init_copy_postgres.log\" -o \"-c shared_preload_libraries=''\"");
 	if (pg_ctl_ret != 0)
 		die(_("postgres startup for restore point catchup failed with %d. See bdr_init_copy_postgres.log."), pg_ctl_ret);
 
 	wait_postmaster_connection(local_connstr);
+
+	/*
+	 * The postmaster is in standby mode and has caught up. Now we have to
+	 * promote it so we can perform read/write transactions and wait for
+	 * it to notice that it has been promoted.
+	 *
+	 * When pg_is_in_recovery() no longer returns true, we're ready.
+	 */
+	wait_for_end_recovery(local_connstr);
 
 	/*
 	 * Clean any per-node data that were copied by pg_basebackup.
@@ -477,6 +504,14 @@ main(int argc, char **argv)
 
 	/*
 	 * Individualize the local node by changing the system identifier.
+	 *
+	 * We can't rely on the timeline ID alone, even though it's incremented
+	 * on promotion of the copy, because we can't make sure it's globally
+	 * unique. If node A is copied to node B, then node A is copied to node C,
+	 * both nodes B and C will have the same tlid.
+	 *
+	 * For 9.6 this means using a patched pg_resetxlog since the stock one
+	 * doesn't know how to alter the sysid.
 	 */
 	set_sysid(node_info.local_sysid);
 
@@ -583,7 +618,9 @@ usage(void)
 	printf(_("  -U, --remote-user=NAME  connect as specified database user to the remote node\n"));
 	printf(_("  --local-dbname=CONNSTR  dbname or connection string for local node\n"));
 	printf(_("  --local-host=HOSTNAME   server host or socket directory for local node\n"));
-	printf(_("  --local-port=PORT       server port number for local node\n"));
+	printf(_("  --local-port=PORT       server port number for local node. Must match\n"));
+	printf(_("                          postgresql.conf, does not set port server is"));
+	printf(_("                          started with."));
 	printf(_("  --local-user=NAME       connect as specified database user to the local node\n"));
 }
 
@@ -703,11 +740,22 @@ set_sysid(uint64 sysid)
 {
 	int			 ret;
 	PQExpBuffer  cmd = createPQExpBuffer();
-	char		*exec_path = find_other_exec_or_die(argv0, "pg_resetxlog", "pg_resetxlog (PostgreSQL) " PG_VERSION "\n");
+	char		*exec_path, *cmdname;
+
+	if (PG_VERSION_NUM/100 == 904)
+	{
+		exec_path = find_other_exec_or_die(argv0, "pg_resetxlog", "pg_resetxlog (PostgreSQL) " PG_VERSION "\n");
+		cmdname = "pg_resetxlog";
+	}
+	else
+	{
+		exec_path = find_other_exec_or_die(argv0, "bdr_resetxlog", "bdr_resetxlog (PostgreSQL) " PG_VERSION "\n");
+		cmdname = "bdr_resetxlog";
+	}
 
 	appendPQExpBuffer(cmd, "%s \"-s "UINT64_FORMAT"\" \"%s\"", exec_path, sysid, data_dir);
 
-	print_msg(VERBOSITY_DEBUG, _("Running pg_resetxlog: %s.\n"), cmd->data);
+	print_msg(VERBOSITY_DEBUG, _("Running %s: %s.\n"), cmdname, cmd->data);
 	ret = system(cmd->data);
 
 	destroyPQExpBuffer(cmd);
@@ -715,11 +763,11 @@ set_sysid(uint64 sysid)
 	if (WIFEXITED(ret) && WEXITSTATUS(ret) == 0)
 		return;
 	if (WIFEXITED(ret))
-		die(_("pg_resetxlog failed with exit status %d, cannot continue.\n"), WEXITSTATUS(ret));
+		die(_("%s failed with exit status %d, cannot continue.\n"), cmdname, WEXITSTATUS(ret));
 	else if (WIFSIGNALED(ret))
-		die(_("pg_resetxlog exited with signal %d, cannot continue"), WTERMSIG(ret));
+		die(_("%s exited with signal %d, cannot continue"), cmdname, WTERMSIG(ret));
 	else
-		die(_("pg_resetxlog exited for an unknown reason (system() returned %d)"), ret);
+		die(_("%s exited for an unknown reason (system() returned %d)"), cmdname, ret);
 }
 
 /*
@@ -728,54 +776,61 @@ set_sysid(uint64 sysid)
 static void
 remove_unwanted_files(void)
 {
-	DIR				*lldir;
-	struct dirent	*llde;
-	PQExpBuffer		 llpath = createPQExpBuffer();
-	PQExpBuffer		 filename = createPQExpBuffer();
-
-	printfPQExpBuffer(llpath, "%s/%s", data_dir, LLOGCDIR);
-
-	print_msg(VERBOSITY_DEBUG, _("Removing data from \"%s\" directory.\n"),
-			  llpath->data);
-
 	/*
-	 * Remove stray logical replication checkpoints
+	 * 9.4's pg_basebackup copies pg_logical/checkpoints; 9.6 does
+	 * not since there's no such thing on 9.6.
 	 */
-	lldir = opendir(llpath->data);
-	if (lldir == NULL)
+	if (PG_VERSION_NUM/100 == 904)
 	{
-		die(_("Could not open directory \"%s\": %s\n"),
-			llpath->data, strerror(errno));
-	}
+		DIR				*lldir;
+		struct dirent	*llde;
+		PQExpBuffer		 llpath = createPQExpBuffer();
+		PQExpBuffer		 filename = createPQExpBuffer();
 
-	while (errno = 0, (llde = readdir(lldir)) != NULL)
-	{
-		size_t len = strlen(llde->d_name);
-		if (len > 5 && !strcmp(llde->d_name + len - 5, ".ckpt"))
+		printfPQExpBuffer(llpath, "%s/%s", data_dir, LLOGCDIR);
+
+		print_msg(VERBOSITY_DEBUG, _("Removing data from \"%s\" directory.\n"),
+				  llpath->data);
+
+		/*
+		 * Remove stray logical replication checkpoints
+		 */
+		lldir = opendir(llpath->data);
+		if (lldir == NULL)
 		{
-			printfPQExpBuffer(filename, "%s/%s", llpath->data, llde->d_name);
+			die(_("Could not open directory \"%s\": %s\n"),
+				llpath->data, strerror(errno));
+		}
 
-			if (unlink(filename->data) != 0)
+		while (errno = 0, (llde = readdir(lldir)) != NULL)
+		{
+			size_t len = strlen(llde->d_name);
+			if (len > 5 && !strcmp(llde->d_name + len - 5, ".ckpt"))
 			{
-				die(_("Could not unlink checkpoint file \"%s\": %s\n"),
-					filename->data, strerror(errno));
+				printfPQExpBuffer(filename, "%s/%s", llpath->data, llde->d_name);
+
+				if (unlink(filename->data) != 0)
+				{
+					die(_("Could not unlink checkpoint file \"%s\": %s\n"),
+						filename->data, strerror(errno));
+				}
 			}
 		}
-	}
 
-	destroyPQExpBuffer(llpath);
-	destroyPQExpBuffer(filename);
+		destroyPQExpBuffer(llpath);
+		destroyPQExpBuffer(filename);
 
-	if (errno)
-	{
-		die(_("Could not read directory \"%s\": %s\n"),
-			LLOGCDIR, strerror(errno));
-	}
+		if (errno)
+		{
+			die(_("Could not read directory \"%s\": %s\n"),
+				LLOGCDIR, strerror(errno));
+		}
 
-	if (closedir(lldir))
-	{
-		die(_("Could not close directory \"%s\": %s\n"),
-			LLOGCDIR, strerror(errno));
+		if (closedir(lldir))
+		{
+			die(_("Could not close directory \"%s\": %s\n"),
+				LLOGCDIR, strerror(errno));
+		}
 	}
 }
 
@@ -1137,6 +1192,22 @@ initialize_node_entry(PGconn *conn, NodeInfo *ni, char* node_name, Oid dboid,
 	PQExpBuffer		query = createPQExpBuffer();
 	PGresult	   *res;
 
+	res = PQexec(conn,
+		"DO LANGUAGE plpgsql $$\n"
+		"BEGIN\n"
+		"	IF EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'acquire_global_lock' AND pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'bdr')) THEN\n"
+		"		PERFORM bdr.acquire_global_lock('ddl');\n"
+		"	END IF;\n"
+		"END; $$;\n");
+
+	if (PQresultStatus(res) != PGRES_COMMAND_OK)
+	{
+		PQclear(res);
+		die(_("Failed to acquire global DDL lock before inserting row into bdr.bdr_nodes: %s\n"), PQerrorMessage(conn));
+	}
+
+	PQclear(res);
+
 	printfPQExpBuffer(query, "INSERT INTO bdr.bdr_nodes"
 							 " (node_status, node_sysid, node_timeline,"
 							 "	node_dboid, node_name, node_init_from_dsn,"
@@ -1166,6 +1237,7 @@ static void
 remove_unwanted_data(PGconn *conn)
 {
 	PGresult	   *res;
+	const char	   *dropident_sql;
 
 	/* Remove any BDR security labels. */
 	res = PQexec(conn, "DELETE FROM pg_catalog.pg_shseclabel WHERE provider = 'bdr';");
@@ -1177,12 +1249,17 @@ remove_unwanted_data(PGconn *conn)
 	}
 	PQclear(res);
 
+	if (PG_VERSION_NUM/100 == 904)
+		dropident_sql = "SELECT pg_catalog.pg_replication_identifier_drop(riname) FROM pg_catalog.pg_replication_identifier;";
+	else
+		dropident_sql = "SELECT pg_catalog.pg_replication_origin_drop(roname) FROM pg_catalog.pg_replication_origin;";
+
 	/* Remove replication identifiers. */
-	res = PQexec(conn, "SELECT pg_catalog.pg_replication_identifier_drop(riname) FROM pg_catalog.pg_replication_identifier;");
+	res = PQexec(conn, dropident_sql);
 	if (PQresultStatus(res) != PGRES_TUPLES_OK)
 	{
 		PQclear(res);
-		die(_("Could not remove existing replication identifiers: %s\n"), PQerrorMessage(conn));
+		die(_("Could not remove existing replication origins: %s\n"), PQerrorMessage(conn));
 	}
 	PQclear(res);
 }
@@ -1196,22 +1273,25 @@ reset_bdr_sequence_cache(PGconn *conn)
 {
 	PGresult	   *res;
 
-	/* Cleanup sequence cache */
-	res = PQexec(conn,
-				 "SELECT\n"
-				 "    bdr.bdr_internal_sequence_reset_cache(pg_class.oid)\n"
-				 "FROM pg_class\n"
-				 "    JOIN pg_seqam ON (pg_seqam.oid = pg_class.relam)\n"
-				 "    JOIN pg_namespace ON (pg_class.relnamespace = pg_namespace.oid)\n"
-				 "WHERE\n"
-				 "    relkind = 'S'\n"
-				 "    AND seqamname = 'bdr'\n");
-	if (PQresultStatus(res) != PGRES_TUPLES_OK)
+	if (PG_VERSION_NUM/100 == 904)
 	{
+		/* Cleanup sequence cache */
+		res = PQexec(conn,
+					 "SELECT\n"
+					 "    bdr.bdr_internal_sequence_reset_cache(pg_class.oid)\n"
+					 "FROM pg_class\n"
+					 "    JOIN pg_seqam ON (pg_seqam.oid = pg_class.relam)\n"
+					 "    JOIN pg_namespace ON (pg_class.relnamespace = pg_namespace.oid)\n"
+					 "WHERE\n"
+					 "    relkind = 'S'\n"
+					 "    AND seqamname = 'bdr'\n");
+		if (PQresultStatus(res) != PGRES_TUPLES_OK)
+		{
+			PQclear(res);
+			die(_("Could not clean sequence cache: %s\n"), PQerrorMessage(conn));
+		}
 		PQclear(res);
-		die(_("Could not clean sequence cache: %s\n"), PQerrorMessage(conn));
 	}
-	PQclear(res);
 }
 
 /*
@@ -1223,34 +1303,46 @@ initialize_replication_identifier(PGconn *conn, NodeInfo *ni, Oid dboid, char *r
 	PGresult   *res;
 	char		remote_ident[256];
 	PQExpBuffer query = createPQExpBuffer();
+	const char *origin_or_identifier;
 
 	snprintf(remote_ident, sizeof(remote_ident), BDR_NODE_ID_FORMAT,
 				ni->remote_sysid, ni->remote_tlid, dboid, dboid, "");
 
-	printfPQExpBuffer(query, "SELECT pg_catalog.pg_replication_identifier_create('%s')",
-					 remote_ident);
+	if (PG_VERSION_NUM/100 == 904)
+		origin_or_identifier = "identifier";
+	else
+		origin_or_identifier = "origin";
+
+	printfPQExpBuffer(query, "SELECT pg_catalog.pg_replication_%s_create('%s')",
+					 origin_or_identifier, remote_ident);
 
 	res = PQexec(conn, query->data);
 
 	if (PQresultStatus(res) != PGRES_TUPLES_OK)
 	{
-		die(_("Could not create replication indentifier \"%s\": status %s: %s\n"),
-			 query->data,
+		die(_("Could not create replication %s \"%s\": status %s: %s\n"),
+			 origin_or_identifier, query->data,
 			 PQresStatus(PQresultStatus(res)), PQresultErrorMessage(res));
 	}
 	PQclear(res);
 
 	if (remote_lsn)
 	{
-		printfPQExpBuffer(query, "SELECT pg_catalog.pg_replication_identifier_advance('%s', '%s', '0/0')",
-						 remote_ident, remote_lsn);
+		/*
+		 * This mess is to handle renaming of pg_replication_identifier_advance
+		 * to pg_replication_origin_advance and removal of the local_lsn param
+		 * in 9.6.
+ 		 */
+		printfPQExpBuffer(query, "SELECT pg_catalog.pg_replication_%s_advance('%s', '%s'%s)",
+						 origin_or_identifier, remote_ident, remote_lsn,
+						 (PG_VERSION_NUM/100 == 904 ? ", '0/0'" : ""));
 
 		res = PQexec(conn, query->data);
 
 		if (PQresultStatus(res) != PGRES_TUPLES_OK)
 		{
-			die(_("Could not advance replication indentifier \"%s\": status %s: %s\n"),
-				 query->data,
+			die(_("Could not advance replication %s \"%s\": status %s: %s\n"),
+				 origin_or_identifier, query->data,
 				 PQresStatus(PQresultStatus(res)), PQresultErrorMessage(res));
 		}
 		PQclear(res);
@@ -1595,18 +1687,30 @@ appendPQExpBufferConnstrValue(PQExpBuffer buf, const char *str)
 
 
 /*
- * Find the pgport and try a connection
+ * Find the pgport and try a connection until it reports not in recovery
  */
 static void
 wait_postmaster_connection(const char *connstr)
 {
 	PGPing		res;
 	long		pmpid = 0;
+	int			start_seconds_waited = 0;
+	static const int start_seconds_to_wait = 30;
 
 	print_msg(VERBOSITY_VERBOSE, "Waiting for PostgreSQL to accept connections ...");
 
-	/* First wait for Postmaster to come up. */
-	for (;;)
+	/*
+	 * First wait for Postmaster to come up.
+	 *
+	 * It's possible for the postmaster to launch then quit immediately due to
+	 * things like port conflicts. We won't get SIGCHLD for this because pg_ctl
+	 * acts as an intermediary, so we just have to time out. We can't use
+	 * pg_ctl -w because it waits for connection. pg_ctl status doesn't help
+	 * us since it has the same race.
+	 *
+	 * So we just time out after a while.
+	 */
+	while (start_seconds_waited < start_seconds_to_wait)
 	{
 		if ((pmpid = get_pgpid()) != 0 &&
 			postmaster_is_alive((pid_t) pmpid))
@@ -1614,9 +1718,23 @@ wait_postmaster_connection(const char *connstr)
 
 		pg_usleep(1000000);		/* 1 sec */
 		print_msg(VERBOSITY_VERBOSE, ".");
+		start_seconds_waited += 1;
 	}
 
-	/* Now wait for Postmaster to either accept connections or die. */
+	if (start_seconds_waited == start_seconds_to_wait)
+	{
+		die(_("\nTimed out waiting for postmaster start after %d seconds, check bdr_init_copy_postgres.log\n"),
+			start_seconds_waited);
+	}
+	else
+	{
+		print_msg(VERBOSITY_VERBOSE, _("\npostmaster started (pid="INT64_FORMAT"), waiting for connection"), pmpid);
+	}
+
+	/*
+	 * Now wait for Postmaster to either accept r/w (non-recovery) connections
+	 * or die.
+	 */
 	for (;;)
 	{
 		res = PQping(connstr);
@@ -1633,12 +1751,62 @@ wait_postmaster_connection(const char *connstr)
 		if (!postmaster_is_alive((pid_t) pmpid))
 			break;
 
+		
+
 		/* No response; wait */
 		pg_usleep(1000000);		/* 1 sec */
 		print_msg(VERBOSITY_VERBOSE, ".");
 	}
 
 	print_msg(VERBOSITY_VERBOSE, "\n");
+}
+
+static void
+wait_for_end_recovery(const char *connstr)
+{
+	PGconn *conn = connectdb((char*)connstr);
+
+	print_msg(VERBOSITY_VERBOSE, _("Waiting for PostgreSQL to become read/write"));
+
+	for (;;)
+	{
+		PGresult   *res;
+		char*		inrecovery;
+
+		res = PQexec(conn, "SELECT pg_catalog.pg_is_in_recovery()");
+
+		if (PQresultStatus(res) != PGRES_TUPLES_OK)
+		{
+			die(_("error while waiting for database to become read/write: %s: %s\n"),
+				 PQresStatus(PQresultStatus(res)), PQresultErrorMessage(res));
+		}
+
+		if (PQntuples(res) != 1 || PQnfields(res) != 1 || PQgetisnull(res, 0, 0))
+		{
+			die(gettext_noop("nonsensical result from pg_is_in_recovery()"));
+		}
+
+		inrecovery = PQgetvalue(res, 0, 0);
+		if (inrecovery[0] == 'f')
+		{
+			break;
+		}
+		else if (inrecovery[0] != 't')
+		{
+			die(gettext_noop("nonsensical result from pg_is_in_recovery, expected t|f, got %s"),
+				inrecovery);
+		}
+
+		PQclear(res);
+
+		/* Keep waiting */
+		pg_usleep(1000000);		/* 1 sec */
+		print_msg(VERBOSITY_VERBOSE, ".");
+	}
+
+	PQfinish(conn);
+
+	print_msg(VERBOSITY_VERBOSE, " ready\n");
 }
 
 /*
@@ -1816,6 +1984,9 @@ postmaster_is_alive(pid_t pid)
 	 * Don't believe that our own PID or parent shell's PID is the postmaster,
 	 * either.  (Windows hasn't got getppid(), though.)
 	 */
+	if (pid == 0)
+		return false;
+
 	if (pid == getpid())
 		return false;
 #ifndef WIN32
