@@ -182,13 +182,13 @@
     BEGIN;
 
     CREATE TABLE gstest (
-      id bigint primarykey,
+      id bigint primary key,
       parrot text
     );
 
-    CREATE SEQUENCE gstest_id_seq USING bdr OWNED BY gstest.id;
+    CREATE SEQUENCE gstest_id_seq OWNED BY gstest.id USING bdr;
 
-    ALTER TABLE gstest ALTER COLUMN id DEFAULT nextval('gstest_id_seq');
+    ALTER TABLE gstest ALTER COLUMN id SET DEFAULT nextval('gstest_id_seq');
    </programlisting>
   </para>
 
