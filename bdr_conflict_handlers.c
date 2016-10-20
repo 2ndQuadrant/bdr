@@ -35,6 +35,7 @@
 #include "replication/replication_identifier.h"
 
 #include "utils/builtins.h"
+#include "utils/guc.h"
 #include "utils/inval.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
@@ -46,18 +47,14 @@ PG_FUNCTION_INFO_V1(bdr_drop_conflict_handler);
 
 const char *create_handler_sql =
 "INSERT INTO bdr.bdr_conflict_handlers " \
-"   (ch_name, ch_type, ch_reloid, ch_fun, ch_timeframe)\n" \
+"   (ch_reloid, ch_name, ch_fun, ch_type, ch_timeframe)\n" \
 "   VALUES ($1, $2, $3, $4, $5)";
 
 const char *drop_handler_sql =
-"DELETE FROM bdr.bdr_conflict_handlers WHERE ch_name = $1 AND ch_reloid = $2";
+"DELETE FROM bdr.bdr_conflict_handlers WHERE ch_reloid = $1 AND ch_name = $2";
 
 const char *drop_handler_get_tbl_oid_sql =
-"SELECT oid FROM bdr.bdr_conflict_handlers WHERE ch_name = $1 AND ch_reloid = $2";
-
-const char *handler_queued_table_sql =
-"INSERT INTO bdr.bdr_queued_commands (lsn, queued_at, perpetrator, command_tag, command)\n" \
-"   VALUES (pg_current_xlog_location(), NOW(), CURRENT_USER, 'SELECT', $1)";
+"SELECT oid FROM bdr.bdr_conflict_handlers WHERE ch_reloid = $1 AND ch_name = $2";
 
 const char *get_conflict_handlers_for_table_sql =
 "SELECT ch_fun::regprocedure, ch_type::text ch_type, ch_timeframe FROM bdr.bdr_conflict_handlers" \
@@ -145,33 +142,45 @@ bdr_conflict_handlers_check_access(Oid reloid)
 Datum
 bdr_create_conflict_handler(PG_FUNCTION_ARGS)
 {
-	Oid			reloid,
-				proc_oid;
-
-	char	   *ch_name;
-	Datum		ch_type_oid,
-				type_label_datum;
-
-	char	   *label = NULL;
+	Oid			proc_oid, reloid;
 	int			ret;
-
 	Oid			argtypes[5];
 	Datum		values[5];
-	char		nulls[5];
+	char		nulls[5] = {' ', ' ', ' ', ' ', 'n'};
+	int			guc_nestlevel;
 
 	ObjectAddress myself,
 				rel_object;
 
 	Relation	rel;
 
-	if (PG_NARGS() < 4 || PG_NARGS() > 5)
-		elog(ERROR, "expecting four or five arguments, got %d", PG_NARGS());
+	if (PG_NARGS() != 5)
+		elog(ERROR, "expecting five arguments, got %d", PG_NARGS());
+
+	if (PG_ARGISNULL(0) || PG_ARGISNULL(1) || PG_ARGISNULL(2) || PG_ARGISNULL(3))
+		elog(ERROR, "relation, handler name, handler procedure, and handler type must be non-null");
 
 	if (bdr_conflict_handler_table_oid == InvalidOid)
 		bdr_conflict_handlers_init();
 
+	guc_nestlevel = NewGUCNestLevel();
+
+	/*
+	 * Force everything in the query to be fully qualified
+	 * so that when we generate SQL to replicate we don't
+	 * rely on the search_path.
+	 */
+	(void) set_config_option("search_path", "",
+					PGC_USERSET, PGC_S_SESSION,
+					GUC_ACTION_SAVE, true, 0
+#if PG_VERSION_NUM >= 90500
+					, false
+#endif
+					);
+
+
+
 	reloid = PG_GETARG_OID(0);
-	ch_name = NameStr(*PG_GETARG_NAME(1));
 	proc_oid = PG_GETARG_OID(2);
 
 	bdr_conflict_handlers_check_access(reloid);
@@ -191,34 +200,28 @@ bdr_create_conflict_handler(PG_FUNCTION_ARGS)
 	 * build up arguments for the INSERT INTO bdr.bdr_conflict_handlers
 	 */
 
-	argtypes[0] = NAMEOID;
-	nulls[0] = false;
-	values[0] = PG_GETARG_DATUM(1);
+	argtypes[0] = REGCLASSOID;
+	values[0] = PG_GETARG_DATUM(0);
 
-	argtypes[1] = bdr_conflict_handler_type_oid;
+	argtypes[1] = NAMEOID;
+	values[1] = PG_GETARG_DATUM(1);
 
-	ch_type_oid = PG_GETARG_DATUM(3);
-	type_label_datum = DirectFunctionCall1(enum_out, ch_type_oid);
-	label = DatumGetCString(type_label_datum);
-
-	nulls[1] = false;
-	values[1] = ch_type_oid;
-
-	argtypes[2] = REGCLASSOID;
-	nulls[2] = false;
-	values[2] = PG_GETARG_DATUM(0);
-
-	argtypes[3] = TEXTOID;
-	nulls[3] = false;
-	values[3] =
+	argtypes[2] = TEXTOID;
+	values[2] =
 		CStringGetTextDatum(format_procedure_qualified(PG_GETARG_OID(2)));
 
+	argtypes[3] = bdr_conflict_handler_type_oid;
+	values[3] = PG_GETARG_DATUM(3);
+
 	argtypes[4] = INTERVALOID;
-	if (PG_NARGS() == 4)
+	if (PG_ARGISNULL(4))
+	{
 		nulls[4] = 'n';
+		values[4] = (Datum)0;
+	}
 	else
 	{
-		nulls[4] = false;
+		nulls[4] = ' ';
 		values[4] = PG_GETARG_DATUM(4);
 	}
 
@@ -256,47 +259,21 @@ bdr_create_conflict_handler(PG_FUNCTION_ARGS)
 	CacheInvalidateRelcacheByRelid(reloid);
 
 	/*
-	 * last: INSERT to queued_commands for replication if not replaying
+	 * INSERT to queued_commands for replication if we are not not replaying
+	 * a queued command.
 	 */
 	if (replication_origin_id == InvalidRepNodeId)
 	{
-		StringInfoData query;
-		char	   *proc_name = format_procedure_qualified(proc_oid);
-		char	   *quoted_ch_name = quote_literal_cstr(ch_name),
-				   *quoted_proc_name = quote_literal_cstr(proc_name),
-				   *quoted_label,
-				   *quoted_rel_name;
+		/*
+		 * Re-use the SPI arguments from creating the handler and let Pg handle quoting
+		 * with format(..) so we don't have to dance with stringifcation etc.
+		 */
+		const char * const insert_query =
+			"INSERT INTO bdr.bdr_queued_commands (lsn, queued_at, perpetrator, command_tag, command)\n"
+			"   VALUES (pg_current_xlog_location(), NOW(), CURRENT_USER, 'SELECT',\n"
+			"           format('SELECT bdr.bdr_create_conflict_handler(%L, %L, %L, %L, %L)', $1, $2, $3, $4, $5));";
 
-		initStringInfo(&query);
-
-		quoted_rel_name =
-			quote_literal_cstr(quote_qualified_identifier(
-														  get_namespace_name(RelationGetNamespace(rel)),
-														  RelationGetRelationName(rel)));
-
-		if (label)
-		{
-			quoted_label = quote_literal_cstr(label);
-
-			appendStringInfo(&query,
-					"SELECT bdr.bdr_create_conflict_handler(%s, %s, %s, %s)",
-							 quoted_rel_name,
-							 quoted_ch_name,
-							 quoted_proc_name,
-							 quoted_label);
-		}
-		else
-			appendStringInfo(&query,
-						"SELECT bdr.bdr_create_conflict_handler(%s, %s, %s)",
-							 quoted_rel_name,
-							 quoted_ch_name,
-							 quoted_proc_name);
-
-		argtypes[0] = TEXTOID;
-		nulls[0] = false;
-		values[0] = CStringGetTextDatum(query.data);
-
-		ret = SPI_execute_with_args(handler_queued_table_sql, 1, argtypes,
+		ret = SPI_execute_with_args(insert_query, 5, argtypes,
 									values, nulls, false, 0);
 
 		if (ret != SPI_OK_INSERT)
@@ -310,6 +287,8 @@ bdr_create_conflict_handler(PG_FUNCTION_ARGS)
 
 	heap_close(rel, NoLock);
 
+	AtEOXact_GUC(false, guc_nestlevel);
+
 	PG_RETURN_VOID();
 }
 
@@ -321,9 +300,7 @@ bdr_create_conflict_handler(PG_FUNCTION_ARGS)
 Datum
 bdr_drop_conflict_handler(PG_FUNCTION_ARGS)
 {
-	Oid			rowoid,
-				tg_reloid;
-	char	   *ch_name;
+	Oid			rowoid;
 	int			ret;
 	bool		isnull;
 
@@ -336,6 +313,10 @@ bdr_drop_conflict_handler(PG_FUNCTION_ARGS)
 	TupleDesc	spi_rslt_desc;
 
 	int			col_oid;
+	Oid			ch_relid = PG_GETARG_OID(0);
+	Name		ch_name = PG_GETARG_NAME(1);
+
+	int			guc_nestlevel;
 
 	Relation	rel;
 
@@ -345,28 +326,38 @@ bdr_drop_conflict_handler(PG_FUNCTION_ARGS)
 
 	if (bdr_conflict_handler_table_oid == InvalidOid)
 		bdr_conflict_handlers_init();
+	guc_nestlevel = NewGUCNestLevel();
 
-	tg_reloid = PG_GETARG_OID(0);
+	/*
+	 * Force everything in the query to be fully qualified
+	 * so that when we generate SQL to replicate we don't
+	 * rely on the search_path.
+	 */
+	(void) set_config_option("search_path", "",
+					PGC_USERSET, PGC_S_SESSION,
+					GUC_ACTION_SAVE, true, 0
+#if PG_VERSION_NUM >= 90500
+					, false
+#endif
+					);
 
-	ch_name = PG_GETARG_NAME(1)->data;
-
-	argtypes[0] = NAMEOID;
-	values[0] = PG_GETARG_DATUM(1);
+	argtypes[0] = REGCLASSOID;
+	values[0] = PG_GETARG_DATUM(0);
 	nulls[0] = 0;
 
-	argtypes[1] = OIDOID;
-	values[1] = PG_GETARG_DATUM(0);
+	argtypes[1] = NAMEOID;
+	values[1] = PG_GETARG_DATUM(1);
 	nulls[1] = 0;
 
-	bdr_conflict_handlers_check_access(tg_reloid);
+	bdr_conflict_handlers_check_access(ch_relid);
 
-	rel = heap_open(tg_reloid, ShareUpdateExclusiveLock);
+	rel = heap_open(ch_relid, ShareUpdateExclusiveLock);
 
 	if (SPI_connect() != SPI_OK_CONNECT)
 		elog(ERROR, "SPI_connect failed");
 
 	/*
-	 * get the row oid to remove the dependency
+	 * get the bdr.bdr_conflict_handlers row oid to remove the dependency
 	 */
 	ret = SPI_execute_with_args(drop_handler_get_tbl_oid_sql, 2, argtypes,
 								values, nulls, false, 0);
@@ -375,7 +366,7 @@ bdr_drop_conflict_handler(PG_FUNCTION_ARGS)
 		elog(ERROR, "expected SPI state %u, got %u", SPI_OK_SELECT, ret);
 
 	if (SPI_processed != 1)
-		elog(ERROR, "handler %s not found", ch_name);
+		elog(ERROR, "handler %s for relation with oid %u not found", NameStr(*ch_name), ch_relid);
 
 	spi_rslt = SPI_tuptable->vals[0];
 	spi_rslt_desc = SPI_tuptable->tupdesc;
@@ -401,29 +392,20 @@ bdr_drop_conflict_handler(PG_FUNCTION_ARGS)
 									RelationRelationId, DEPENDENCY_INTERNAL);
 	CommandCounterIncrement();
 
-	CacheInvalidateRelcacheByRelid(tg_reloid);
+	CacheInvalidateRelcacheByRelid(ch_relid);
 
 	/*
 	 * last: INSERT to queued_commands for replication if not replaying
 	 */
 	if (replication_origin_id == InvalidRepNodeId)
 	{
-		StringInfoData query;
-		char	   *quoted_ch_name = quote_literal_cstr(ch_name);
 
-		initStringInfo(&query);
+		const char * const query =
+			"INSERT INTO bdr.bdr_queued_commands (lsn, queued_at, perpetrator, command_tag, command)\n"
+			"   VALUES (pg_current_xlog_location(), NOW(), CURRENT_USER, 'SELECT', "
+			"           format('SELECT bdr.bdr_drop_conflict_handler(%L, %L)', $1, $2));";
 
-		appendStringInfo(&query,
-						 "SELECT bdr.bdr_drop_conflict_handler(%d, %s)",
-						 tg_reloid, quoted_ch_name);
-
-		pfree(quoted_ch_name);
-
-		argtypes[0] = TEXTOID;
-		nulls[0] = false;
-		values[0] = CStringGetTextDatum(query.data);
-
-		ret = SPI_execute_with_args(handler_queued_table_sql, 1, argtypes,
+		ret = SPI_execute_with_args(query, 2, argtypes,
 									values, nulls, false, 0);
 
 		if (ret != SPI_OK_INSERT)
@@ -434,6 +416,8 @@ bdr_drop_conflict_handler(PG_FUNCTION_ARGS)
 		elog(ERROR, "SPI_finish failed");
 
 	heap_close(rel, NoLock);
+
+	AtEOXact_GUC(false, guc_nestlevel);
 
 	PG_RETURN_VOID();
 }
