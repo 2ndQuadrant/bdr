@@ -822,7 +822,8 @@ bdr_node_status_from_char(PG_FUNCTION_ARGS)
 		BDR_NODE_STATUS_TOSTR(BDR_NODE_STATUS_KILLED)
 	};
 
-	Assert(result != NULL);
+	if (result == NULL)
+		elog(ERROR, "unrcognised status char %c", PG_GETARG_CHAR(0));
 
 	PG_RETURN_TEXT_P(cstring_to_text(pstrdup(result)));
 }
