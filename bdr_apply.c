@@ -959,9 +959,18 @@ process_remote_update(StringInfo s)
 	else
 	{
 		/*
-		 * Update target is missing. We don't know if this is an update-vs-delete
-		 * conflict or if the target tuple came from some 3rd node and hasn't yet
-		 * been applied to the local node.
+		 * Update target is missing. We don't know if this is an
+		 * update-vs-delete conflict or an insert/update conflict. The target
+		 * tuple could've been inserted on node A, replicated to node B and
+		 * updated there, and we might be seeing the update before the insert.
+		 * Or we could've locally deleted it (or replayed a delete) concurrent
+		 * with a remote update.
+		 *
+		 * We currently assume it's an update/delete conflict.
+		 *
+		 * TODO. Determining this reliably requires keeping knowledge of
+		 * locally deleted tuples for a while and looking them up with dirty
+		 * reads.
 		 */
 
 		bool skip = false;
@@ -1143,6 +1152,11 @@ process_remote_delete(StringInfo s)
 		 *
 		 * (This can also arise with an UPDATE that changes the PRIMARY KEY,
 		 * as that's effectively a DELETE + INSERT).
+		 *
+		 * TODO. If we keep track of locally deleted tuples for a while we
+		 * can do better by doing dirty reads to see if there's a recently
+		 * deleted tuple. Though that may still suffer from other races when
+		 * the tuple is deleted then re-created.
 		 */
 
 		bool		skip = false;
