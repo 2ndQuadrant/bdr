@@ -22,6 +22,8 @@
 #include "utils/timestamp.h"
 #include "utils/datetime.h"
 
+#include "miscadmin.h"
+
 #include "bdr.h"
 
 #define TIMESTAMP_BITS	40
@@ -33,6 +35,7 @@
 
 /* Cache for nodeid so we don't have to read it for every nextval call. */
 static int16	seq_nodeid = -1;
+static Oid	seq_nodeid_dboid = InvalidOid;
 
 static int16 global_seq_get_nodeid(void);
 
@@ -64,14 +67,23 @@ global_seq_nextval_oid(PG_FUNCTION_ARGS)
 	int64	timestamp;
 	int64	res;
 	const int64 seq_ts_epoch = 529111339634; /* Oct 7, 2016, when this code was written, in ms */
+	int64	current_ts = GetCurrentIntegerTimestamp();
+
+	if (PG_NARGS() >= 2)
+	{
+		/*
+		 * We allow an override timestamp to be passed for testing
+		 * purposes using an alternate function signature. We've
+		 * received one.
+		 */
+		current_ts = PG_GETARG_INT64(1);
+	}
 
 	/* timestamp is in milliseconds */
-	timestamp = (GetCurrentIntegerTimestamp()/1000) - seq_ts_epoch;
+	timestamp = (current_ts/1000) - seq_ts_epoch;
 	nodeid = global_seq_get_nodeid();
 	sequenced = DirectFunctionCall1(nextval_oid, seqoid);
 	sequence = DatumGetInt64(sequenced) % MAX_SEQ_ID;
-
-	elog(NOTICE, "timestamp is "UINT64_FORMAT, timestamp);
 
 	/*
 	 * This is mainly a failsafe so that we don't generate corrupted
@@ -97,17 +109,6 @@ global_seq_nextval_oid(PG_FUNCTION_ARGS)
 }
 
 /*
- * TODO - vote for sequence nodeid?
- *
- * HACK for testing: use database oid.
- */
-static int16
-global_seq_assign_nodeid(void)
-{
-	elog(ERROR, "sequence ID not allocated (TODO)");
-}
-
-/*
  * Read the unique node id for this node.
  */
 static int16
@@ -116,7 +117,11 @@ global_seq_read_nodeid(void)
 	int seq_id = bdr_local_node_seq_id();
 
 	if (seq_id == -1)
-		seq_id = global_seq_assign_nodeid();
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("node sequence ID not allocated"),
+				 errdetail("No node_seq_id in bdr.bdr_nodes for this node"),
+				 errhint("Check the node status to ensure it's fully ready")));
 
 	if (seq_id < 0 || seq_id > MAX_NODE_ID)
 		elog(ERROR, "node sequence ID out of range 0 .. %d", MAX_NODE_ID);
@@ -130,8 +135,11 @@ global_seq_read_nodeid(void)
 static int16
 global_seq_get_nodeid(void)
 {
-	if (seq_nodeid == -1)
+	if (seq_nodeid_dboid != MyDatabaseId)
+	{
 		seq_nodeid = global_seq_read_nodeid();
+		seq_nodeid_dboid = MyDatabaseId;
+	}
 
 	return seq_nodeid;
 }

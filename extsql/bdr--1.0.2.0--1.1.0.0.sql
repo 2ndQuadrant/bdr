@@ -84,6 +84,18 @@ CREATE FUNCTION bdr.global_seq_nextval(regclass)
 RETURNS bigint
 LANGUAGE c STRICT VOLATILE AS 'MODULE_PATHNAME','global_seq_nextval_oid';
 
+COMMENT ON FUNCTION bdr.global_seq_nextval(regclass)
+IS 'generate sequence values unique to this node using a local sequence as a seed';
+
+-- For testing purposes we sometimes want to be able to override the
+-- timestamp etc.
+CREATE FUNCTION bdr.global_seq_nextval_test(regclass, bigint)
+RETURNS bigint
+LANGUAGE c STRICT VOLATILE AS 'MODULE_PATHNAME','global_seq_nextval_oid';
+
+COMMENT ON FUNCTION bdr.global_seq_nextval_test(regclass, bigint)
+IS 'function for BDR testing only, do not use in application code';
+
 -- Add "node_status" to remote_nodeinfo result
 DROP FUNCTION bdr.bdr_get_remote_nodeinfo(
 	dsn text, sysid OUT text, timeline OUT oid, dboid OUT oid,
