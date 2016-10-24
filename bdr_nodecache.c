@@ -164,6 +164,8 @@ bdr_nodecache_lookup(BDRNodeId nodeid, bool missing_ok)
 		entry->name = MemoryContextStrdup(CacheMemoryContext,
 										  nodeinfo->name);
 
+	entry->seq_id = nodeinfo->seq_id;
+
 	entry->valid = true;
 
 	bdr_bdr_node_free(nodeinfo);
