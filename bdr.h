@@ -590,7 +590,8 @@ extern BdrNodeStatus bdr_nodes_get_local_status(uint64 sysid, TimeLineID tli,
 extern BDRNodeInfo * bdr_nodes_get_local_info(uint64 sysid, TimeLineID tli,
 										  Oid dboid);
 extern void bdr_bdr_node_free(BDRNodeInfo *node);
-extern void bdr_nodes_set_local_status(BdrNodeStatus status);
+extern void bdr_nodes_set_local_status(BdrNodeStatus status, BdrNodeStatus oldstatus);
+extern void bdr_nodes_set_local_attrs(BdrNodeStatus status, BdrNodeStatus oldstatus, const int *seq_id);
 
 extern Oid GetSysCacheOidError(int cacheId, Datum key1, Datum key2, Datum key3,
 							   Datum key4);

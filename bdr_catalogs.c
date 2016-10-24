@@ -293,19 +293,32 @@ bdr_bdr_node_free(BDRNodeInfo *node)
 	pfree(node);
 }
 
+void
+bdr_nodes_set_local_status(BdrNodeStatus status, BdrNodeStatus fromstatus)
+{
+	bdr_nodes_set_local_attrs(status, fromstatus, NULL);
+}
+
 /*
- * Update the status field on the local node (as identified by current
- * sysid,tlid,dboid) of bdr.bdr_nodes. The node record must already exist.
+ * Update mutable fields on the local bdr.bdr_nodes entry as identified by
+ * current sysid,tlid,dboid. The node record must already exist and have the
+ * specified old status.
+ *
+ * TODO: should do this with catalog access routines, not SPI.
+ *
+ * If seq_id is passed as non-null a sequence ID is assigned. node_seq_id
+ * cannot be set back to null from this interface.
  *
  * Unlike bdr_nodes_get_local_status, this inteface does not accept
  * sysid, tlid and dboid input but can only set the status of the local node.
  */
 void
-bdr_nodes_set_local_status(BdrNodeStatus status)
+bdr_nodes_set_local_attrs(BdrNodeStatus status, BdrNodeStatus oldstatus, const int *seq_id)
 {
 	int			spi_ret;
-	Oid			argtypes[] = { CHAROID, TEXTOID, OIDOID, OIDOID };
-	Datum		values[4];
+	Oid			argtypes[] = { CHAROID, TEXTOID, OIDOID, OIDOID, CHAROID, INT4OID };
+	char		nulls[] = {' ', ' ', ' ', ' ', ' ', ' '};
+	Datum		values[6];
 	char		sysid_str[33];
 	bool		tx_started = false;
 	bool		spi_pushed;
@@ -330,14 +343,21 @@ bdr_nodes_set_local_status(BdrNodeStatus status)
 	values[1] = CStringGetTextDatum(sysid_str);
 	values[2] = ObjectIdGetDatum(ThisTimeLineID);
 	values[3] = ObjectIdGetDatum(MyDatabaseId);
+	values[4] = CharGetDatum((char)oldstatus);
+	if (seq_id != NULL)
+		values[5] = Int32GetDatum(*seq_id);
+	else
+		nulls[5] = 'n';
 
 	spi_ret = SPI_execute_with_args(
 							   "UPDATE bdr.bdr_nodes"
-							   "   SET node_status = $1"
+							   "   SET node_status = $1,"
+							   "       node_seq_id = coalesce($6, node_seq_id)"
 							   " WHERE node_sysid = $2"
 							   "   AND node_timeline = $3"
-							   "   AND node_dboid = $4;",
-							   4, argtypes, values, NULL, false, 0);
+							   "   AND node_dboid = $4"
+							   "   AND node_status = $5;",
+							   6, argtypes, values, nulls, false, 0);
 
 	if (spi_ret != SPI_OK_UPDATE)
 		elog(ERROR, "Unable to set status=%c of row (node_sysid="

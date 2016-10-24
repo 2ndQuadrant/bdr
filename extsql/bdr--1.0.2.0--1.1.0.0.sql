@@ -19,6 +19,16 @@ ALTER TABLE bdr_queued_commands
 ALTER TABLE bdr_queued_commands
   ALTER COLUMN search_path SET NOT NULL;
 
+-- Marking this immutable is technically a bit cheeky as we could add
+-- new statuses. But for index use we need it, and it's safe since
+-- any unrecognised entries will result in ERRORs and can thus never
+-- exist in an index.
+CREATE FUNCTION bdr.node_status_from_char("char")
+RETURNS text LANGUAGE c STRICT IMMUTABLE AS 'MODULE_PATHNAME','bdr_node_status_from_char';
+
+CREATE FUNCTION bdr.node_status_to_char(text)
+RETURNS "char" LANGUAGE c STRICT IMMUTABLE AS 'MODULE_PATHNAME','bdr_node_status_to_char';
+
 --
 -- DDL replication limitations in 9.6bdr mean that we can't directly
 -- EXECUTE ddl in function bodies, and must use bdr.bdr_replicate_ddl_command
@@ -66,15 +76,13 @@ $$;
 ALTER TABLE bdr.bdr_nodes
   ADD COLUMN node_seq_id smallint;
 
+-- BDR doesn't like partial unique indexes, but we don't do
+-- conflict resolution on bdr_nodes so it's safe here.
+CREATE UNIQUE INDEX ON bdr.bdr_nodes(node_seq_id) WHERE (node_status IN (bdr.node_status_to_char('BDR_NODE_STATUS_READY')));
+
 CREATE FUNCTION bdr.global_seq_nextval(regclass)
 RETURNS bigint
 LANGUAGE c STRICT VOLATILE AS 'MODULE_PATHNAME','global_seq_nextval_oid';
-
-CREATE FUNCTION bdr.node_status_from_char("char")
-RETURNS text LANGUAGE c STRICT STABLE AS 'MODULE_PATHNAME','bdr_node_status_from_char';
-
-CREATE FUNCTION bdr.node_status_to_char(text)
-RETURNS "char" LANGUAGE c STRICT STABLE AS 'MODULE_PATHNAME','bdr_node_status_to_char';
 
 -- Add "node_status" to remote_nodeinfo result
 DROP FUNCTION bdr.bdr_get_remote_nodeinfo(
@@ -105,6 +113,7 @@ DECLARE
     localid_from_dsn RECORD;
     remote_nodeinfo RECORD;
     remote_nodeinfo_r RECORD;
+    n RECORD;
 BEGIN
     -- Only one tx can be adding connections
     LOCK TABLE bdr.bdr_connections IN EXCLUSIVE MODE;
@@ -131,6 +140,17 @@ BEGIN
             MESSAGE = 'This node is already a member of a BDR group',
             HINT = 'Connect to the node you wish to add and run '||caller||' from it instead',
             ERRCODE = 'object_not_in_prerequisite_state';
+    END IF;
+
+    -- Ensure local bdr.bdr_nodes is empty
+    SELECT * FROM bdr.bdr_nodes LIMIT 1 INTO n;
+    IF FOUND THEN
+        RAISE USING
+            MESSAGE = 'Existing BDR nodes exist',
+            ERRCODE = 'object_not_in_prerequisite_state',
+            DETAIL = format('Table bdr.bdr_nodes contains a row for node (%s,%s,%s) named %s with state %s, this is not a fresh database',
+                            n.node_sysid, n.node_timeline, n.node_dboid, n.node_name, n.node_status),
+            HINT = 'Make sure you''re running this on the right node. See also bdr.remove_bdr_from_local_node(...).';
     END IF;
 
     -- Validate that the local connection is usable and matches
@@ -241,24 +261,19 @@ BEGIN
 
     END IF;
 
-    -- Create local node record if needed
-    PERFORM 1 FROM bdr_nodes
-    WHERE node_sysid = localid.sysid
-      AND node_timeline = localid.timeline
-      AND node_dboid = localid.dboid;
-
-    IF NOT FOUND THEN
-        INSERT INTO bdr_nodes (
-            node_name,
-            node_sysid, node_timeline, node_dboid,
-            node_status, node_local_dsn, node_init_from_dsn
-        ) VALUES (
-            local_node_name,
-            localid.sysid, localid.timeline, localid.dboid,
-            bdr.node_status_to_char('BDR_NODE_STATUS_BEGINNING_INIT'),
-			node_local_dsn, remote_dsn
-        );
-    END IF;
+    -- Create local node record so the apply worker knows
+    -- to start initializing this node with bdr_init_replica
+    -- when it's started.
+    INSERT INTO bdr_nodes (
+        node_name,
+        node_sysid, node_timeline, node_dboid,
+        node_status, node_local_dsn, node_init_from_dsn
+    ) VALUES (
+        local_node_name,
+        localid.sysid, localid.timeline, localid.dboid,
+        bdr.node_status_to_char('BDR_NODE_STATUS_BEGINNING_INIT'),
+		node_local_dsn, remote_dsn
+    );
 
     PERFORM bdr.internal_update_seclabel();
 END;

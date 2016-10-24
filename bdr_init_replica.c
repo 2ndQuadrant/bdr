@@ -23,6 +23,7 @@
 #include <sys/stat.h>
 
 #include "bdr.h"
+#include "bdr_internal.h"
 #include "bdr_locks.h"
 
 #include "fmgr.h"
@@ -759,6 +760,10 @@ bdr_ddl_lock_remote(PGconn *conn, BDRLockType mode)
  *
  * This function can leave a tx open and aborted on failure, but the
  * caller is assumed to just close the conn on failure anyway.
+ *
+ * Note that we set the global sequence ID from here too.
+ *
+ * TODO: move to bdr_common.c and re-use from bdr_init_copy
  */
 static void
 bdr_nodes_set_remote_status_ready(PGconn *conn)
@@ -766,6 +771,7 @@ bdr_nodes_set_remote_status_ready(PGconn *conn)
 	PGresult   *res;
 	char	   *values[3];
 	char		local_sysid[32], local_timeline[32], local_dboid[32];
+	int			node_seq_id;
 	
 	res = PQexec(conn, "BEGIN ISOLATION LEVEL READ COMMITTED;");
 	if (PQresultStatus(res) != PGRES_COMMAND_OK)
@@ -776,6 +782,9 @@ bdr_nodes_set_remote_status_ready(PGconn *conn)
 
 	bdr_ddl_lock_remote(conn, BDR_LOCK_DDL);
 
+	/* DDL lock renders this somewhat redundant but you can't be too careful */
+	res = PQexec(conn, "LOCK TABLE bdr.bdr_nodes IN EXCLUSIVE MODE;");
+
 	snprintf(local_sysid, sizeof(local_sysid), UINT64_FORMAT, GetSystemIdentifier());
 	snprintf(local_timeline, sizeof(local_timeline), "%u", ThisTimeLineID);
 	snprintf(local_dboid, sizeof(local_dboid), "%u", MyDatabaseId);
@@ -783,16 +792,48 @@ bdr_nodes_set_remote_status_ready(PGconn *conn)
 	values[1] = &local_timeline[0];
 	values[2] = &local_dboid[0];
 
+	/*
+	 * Update our node status to 'r'eady, and grab the lowest free node
+	 * node_seq_id in the process.
+	 *
+	 * It's safe to claim a node_seq_id from a 'k'illed node because we
+	 * won't be replaying new changes from it once we see that status and
+	 * the ID generator is based on timestamps.
+	 *
+	 * TODO: for extra safety don't re-use IDs for recently killed nodes
+	 * based on a new status_changed ts field.
+	 */
 	res = PQexecParams(conn,
-				 "UPDATE bdr.bdr_nodes SET node_status = "BDR_NODE_STATUS_READY_S" \n"
-				 "WHERE (node_sysid, node_timeline, node_dboid) = ($1, $2, $3)",
+				 "UPDATE bdr.bdr_nodes\n"
+				 "SET node_status = "BDR_NODE_STATUS_READY_S",\n"
+				 "    node_seq_id = (SELECT min(node_seq_id) FROM bdr.bdr_nodes WHERE node_status IN ("BDR_NODE_STATUS_READY_S")) + 1\n"
+				 "WHERE (node_sysid, node_timeline, node_dboid) = ($1, $2, $3)\n"
+				 "RETURNING node_seq_id\n",
 				 3, NULL, (const char **)values, NULL, NULL, 0);
 
-	if (PQresultStatus(res) != PGRES_COMMAND_OK)
+	if (PQresultStatus(res) != PGRES_TUPLES_OK)
 	{
 		PQclear(res);
 		elog(ERROR, "failed to update my bdr.bdr_nodes entry on remote server: %s\n", PQerrorMessage(conn));
 	}
+
+	if (PQntuples(res) != 1)
+	{
+		PQclear(res);
+		elog(ERROR, "failed to update my bdr.bdr_nodes entry on remote server: affected %d rows instead of expected 1", PQntuples(res));
+	}
+
+	Assert(PQnfields(res) == 1);
+
+	if (PQgetisnull(res, 0, 0))
+	{
+		PQclear(res);
+		elog(ERROR, "assigned node sequence ID is unexpectedly null");
+	}
+
+	node_seq_id = atoi(PQgetvalue(res, 0,0));
+
+	elog(DEBUG1, "BDR node finishing join assigned global seq id %d", node_seq_id);
 
 	res = PQexec(conn, "COMMIT;");
 	if (PQresultStatus(res) != PGRES_COMMAND_OK)
@@ -859,6 +900,25 @@ perform_pointless_transaction(PGconn *conn, BDRNodeInfo *node)
 }
 
 /*
+ * Set a standalone node, i.e one that's not initializing from another peer, to
+ * ready state and assign it a node sequence ID.
+ */
+static void
+bdr_init_standalone_node(BDRNodeInfo *local_node)
+{
+	int seq_id = 1;
+	Relation rel;
+
+	Assert(local_node->init_from_dsn == NULL);
+
+	StartTransactionCommand();
+	rel = heap_open(BdrNodesRelid, ExclusiveLock);
+	bdr_nodes_set_local_attrs(BDR_NODE_STATUS_READY, BDR_NODE_STATUS_BEGINNING_INIT, &seq_id);
+	heap_close(rel, ExclusiveLock);
+	CommitTransactionCommand();
+}
+
+/*
  * Initialize the database, from a remote node if necessary.
  */
 void
@@ -904,15 +964,13 @@ bdr_init_replica(BDRNodeInfo *local_node)
 								   "but has init_from_dsn set to NULL",
 					GetSystemIdentifier(), ThisTimeLineID, MyDatabaseId, EMPTY_REPLICATION_NAME, status)));
 		}
+
 		/*
-		 * No connections have init_replica=t, so there's no remote copy to do.
-		 * We still have to ensure that bdr.bdr_nodes.status is 'r' for this
-		 * node so that slot creation is permitted.
-		 *
-		 * XXX: is this actually a good idea?
+		 * No connections have init_replica=t, so there's no remote copy to do,
+		 * but we still have some work to do to bring up the first / a standalone
+		 * node.
 		 */
-		elog(DEBUG2, "init_replica: Marking as root/standalone node");
-		bdr_nodes_set_local_status(BDR_NODE_STATUS_READY);
+		bdr_init_standalone_node(local_node);
 
 		return;
 	}
@@ -1017,7 +1075,7 @@ bdr_init_replica(BDRNodeInfo *local_node)
 			elog(INFO, "initializing node");
 
 			status = BDR_NODE_STATUS_COPYING_INITIAL_DATA;
-			bdr_nodes_set_local_status(status);
+			bdr_nodes_set_local_status(status, BDR_NODE_STATUS_BEGINNING_INIT);
 
 			/*
 			 * Force the node to read-only while we initialize. This is
@@ -1082,7 +1140,7 @@ bdr_init_replica(BDRNodeInfo *local_node)
 			bdr_sync_nodes(nonrepl_init_conn, local_node);
 
 			status = BDR_NODE_STATUS_CATCHUP;
-			bdr_nodes_set_local_status(status);
+			bdr_nodes_set_local_status(status, BDR_NODE_STATUS_COPYING_INITIAL_DATA);
 			elog(DEBUG1, "dump and apply finished, preparing for catchup replay");
 		}
 
@@ -1160,7 +1218,7 @@ bdr_init_replica(BDRNodeInfo *local_node)
 			 * conninfo, so set status=o
 			 */
 			status = BDR_NODE_STATUS_CREATING_OUTBOUND_SLOTS;
-			bdr_nodes_set_local_status(status);
+			bdr_nodes_set_local_status(status, BDR_NODE_STATUS_CATCHUP);
 			elog(DEBUG1, "catchup worker finished, requesting slot creation");
 		}
 
@@ -1225,8 +1283,8 @@ bdr_init_replica(BDRNodeInfo *local_node)
 		 * If we crash here we'll repeat this phase, but it's all idempotent so
 		 * that's fine.
 		 *
-		 * TODO FIXME XXX: ensure we only count 'r'eady nodes in total of
-		 * nodes. (Will need 'p'arting soon too).
+		 * As a side-effect, while we hold the DDL lock when setting the node
+		 * status we'll also assign the lowest free node sequence ID.
 		 */
 		bdr_nodes_set_remote_status_ready(nonrepl_init_conn);
 		status = BDR_NODE_STATUS_READY;
