@@ -688,8 +688,12 @@ SetCommitTsLimit(TransactionId oldestXact)
 	 * "future" or signal a disabled committs.
 	 */
 	LWLockAcquire(CommitTsControlLock, LW_EXCLUSIVE);
-	if (ShmemVariableCache->oldestCommitTs != InvalidTransactionId &&
-		TransactionIdPrecedes(ShmemVariableCache->oldestCommitTs, oldestXact))
+	if (ShmemVariableCache->oldestCommitTs != InvalidTransactionId)
+	{
+		if (TransactionIdPrecedes(ShmemVariableCache->oldestCommitTs, oldestXact))
+			ShmemVariableCache->oldestCommitTs = oldestXact;
+	}
+	else
 		ShmemVariableCache->oldestCommitTs = oldestXact;
 	LWLockRelease(CommitTsControlLock);
 }
