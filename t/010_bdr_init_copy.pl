@@ -4,7 +4,7 @@ use Cwd;
 use Config;
 use PostgresNode;
 use TestLib;
-use Test::More tests => 14;
+use Test::More tests => 15;
 
 my $tempdir = TestLib::tempdir;
 
@@ -49,6 +49,11 @@ SELECT bdr.bdr_group_create(
 	);
 });
 
+$node_a->safe_psql($dbname, 'SELECT bdr.bdr_node_join_wait_for_ready()');
+
+is($node_a->safe_psql($dbname, 'SELECT bdr.bdr_is_active_in_db()'), 't',
+	'BDR is active on node_a');
+
 # The postgresql.conf copied by bdr_init_copy's pg_basebackup invocation will
 # use the same port as node_a . We can't have that, so template a new config file.
 open(my $conf_a, "<", $node_a->data_dir . '/postgresql.conf')
@@ -73,23 +78,25 @@ close($conf_b) or die ("failed to close new postgresql.conf: $!");
 
 
 command_ok(
-	[ 'bdr_init_copy', '-v', '-D', $node_b->data_dir, "-n", 'node_b', '-d', $node_a->connstr($dbname), '--local-dbname', $dbname, '--local-port', $node_b->port, '--postgresql-conf', "$tempdir/postgresql.conf.b"],
+	[ 'bdr_init_copy', '-v', '-D', $node_b->data_dir, "-n", 'node-b', '-d', $node_a->connstr($dbname), '--local-dbname', $dbname, '--local-port', $node_b->port, '--postgresql-conf', "$tempdir/postgresql.conf.b"],
 	'bdr_init_copy succeeds');
 
 # ... but does replication actually work? Is this a live, working cluster?
 my $bdr_version = $node_b->safe_psql($dbname, 'SELECT bdr.bdr_version()');
 diag "BDR version $bdr_version";
 
+$node_b->safe_psql($dbname, 'SELECT bdr.bdr_node_join_wait_for_ready()');
+
 is($node_a->safe_psql($dbname, 'SELECT bdr.bdr_is_active_in_db()'), 't',
 	'BDR is active on node_a');
 is($node_b->safe_psql($dbname, 'SELECT bdr.bdr_is_active_in_db()'), 't',
 	'BDR is active on node_b');
 
-my $status_a = $node_a->safe_psql($dbname, 'SELECT bdr.node_status_from_char(node_status) FROM bdr.bdr_nodes WHERE node_name = bdr.bdr_get_local_node_name()');
-my $status_b = $node_b->safe_psql($dbname, 'SELECT bdr.node_status_from_char(node_status) FROM bdr.bdr_nodes WHERE node_name = bdr.bdr_get_local_node_name()');
+my $status_a = $node_a->safe_psql($dbname, 'SELECT node_name, bdr.node_status_from_char(node_status) FROM bdr.bdr_nodes ORDER BY node_name');
+my $status_b = $node_b->safe_psql($dbname, 'SELECT node_name, bdr.node_status_from_char(node_status) FROM bdr.bdr_nodes ORDER BY node_name');
 
-is($status_a, 'BDR_NODE_STATUS_READY', 'first node in ready state');
-is($status_b, 'BDR_NODE_STATUS_READY', 'second node in ready state');
+is($status_a, "node-a|BDR_NODE_STATUS_READY\nnode-b|BDR_NODE_STATUS_READY", 'node A sees both nodes as ready');
+is($status_b, "node-a|BDR_NODE_STATUS_READY\nnode-b|BDR_NODE_STATUS_READY", 'node B sees both nodes as ready');
 
 diag "Taking ddl lock manually";
 
