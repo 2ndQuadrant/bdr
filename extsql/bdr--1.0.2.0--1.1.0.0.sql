@@ -125,7 +125,7 @@ DECLARE
     localid_from_dsn RECORD;
     remote_nodeinfo RECORD;
     remote_nodeinfo_r RECORD;
-    n RECORD;
+	cur_node RECORD;
 BEGIN
     -- Only one tx can be adding connections
     LOCK TABLE bdr.bdr_connections IN EXCLUSIVE MODE;
@@ -152,17 +152,6 @@ BEGIN
             MESSAGE = 'This node is already a member of a BDR group',
             HINT = 'Connect to the node you wish to add and run '||caller||' from it instead',
             ERRCODE = 'object_not_in_prerequisite_state';
-    END IF;
-
-    -- Ensure local bdr.bdr_nodes is empty
-    SELECT * FROM bdr.bdr_nodes LIMIT 1 INTO n;
-    IF FOUND THEN
-        RAISE USING
-            MESSAGE = 'Existing BDR nodes exist',
-            ERRCODE = 'object_not_in_prerequisite_state',
-            DETAIL = format('Table bdr.bdr_nodes contains a row for node (%s,%s,%s) named %s with state %s, this is not a fresh database',
-                            n.node_sysid, n.node_timeline, n.node_dboid, n.node_name, n.node_status),
-            HINT = 'Make sure you''re running this on the right node. See also bdr.remove_bdr_from_local_node(...).';
     END IF;
 
     -- Validate that the local connection is usable and matches
@@ -276,16 +265,36 @@ BEGIN
     -- Create local node record so the apply worker knows
     -- to start initializing this node with bdr_init_replica
     -- when it's started.
-    INSERT INTO bdr_nodes (
-        node_name,
-        node_sysid, node_timeline, node_dboid,
-        node_status, node_local_dsn, node_init_from_dsn
-    ) VALUES (
-        local_node_name,
-        localid.sysid, localid.timeline, localid.dboid,
-        bdr.node_status_to_char('BDR_NODE_STATUS_BEGINNING_INIT'),
-		node_local_dsn, remote_dsn
-    );
+    --
+    -- bdr_init_copy might've created a node entry in catchup
+    -- mode already, in which case we can skip this.
+    SELECT node_status FROM bdr_nodes
+    WHERE node_sysid = localid.sysid
+      AND node_timeline = localid.timeline
+      AND node_dboid = localid.dboid
+    INTO cur_node;
+
+    IF NOT FOUND THEN
+        INSERT INTO bdr_nodes (
+            node_name,
+            node_sysid, node_timeline, node_dboid,
+            node_status, node_local_dsn, node_init_from_dsn
+        ) VALUES (
+            local_node_name,
+            localid.sysid, localid.timeline, localid.dboid,
+            bdr.node_status_to_char('BDR_NODE_STATUS_BEGINNING_INIT'),
+            node_local_dsn, remote_dsn
+        );
+    ELSIF bdr.node_status_from_char(cur_node.node_status) = 'BDR_NODE_STATUS_CATCHUP' THEN
+        RAISE DEBUG 'starting node join in BDR_NODE_STATUS_CATCHUP';
+    ELSE
+        RAISE USING
+            MESSAGE = 'a bdr_nodes entry for this node already exists',
+            DETAIL = format('bdr.bdr_nodes entry for (%s,%s,%s) named ''%s'' with status %s exists',
+                            cur_node.node_sysid, cur_node.node_timeline, cur_node.node_dboid,
+                            cur_node.node_name, bdr.node_status_from_char(cur_node.node_status)),
+            ERRCODE = 'object_not_in_prerequisite_state';
+    END IF;
 
     PERFORM bdr.internal_update_seclabel();
 END;

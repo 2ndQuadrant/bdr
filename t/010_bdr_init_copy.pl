@@ -4,7 +4,7 @@ use Cwd;
 use Config;
 use PostgresNode;
 use TestLib;
-use Test::More tests => 10;
+use Test::More tests => 14;
 
 my $tempdir = TestLib::tempdir;
 
@@ -85,6 +85,18 @@ is($node_a->safe_psql($dbname, 'SELECT bdr.bdr_is_active_in_db()'), 't',
 is($node_b->safe_psql($dbname, 'SELECT bdr.bdr_is_active_in_db()'), 't',
 	'BDR is active on node_b');
 
+my $status_a = $node_a->safe_psql($dbname, 'SELECT bdr.node_status_from_char(node_status) FROM bdr.bdr_nodes WHERE node_name = bdr.bdr_get_local_node_name()');
+my $status_b = $node_b->safe_psql($dbname, 'SELECT bdr.node_status_from_char(node_status) FROM bdr.bdr_nodes WHERE node_name = bdr.bdr_get_local_node_name()');
+
+is($status_a, 'BDR_NODE_STATUS_READY', 'first node in ready state');
+is($status_b, 'BDR_NODE_STATUS_READY', 'second node in ready state');
+
+diag "Taking ddl lock manually";
+
+$node_a->safe_psql($dbname, "SELECT bdr.acquire_global_lock('write')");
+
+diag "Creating a table...";
+
 $node_b->safe_psql($dbname, q{
 SELECT bdr.bdr_replicate_ddl_command($DDL$
 CREATE TABLE public.reptest(
@@ -111,3 +123,9 @@ SELECT EXISTS (
 });
 
 is($node_b->safe_psql($dbname, 'SELECT id, dummy FROM reptest;'), '1|42', "reptest insert successfully replicated");
+
+my $seqid_a = $node_a->safe_psql($dbname, 'SELECT node_seq_id FROM bdr.bdr_nodes WHERE node_name = bdr.bdr_get_local_node_name()');
+my $seqid_b = $node_b->safe_psql($dbname, 'SELECT node_seq_id FROM bdr.bdr_nodes WHERE node_name = bdr.bdr_get_local_node_name()');
+
+is($seqid_a, 1, 'first node got global sequence ID 1');
+is($seqid_b, 2, 'second node got global sequence ID 2');
