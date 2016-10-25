@@ -744,7 +744,7 @@ bdr_commandfilter(Node *parsetree,
 	/* take strongest lock by default. */
 	BDRLockType	lock_type = BDR_LOCK_WRITE;
 
-	elog(LOG, "processing %s: %s in statement %s", context == PROCESS_UTILITY_TOPLEVEL ? "toplevel" : "query", CreateCommandTag(parsetree), queryString);
+	elog(DEBUG2, "processing %s: %s in statement %s", context == PROCESS_UTILITY_TOPLEVEL ? "toplevel" : "query", CreateCommandTag(parsetree), queryString);
 
 	/* don't filter in single user mode */
 	if (!IsUnderPostmaster)
@@ -1294,13 +1294,13 @@ bdr_commandfilter(Node *parsetree,
 		if (PG_VERSION_NUM >= 90600)
 			bdr_capture_ddl(parsetree, queryString, context, params, dest, CreateCommandTag(parsetree));
 
-		elog(DEBUG1, "DDLREP: Entering level %d DDL block. Toplevel command is %s", bdr_ddl_nestlevel, queryString);
+		elog(DEBUG3, "DDLREP: Entering level %d DDL block. Toplevel command is %s", bdr_ddl_nestlevel, queryString);
 		incremented_nestlevel = true;
 		bdr_ddl_nestlevel ++;
 	}
 	else
 	{
-		elog(DEBUG1, "DDLREP: At ddl level %d ignoring non-persistent cmd %s", bdr_ddl_nestlevel, queryString);
+		elog(DEBUG3, "DDLREP: At ddl level %d ignoring non-persistent cmd %s", bdr_ddl_nestlevel, queryString);
 	}
 	
 
@@ -1352,7 +1352,7 @@ done:
 		{
 			bdr_ddl_nestlevel --;
 			Assert(bdr_ddl_nestlevel >= 0);
-			elog(DEBUG1, "DDLREP: Exiting level %d in exception ", bdr_ddl_nestlevel);
+			elog(DEBUG3, "DDLREP: Exiting level %d in exception ", bdr_ddl_nestlevel);
 		}
 
 		/* Error was during extension creation */
@@ -1379,7 +1379,7 @@ done:
 	{
 		bdr_ddl_nestlevel --;
 		Assert(bdr_ddl_nestlevel >= 0);
-		elog(DEBUG1, "DDLREP: Exiting level %d block normally", bdr_ddl_nestlevel);
+		elog(DEBUG3, "DDLREP: Exiting level %d block normally", bdr_ddl_nestlevel);
 	}
 	Assert(bdr_ddl_nestlevel >= 0);
 }
