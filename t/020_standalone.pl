@@ -4,7 +4,7 @@ use Cwd;
 use Config;
 use PostgresNode;
 use TestLib;
-use Test::More tests => 11;
+use Test::More tests => 13;
 
 my $tempdir = TestLib::tempdir;
 
@@ -50,11 +50,15 @@ ok(!$node_a->psql($dbname, "INSERT INTO reptest (id, dummy) VALUES (1, '42')"), 
 
 is($node_a->safe_psql($dbname, 'SELECT dummy FROM reptest WHERE id = 1'), '42', 'simple DDL and insert worked');
 
+is($node_a->safe_psql($dbname, "SELECT node_status FROM bdr.bdr_nodes WHERE node_name = bdr.bdr_get_local_node_name()"), 'r', 'node status is "r"');
+
 ok(!$node_a->psql($dbname, "SELECT bdr.bdr_part_by_node_names(ARRAY['node-a'])"), 'parted without error');
+
+is($node_a->safe_psql($dbname, "SELECT node_status FROM bdr.bdr_nodes WHERE node_name = bdr.bdr_get_local_node_name()"), 'k', 'node status is "k"');
 
 ok($node_a->psql($dbname, "DROP EXTENSION bdr"), 'DROP EXTENSION fails after part');
 
-is($node_a->safe_psql($dbname, 'SELECT bdr.bdr_is_active_in_db();'), 'f', 'not active after part');
+is($node_a->safe_psql($dbname, 'SELECT bdr.bdr_is_active_in_db();'), 't', 'still active after part');
 
 ok(!$node_a->psql($dbname, 'SELECT bdr.remove_bdr_from_local_node(true, true);'), 'remove_bdr_from_local_node succeeds');
 
