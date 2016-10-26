@@ -445,7 +445,7 @@ main(int argc, char **argv)
 	{
 		appendPQExpBuffer(recoveryconfcontents, "pause_at_recovery_target = off");
 	}
-	else if (PG_VERSION_NUM/100 == 906)
+	else if (PG_VERSION_NUM >= 90600)
 	{
 		appendPQExpBuffer(recoveryconfcontents, "recovery_target_action = promote");
 	}
