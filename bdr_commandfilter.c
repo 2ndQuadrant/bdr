@@ -883,27 +883,6 @@ bdr_commandfilter(Node *parsetree,
 		case T_AlterRoleSetStmt:
 		case T_DropRoleStmt:
 			goto done;
-		
-		/*
-		 * Can't replicate on 9.4 due to lack of deparse support,
-		 * could replicate on 9.6. Does not need DDL lock.
-		 */
-		case T_CommentStmt:
-		case T_ReassignOwnedStmt:
-#if PG_VERSION_NUM >= 90600
-			lock_type = BDR_LOCK_NOLOCK;
-			break;
-#else
-			goto done;
-#endif
-
-		case T_GrantStmt:
-#if PG_VERSION_NUM >= 90600
-			lock_type = BDR_LOCK_NOLOCK;
-			break;
-#else
-			goto done;
-#endif
 
 		default:
 			break;
@@ -1203,6 +1182,27 @@ bdr_commandfilter(Node *parsetree,
 				error_unsupported_command(CreateCommandTag(parsetree));
 				break;
 			}
+		
+		/*
+		 * Can't replicate on 9.4 due to lack of deparse support,
+		 * could replicate on 9.6. Does not need DDL lock.
+		 */
+		case T_CommentStmt:
+		case T_ReassignOwnedStmt:
+#if PG_VERSION_NUM >= 90600
+			lock_type = BDR_LOCK_NOLOCK;
+			break;
+#else
+			goto done;
+#endif
+
+		case T_GrantStmt:
+#if PG_VERSION_NUM >= 90600
+			elog(WARNING, "processing GRANT statement");
+			break;
+#else
+			goto done;
+#endif
 
 		default:
 			/*
