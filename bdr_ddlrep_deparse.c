@@ -232,7 +232,7 @@ bdr_queue_dropped_objects(PG_FUNCTION_ARGS)
 	 *
 	 * XXX TODO
 	 */
-	if (PG_VERSION_NUM / 100 == 906)
+	if (PG_VERSION_NUM >= 90600)
 	{
 		ereport(DEBUG1,
 			    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
