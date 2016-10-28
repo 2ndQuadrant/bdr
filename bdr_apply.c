@@ -2724,9 +2724,9 @@ bdr_apply_main(Datum main_arg)
 		bdr_apply_worker->remote_dboid);
 	SPI_finish();
 	CommitTransactionCommand();
-	if (status == 'k')
+	if (status == 'k' || status == '\0')
 	{
-		elog(LOG, "unregistering worker, node has been killed");
+		elog(LOG, "unregistering worker, node has been killed or removed");
 		bdr_worker_shmem_free(bdr_worker_slot, NULL);
 		bdr_worker_slot = NULL;
 		proc_exit(0); /* unregister */
