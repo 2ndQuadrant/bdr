@@ -372,8 +372,8 @@ process_remote_begin(StringInfo s)
 static void
 process_remote_commit(StringInfo s)
 {
-	XLogRecPtr		commit_lsn;
-	TimestampTz		committime;
+	XLogRecPtr		commit_lsn PG_USED_FOR_ASSERTS_ONLY;
+	TimestampTz		committime PG_USED_FOR_ASSERTS_ONLY;
 	TimestampTz		end_lsn;
 	int				flags;
 	ErrorContextCallback errcallback;
