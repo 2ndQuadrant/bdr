@@ -908,8 +908,12 @@ ReorderBufferIterTXNInit(ReorderBuffer *rb, ReorderBufferTXN *txn)
 		ReorderBufferChange *cur_change;
 
 		if (txn->nentries != txn->nentries_mem)
+		{
+			/* serialize remaining changes */
+			ReorderBufferSerializeTXN(rb, txn);
 			ReorderBufferRestoreChanges(rb, txn, &state->entries[off].fd,
 										&state->entries[off].segno);
+		}
 
 		cur_change = dlist_head_element(ReorderBufferChange, node,
 										&txn->changes);
@@ -933,10 +937,13 @@ ReorderBufferIterTXNInit(ReorderBuffer *rb, ReorderBufferTXN *txn)
 			ReorderBufferChange *cur_change;
 
 			if (cur_txn->nentries != cur_txn->nentries_mem)
+			{
+				/* serialize remaining changes */
+				ReorderBufferSerializeTXN(rb, cur_txn);
 				ReorderBufferRestoreChanges(rb, cur_txn,
 											&state->entries[off].fd,
 											&state->entries[off].segno);
-
+			}
 			cur_change = dlist_head_element(ReorderBufferChange, node,
 											&cur_txn->changes);
 
@@ -1342,10 +1349,6 @@ ReorderBufferCommit(ReorderBuffer *rb, TransactionId xid,
 	txn->commit_time = commit_time;
 	txn->origin_id = origin_id;
 	txn->origin_lsn = origin_lsn;
-
-	/* serialize the last bunch of changes if we need start earlier anyway */
-	if (txn->nentries_mem != txn->nentries)
-		ReorderBufferSerializeTXN(rb, txn);
 
 	/*
 	 * If this transaction didn't have any real changes in our database, it's
@@ -2193,7 +2196,10 @@ ReorderBufferSerializeChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
 
 	if (write(fd, rb->outbuf, ondisk->size) != ondisk->size)
 	{
+		int save_errno = errno;
+
 		CloseTransientFile(fd);
+		errno = save_errno;
 		ereport(ERROR,
 				(errcode_for_file_access(),
 				 errmsg("could not write to data file for XID %u: %m",
@@ -2930,7 +2936,8 @@ ApplyLogicalMappingFile(HTAB *tuplecid_data, Oid relid, const char *fname)
 	fd = OpenTransientFile(path, O_RDONLY | PG_BINARY, 0);
 	if (fd < 0)
 		ereport(ERROR,
-				(errmsg("could not open file \"%s\": %m", path)));
+				(errcode_for_file_access(),
+				 errmsg("could not open file \"%s\": %m", path)));
 
 	while (true)
 	{

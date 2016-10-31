@@ -3467,6 +3467,7 @@ l2:
 			ReleaseBuffer(vmbuffer);
 		bms_free(hot_attrs);
 		bms_free(key_attrs);
+		bms_free(id_attrs);
 		return result;
 	}
 
@@ -3928,6 +3929,7 @@ l2:
 
 	bms_free(hot_attrs);
 	bms_free(key_attrs);
+	bms_free(id_attrs);
 
 	return HeapTupleMayBeUpdated;
 }
@@ -5236,6 +5238,17 @@ l4:
 		if (TransactionIdIsValid(priorXmax) &&
 			!TransactionIdEquals(HeapTupleHeaderGetXmin(mytup.t_data),
 								 priorXmax))
+		{
+			UnlockReleaseBuffer(buf);
+			return HeapTupleMayBeUpdated;
+		}
+
+		/*
+		 * Also check Xmin: if this tuple was created by an aborted
+		 * (sub)transaction, then we already locked the last live one in the
+		 * chain, thus we're done, so return success.
+		 */
+		if (TransactionIdDidAbort(HeapTupleHeaderGetXmin(mytup.t_data)))
 		{
 			UnlockReleaseBuffer(buf);
 			return HeapTupleMayBeUpdated;
