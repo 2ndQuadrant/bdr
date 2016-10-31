@@ -2495,6 +2495,27 @@ bdr_apply_work(PGconn* streamConn)
 					XLogRecPtr endpos;
 					bool reply_requested;
 
+					/*
+					 * Walsender keepalive/feedback message. We'll get these
+					 * both while idle and while we're replaying a transaction
+					 * data stream, to ensure the walsender knows we're alive
+					 * and kicking.  There's no need for us to schedule our own
+					 * keepalives, the walsender will send one with
+					 * reply-requested when needed, even in the middle of sending
+					 * a single big row or Datum.
+					 *
+					 * Keepalives are also sent by the upstream when the server
+					 * is making changes that don't result in logical decoding
+					 * activity, so that it can advance the catalog_xmin and
+					 * restart_lsn of idle slots. It's also important for
+					 * synchronous replication so the upstream can confirm
+					 * commits since our reply tells the upstream we've flushed
+					 * anything we needed to.
+					 *
+					 * See:  WalSndKeepaliveIfNecessary(...), WalSndWriteData(...)
+					 * in walsender.c .
+					 */
+
 					endpos = pq_getmsgint64(&s);
 					/* timestamp = */ pq_getmsgint64(&s);
 					reply_requested = pq_getmsgbyte(&s);
