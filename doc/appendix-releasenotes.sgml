@@ -15,6 +15,39 @@
   See also: <xref linkend="upgrade">.
  </para>
 
+ <sect1 id="release-1.0.2">
+  <title>Release 1.0.2</title>
+
+  <para>
+   The BDR 1.0.2 maintenance release fixes an intermittent failure in
+   <application>bdr_init_copy</> caused by failure to wait until promotion
+   of a copied node has fully completed. (#255).
+  </para>
+
+  <para>
+   Also fixes failure to replicate the <literal>ch_timeframe</> argument to
+   peers when user defined conflict handlers are created.
+  </para>
+  
+ </sect1>
+
+ <sect1 id="release-1.0.1">
+  <title>Release 1.0.1</title>
+
+  <para>
+   The 1.0.1 maintenance release fixes a significant bug in
+   <literal>bdr_group_join</> caused by <literal>bdr_dump</> running parts of
+   the binary upgrade code that it shouldn't have. This could lead to incorrect
+   frozenxids among other issues.
+  </para>
+
+  <para>
+   A variety of minor documentation and message fixes are also incorporated; see
+   the git log.
+  </para>
+
+ </sect1>
+
  <sect1 id="release-1.0.0">
   <title>Release 1.0.0</title>
 
