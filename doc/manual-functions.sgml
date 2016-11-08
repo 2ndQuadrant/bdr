@@ -235,6 +235,29 @@
        </entry>
       </row>
 
+      <row>
+       <entry>
+        <indexterm>
+         <primary>bdr.bdr_node_set_read_only</primary>
+        </indexterm>
+        <function><literal>bdr.bdr_node_set_read_only(</><replaceable>node_name</> <literal>text</>, <replaceable>read_only</> <literal>boolean</>)</></>
+       </entry>
+       <entry>void</entry>
+       <entry>
+        Turn read-only mode for a node on or off. A read-only node rejects all
+        direct local writes to replicateable tables, only allowing writes via
+        replication from other nodes. Read-only mode may be set or unset from
+        any node. If not set directly on the local node it takes effect as soon
+        as the peer node replicates the transaction that made it read-only from
+        the peer that asked it to become read-only. Writes to <literal>UNLOGGED</>
+        and <literal>TEMPORARY</> tables are still permitted on read-only nodes,
+        it's only tables that can be replicated (whether or not they are actually
+        in a replication set) that have writes restricted. Note that read-only
+        mode is persistent across restarts. <literal>bdr.bdr_get_local_node_name()</>
+        can be used to supply the node name of the local node.
+       </entry>
+      </row>
+
       <row id="function-bdr-replicate-ddl-command" xreflabel="bdr.bdr_replicate_ddl_command">
        <entry>
         <indexterm>
