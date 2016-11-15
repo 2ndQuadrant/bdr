@@ -18,6 +18,8 @@
  <sect1 id="release-1.0.2">
   <title>Release 1.0.2</title>
 
+  <para><emphasis>Mon Nov 14, 2016</></>
+
   <para>
    The BDR 1.0.2 maintenance release fixes an intermittent failure in
    <application>bdr_init_copy</> caused by failure to wait until promotion
