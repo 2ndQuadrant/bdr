@@ -1,7 +1,9 @@
 See http://2ndquadrant.com/BDR and http://bdr-project.org/docs/ for
 documentation on the installation and use of BDR.
 
-This source tree contains BDR for patched PostgreSQL 9.4.
+BDR requires either PostgreSQL 9.6 or a patched PostgreSQL 9.4.
+
+PostgreSQL 9.5 is not supported. Neither is unpatched community PostgreSQL 9.4.
 
 See INSTALL.src for details.
 
@@ -10,7 +12,3 @@ The bdr-plugin/next branch is the development tree for the BDR plugin.
 Stable branches are named in the form bdr-plugin/RELX_Y_STABLE, e.g.
 bdr-plugin/REL0_9_STABLE.  Tagged releases are named bdr-plugin/X_Y_Z, e.g.
 bdr-plugin/0.9.0 .
-
-BDR requires a patched PostgreSQL 9.4, which is in branches prefixed with
-bdr-pg/ . Tagged BDR plugin releases specify the required bdr-pg version in the
-tag commit message.

@@ -4,10 +4,11 @@
 # New users should use the packages, or see the more detailed source install
 # instructions in the main documentation.
 #
-# This package contains both BDR for patched PostgreSQL 9.4.
-#
 # The following instructions are for compiling full BDR, including the patched
 # PostgreSQL.
+#
+# Skip the section for installing PostgreSQL its self if you are installing BDR
+# against PostgreSQL 9.6, where a modified PostgreSQL is not required.
 ############
 
 # == get dependencies ==

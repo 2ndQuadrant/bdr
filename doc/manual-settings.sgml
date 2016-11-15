@@ -145,10 +145,10 @@
      </term>
      <listitem>
       <para>
-       Only present in &bdr;. Controls the type of sequence created by unqualified
-       <literal>CREATE SEQUENCE</literal> commands and by <literal>SERIAL</literal>
-       and <literal>BIGSERIAL</literal>. See <xref linkend="global-sequences">.
-       May be set per-session with <literal>SET</literal>.
+       This option is deprecated. On PostgreSQL 9.6 it is not supported and may
+       not be set. On BDR-Postgres 9.4 it can be used to activate the old
+       global sequences implementation; see <xref linkend="globals-sequences">
+       and the BDR 1.0 documentation.
       </para>
      </listitem>
     </varlistentry>
@@ -380,13 +380,23 @@
       </term>
       <listitem>
        <para>
-        Sets a default apply delay for all configured connections
-        that don't have a explicitly configured apply delay.
+        Sets a default apply delay (in milliseconds) for all configured
+        connections that don't have a explicitly configured apply delay in
+        their <literal>bdr.bdr_connections</> entry as set at node create or
+        join time.
        </para>
        <para>
-        This is primarily useful to simulate a high latency network
-        in a low latency testing environment. It requires a server
-        reload to take effect.
+        BDR won't replay a transaction on peer nodes until at least the
+        specified number of milliseconds have elapsed since it was committed.
+       </para>
+       <para>
+        This is primarily useful to simulate a high latency network in a low
+        latency testing environment, mainly to make it easier to create
+        conflicts. For example, if node A and B both have a 500ms apply_delay
+        set, then after INSERTing a value into a table on node A, you have at
+        least 500ms to perform a conflicting INSERT on B. This parameter
+        requires a server reload or restart of the apply workers to take
+        effect.
        </para>
       </listitem>
      </varlistentry>
