@@ -28,6 +28,13 @@
    Also fixes failure to replicate the <literal>ch_timeframe</> argument to
    peers when user defined conflict handlers are created.
   </para>
+
+  <para>
+   Alongside the bdr-plugin 1.0.2 release, BDR-Postgres is updated to 9.4.10,
+   including all fixes and improvements from PostgreSQL 9.4.10. See
+   <ulink url="https://www.postgresql.org/docs/9.4/static/release-9-4-10.html">
+   the PostgreSQL 9.4.10 release notes</>.
+  </para>
   
  </sect1>
 
