@@ -352,6 +352,8 @@ process_remote_begin(StringInfo s)
 								&sec, &usec);
 			/* FIXME: deal with overflow? */
 			pg_usleep(usec + (sec * USECS_PER_SEC));
+
+			CHECK_FOR_INTERRUPTS();
 		}
 	}
 
