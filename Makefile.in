@@ -178,7 +178,17 @@ scripts/bdr_initial_load: scripts/bdr_initial_load.in
 	sed -e "s/BDR_VERSION/$(BDR_VERSION)/" -e "s/PG_VERSION/$(VERSION)/" $< > $@
 	@chmod +x $@
 
-define genextfile=
+#----
+# Generate flattened extension files.
+#
+# This isn't needed on PostgreSQL 10 as it's smart enough to figure out a
+# creation path, but we still need it for 9.6 and 9.4bdr.
+#
+# Note that make 3.81 doesn't like define with =, so don't add one even though
+# that's how the manual shows the syntax. See
+# http://stackoverflow.com/q/13260396/398670 .
+#---
+define genextfile
 extsql/bdr--$(2).sql: extsql/bdr--$(1).sql extsql/bdr--$(1)--$(2).sql
 	mkdir -p extsql
 	cat $$^ > $$@
