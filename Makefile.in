@@ -36,7 +36,7 @@ ifneq ($(BDR_PG_MAJORVERSION),9.4)
 SCRIPTS_built += bdr_resetxlog
 endif
 
-PG_CPPFLAGS = -I$(BDR_PGVERCOMPAT_INCDIR) -I$(libpq_srcdir) -Wmissing-prototypes -Wmissing-declarations -Werror
+PG_CPPFLAGS = -std=gnu89 -I$(BDR_PGVERCOMPAT_INCDIR) -I$(libpq_srcdir) -Wmissing-prototypes -Wmissing-declarations -Werror
 SHLIB_LINK = $(libpq)
 
 OBJS = \
