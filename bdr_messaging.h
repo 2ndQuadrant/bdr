@@ -1,8 +1,7 @@
 #ifndef BDR_NODE_MESSAGING_H
 #define BDR_NODE_MESSAGING_H
 
-struct StringInfoData;
-typedef StringInfoData* StringInfo;
+#include "lib/stringinfo.h"
 
 typedef enum BdrMessageType
 {

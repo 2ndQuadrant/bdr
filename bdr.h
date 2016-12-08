@@ -62,10 +62,6 @@ struct EState; /* from nodes/execnodes.h */
 struct ScanKeyData; /* from access/skey.h for ScanKey */
 enum LockTupleMode; /* from access/heapam.h */
 
-typedef enum BdrNodeStatus BdrNodeStatus;
-
-
-
 /*
  * Flags to indicate which fields are present in a begin record sent by the
  * output plugin.
@@ -549,9 +545,6 @@ extern void bdr_queue_ddl_command(const char *command_tag, const char *command, 
 extern void bdr_execute_ddl_command(char *cmdstr, char *perpetrator, char *search_path, bool tx_just_started);
 extern void bdr_start_truncate(void);
 extern void bdr_finish_truncate(void);
-
-typedef struct ParamListInfoData* ParamListInfo;
-typedef struct _DestReceiver DestReceiver;
 
 extern void bdr_capture_ddl(Node *parsetree, const char *queryString,
 							ProcessUtilityContext context, ParamListInfo params,
