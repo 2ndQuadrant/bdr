@@ -32,8 +32,6 @@ html-stamp: bdr.sgml $(ALLSGML) $(GENERATED_SGML) stylesheet.dsl website-docs.cs
 
 version.sgml: ${bdr_top_builddir}/bdr_config_generated.h
 	{ \
-	  echo "<!ENTITY pgversion \"$(VERSION)\">"; \
-	  echo "<!ENTITY pgmajorversion \"$(MAJORVERSION)\">"; \
 	  echo "<!ENTITY bdrversion \"$(BDR_VERSION)\">"; \
 	} > $@
 

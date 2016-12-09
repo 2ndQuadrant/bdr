@@ -13,10 +13,10 @@
 ]>
 
 <book id="bdr">
- <title>&bdr; &bdrversion; Documentation</title>
+ <title>BDR &bdrversion; Documentation</title>
 
  <bookinfo>
-  <corpauthor>The PostgreSQL Global Development Group</corpauthor>
+  <corpauthor>2ndQuadrant Ltd</corpauthor>
   <productname>BDR</productname>
   <productnumber>&bdrversion;</productnumber>
   &legal;
@@ -39,16 +39,16 @@
   -->
   <abstract>
    <para>
-   This book is the official documentation of &bdr; &bdrversion; for
-   use with PostgreSQL &pgmajorversion; (the &bdr;-patched version of it).
-   It has been written by the &postgres; and &bdr; developers and other
-   volunteers in parallel to the development of the &bdr; software.  It
-   describes all the functionality that the current version of &bdr; officially
+   This book is the official documentation of BDR &bdrversion; for
+   use with PostgreSQL 9.6 or with a modified version of PostgreSQL 9.4.
+   It has been written by the &postgres; and BDR developers and other
+   volunteers in parallel to the development of the BDR software.  It
+   describes all the functionality that the current version of BDR officially
    supports.
    </para>
 
    <para>
-    &bdr; was initially developed at
+    BDR was initially developed at
     <ulink url="http://2ndquadrant.com">2ndQuadrant</ulink>;
     others have joined the effort.
     Contributions are appreciated and welcome.
@@ -99,7 +99,7 @@
  </part>
 
  <part id="manual" xreflabel="BDR administration manual">
-  <title>&bdr; administration manual</title>
+  <title>BDR administration manual</title>
 
   &manual-settings;
   &manual-node-management;
@@ -117,6 +117,7 @@
 
  &appendix-releasenotes;
  &appendix-signatures;
+ &appendix-technotes;
 
  <![%include-index;[&bookindex;]]>
  <![%include-xslt-index;[<index id="bookindex"></index>]]>

@@ -14,24 +14,20 @@
   <title>Why monitoring matters</title>
 
   <para>
-   If one or more nodes are down in a &bdr; group then <acronym>DDL</acronym>
-   locking for <xref linkend="ddl-replication"> will wait indefinitely or until
-   cancelled. <acronym>DDL</acronym> locking requires <emphasis>consensus</emphasis>
+   If one or more nodes are down in a BDR group then <link
+   linkend="ddl-replication-locking"><acronym>DDL</acronym> locking</> for
+   <xref linkend="ddl-replication"> will wait indefinitely or until cancelled.
+   <acronym>DDL</acronym> locking requires <emphasis>consensus</emphasis>
    across all nodes, not just a quorum, so it must be able to reach all nodes.
-   So it's important to monitor for node outages.
+   So it's important to monitor for node outages, especially since a stuck
+   DDL locking attempt will cause all queries to wait until it fails
+   or completes.
   </para>
 
   <para>
-   Global sequence chunk allocations can also be distrupted if half or more of
-   the nodes are down or unreachable. See
-   <xref linkend="global-sequence-voting">.
-  </para>
-
-  <para>
-   Because <acronym>DDL</acronym> locking and global sequence allocations
-   insert messages into the replication stream, a node that is extremely
-   behind on replay will cause similar disruption to one that is entirely
-   down.
+   Because <acronym>DDL</acronym> locking inserts messages into the replication
+   stream, a node that is extremely behind on replay will cause similar
+   disruption to one that is entirely down.
   </para>
 
   <para>
@@ -46,13 +42,34 @@
    slot will accumulate <acronym>WAL</acronym> until it runs out of disk space
    on <filename>pg_xlog</filename>. This can happen even if the downstream peer
    is online and replaying if it isn't able to receive and replay changes as
-   fast as the upstream node generates them.
+   fast as the upstream node generates them. WAL archiving cannot (yet) be used
+   for logical replication, so the WAL segments must remain in <filename>pg_xlog</>
+   until all nodes are done with them.
   </para>
 
   <para>
-   It is therefore important to have automated monitoring in place to
-   ensure that if replication slots start falling badly behind the
-   admin is alerted and can take proactive action.
+   A less significant side effect of a lagging peer node is that <literal>VACUUM</>
+   cannot remove old rows (deleted rows, or old versions of updated rows) in
+   <literal>pg_catalog</> tables or user-catalogs until every replica has replayed
+   up to the transaction that deleted or replaced that row. This can be an issue
+   in deployments that use lots of temporary tables, as it can cause significant
+   bloat in <literal>pg_class</> and <literal>pg_attribute</>.
+  </para>
+
+  <para>
+   It is important to have automated monitoring in place to ensure that if
+   replication slots start falling badly behind the admin is alerted and can
+   take proactive action. BDR does not provide monitoring, but can be integrated
+   into tools like:
+   <itemizedlist>
+    <listitem><para><ulink url="https://collectd.org/">collectd</></></>
+	<listitem><para><ulink url="http://munin-monitoring.org/">Munin</> or <ulink url="http://www.cacti.net/">Cacti</></></>
+	<listitem><para><ulink url="https://www.icinga.com/">Icinga</> or <ulink url="https://www.nagios.com/">Nagios</></></>
+	<listitem><para><ulink url="http://www.zabbix.com/">Zabbix</></></>
+	<listitem><para>... and numerous extensible commercial solutions</></>
+   </itemizedlist>
+   If there isn't a plugin available for your chosen platform, feel free to
+   <ulink url="http://2ndQuadrant.com">get in touch with 2ndQuadrant</>.
   </para>
 
  </sect1>
@@ -61,7 +78,7 @@
   <title>Monitoring node join/removal</title>
 
   <para>
-   Node join and removal is asynchronous in &bdr;. The <xref
+   Node join and removal is asynchronous in BDR. The <xref
    linkend="functions-node-mgmt"> return immediately, without first
    ensuring the join or part operation is complete. To see when a join or
    part operation finishes it is necessary to check the node state indirectly
@@ -78,7 +95,7 @@
 
   <para>
    For other node status monitoring <xref linkend="catalog-bdr-nodes">
-   must be queried directly.
+   or must be queried directly.
   </para>
 
   <para>
@@ -104,7 +121,7 @@
 
   <para>
    As outlined in <xref linkend="monitoring-why"> it is important to monitor
-   the state of peer nodes in a &bdr; group. There are two main views
+   the state of peer nodes in a BDR group. There are two main views
    used for this: <literal>pg_stat_replication</literal> to monitor for
    actively replicating nodes, and <literal>pg_replication_slots</literal>
    to monitor for replication slot progress.
@@ -128,7 +145,7 @@
      29082 |    16385 | myadmin   | bdr (6127682494973391064,1,16386,):receive |             |                 |          -1 | 2015-03-18 21:03:44.665272+00 |              | streaming | 0/189D3B8     | 0/189D3B8      | 0/189D3B8      | 0/189D3B8       |             0 | async
     </programlisting>
     This view shows all active replication connections, not just those used by
-    &bdr;. You will see connections from physical streaming replicas, other
+    BDR. You will see connections from physical streaming replicas, other
     logical decoding solutions, etc here as well.
    </para>
 
@@ -147,8 +164,8 @@
     This query will show how much lag downstream servers have from the upstream
     server you run the query on. You can't use this to see, from the downstream
     server, how far it is behind an upstream it's receiving from.
-    Also, the query will show lag for all replication consumers, including non-&bdr;
-    ones. To show only &bdr; peers, append
+    Also, the query will show lag for all replication consumers, including non-BDR
+    ones. To show only BDR peers, append
     <literal>WHERE application_name LIKE 'bdr%'</literal>.
    </para>
 
@@ -177,16 +194,17 @@
    <title>Monitoring replication slots</title>
 
    <para>
-    Information about replication slots (both logical and physical) is available
-    in the <literal>pg_catalog.pg_replication_slots</literal> view. This view
-    shows all slots, whether or not there is an active replication connection
-    using them. It looks like:
+	Information about replication slots (both logical and physical) is
+	available in the <literal>pg_catalog.pg_replication_slots</literal> view
+	or, for Postgres-BDR 9.4, from the <literal>bdr.pg_replication_slots</>
+	view. This view shows all slots, whether or not there is an active
+	replication connection using them. It looks like:
     <programlisting>
-    SELECT * FROM pg_replication_slots;
-                    slot_name                | plugin | slot_type | datoid | database | active | xmin | catalog_xmin | restart_lsn
-    -----------------------------------------+--------+-----------+--------+----------+--------+------+--------------+-------------
-     bdr_16386_6127682459268878512_1_16386__ | bdr    | logical   |  16386 | bdrdemo  | t      |      |          749 | 0/191B130
-     bdr_16386_6127682494973391064_1_16386__ | bdr    | logical   |  16386 | bdrdemo  | t      |      |          749 | 0/191B130
+    SELECT * FROM bdr.pg_replication_slots;
+                    slot_name                | plugin | slot_type | datoid | database | active | active_pid | xmin | catalog_xmin | restart_lsn | confirmed_flush_lsn 
+    -----------------------------------------+--------+-----------+--------+----------+--------+------------+------+--------------+-------------+---------------------
+     bdr_16386_6127682459268878512_1_16386__ | bdr    | logical   |  16386 | bdrdemo  | t      |       4121 |      |          749 | 0/191B130   | 0/201E120
+     bdr_16386_6127682494973391064_1_16386__ | bdr    | logical   |  16386 | bdrdemo  | t      |       4317 |      |          749 | 0/191B130   | 0/201E120
     (2 rows)
     </programlisting>
     If a slot has <literal>active = t</literal>
@@ -197,18 +215,32 @@
    <para>
     This view shows only replication peers that use a slot. Physical streaming
     replication connections that don't use slots will not show up here, only in
-    <literal>pg_stat_replication</literal>. &bdr; always uses slots so all
-    &bdr; peers will appear here.
+    <literal>pg_stat_replication</literal>. BDR always uses slots so all
+    BDR peers will appear here.
    </para>
 
    <para>
-    To see how much extra <acronym>WAL</acronym> &bdr; slot is asking the server
+    If you want to see a combined view, you can query a join of the two:
+	<programlisting>
+	SELECT *
+	FROM pg_catalog.pg_stat_replication r
+	FULL OUTER JOIN bdr.pg_replication_slots s
+	             ON r.pid = s.active_pid
+	WHERE r.application_name IS NULL
+	   OR r.application_name LIKE 'bdr%';
+	</programlisting>
+	This has the handy advantage of showing the replication slot name along
+	with details of the walsender backend using the slot.
+   </para>
+
+   <para>
+    To see how much extra <acronym>WAL</acronym> BDR slot is asking the server
     to keep, in bytes, use a query like:
     <programlisting>
     SELECT
-      slot_name, database, active,
+      slot_name, database, active, active_pid
       pg_xlog_location_diff(pg_current_xlog_insert_location(), restart_lsn) AS retained_bytes
-    FROM pg_replication_slots
+    FROM bdr.pg_replication_slots
     WHERE plugin = 'bdr';
     </programlisting>
    </para>
@@ -229,6 +261,16 @@
     advances on an active connection. The slot restat position does
     <emphasis>not</emphasis> indicate how old the data you will see on a peer
     node is.
+   </para>
+
+   <para>
+	<literal>pg_replication_slots.confirmed_flush_lsn</literal> is a better
+	measure of replication progress, since it shows the position of the last
+	commit the replica has written safely to disk. However, it will only
+	advance when a transaction <emphasis>completes</> replay and commits. If
+	you monitor only <literal>confirmed_flush_lsn</>, replication will seem to
+	stop making progress during transfer and apply of big transactions, wheras
+	<literal>pg_stat_replication.write_location</>'s will continue to advance.
    </para>
 
   </sect2>
@@ -281,7 +323,7 @@ locktype |    owning_sysid     | owning_timeline | owning_datid | owner_created_
   <para>
    <xref linkend="conflicts"> can arise when multiple nodes make changes
    that affect the same tables in ways that can interact with each other.
-   The &bdr; system should be monitored to ensure that conflicts
+   The BDR system should be monitored to ensure that conflicts
    are identified and, where possible, applicaiton changes are made to
    eliminate them or make them less frequent.
   </para>
@@ -289,7 +331,7 @@ locktype |    owning_sysid     | owning_timeline | owning_datid | owner_created_
   <para>
    Not all conflicts are logged to <xref linkend="catalog-bdr-conflict-history">
    even when <xref linkend="guc-bdr-log-conflicts-to-table"> is on. Conflicts
-   where &bdr; cannot proactively detect and handle the conflict (like 3-way
+   where BDR cannot proactively detect and handle the conflict (like 3-way
    foreign key conflicts) will result in an <literal>ERROR</literal> message
    in the PostgreSQL logs and an increment of
    <xref linkend="catalog-pg-stat-bdr"><literal>.nr_rollbacks</literal>

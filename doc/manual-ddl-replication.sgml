@@ -83,12 +83,15 @@
    and a new node joined in its place.)
   </para>
 
-  <sect2 id="ddl-replication-locking">
+  <sect2 id="ddl-replication-locking" xreflabel="DDL Locking">
    <title>The DDL lock</title>
 
     <para>
      DDL is a heavier weight operation than on standalone
      PostgreSQL. Performing DDL on any node will acquire a "global DDL lock". 
+	</para>
+
+	<para>
      This causes new transactions that attempt write operations <emphasis>on any
      node</emphasis> to pause (block) until the DDL lock is released or canceled.
      Existing write transactions will be given a grace period (controlled by
@@ -108,6 +111,13 @@ DETAIL:  User was holding a relation lock for too long.
      writes will be blocked, even if it does not affect the objects the
      currently in-progress DDL is modifying.</emphasis>
     </para>
+
+    <note>
+     <para>
+      See <xref linkend="technotes-ddl-locking"> for additional details on why
+      DDL locking is required and how it's done.
+     </para>
+    </note>
 
     <para>
      While <emphasis>any</emphasis> transaction on any node holds the DDL lock,
@@ -129,80 +139,44 @@ HINT:  Node (6313760193895071967,1,16385) in the cluster is already performing D
      that's taking/holding the DDL lock. It's all crash-safe.
     </para>
 
-    <sect3 id="ddl-replication-locking-howworks" xreflabel="How DDL locking works">
-     <title>How the DDL lock works</title>
+	<para>
+	 If the node that holds the DDL lock goes down permanently while holding
+	 the DDL lock, parting the node with <link
+	 xref="function-bdr-part-by-node-names">
+	 <function>bdr.bdr_part_by_node_names()</></> will release the lock on
+	 other nodes.
+	</para>
 
-     <para>
-      If you don't care how the global DDL lock works you can skip this section,
-      but understanding it will be useful when you're diagnosing issues.
-     </para>
+	<para>
+	 You cannot see the global DDL lock in the <filename>pg_locks</filename>
+	 view, as it is not implemented using a heavyweight lock. See
+	 <xref linkend="monitoring"> for guidance on monitoring BDR,
+	 including DDL locking.
+	</para>
 
-     <para>
-      There are two levels to the DDL lock: the global DDL lock, which only one node
-      at a time may hold, and the local DDL lock, which each node has separately.
-      When the global DDL lock is held then all the local DDL locks are held too.
-     </para>
-
-     <para>
-      The (somewhat simplified) process of DDL lock acquision is:
-     </para>
-
-     <orderedlist>
-      <listitem><para>A normal user backend attempts something that requires the DDL lock</para></listitem>
-      <listitem><para>The BDR command filter notices that the DDL lock is needed, pauses the user's command, and requests that the local BDR node acquire the global DDL lock</para></listitem>
-      <listitem><para>The local BDR node acquires its own local DDL lock. It will now reject any incoming lock requests from other nodes, cancel write transactions if needed, and pause new write transactions if needed.</para></listitem>
-      <listitem><para>The local DDL node writes a message in its replicaiton stream to ask every other node to take their local DDL locks and reply to confirm they've done so</para></listitem>
-      <listitem><para>Every node that gets the request acquires the local DDL lock to prevent concurrent DDL and writes, then checks with every other node to see that they've all replayed all outstanding changes from each other</para></listitem>
-      <listitem><para>When a node confirms all its peers have fully replayed its pending replication stream it replies to the lock requestor to say the lock is granted</para></listitem>
-      <listitem><para>When all peers have confirmed lock acquisition, the requesting node knows it now holds the global DDL lock</para></listitem>
-      <listitem><para>The requesting node makes the required schema changes</para></listitem>
-      <listitem><para>The requesting node writes the fact that it's done with the DDL lock to its WAL in the form of a lock release message</para></listitem>
-      <listitem><para>The requesting node releases its local DDL lock and resumes normal write operations</para></listitem>
-      <listitem><para>The other nodes replay the lock release message and release their local DDL locks, resuming normal write operations</para></listitem>
-     </orderedlist>
-
-     <para>
-      Critically, this means that <emphasis>every BDR node must complete a
-      two-way communication with every other BDR node before the DDL lock can
-      be granted</emphasis>. This communication is done via the replication
-      stream, so replication lag and delays, network slowness or outages, etc
-      in turn delay the DDL locking process. While the system is in the process
-      of acquiring the DDL lock, many nodes will hold their local DDL locks and
-      will be rejecting other DDL requests or, if the lock mode requires,
-      rejecting writes.
-     </para>
-
-     <para>
-      This means that schema changes and anything else that takes the DDL
-      lock should only be performed when all nodes are reachable and there
-      isn't a big replication delay between any pair of nodes.
-     </para>
-
-     <para>
-      It also means that if the system gets stuck waiting for a down node,
-      everything stops while we wait.
-     </para>
-     
-     <para>
-      If the DDL lock request is canceled by the requesting node, all the other
-      reachable nodes will release their locks. So if your system is hung up
-      on a DDL lock request that's making no progress you can just cancel the
-      statement that's requesting the DDL lock and everything will resume normal
-      operation.
-     </para>
-
-    </sect3>
+	<para>
+	 BDR 2.0 allows some DDL that doesn't affect table structure to proceed
+	 without blocking concurrent writes, only other DDL. See <xref
+	 linkend="ddl-replication-statements"> for details. Most DDL still requires
+	 a full write lock.
+	</para>
 
   </sect2>
 
-  <sect2 id="ddl-replication-safety" xreflabel="Minimisng impact of DDL">
+  <sect2 id="ddl-replication-safety" xreflabel="Minimising the impact of DDL">
    <title>Minimising the impact of DDL</title>
 
     <para>
      To minimise the impact of DDL, transactions performing DDL should be short,
      should not be combined with lots of row changes, and should avoid long
-     running foreign key lookups.
+     running foreign key or other constraint re-checks.
     </para>
+
+	<para>
+	 Multiple DDL statements  should generally be bunched into a transaction
+	 rather than fired as individual statements, so the DDL lock only has to be
+	 taken once.
+	</para>
 
     <para>
      If DDL is holding the system up for too long, it is possible and safe to
@@ -250,13 +224,14 @@ COMMIT;
 
  </sect1>
 
- <sect1 id="ddl-replication-statements">
+ <sect1 id="ddl-replication-statements" xreflabel="Statement specific DDL replication concerns">
   <title>Statement specific DDL replication concerns</title>
 
   <para>
    Not all commands can be replicated automatically. Some are
-   allowed regardless - generally ones that have affect on more
-   than one database. Others are disallowed.
+   allowed regardless - generally ones that have affect on more than one
+   database. Others are disallowed, and some have limitations and restrictions
+   on what can be used as compared to PostgreSQL without BDR.
   </para>
 
   <important>
@@ -266,6 +241,33 @@ COMMIT;
     if the created objects will be referenced by a BDR-enabled database.
    </para>
   </important>
+
+  <sect2>
+   <title>Statements with weaker DDL locking</title>
+
+   <para>
+	Some statements don't require the full <link
+	linkend="ddl-replication-locking">DDL lock</> and can proceed
+	with a weaker lock that prohibits other nodes from doing DDL
+	at the same time, but does not restrict concurrent DML
+	(insert, update or delete) operations.
+   </para>
+
+   <para>
+    <itemizedlist>
+	 <listitem><para><literal>CREATE SCHEMA ...</></></>
+	 <listitem><para><literal>CREATE [TABLE|VIEW] ...</></></>
+	 <listitem><para><literal>CREATE FOREIGN TABLE ...</></></>
+	 <listitem><para><literal>CREATE [AGGREGATE|OPERATOR|TYPE] ...</></></>
+	 <listitem><para><literal>CREATE INDEX CONCURRENTLY</> (not if <literal>UNIQUE</>)</></>
+	 <listitem><para><literal>CREATE [OR REPLACE] FUNCTION ...</></></>
+	 <listitem><para><literal>CREATE DOMAIN ...</></></>
+	 <listitem><para><literal>ALTER DEFAULT PRIVILEGES ...</></></>
+	 <listitem><para><literal>ALTER ... OWNER TO ...</></></>
+	</itemizedlist>
+   </para>
+
+  </sect2>
 
   <sect2>
    <title>Not replicated DDL statements</title>
@@ -976,36 +978,11 @@ COMMIT;
    </para>
 
    <note>
-    <para>
-     There are a number of reasons why we don't support full table rewrites.
-    </para>
-    <para>
-     They tend to be very slow operations for which the global
-     DDL lock must be held throughout. That's a long time to "stop the world".
-     They can be problematic for apps on standalone PostgreSQL for this reason,
-     but it's worse on BDR due to the global DDL lock.
-    </para>
-    <para>
-     Table rewrites discard replication origin and commit timestamp information
-     that we need to ensure that conflict resolution is consistent across all
-     nodes. There's currently no way to remap it.
-    </para>
-    <para>
-     Finally, we can't guarantee that the rewrite will have the same results
-     across all nodes unless the entire expression it uses is classified as
-     immutable. This isn't currently checked for. Even seemingly safe
-     defaults like <function>nextval(...)</function> aren't safe because
-     the order in which rows are processed by a table rewrite will be
-     different on different nodes, so different rows will get a given
-     generated value on each node.
-    </para>
-    <para>
-     Because of the performance issues we recommend that table-rewriting
-     operations be split up into multiple smaller operations and aren't
-     prioritizing support for the subset of them that can be made safe; see
-     <xref linkend="ddl-replication-how">.
-    </para>
-   </para>
+	<para>
+	 See <xref linkend="technotes-ddl-locking"> for additional details on why
+	 DDL locking is required and how it's done.
+	</para>
+   </note>
 
    <para>
     Generally unsupported statements are prevented from being

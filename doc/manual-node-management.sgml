@@ -9,7 +9,7 @@
   <title>Joining a node</title>
 
   <para>
-   When a new &bdr; node is joined to an existing &bdr; group,
+   When a new BDR node is joined to an existing BDR group,
    node is subscribed to an upstream peer, the system must copy
    the existing data from the peer node(s) to the local node before
    replication can begin. This copy has to be carefully co-ordinated
@@ -20,17 +20,26 @@
   </para>
 
   <para>
-   There are two ways to join a new &bdr; node: logical or physical copy.
+   Every BDR node must be <emphasis>online and reachable</> when an
+   attempt to join a new node is made. Otherwise the join will hang
+   indefinitely or fail. BDR is a mesh where every node must be able to
+   communicate with every other node, and while it is tolerant of network
+   partitions and interruptions all nodes need to know about every other node
+   that exist. See <xref linkend="technotes-mesh">.
+  </para>
+
+  <para>
+   There are two ways to join a new BDR node: logical or physical copy.
    After the initial copy is done there is no
-   significant difference between physical or logical initialization of a &bdr;
+   significant difference between physical or logical initialization of a BDR
    node, so the choice is down to which setup method will be quickest and
    easiest for your particular needs.
   </para>
 
   <para>
    In a logical copy, a blank database in an existing standalone PostgreSQL
-   instance is enabled for &bdr; via <acronym>SQL</acronym>
-   functions calls. The &bdr; extension makes a connection to an upstream
+   instance is enabled for BDR via <acronym>SQL</acronym>
+   functions calls. The BDR extension makes a connection to an upstream
    node designated by the user and takes a schema and data dump of that node.
    The dump is then applied to the local blank database before replication
    begins. Only the specified database is copied. With a logical copy you don't
@@ -43,7 +52,7 @@
    to clone a user-designated upstream node. This clone is then reconfigured
    and started up as a new node before replication begins. All databases
    on the remote node are copied, though only the specified database is
-   initially activated for &bdr;. (Support for multiple database
+   initially activated for BDR. (Support for multiple database
    join may be added at a later date). After a physical node
    join or subscribe the admin will generally need to separately register
    the new PostgreSQL instance with the operating system to auto-start,
@@ -75,7 +84,7 @@
   </para>
 
   <sect2 id="node-management-joining-bdr" xreflabel="Joining or creating a BDR node">
-   <title>Joining or creating a &bdr; node</title>
+   <title>Joining or creating a BDR node</title>
 
    <note>
     <para>
@@ -84,10 +93,10 @@
    </note>
 
    <para>
-    For &bdr; every node has to have a connection to every other node. To make
+    For BDR every node has to have a connection to every other node. To make
     configuration easy, when a new node joins it automatically configures all
     existing nodes to connect to it. For this reason, every node, including
-    the first &bdr; node created, must know the <ulink
+    the first BDR node created, must know the <ulink
     url="https://www.postgresql.org/docs/9.4/static/libpq-connect.html#LIBPQ-CONNSTRING">
     PostgreSQL connection string</ulink>
     (sometimes referred to as a <acronym>DSN</acronym>, for "data source name")
@@ -96,9 +105,9 @@
 
    <para>
     The SQL function <xref linkend="function-bdr-group-create">
-    is used to create the first node of a &bdr; cluster from a standalone
-    PostgreSQL database. Doing so makes &bdr; active on that
-    database and allows other nodes to join the &bdr; cluster (which
+    is used to create the first node of a BDR cluster from a standalone
+    PostgreSQL database. Doing so makes BDR active on that
+    database and allows other nodes to join the BDR cluster (which
     consists out of one node at that point). You must specify the
     connection string that other nodes will use to connect to this
     node at the time of creation.
@@ -111,14 +120,14 @@
    </para>
 
    <para>
-    Once the initial node is created every further node can join the &bdr;
+    Once the initial node is created every further node can join the BDR
     cluster using the <xref linkend="function-bdr-group-join"> function
     or using <xref linkend="command-bdr-init-copy">.
    </para>
 
    <para>
     Either way, when joining you must nominate a single node that is already a
-    member of the &bdr; group as the join target. This node's contents are
+    member of the BDR group as the join target. This node's contents are
     copied to become the initial state of the newly joined node. The new node
     will then synchronise with the other nodes to ensure it has the same
     contents as the others.
@@ -147,7 +156,7 @@
   <title>Removing a node</title>
 
   <para>
-   Because &bdr; can recover from extended node outages it is
+   Because BDR can recover from extended node outages it is
    necessary to explicitly tell the system if you are removing a node
    permanently. If you permanently shut down a node and don't tell
    the other nodes then performance will suffer and eventually
