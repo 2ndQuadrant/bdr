@@ -1223,7 +1223,6 @@ COMMIT;
 
 	 </sect3>
 
-
   <para>
    Alternately, the application may do what PostgreSQL does internally with
    the <literal>SERIAL</literal> and <literal>BIGSERIAL</literal> types:

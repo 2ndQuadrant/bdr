@@ -10,7 +10,7 @@
   <title>Prerequisite &postgres; parameters</title>
 
   <para>
-   &bdr; require certain &postgres; settings to be set to appropriate values.
+   BDR require certain &postgres; settings to be set to appropriate values.
   </para>
 
   <para>
@@ -24,7 +24,7 @@
      </term>
      <listitem>
       <para>
-       For &bdr; this has to be set to a big
+       For BDR this has to be set to a big
        enough value to have one worker per configured database, and
        one worker per connection.
       </para>
@@ -44,7 +44,7 @@
      </term>
      <listitem>
       <para>
-       For &bdr; this needs to be set big
+       For BDR this needs to be set big
        enough so that every connection to this node has a free
        replication slot.
       </para>
@@ -64,7 +64,7 @@
      </term>
      <listitem>
       <para>
-       For &bdr; this needs to be set big
+       For BDR this needs to be set big
        enough so that every connection to this node has a free wal
        sender process.
       </para>
@@ -72,7 +72,7 @@
        If a node also does streaming base backups and/or base
        backups using <application>pg_basebackup</application>, the
        value needs to be big enough to accomodate both that
-       and &bdr;.
+       and BDR.
       </para>
 
       <para>
@@ -91,7 +91,7 @@
      </term>
      <listitem>
       <para>
-       For &bdr; this parameter has to
+       For BDR this parameter has to
        include <literal>bdr</literal> as one of the comma separated
        values. The parameter can only be changed at server start.
       </para>
@@ -111,7 +111,7 @@
      </term>
      <listitem>
       <para>
-       To use &bdr; this parameter has to
+       To use BDR this parameter has to
        be set to <literal>true</literal>.
       </para>
      </listitem>
@@ -125,7 +125,7 @@
      </term>
      <listitem>
       <para>
-       For &bdr; this parameter has to be
+       For BDR this parameter has to be
        set to <literal>logical</literal>.
       </para>
 
@@ -158,10 +158,10 @@
  </sect1>
 
  <sect1 id="bdr-configuration-variables" xreflabel="BDR-specific configuration variables">
-  <title>&bdr; specific configuration variables</title>
+  <title>BDR specific configuration variables</title>
 
   <para>
-   The &bdr; extension exposes a number of configuration parameters via
+   The BDR extension exposes a number of configuration parameters via
    PostgreSQL's usual configuration mechanism. You can set these in the same
    way as any other setting, via <literal>postgresql.conf</literal> or using
    <literal>ALTER SYSTEM</literal>. Some variables can also be set per-user,
@@ -180,7 +180,7 @@
      </term>
      <listitem>
       <para>
-       Log whole tuples when logging &bdr; tuples. Requires a server reload to take effect.
+       Log whole tuples when logging BDR tuples. Requires a server reload to take effect.
       </para>
      </listitem>
     </varlistentry>
@@ -194,7 +194,7 @@
      <listitem>
       <para>
        This boolean option controls whether
-       detected &bdr; conflicts get logged
+       detected BDR conflicts get logged
        to the bdr.bdr_conflict_history table. See Conflict logging
        for details. <!-- FIXME: Add link to not yet existing
                          conflict logging chapter-->
@@ -213,9 +213,9 @@
       <para>
        This boolean option controls whether
        the <varname>synchronous_commit</varname> setting
-       in &bdr; apply workers is enabled. It defaults
+       in BDR apply workers is enabled. It defaults
        to <literal>off</literal>.  If set to <literal>off</literal>,
-       &bdr; apply workers will perform
+       BDR apply workers will perform
        asynchronous commits,
        allowing &postgres; to
        considerably improve throughput.
@@ -409,7 +409,7 @@
       </term>
       <listitem>
        <para>
-        Only affects &bdr;. Prevents acquisiton of the the global
+        Only affects BDR. Prevents acquisiton of the the global
         DDL lock when executing DDL statement. This is mainly
         used internally, but can also be useful in other cases.  This
         option can be set at any time, but only by superusers.
@@ -431,7 +431,7 @@
       </term>
       <listitem>
        <para>
-        Only affects &bdr;. Permits execution of schema
+        Only affects BDR. Permits execution of schema
         changes that cannot safely be replicated. This is primarily
         used internally, but can also be used in other cases.  This
         option can be set at any time, but only by superusers.
@@ -454,10 +454,10 @@
       </term>
       <listitem>
        <para>
-        Only affects &bdr;. Skips replication of DDL changes
+        Only affects BDR. Skips replication of DDL changes
         made in a session where this option is set to other systems.
         This is primarily useful
-        for &bdr; internal use, but also can
+        for BDR internal use, but also can
         be used for some intentional schema changes like adding a
         index only on some nodes. This option can be set at any time,
         but only by superusers.

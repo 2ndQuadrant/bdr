@@ -218,7 +218,7 @@
  </sect1>
 
  <sect1 id="node-management-disabling" xreflabel="Turning a BDR node back into a normal database">
-  <title>Removing a node</title>
+  <title>Completely removing BDR</>
 
   <para>
    To take a BDR node that has already been parted, or one that has been
