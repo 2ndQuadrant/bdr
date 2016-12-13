@@ -763,7 +763,8 @@ bdr_ddl_lock_remote(PGconn *conn, BDRLockType mode)
  *
  * Note that we set the global sequence ID from here too.
  *
- * TODO: move to bdr_common.c and re-use from bdr_init_copy
+ * Since bdr_init_copy creates nodes in state BDR_NODE_STATUS_CATCHUP,
+ * we'll run this for both logically and physically joined nodes.
  */
 static void
 bdr_nodes_set_remote_status_ready(PGconn *conn)
@@ -799,14 +800,20 @@ bdr_nodes_set_remote_status_ready(PGconn *conn)
 	 * It's safe to claim a node_seq_id from a 'k'illed node because we
 	 * won't be replaying new changes from it once we see that status and
 	 * the ID generator is based on timestamps.
-	 *
-	 * TODO: for extra safety don't re-use IDs for recently killed nodes
-	 * based on a new status_changed ts field.
 	 */
 	res = PQexecParams(conn,
 				 "UPDATE bdr.bdr_nodes\n"
 				 "SET node_status = "BDR_NODE_STATUS_READY_S",\n"
-				 "    node_seq_id = (SELECT min(node_seq_id) FROM bdr.bdr_nodes WHERE node_status IN ("BDR_NODE_STATUS_READY_S")) + 1\n"
+				 "    node_seq_id = coalesce(\n"
+				 "         -- lowest free ID if one has been released\n"
+				 "         (select min(x)\n"
+				 "          from\n"
+				 "            (select * from bdr.bdr_nodes where node_status not in ("BDR_NODE_STATUS_KILLED_S")) n\n"
+				 "            right join generate_series(1, (select max(n2.node_seq_id) from bdr.bdr_nodes n2)) s(x)\n"
+				 "              on (n.node_seq_id = x)\n"
+				 "            where n.node_seq_id is null),\n"
+				 "         -- otherwise next-greatest ID\n"
+				 "         (select coalesce(max(node_seq_id),0) + 1 from bdr.bdr_nodes where node_status not in ("BDR_NODE_STATUS_KILLED_S")))\n"
 				 "WHERE (node_sysid, node_timeline, node_dboid) = ($1, $2, $3)\n"
 				 "RETURNING node_seq_id\n",
 				 3, NULL, (const char **)values, NULL, NULL, 0);
