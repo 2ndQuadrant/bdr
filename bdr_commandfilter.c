@@ -1198,7 +1198,6 @@ bdr_commandfilter(Node *parsetree,
 
 		case T_GrantStmt:
 #if PG_VERSION_NUM >= 90600
-			elog(WARNING, "processing GRANT statement");
 			break;
 #else
 			goto done;
