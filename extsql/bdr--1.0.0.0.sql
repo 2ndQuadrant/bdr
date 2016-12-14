@@ -1986,10 +1986,10 @@ BEGIN
         END IF;
       END LOOP;
     ELSE
-      RAISE INFO 'Global sequences not supported, nothing to convert';
+      RAISE INFO 'BDR 1.0 global sequences not supported, nothing to convert';
     END IF;
   ELSE
-    RAISE NOTICE 'global sequences not converted to local; they will not work until a new nodegroup is created';
+    RAISE NOTICE 'BDR 1.0 global sequences not converted to local; they will not work until a new nodegroup is created';
   END IF;
 
   -- Strip the database security label
