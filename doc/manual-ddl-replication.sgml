@@ -142,7 +142,7 @@ HINT:  Node (6313760193895071967,1,16385) in the cluster is already performing D
 	<para>
 	 If the node that holds the DDL lock goes down permanently while holding
 	 the DDL lock, parting the node with <link
-	 xref="function-bdr-part-by-node-names">
+	 linkend="function-bdr-part-by-node-names">
 	 <function>bdr.bdr_part_by_node_names()</></> will release the lock on
 	 other nodes.
 	</para>
@@ -1057,6 +1057,7 @@ COMMIT;
            can unfortunately not be supported. It is however often
            possible to rewrite this into a series of supported
            commands; see <xref linkend="ddl-replication-how">.
+          </para>
          </listitem>
 
          <listitem>
@@ -1081,7 +1082,7 @@ COMMIT;
            column's type is not supported. Changing a column in a way
            that doesn't require table rewrites may be suppported at
            some point. See <xref linkend="ddl-replication-how">
-					 for how to work around this limitation.
+           for how to work around this limitation.
           </para>
          </listitem>
 
@@ -1186,73 +1187,62 @@ COMMIT;
    <title>How to work around restricted DDL</title>
 
    <para>
-    As noted in <xref linkend="">, BDR limits some kinds of DDL operations. In particular,
-    an <literal>ALTER TABLE</literal> that causes a full table rewrite is prohibited.
+    As noted in <xref linkend="ddl-replication-prohibited-commands">, BDR
+    limits some kinds of DDL operations. In particular, an <literal>ALTER
+    TABLE</literal> that causes a full table rewrite is prohibited.
    </para>
 
-	 <para>
-		It's possible to split almost all such operations up into smaller changes,
-		but not always simple. The same decomposition into smaller operations that's done
-		for BDR is what's typically needed for low-lock, low-downtime schema changes on high
-		load systems, though.
-	 </para>
+   <para>
+    It's possible to split almost all such operations up into smaller changes,
+    but not always simple. The same decomposition into smaller operations that's done
+    for BDR is what's typically needed for low-lock, low-downtime schema changes on high
+    load systems, though.
+   </para>
 
    <sect3 id="ddl-replication-addcolumn" xreflabel="Adding a column">
-	  <title>Adding a column</title>
+    <title>Adding a column</title>
 
-		<para>
-		 Usually you can just <literal>ALTER TABLE ... ADD COLUMN ...</>. But you cannot
-		 add columns with a <literal>DEFAULT</>, and therefore cannot add <literal>NOT NULL</>
-		 columns to non-empty tables.
-		</para>
+    <para>
+     Usually you can just <literal>ALTER TABLE ... ADD COLUMN ...</>. But you cannot
+     add columns with a <literal>DEFAULT</>, and therefore cannot add <literal>NOT NULL</>
+     columns to non-empty tables.
+    </para>
 
-		<para>
-		 To add a column with a default:
-		 <itemizedlist>
-		  <listitem><para><literal>ALTER TABLE</> <replaceable>thetable</> <literal>ADD COLUMN</> <replaceable>newcolumn coltype</><literal>;</>. Note the lack of a <literal>DEFAULT</> or <literal>NOT NULL</>.</></>
-			<listitem><para><literal>ALTER TABLE</> <replaceable>thetable</> <literal>ALTER COLUMN</> <replaceable>newcolumn</> <literal>DEFAULT</> <replaceable>default-expression</><literal>;</></></>
-			<listitem><para><literal>UPDATE</> <replaceable>thetable</> <literal>SET</> <replaceable>newcolumn</> <literal>=</> <replaceable>default-expression</><literal>;</> . For best results batch the update into chunks so you don't update more than a few tens or hundreds of thousands of rows at once.</></>
-			<listitem><para>If required, <literal>ALTER TABLE</> <replaceable>thetable</> <literal>ALTER COLUMN</> <replaceable>newcolumn</> <literal>NOT NULL;</></></>
-		 </itemizedlist>
-		 This splits schema changes and row changes into separate transactions,
-		 which performs <emphasis>much</> better with BDR and avoids the full table
-		 rewrite limitations. It's fine to create the column and alter it to add a
-		 default in a single transaction, but the update and final alter should be
-		 separate transactions.
-		</para>
+    <para>
+     To add a column with a default:
+     <itemizedlist>
+      <listitem><para><literal>ALTER TABLE</> <replaceable>thetable</> <literal>ADD COLUMN</> <replaceable>newcolumn coltype</><literal>;</>. Note the lack of a <literal>DEFAULT</> or <literal>NOT NULL</>.</></>
+      <listitem><para><literal>ALTER TABLE</> <replaceable>thetable</> <literal>ALTER COLUMN</> <replaceable>newcolumn</> <literal>DEFAULT</> <replaceable>default-expression</><literal>;</></></>
+      <listitem><para><literal>UPDATE</> <replaceable>thetable</> <literal>SET</> <replaceable>newcolumn</> <literal>=</> <replaceable>default-expression</><literal>;</> . For best results batch the update into chunks so you don't update more than a few tens or hundreds of thousands of rows at once.</></>
+      <listitem><para>If required, <literal>ALTER TABLE</> <replaceable>thetable</> <literal>ALTER COLUMN</> <replaceable>newcolumn</> <literal>NOT NULL;</></></>
+     </itemizedlist>
+     This splits schema changes and row changes into separate transactions,
+     which performs <emphasis>much</> better with BDR and avoids the full table
+     rewrite limitations. It's fine to create the column and alter it to add a
+     default in a single transaction, but the update and final alter should be
+     separate transactions.
+    </para>
 
-	 </sect3>
+   </sect3>
 
-  <para>
-   Alternately, the application may do what PostgreSQL does internally with
-   the <literal>SERIAL</literal> and <literal>BIGSERIAL</literal> types:
-   <programlisting>
-    BEGIN;
+   <sect3 id="ddl-replication-altertype" xreflabel="Changing a column's type">
+    <title>Changing a column's type</>
 
-    CREATE TABLE gstest (
-      id bigint primary key,
-      parrot text
-    );
+    <para>
+     Similarly, to change a column's type:
+     <itemizedlist>
+      <listitem><para><literal>ALTER TABLE</> <replaceable>thetable</> <literal>ADD COLUMN</> <replaceable>newcolumn</> <replaceable>newtype</> a column of the desired type</></>
+      <listitem><para>Create a <literal>BEFORE INSERT OR UPDATE ON</> <replaceable>thetable</> <literal>FOR EACH ROW ..</> trigger that assigns <literal>NEW.</><replaceable>newcolumn</> <literal>:= NEW.</><replaceable>oldcolumn</> so that new writes to the table update the new column too</></>
+      <listitem><para><literal>UPDATE</> <replaceable>thetable</> the table in batches to copy the value of <replaceable>oldcolumn</> to <replaceable>newcolumn</>. Batching the work will help reduce replication lag if it's a big table, since BDR replicates strictly in commit order. Updating by range of IDs or whatever method you prefer is fine, or the whole table in one go for smaller tables.</></>
+      <listitem><para><literal>CREATE INDEX ...</> any required indexes on the new column. It's safe to use <literal>CREATE INDEX ... CONCURRENTLY</>.</></>
+      <listitem><para><literal>ALTER</> the column to add a <literal>NOT NULL</> and <literal>CHECK</> constraints, if required</></>
+      <listitem><para>If the column is <literal>UNIQUE</> or the <literal>PRIMARY KEY</> and is the target of one or more <literal>FOREIGN KEY</> constraints, repeat this process on each referencing table, recursively, such that all related tables have the new column fully populated before you:</></>
+      <listitem><para><literal>ALTER</> the table to add any <literal>FOREIGN KEY</> constraints that were present on <replaceable>oldcolumn</>.</></>
+      <listitem><para><literal>BEGIN</> a transaction, <literal>DROP</> the trigger you added, <literal>ALTER TABLE</> to add any <literal>DEFAULT</> required on the column, <literal>DROP</> the old column, and <literal>ALTER TABLE</> <replaceable>thetable</> <literal>RENAME COLUMN</> <replaceable>newcolumn</> <literal>TO</> <replaceable>oldcolumn</>, then <literal>COMMIT</>. Because you're dropping a column you may have to re-create views, procedures, etc that depend on the table. Be careful if you <literal>CASCADE</> drop the column, as you'll need to ensure you re-create everything that referred to it.</></>
+     </itemizedlist>
+    </para>
 
-    CREATE SEQUENCE gstest_id_seq OWNED BY gstest.id USING bdr;
-
-    ALTER TABLE gstest ALTER COLUMN id SET DEFAULT nextval('gstest_id_seq');
-   </programlisting>
-  </para>
-
-   <para>
-	  Similarly, to change a column's type:
-		<itemizedlist>
-		 <listitem><para><literal>ALTER TABLE</> <replaceable>thetable</> <literal>ADD COLUMN</> <replaceable>newcolumn</> <replaceable>newtype</> a column of the desired type</></>
-		 <listitem><para>Create a <literal>BEFORE INSERT OR UPDATE ON</> <replaceable>thetable</> <literal>FOR EACH ROW ..</> trigger that assigns <literal>NEW.</><replaceable>newcolumn</> <literal>:= NEW.</><replaceable>oldcolumn</> so that new writes to the table update the new column too</></>
-		 <listitem><para><literal>UPDATE</> <replaceable>thetable</> the table in batches to copy the value of <replaceable>oldcolumn</> to <replaceable>newcolumn</>. Batching the work will help reduce replication lag if it's a big table, since BDR replicates strictly in commit order. Updating by range of IDs or whatever method you prefer is fine, or the whole table in one go for smaller tables.</></>
-		 <listitem><para><literal>CREATE INDEX ...</> any required indexes on the new column. It's safe to use <literal>CREATE INDEX ... CONCURRENTLY</>.</></>
-		 <listitem><para><literal>ALTER</> the column to add a <literal>NOT NULL</> and <literal>CHECK</> constraints, if required</></>
-		 <listitem><para>If the column is <literal>UNIQUE</> or the <literal>PRIMARY KEY</> and is the target of one or more <literal>FOREIGN KEY</> constraints, repeat this process on each referencing table, recursively, such that all related tables have the new column fully populated before you:</></>
-		 <listitem><para><literal>ALTER</> the table to add any <literal>FOREIGN KEY</> constraints that were present on <replaceable>oldcolumn</>.</></>
-		 <listitem><para><literal>BEGIN</> a transaction, <literal>DROP</> the trigger you added, <literal>ALTER TABLE</> to add any <literal>DEFAULT</> required on the column, <literal>DROP</> the old column, and <literal>ALTER TABLE</> <replaceable>thetable</> <literal>RENAME COLUMN</> <replaceable>newcolumn</> <literal>TO</> <replaceable>oldcolumn</>, then <literal>COMMIT</>. Because you're dropping a column you may have to re-create views, procedures, etc that depend on the table. Be careful if you <literal>CASCADE</> drop the column, as you'll need to ensure you re-create everything that referred to it.</></>
-		</itemizedlist>
-	 </para>
+   </sect3>
 
   </sect2>
  </sect1>

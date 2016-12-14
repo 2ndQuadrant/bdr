@@ -58,7 +58,7 @@
      and <application>pg_restore</> from PostgreSQL 9.6, <emphasis>not</> the
      ones from Postgres-BDR 9.4.
     </para>
-   </para>
+   </important>
 
    <para>
     Once your database is restored to PostgreSQL 9.6, bring up BDR as if this
@@ -139,8 +139,8 @@
      because unlike the 1.0-style sequences they are immune to network partition
      related faults and they cannot suffer temporary exhaustion when consumed
      too fast. There are downsides too, so make sure to read the
-     <xref linkend="global-sequences">global sequences</> chapter.
-     <empasis>Application changes or configuration may be necessary.</>
+     <link linkend="global-sequences">global sequences</> chapter.
+     <emphasis>Application changes or configuration may be necessary.</>
     </para>
 
     <para>
@@ -224,8 +224,8 @@
      Because <application>bdr_init_replica</> does a physical copy with
      <application>pg_basebackup</> it cannot be used to join the first 9.6 node
      to a running 9.4 BDR group. A logical join using <link
-     linkend=""><function>bdr.bdr_group_join</></> must be performed. See <xref
-     linkend="node-management-joining">.
+     linkend="function-bdr-group-join"><function>bdr.bdr_group_join</></> must
+     be performed. See <xref linkend="node-management-joining">.
     </para>
 
     <para>

@@ -32,7 +32,7 @@
 
   </sect3>
 
-  <sect3 id="installation-get-source-94">
+  <sect3 id="installation-get-source">
    <title>Getting BDR source code</title>
 
    <sect4>
@@ -48,20 +48,13 @@
     <para>
      The source for BDR is maintained at
      <ulink url="https://github.com/2ndQuadrant/bdr">https://github.com/2ndQuadrant/bdr</ulink>.
-     There are actually two independent source trees in this repository - one
-     tree for the BDR plugin, and one for the modified version of PostgreSQL, Postgres-BDR 9.4
-     that it requires when run on PostgreSQL 9.4. (If you want to run BDR on PostgreSQL 9.6+,
-     you can just install it as an extension instead; see <xref
-     linkend="installation-source">.) At the time of writing the main branches
-     are:
+     At the time of writing the main branches of interest are:
      <itemizedlist>
       <listitem><para><filename>bdr-plugin/RELX_Y_STABLE</filename>:
 	 the stable releases of the BDR plugin (for example
 	 <filename>bdr-plugin/REL2_0_STABLE</filename> is latest source of 2.0.x).</para></listitem>
       <listitem><para><filename>bdr-plugin/next</filename>:
 	 the in-progress development version of the BDR plugin</para></listitem>
-      <listitem><para><filename>bdr-pg/REL9_4_STABLE</filename>:
-	 the current stable release of the modified PostgreSQL 9.4 that BDR requires.</para></listitem>
      </itemizedlist>
     </para>
 
@@ -70,11 +63,8 @@
     </para>
 
     <para>
-     To clone the source code using <application>git</application> you will
-     need to run two clones, one for the BDR plugin sources and one for the
-     patched PostgreSQL sources, e.g. (for the 2.0.x version of BDR):
+     To clone the source code using <application>git</application>:
      <programlisting>
-      git clone -b bdr-pg/REL9_4_STABLE https://github.com/2ndQuadrant/bdr.git postgresql-bdr
       git clone -b bdr-plugin/REL2_0_STABLE https://github.com/2ndQuadrant/bdr.git bdr-plugin
      </programlisting>
     </para>
@@ -99,9 +89,10 @@
     </para>
 
     <para>
-     You will need to download <emphasis>both</emphasis> the patched
-     PostgreSQL source (<filename>postgresql-bdr-[...].tar.gz</filename>) and
-     the associated BDR release (<filename>bdr-[...].tar.gz</filename>).
+     When installing BDR 2.0 on PostgreSQL 9.6, you <emphasis>only</> need the
+     BDR extension sources in the <filename>bdr-[...].tar.gz</filename> archive.
+     Ignore the <filename>postgresql-bdr-[...].tar.gz</filename> containing
+     BDR-Postgres 9.4, as this is not required when installing on PostgreSQL 9.6.
     </para>
 
     <para>
@@ -120,38 +111,23 @@
 
   </sect3>
 
- <sect3 id="installation-bdr-source-94">
-  <title>Installation of BDR for Postgres-BDR 9.4 from source</title>
-  <para>
-   Installing BDR for 9.4 from source consists out of two steps: First
-   compile and install Postgres-BDR 9.4; secondly compile and install the BDR
-   plugin.
-  </para>
+  <sect3 id="installation-bdr-source">
+   <title>Installation of BDR for PostgreSQL 9.6 from source</title>
 
-  <para>
-   The patched PostgreSQL 9.4 required for BDR on 9.4 can be compiled using the
-   <ulink
-   url="http://www.postgresql.org/docs/current/static/installation.html">normal
-   documented procedures</ulink>. That will usually be something
-   like:
-   <programlisting>
-    cd /path/to/bdr-pg-source/
-    ./configure --prefix=/path/to/install --enable-debug --with-openssl
-    make -j4 -s install-world
-   </programlisting>
-  </para>
-  <para>
-   To then install BDR execute its configure script with the
-   <application>pg_config</application> installed by the patched PostgreSQL
-   in the <literal>PATH</literal> environment variable, e.g.:
-   <programlisting>
-    cd /path/to/bdr-plugin-source/
-    PATH=/path/to/postgres/install/bin:"$PATH" ./configure
-    make -j4 -s all
-    make -s install
-   </programlisting>
-  </para>
- </sect3>
+   <para>
+    To add the BDR 2.0 extension to your PostgreSQL 9.6 install execute its
+    configure script with the <application>pg_config</application> from
+    PostgreSQL 9.6 in the <literal>PATH</literal> environment variable,
+    e.g.:
+    <programlisting>
+     cd /path/to/bdr-plugin-source/
+     PATH=/path/to/postgres96/install/bin:"$PATH" ./configure
+     make -j4 -s all
+     make -s install
+    </programlisting>
+   </para>
+
+  </sect3>
 
  </sect2>
 

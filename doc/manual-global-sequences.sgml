@@ -96,7 +96,7 @@
     that are still on BDR-Postgres 9.4. For details on the old global sequences
     implementation see the BDR 1.0 manual.
    </para>
-  </para>
+  </note>
 
  </sect1>
 
@@ -175,28 +175,38 @@
   </para>
 
   <para>
-   If you normally create the sequence as a <type>SERIAL</type> or
-   <type>BIGSERIAL</type> column you may continue to do so. To enable global sequence
-   use on the column you must <literal>ALTER</literal> the <literal>DEFAULT</literal>
-   expression after table creation. There is currently no facility to do this
-   automatically and transparently so you need to do it in a follow up command
-   like:
+   If you normally create the sequence as a <type>BIGSERIAL</type> column you
+   may continue to do so. To enable global sequence use on the column you must
+   <literal>ALTER</literal> the <literal>DEFAULT</literal> expression after
+   table creation. There is currently no facility to do this automatically and
+   transparently so you need to do it in a follow up command like:
    <programlisting>
     ALTER TABLE my_table ALTER COLUMN my_bigserial DEFAULT bdr.global_seq_nextval('my_table_my_bigserial_seq');
    </programlisting>
   </para>
 
-  <note>
+  <para>
+   <literal>SERIAL</> must be converted to <literal>BIGSERIAL</> since 32-bit
+   wide global sequence values are not supported.
+  </para>
+
+  <warning>
    <para>
-    Do not add a <type>SERIAL</type> or <type>BIGSERIAL</type> column to an
-    existing non-empty table. Instead follow the advice for adding columns in
-    the <xref linkend="ddl-replication"> chapter.
+    Do not add a <type>BIGSERIAL</type> column to an existing non-empty table,
+    either directly or using <literal>bdr.replicate_ddl_command</>.  Instead
+    follow the advice for adding columns in the <xref
+    linkend="ddl-replication"> chapter. If default values are assigned during
+    <literal>ALTER TABLE ... ADD COLUMN ...</> rather than by a follow-up
+    <literal>UPDATE</> the order of value assignment may differ from node to
+    node, leading to inconsistencies. Additionally, the sequence values will be
+    assigned before you can switch to using <literal>bdr.global_seq_nextval</>.
    </para>
-  </note>
+  </warning>
 
   <para>
-   Global sequences are handled normally by <application>pg_dump</>. No special action
-   is required.
+   Global sequences are handled normally by <application>pg_dump</>. Because
+   the <literal>DEFAULT</> is <literal>bdr.global_seq_nextval(...)</>, the
+   <literal>bdr</> schema must exist on the node targeted for restoration.
   </para>
 
   <para>
@@ -271,7 +281,7 @@
    to trigger this limitation. Generating a single ID typically takes over 3ns,
    so 8192 per ms is exceedingly unlikely especially since there will be other
    work being done, rows inserted, indexes updated, etc. Despite that,
-   applications should have a <litreal>UNIQUE</> constraint in place where they
+   applications should have a <literal>UNIQUE</> constraint in place where they
    absolutely rely on lack of collisions.
   </para>
 

@@ -12,7 +12,8 @@
    BDR is also compatible with BDR-Postgres 9.4, a modified PostgreSQL 9.4 that
    was required by BDR 1.x releases. New installs should use PostgreSQL 9.6.
    Support for BDR-Postgres 9.4 is mainly for existing deployments and for
-   upgrades. See <xref linkend="upgrading-bdr-postgres"/>.
+   upgrades. See <xref linkend="upgrading-bdr-postgres"/> and
+   <xref linkend="install-requirements-94">.
   </para>
 
   <para>
@@ -27,11 +28,6 @@
    <ulink url="http://2ndquadrant.com/BDR">BDR website</ulink> for
    the latest information.
   </para>
-
-  <sect2 id="install-requirements-96plus" xreflabel="BDR Requirements (9.6)">
-   <title>BDR Requirements (PostgreSQL 9.6)</>
-
-  </sect2>
 
   <sect2 id="install-requirements-94" xreflabel="BDR requirements (9.4)">
    <title>BDR Requirements (BDR-Postgres 9.4)</>

@@ -7,11 +7,19 @@
  </para>
 
  <sect1 id="technotes-mesh" xreflabel="BDR mesh network">
+  <title>BDR network structure</>
 
   <para>
    BDR uses a mesh topology, where every node can communicate directly with
    every other node. It doesn't support circular replication, forwarding,
    cascading, etc.
+  </para>
+
+  <para>
+   Each pair of nodes communicates over a pair of (mostly) uni-directional
+   channels, one to stream data from node A=>B and one to stream data from node
+   B=>A. This means each node must be able to connect directly to each other
+   node. Firewalls, NAT, etc must be configured accordingly.
   </para>
   
   <para>
@@ -44,6 +52,7 @@
  </sect1>
 
  <sect1 id="technotes-ddl-locking" xreflabel="DDL locking details">
+  <title>DDL locking details</>
 
   <para>
    To ensure complete consistency of some types of schema change operations
@@ -82,79 +91,79 @@
    <title>How the DDL lock works</title>
 
    <para>
-	If you don't care how the global DDL lock works you can skip this section,
-	but understanding it will be useful when you're diagnosing issues.
+    If you don't care how the global DDL lock works you can skip this section,
+    but understanding it will be useful when you're diagnosing issues.
    </para>
 
    <para>
-	There are two levels to the DDL lock: the global DDL lock, which only one node
-	at a time may hold, and the local DDL lock, which each node has separately.
-	When the global DDL lock is held then all the local DDL locks are held too.
+    There are two levels to the DDL lock: the global DDL lock, which only one node
+    at a time may hold, and the local DDL lock, which each node has separately.
+    When the global DDL lock is held then all the local DDL locks are held too.
    </para>
 
    <para>
-	Inter-node communication is done via WAL messages written to the
-	transaction logs and replayed by apply workers. So replication and replay
-	lag will result in lag with DDL locking too.
+    Inter-node communication is done via WAL messages written to the
+    transaction logs and replayed by apply workers. So replication and replay
+    lag will result in lag with DDL locking too.
    </para>
 
    <para>
-	There are also two (currently) DDL lock modes. The weak 'ddl' lock, and the
-	'write' lock. The global 'ddl' mode prevents other nodes from running any
-	DDL while it is held by holding each node's local DDL lock. The 'write'
-	mode further requires that all nodes complete all in-progress transactions,
-	disallow new write operations, and make sure they have fully replayed all
-	changes from their peers. BDR versions prior to 1.0 only had the
-	heavier-weight 'write' mode lock.
+    There are also two (currently) DDL lock modes. The weak 'ddl' lock, and the
+    'write' lock. The global 'ddl' mode prevents other nodes from running any
+    DDL while it is held by holding each node's local DDL lock. The 'write'
+    mode further requires that all nodes complete all in-progress transactions,
+    disallow new write operations, and make sure they have fully replayed all
+    changes from their peers. BDR versions prior to 1.0 only had the
+    heavier-weight 'write' mode lock.
    </para>
 
    <para>
-	The (somewhat simplified) process of DDL lock acquision is:
+    The (somewhat simplified) process of DDL lock acquision is:
    </para>
 
    <orderedlist>
-	<listitem><para>A normal user backend attempts something that requires the DDL lock</para></listitem>
-	<listitem><para>The BDR command filter notices that the DDL lock is needed, pauses the user's command, and requests that the local BDR node acquire the global DDL lock</para></listitem>
-	<listitem><para>The local BDR node acquires its own local DDL lock. It will now reject any incoming lock requests from other nodes, cancel write transactions if needed, and pause new write transactions if needed.</para></listitem>
-	<listitem><para>The local DDL node writes a message in its replicaiton stream to ask every other node to take their local DDL locks and reply to confirm they've done so</para></listitem>
-	<listitem><para>Every node that gets the request acquires the local DDL lock to prevent concurrent DDL and possibly writes, then replies to the requestor to confirm that its lock DDL lock is taken.</para></listitem>
-	<listitem><para>When all peers have confirmed lock acquisition, the requesting node knows it now holds the global DDL lock. If it's acquiring a weak DDL lock it's done now. If it's acquiring a write lock it must wait until all peers confirm replay.</para></listitem>
-	<listitem><para>If the DDL lock request was a write-lock request, each node receiving a lock request checks with every other node to see that they've all replayed all outstanding changes from each other and waits for them all to reply with confirmation, then sends its own catchup confirmation.</para></listitem>
-	<listitem><para>Once it has the global DDL lock, and (for write locks) knows all peers are caught up to each other, the requesting node is ready to proceed.</listitem></para>
-	<listitem><para>The requesting node makes the required schema changes</para></listitem>
-	<listitem><para>The requesting node writes the fact that it's done with the DDL lock to its WAL in the form of a lock release message</para></listitem>
-	<listitem><para>The requesting node releases its local DDL lock and resumes normal write operations</para></listitem>
-	<listitem><para>The other nodes replay the lock release message and release their local DDL locks, resuming normal write operations</para></listitem>
+    <listitem><para>A normal user backend attempts something that requires the DDL lock</para></listitem>
+    <listitem><para>The BDR command filter notices that the DDL lock is needed, pauses the user's command, and requests that the local BDR node acquire the global DDL lock</para></listitem>
+    <listitem><para>The local BDR node acquires its own local DDL lock. It will now reject any incoming lock requests from other nodes, cancel write transactions if needed, and pause new write transactions if needed.</para></listitem>
+    <listitem><para>The local DDL node writes a message in its replicaiton stream to ask every other node to take their local DDL locks and reply to confirm they've done so</para></listitem>
+    <listitem><para>Every node that gets the request acquires the local DDL lock to prevent concurrent DDL and possibly writes, then replies to the requestor to confirm that its lock DDL lock is taken.</para></listitem>
+    <listitem><para>When all peers have confirmed lock acquisition, the requesting node knows it now holds the global DDL lock. If it's acquiring a weak DDL lock it's done now. If it's acquiring a write lock it must wait until all peers confirm replay.</para></listitem>
+    <listitem><para>If the DDL lock request was a write-lock request, each node receiving a lock request checks with every other node to see that they've all replayed all outstanding changes from each other and waits for them all to reply with confirmation, then sends its own catchup confirmation.</para></listitem>
+    <listitem><para>Once it has the global DDL lock, and (for write locks) knows all peers are caught up to each other, the requesting node is ready to proceed.</para></listitem>
+    <listitem><para>The requesting node makes the required schema changes</para></listitem>
+    <listitem><para>The requesting node writes the fact that it's done with the DDL lock to its WAL in the form of a lock release message</para></listitem>
+    <listitem><para>The requesting node releases its local DDL lock and resumes normal write operations</para></listitem>
+    <listitem><para>The other nodes replay the lock release message and release their local DDL locks, resuming normal write operations</para></listitem>
    </orderedlist>
 
    <para>
-	Critically, this means that for write-locks <emphasis>every BDR node must
-	complete a two-way communication with every other BDR node before the DDL
-	lock can be granted</emphasis>. This communication is done via the
-	replication stream, so replication lag and delays, network slowness or
-	outages, etc in turn delay the DDL locking process. While the system is in
-	the process of acquiring the DDL lock, many nodes will hold their local DDL
-	locks and will be rejecting other DDL requests or, if the lock mode
-	requires, rejecting writes.
+    Critically, this means that for write-locks <emphasis>every BDR node must
+    complete a two-way communication with every other BDR node before the DDL
+    lock can be granted</emphasis>. This communication is done via the
+    replication stream, so replication lag and delays, network slowness or
+    outages, etc in turn delay the DDL locking process. While the system is in
+    the process of acquiring the DDL lock, many nodes will hold their local DDL
+    locks and will be rejecting other DDL requests or, if the lock mode
+    requires, rejecting writes.
    </para>
 
    <para>
-	This means that schema changes and anything else that takes the DDL
-	lock should only be performed when all nodes are reachable and there
-	isn't a big replication delay between any pair of nodes.
+    This means that schema changes and anything else that takes the DDL
+    lock should only be performed when all nodes are reachable and there
+    isn't a big replication delay between any pair of nodes.
    </para>
 
    <para>
-	It also means that if the system gets stuck waiting for a down node,
-	everything stops while we wait.
+    It also means that if the system gets stuck waiting for a down node,
+    everything stops while we wait.
    </para>
    
    <para>
-	If the DDL lock request is canceled by the requesting node, all the other
-	reachable nodes will release their locks. So if your system is hung up
-	on a DDL lock request that's making no progress you can just cancel the
-	statement that's requesting the DDL lock and everything will resume normal
-	operation.
+    If the DDL lock request is canceled by the requesting node, all the other
+    reachable nodes will release their locks. So if your system is hung up
+    on a DDL lock request that's making no progress you can just cancel the
+    statement that's requesting the DDL lock and everything will resume normal
+    operation.
    </para>
 
    <para>
@@ -167,6 +176,7 @@
  </sect1>
 
  <sect1 id="technotes-rewrites" xreflabel="Full table rewrites">
+  <title>Full table rewrites</>
 
   <para>
    There are a number of reasons why BDR doesn't support DDL operations that

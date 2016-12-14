@@ -240,7 +240,7 @@
         <indexterm>
          <primary>bdr.bdr_node_set_read_only</primary>
         </indexterm>
-        <function><literal>bdr.bdr_node_set_read_only(</><replaceable>node_name</> <literal>text</>, <replaceable>read_only</> <literal>boolean</>)</></>
+        <function><literal>bdr.bdr_node_set_read_only(</><replaceable>node_name</> <literal>text</>, <replaceable>read_only</> <literal>boolean</>)</>
        </entry>
        <entry>void</entry>
        <entry>
