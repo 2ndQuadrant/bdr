@@ -4,6 +4,8 @@ set -e -u
 
 rev=$(awk '/^#define BDR_VERSION / { match($3,"\"([0-9]+\\.[0-9]+)\\.[0-9]+",a); print a[1] }' ../bdr_version.h)
 
+(cd .. && autoreconf && ./config.status --recheck)
+
 MAKE=${MAKE:-make}
 DOCHOST="bdr-project.org"
 DOCDIR="/var/www_bdr-project.org/docs/"
