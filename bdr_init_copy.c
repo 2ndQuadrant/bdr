@@ -44,6 +44,7 @@
 typedef struct RemoteInfo {
 	uint64		sysid;
 	TimeLineID	tlid;
+	int			version;
 	int			numdbs;
 	Oid		   *dboids;
 	char	  **dbnames;
@@ -950,6 +951,16 @@ get_remote_info(char* remote_connstr)
 	{
 		die(_("Could not connect to the remote server: %s\n"),
 					PQerrorMessage(remote_conn));
+	}
+
+	ri->version = PQserverVersion(remote_conn);
+	if (ri->version == 0)
+		die(_("Could not determine remote server's PostgreSQL version\n"));
+
+	if (ri->version/100 != PG_VERSION_NUM/100)
+	{
+		die(_("Target server is version %s but we are version %s. bdr_init_copy can only be used when the join target is the same major version. See bdr.bdr_group_join()."),
+			PQparameterStatus(remote_conn, "server_version"), PG_VERSION);
 	}
 
 	res = PQexec(remote_conn, "IDENTIFY_SYSTEM");
