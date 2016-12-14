@@ -26,6 +26,9 @@ $MAKE clean
 rm -rf html
 $MAKE JADEFLAGS="-V website-build"
 
+echo "***Confirm that the bdrversion generated matches this git branch $(git rev-parse --abbrev-ref HEAD)***"
+read -p "Enter to configure, control-C to cancel: " DISCARD
+
 echo -n "Uploading... "
 RSYNC_RSH="ssh -o StrictHostKeyChecking=no" rsync \
   -r --delete html/ \
