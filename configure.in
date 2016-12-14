@@ -29,10 +29,12 @@ if test -z "$version_num"; then
   AC_MSG_ERROR([could not detect the PostgreSQL version, wrong or broken pg_config?])
 fi
 
-if test "$version_num" != '9.4' -a "$version_num" != '9.5'; then
+if test "$version_num" != '9.4'; then
    AC_MSG_ERROR([bdr is not compatible with detected postgres version: $version_num])
 else
    AC_MSG_NOTICE([building against PostgreSQL $version_num])
+   BDR_PG_MAJORVERSION="$version_num"
+   AC_SUBST(BDR_PG_MAJORVERSION)
 fi;
 
 # add includedir to prerequisites, so tests for headers can succeed
