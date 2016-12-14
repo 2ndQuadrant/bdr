@@ -15,6 +15,34 @@
   See also: <xref linkend="upgrade">.
  </para>
 
+ <sect1 id="release-2.0.0">
+  <title>Release 2.0.0</title>
+
+  <para>
+   BDR 2.0 is a major update that brings compatibility with unmodified community
+   PostgreSQL 9.6, a new DDL replication model, a new implementation of global
+   sequences, and more.
+  </para>
+
+  <para>
+   It it <emphasis>crucial</> that BDR 1.0 users read the <link linkend="upgrade">
+   documentation on upgrading from BDR 1.0.</>.
+  </para>
+
+  <para>
+   Notable release highlights are:
+   <itemizedlist>
+    <listitem><para>Compatibility with community PostgreSQL 9.6</></>
+    <listitem><para>Runs as an extension on PostgreSQL 9.6, no patched PostgreSQL required</></>
+    <listitem><para>New global sequences implementation that doesn't experience exhaustion under load or network partitions</></>
+    <listitem><para>New DDL replication implementation for PostgreSQL 9.6 compatibility. This brings a different set of limitations and benefits.</></>
+    <listitem><para>Retains compatibility with BDR-Postgres 9.4</></>
+    <listitem><para>Node join is now race-free.</></>
+   </itemizedlist>
+  </para>
+
+ </sect1>
+
  <sect1 id="release-1.0.2">
   <title>Release 1.0.2</title>
 
