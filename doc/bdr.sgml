@@ -48,6 +48,15 @@
    </para>
 
    <para>
+    <emphasis>
+    BDR 2.0 is in development. This is not a final production ready
+    release. Compatibility may be broken without warning. Do not use
+    this on data you care about and cannot re-create.
+    </emphasis>
+    Use the latest BDR stable release in the 1.x series.
+   </para>
+
+   <para>
     BDR was developed by
     <ulink url="http://2ndquadrant.com">2ndQuadrant</ulink>
     along with contributions from other individuals and companies.
