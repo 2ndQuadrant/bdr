@@ -2,12 +2,12 @@
   <title>&bdr; requirements</title>
 
   <para>
-   To use logical replication via &bdr; you will need PostgreSQL 9.4
-   or newer. Earlier versions are not supported and will never be supported.
+   To use logical replication via &bdr; you will need PostgreSQL 9.4. Earlier
+   versions are not supported and will never be supported.
   </para>
 
   <para>
-   Currently &bdr; requires a modified version of PostgreSQL 9.4. This modified
+   &bdr; 1.0 requires a modified version of PostgreSQL 9.4. This modified
    PostgreSQL adds functionality BDR needs to support DDL replication, multi-master
    last-update-wins conflict resolution, user-defined conflict handlers, etc. This
    modified version of PostgreSQL 9.4 is available from the &bdr; download page
@@ -29,11 +29,14 @@
   </para>
 
   <para>
-   As of the time of writing, PostgreSQL versions after 9.4 are not yet
-   supported. Neither is Microsoft Windows. Support for both may be added
-   in later releases; please check the
+   &bdr; 2.0 supports PostgreSQL 9.6. See the BDR 2.0 documentation
+   and the
    <ulink url="http://2ndquadrant.com/BDR">&bdr; website</ulink> for
    the latest information.
+  </para>
+
+  <para>
+   BDR 1.0 does not support Microsoft Windows.
   </para>
 
  </sect1>
