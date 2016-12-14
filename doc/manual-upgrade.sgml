@@ -33,8 +33,10 @@
 
    <important>
     <para>
-     To check if you are using BDR 1.0 global sequences, see <xref
-     linkend="global-sequences-10-check">.
+     Check to ensure you are not using BDR 1.0 global sequences before
+     upgrading, or at least list them so you know which seqences will need
+     fixing after you upgrade.  See <xref linkend="global-sequences-bdr10">
+     and <xref linkend="upgrade-20-convert-10-global-sequences">.
     </para>
    </important>
 
@@ -121,8 +123,8 @@
 
    </sect3>
 
-   <sect3>
-    <title>Converting global sequences</>
+   <sect3 id="upgrade-20-convert-10-global-sequences" xreflabel="Converting BDR 1.0 global sequences">
+    <title>Converting BDR 1.0 global sequences</>
 
     <para>
      BDR 1.0-style global sequences, created with the <literal>USING bdr</>
@@ -131,6 +133,11 @@
      PostgreSQL releases, as the underlying functionality required to intercept
      sequence operations and redirect them was not incorporated into community
      PostgreSQL.
+    </para>
+
+    <para>
+     To check whether you are using BDR 1.0 global sequences, and where, see
+     <xref linkend="global-sequences-bdr10">.
     </para>
 
     <para>
@@ -149,7 +156,7 @@
      requires multiple steps and <emphasis><link
      linkend="ddl-replication-restricted-commands">cannot be done with
      <literal>ALTER TABLE ... ALTER COLUMN ... TYPE ...</></link></emphasis>.
-     See <xref linkend="ddl-replication-alter-type">. Alternately, you may
+     See <xref linkend="ddl-replication-altertype">. Alternately, you may
      choose to <link linkend="global-sequences-alternatives">use step/offset
      sequences</>, which do not require <type>bigint</> storage, but need manual
      setup when nodes are added or removed.

@@ -36,7 +36,7 @@
   <para>
    If you need to install or update BDR on BDR-Postgres 9.4, see <xref
    linkend="installation-packages-redhat">. These instructions only apply
-   to PostgreSQL 9.6. Confused? See <xref linkend="installation-requirements">.
+   to PostgreSQL 9.6. Confused? See <xref linkend="install-requirements">.
   </para>
 
   <sect3>
@@ -140,7 +140,7 @@
   <para>
    These instructions are for BDR on PostgreSQL 9.6+. For BDR-Postgres 9.4, see
    <xref linkend="installation-packages-debian-94">.  Confused? See <xref
-   linkend="installation-requirements">.
+   linkend="install-requirements">.
   </para>
 
   <sect3>
@@ -232,7 +232,7 @@
    instructions</>. The following instructions are for installing BDR with
    BDR-Postgres 9.4, the modified PostgreSQL 9.4 that was used by BDR 1.0. This
    is mainly necessary for upgrading BDR. Confused? See <xref
-   linkend="installation-requirements">.
+   linkend="install-requirements">.
   </para>
 
   <sect3>
@@ -382,7 +382,7 @@
    installation instructions</>. The following instructions are for installing
    BDR with BDR-Postgres 9.4, the modified PostgreSQL 9.4 that was used by BDR
    1.0. This is mainly necessary for upgrading BDR. Confused? See <xref
-   linkend="installation-requirements">.
+   linkend="install-requirements">.
   </para>
 
   <sect3>

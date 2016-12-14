@@ -80,21 +80,8 @@
 
   <note>
    <para>
-    BDR 1.0 provided a different implementation of global sequences which
-    intercepted <function>nextval</function> requests and negotiated between
-    nodes to ensure that values were unique across the whole BDR group. They
-    were created with the syntax
-    <literal>CREATE SEQUENCE ... USING bdr</literal>
-    and used with <literal>nextval(...)</literal> like any other
-    sequence. This relied on modifications to Postgres-BDR 9.4 that were not
-    included in PostgreSQL 9.6 so the feature is not available on 9.6. It also
-    tolerated extended network partitions poorly. New applications should avoid
-    using them.
-   </para>
-   <para>
-    The old implementation is retained for applications migrating from BDR 1.0
-    that are still on BDR-Postgres 9.4. For details on the old global sequences
-    implementation see the BDR 1.0 manual.
+    BDR 1.0 provided a different implementation of global sequences with different
+    syntax and behaviour. See <xref linkend="global-sequences-bdr10">.
    </para>
   </note>
 
@@ -487,6 +474,47 @@
     </programlisting>
    </para>
   </sect2>
+
+ </sect1>
+
+ <sect1 id="global-sequences-bdr10" xreflabel="BDR 1.0 Global Sequences">
+  <title>BDR 1.0 global sequences</>
+
+  <para>
+   BDR 1.0 provided a different implementatoin of global sequences. They
+   intercepted <function>nextval(...)</function> function calls and negotiated
+   between nodes to ensure that values were unique across the whole BDR group.
+   They were created with the syntax
+   <literal>CREATE SEQUENCE ... USING bdr</literal>
+   and used with <literal>nextval(...)</literal> like any other
+   sequence.
+  </para>
+  <para>
+   This funtionality relied on modifications to Postgres-BDR 9.4 that were not
+   included in PostgreSQL 9.6. So the feature is not available on 9.6. It also
+   tolerated extended network partitions poorly. New applications should avoid
+   using them.
+  </para>
+  <para>
+   The old implementation is retained in BDR 2.0 for applications migrating
+   from BDR 1.0 that are still on BDR-Postgres 9.4. For details on the old
+   global sequences implementation see the BDR 1.0 manual.
+  </para>
+  <para>
+   To find out whether you are using BDR 1.0 global sequences and if so where,
+   query:
+   <programlisting>
+    SELECT oid::regclass
+    FROM pg_class
+    WHERE relkind = 'S' AND
+          pg_class.relam = (SELECT oid FROM pg_seqam WHERE seqamname = 'bdr');
+   </programlisting>
+   to list sequences. You can self-join on <literal>pg_class.relowner</>
+   to find the associated table for each sequence.
+  </para>
+  <para>
+   For upgrade and conversion advice see <xref linkend="upgrade-20-convert-10-global-sequences">.
+  </para>
 
  </sect1>
 

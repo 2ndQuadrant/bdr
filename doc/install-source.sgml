@@ -8,7 +8,7 @@
    This section discusses installing BDR on PostgreSQL 9.6+. For instructions
    on installing BDR-Postgres 9.4 and BDR for 9.4, see <xref
    linkend="installation-bdr-source-94">. Confused? See <xref
-   linkend="installation-requirements">.
+   linkend="install-requirements">.
   </para>
 
   <sect3 id="installation-source-prereqs">

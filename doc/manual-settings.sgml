@@ -147,7 +147,7 @@
       <para>
        This option is deprecated. On PostgreSQL 9.6 it is not supported and may
        not be set. On BDR-Postgres 9.4 it can be used to activate the old
-       global sequences implementation; see <xref linkend="globals-sequences">
+       global sequences implementation; see <xref linkend="global-sequences">
        and the BDR 1.0 documentation.
       </para>
      </listitem>
