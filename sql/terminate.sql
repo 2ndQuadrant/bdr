@@ -20,7 +20,7 @@ RETURNS void
 LANGUAGE plpgsql
 AS $$
 BEGIN
-  WHILE (SELECT count(1) FROM pg_stat_activity WHERE application_name LIKE 'bdr (%): apply') != nsenders
+  WHILE (SELECT count(1) FROM pg_stat_activity WHERE application_name LIKE 'node%:apply') != nsenders
   LOOP
     PERFORM pg_sleep(0.2);
     PERFORM pg_stat_clear_snapshot();

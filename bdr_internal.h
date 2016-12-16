@@ -5,7 +5,8 @@
  *
  * Copyright (c) 2012-2015, PostgreSQL Global Development Group
  *
- * bdr_internal.h
+ * bdr_internal.h must be #include-able from FRONTEND code, so it may not
+ * reference elog, List, etc.
  */
 #ifndef BDR_INTERNAL_H
 #define BDR_INTERNAL_H
@@ -28,7 +29,7 @@
  *
  * params: remote_sysid, remote_timeline, remote_dboid, local_dboid, replname
  */
-#define BDR_NODE_ID_FORMAT "bdr_"UINT64_FORMAT"_%u_%u_%u_%s"
+#define BDR_REPORIGIN_ID_FORMAT "bdr_"UINT64_FORMAT"_%u_%u_%u_%s"
 
 #ifdef __GNUC__
 #define BDR_WARN_UNUSED __attribute__((warn_unused_result))
@@ -59,12 +60,18 @@ typedef enum BdrNodeStatus {
 #define BDR_NODE_STATUS_READY_S "'r'"
 #define BDR_NODE_STATUS_KILLED_S "'k'"
 
-/* A configured BDR connection from bdr_connections */
-typedef struct BdrConnectionConfig
+/* Structure representing bdr_nodes record */
+typedef struct BDRNodeId
 {
 	uint64		sysid;
 	TimeLineID	timeline;
 	Oid			dboid;
+} BDRNodeId;
+
+/* A configured BDR connection from bdr_connections */
+typedef struct BdrConnectionConfig
+{
+	BDRNodeId remote_node;
 
 	/*
 	 * If the origin_ id fields are set then they must refer to our node,
@@ -74,7 +81,14 @@ typedef struct BdrConnectionConfig
 	 */
 	bool origin_is_my_id;
 
+	/* connstring, palloc'd in same memory context as this struct */
 	char *dsn;
+
+	/*
+	 * bdr_nodes.node_name, palloc'd in same memory context as this struct.
+	 * Could be NULL if we're talking to an old BDR.
+     */
+	char *node_name;
 
 	int   apply_delay;
 
@@ -92,29 +106,21 @@ typedef struct BdrFlushPosition
 extern volatile sig_atomic_t got_SIGTERM;
 extern volatile sig_atomic_t got_SIGHUP;
 
-extern void bdr_error_nodeids_must_differ(uint64 sysid, TimeLineID timeline,
-										  Oid dboid);
+extern void bdr_error_nodeids_must_differ(const BDRNodeId * const other_nodeid);
 extern List* bdr_read_connection_configs(void);
-extern BdrConnectionConfig* bdr_get_connection_config(uint64 sysid,
-													  TimeLineID timeline,
-													  Oid dboid,
+extern BdrConnectionConfig* bdr_get_connection_config(const BDRNodeId * nodeid,
 													  bool missing_ok);
+extern BdrConnectionConfig* bdr_get_my_connection_config(bool missing_ok);
 
 extern void bdr_free_connection_config(BdrConnectionConfig *cfg);
 
-extern void bdr_slot_name(Name slot_name, uint64 sysid, TimeLineID tlid,
-						  Oid dboid, Oid local_dboid);
+extern void bdr_slot_name(Name out_name, const BDRNodeId * const remote, Oid local_dboid);
 
-extern char* bdr_replident_name(uint64 remote_sysid,
-	TimeLineID remote_timeline, Oid remote_dboid, Oid local_dboid);
+extern char* bdr_replident_name(const BDRNodeId * const remote, Oid local_dboid);
 
-extern void bdr_parse_slot_name(const char *name, uint64 *remote_sysid,
-								Oid *remote_dboid, TimeLineID *remote_tli,
-								Oid *local_dboid);
+extern void bdr_parse_slot_name(const char *name, BDRNodeId *remote, Oid *local_dboid);
 
-extern void bdr_parse_replident_name(const char *name, uint64 *remote_sysid,
-								Oid *remote_dboid, TimeLineID *remote_tli,
-								Oid *local_dboid);
+extern void bdr_parse_replident_name(const char *name, BDRNodeId *remote, Oid *local_dboid);
 
 extern int bdr_find_other_exec(const char *argv0, const char *target,
 							   uint32 *version, char *retpath);

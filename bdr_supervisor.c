@@ -374,6 +374,7 @@ bdr_supervisor_worker_main(Datum main_arg)
 	}
 
 	BackgroundWorkerInitializeConnection(BDR_SUPERVISOR_DBNAME, NULL);
+	Assert(ThisTimeLineID > 0);
 
 	LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
 	BdrWorkerCtl->supervisor_latch = &MyProc->procLatch;

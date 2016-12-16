@@ -67,11 +67,6 @@
 volatile sig_atomic_t got_SIGTERM = false;
 volatile sig_atomic_t got_SIGHUP = false;
 
-extern uint64		origin_sysid;
-extern TimeLineID	origin_timeline;
-extern Oid			origin_dboid;
-/* end externs for bdr apply state */
-
 ResourceOwner bdr_saved_resowner;
 Oid   BdrSchemaOid = InvalidOid;
 Oid   BdrNodesRelid = InvalidOid;
@@ -138,11 +133,9 @@ PG_FUNCTION_INFO_V1(bdr_skip_changes_upto);
 PG_FUNCTION_INFO_V1(bdr_pause_worker_management);
 PG_FUNCTION_INFO_V1(bdr_is_active_in_db);
 
-static int bdr_get_worker_pid_byid(uint64 sysid, TimeLineID timeline,
-	Oid dboid, BdrWorkerType worker_type);
+static int bdr_get_worker_pid_byid(const BDRNodeId * const nodeid, BdrWorkerType worker_type);
 
-static bool bdr_terminate_workers_byid(uint64 sysid, TimeLineID timeline,
-	Oid dboid, BdrWorkerType worker_type);
+static bool bdr_terminate_workers_byid(const BDRNodeId * const nodeid, BdrWorkerType worker_type);
 
 static const struct config_enum_entry bdr_trace_ddl_locks_level_options[] = {
 	{"debug", DDL_LOCK_TRACE_DEBUG, false},
@@ -232,31 +225,6 @@ bdr_get_remote_dboid(const char *conninfo_db)
 }
 
 /*
- * Format a slot name and replication identifier for a connection to a remote
- * node, suitable for use as the slot name on the remote server and as the
- * local replication identifier for that slot. Uses the local node's current
- * dboid.
- *
- * Does NOT enforce that the remote and local node identities must differ.
- *
- * The replication identifier is allocated in the current memory context.
- */
-static void
-bdr_build_ident_and_slotname(uint64 remote_sysid, TimeLineID remote_tlid,
-		Oid remote_dboid, char **out_replication_identifier,
-		Name out_slot_name)
-{
-	Assert(MyDatabaseId != InvalidOid);
-	Assert(remote_dboid != InvalidOid);
-
-	bdr_slot_name(out_slot_name, GetSystemIdentifier(), ThisTimeLineID, MyDatabaseId,
-				  remote_dboid);
-
-	*out_replication_identifier = bdr_replident_name(remote_sysid, remote_tlid,
-			remote_dboid, MyDatabaseId);
-}
-
-/*
  * Establish a BDR connection
  *
  * Connects to the remote node, identifies it, and generates local and remote
@@ -274,21 +242,18 @@ bdr_build_ident_and_slotname(uint64 remote_sysid, TimeLineID remote_tlid,
  * Sets out parameters:
  *   remote_ident
  *   slot_name
- *   remote_sysid_i
- *   remote_tlid_i
+ *   remote_node (members)
  */
 PGconn*
 bdr_connect(const char *conninfo,
 			Name appname,
-			uint64* remote_sysid_i, TimeLineID *remote_tlid_i,
-			Oid *remote_dboid_i)
+			BDRNodeId * remote_node)
 {
 	PGconn	   *streamConn;
 	PGresult   *res;
 	StringInfoData conninfo_repl;
 	char	   *remote_sysid;
 	char	   *remote_tlid;
-	char		local_sysid[32];
 
 	initStringInfo(&conninfo_repl);
 
@@ -331,26 +296,22 @@ bdr_connect(const char *conninfo,
 	{
 		char	   *remote_dboid = PQgetvalue(res, 0, 4);
 
-		if (sscanf(remote_dboid, "%u", remote_dboid_i) != 1)
+		if (sscanf(remote_dboid, "%u", &remote_node->dboid) != 1)
 			elog(ERROR, "could not parse remote database OID %s", remote_dboid);
 	}
 	else
 	{
-		*remote_dboid_i = bdr_get_remote_dboid(conninfo);
+		remote_node->dboid = bdr_get_remote_dboid(conninfo);
 	}
 
-	if (sscanf(remote_sysid, UINT64_FORMAT, remote_sysid_i) != 1)
+	if (sscanf(remote_sysid, UINT64_FORMAT, &remote_node->sysid) != 1)
 		elog(ERROR, "could not parse remote sysid %s", remote_sysid);
 
-	if (sscanf(remote_tlid, "%u", remote_tlid_i) != 1)
+	if (sscanf(remote_tlid, "%u", &remote_node->timeline) != 1)
 		elog(ERROR, "could not parse remote tlid %s", remote_tlid);
 
-	snprintf(local_sysid, sizeof(local_sysid), UINT64_FORMAT,
-			 GetSystemIdentifier());
-
-	elog(DEBUG2, "local node (%s,%u,%u), remote node (%s,%s,%u)",
-		 local_sysid, ThisTimeLineID, MyDatabaseId, remote_sysid,
-		 remote_tlid, *remote_dboid_i);
+	elog(DEBUG2, "local node "BDR_NODEID_FORMAT", remote node "BDR_NODEID_FORMAT,
+		 BDR_LOCALID_FORMAT_ARGS, BDR_NODEID_FORMAT_ARGS(*remote_node));
 
 	/* no parts of IDENTIFY_SYSTEM's response needed anymore */
 	PQclear(res);
@@ -483,6 +444,7 @@ bdr_bgworker_init(uint32 worker_arg, BdrWorkerType worker_type)
 
 	/* Connect to our database */
 	BackgroundWorkerInitializeConnection(dbname, NULL);
+	Assert(ThisTimeLineID > 0);
 
 	LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
 	bdr_worker_slot->worker_pid = MyProcPid;
@@ -513,6 +475,26 @@ bdr_bgworker_init(uint32 worker_arg, BdrWorkerType worker_type)
 	}
 
 	/*
+	 * Copy our node name and, if relevant, our remote's node name into
+	 * nodecache globals where we can access them later. This means we can
+	 * find our node name without needing a running txn, say, for error
+	 * output.
+	 */
+	StartTransactionCommand();
+	bdr_setup_my_cached_node_names();
+	if (worker_type == BDR_WORKER_APPLY)
+	{
+		BdrApplyWorker *apply = &bdr_worker_slot->data.apply;
+		bdr_setup_cached_remote_name(&apply->remote_node);
+	}
+	else if (worker_type == BDR_WORKER_WALSENDER)
+	{
+		BdrWalsenderWorker *walsender = &bdr_worker_slot->data.walsnd;
+		bdr_setup_cached_remote_name(&walsender->remote_node);
+	}
+	CommitTransactionCommand();
+
+	/*
 	 * Disable function body checks during replay. That's necessary because a)
 	 * the creator of the function might have had it disabled b) the function
 	 * might be search_path dependant and we don't fix the contents of
@@ -527,13 +509,13 @@ bdr_bgworker_init(uint32 worker_arg, BdrWorkerType worker_type)
  * Re-usable common error message
  */
 void
-bdr_error_nodeids_must_differ(uint64 sysid, TimeLineID timeline, Oid dboid)
+bdr_error_nodeids_must_differ(const BDRNodeId * const nodeid)
 {
 	ereport(ERROR,
 			(errcode(ERRCODE_INVALID_NAME),
 			 errmsg("The system identifier, timeline ID and/or database oid must differ between the nodes"),
 			 errdetail("Both keys are (sysid, timelineid, dboid) = ("UINT64_FORMAT",%u,%u)",
-				 sysid, timeline, dboid)));
+				 nodeid->sysid, nodeid->timeline, nodeid->dboid)));
 }
 
 /*
@@ -559,46 +541,38 @@ bdr_error_nodeids_must_differ(uint64 sysid, TimeLineID timeline, Oid dboid)
  */
 PGconn*
 bdr_establish_connection_and_slot(const char *dsn,
-	const char *application_name_suffix, Name out_slot_name, uint64 *out_sysid,
-	TimeLineID* out_timeline, Oid *out_dboid,
+	const char *application_name_suffix, Name out_slot_name,
+	BDRNodeId * out_nodeid,
 	RepOriginId *out_replication_identifier, char **out_snapshot)
 {
 	PGconn		*streamConn;
 	bool		tx_started = false;
 	NameData	appname;
-	char		*remote_ident;
+	char		*remote_repident_name;
+	BDRNodeId myid;
 
-	/*
-	 * Make sure the local and remote nodes aren't the same node.
-	 */
-	if (GetSystemIdentifier() == *out_sysid
-		&& ThisTimeLineID == *out_timeline
-		&& MyDatabaseId == *out_dboid)
-	{
-		bdr_error_nodeids_must_differ(*out_sysid, *out_timeline, *out_dboid);
-	}
+	bdr_make_my_nodeid(&myid);
 
-	snprintf(NameStr(appname), NAMEDATALEN, BDR_LOCALID_FORMAT":%s",
-			BDR_LOCALID_FORMAT_ARGS, application_name_suffix);
+	snprintf(NameStr(appname), NAMEDATALEN, "%s:%s",
+			bdr_get_my_cached_node_name(), application_name_suffix);
 
 	/*
 	 * Establish BDR conn and IDENTIFY_SYSTEM, ERROR on things like
 	 * connection failure.
 	 */
 	streamConn = bdr_connect(
-		dsn, &appname, out_sysid, out_timeline, out_dboid);
+		dsn, &appname, out_nodeid);
 
-	bdr_build_ident_and_slotname(*out_sysid, *out_timeline, *out_dboid,
-			&remote_ident, out_slot_name);
-
-	Assert(remote_ident != NULL);
+	bdr_slot_name(out_slot_name, &myid, out_nodeid->dboid);
+	remote_repident_name = bdr_replident_name(out_nodeid, myid.dboid);
+	Assert(remote_repident_name != NULL);
 
 	if (!IsTransactionState())
 	{
 		tx_started = true;
 		StartTransactionCommand();
 	}
-	*out_replication_identifier = replorigin_by_name(remote_ident, true);
+	*out_replication_identifier = replorigin_by_name(remote_repident_name, true);
 	if (tx_started)
 		CommitTransactionCommand();
 
@@ -621,12 +595,11 @@ bdr_establish_connection_and_slot(const char *dsn,
 
 		/* create local replication identifier and a remote slot */
 		elog(DEBUG1, "Creating new slot %s", NameStr(*out_slot_name));
-		bdr_create_slot(streamConn, out_slot_name, remote_ident,
+		bdr_create_slot(streamConn, out_slot_name, remote_repident_name,
 						out_replication_identifier, out_snapshot);
 	}
 
-	pfree(remote_ident);
-	remote_ident = NULL;
+	pfree(remote_repident_name);
 
 	return streamConn;
 }
@@ -1092,16 +1065,18 @@ bdr_get_local_nodeid(PG_FUNCTION_ARGS)
 	TupleDesc	tupleDesc;
 	HeapTuple	returnTuple;
 	char		sysid_str[33];
+	BDRNodeId	myid;
+	bdr_make_my_nodeid(&myid);
 
 	if (get_call_result_type(fcinfo, NULL, &tupleDesc) != TYPEFUNC_COMPOSITE)
 		elog(ERROR, "return type must be a row type");
 
-	snprintf(sysid_str, sizeof(sysid_str), UINT64_FORMAT, GetSystemIdentifier());
+	snprintf(sysid_str, sizeof(sysid_str), UINT64_FORMAT, myid.sysid);
 	sysid_str[sizeof(sysid_str)-1] = '\0';
 
 	values[0] = CStringGetTextDatum(sysid_str);
-	values[1] = ObjectIdGetDatum(ThisTimeLineID);
-	values[2] = ObjectIdGetDatum(MyDatabaseId);
+	values[1] = ObjectIdGetDatum(myid.timeline);
+	values[2] = ObjectIdGetDatum(myid.dboid);
 
 	returnTuple = heap_form_tuple(tupleDesc, values, isnull);
 
@@ -1117,24 +1092,21 @@ bdr_parse_slot_name_sql(PG_FUNCTION_ARGS)
 	TupleDesc	tupleDesc;
 	HeapTuple	returnTuple;
 	char		remote_sysid_str[33];
-	uint64		remote_sysid;
-	TimeLineID	remote_tli;
-	Oid			remote_dboid;
+	BDRNodeId	remote;
 	Oid			local_dboid;
 
 	if (get_call_result_type(fcinfo, NULL, &tupleDesc) != TYPEFUNC_COMPOSITE)
 		elog(ERROR, "return type must be a row type");
 
-	bdr_parse_slot_name(slot_name, &remote_sysid, &remote_tli,
-			&remote_dboid, &local_dboid);
+	bdr_parse_slot_name(slot_name, &remote, &local_dboid);
 
 	snprintf(remote_sysid_str, sizeof(remote_sysid_str),
-			UINT64_FORMAT, remote_sysid);
+			UINT64_FORMAT, remote.sysid);
 	remote_sysid_str[sizeof(remote_sysid_str)-1] = '\0';
 
 	values[0] = CStringGetTextDatum(remote_sysid_str);
-	values[1] = ObjectIdGetDatum(remote_tli);
-	values[2] = ObjectIdGetDatum(remote_dboid);
+	values[1] = ObjectIdGetDatum(remote.timeline);
+	values[2] = ObjectIdGetDatum(remote.dboid);
 	values[3] = ObjectIdGetDatum(local_dboid);
 	values[4] = CStringGetTextDatum(EMPTY_REPLICATION_NAME);
 
@@ -1152,24 +1124,21 @@ bdr_parse_replident_name_sql(PG_FUNCTION_ARGS)
 	TupleDesc	tupleDesc;
 	HeapTuple	returnTuple;
 	char		remote_sysid_str[33];
-	uint64		remote_sysid;
-	TimeLineID	remote_tli;
-	Oid			remote_dboid;
+	BDRNodeId	remote;
 	Oid			local_dboid;
 
 	if (get_call_result_type(fcinfo, NULL, &tupleDesc) != TYPEFUNC_COMPOSITE)
 		elog(ERROR, "return type must be a row type");
 
-	bdr_parse_replident_name(replident_name, &remote_sysid, &remote_tli,
-			&remote_dboid, &local_dboid);
+	bdr_parse_replident_name(replident_name, &remote, &local_dboid);
 
 	snprintf(remote_sysid_str, sizeof(remote_sysid_str),
-			UINT64_FORMAT, remote_sysid);
+			UINT64_FORMAT, remote.sysid);
 	remote_sysid_str[sizeof(remote_sysid_str)-1] = '\0';
 
 	values[0] = CStringGetTextDatum(remote_sysid_str);
-	values[1] = ObjectIdGetDatum(remote_tli);
-	values[2] = ObjectIdGetDatum(remote_dboid);
+	values[1] = ObjectIdGetDatum(remote.timeline);
+	values[2] = ObjectIdGetDatum(remote.dboid);
 	values[3] = ObjectIdGetDatum(local_dboid);
 	values[4] = CStringGetTextDatum(EMPTY_REPLICATION_NAME);
 
@@ -1181,24 +1150,24 @@ bdr_parse_replident_name_sql(PG_FUNCTION_ARGS)
 Datum
 bdr_format_slot_name_sql(PG_FUNCTION_ARGS)
 {
+	BDRNodeId	remote;
 	const char	*remote_sysid_str = text_to_cstring(PG_GETARG_TEXT_P(0));
-	Oid			remote_tli = PG_GETARG_OID(1);
-	Oid			remote_dboid = PG_GETARG_OID(2);
 	Oid			local_dboid = PG_GETARG_OID(3);
 	const char	*replication_name = NameStr(*PG_GETARG_NAME(4));
-	uint64		remote_sysid;
 	Name		slot_name;
+
+	remote.timeline = PG_GETARG_OID(1);
+	remote.dboid = PG_GETARG_OID(2);
 
 	if (strlen(replication_name) != 0)
 		elog(ERROR, "Non-empty replication_name is not yet supported");
 
-	if (sscanf(remote_sysid_str, UINT64_FORMAT, &remote_sysid) != 1)
+	if (sscanf(remote_sysid_str, UINT64_FORMAT, &remote.sysid) != 1)
 		elog(ERROR, "Parsing of remote sysid as uint64 failed");
 
 	slot_name = (Name)palloc0(NAMEDATALEN);
 
-	bdr_slot_name(slot_name, remote_sysid, remote_tli,
-			remote_dboid, local_dboid);
+	bdr_slot_name(slot_name, &remote, local_dboid);
 
 	PG_RETURN_NAME(slot_name);
 }
@@ -1206,22 +1175,22 @@ bdr_format_slot_name_sql(PG_FUNCTION_ARGS)
 Datum
 bdr_format_replident_name_sql(PG_FUNCTION_ARGS)
 {
+	BDRNodeId	remote;
 	const char	*remote_sysid_str = text_to_cstring(PG_GETARG_TEXT_P(0));
-	Oid			remote_tli = PG_GETARG_OID(1);
-	Oid			remote_dboid = PG_GETARG_OID(2);
 	Oid			local_dboid = PG_GETARG_OID(3);
 	const char	*replication_name = NameStr(*PG_GETARG_NAME(4));
-	uint64		remote_sysid;
 	char*		replident_name;
+
+	remote.timeline = PG_GETARG_OID(1);
+	remote.dboid = PG_GETARG_OID(2);
 
 	if (strlen(replication_name) != 0)
 		elog(ERROR, "Non-empty replication_name is not yet supported");
 
-	if (sscanf(remote_sysid_str, UINT64_FORMAT, &remote_sysid) != 1)
+	if (sscanf(remote_sysid_str, UINT64_FORMAT, &remote.sysid) != 1)
 		elog(ERROR, "Parsing of remote sysid as uint64 failed");
 
-	replident_name = bdr_replident_name(remote_sysid, remote_tli,
-			remote_dboid, local_dboid);
+	replident_name = bdr_replident_name(&remote, local_dboid);
 
 	PG_RETURN_TEXT_P(cstring_to_text(replident_name));
 }
@@ -1274,11 +1243,14 @@ Datum
 bdr_skip_changes_upto(PG_FUNCTION_ARGS)
 {
 	const char	*remote_sysid_str = text_to_cstring(PG_GETARG_TEXT_P(0));
-	Oid			remote_tli = PG_GETARG_OID(1);
-	Oid			remote_dboid = PG_GETARG_OID(2);
 	XLogRecPtr	upto_lsn = PG_GETARG_LSN(3);
-	uint64		remote_sysid;
 	RepOriginId   nodeid;
+	BDRNodeId	myid, remote;
+
+	remote.timeline = PG_GETARG_OID(1);
+	remote.dboid = PG_GETARG_OID(2);
+
+	bdr_make_my_nodeid(&myid);
 
 	if (!bdr_permit_unsafe_commands)
 		ereport(ERROR,
@@ -1291,17 +1263,14 @@ bdr_skip_changes_upto(PG_FUNCTION_ARGS)
 				(errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
 				 errmsg("Target LSN must be nonzero")));
 
-	if (sscanf(remote_sysid_str, UINT64_FORMAT, &remote_sysid) != 1)
+	if (sscanf(remote_sysid_str, UINT64_FORMAT, &remote.sysid) != 1)
 		elog(ERROR, "Parsing of remote sysid as uint64 failed");
 
-	if (remote_sysid == GetSystemIdentifier()
-		&& remote_tli == ThisTimeLineID
-		&& remote_dboid == MyDatabaseId)
+	if (bdr_nodeid_eq(&myid, &remote))
 		elog(ERROR, "the passed ID is for the local node, can't skip changes from self");
 
 	/* Only ever matches a replnode id owned by the local BDR node */
-	nodeid = bdr_fetch_node_id_via_sysid(remote_sysid,
-			(TimeLineID)remote_tli, remote_dboid);
+	nodeid = bdr_fetch_node_id_via_sysid(&remote);
 
 	if (nodeid == InvalidRepOriginId)
 		ereport(ERROR,
@@ -1335,14 +1304,14 @@ bdr_skip_changes_upto(PG_FUNCTION_ARGS)
 		 * and wait for it to exit. Because we're blocked worker management
 		 * it can't be relaunched until we give the go-ahead.
 		 */
-		bdr_terminate_workers_byid(remote_sysid, remote_tli, remote_dboid, BDR_WORKER_APPLY);
+		bdr_terminate_workers_byid(&remote, BDR_WORKER_APPLY);
 
 		/*
 		 * The worker is signaled, but if it was actually running it might not
 		 * have exited yet, and we need it to release its hold on the
 		 * replication origin. Wait until it does.
 		 */
-		while (bdr_get_worker_pid_byid(remote_sysid, remote_tli, remote_dboid, BDR_WORKER_APPLY) != 0)
+		while (bdr_get_worker_pid_byid(&remote, BDR_WORKER_APPLY) != 0)
 		{
 			int ret = WaitLatch(&MyProc->procLatch,
 							WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
@@ -1382,7 +1351,7 @@ bdr_skip_changes_upto(PG_FUNCTION_ARGS)
  * or 0 if not.
  */
 static int
-bdr_get_worker_pid_byid(uint64 sysid, TimeLineID timeline, Oid dboid, BdrWorkerType worker_type)
+bdr_get_worker_pid_byid(const BDRNodeId * const node, BdrWorkerType worker_type)
 {
 	int			pid = 0;
 	BdrWorker * worker;
@@ -1392,7 +1361,7 @@ bdr_get_worker_pid_byid(uint64 sysid, TimeLineID timeline, Oid dboid, BdrWorkerT
 	 * to deal with multiple workers at all.
 	 */
 	LWLockAcquire(BdrWorkerCtl->lock, LW_SHARED);
-	worker = bdr_worker_get_entry(sysid, timeline, dboid, worker_type);
+	worker = bdr_worker_get_entry(node, worker_type);
 
 	if (worker != NULL && worker->worker_proc != NULL)
 		pid = worker->worker_proc->pid;
@@ -1407,9 +1376,9 @@ bdr_get_worker_pid_byid(uint64 sysid, TimeLineID timeline, Oid dboid, BdrWorkerT
  * is operating on the current database.
  */
 static bool
-bdr_terminate_workers_byid(uint64 sysid, TimeLineID timeline, Oid dboid, BdrWorkerType worker_type)
+bdr_terminate_workers_byid(const BDRNodeId * const node, BdrWorkerType worker_type)
 {
-	int pid = bdr_get_worker_pid_byid(sysid, timeline, dboid, worker_type);
+	int pid = bdr_get_worker_pid_byid(node, worker_type);
 
 	if (pid == 0)
 		return false;
@@ -1428,43 +1397,42 @@ Datum
 bdr_terminate_apply_workers(PG_FUNCTION_ARGS)
 {
 	const char *sysid_str	= text_to_cstring(PG_GETARG_TEXT_P(0));
-	uint64		sysid;
-	TimeLineID	timeline	= PG_GETARG_OID(1);
-	Oid			dboid		= PG_GETARG_OID(2);
+	BDRNodeId	node;
 
-	if (sscanf(sysid_str, UINT64_FORMAT, &sysid) != 1)
+	node.timeline	= PG_GETARG_OID(1);
+	node.dboid		= PG_GETARG_OID(2);
+
+	if (sscanf(sysid_str, UINT64_FORMAT, &node.sysid) != 1)
 		elog(ERROR, "couldn't parse sysid as uint64");
 
-	PG_RETURN_BOOL(bdr_terminate_workers_byid(sysid, timeline, dboid, BDR_WORKER_APPLY));
+	PG_RETURN_BOOL(bdr_terminate_workers_byid(&node, BDR_WORKER_APPLY));
 }
 
 Datum
 bdr_terminate_walsender_workers(PG_FUNCTION_ARGS)
 {
 	const char *sysid_str	= text_to_cstring(PG_GETARG_TEXT_P(0));
-	uint64		sysid;
-	TimeLineID	timeline	= PG_GETARG_OID(1);
-	Oid			dboid		= PG_GETARG_OID(2);
+	BDRNodeId	node;
+	node.timeline	= PG_GETARG_OID(1);
+	node.dboid		= PG_GETARG_OID(2);
 
-	if (sscanf(sysid_str, UINT64_FORMAT, &sysid) != 1)
+	if (sscanf(sysid_str, UINT64_FORMAT, &node.sysid) != 1)
 		elog(ERROR, "couldn't parse sysid as uint64");
 
-	PG_RETURN_BOOL(bdr_terminate_workers_byid(sysid, timeline, dboid, BDR_WORKER_WALSENDER));
+	PG_RETURN_BOOL(bdr_terminate_workers_byid(&node, BDR_WORKER_WALSENDER));
 }
 
 Datum
 bdr_terminate_apply_workers_byname(PG_FUNCTION_ARGS)
 {
 	const char *node_name = text_to_cstring(PG_GETARG_TEXT_P(0));
-	TimeLineID	timeline;
-	Oid			dboid;
-	uint64		sysid;
+	BDRNodeId	node;
 
-	if (!bdr_get_node_identity_by_name(node_name, &sysid, &timeline, &dboid))
+	if (!bdr_get_node_identity_by_name(node_name, &node))
 		ereport(ERROR,
 				(errmsg("named node not found in bdr.bdr_nodes")));
 
-	PG_RETURN_BOOL(bdr_terminate_workers_byid(sysid, timeline, dboid, BDR_WORKER_APPLY));
+	PG_RETURN_BOOL(bdr_terminate_workers_byid(&node, BDR_WORKER_APPLY));
 
 }
 
@@ -1472,15 +1440,13 @@ Datum
 bdr_terminate_walsender_workers_byname(PG_FUNCTION_ARGS)
 {
 	const char *node_name = text_to_cstring(PG_GETARG_TEXT_P(0));
-	TimeLineID	timeline;
-	Oid			dboid;
-	uint64		sysid;
+	BDRNodeId	node;
 
-	if (!bdr_get_node_identity_by_name(node_name, &sysid, &timeline, &dboid))
+	if (!bdr_get_node_identity_by_name(node_name, &node))
 		ereport(ERROR,
 				(errmsg("named node not found in bdr.bdr_nodes")));
 
-	PG_RETURN_BOOL(bdr_terminate_workers_byid(sysid, timeline, dboid, BDR_WORKER_WALSENDER));
+	PG_RETURN_BOOL(bdr_terminate_workers_byid(&node, BDR_WORKER_WALSENDER));
 }
 
 /*

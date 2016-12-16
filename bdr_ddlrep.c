@@ -55,9 +55,9 @@ bdr_queue_ddl_command(const char *command_tag, const char *command, const char *
 	Datum			values[6];
 	bool			nulls[6];
 
-	elog(DEBUG2, "node " BDR_LOCALID_FORMAT " enqueuing DDL command \"%s\" "
+	elog(DEBUG2, "node %s enqueuing DDL command \"%s\" "
 		 "with search_path \"%s\"",
-		 BDR_LOCALID_FORMAT_ARGS, command,
+		 bdr_local_node_name(), command,
 		 search_path == NULL ? "" : search_path);
 
 	if (search_path == NULL)

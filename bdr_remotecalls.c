@@ -73,8 +73,8 @@ bdr_connect_nonrepl(const char *connstring, const char *appnamesuffix)
 	appendStringInfoChar(&dsn, ' ');
 	appendStringInfoString(&dsn, connstring);
 	appendStringInfo(&dsn,
-					" fallback_application_name='"BDR_LOCALID_FORMAT":%s'",
-					BDR_LOCALID_FORMAT_ARGS, appnamesuffix);
+					" fallback_application_name='%s:%s'",
+					bdr_get_my_cached_node_name(), appnamesuffix);
 
 	/*
 	 * Test to see if there's an entry in the remote's bdr.bdr_nodes for our
@@ -392,12 +392,12 @@ bdr_get_remote_nodeinfo_internal(PGconn *conn, struct remote_node_info *ri)
 
 		ri->sysid_str = pstrdup(PQgetvalue(res, 0, 0));
 
-		if (sscanf(ri->sysid_str, UINT64_FORMAT, &ri->sysid) != 1)
+		if (sscanf(ri->sysid_str, UINT64_FORMAT, &ri->nodeid.sysid) != 1)
 			elog(ERROR, "could not parse remote sysid %s", ri->sysid_str);
 
-		ri->timeline = DatumGetObjectId(
+		ri->nodeid.timeline = DatumGetObjectId(
 				DirectFunctionCall1(oidin, CStringGetDatum(PQgetvalue(res, 0, 1))));
-		ri->dboid = DatumGetObjectId(
+		ri->nodeid.dboid = DatumGetObjectId(
 				DirectFunctionCall1(oidin, CStringGetDatum(PQgetvalue(res, 0, 2))));
 
 		PQclear(res);
@@ -412,9 +412,9 @@ bdr_get_remote_nodeinfo_internal(PGconn *conn, struct remote_node_info *ri)
 		 * peer but there's no point.
 		 */
 		ri->sysid_str = NULL;
-		ri->sysid = 0;
-		ri->timeline = DatumGetObjectId(InvalidOid);
-		ri->dboid = DatumGetObjectId(InvalidOid);
+		ri->nodeid.sysid = 0;
+		ri->nodeid.timeline = InvalidOid;
+		ri->nodeid.dboid = InvalidOid;
 	}
 
 	/*
@@ -479,8 +479,8 @@ bdr_get_remote_nodeinfo(PG_FUNCTION_ARGS)
 		if (ri.sysid_str != NULL)
 		{
 			values[0] = CStringGetTextDatum(ri.sysid_str);
-			values[1] = ObjectIdGetDatum(ri.timeline);
-			values[2] = ObjectIdGetDatum(ri.dboid);
+			values[1] = ObjectIdGetDatum(ri.nodeid.timeline);
+			values[2] = ObjectIdGetDatum(ri.nodeid.dboid);
 		}
 		else
 		{
@@ -529,9 +529,7 @@ bdr_test_replication_connection(PG_FUNCTION_ARGS)
 	HeapTuple	returnTuple;
 	PGconn		*conn;
 	NameData	appname;
-	uint64		remote_sysid;
-	TimeLineID	remote_tlid;
-	Oid			remote_dboid;
+	BDRNodeId	remote;
 	Datum		values[3];
 	bool		isnull[3] = {false, false, false};
 	char		sysid_str[33];
@@ -541,15 +539,14 @@ bdr_test_replication_connection(PG_FUNCTION_ARGS)
 
 	strncpy(NameStr(appname), "BDR test connection", NAMEDATALEN);
 
-	conn = bdr_connect(conninfo, &appname, &remote_sysid, &remote_tlid,
-					   &remote_dboid);
+	conn = bdr_connect(conninfo, &appname, &remote);
 
-	snprintf(sysid_str, sizeof(sysid_str), UINT64_FORMAT, remote_sysid);
+	snprintf(sysid_str, sizeof(sysid_str), UINT64_FORMAT, remote.sysid);
 	sysid_str[sizeof(sysid_str)-1] = '\0';
 
 	values[0] = CStringGetTextDatum(sysid_str);
-	values[1] = ObjectIdGetDatum(remote_tlid);
-	values[2] = ObjectIdGetDatum(remote_dboid);
+	values[1] = ObjectIdGetDatum(remote.timeline);
+	values[2] = ObjectIdGetDatum(remote.dboid);
 
 	returnTuple = heap_form_tuple(tupleDesc, values, isnull);
 
@@ -612,9 +609,9 @@ bdr_test_remote_connectback_internal(PGconn *conn,
 		elog(ERROR, "Got %d tuples instead of expected 1", PQntuples(res));
 
 	ri->sysid_str = NULL;
-	ri->sysid = 0;
-	ri->timeline = 0;
-	ri->dboid = InvalidOid;
+	ri->nodeid.sysid = 0;
+	ri->nodeid.timeline = 0;
+	ri->nodeid.dboid = InvalidOid;
 	ri->variant = NULL;
 	ri->version = NULL;
 	ri->version_num = 0;
@@ -625,19 +622,19 @@ bdr_test_remote_connectback_internal(PGconn *conn,
 	{
 		ri->sysid_str = pstrdup(PQgetvalue(res, 0, 0));
 
-		if (sscanf(ri->sysid_str, UINT64_FORMAT, &ri->sysid) != 1)
+		if (sscanf(ri->sysid_str, UINT64_FORMAT, &ri->nodeid.sysid) != 1)
 			elog(ERROR, "could not parse sysid %s", ri->sysid_str);
 	}
 
 	if (!PQgetisnull(res, 0, 1))
 	{
-		ri->timeline = DatumGetObjectId(
+		ri->nodeid.timeline = DatumGetObjectId(
 				DirectFunctionCall1(oidin, CStringGetDatum(PQgetvalue(res, 0, 1))));
 	}
 
 	if (!PQgetisnull(res, 0, 2))
 	{
-		ri->dboid = DatumGetObjectId(
+		ri->nodeid.dboid = DatumGetObjectId(
 				DirectFunctionCall1(oidin, CStringGetDatum(PQgetvalue(res, 0, 2))));
 	}
 
@@ -704,13 +701,13 @@ bdr_test_remote_connectback(PG_FUNCTION_ARGS)
 		else
 			isnull[0] = true;
 
-		if (ri.timeline != 0)
-			values[1] = ObjectIdGetDatum(ri.timeline);
+		if (ri.nodeid.timeline != 0)
+			values[1] = ObjectIdGetDatum(ri.nodeid.timeline);
 		else
 			isnull[1] = true;
 
-		if (ri.dboid != InvalidOid)
-			values[2] = ObjectIdGetDatum(ri.dboid);
+		if (ri.nodeid.dboid != InvalidOid)
+			values[2] = ObjectIdGetDatum(ri.nodeid.dboid);
 		else
 			isnull[2] = true;
 
@@ -756,18 +753,19 @@ Datum
 bdr_drop_remote_slot(PG_FUNCTION_ARGS)
 {
 	const char *remote_sysid_str = text_to_cstring(PG_GETARG_TEXT_P(0));
-	Oid			remote_tli = PG_GETARG_OID(1);
-	Oid			remote_dboid = PG_GETARG_OID(2);
-	uint64		remote_sysid;
 	PGconn	   *conn;
 	PGresult   *res;
 	NameData	slotname;
 	BdrConnectionConfig *cfg;
+	BDRNodeId remote;
 
-	if (sscanf(remote_sysid_str, UINT64_FORMAT, &remote_sysid) != 1)
+	remote.timeline = PG_GETARG_OID(1);
+	remote.dboid = PG_GETARG_OID(2);
+
+	if (sscanf(remote_sysid_str, UINT64_FORMAT, &remote.sysid) != 1)
 		elog(ERROR, "Parsing of remote sysid as uint64 failed");
 
-	cfg = bdr_get_connection_config(remote_sysid, remote_tli, remote_dboid, false);
+	cfg = bdr_get_connection_config(&remote, false);
 	conn = bdr_connect_nonrepl(cfg->dsn, "bdr_drop_replication_slot");
 	bdr_free_connection_config(cfg);
 
@@ -777,11 +775,13 @@ bdr_drop_remote_slot(PG_FUNCTION_ARGS)
 		struct remote_node_info ri;
 		const char *	values[1];
 		Oid				types[1] = { TEXTOID };
+		BDRNodeId		myid;
+
+		bdr_make_my_nodeid(&myid);
 
 		/* Try connecting and build slot name from retrieved info */
 		bdr_get_remote_nodeinfo_internal(conn, &ri);
-		bdr_slot_name(&slotname, GetSystemIdentifier(), ThisTimeLineID,
-					  MyDatabaseId, remote_dboid);
+		bdr_slot_name(&slotname, &myid, remote.dboid);
 		free_remote_node_info(&ri);
 
 		values[0] = NameStr(slotname);

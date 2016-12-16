@@ -99,7 +99,7 @@ find_perdb_worker_slot(Oid dboid, BdrWorker **worker_found)
  * Note that there's no guarantee that the worker is actually started up.
  */
 static int
-find_apply_worker_slot(uint64 sysid, TimeLineID timeline, Oid dboid, BdrWorker **worker_found)
+find_apply_worker_slot(const BDRNodeId * const remote, BdrWorker **worker_found)
 {
 	int i, found = -1;
 
@@ -111,10 +111,8 @@ find_apply_worker_slot(uint64 sysid, TimeLineID timeline, Oid dboid, BdrWorker *
 		if (w->worker_type == BDR_WORKER_APPLY)
 		{
 			BdrApplyWorker *aw = &w->data.apply;
-			if (aw->dboid == MyDatabaseId
-				&& aw->remote_sysid == sysid
-				&& aw->remote_timeline == timeline
-				&& aw->remote_dboid == dboid)
+			if (aw->dboid == MyDatabaseId &&
+				bdr_nodeid_eq(&aw->remote_node, remote))
 			{
 				found = i;
 				if (worker_found != NULL)
@@ -232,6 +230,9 @@ bdr_maintain_db_workers(void)
 	Datum				values[BDR_CON_Q_NARGS];
 	char				sysid_str[33];
 	char				our_status;
+	BDRNodeId			myid;
+
+	bdr_make_my_nodeid(&myid);
 
 	/* Should be called from the perdb worker */
 	Assert(IsBackgroundWorker);
@@ -249,7 +250,7 @@ bdr_maintain_db_workers(void)
 		return;
 	}
 
-	snprintf(sysid_str, sizeof(sysid_str), UINT64_FORMAT, GetSystemIdentifier());
+	snprintf(sysid_str, sizeof(sysid_str), UINT64_FORMAT, myid.sysid);
 	sysid_str[sizeof(sysid_str)-1] = '\0';
 
 	elog(DEBUG2, "launching apply workers");
@@ -276,8 +277,7 @@ bdr_maintain_db_workers(void)
 
 	PushActiveSnapshot(GetTransactionSnapshot());
 
-	our_status = bdr_nodes_get_local_status(
-		GetSystemIdentifier(), ThisTimeLineID, MyDatabaseId);
+	our_status = bdr_nodes_get_local_status(&myid);
 
 	/*
 	 * First check whether any existing processes to/from this database need
@@ -304,10 +304,8 @@ bdr_maintain_db_workers(void)
 		HeapTuple	tuple;
 		int			slotoff;
 		bool		found_alive = false;
-		Oid			node_datoid;
-		uint64		node_sysid;
+		BDRNodeId	node;
 		char	   *node_sysid_s;
-		TimeLineID	node_timeline;
 
 		bool		isnull;
 
@@ -315,15 +313,15 @@ bdr_maintain_db_workers(void)
 
 		node_sysid_s = SPI_getvalue(tuple, SPI_tuptable->tupdesc, BDR_NODES_ATT_SYSID);
 
-		if (sscanf(node_sysid_s, UINT64_FORMAT, &node_sysid) != 1)
+		if (sscanf(node_sysid_s, UINT64_FORMAT, &node.sysid) != 1)
 			elog(ERROR, "Parsing sysid uint64 from %s failed", node_sysid_s);
 
-		node_timeline = DatumGetObjectId(
+		node.timeline = DatumGetObjectId(
 			SPI_getbinval(tuple, SPI_tuptable->tupdesc, BDR_NODES_ATT_TIMELINE,
 						  &isnull));
 		Assert(!isnull);
 
-		node_datoid = DatumGetObjectId(
+		node.dboid = DatumGetObjectId(
 			SPI_getbinval(tuple, SPI_tuptable->tupdesc, BDR_NODES_ATT_DBOID,
 						  &isnull));
 		Assert(!isnull);
@@ -351,7 +349,7 @@ bdr_maintain_db_workers(void)
 				 * to-be-killed node or connecting to it.
 				 */
 
-				if (our_status == BDR_NODE_STATUS_KILLED && w->worker_proc->databaseId == node_datoid)
+				if (our_status == BDR_NODE_STATUS_KILLED && w->worker_proc->databaseId == node.dboid)
 				{
 					/*
 					 * NB: It's sufficient to check the database oid, the
@@ -359,25 +357,17 @@ bdr_maintain_db_workers(void)
 					 */
 					kill_proc = true;
 				}
-				else if (apply->remote_sysid == node_sysid &&
-						 apply->remote_timeline == node_timeline &&
-						 apply->remote_dboid == node_datoid)
-				{
+				else if (bdr_nodeid_eq(&apply->remote_node, &node))
 					kill_proc = true;
-				}
 			}
 			else if (w->worker_type == BDR_WORKER_WALSENDER)
 			{
 				BdrWalsenderWorker *walsnd = &w->data.walsnd;
 
-				if (our_status == BDR_NODE_STATUS_KILLED && w->worker_proc->databaseId == node_datoid)
+				if (our_status == BDR_NODE_STATUS_KILLED && w->worker_proc->databaseId == node.dboid)
 					kill_proc = true;
-				else if (walsnd->remote_sysid == node_sysid &&
-						 walsnd->remote_timeline == node_timeline &&
-						 walsnd->remote_dboid == node_datoid)
-				{
+				else if (bdr_nodeid_eq(&walsnd->remote_node, &node))
 					kill_proc = true;
-				}
 			}
 
 			if (kill_proc)
@@ -404,13 +394,9 @@ bdr_maintain_db_workers(void)
 			NameData slot_name_dropped; /* slot of the dropped node */
 
 			/* if a remote node (got) parted, we can easily drop their slot */
-			bdr_slot_name(&slot_name_dropped,
-						  node_sysid, node_timeline, node_datoid,
-						  MyDatabaseId);
+			bdr_slot_name(&slot_name_dropped, &node, myid.dboid);
 
-			we_were_dropped = node_sysid == GetSystemIdentifier() &&
-				node_timeline == ThisTimeLineID &&
-				node_datoid == MyDatabaseId;
+			we_were_dropped = bdr_nodeid_eq(&node, &myid);
 
 			LWLockAcquire(ReplicationSlotControlLock, LW_SHARED);
 			for (i = 0; i < max_replication_slots; i++)
@@ -424,7 +410,7 @@ bdr_maintain_db_workers(void)
 					continue;
 
 				if (we_were_dropped &&
-					s->data.database == MyDatabaseId)
+					s->data.database == myid.dboid)
 				{
 					elog(LOG, "need to drop slot %s as we got parted",
 						 NameStr(s->data.name));
@@ -476,8 +462,8 @@ bdr_maintain_db_workers(void)
 	 * (excluded by the join).
 	 */
 	values[0] = CStringGetTextDatum(sysid_str);
-	values[1] = ObjectIdGetDatum(ThisTimeLineID);
-	values[2] = ObjectIdGetDatum(MyDatabaseId);
+	values[1] = ObjectIdGetDatum(myid.timeline);
+	values[2] = ObjectIdGetDatum(myid.dboid);
 
 	ret = SPI_execute_with_args(
 			"SELECT DISTINCT ON (conn_sysid, conn_timeline, conn_dboid) "
@@ -524,9 +510,7 @@ bdr_maintain_db_workers(void)
 		BdrApplyWorker		   *apply;
 		Datum					temp_datum;
 		bool					isnull;
-		uint64					target_sysid;
-		TimeLineID				target_timeline;
-		Oid						target_dboid;
+		BDRNodeId				target;
 		char*					tmp_sysid;
 		bool					origin_is_my_id;
 		BdrNodeStatus			node_status;
@@ -536,20 +520,20 @@ bdr_maintain_db_workers(void)
 		tmp_sysid = SPI_getvalue(tuple, SPI_tuptable->tupdesc,
 								 getattno("conn_sysid"));
 
-		if (sscanf(tmp_sysid, UINT64_FORMAT, &target_sysid) != 1)
+		if (sscanf(tmp_sysid, UINT64_FORMAT, &target.sysid) != 1)
 			elog(ERROR, "Parsing sysid uint64 from %s failed", tmp_sysid);
 
 		temp_datum = SPI_getbinval(tuple, SPI_tuptable->tupdesc,
 								   getattno("conn_timeline"),
 								   &isnull);
 		Assert(!isnull);
-		target_timeline = DatumGetObjectId(temp_datum);
+		target.timeline = DatumGetObjectId(temp_datum);
 
 		temp_datum = SPI_getbinval(tuple, SPI_tuptable->tupdesc,
 								   getattno("conn_dboid"),
 								   &isnull);
 		Assert(!isnull);
-		target_dboid = DatumGetObjectId(temp_datum);
+		target.dboid = DatumGetObjectId(temp_datum);
 
 		temp_datum = SPI_getbinval(tuple, SPI_tuptable->tupdesc,
 								   getattno("conn_is_unidirectional"),
@@ -558,8 +542,8 @@ bdr_maintain_db_workers(void)
 		if (DatumGetBool(temp_datum))
 		{
 			ereport(WARNING,
-					(errmsg("unidirectional connection to ("UINT64_FORMAT",%u,%u) ignored; UDR support has been removed",
-					 target_sysid, target_timeline, target_dboid)));
+					(errmsg("unidirectional connection to "BDR_NODEID_FORMAT" ignored; UDR support has been removed",
+					 BDR_NODEID_FORMAT_ARGS(target))));
 			continue;
 		}
 
@@ -575,9 +559,8 @@ bdr_maintain_db_workers(void)
 		Assert(!isnull);
 		node_status = DatumGetChar(temp_datum);
 
-		elog(DEBUG1, "Found bdr_connections entry for "BDR_LOCALID_FORMAT" (origin specific: %d, status: %c)",
-			 target_sysid, target_timeline, target_dboid,
-			 EMPTY_REPLICATION_NAME,
+		elog(DEBUG1, "Found bdr_connections entry for "BDR_NODEID_FORMAT" (origin specific: %d, status: %c)",
+			 BDR_NODEID_FORMAT_ARGS(target),
 			 (int) origin_is_my_id, node_status);
 
 		if(node_status == BDR_NODE_STATUS_KILLED)
@@ -605,11 +588,10 @@ bdr_maintain_db_workers(void)
 		/*
 		 * Is there already a worker registered for this connection?
 		 */
-		if (find_apply_worker_slot(target_sysid, target_timeline, target_dboid, &worker) != -1)
+		if (find_apply_worker_slot(&target, &worker) != -1)
 		{
-			elog(DEBUG2, "Skipping registration of worker for node "BDR_LOCALID_FORMAT" on db oid=%u: already registered",
-				 target_sysid, target_timeline, target_dboid,
-				 EMPTY_REPLICATION_NAME, MyDatabaseId);
+			elog(DEBUG2, "Skipping registration of worker for node "BDR_NODEID_FORMAT" on db oid=%u: already registered",
+				 BDR_NODEID_FORMAT_ARGS(target), myid.dboid);
 
 			/*
 			 * Notify the worker that its config could have changed.
@@ -626,14 +608,13 @@ bdr_maintain_db_workers(void)
 			continue;
 		}
 
-		/* We're going to resister a new worker for this connection */
+		/* We're going to register a new worker for this connection */
 
 		/* Set the display name in 'ps' etc */
 		snprintf(bgw.bgw_name, BGW_MAXLEN,
-				 BDR_LOCALID_FORMAT"->"BDR_LOCALID_FORMAT,
-				 BDR_LOCALID_FORMAT_ARGS,
-				 target_sysid, target_timeline, target_dboid,
-				 EMPTY_REPLICATION_NAME);
+				 "bdr apply %s to %s",
+				 bdr_nodeid_name(&target, true),
+				 bdr_nodeid_name(&myid, true));
 
 		/* Allocate a new shmem slot for this apply worker */
 		worker = bdr_worker_shmem_alloc(BDR_WORKER_APPLY, &slot);
@@ -647,16 +628,12 @@ bdr_maintain_db_workers(void)
 		 * Apply workers (other than in catchup mode, which are registered
 		 * elsewhere) should not be using the local node's connection entry.
 		 */
-		Assert(!(target_sysid == GetSystemIdentifier() &&
-				 target_timeline == ThisTimeLineID &&
-				 target_dboid == MyDatabaseId));
+		Assert(!bdr_nodeid_eq(&target, &myid));
 
 		/* Now populate the apply worker state */
 		apply = &worker->data.apply;
 		apply->dboid = MyDatabaseId;
-		apply->remote_sysid = target_sysid;
-		apply->remote_timeline = target_timeline;
-		apply->remote_dboid = target_dboid;
+		bdr_nodeid_cpy(&apply->remote_node, &target);
 		apply->replay_stop_lsn = InvalidXLogRecPtr;
 		apply->forward_changesets = false;
 		apply->perdb = bdr_worker_slot;
@@ -675,22 +652,20 @@ bdr_maintain_db_workers(void)
 			 */
 			LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
 			apply->dboid = InvalidOid;
-			apply->remote_sysid = 0;
-			apply->remote_timeline = 0;
-			apply->remote_dboid = InvalidOid;
+			apply->remote_node.sysid = 0;
+			apply->remote_node.timeline = 0;
+			apply->remote_node.dboid = InvalidOid;
 			worker->worker_type = BDR_WORKER_EMPTY_SLOT;
 			LWLockRelease(BdrWorkerCtl->lock);
 
 			ereport(ERROR,
-					(errmsg("bdr: Failed to register background worker"
-							" for "BDR_LOCALID_FORMAT", see previous log messages",
-							BDR_LOCALID_FORMAT_ARGS)));
+					(errmsg("bdr: Failed to register apply worker for "BDR_NODEID_FORMAT,
+							BDR_NODEID_FORMAT_ARGS(target))));
 		}
 		else
 		{
-			elog(DEBUG2, "registered apply worker for "BDR_LOCALID_FORMAT,
-				 target_sysid, target_timeline, target_dboid,
-				 EMPTY_REPLICATION_NAME);
+			elog(DEBUG2, "registered apply worker for "BDR_NODEID_FORMAT,
+				 BDR_NODEID_FORMAT_ARGS(target));
 		}
 	}
 
@@ -743,6 +718,7 @@ bdr_perdb_worker_main(Datum main_arg)
 	BdrPerdbWorker		*perdb;
 	StringInfoData		si;
 	bool				wait;
+	BDRNodeId			myid;
 
 	initStringInfo(&si);
 
@@ -752,9 +728,10 @@ bdr_perdb_worker_main(Datum main_arg)
 
 	perdb->nnodes = -1;
 
-	elog(DEBUG1, "per-db worker for node " BDR_LOCALID_FORMAT " starting", BDR_LOCALID_FORMAT_ARGS);
+	bdr_make_my_nodeid(&myid);
+	elog(DEBUG1, "per-db worker for node " BDR_NODEID_FORMAT " starting", BDR_LOCALID_FORMAT_ARGS);
 
-	appendStringInfo(&si, BDR_LOCALID_FORMAT": %s", BDR_LOCALID_FORMAT_ARGS, "perdb");
+	appendStringInfo(&si, "%s: perdb", bdr_get_my_cached_node_name());
 	SetConfigOption("application_name", si.data, PGC_USERSET, PGC_S_SESSION);
 	SetConfigOption("lock_timeout", "10000", PGC_USERSET, PGC_S_SESSION);
 
@@ -796,14 +773,14 @@ bdr_perdb_worker_main(Datum main_arg)
 			elog(ERROR, "SPI already connected; this shouldn't be possible");
 
 		saved_ctx = MemoryContextSwitchTo(TopMemoryContext);
-		local_node = bdr_nodes_get_local_info(GetSystemIdentifier(), ThisTimeLineID,
-										  MyDatabaseId);
+		local_node = bdr_nodes_get_local_info(&myid);
 		MemoryContextSwitchTo(saved_ctx);
 
 		if (local_node == NULL)
 			ereport(ERROR,
 					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-					 errmsg("local node record not found")));
+					 errmsg("local node record for "BDR_NODEID_FORMAT" not found",
+							BDR_NODEID_FORMAT_ARGS(myid))));
 
 		SPI_finish();
 		CommitTransactionCommand();
@@ -818,8 +795,8 @@ bdr_perdb_worker_main(Datum main_arg)
 		bdr_bdr_node_free(local_node);
 	}
 
-	elog(DEBUG1, "Starting bdr apply workers for "BDR_LOCALID_FORMAT" (%s)",
-		 BDR_LOCALID_FORMAT_ARGS, NameStr(perdb->dbname));
+	elog(DEBUG1, "Starting bdr apply workers on "BDR_NODEID_FORMAT,
+		 BDR_LOCALID_FORMAT_ARGS);
 
 	/* Launch the apply workers */
 	bdr_maintain_db_workers();
@@ -899,18 +876,19 @@ Datum
 bdr_get_apply_pid(PG_FUNCTION_ARGS)
 {
 	const char *remote_sysid_str = text_to_cstring(PG_GETARG_TEXT_P(0));
-	Oid			remote_tli = PG_GETARG_OID(1);
-	Oid			remote_dboid = PG_GETARG_OID(2);
-	uint64		remote_sysid;
 	BdrWorker  *worker = NULL;
 	pid_t		ret;
+	BDRNodeId	remote;
 
-	if (sscanf(remote_sysid_str, UINT64_FORMAT, &remote_sysid) != 1)
+	remote.timeline = PG_GETARG_OID(1);
+	remote.dboid = PG_GETARG_OID(2);
+
+	if (sscanf(remote_sysid_str, UINT64_FORMAT, &remote.sysid) != 1)
 		elog(ERROR, "Parsing of remote sysid as uint64 failed");
 
 	LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
 
-	find_apply_worker_slot(remote_sysid, remote_tli, remote_dboid, &worker);
+	find_apply_worker_slot(&remote, &worker);
 
 	/* Worker slot not found or worker isn't running. */
 	if (worker == NULL || worker->worker_proc == NULL)

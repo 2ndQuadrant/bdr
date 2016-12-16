@@ -908,9 +908,13 @@ initialize_replication_slot(PGconn *conn, NodeInfo *ni, Oid dboid)
 	NameData	slotname;
 	PQExpBuffer	query = createPQExpBuffer();
 	PGresult   *res;
+	BDRNodeId	node;
 
 	/* dboids are the same, because we just cloned... */
-	bdr_slot_name(&slotname, ni->local_sysid, ni->local_tlid, dboid, dboid);
+	node.sysid = ni->local_sysid;
+	node.timeline = ni->local_tlid;
+	node.dboid = dboid;
+	bdr_slot_name(&slotname, &node, dboid);
 	appendPQExpBuffer(query, "SELECT pg_create_logical_replication_slot(%s, '%s');",
 					  PQescapeLiteral(conn, NameStr(slotname), NAMEDATALEN), "bdr");
 
@@ -1316,7 +1320,7 @@ initialize_replication_identifier(PGconn *conn, NodeInfo *ni, Oid dboid, char *r
 	PQExpBuffer query = createPQExpBuffer();
 	const char *origin_or_identifier;
 
-	snprintf(remote_ident, sizeof(remote_ident), BDR_NODE_ID_FORMAT,
+	snprintf(remote_ident, sizeof(remote_ident), BDR_REPORIGIN_ID_FORMAT,
 				ni->remote_sysid, ni->remote_tlid, dboid, dboid, "");
 
 	if (PG_VERSION_NUM/100 == 904)

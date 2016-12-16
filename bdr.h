@@ -30,16 +30,25 @@
 #define EMPTY_REPLICATION_NAME ""
 
 /*
- * BDR_LOCALID_FORMAT is used in fallback_application_name. It's distinct from
+ * BDR_NODEID_FORMAT is used in fallback_application_name. It's distinct from
  * BDR_NODE_ID_FORMAT in that it doesn't include the remote dboid as that may
  * not be known yet, just (sysid,tlid,dboid,replication_name) .
  *
- * Use BDR_LOCALID_FORMAT_ARGS to sub it in to format strings.
+ * Use BDR_LOCALID_FORMAT_ARGS to sub it in to format strings, or BDR_NODEID_FORMAT_ARGS(node)
+ * to format a BDRNodeId.
  */
-#define BDR_LOCALID_FORMAT "bdr ("UINT64_FORMAT",%u,%u,%s)"
+#define BDR_NODEID_FORMAT "("UINT64_FORMAT",%u,%u,%s)"
 
 #define BDR_LOCALID_FORMAT_ARGS \
 	GetSystemIdentifier(), ThisTimeLineID, MyDatabaseId, EMPTY_REPLICATION_NAME
+
+/*
+ * print helpers for node IDs, for use with BDR_NODEID_FORMAT.
+ *
+ * MULTIPLE EVALUATION HAZARD.
+ */
+#define BDR_NODEID_FORMAT_ARGS(node) \
+	(node).sysid, (node).timeline, (node).dboid, EMPTY_REPLICATION_NAME
 
 #define BDR_INIT_REPLICA_CMD "bdr_initial_load"
 #define BDR_LIBRARY_NAME "bdr"
@@ -177,9 +186,7 @@ typedef struct BdrApplyWorker
 	 * Identification for the remote db we're connecting to; used to
 	 * find the appropriate bdr.connections row, etc.
 	 */
-	uint64		remote_sysid;
-	TimeLineID	remote_timeline;
-	Oid			remote_dboid;
+	BDRNodeId	remote_node;
 
 	/*
 	 * If not InvalidXLogRecPtr, stop replay at this point and exit.
@@ -240,9 +247,7 @@ typedef struct BdrWalsenderWorker
 	struct ReplicationSlot *slot;
 
 	/* Identification for the remote the connection comes from. */
-	uint64		remote_sysid;
-	TimeLineID	remote_timeline;
-	Oid			remote_dboid;
+	BDRNodeId remote_node;
 
 } BdrWalsenderWorker;
 
@@ -390,14 +395,6 @@ extern Oid	BdrLocksByOwnerRelid;
 extern Oid	QueuedDropsRelid;
 extern Oid  BdrSupervisorDbOid;
 
-/* Structure representing bdr_nodes record */
-typedef struct BDRNodeId
-{
-	uint64		sysid;
-	TimeLineID	timeline;
-	Oid			dboid;
-} BDRNodeId;
-
 typedef struct BDRNodeInfo
 {
 	/* hash key */
@@ -423,9 +420,8 @@ extern Oid bdr_lookup_relid(const char *relname, Oid schema_oid);
 
 
 /* apply support */
-extern void bdr_fetch_sysid_via_node_id(RepOriginId node_id, uint64 *sysid,
-										TimeLineID *tli, Oid *remote_dboid);
-extern RepOriginId bdr_fetch_node_id_via_sysid(uint64 sysid, TimeLineID tli, Oid dboid);
+extern void bdr_fetch_sysid_via_node_id(RepOriginId node_id, BDRNodeId * out_nodeid);
+extern RepOriginId bdr_fetch_node_id_via_sysid(const BDRNodeId * const node);
 
 /* Index maintenance, heap access, etc */
 extern struct EState * bdr_create_rel_estate(Relation rel);
@@ -458,9 +454,7 @@ typedef struct BdrApplyConflict
 	TimestampTz				local_conflict_time;
 	const char			   *object_schema; /* unused if apply_error */
 	const char			   *object_name;   /* unused if apply_error */
-	uint64					remote_sysid;
-	TimeLineID				remote_tli;
-	Oid						remote_dboid;
+	BDRNodeId				remote_node;
 	TransactionId			remote_txid;
 	TimestampTz				remote_commit_time;
 	XLogRecPtr				remote_commit_lsn;
@@ -469,9 +463,7 @@ typedef struct BdrApplyConflict
 	bool					local_tuple_null;
 	Datum					local_tuple;    /* composite */
 	TransactionId			local_tuple_xmin;
-	uint64					local_tuple_origin_sysid; /* init to 0 if unknown */
-	TimeLineID				local_tuple_origin_tli;
-	Oid						local_tuple_origin_dboid;
+	BDRNodeId				local_tuple_origin_node; /* sysid 0 if unknown */
 	bool					remote_tuple_null;
 	Datum					remote_tuple;   /* composite */
 	ErrorData			   *apply_error;
@@ -530,9 +522,7 @@ extern void bdr_worker_shmem_acquire(BdrWorkerType worker_type,
 extern void bdr_worker_shmem_release(void);
 
 extern bool bdr_is_bdr_activated_db(Oid dboid);
-extern BdrWorker *bdr_worker_get_entry(uint64 sysid,
-									   TimeLineID timeline,
-									   Oid dboid,
+extern BdrWorker *bdr_worker_get_entry(const BDRNodeId * nodeid,
 									   BdrWorkerType worker_type);
 
 /* forbid commands we do not support currently (or never will) */
@@ -578,19 +568,19 @@ extern int bdr_parse_version(const char * bdr_version_str, int *o_major,
 							 int *o_minor, int *o_rev, int *o_subrev);
 
 /* manipulation of bdr catalogs */
-extern BdrNodeStatus bdr_nodes_get_local_status(uint64 sysid, TimeLineID tli,
-									   Oid dboid);
-extern BDRNodeInfo * bdr_nodes_get_local_info(uint64 sysid, TimeLineID tli,
-										  Oid dboid);
+extern BdrNodeStatus bdr_nodes_get_local_status(const BDRNodeId * const node);
+extern BDRNodeInfo * bdr_nodes_get_local_info(const BDRNodeId * const node);
 extern void bdr_bdr_node_free(BDRNodeInfo *node);
 extern void bdr_nodes_set_local_status(BdrNodeStatus status, BdrNodeStatus oldstatus);
 extern void bdr_nodes_set_local_attrs(BdrNodeStatus status, BdrNodeStatus oldstatus, const int *seq_id);
 
+/* return a node name or (none) if unknown for given nodeid */
+extern const char * bdr_nodeid_name(const BDRNodeId * const node, bool missing_ok);
+
 extern Oid GetSysCacheOidError(int cacheId, Datum key1, Datum key2, Datum key3,
 							   Datum key4);
 
-extern bool bdr_get_node_identity_by_name(const char *node_name, uint64 *sysid,
-										  TimeLineID *timeline, Oid *dboid);
+extern bool bdr_get_node_identity_by_name(const char *node_name, BDRNodeId * out_nodeid);
 
 #define GetSysCacheOidError2(cacheId, key1, key2) \
 	GetSysCacheOidError(cacheId, key1, key2, 0, 0)
@@ -604,7 +594,7 @@ extern void
 stringify_node_identity(char *sysid_str, Size sysid_str_size,
 						char *timeline_str, Size timeline_str_size,
 						char *dboid_str, Size dboid_str_size,
-						uint64 sysid, TimeLineID timeline, Oid dboid);
+						const BDRNodeId * const nodeid);
 
 extern void
 bdr_copytable(PGconn *copyfrom_conn, PGconn *copyto_conn,
@@ -618,20 +608,20 @@ extern int32 bdr_local_node_seq_id(void);
 extern const char *bdr_local_node_name(void);
 
 extern void bdr_node_set_read_only_internal(char *node_name, bool read_only, bool force);
+extern void bdr_setup_my_cached_node_names(void);
+extern void bdr_setup_cached_remote_name(const BDRNodeId * const remote_nodeid);
+extern const char * bdr_get_my_cached_node_name(void);
+extern const char * bdr_get_my_cached_remote_name(const BDRNodeId * const remote_nodeid);
 
 /* helpers shared by multiple worker types */
 extern struct pg_conn* bdr_connect(const char *conninfo, Name appname,
-								   uint64* remote_sysid_i,
-								   TimeLineID *remote_tlid_i,
-								   Oid *out_dboid_i);
+								   BDRNodeId * out_nodeid);
 
 extern struct pg_conn *
 bdr_establish_connection_and_slot(const char *dsn,
 								  const char *application_name_suffix,
 								  Name out_slot_name,
-								  uint64 *out_sysid,
-								  TimeLineID *out_timeline,
-								  Oid *out_dboid,
+								  BDRNodeId *out_nodeid,
 								  RepOriginId *out_replication_identifier,
 	 							  char **out_snapshot);
 
@@ -670,10 +660,8 @@ void bdr_validate_replication_set_name(const char *name, bool allow_implicit);
 
 typedef struct remote_node_info
 {
-	uint64 sysid;
+	BDRNodeId nodeid;
 	char *sysid_str;
-	TimeLineID timeline;
-	Oid dboid;
 	char *variant;
 	char *version;
 	int version_num;
@@ -697,9 +685,20 @@ extern void bdr_test_remote_connectback_internal(PGconn *conn,
  */
 extern BdrWorkerType bdr_worker_type;
 
+extern void bdr_make_my_nodeid(BDRNodeId * const node);
+extern void bdr_nodeid_cpy(BDRNodeId * const dest, const BDRNodeId * const src);
+extern bool bdr_nodeid_eq(const BDRNodeId * const left, const BDRNodeId * const right);
+
 /*
  * sequencer support
  */
 #include "bdr_seq.h"
+
+/*
+ * Protocol
+ */
+extern void bdr_getmsg_nodeid(StringInfo message, BDRNodeId * const nodeid, bool expect_empty_nodename);
+extern void bdr_send_nodeid(StringInfo s, const BDRNodeId * const nodeid, bool include_empty_nodename);
+extern void bdr_sendint64(int64 i, char *buf);
 
 #endif   /* BDR_H */

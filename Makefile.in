@@ -62,6 +62,7 @@ OBJS = \
 	bdr_messaging.o \
 	bdr_output.o \
 	bdr_pgutils.o \
+	bdr_protocol.o \
 	bdr_relcache.o \
 	bdr_remotecalls.o \
 	bdr_seq2.o \

@@ -452,20 +452,21 @@ bdr_locks_startup()
 		Datum		values[10];
 		bool		isnull[10];
 		const char *state;
-		uint64		sysid;
 		RepOriginId	node_id;
 		BDRLockType	lock_type;
+		BDRNodeId	locker_id;
 
 		heap_deform_tuple(tuple, RelationGetDescr(rel),
 						  values, isnull);
 
 		/* lookup the lock owner's node id */
 		state = TextDatumGetCString(values[9]);
-		if (sscanf(TextDatumGetCString(values[1]), UINT64_FORMAT, &sysid) != 1)
+		if (sscanf(TextDatumGetCString(values[1]), UINT64_FORMAT, &locker_id.sysid) != 1)
 			elog(ERROR, "could not parse sysid %s",
 				 TextDatumGetCString(values[1]));
-		node_id = bdr_fetch_node_id_via_sysid(
-			sysid, DatumGetObjectId(values[2]), DatumGetObjectId(values[3]));
+		locker_id.timeline = DatumGetObjectId(values[2]);
+		locker_id.dboid = DatumGetObjectId(values[3]);
+		node_id = bdr_fetch_node_id_via_sysid(&locker_id);
 		lock_type = bdr_lock_name_to_type(TextDatumGetCString(values[0]));
 
 		if (strcmp(state, "acquired") == 0)
@@ -556,15 +557,13 @@ bdr_locks_set_nnodes(int nnodes)
  */
 bool
 bdr_locks_process_message(int msg_type, bool transactional, XLogRecPtr lsn,
-						  uint64 origin_sysid, TimeLineID origin_tlid, Oid  origin_datid,
-						  StringInfo message)
+						  const BDRNodeId * const origin, StringInfo message)
 {
 	bool handled = true;
 
 	if (msg_type == BDR_MESSAGE_START)
 	{
-		bdr_locks_process_remote_startup(
-			origin_sysid, origin_tlid, origin_datid);
+		bdr_locks_process_remote_startup(origin);
 	}
 	else if (msg_type == BDR_MESSAGE_ACQUIRE_LOCK)
 	{
@@ -574,77 +573,56 @@ bdr_locks_process_message(int msg_type, bool transactional, XLogRecPtr lsn,
 			lock_type = BDR_LOCK_WRITE;
 		else
 			lock_type = pq_getmsgint(message, 4);
-		bdr_process_acquire_ddl_lock(origin_sysid, origin_tlid, origin_datid,
-									 lock_type);
+		bdr_process_acquire_ddl_lock(origin, lock_type);
 	}
 	else if (msg_type == BDR_MESSAGE_RELEASE_LOCK)
 	{
-		uint64		lock_sysid;
-		TimeLineID	lock_tlid;
-		Oid			lock_datid;
-
-		lock_sysid = pq_getmsgint64(message);
-		lock_tlid = pq_getmsgint(message, 4);
-		lock_datid = pq_getmsgint(message, 4);
-
-		bdr_process_release_ddl_lock(origin_sysid, origin_tlid, origin_datid,
-									 lock_sysid, lock_tlid, lock_datid);
+		BDRNodeId	peer;
+		/* locks are node-wide, so no node name */
+		bdr_getmsg_nodeid(message, &peer, false);
+		bdr_process_release_ddl_lock(origin, &peer);
 	}
 	else if (msg_type == BDR_MESSAGE_CONFIRM_LOCK)
 	{
-		uint64		lock_sysid;
-		TimeLineID	lock_tlid;
-		Oid			lock_datid;
+		BDRNodeId	peer;
 		int			lock_type;
-
-		lock_sysid = pq_getmsgint64(message);
-		lock_tlid = pq_getmsgint(message, 4);
-		lock_datid = pq_getmsgint(message, 4);
+		/* locks are node-wide, so no node name */
+		bdr_getmsg_nodeid(message, &peer, false);
 
 		if (message->cursor == message->len) 		/* Old proto */
 			lock_type = BDR_LOCK_WRITE;
 		else
 			lock_type = pq_getmsgint(message, 4);
 
-		bdr_process_confirm_ddl_lock(origin_sysid, origin_tlid, origin_datid,
-									 lock_sysid, lock_tlid, lock_datid,
-									 lock_type);
+		bdr_process_confirm_ddl_lock(origin, &peer, lock_type);
 	}
 	else if (msg_type == BDR_MESSAGE_DECLINE_LOCK)
 	{
-		uint64		lock_sysid;
-		TimeLineID	lock_tlid;
-		Oid			lock_datid;
+		BDRNodeId	peer;
 		int			lock_type;
-
-		lock_sysid = pq_getmsgint64(message);
-		lock_tlid = pq_getmsgint(message, 4);
-		lock_datid = pq_getmsgint(message, 4);
+		/* locks are node-wide, so no node name */
+		bdr_getmsg_nodeid(message, &peer, false);
 
 		if (message->cursor == message->len) 		/* Old proto */
 			lock_type = BDR_LOCK_WRITE;
 		else
 			lock_type = pq_getmsgint(message, 4);
 
-		bdr_process_decline_ddl_lock(origin_sysid, origin_tlid, origin_datid,
-									 lock_sysid, lock_tlid, lock_datid,
-									 lock_type);
+		bdr_process_decline_ddl_lock(origin, &peer, lock_type);
 	}
 	else if (msg_type == BDR_MESSAGE_REQUEST_REPLAY_CONFIRM)
 	{
 		XLogRecPtr confirm_lsn;
 		confirm_lsn = pq_getmsgint64(message);
 
-		bdr_process_request_replay_confirm(origin_sysid, origin_tlid,
-										   origin_datid, confirm_lsn);
+		bdr_process_request_replay_confirm(origin, confirm_lsn);
 	}
 	else if (msg_type == BDR_MESSAGE_REPLAY_CONFIRM)
 	{
 		XLogRecPtr confirm_lsn;
 		confirm_lsn = pq_getmsgint64(message);
 
-		bdr_process_replay_confirm(origin_sysid, origin_tlid, origin_datid,
-								   confirm_lsn);
+		bdr_process_replay_confirm(origin, confirm_lsn);
 	}
 	else
 	{
@@ -658,6 +636,10 @@ bdr_locks_process_message(int msg_type, bool transactional, XLogRecPtr lsn,
 static void
 bdr_lock_xact_callback(XactEvent event, void *arg)
 {
+	BDRNodeId myid;
+
+	bdr_make_my_nodeid(&myid);
+
 	if (!this_xact_acquired_lock)
 		return;
 
@@ -672,11 +654,7 @@ bdr_lock_xact_callback(XactEvent event, void *arg)
 		bdr_prepare_message(&s, BDR_MESSAGE_RELEASE_LOCK);
 
 		/* no lock_type, finished transaction releases all locks it held */
-		pq_sendint64(&s, GetSystemIdentifier()); /* sysid */
-		pq_sendint(&s, ThisTimeLineID, 4); /* tli */
-		pq_sendint(&s, MyDatabaseId, 4); /* database */
-		/* no name! locks are db wide */
-
+		bdr_send_nodeid(&s, &myid, false);
 		bdr_send_message(&s, false);
 
 		LWLockAcquire(bdr_locks_ctl->lock, LW_EXCLUSIVE);
@@ -714,13 +692,13 @@ register_xact_callback()
 }
 
 static SysScanDesc
-locks_begin_scan(Relation rel, Snapshot snap, uint64 sysid, TimeLineID tli, Oid datid)
+locks_begin_scan(Relation rel, Snapshot snap, const BDRNodeId * const node)
 {
 	ScanKey			key;
 	char			buf[30];
 	key = (ScanKey) palloc(sizeof(ScanKeyData) * 4);
 
-	sprintf(buf, UINT64_FORMAT, sysid);
+	sprintf(buf, UINT64_FORMAT, node->sysid);
 
 	ScanKeyInit(&key[0],
 				2,
@@ -729,11 +707,11 @@ locks_begin_scan(Relation rel, Snapshot snap, uint64 sysid, TimeLineID tli, Oid 
 	ScanKeyInit(&key[1],
 				3,
 				BTEqualStrategyNumber, F_OIDEQ,
-				ObjectIdGetDatum(tli));
+				ObjectIdGetDatum(node->timeline));
 	ScanKeyInit(&key[2],
 				4,
 				BTEqualStrategyNumber, F_OIDEQ,
-				ObjectIdGetDatum(datid));
+				ObjectIdGetDatum(node->dboid));
 
 	return systable_beginscan(rel, 0, true, snap, 3, key);
 }
@@ -795,7 +773,7 @@ bdr_acquire_ddl_lock(BDRLockType lock_type)
 	if (this_xact_acquired_lock)
 	{
 		elog(ddl_lock_log_level(DDL_LOCK_TRACE_STATEMENT),
-			LOCKTRACE "attempting to acquire in mode <%s> (upgrading from <%s>) for (" BDR_LOCALID_FORMAT ")",
+			LOCKTRACE "attempting to acquire in mode <%s> (upgrading from <%s>) for "BDR_NODEID_FORMAT,
 			bdr_lock_type_to_name(lock_type),
 			bdr_lock_type_to_name(bdr_my_locks_database->lock_type),
 			BDR_LOCALID_FORMAT_ARGS);
@@ -803,9 +781,8 @@ bdr_acquire_ddl_lock(BDRLockType lock_type)
 	else
 	{
 		elog(ddl_lock_log_level(DDL_LOCK_TRACE_STATEMENT),
-			LOCKTRACE "attempting to acquire in mode <%s> for (" BDR_LOCALID_FORMAT ")",
-			bdr_lock_type_to_name(lock_type),
-			BDR_LOCALID_FORMAT_ARGS);
+			LOCKTRACE "attempting to acquire in mode <%s> for "BDR_NODEID_FORMAT,
+			bdr_lock_type_to_name(lock_type), BDR_LOCALID_FORMAT_ARGS);
 	}
 
 	/* register an XactCallback to release the lock */
@@ -816,23 +793,19 @@ bdr_acquire_ddl_lock(BDRLockType lock_type)
 	/* check whether the lock can actually be acquired */
 	if (!this_xact_acquired_lock && bdr_my_locks_database->lockcount > 0)
 	{
-		uint64		holder_sysid;
-		TimeLineID	holder_tli;
-		Oid			holder_datid;
+		BDRNodeId	holder;
 
-		bdr_fetch_sysid_via_node_id(bdr_my_locks_database->lock_holder,
-									&holder_sysid, &holder_tli,
-									&holder_datid);
-
+		bdr_fetch_sysid_via_node_id(bdr_my_locks_database->lock_holder, &holder);
+		
 		elog(ddl_lock_log_level(DDL_LOCK_TRACE_ACQUIRE_RELEASE),
-			LOCKTRACE "lock already held by (" BDR_LOCALID_FORMAT ")",
-			holder_sysid, holder_tli, holder_datid, "");
+			LOCKTRACE "lock already held by "BDR_NODEID_FORMAT,
+			BDR_NODEID_FORMAT_ARGS(holder));
 
 		ereport(ERROR,
 				(errcode(ERRCODE_LOCK_NOT_AVAILABLE),
 				 errmsg("database is locked against ddl by another node"),
-				 errhint("Node ("UINT64_FORMAT",%u,%u) in the cluster is already performing DDL",
-						 holder_sysid, holder_tli, holder_datid)));
+				 errhint("Node "BDR_NODEID_FORMAT" in the cluster is already performing DDL",
+						 BDR_NODEID_FORMAT_ARGS(holder))));
 	}
 
 	/* send message about ddl lock */
@@ -870,9 +843,8 @@ bdr_acquire_ddl_lock(BDRLockType lock_type)
 	 * ---
 	 */
 	elog(ddl_lock_log_level(DDL_LOCK_TRACE_DEBUG),
-		LOCKTRACE "sent DDL lock mode %s request for (" BDR_LOCALID_FORMAT "), waiting for confirmation",
-		bdr_lock_type_to_name(lock_type),
-		BDR_LOCALID_FORMAT_ARGS);
+		LOCKTRACE "sent DDL lock mode %s request for "BDR_NODEID_FORMAT"), waiting for confirmation",
+		bdr_lock_type_to_name(lock_type), BDR_LOCALID_FORMAT_ARGS);
 
 	while (true)
 	{
@@ -925,9 +897,8 @@ bdr_acquire_ddl_lock(BDRLockType lock_type)
 	bdr_my_locks_database->requestor = NULL;
 
 	elog(ddl_lock_log_level(DDL_LOCK_TRACE_ACQUIRE_RELEASE),
-		LOCKTRACE "DDL lock acquired in mode mode %s (" BDR_LOCALID_FORMAT ")",
-		bdr_lock_type_to_name(lock_type),
-		BDR_LOCALID_FORMAT_ARGS);
+		LOCKTRACE "DDL lock acquired in mode mode %s for "BDR_NODEID_FORMAT,
+		bdr_lock_type_to_name(lock_type), BDR_LOCALID_FORMAT_ARGS);
 
 	LWLockRelease(bdr_locks_ctl->lock);
 }
@@ -987,38 +958,29 @@ bdr_lock_type_from_char(char *mode)
  * changes from.
  */
 static bool
-check_is_my_origin_node(uint64 sysid, TimeLineID tli, Oid datid)
+check_is_my_origin_node(const BDRNodeId * const peer)
 {
-	uint64 replay_sysid;
-	TimeLineID replay_tli;
-	Oid replay_datid;
+	BDRNodeId session_origin_node;
 
 	Assert(!IsTransactionState());
 	Assert(bdr_worker_type == BDR_WORKER_APPLY);
 
 	StartTransactionCommand();
-	bdr_fetch_sysid_via_node_id(replorigin_session_origin, &replay_sysid,
-								&replay_tli, &replay_datid);
+	bdr_fetch_sysid_via_node_id(replorigin_session_origin, &session_origin_node);
 	CommitTransactionCommand();
 
-	if (sysid != replay_sysid ||
-		tli != replay_tli ||
-		datid != replay_datid)
-		return false;
-	return true;
+	return bdr_nodeid_eq(peer, &session_origin_node);
 }
 
 /*
  * True if the passed nodeid is the local node.
  */
 static bool
-check_is_my_node(uint64 sysid, TimeLineID tli, Oid datid)
+check_is_my_node(const BDRNodeId * const node)
 {
-	if (sysid != GetSystemIdentifier() ||
-		tli != ThisTimeLineID ||
-		datid != MyDatabaseId)
-		return false;
-	return true;
+	BDRNodeId myid;
+	bdr_make_my_nodeid(&myid);
+	return bdr_nodeid_eq(node, &myid);
 }
 
 /*
@@ -1138,19 +1100,22 @@ bdr_request_replay_confirmation(void)
  * Runs in the apply worker.
  */
 void
-bdr_process_acquire_ddl_lock(uint64 sysid, TimeLineID tli, Oid datid, BDRLockType lock_type)
+bdr_process_acquire_ddl_lock(const BDRNodeId * const node, BDRLockType lock_type)
 {
 	StringInfoData	s;
 	const char *lock_name = bdr_lock_type_to_name(lock_type);
+	BDRNodeId myid;
 
-	if (!check_is_my_origin_node(sysid, tli, datid))
+	bdr_make_my_nodeid(&myid);
+
+	if (!check_is_my_origin_node(node))
 		return;
 
 	bdr_locks_find_my_database(false);
 
 	elog(ddl_lock_log_level(DDL_LOCK_TRACE_PEERS),
-		 LOCKTRACE "%s lock requested by node ("UINT64_FORMAT",%u,%u)",
-		 lock_name, sysid, tli, datid);
+		 LOCKTRACE "%s lock requested by node "BDR_NODEID_FORMAT,
+		 lock_name, BDR_NODEID_FORMAT_ARGS(*node));
 
 	initStringInfo(&s);
 
@@ -1182,19 +1147,19 @@ bdr_process_acquire_ddl_lock(uint64 sysid, TimeLineID tli, Oid datid, BDRLockTyp
 
 		values[0] = CStringGetTextDatum(lock_name);
 
-		appendStringInfo(&s, UINT64_FORMAT, sysid);
+		appendStringInfo(&s, UINT64_FORMAT, node->sysid);
 		values[1] = CStringGetTextDatum(s.data);
 		resetStringInfo(&s);
-		values[2] = ObjectIdGetDatum(tli);
-		values[3] = ObjectIdGetDatum(datid);
+		values[2] = ObjectIdGetDatum(node->timeline);
+		values[3] = ObjectIdGetDatum(node->dboid);
 
 		values[4] = TimestampTzGetDatum(GetCurrentTimestamp());
 
-		appendStringInfo(&s, UINT64_FORMAT, GetSystemIdentifier());
+		appendStringInfo(&s, UINT64_FORMAT, myid.sysid);
 		values[5] = CStringGetTextDatum(s.data);
 		resetStringInfo(&s);
-		values[6] = ObjectIdGetDatum(ThisTimeLineID);
-		values[7] = ObjectIdGetDatum(MyDatabaseId);
+		values[6] = ObjectIdGetDatum(myid.timeline);
+		values[7] = ObjectIdGetDatum(myid.dboid);
 
 		nulls[8] = true;
 
@@ -1274,8 +1239,8 @@ bdr_process_acquire_ddl_lock(uint64 sysid, TimeLineID tli, Oid datid, BDRLockTyp
 			bdr_send_confirm_lock();
 		}
 		elog(ddl_lock_log_level(DDL_LOCK_TRACE_ACQUIRE_RELEASE),
-			 LOCKTRACE "global lock granted to remote node (" BDR_LOCALID_FORMAT ")",
-			 sysid, tli, datid, "");
+			 LOCKTRACE "global lock granted to remote node "BDR_NODEID_FORMAT,
+			 BDR_NODEID_FORMAT_ARGS(*node));
 	}
 	else if (bdr_my_locks_database->lock_holder == replorigin_session_origin &&
 			 lock_type > bdr_my_locks_database->lock_type)
@@ -1284,19 +1249,15 @@ bdr_process_acquire_ddl_lock(uint64 sysid, TimeLineID tli, Oid datid, BDRLockTyp
 		SysScanDesc	scan;
 		Snapshot	snap;
 		HeapTuple	tuple;
-		uint64		replay_sysid;
-		TimeLineID	replay_tli;
-		Oid			replay_datid;
 		bool		found = false;
+		BDRNodeId	replay_node;
 
 		elog(ddl_lock_log_level(DDL_LOCK_TRACE_DEBUG),
 			 LOCKTRACE "prior lesser lock from same lock holder, upgrading the global lock locally");
 
 		Assert(!IsTransactionState());
 		StartTransactionCommand();
-		bdr_fetch_sysid_via_node_id(bdr_my_locks_database->lock_holder,
-									&replay_sysid, &replay_tli,
-									&replay_datid);
+		bdr_fetch_sysid_via_node_id(bdr_my_locks_database->lock_holder, &replay_node);
 
 		/*
 		 * Update state of lock.
@@ -1305,7 +1266,7 @@ bdr_process_acquire_ddl_lock(uint64 sysid, TimeLineID tli, Oid datid, BDRLockTyp
 		snap = RegisterSnapshot(GetLatestSnapshot());
 		rel = heap_open(BdrLocksRelid, RowExclusiveLock);
 
-		scan = locks_begin_scan(rel, snap, replay_sysid, replay_tli, replay_datid);
+		scan = locks_begin_scan(rel, snap, &replay_node);
 
 		while ((tuple = systable_getnext(scan)) != NULL)
 		{
@@ -1391,14 +1352,12 @@ bdr_process_acquire_ddl_lock(uint64 sysid, TimeLineID tli, Oid datid, BDRLockTyp
 		}
 
 		elog(ddl_lock_log_level(DDL_LOCK_TRACE_DEBUG),
-			 LOCKTRACE "global lock granted to remote node (" BDR_LOCALID_FORMAT ")",
-			 sysid, tli, datid, "");
+			 LOCKTRACE "global lock granted to remote node "BDR_NODEID_FORMAT,
+			 BDR_NODEID_FORMAT_ARGS(*node));
 	}
 	else
 	{
-		uint64		replay_sysid;
-		TimeLineID	replay_tli;
-		Oid			replay_datid;
+		BDRNodeId replay_node;
 
 		LWLockRelease(bdr_locks_ctl->lock);
 decline:
@@ -1411,16 +1370,10 @@ decline:
 
 		Assert(!IsTransactionState());
 		StartTransactionCommand();
-		bdr_fetch_sysid_via_node_id(bdr_my_locks_database->lock_holder,
-									&replay_sysid, &replay_tli,
-									&replay_datid);
+		bdr_fetch_sysid_via_node_id(bdr_my_locks_database->lock_holder, &replay_node);
 		CommitTransactionCommand();
 
-		pq_sendint64(&s, replay_sysid); /* sysid */
-		pq_sendint(&s, replay_tli, 4); /* tli */
-		pq_sendint(&s, replay_datid, 4); /* database */
-		/* no name! locks are db wide */
-
+		bdr_send_nodeid(&s, node, false);
 		pq_sendint(&s, lock_type, 4);
 
 		bdr_send_message(&s, false);
@@ -1433,8 +1386,7 @@ decline:
  * Runs in the apply worker.
  */
 void
-bdr_process_release_ddl_lock(uint64 origin_sysid, TimeLineID origin_tli, Oid origin_datid,
-							 uint64 lock_sysid, TimeLineID lock_tli, Oid lock_datid)
+bdr_process_release_ddl_lock(const BDRNodeId * const origin, const BDRNodeId * const lock)
 {
 	Relation		rel;
 	Snapshot		snap;
@@ -1444,7 +1396,7 @@ bdr_process_release_ddl_lock(uint64 origin_sysid, TimeLineID origin_tli, Oid ori
 	Latch		   *latch;
 	StringInfoData	s;
 
-	if (!check_is_my_origin_node(origin_sysid, origin_tli, origin_datid))
+	if (!check_is_my_origin_node(origin))
 		return;
 
 	/* FIXME: check db */
@@ -1454,8 +1406,8 @@ bdr_process_release_ddl_lock(uint64 origin_sysid, TimeLineID origin_tli, Oid ori
 	initStringInfo(&s);
 
 	elog(ddl_lock_log_level(DDL_LOCK_TRACE_PEERS),
-		 LOCKTRACE "global lock released by (" BDR_LOCALID_FORMAT ")",
-		 lock_sysid, lock_tli, lock_datid, "");
+		 LOCKTRACE "global lock released by "BDR_NODEID_FORMAT,
+		 BDR_NODEID_FORMAT_ARGS(*lock));
 
 	/*
 	 * Remove row from bdr_locks *before* releasing the in memory lock. If we
@@ -1466,7 +1418,7 @@ bdr_process_release_ddl_lock(uint64 origin_sysid, TimeLineID origin_tli, Oid ori
 	rel = heap_open(BdrLocksRelid, RowExclusiveLock);
 
 	/* Find any bdr_locks entry for the releasing peer */
-	scan = locks_begin_scan(rel, snap, origin_sysid, origin_tli, origin_datid);
+	scan = locks_begin_scan(rel, snap, origin);
 
 	while ((tuple = systable_getnext(scan)) != NULL)
 	{
@@ -1496,12 +1448,12 @@ bdr_process_release_ddl_lock(uint64 origin_sysid, TimeLineID origin_tli, Oid ori
 		ereport(DEBUG1,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("Did not find global lock entry locally for a remotely released global lock"),
-				 errdetail("node ("BDR_LOCALID_FORMAT") sent a release message but the lock isn't held locally",
-						   lock_sysid, lock_tli, lock_datid, "")));
+				 errdetail("node "BDR_NODEID_FORMAT" sent a release message but the lock isn't held locally",
+						   BDR_NODEID_FORMAT_ARGS(*lock))));
 
 		elog(ddl_lock_log_level(DDL_LOCK_TRACE_DEBUG),
-			 LOCKTRACE "missing local lock entry for remotely released global lock from (" BDR_LOCALID_FORMAT ")",
-			 lock_sysid, lock_tli, lock_datid, "");
+			 LOCKTRACE "missing local lock entry for remotely released global lock from "BDR_NODEID_FORMAT,
+			 BDR_NODEID_FORMAT_ARGS(*lock));
 	}
 
 	LWLockAcquire(bdr_locks_ctl->lock, LW_EXCLUSIVE);
@@ -1540,17 +1492,16 @@ bdr_process_release_ddl_lock(uint64 origin_sysid, TimeLineID origin_tli, Oid ori
  * Runs in the apply worker.
  */
 void
-bdr_process_confirm_ddl_lock(uint64 origin_sysid, TimeLineID origin_tli, Oid origin_datid,
-							 uint64 lock_sysid, TimeLineID lock_tli, Oid lock_datid,
+bdr_process_confirm_ddl_lock(const BDRNodeId * const origin, const BDRNodeId * const lock,
 							 BDRLockType lock_type)
 {
 	Latch *latch;
 
-	if (!check_is_my_origin_node(origin_sysid, origin_tli, origin_datid))
+	if (!check_is_my_origin_node(origin))
 		return;
 
 	/* don't care if another database has gotten the lock */
-	if (!check_is_my_node(lock_sysid, lock_tli, lock_datid))
+	if (!check_is_my_node(lock))
 		return;
 
 	bdr_locks_find_my_database(false);
@@ -1568,9 +1519,9 @@ bdr_process_confirm_ddl_lock(uint64 origin_sysid, TimeLineID origin_tli, Oid ori
 	latch = bdr_my_locks_database->requestor;
 
 	elog(ddl_lock_log_level(DDL_LOCK_TRACE_DEBUG),
-		 LOCKTRACE "received global lock confirmation number %d/%d from ("BDR_LOCALID_FORMAT")",
+		 LOCKTRACE "received global lock confirmation number %d/%d from "BDR_NODEID_FORMAT,
 		 bdr_my_locks_database->acquire_confirmed, bdr_my_locks_database->nnodes,
-		 origin_sysid, origin_tli, origin_datid, "");
+		 BDR_NODEID_FORMAT_ARGS(*origin));
 
 	LWLockRelease(bdr_locks_ctl->lock);
 
@@ -1586,14 +1537,13 @@ bdr_process_confirm_ddl_lock(uint64 origin_sysid, TimeLineID origin_tli, Oid ori
  * Runs in the apply worker.
  */
 void
-bdr_process_decline_ddl_lock(uint64 origin_sysid, TimeLineID origin_tli, Oid origin_datid,
-							 uint64 lock_sysid, TimeLineID lock_tli, Oid lock_datid,
+bdr_process_decline_ddl_lock(const BDRNodeId * const origin, const BDRNodeId * const lock,
 							 BDRLockType lock_type)
 {
 	Latch *latch;
 
 	/* don't care if another database has been declined a lock */
-	if (!check_is_my_origin_node(origin_sysid, origin_tli, origin_datid))
+	if (!check_is_my_origin_node(origin))
 		return;
 
 	bdr_locks_find_my_database(false);
@@ -1601,8 +1551,8 @@ bdr_process_decline_ddl_lock(uint64 origin_sysid, TimeLineID origin_tli, Oid ori
 	if (bdr_my_locks_database->lock_type != lock_type)
 	{
 		elog(WARNING,
-			 LOCKTRACE "received global lock confirmation with unexpected lock type (%d), waiting for (%d)",
-			 lock_type, bdr_my_locks_database->lock_type);
+			 LOCKTRACE "received global lock confirmation with unexpected lock type (%d) from "BDR_NODEID_FORMAT", waiting for (%d)",
+			 lock_type, BDR_NODEID_FORMAT_ARGS(*origin), bdr_my_locks_database->lock_type);
 		return;
 	}
 
@@ -1614,8 +1564,8 @@ bdr_process_decline_ddl_lock(uint64 origin_sysid, TimeLineID origin_tli, Oid ori
 		SetLatch(latch);
 
 	elog(ddl_lock_log_level(DDL_LOCK_TRACE_ACQUIRE_RELEASE),
-		 LOCKTRACE "global lock request declined by node ("BDR_LOCALID_FORMAT")",
-		 origin_sysid, origin_tli, origin_datid, "");
+		 LOCKTRACE "global lock request declined by node "BDR_NODEID_FORMAT,
+		 BDR_NODEID_FORMAT_ARGS(*origin));
 }
 
 /*
@@ -1625,19 +1575,18 @@ bdr_process_decline_ddl_lock(uint64 origin_sysid, TimeLineID origin_tli, Oid ori
  * Runs in the apply worker.
  */
 void
-bdr_process_request_replay_confirm(uint64 sysid, TimeLineID tli,
-								   Oid datid, XLogRecPtr request_lsn)
+bdr_process_request_replay_confirm(const BDRNodeId * const node, XLogRecPtr request_lsn)
 {
 	StringInfoData s;
 
-	if (!check_is_my_origin_node(sysid, tli, datid))
+	if (!check_is_my_origin_node(node))
 		return;
 
 	bdr_locks_find_my_database(false);
 
 	elog(ddl_lock_log_level(DDL_LOCK_TRACE_PEERS),
-		 LOCKTRACE "replay confirmation requested by node ("BDR_LOCALID_FORMAT"); sending",
-		 sysid, tli, datid, "");
+		 LOCKTRACE "replay confirmation requested by node "BDR_NODEID_FORMAT"; sending",
+		 BDR_NODEID_FORMAT_ARGS(*node));
 
 	initStringInfo(&s);
 	bdr_prepare_message(&s, BDR_MESSAGE_REPLAY_CONFIRM);
@@ -1655,9 +1604,7 @@ bdr_send_confirm_lock(void)
 	Snapshot		snap;
 	HeapTuple		tuple;
 
-	uint64			replay_sysid;
-	TimeLineID		replay_tli;
-	Oid				replay_datid;
+	BDRNodeId		replay;
 	StringInfoData	s;
 	bool			found = false;
 
@@ -1671,17 +1618,10 @@ bdr_send_confirm_lock(void)
 
 	Assert(!IsTransactionState());
 	StartTransactionCommand();
-	bdr_fetch_sysid_via_node_id(bdr_my_locks_database->lock_holder,
-								&replay_sysid, &replay_tli,
-								&replay_datid);
+	bdr_fetch_sysid_via_node_id(bdr_my_locks_database->lock_holder, &replay);
 
-	pq_sendint64(&s, replay_sysid); /* sysid */
-	pq_sendint(&s, replay_tli, 4); /* tli */
-	pq_sendint(&s, replay_datid, 4); /* database */
-	/* no name! locks are db wide */
-
+	bdr_send_nodeid(&s, &replay, false);
 	pq_sendint(&s, bdr_my_locks_database->lock_type, 4);
-
 	bdr_send_message(&s, true); /* transactional */
 
 	/*
@@ -1692,7 +1632,7 @@ bdr_send_confirm_lock(void)
 	snap = RegisterSnapshot(GetLatestSnapshot());
 	rel = heap_open(BdrLocksRelid, RowExclusiveLock);
 
-	scan = locks_begin_scan(rel, snap, replay_sysid, replay_tli, replay_datid);
+	scan = locks_begin_scan(rel, snap, &replay);
 
 	while ((tuple = systable_getnext(scan)) != NULL)
 	{
@@ -1739,20 +1679,19 @@ bdr_send_confirm_lock(void)
  * Runs in the apply worker.
  */
 void
-bdr_process_replay_confirm(uint64 sysid, TimeLineID tli,
-						   Oid datid, XLogRecPtr request_lsn)
+bdr_process_replay_confirm(const BDRNodeId * const node, XLogRecPtr request_lsn)
 {
 	bool quorum_reached = false;
 
-	if (!check_is_my_origin_node(sysid, tli, datid))
+	if (!check_is_my_origin_node(node))
 		return;
 
 	bdr_locks_find_my_database(false);
 
 	LWLockAcquire(bdr_locks_ctl->lock, LW_EXCLUSIVE);
 	elog(ddl_lock_log_level(DDL_LOCK_TRACE_DEBUG),
-		 LOCKTRACE "processing replay confirmation from node ("BDR_LOCALID_FORMAT") for request %X/%X at %X/%X",
-		 sysid, tli, datid, "",
+		 LOCKTRACE "processing replay confirmation from node "BDR_NODEID_FORMAT" for request %X/%X at %X/%X",
+		 BDR_NODEID_FORMAT_ARGS(*node),
 		 (uint32)(bdr_my_locks_database->replay_confirmed_lsn >> 32),
 		 (uint32)bdr_my_locks_database->replay_confirmed_lsn,
 		 (uint32)(request_lsn >> 32),
@@ -1793,7 +1732,7 @@ bdr_process_replay_confirm(uint64 sysid, TimeLineID tli,
  * Runs in the apply worker.
  */
 void
-bdr_locks_process_remote_startup(uint64 sysid, TimeLineID tli, Oid datid)
+bdr_locks_process_remote_startup(const BDRNodeId * const node)
 {
 	Relation rel;
 	Snapshot snap;
@@ -1808,14 +1747,14 @@ bdr_locks_process_remote_startup(uint64 sysid, TimeLineID tli, Oid datid)
 	initStringInfo(&s);
 
 	elog(ddl_lock_log_level(DDL_LOCK_TRACE_PEERS),
-		 LOCKTRACE "got startup message from node ("BDR_LOCALID_FORMAT"), clearing any locks it held",
-		 sysid, tli, datid, "");
+		 LOCKTRACE "got startup message from node "BDR_NODEID_FORMAT", clearing any locks it held",
+		 BDR_NODEID_FORMAT_ARGS(*node));
 
 	StartTransactionCommand();
 	snap = RegisterSnapshot(GetLatestSnapshot());
 	rel = heap_open(BdrLocksRelid, RowExclusiveLock);
 
-	scan = locks_begin_scan(rel, snap, sysid, tli, datid);
+	scan = locks_begin_scan(rel, snap, node);
 
 	while ((tuple = systable_getnext(scan)) != NULL)
 	{

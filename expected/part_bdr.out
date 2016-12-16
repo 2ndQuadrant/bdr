@@ -165,7 +165,7 @@ SELECT bdr.remove_bdr_from_local_node(true, true);
 WARNING:  forcing deletion of possibly active BDR node
 NOTICE:  node forced to parted state, now removing
 NOTICE:  removing BDR from node
-INFO:  Global sequences not supported, nothing to convert
+INFO:  BDR 1.0 global sequences not supported, nothing to convert
 NOTICE:  BDR removed from this node. You can now DROP EXTENSION bdr and, if this is the last BDR node on this PostgreSQL instance, remove bdr from shared_preload_libraries.
  remove_bdr_from_local_node 
 ----------------------------

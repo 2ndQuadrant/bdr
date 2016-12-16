@@ -75,9 +75,7 @@ Oid			QueuedDDLCommandsRelid = InvalidOid;
 Oid			QueuedDropsRelid = InvalidOid;
 
 /* Global apply worker state */
-uint64		origin_sysid;
-TimeLineID	origin_timeline;
-Oid			origin_dboid;
+BDRNodeId	origin;
 bool		started_transaction = false;
 /* During apply, holds xid of remote transaction */
 TransactionId replication_origin_xid = InvalidTransactionId;
@@ -86,9 +84,7 @@ TransactionId replication_origin_xid = InvalidTransactionId;
  * For tracking of the remote origin's information when in catchup mode
  * (BDR_OUTPUT_TRANSACTION_HAS_ORIGIN).
  */
-static uint64			remote_origin_sysid = 0;
-static TimeLineID		remote_origin_timeline_id = 0;
-static Oid				remote_origin_dboid = InvalidOid;
+static BDRNodeId		remote_origin;
 static XLogRecPtr		remote_origin_lsn = InvalidXLogRecPtr;
 /* The local identifier for the remote's origin, if any. */
 static RepOriginId		remote_origin_id = InvalidRepOriginId;
@@ -180,20 +176,16 @@ format_action_description(
 
 	if (replorigin_session_origin != InvalidRepOriginId)
 	{
-		appendStringInfo(si, " from node ("UINT64_FORMAT",%u,%u)",
-				origin_sysid,
-				origin_timeline,
-				origin_dboid);
+		appendStringInfo(si, " from node "BDR_NODEID_FORMAT,
+				BDR_NODEID_FORMAT_ARGS(origin));
 	}
 
 	if (remote_origin_id != InvalidRepOriginId)
 	{
-		appendStringInfo(si, " forwarded from commit %X/%X on node ("UINT64_FORMAT",%u,%u)",
+		appendStringInfo(si, " forwarded from commit %X/%X on node "BDR_NODEID_FORMAT,
 				(uint32)(remote_origin_lsn>>32),
 				(uint32)remote_origin_lsn,
-				remote_origin_sysid,
-				remote_origin_timeline_id,
-				remote_origin_dboid);
+				BDR_NODEID_FORMAT_ARGS(remote_origin));
 	}
 }
 
@@ -253,17 +245,15 @@ process_remote_begin(StringInfo s)
 
 	if (flags & BDR_OUTPUT_TRANSACTION_HAS_ORIGIN)
 	{
-		remote_origin_sysid = pq_getmsgint64(s);
-		remote_origin_timeline_id = pq_getmsgint(s, 4);
-		remote_origin_dboid = pq_getmsgint(s, 4);
+		bdr_getmsg_nodeid(s, &remote_origin, false);
 		remote_origin_lsn = pq_getmsgint64(s);
 	}
 	else
 	{
 		/* Transaction originated directly from remote node */
-		remote_origin_sysid = 0;
-		remote_origin_timeline_id = 0;
-		remote_origin_dboid = InvalidOid;
+		remote_origin.sysid = 0;
+		remote_origin.timeline = 0;
+		remote_origin.dboid = InvalidOid;
 		remote_origin_lsn = InvalidXLogRecPtr;
 	}
 
@@ -293,10 +283,10 @@ process_remote_begin(StringInfo s)
 	{
 		char remote_ident[256];
 		NameData replication_name;
+		BDRNodeId my_nodeid;
+		bdr_make_my_nodeid(&my_nodeid);
 
-		if (remote_origin_sysid == GetSystemIdentifier()
-			&& remote_origin_timeline_id == ThisTimeLineID
-			&& remote_origin_dboid == MyDatabaseId)
+		if (bdr_nodeid_eq(&remote_origin, &my_nodeid))
 		{
 			/*
 			 * This might not have to be an error condition, but we don't cope
@@ -317,8 +307,8 @@ process_remote_begin(StringInfo s)
 		 * on the (sysid, timelineid, dboid) supplied in catchup mode.
 		 */
 		snprintf(remote_ident, sizeof(remote_ident),
-				BDR_NODE_ID_FORMAT,
-				remote_origin_sysid, remote_origin_timeline_id, remote_origin_dboid, MyDatabaseId,
+				BDR_REPORIGIN_ID_FORMAT,
+				remote_origin.sysid, remote_origin.timeline, remote_origin.dboid, MyDatabaseId,
 				NameStr(replication_name));
 
 		StartTransactionCommand();
@@ -1251,22 +1241,14 @@ bdr_conflict_last_update_wins(RepOriginId local_node_id,
 	}
 	else
 	{
-		uint64		local_sysid,
-					remote_origin_sysid;
-		TimeLineID	local_tli,
-					remote_tli;
-		Oid			local_dboid,
-					remote_origin_dboid;
+		BDRNodeId local, remote;
+
 		/*
 		 * Timestamps are equal. Use sysid + timeline id to decide which
 		 * tuple to retain.
 		 */
-		bdr_fetch_sysid_via_node_id(local_node_id,
-									&local_sysid, &local_tli,
-									&local_dboid);
-		bdr_fetch_sysid_via_node_id(remote_node_id,
-									&remote_origin_sysid, &remote_tli,
-									&remote_origin_dboid);
+		bdr_fetch_sysid_via_node_id(local_node_id, &local);
+		bdr_fetch_sysid_via_node_id(remote_node_id, &remote);
 
 		/*
 		 * As the timestamps were equal, we have to break the tie in a
@@ -1275,17 +1257,17 @@ bdr_conflict_last_update_wins(RepOriginId local_node_id,
 		 * Use the ordering of the node's unique identifier, the tuple of
 		 * (sysid, timelineid, dboid).
 		 */
-		if (local_sysid < remote_origin_sysid)
+		if (local.sysid < remote.sysid)
 			*perform_update = true;
-		else if (local_sysid > remote_origin_sysid)
+		else if (local.sysid > remote.sysid)
 			*perform_update = false;
-		else if (local_tli < remote_tli)
+		else if (local.timeline < remote.timeline)
 			*perform_update = true;
-		else if (local_tli > remote_tli)
+		else if (local.timeline > remote.timeline)
 			*perform_update = false;
-		else if (local_dboid < remote_origin_dboid)
+		else if (local.dboid < remote.dboid)
 			*perform_update = true;
-		else if (local_dboid > remote_origin_dboid)
+		else if (local.dboid > remote.dboid)
 			*perform_update = false;
 		else
 			/* shouldn't happen */
@@ -2094,25 +2076,6 @@ bdr_process_remote_action(StringInfo s)
 
 
 /*
- * Converts an int64 to network byte order.
- */
-static void
-bdr_sendint64(int64 i, char *buf)
-{
-	uint32		n32;
-
-	/* High order half first, since we're doing MSB-first */
-	n32 = (uint32) (i >> 32);
-	n32 = htonl(n32);
-	memcpy(&buf[0], &n32, 4);
-
-	/* Now the low order half */
-	n32 = (uint32) i;
-	n32 = htonl(n32);
-	memcpy(&buf[4], &n32, 4);
-}
-
-/*
  * Figure out which write/flush positions to report to the walsender process.
  *
  * We can't simply report back the last LSN the walsender sent us because the
@@ -2308,14 +2271,10 @@ bdr_apply_reload_config()
 
 	/* Fetch our config from the DB */
 	new_apply_config = bdr_get_connection_config(
-		bdr_apply_worker->remote_sysid,
-		bdr_apply_worker->remote_timeline,
-		bdr_apply_worker->remote_dboid,
+		&bdr_apply_worker->remote_node,
 		false);
 
-	Assert(new_apply_config->sysid == bdr_apply_worker->remote_sysid &&
-		   new_apply_config->timeline == bdr_apply_worker->remote_timeline &&
-		   new_apply_config->dboid == bdr_apply_worker->remote_dboid);
+	Assert(bdr_nodeid_eq(&new_apply_config->remote_node, &bdr_apply_worker->remote_node));
 
 	/*
 	 * Got default remote connection info, read also local defaults.
@@ -2327,9 +2286,7 @@ bdr_apply_reload_config()
 	 */
 	if (!new_apply_config->origin_is_my_id)
 	{
-		BdrConnectionConfig *cfg =
-			bdr_get_connection_config(GetSystemIdentifier(), ThisTimeLineID,
-									  MyDatabaseId, false);
+		BdrConnectionConfig *cfg = bdr_get_my_connection_config(false);
 
 		new_apply_config->apply_delay = cfg->apply_delay;
 		pfree(new_apply_config->replication_sets);
@@ -2612,13 +2569,12 @@ bdr_apply_main(Datum main_arg)
 	bdr_apply_worker->proclatch = &MyProc->procLatch;
 	LWLockRelease(BdrWorkerCtl->lock);
 
-	/* Check if we decided to kill off this connection */
+	/*
+	 * Check if we decided to kill off this connection
+	 */
 	StartTransactionCommand();
 	SPI_connect();
-	status = bdr_nodes_get_local_status(
-		bdr_apply_worker->remote_sysid,
-		bdr_apply_worker->remote_timeline,
-		bdr_apply_worker->remote_dboid);
+	status = bdr_nodes_get_local_status(&bdr_apply_worker->remote_node);
 	SPI_finish();
 	CommitTransactionCommand();
 	if (status == BDR_NODE_STATUS_KILLED)
@@ -2632,12 +2588,9 @@ bdr_apply_main(Datum main_arg)
 	/* Read our connection configuration from the database */
 	bdr_apply_reload_config();
 
-	CurrentResourceOwner = ResourceOwnerCreate(NULL, "bdr apply top-level resource owner");
-	bdr_saved_resowner = CurrentResourceOwner;
-
 	/* Set our local application_name for our SPI connections */
 	resetStringInfo(&query);
-	appendStringInfo(&query, BDR_LOCALID_FORMAT": %s", BDR_LOCALID_FORMAT_ARGS, "apply");
+	appendStringInfo(&query, "%s:%s", bdr_get_my_cached_node_name(), "apply");
 	if (bdr_apply_worker->forward_changesets)
 		appendStringInfoString(&query, " catchup");
 
@@ -2647,6 +2600,9 @@ bdr_apply_main(Datum main_arg)
 						 (uint32)bdr_apply_worker->replay_stop_lsn);
 
 	SetConfigOption("application_name", query.data, PGC_USERSET, PGC_S_SESSION);
+
+	CurrentResourceOwner = ResourceOwnerCreate(NULL, "bdr apply top-level resource owner");
+	bdr_saved_resowner = CurrentResourceOwner;
 
 	/* Form an application_name string to send to the remote end */
 	resetStringInfo(&query);
@@ -2662,8 +2618,7 @@ bdr_apply_main(Datum main_arg)
 
 	/* Make the replication connection to the remote end */
 	streamConn = bdr_establish_connection_and_slot(bdr_apply_config->dsn,
-		query.data, &slot_name, &origin_sysid, &origin_timeline,
-		&origin_dboid, &replication_identifier, NULL);
+		query.data, &slot_name, &origin, &replication_identifier, NULL);
 
 
 	/* initialize stat subsystem, our id won't change further */

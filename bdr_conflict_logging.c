@@ -48,7 +48,7 @@ static Oid BdrConflictTypeOid = InvalidOid;
 static Oid BdrConflictResolutionOid = InvalidOid;
 static Oid BdrConflictHistorySeqId = InvalidOid;
 
-#define BDR_CONFLICT_HISTORY_COLS 30
+#define BDR_CONFLICT_HISTORY_COLS 34
 #define SYSID_DIGITS 33
 
 /* We want our own memory ctx to clean up easily & reliably */
@@ -370,6 +370,9 @@ bdr_conflict_log_table(BdrApplyConflict *conflict)
 	char			local_sysid[SYSID_DIGITS];
 	char			remote_sysid[SYSID_DIGITS];
 	char			origin_sysid[SYSID_DIGITS];
+	BDRNodeId		myid;
+
+	bdr_make_my_nodeid(&myid);
 
 	if (IsAbortedTransactionBlockState())
 		elog(ERROR, "bdr: attempt to log conflict in aborted transaction");
@@ -383,14 +386,14 @@ bdr_conflict_log_table(BdrApplyConflict *conflict)
 
 	/* Pg has no uint64 SQL type so we have to store all them as text */
 	snprintf(local_sysid, sizeof(local_sysid), UINT64_FORMAT,
-			 GetSystemIdentifier());
+			 myid.sysid);
 
 	snprintf(remote_sysid, sizeof(remote_sysid), UINT64_FORMAT,
-			 conflict->remote_sysid);
+			 conflict->remote_node.sysid);
 
-	if (conflict->local_tuple_origin_sysid != 0)
+	if (conflict->local_tuple_origin_node.sysid != 0)
 		snprintf(origin_sysid, sizeof(origin_sysid), UINT64_FORMAT,
-				 conflict->local_tuple_origin_sysid);
+				 conflict->local_tuple_origin_node.sysid);
 	else
 		origin_sysid[0] = '\0';
 
@@ -440,7 +443,7 @@ bdr_conflict_log_table(BdrApplyConflict *conflict)
 		nulls[attno] = 1;
 	attno++;
 
-	if (conflict->local_tuple_origin_sysid != 0)
+	if (conflict->local_tuple_origin_node.sysid != 0)
 		values[attno] = CStringGetTextDatum(origin_sysid);
 	else
 		nulls[attno] = 1;
@@ -457,6 +460,12 @@ bdr_conflict_log_table(BdrApplyConflict *conflict)
 		/*
 		 * There's error data to log. We don't attempt to log it selectively,
 		 * as bdr apply errors are not supposed to be routine anyway.
+		 *
+		 * WARNING: in practice we'll never hit this code, since we can't
+		 * trap errors reliably then continue to write to the DB. It's not as
+		 * simple as PG_TRY / PG_CATCH(). We have to do a bunch of work like
+		 * that done by PostgresMain. It really needs bgworker infrastructure
+		 * improvements before we can do this unless we use IPC to a helper proc.
 		 */
 		ErrorData *edata = conflict->apply_error;
 
@@ -503,6 +512,34 @@ bdr_conflict_log_table(BdrApplyConflict *conflict)
 
 		/* note: do NOT free the errordata, it's the caller's responsibility */
 	}
+
+	/*
+	 * BDR 2.0 extends the conflict history with each node's dboid
+	 * and timeline to give complete node IDs.
+	 */
+	if (conflict->remote_node.sysid != 0)
+		values[attno] = ObjectIdGetDatum(conflict->remote_node.timeline);
+	else
+		nulls[attno] = 1;
+	attno++;
+
+	if (conflict->remote_node.sysid != 0)
+		values[attno] = ObjectIdGetDatum(conflict->remote_node.dboid);
+	else
+		nulls[attno] = 1;
+	attno++;
+
+	if (conflict->local_tuple_origin_node.sysid != 0)
+		values[attno] = ObjectIdGetDatum(conflict->local_tuple_origin_node.timeline);
+	else
+		nulls[attno] = 1;
+	attno++;
+
+	if (conflict->local_tuple_origin_node.sysid != 0)
+		values[attno] = ObjectIdGetDatum(conflict->local_tuple_origin_node.dboid);
+	else
+		nulls[attno] = 1;
+	attno++;
 
 	/* Make sure assignments match allocated tuple size */
 	Assert(attno == BDR_CONFLICT_HISTORY_COLS);
@@ -554,13 +591,11 @@ bdr_conflict_log_serverlog(BdrApplyConflict *conflict)
 		case BdrConflictType_InsertUpdate:
 			ereport(LOG,
 					(errcode(ERRCODE_INTEGRITY_CONSTRAINT_VIOLATION),
-					 errmsg(CONFLICT_MSG_PREFIX " row was previously %s at node " UINT64_FORMAT ":%u. Resolution: %s; PKEY:%s",
+					 errmsg(CONFLICT_MSG_PREFIX " row was previously %s at node "BDR_NODEID_FORMAT". Resolution: %s; PKEY:%s",
 							conflict->conflict_type == BdrConflictType_UpdateUpdate ? "UPDATE" : "INSERT",
 							conflict->conflict_type == BdrConflictType_InsertInsert ? "INSERTed" : "UPDATEd",
-							conflict->local_tuple_origin_sysid,
-							conflict->local_tuple_origin_tli,
-							resolution_name,
-							s_key.data)));
+							BDR_NODEID_FORMAT_ARGS(conflict->local_tuple_origin_node),
+							resolution_name, s_key.data)));
 			break;
 		case BdrConflictType_UpdateDelete:
 		case BdrConflictType_DeleteDelete:
@@ -646,11 +681,8 @@ bdr_make_apply_conflict(BdrConflictType conflict_type,
 			get_namespace_name(RelationGetNamespace(conflict_relation->rel));
 	}
 
-	/* TODO: May make sense to cache the remote sysid in a global too... */
 	bdr_fetch_sysid_via_node_id(replorigin_session_origin,
-								&conflict->remote_sysid,
-								&conflict->remote_tli,
-								&conflict->remote_dboid);
+								&conflict->remote_node);
 	conflict->remote_commit_time = replorigin_session_origin_timestamp;
 	conflict->remote_txid = remote_txid;
 	conflict->remote_commit_lsn = replorigin_session_origin_lsn;
@@ -678,13 +710,13 @@ bdr_make_apply_conflict(BdrConflictType conflict_type,
 	if (local_tuple_origin_id != InvalidRepOriginId)
 	{
 		bdr_fetch_sysid_via_node_id(local_tuple_origin_id,
-									&conflict->local_tuple_origin_sysid,
-									&conflict->local_tuple_origin_tli,
-									&conflict->local_tuple_origin_dboid);
+									&conflict->local_tuple_origin_node);
 	}
 	else
 	{
-		conflict->local_tuple_origin_sysid = 0;
+		conflict->local_tuple_origin_node.sysid = 0;
+		conflict->local_tuple_origin_node.timeline = 0;
+		conflict->local_tuple_origin_node.dboid = 0;
 	}
 
 	if (remote_tuple != NULL && bdr_conflict_logging_include_tuples)

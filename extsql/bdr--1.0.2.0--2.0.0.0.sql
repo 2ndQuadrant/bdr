@@ -135,6 +135,8 @@ BEGIN
     SELECT sysid, timeline, dboid INTO localid
     FROM bdr.bdr_get_local_nodeid();
 
+    RAISE LOG USING MESSAGE = format('node identity of node being created is (%s,%s,%s)', localid.sysid, localid.timeline, localid.dboid);
+
     -- If there's already an entry for ourselves in bdr.bdr_connections
     -- then we know this node is part of an active BDR group and cannot
     -- be joined to another group. Unidirectional connections are ignored.
@@ -161,6 +163,11 @@ BEGIN
     -- gets supplied. We don't know if 'dsn' is even valid
     -- for loopback connections and can't assume it is. That'll
     -- get checked later by BDR specific code.
+    --
+    -- We'll get a null node name back at this point since we haven't
+    -- inserted our nodes record (and it wouldn't have committed yet
+    -- if we had).
+    ---
     SELECT * INTO localid_from_dsn
     FROM bdr_get_remote_nodeinfo(node_local_dsn);
 

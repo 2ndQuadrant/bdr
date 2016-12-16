@@ -1103,10 +1103,10 @@ BEGIN
     -- Validate that the local connection is usable and matches
     -- the node identity of the node we're running on.
     --
-    -- For BDR this will NOT check the 'dsn' if 'node_local_dsn'
+    -- This will NOT check the 'dsn' if 'node_local_dsn'
     -- gets supplied. We don't know if 'dsn' is even valid
     -- for loopback connections and can't assume it is. That'll
-    -- get checked later by BDR specific code.
+    -- be checked only when another node joins.
     SELECT * INTO localid_from_dsn
     FROM bdr_get_remote_nodeinfo(node_local_dsn);
 

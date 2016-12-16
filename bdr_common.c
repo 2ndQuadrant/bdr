@@ -24,11 +24,10 @@
  * Format slot name string from node identifiers.
  */
 void
-bdr_slot_name(Name slot_name, uint64 sysid, TimeLineID tlid,
-			  Oid dboid, Oid local_dboid)
+bdr_slot_name(Name slot_name, const BDRNodeId * const remote_node, Oid local_dboid)
 {
 	snprintf(NameStr(*slot_name), NAMEDATALEN, BDR_SLOT_NAME_FORMAT,
-			 local_dboid, sysid, tlid, dboid,
+			 local_dboid, remote_node->sysid, remote_node->timeline, remote_node->dboid,
 			 EMPTY_REPLICATION_NAME);
 	NameStr(*slot_name)[NAMEDATALEN-1] = '\0';
 }

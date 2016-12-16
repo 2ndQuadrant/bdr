@@ -195,10 +195,13 @@ bdr_init_exec_dump_restore(BDRNodeInfo *node,
 	StringInfoData local_dsn;
 	int   saved_errno;
 	uint32	bin_version;
+	char *nodename;
 
 	initStringInfo(&path);
 	initStringInfo(&origin_dsn);
 	initStringInfo(&local_dsn);
+
+	nodename = MemoryContextStrdup(TopMemoryContext, bdr_get_my_cached_node_name());
 
 	bindir = pstrdup(my_exec_path);
 	get_parent_directory(bindir);
@@ -258,12 +261,15 @@ bdr_init_exec_dump_restore(BDRNodeInfo *node,
 	appendStringInfoChar(&origin_dsn, ' ');
 	appendStringInfoString(&origin_dsn, node->init_from_dsn);
 	appendStringInfo(&origin_dsn,
-					 " fallback_application_name='"BDR_LOCALID_FORMAT": init_replica dump'",
-					 BDR_LOCALID_FORMAT_ARGS);
+					 " fallback_application_name='%s: init dump'",
+					 nodename);
 
 	appendStringInfo(&local_dsn,
-					 "%s fallback_application_name='"BDR_LOCALID_FORMAT": init_replica restore'",
-					 node->local_dsn, BDR_LOCALID_FORMAT_ARGS);
+					 "%s fallback_application_name='%s: init restore'",
+					 node->local_dsn, nodename);
+
+	pfree(nodename);
+	nodename = NULL;
 
 	/*
 	 * Suppress replication of changes applied via pg_restore back to
@@ -566,15 +572,13 @@ bdr_init_make_other_slots()
 		BdrConnectionConfig *cfg = lfirst(lc);
 		PGconn *conn;
 		NameData slot_name;
-		uint64 sysid;
-		TimeLineID timeline;
-		Oid dboid;
+		BDRNodeId remote, myid;
 		RepOriginId replication_identifier;
 		char *snapshot;
 
-		if (cfg->sysid == GetSystemIdentifier() &&
-			cfg->timeline == ThisTimeLineID &&
-			cfg->dboid == MyDatabaseId)
+		bdr_make_my_nodeid(&myid);
+
+		if (bdr_nodeid_eq(&cfg->remote_node, &myid))
 		{
 			/* Don't make a slot pointing to ourselves */
 			continue;
@@ -582,20 +586,17 @@ bdr_init_make_other_slots()
 		}
 
 		conn = bdr_establish_connection_and_slot(cfg->dsn, "mkslot", &slot_name,
-				&sysid, &timeline, &dboid, &replication_identifier,
-				&snapshot);
+				&remote, &replication_identifier, &snapshot);
 
 		/* Ensure the slot points to the node the conn info says it should */
-		if (cfg->sysid != sysid ||
-			cfg->timeline != timeline ||
-			cfg->dboid != dboid)
+		if (!bdr_nodeid_eq(&cfg->remote_node, &remote))
 		{
 			ereport(ERROR,
 					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 					 errmsg("System identification mismatch between connection and slot"),
-					 errdetail("Connection for "BDR_LOCALID_FORMAT" resulted in slot on node "BDR_LOCALID_FORMAT" instead of expected node",
-							   cfg->sysid, cfg->timeline, cfg->dboid, EMPTY_REPLICATION_NAME,
-							   sysid, timeline, dboid, EMPTY_REPLICATION_NAME)));
+					 errdetail("Connection for "BDR_NODEID_FORMAT" resulted in slot on node "BDR_NODEID_FORMAT" instead of expected node",
+							   BDR_NODEID_FORMAT_ARGS(cfg->remote_node),
+							   BDR_NODEID_FORMAT_ARGS(remote))));
 		}
 
 		/* We don't require the snapshot IDs here */
@@ -605,9 +606,8 @@ bdr_init_make_other_slots()
 		/* No replication for now, just close the connection */
 		PQfinish(conn);
 
-		elog(DEBUG2, "Ensured existence of slot %s on "BDR_LOCALID_FORMAT,
-					 NameStr(slot_name), cfg->sysid, cfg->timeline, cfg->dboid,
-					 EMPTY_REPLICATION_NAME);
+		elog(DEBUG2, "Ensured existence of slot %s on "BDR_NODEID_FORMAT,
+					 NameStr(slot_name), BDR_NODEID_FORMAT_ARGS(remote));
 
 		bdr_free_connection_config(cfg);
 	}
@@ -628,6 +628,9 @@ bdr_init_wait_for_slot_creation()
 	ListCell   *lc;
 	ListCell   *next,
 			   *prev;
+
+	BDRNodeId	myid;
+	bdr_make_my_nodeid(&myid);
 
 	elog(INFO, "waiting for all inbound slots to be established");
 
@@ -650,9 +653,7 @@ bdr_init_wait_for_slot_creation()
 		/*
 		 * We won't see an inbound slot from our own node.
 		 */
-		if (cfg->sysid == GetSystemIdentifier() &&
-			 cfg->timeline == ThisTimeLineID &&
-			 cfg->dboid == MyDatabaseId)
+		if (bdr_nodeid_eq(&cfg->remote_node, &myid))
 		{
 			configs = list_delete_cell(configs, lc, prev);
 			break;
@@ -678,9 +679,7 @@ bdr_init_wait_for_slot_creation()
 		{
 			BdrConnectionConfig *cfg = lfirst(lc);
 
-			if (cfg->sysid == GetSystemIdentifier() &&
-				cfg->timeline == ThisTimeLineID &&
-				cfg->dboid == MyDatabaseId)
+			if (bdr_nodeid_eq(&cfg->remote_node, &myid))
 			{
 				/* We won't see an inbound slot from our own node */
 				continue;
@@ -694,9 +693,7 @@ bdr_init_wait_for_slot_creation()
 				if (w->worker_type != BDR_WORKER_WALSENDER)
 					continue;
 
-				if (cfg->sysid == w->data.walsnd.remote_sysid &&
-					cfg->timeline == w->data.walsnd.remote_timeline &&
-					cfg->dboid == w->data.walsnd.remote_dboid &&
+				if (bdr_nodeid_eq(&cfg->remote_node, &w->data.walsnd.remote_node) &&
 					w->worker_proc &&
 					w->worker_proc->databaseId == MyDatabaseId)
 					found ++;
@@ -786,9 +783,9 @@ bdr_nodes_set_remote_status_ready(PGconn *conn)
 	/* DDL lock renders this somewhat redundant but you can't be too careful */
 	res = PQexec(conn, "LOCK TABLE bdr.bdr_nodes IN EXCLUSIVE MODE;");
 
-	snprintf(local_sysid, sizeof(local_sysid), UINT64_FORMAT, GetSystemIdentifier());
-	snprintf(local_timeline, sizeof(local_timeline), "%u", ThisTimeLineID);
-	snprintf(local_dboid, sizeof(local_dboid), "%u", MyDatabaseId);
+	stringify_my_node_identity(local_sysid, sizeof(local_sysid),
+							   local_timeline, sizeof(local_timeline),
+							   local_dboid, sizeof(local_dboid));
 	values[0] = &local_sysid[0];
 	values[1] = &local_timeline[0];
 	values[2] = &local_dboid[0];
@@ -857,6 +854,8 @@ static void
 bdr_wait_for_local_node_ready()
 {
 	BdrNodeStatus status = BDR_NODE_STATUS_NONE;
+	BDRNodeId myid;
+	bdr_make_my_nodeid(&myid);
 
 	while (status != BDR_NODE_STATUS_READY)
 	{
@@ -875,7 +874,7 @@ bdr_wait_for_local_node_ready()
 		StartTransactionCommand();
 		SPI_connect();
 		PushActiveSnapshot(GetTransactionSnapshot());
-		status = bdr_nodes_get_local_status(GetSystemIdentifier(), ThisTimeLineID, MyDatabaseId);
+		status = bdr_nodes_get_local_status(&myid);
 		PopActiveSnapshot();
 		SPI_finish();
 		CommitTransactionCommand();
@@ -967,9 +966,9 @@ bdr_init_replica(BDRNodeInfo *local_node)
 			 * has an entry for our (sysid,dbname) and it isn't status=r (checked above),
 			 * this should never happen
 			 */
-			ereport(ERROR, (errmsg("bdr.bdr_nodes row with "BDR_LOCALID_FORMAT" exists and has status=%c, "
-								   "but has init_from_dsn set to NULL",
-					GetSystemIdentifier(), ThisTimeLineID, MyDatabaseId, EMPTY_REPLICATION_NAME, status)));
+			ereport(ERROR,
+					(errmsg("bdr.bdr_nodes row with "BDR_NODEID_FORMAT" exists and has status=%c, but has init_from_dsn set to NULL",
+					BDR_LOCALID_FORMAT_ARGS, status)));
 		}
 
 		/*
@@ -982,11 +981,7 @@ bdr_init_replica(BDRNodeInfo *local_node)
 		return;
 	}
 
-	local_conn_config = bdr_get_connection_config(
-			local_node->id.sysid,
-			local_node->id.timeline,
-			local_node->id.dboid,
-			true);
+	local_conn_config = bdr_get_connection_config(&local_node->id, true);
 
 	if (!local_conn_config)
 		elog(ERROR, "cannot find local BDR connection configurations");
@@ -1060,7 +1055,7 @@ bdr_init_replica(BDRNodeInfo *local_node)
 				ereport(ERROR,
 						(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 						 errmsg("previous init failed, manual cleanup is required"),
-						 errdetail("Found bdr.bdr_nodes entry for "BDR_LOCALID_FORMAT" with state=i in remote bdr.bdr_nodes", BDR_LOCALID_FORMAT_ARGS),
+						 errdetail("Found bdr.bdr_nodes entry for "BDR_NODEID_FORMAT" with state=i in remote bdr.bdr_nodes", BDR_LOCALID_FORMAT_ARGS),
 						 errhint("Remove all replication identifiers and slots corresponding to this node from the init target node then drop and recreate this database and try again")));
 				break;
 
@@ -1074,9 +1069,7 @@ bdr_init_replica(BDRNodeInfo *local_node)
 			char	   *init_snapshot = NULL;
 			PGconn	   *init_repl_conn = NULL;
 			NameData	slot_name;
-			uint64		remote_sysid;
-			TimeLineID  remote_timeline;
-			Oid			remote_dboid;
+			BDRNodeId	remote;
 			RepOriginId	repnodeid;
 
 			elog(INFO, "initializing node");
@@ -1100,13 +1093,11 @@ bdr_init_replica(BDRNodeInfo *local_node)
 			init_repl_conn = bdr_establish_connection_and_slot(
 								local_node->init_from_dsn,
 								"init", &slot_name,
-								&remote_sysid, &remote_timeline, &remote_dboid,
-								&repnodeid, &init_snapshot);
+								&remote, &repnodeid, &init_snapshot);
 
-			elog(INFO, "connected to target node "BDR_LOCALID_FORMAT
+			elog(INFO, "connected to target node "BDR_NODEID_FORMAT
 				 " with snapshot %s",
-				 remote_sysid, remote_timeline, remote_dboid,
-				 EMPTY_REPLICATION_NAME, init_snapshot);
+				 BDR_NODEID_FORMAT_ARGS(remote), init_snapshot);
 
 			/*
 			 * Take the remote dump and apply it. This will give us a local
@@ -1354,8 +1345,8 @@ bdr_catchup_to_lsn(remote_node_info *ri, XLogRecPtr target_lsn)
 	BdrWorker *worker;
 	BdrApplyWorker *catchup_worker;
 
-	elog(DEBUG1, "Registering bdr apply catchup worker for "BDR_LOCALID_FORMAT" to lsn %X/%X",
-		 ri->sysid, ri->timeline, ri->dboid, EMPTY_REPLICATION_NAME,
+	elog(DEBUG1, "Registering bdr apply catchup worker for "BDR_NODEID_FORMAT" to lsn %X/%X",
+		 BDR_NODEID_FORMAT_ARGS(ri->nodeid),
 		 (uint32)(target_lsn>>32), (uint32)target_lsn);
 
 	Assert(bdr_worker_type == BDR_WORKER_PERDB);
@@ -1364,9 +1355,7 @@ bdr_catchup_to_lsn(remote_node_info *ri, XLogRecPtr target_lsn)
 	worker = bdr_worker_shmem_alloc(BDR_WORKER_APPLY, &worker_shmem_idx);
 	catchup_worker = &worker->data.apply;
 	catchup_worker->dboid = MyDatabaseId;
-	catchup_worker->remote_sysid = ri->sysid;
-	catchup_worker->remote_timeline = ri->timeline;
-	catchup_worker->remote_dboid = ri->dboid;
+	bdr_nodeid_cpy(&catchup_worker->remote_node, &ri->nodeid);
 	catchup_worker->perdb = bdr_worker_slot;
 	LWLockRelease(BdrWorkerCtl->lock);
 

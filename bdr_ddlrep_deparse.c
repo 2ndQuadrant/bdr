@@ -250,8 +250,11 @@ bdr_queue_dropped_objects(PG_FUNCTION_ARGS)
 	res = SPI_execute("SELECT "
 					  "   original, normal, object_type, "
 					  "   address_names, address_args "
-					  "FROM pg_event_trigger_dropped_objects()",
-					  false, 0);
+					  "FROM pg_event_trigger_dropped_objects()"
+#if PG_VERSION_NUM >= 90600
+					  "WHERE !is_temporary"
+#endif
+					  , false, 0);
 	if (res != SPI_OK_SELECT)
 		elog(ERROR, "SPI query failed: %d", res);
 

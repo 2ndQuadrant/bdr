@@ -45,10 +45,7 @@ bdr_process_remote_message(StringInfo s)
 	bool		transactional;
 	int			msg_type;
 	XLogRecPtr	lsn;
-	uint64		origin_sysid;
-	TimeLineID	origin_tlid;
-	Oid			origin_datid;
-	int			origin_namelen;
+	BDRNodeId	origin_node;
 
 	transactional = pq_getmsgbyte(s);
 	lsn = pq_getmsgint64(s);
@@ -89,19 +86,14 @@ bdr_process_remote_message(StringInfo s)
 #endif
 
 	msg_type = pq_getmsgint(&message, 4);
-	origin_sysid = pq_getmsgint64(&message);
-	origin_tlid = pq_getmsgint(&message, 4);
-	origin_datid = pq_getmsgint(&message, 4);
-	origin_namelen = pq_getmsgint(&message, 4);
+	bdr_getmsg_nodeid(&message, &origin_node, true);
 
-	elog(DEBUG1, "message type %s from "UINT64_FORMAT":%u database %u at %X/%X",
-		 bdr_message_type_str(msg_type), origin_sysid, origin_tlid, origin_datid,
+	elog(DEBUG1, "message type %s from "BDR_NODEID_FORMAT" at %X/%X",
+		 bdr_message_type_str(msg_type),
+		 BDR_NODEID_FORMAT_ARGS(origin_node),
 		 (uint32) (lsn >> 32), (uint32) lsn);
 
-	if (origin_namelen != 0)
-		elog(ERROR, "no names expected yet");
-
-	if (bdr_locks_process_message(msg_type, transactional, lsn, origin_sysid, origin_tlid, origin_datid, &message))
+	if (bdr_locks_process_message(msg_type, transactional, lsn, &origin_node, &message))
 		goto done;
 	
 	elog(WARNING, "unhandled BDR message of type %s", bdr_message_type_str(msg_type));
@@ -124,6 +116,9 @@ done:
 void
 bdr_prepare_message(StringInfo s, BdrMessageType message_type)
 {
+	BDRNodeId myid;
+	
+	bdr_make_my_nodeid(&myid);
 #if PG_VERSION_NUM/100 == 904
 	/* channel. Only send on 9.4 since it's embedded in 9.6 messages */
 	pq_sendint(s, strlen(BDR_LOGICAL_MSG_PREFIX), 4);
@@ -132,10 +127,7 @@ bdr_prepare_message(StringInfo s, BdrMessageType message_type)
 	/* message type */
 	pq_sendint(s, message_type, 4);
 	/* node identifier */
-	pq_sendint64(s, GetSystemIdentifier()); /* sysid */
-	pq_sendint(s, ThisTimeLineID, 4); /* tli */
-	pq_sendint(s, MyDatabaseId, 4); /* database */
-	pq_sendint(s, 0, 4); /* name, always empty for now */
+	bdr_send_nodeid(s, &myid, true);
 
 	/* caller's data will follow */
 }

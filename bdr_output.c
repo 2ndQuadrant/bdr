@@ -61,9 +61,7 @@ typedef struct
 {
 	MemoryContext context;
 
-	uint64		remote_sysid;
-	TimeLineID	remote_timeline;
-	Oid			remote_dboid;
+	BDRNodeId remote_node;
 
 	bool allow_binary_protocol;
 	bool allow_sendrecv_protocol;
@@ -151,6 +149,8 @@ _PG_output_plugin_init(OutputPluginCallbacks *cb)
 	cb->message_cb = pg_decode_message;
 #endif
 	cb->shutdown_cb = pg_decode_shutdown;
+
+	Assert(ThisTimeLineID > 0);
 }
 
 /* Ensure a bdr_parse_... arg is non-null */
@@ -260,11 +260,8 @@ static void
 bdr_ensure_node_ready(BdrOutputData *data)
 {
 	int spi_ret;
-	const uint64 sysid = GetSystemIdentifier();
 	char our_status;
 	BdrNodeStatus remote_status;
-	BDRNodeInfo *our_node;
-	BDRNodeInfo *remote_node;
 	NameData dbname;
 	char *tmp_dbname;
 
@@ -282,13 +279,14 @@ bdr_ensure_node_ready(BdrOutputData *data)
 	if (spi_ret != SPI_OK_CONNECT)
 		elog(ERROR, "Local SPI connect failed; shouldn't happen");
 
-	our_node = bdr_nodes_get_local_info(sysid, ThisTimeLineID, MyDatabaseId);
-	remote_node = bdr_nodes_get_local_info(
-		data->remote_sysid, data->remote_timeline, data->remote_dboid);
-	our_status = our_node == NULL ? '\0' : our_node->status;
-	remote_status = remote_node == NULL ? '\0' : remote_node->status;
-	bdr_bdr_node_free(our_node);
-	bdr_bdr_node_free(remote_node);
+	our_status = bdr_local_node_status();
+
+	{
+		BDRNodeInfo *remote_nodeinfo;
+		remote_nodeinfo = bdr_nodes_get_local_info(&data->remote_node);
+		remote_status = remote_nodeinfo == NULL ? '\0' : remote_nodeinfo->status;
+		bdr_bdr_node_free(remote_nodeinfo);
+	}
 
 	SPI_finish();
 
@@ -312,8 +310,8 @@ bdr_ensure_node_ready(BdrOutputData *data)
 			/* This isn't a BDR node yet. */
 			ereport(ERROR,
 					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-					 errmsg("bdr output plugin: slot creation rejected, bdr.bdr_nodes entry for local node (sysid="UINT64_FORMAT", timelineid=%u, dboid=%u) does not exist",
-							sysid, ThisTimeLineID, MyDatabaseId),
+					 errmsg("bdr output plugin: slot creation rejected, bdr.bdr_nodes entry for local node "BDR_NODEID_FORMAT" does not exist",
+							BDR_LOCALID_FORMAT_ARGS),
 					 errdetail("BDR is not active on this database."),
 					 errhint("Add bdr to shared_preload_libraries and check logs for bdr startup errors.")));
 			break;
@@ -379,10 +377,7 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 
 	/* parse where the connection has to be from */
 	bdr_parse_slot_name(NameStr(MyReplicationSlot->data.name),
-						&data->remote_sysid,
-						&data->remote_timeline,
-						&data->remote_dboid,
-						&local_dboid);
+						&data->remote_node, &local_dboid);
 
 	/* parse options passed in by the client */
 
@@ -505,7 +500,7 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("bdr extension does not exist on " BDR_LOCALID_FORMAT,
+				 errmsg("bdr extension does not exist on "BDR_NODEID_FORMAT,
 						BDR_LOCALID_FORMAT_ARGS),
 				 errdetail("Cannot create a BDR slot without the BDR extension installed")));
 	}
@@ -657,9 +652,7 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 		/* can be null if sql interface is used */
 		bdr_worker_slot->data.walsnd.walsender = MyWalSnd;
 		bdr_worker_slot->data.walsnd.slot = MyReplicationSlot;
-		bdr_worker_slot->data.walsnd.remote_sysid = data->remote_sysid;
-		bdr_worker_slot->data.walsnd.remote_timeline = data->remote_timeline;
-		bdr_worker_slot->data.walsnd.remote_dboid = data->remote_dboid;
+		bdr_nodeid_cpy(&bdr_worker_slot->data.walsnd.remote_node, &data->remote_node);
 
 		LWLockRelease(BdrWorkerCtl->lock);
 	}
@@ -768,16 +761,11 @@ pg_decode_begin_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *txn)
 		 * converted into the (sysid, tlid, dboid) that uniquely identifies the
 		 * node globally so that can be sent.
 		 */
-		uint64		origin_sysid;
-		TimeLineID	origin_tlid;
-		Oid			origin_dboid = InvalidOid;
+		BDRNodeId	origin;
 
-		bdr_fetch_sysid_via_node_id(txn->origin_id, &origin_sysid,
-									&origin_tlid, &origin_dboid);
+		bdr_fetch_sysid_via_node_id(txn->origin_id, &origin);
 
-		pq_sendint64(ctx->out, origin_sysid);
-		pq_sendint(ctx->out, origin_tlid, 4);
-		pq_sendint(ctx->out, origin_dboid, 4);
+		bdr_send_nodeid(ctx->out, &origin, false);
 		pq_sendint64(ctx->out, txn->origin_lsn);
 	}
 

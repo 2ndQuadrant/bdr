@@ -340,7 +340,7 @@ bdr_worker_shmem_release(void)
  * The caller must hold the BdrWorkerCtl lock in at least share mode.
  */
 BdrWorker*
-bdr_worker_get_entry(uint64 sysid, TimeLineID timeline, Oid dboid, BdrWorkerType worker_type)
+bdr_worker_get_entry(const BDRNodeId * const nodeid, BdrWorkerType worker_type)
 {
 	BdrWorker *worker = NULL;
 	int i;
@@ -366,17 +366,13 @@ bdr_worker_get_entry(uint64 sysid, TimeLineID timeline, Oid dboid, BdrWorkerType
 		if (worker->worker_type == BDR_WORKER_APPLY)
 		{
 			const BdrApplyWorker * const w = &worker->data.apply;
-			if (w->remote_sysid == sysid
-				&& w->remote_timeline == timeline
-				&& w->remote_dboid == dboid)
+			if (bdr_nodeid_eq(&w->remote_node, nodeid))
 				break;
 		}
 		else if (worker->worker_type == BDR_WORKER_WALSENDER)
 		{
 			const BdrWalsenderWorker * const w = &worker->data.walsnd;
-			if (w->remote_sysid == sysid
-				&& w->remote_timeline == timeline
-				&& w->remote_dboid == dboid)
+			if (bdr_nodeid_eq(&w->remote_node, nodeid))
 				break;
 		}
 		else
