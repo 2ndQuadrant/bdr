@@ -21,6 +21,9 @@ $MAKE clean
 rm -rf html
 $MAKE JADEFLAGS="-V website-build"
 
+echo "Suppressing BDR 2.0 from website other versions list"
+touch html/.hide_version
+
 echo -n "Uploading... "
 RSYNC_RSH="ssh -o StrictHostKeyChecking=no" rsync \
   -r --delete html/ \
