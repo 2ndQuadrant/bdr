@@ -389,6 +389,17 @@ BEGIN
 END;
 $body$;
 
+-- Conflict history table didn't have full BDR node IDs before
+-- Unfortunately we cannot fix the display attribute ordering.
+ALTER TABLE bdr.bdr_conflict_history
+  ADD COLUMN remote_node_timeline oid;
+ALTER TABLE bdr.bdr_conflict_history
+  ADD COLUMN remote_node_dboid oid;
+ALTER TABLE bdr.bdr_conflict_history
+  ADD COLUMN local_tuple_origin_timeline oid;
+ALTER TABLE bdr.bdr_conflict_history
+  ADD COLUMN local_tuple_origin_dboid oid;
+
 RESET bdr.permit_unsafe_ddl_commands;
 RESET bdr.skip_ddl_replication;
 RESET search_path;
