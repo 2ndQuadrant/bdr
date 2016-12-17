@@ -122,7 +122,7 @@
   </para>
   <para>
    To change one node's replication sets in a running &bdr; cluster, the <xref
-   linkend="function-bdr-connection-set-replication-sets-byname"> functions
+   linkend="function-bdr-connection-set-rep-sets-byname"> functions
    should be used. Changes only need to be made on one node, since BDR
    connection configuration is its self replicated to all other nodes. The
    global DDL lock is not taken by this operation.

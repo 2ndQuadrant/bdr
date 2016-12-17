@@ -557,7 +557,7 @@
        </entry>
       </row>
 
-      <row id="function-bdr-connection-set-replication-sets-byname" xreflabel="bdr.connection_set_replication_sets">
+      <row id="function-bdr-connection-set-rep-sets-byname" xreflabel="bdr.connection_set_replication_sets">
        <entry>
         <indexterm>
          <primary>bdr.connection_set_replication_sets</primary>
@@ -575,7 +575,7 @@
        </entry>
       </row>
 
-      <row id="function-bdr-connection-get-replication-sets-byname" xreflabel="bdr.connection_get_replication_sets">
+      <row id="function-bdr-connection-get-rep-sets-byname" xreflabel="bdr.connection_get_replication_sets">
        <entry>
         <indexterm>
          <primary>bdr.connection_get_replication_sets(text)</primary>
@@ -592,7 +592,7 @@
        </entry>
       </row>
 
-      <row id="function-bdr-connection-set-replication-sets-byid" xreflabel="bdr.connection_set_replication_sets">
+      <row id="function-bdr-connection-set-rep-sets-byid" xreflabel="bdr.connection_set_replication_sets">
        <entry>
         <indexterm>
          <primary>bdr.connection_set_replication_sets(text[],text)</primary>
@@ -610,7 +610,7 @@
        </entry>
       </row>
 
-      <row id="function-bdr-connection-get-replication-sets-byid" xreflabel="bdr.connection_get_replication_sets">
+      <row id="function-bdr-connection-get-rep-sets-byid" xreflabel="bdr.connection_get_replication_sets">
        <entry>
         <indexterm>
          <primary>bdr.connection_get_replication_sets</primary>
