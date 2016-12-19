@@ -407,6 +407,13 @@ ALTER TABLE bdr.bdr_conflict_history
 ALTER TABLE bdr.bdr_conflict_history
   ADD COLUMN local_tuple_origin_dboid oid;
 
+-- Conflict history should never be in dumps
+SELECT pg_catalog.pg_extension_config_dump('bdr_conflict_history', 'WHERE false');
+
+-- bdr.bdr_nodes gets synced by bdr_sync_nodes(), it shouldn't be
+-- dumped and applied.
+SELECT pg_catalog.pg_extension_config_dump('bdr_nodes', 'WHERE false');
+
 RESET bdr.permit_unsafe_ddl_commands;
 RESET bdr.skip_ddl_replication;
 RESET search_path;
