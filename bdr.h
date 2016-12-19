@@ -36,11 +36,25 @@
  *
  * Use BDR_LOCALID_FORMAT_ARGS to sub it in to format strings, or BDR_NODEID_FORMAT_ARGS(node)
  * to format a BDRNodeId.
+ *
+ * The WITHNAME variant does a cache lookup to add the node name. It's only safe where
+ * the nodecache exists.
  */
 #define BDR_NODEID_FORMAT "("UINT64_FORMAT",%u,%u,%s)"
+#define BDR_NODEID_FORMAT_WITHNAME "%s ("UINT64_FORMAT",%u,%u,%s)"
 
 #define BDR_LOCALID_FORMAT_ARGS \
 	GetSystemIdentifier(), ThisTimeLineID, MyDatabaseId, EMPTY_REPLICATION_NAME
+
+/*
+ * For use with BDR_NODEID_FORMAT_WITHNAME, print our node id tuple and name.
+ * The node name used is stored in the bdr nodecache and is accessible outside
+ * transaction scope when in a BDR bgworker. For a normal backend a syscache
+ * lookup may be performed to find the node name if we're already in a
+ * transaction, otherwise (none) is returned.
+ */
+#define BDR_LOCALID_FORMAT_WITHNAME_ARGS \
+	bdr_local_node_name_cached(), GetSystemIdentifier(), ThisTimeLineID, MyDatabaseId, EMPTY_REPLICATION_NAME
 
 /*
  * print helpers for node IDs, for use with BDR_NODEID_FORMAT.
@@ -49,6 +63,18 @@
  */
 #define BDR_NODEID_FORMAT_ARGS(node) \
 	(node).sysid, (node).timeline, (node).dboid, EMPTY_REPLICATION_NAME
+
+/*
+ * This argument set is for BDR_NODE_ID_FORMAT_WITHNAME, for use within an
+ * apply worker or a walsender output plugin. The argument name should be the
+ * peer node's ID. Since it's for use outside transaction scope we can't look
+ * up other node IDs, and will print (none) if the node ID passed isn't the
+ * peer node ID.
+ *
+ * MULTIPLE EVALUATION HAZARD.
+ */
+#define BDR_NODEID_FORMAT_WITHNAME_ARGS(node) \
+	bdr_get_my_cached_remote_name(&(node)), (node).sysid, (node).timeline, (node).dboid, EMPTY_REPLICATION_NAME
 
 #define BDR_INIT_REPLICA_CMD "bdr_initial_load"
 #define BDR_LIBRARY_NAME "bdr"
