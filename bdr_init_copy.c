@@ -1743,7 +1743,7 @@ wait_postmaster_connection(const char *connstr)
 	}
 	else
 	{
-		print_msg(VERBOSITY_VERBOSE, _("\npostmaster started (pid="INT64_FORMAT"), waiting for connection"), pmpid);
+		print_msg(VERBOSITY_VERBOSE, _("\npostmaster started (pid=%ld), waiting for connection"), pmpid);
 	}
 
 	/*
