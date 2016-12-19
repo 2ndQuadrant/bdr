@@ -773,16 +773,16 @@ bdr_acquire_ddl_lock(BDRLockType lock_type)
 	if (this_xact_acquired_lock)
 	{
 		elog(ddl_lock_log_level(DDL_LOCK_TRACE_STATEMENT),
-			LOCKTRACE "attempting to acquire in mode <%s> (upgrading from <%s>) for "BDR_NODEID_FORMAT,
+			LOCKTRACE "attempting to acquire in mode <%s> (upgrading from <%s>) for "BDR_NODEID_FORMAT_WITHNAME,
 			bdr_lock_type_to_name(lock_type),
 			bdr_lock_type_to_name(bdr_my_locks_database->lock_type),
-			BDR_LOCALID_FORMAT_ARGS);
+			BDR_LOCALID_FORMAT_WITHNAME_ARGS);
 	}
 	else
 	{
 		elog(ddl_lock_log_level(DDL_LOCK_TRACE_STATEMENT),
-			LOCKTRACE "attempting to acquire in mode <%s> for "BDR_NODEID_FORMAT,
-			bdr_lock_type_to_name(lock_type), BDR_LOCALID_FORMAT_ARGS);
+			LOCKTRACE "attempting to acquire in mode <%s> for "BDR_NODEID_FORMAT_WITHNAME,
+			bdr_lock_type_to_name(lock_type), BDR_LOCALID_FORMAT_WITHNAME_ARGS);
 	}
 
 	/* register an XactCallback to release the lock */
@@ -798,14 +798,14 @@ bdr_acquire_ddl_lock(BDRLockType lock_type)
 		bdr_fetch_sysid_via_node_id(bdr_my_locks_database->lock_holder, &holder);
 		
 		elog(ddl_lock_log_level(DDL_LOCK_TRACE_ACQUIRE_RELEASE),
-			LOCKTRACE "lock already held by "BDR_NODEID_FORMAT,
-			BDR_NODEID_FORMAT_ARGS(holder));
+			LOCKTRACE "lock already held by "BDR_NODEID_FORMAT_WITHNAME,
+			BDR_NODEID_FORMAT_WITHNAME_ARGS(holder));
 
 		ereport(ERROR,
 				(errcode(ERRCODE_LOCK_NOT_AVAILABLE),
 				 errmsg("database is locked against ddl by another node"),
-				 errhint("Node "BDR_NODEID_FORMAT" in the cluster is already performing DDL",
-						 BDR_NODEID_FORMAT_ARGS(holder))));
+				 errhint("Node "BDR_NODEID_FORMAT_WITHNAME" in the cluster is already performing DDL",
+						 BDR_NODEID_FORMAT_WITHNAME_ARGS(holder))));
 	}
 
 	/* send message about ddl lock */
@@ -843,8 +843,8 @@ bdr_acquire_ddl_lock(BDRLockType lock_type)
 	 * ---
 	 */
 	elog(ddl_lock_log_level(DDL_LOCK_TRACE_DEBUG),
-		LOCKTRACE "sent DDL lock mode %s request for "BDR_NODEID_FORMAT"), waiting for confirmation",
-		bdr_lock_type_to_name(lock_type), BDR_LOCALID_FORMAT_ARGS);
+		LOCKTRACE "sent DDL lock mode %s request for "BDR_NODEID_FORMAT_WITHNAME"), waiting for confirmation",
+		bdr_lock_type_to_name(lock_type), BDR_LOCALID_FORMAT_WITHNAME_ARGS);
 
 	while (true)
 	{
@@ -897,8 +897,8 @@ bdr_acquire_ddl_lock(BDRLockType lock_type)
 	bdr_my_locks_database->requestor = NULL;
 
 	elog(ddl_lock_log_level(DDL_LOCK_TRACE_ACQUIRE_RELEASE),
-		LOCKTRACE "DDL lock acquired in mode mode %s for "BDR_NODEID_FORMAT,
-		bdr_lock_type_to_name(lock_type), BDR_LOCALID_FORMAT_ARGS);
+		LOCKTRACE "DDL lock acquired in mode mode %s for "BDR_NODEID_FORMAT_WITHNAME,
+		bdr_lock_type_to_name(lock_type), BDR_LOCALID_FORMAT_WITHNAME_ARGS);
 
 	LWLockRelease(bdr_locks_ctl->lock);
 }
@@ -1114,8 +1114,8 @@ bdr_process_acquire_ddl_lock(const BDRNodeId * const node, BDRLockType lock_type
 	bdr_locks_find_my_database(false);
 
 	elog(ddl_lock_log_level(DDL_LOCK_TRACE_PEERS),
-		 LOCKTRACE "%s lock requested by node "BDR_NODEID_FORMAT,
-		 lock_name, BDR_NODEID_FORMAT_ARGS(*node));
+		 LOCKTRACE "%s lock requested by node "BDR_NODEID_FORMAT_WITHNAME,
+		 lock_name, BDR_NODEID_FORMAT_WITHNAME_ARGS(*node));
 
 	initStringInfo(&s);
 
@@ -1239,8 +1239,8 @@ bdr_process_acquire_ddl_lock(const BDRNodeId * const node, BDRLockType lock_type
 			bdr_send_confirm_lock();
 		}
 		elog(ddl_lock_log_level(DDL_LOCK_TRACE_ACQUIRE_RELEASE),
-			 LOCKTRACE "global lock granted to remote node "BDR_NODEID_FORMAT,
-			 BDR_NODEID_FORMAT_ARGS(*node));
+			 LOCKTRACE "global lock granted to remote node "BDR_NODEID_FORMAT_WITHNAME,
+			 BDR_NODEID_FORMAT_WITHNAME_ARGS(*node));
 	}
 	else if (bdr_my_locks_database->lock_holder == replorigin_session_origin &&
 			 lock_type > bdr_my_locks_database->lock_type)
@@ -1352,8 +1352,8 @@ bdr_process_acquire_ddl_lock(const BDRNodeId * const node, BDRLockType lock_type
 		}
 
 		elog(ddl_lock_log_level(DDL_LOCK_TRACE_DEBUG),
-			 LOCKTRACE "global lock granted to remote node "BDR_NODEID_FORMAT,
-			 BDR_NODEID_FORMAT_ARGS(*node));
+			 LOCKTRACE "global lock granted to remote node "BDR_NODEID_FORMAT_WITHNAME,
+			 BDR_NODEID_FORMAT_WITHNAME_ARGS(*node));
 	}
 	else
 	{
@@ -1406,8 +1406,8 @@ bdr_process_release_ddl_lock(const BDRNodeId * const origin, const BDRNodeId * c
 	initStringInfo(&s);
 
 	elog(ddl_lock_log_level(DDL_LOCK_TRACE_PEERS),
-		 LOCKTRACE "global lock released by "BDR_NODEID_FORMAT,
-		 BDR_NODEID_FORMAT_ARGS(*lock));
+		 LOCKTRACE "global lock released by "BDR_NODEID_FORMAT_WITHNAME,
+		 BDR_NODEID_FORMAT_WITHNAME_ARGS(*lock));
 
 	/*
 	 * Remove row from bdr_locks *before* releasing the in memory lock. If we
@@ -1448,12 +1448,12 @@ bdr_process_release_ddl_lock(const BDRNodeId * const origin, const BDRNodeId * c
 		ereport(DEBUG1,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("Did not find global lock entry locally for a remotely released global lock"),
-				 errdetail("node "BDR_NODEID_FORMAT" sent a release message but the lock isn't held locally",
-						   BDR_NODEID_FORMAT_ARGS(*lock))));
+				 errdetail("node "BDR_NODEID_FORMAT_WITHNAME" sent a release message but the lock isn't held locally",
+						   BDR_NODEID_FORMAT_WITHNAME_ARGS(*lock))));
 
 		elog(ddl_lock_log_level(DDL_LOCK_TRACE_DEBUG),
-			 LOCKTRACE "missing local lock entry for remotely released global lock from "BDR_NODEID_FORMAT,
-			 BDR_NODEID_FORMAT_ARGS(*lock));
+			 LOCKTRACE "missing local lock entry for remotely released global lock from "BDR_NODEID_FORMAT_WITHNAME,
+			 BDR_NODEID_FORMAT_WITHNAME_ARGS(*lock));
 	}
 
 	LWLockAcquire(bdr_locks_ctl->lock, LW_EXCLUSIVE);
@@ -1519,9 +1519,9 @@ bdr_process_confirm_ddl_lock(const BDRNodeId * const origin, const BDRNodeId * c
 	latch = bdr_my_locks_database->requestor;
 
 	elog(ddl_lock_log_level(DDL_LOCK_TRACE_DEBUG),
-		 LOCKTRACE "received global lock confirmation number %d/%d from "BDR_NODEID_FORMAT,
+		 LOCKTRACE "received global lock confirmation number %d/%d from "BDR_NODEID_FORMAT_WITHNAME,
 		 bdr_my_locks_database->acquire_confirmed, bdr_my_locks_database->nnodes,
-		 BDR_NODEID_FORMAT_ARGS(*origin));
+		 BDR_NODEID_FORMAT_WITHNAME_ARGS(*origin));
 
 	LWLockRelease(bdr_locks_ctl->lock);
 
@@ -1551,8 +1551,8 @@ bdr_process_decline_ddl_lock(const BDRNodeId * const origin, const BDRNodeId * c
 	if (bdr_my_locks_database->lock_type != lock_type)
 	{
 		elog(WARNING,
-			 LOCKTRACE "received global lock confirmation with unexpected lock type (%d) from "BDR_NODEID_FORMAT", waiting for (%d)",
-			 lock_type, BDR_NODEID_FORMAT_ARGS(*origin), bdr_my_locks_database->lock_type);
+			 LOCKTRACE "received global lock confirmation with unexpected lock type (%d) from "BDR_NODEID_FORMAT_WITHNAME", waiting for (%d)",
+			 lock_type, BDR_NODEID_FORMAT_WITHNAME_ARGS(*origin), bdr_my_locks_database->lock_type);
 		return;
 	}
 
@@ -1564,8 +1564,8 @@ bdr_process_decline_ddl_lock(const BDRNodeId * const origin, const BDRNodeId * c
 		SetLatch(latch);
 
 	elog(ddl_lock_log_level(DDL_LOCK_TRACE_ACQUIRE_RELEASE),
-		 LOCKTRACE "global lock request declined by node "BDR_NODEID_FORMAT,
-		 BDR_NODEID_FORMAT_ARGS(*origin));
+		 LOCKTRACE "global lock request declined by node "BDR_NODEID_FORMAT_WITHNAME,
+		 BDR_NODEID_FORMAT_WITHNAME_ARGS(*origin));
 }
 
 /*
@@ -1585,8 +1585,8 @@ bdr_process_request_replay_confirm(const BDRNodeId * const node, XLogRecPtr requ
 	bdr_locks_find_my_database(false);
 
 	elog(ddl_lock_log_level(DDL_LOCK_TRACE_PEERS),
-		 LOCKTRACE "replay confirmation requested by node "BDR_NODEID_FORMAT"; sending",
-		 BDR_NODEID_FORMAT_ARGS(*node));
+		 LOCKTRACE "replay confirmation requested by node "BDR_NODEID_FORMAT_WITHNAME"; sending",
+		 BDR_NODEID_FORMAT_WITHNAME_ARGS(*node));
 
 	initStringInfo(&s);
 	bdr_prepare_message(&s, BDR_MESSAGE_REPLAY_CONFIRM);
@@ -1690,8 +1690,8 @@ bdr_process_replay_confirm(const BDRNodeId * const node, XLogRecPtr request_lsn)
 
 	LWLockAcquire(bdr_locks_ctl->lock, LW_EXCLUSIVE);
 	elog(ddl_lock_log_level(DDL_LOCK_TRACE_DEBUG),
-		 LOCKTRACE "processing replay confirmation from node "BDR_NODEID_FORMAT" for request %X/%X at %X/%X",
-		 BDR_NODEID_FORMAT_ARGS(*node),
+		 LOCKTRACE "processing replay confirmation from node "BDR_NODEID_FORMAT_WITHNAME" for request %X/%X at %X/%X",
+		 BDR_NODEID_FORMAT_WITHNAME_ARGS(*node),
 		 (uint32)(bdr_my_locks_database->replay_confirmed_lsn >> 32),
 		 (uint32)bdr_my_locks_database->replay_confirmed_lsn,
 		 (uint32)(request_lsn >> 32),
@@ -1747,8 +1747,8 @@ bdr_locks_process_remote_startup(const BDRNodeId * const node)
 	initStringInfo(&s);
 
 	elog(ddl_lock_log_level(DDL_LOCK_TRACE_PEERS),
-		 LOCKTRACE "got startup message from node "BDR_NODEID_FORMAT", clearing any locks it held",
-		 BDR_NODEID_FORMAT_ARGS(*node));
+		 LOCKTRACE "got startup message from node "BDR_NODEID_FORMAT_WITHNAME", clearing any locks it held",
+		 BDR_NODEID_FORMAT_WITHNAME_ARGS(*node));
 
 	StartTransactionCommand();
 	snap = RegisterSnapshot(GetLatestSnapshot());

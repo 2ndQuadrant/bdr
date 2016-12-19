@@ -594,9 +594,9 @@ bdr_init_make_other_slots()
 			ereport(ERROR,
 					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 					 errmsg("System identification mismatch between connection and slot"),
-					 errdetail("Connection for "BDR_NODEID_FORMAT" resulted in slot on node "BDR_NODEID_FORMAT" instead of expected node",
-							   BDR_NODEID_FORMAT_ARGS(cfg->remote_node),
-							   BDR_NODEID_FORMAT_ARGS(remote))));
+					 errdetail("Connection for "BDR_NODEID_FORMAT_WITHNAME" resulted in slot on node "BDR_NODEID_FORMAT_WITHNAME" instead of expected node",
+							   BDR_NODEID_FORMAT_WITHNAME_ARGS(cfg->remote_node),
+							   BDR_NODEID_FORMAT_WITHNAME_ARGS(remote))));
 		}
 
 		/* We don't require the snapshot IDs here */
@@ -606,8 +606,8 @@ bdr_init_make_other_slots()
 		/* No replication for now, just close the connection */
 		PQfinish(conn);
 
-		elog(DEBUG2, "Ensured existence of slot %s on "BDR_NODEID_FORMAT,
-					 NameStr(slot_name), BDR_NODEID_FORMAT_ARGS(remote));
+		elog(DEBUG2, "Ensured existence of slot %s on "BDR_NODEID_FORMAT_WITHNAME,
+					 NameStr(slot_name), BDR_NODEID_FORMAT_WITHNAME_ARGS(remote));
 
 		bdr_free_connection_config(cfg);
 	}
@@ -967,8 +967,8 @@ bdr_init_replica(BDRNodeInfo *local_node)
 			 * this should never happen
 			 */
 			ereport(ERROR,
-					(errmsg("bdr.bdr_nodes row with "BDR_NODEID_FORMAT" exists and has status=%c, but has init_from_dsn set to NULL",
-					BDR_LOCALID_FORMAT_ARGS, status)));
+					(errmsg("bdr.bdr_nodes row with "BDR_NODEID_FORMAT_WITHNAME" exists and has status=%c, but has init_from_dsn set to NULL",
+					BDR_LOCALID_FORMAT_WITHNAME_ARGS, status)));
 		}
 
 		/*
@@ -1055,7 +1055,7 @@ bdr_init_replica(BDRNodeInfo *local_node)
 				ereport(ERROR,
 						(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 						 errmsg("previous init failed, manual cleanup is required"),
-						 errdetail("Found bdr.bdr_nodes entry for "BDR_NODEID_FORMAT" with state=i in remote bdr.bdr_nodes", BDR_LOCALID_FORMAT_ARGS),
+						 errdetail("Found bdr.bdr_nodes entry for "BDR_NODEID_FORMAT_WITHNAME" with state=i in remote bdr.bdr_nodes", BDR_LOCALID_FORMAT_WITHNAME_ARGS),
 						 errhint("Remove all replication identifiers and slots corresponding to this node from the init target node then drop and recreate this database and try again")));
 				break;
 
@@ -1095,9 +1095,9 @@ bdr_init_replica(BDRNodeInfo *local_node)
 								"init", &slot_name,
 								&remote, &repnodeid, &init_snapshot);
 
-			elog(INFO, "connected to target node "BDR_NODEID_FORMAT
+			elog(INFO, "connected to target node "BDR_NODEID_FORMAT_WITHNAME
 				 " with snapshot %s",
-				 BDR_NODEID_FORMAT_ARGS(remote), init_snapshot);
+				 BDR_NODEID_FORMAT_WITHNAME_ARGS(remote), init_snapshot);
 
 			/*
 			 * Take the remote dump and apply it. This will give us a local
@@ -1345,8 +1345,8 @@ bdr_catchup_to_lsn(remote_node_info *ri, XLogRecPtr target_lsn)
 	BdrWorker *worker;
 	BdrApplyWorker *catchup_worker;
 
-	elog(DEBUG1, "Registering bdr apply catchup worker for "BDR_NODEID_FORMAT" to lsn %X/%X",
-		 BDR_NODEID_FORMAT_ARGS(ri->nodeid),
+	elog(DEBUG1, "Registering bdr apply catchup worker for "BDR_NODEID_FORMAT_WITHNAME" to lsn %X/%X",
+		 BDR_NODEID_FORMAT_WITHNAME_ARGS(ri->nodeid),
 		 (uint32)(target_lsn>>32), (uint32)target_lsn);
 
 	Assert(bdr_worker_type == BDR_WORKER_PERDB);

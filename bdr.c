@@ -310,8 +310,8 @@ bdr_connect(const char *conninfo,
 	if (sscanf(remote_tlid, "%u", &remote_node->timeline) != 1)
 		elog(ERROR, "could not parse remote tlid %s", remote_tlid);
 
-	elog(DEBUG2, "local node "BDR_NODEID_FORMAT", remote node "BDR_NODEID_FORMAT,
-		 BDR_LOCALID_FORMAT_ARGS, BDR_NODEID_FORMAT_ARGS(*remote_node));
+	elog(DEBUG2, "local node "BDR_NODEID_FORMAT_WITHNAME", remote node "BDR_NODEID_FORMAT_WITHNAME,
+		 BDR_LOCALID_FORMAT_WITHNAME_ARGS, BDR_NODEID_FORMAT_WITHNAME_ARGS(*remote_node));
 
 	/* no parts of IDENTIFY_SYSTEM's response needed anymore */
 	PQclear(res);

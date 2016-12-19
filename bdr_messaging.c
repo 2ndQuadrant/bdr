@@ -88,9 +88,9 @@ bdr_process_remote_message(StringInfo s)
 	msg_type = pq_getmsgint(&message, 4);
 	bdr_getmsg_nodeid(&message, &origin_node, true);
 
-	elog(DEBUG1, "message type %s from "BDR_NODEID_FORMAT" at %X/%X",
+	elog(DEBUG1, "message type %s from "BDR_NODEID_FORMAT_WITHNAME" at %X/%X",
 		 bdr_message_type_str(msg_type),
-		 BDR_NODEID_FORMAT_ARGS(origin_node),
+		 BDR_NODEID_FORMAT_WITHNAME_ARGS(origin_node),
 		 (uint32) (lsn >> 32), (uint32) lsn);
 
 	if (bdr_locks_process_message(msg_type, transactional, lsn, &origin_node, &message))

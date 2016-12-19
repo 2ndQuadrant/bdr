@@ -54,7 +54,7 @@
  * transaction, otherwise (none) is returned.
  */
 #define BDR_LOCALID_FORMAT_WITHNAME_ARGS \
-	bdr_local_node_name_cached(), GetSystemIdentifier(), ThisTimeLineID, MyDatabaseId, EMPTY_REPLICATION_NAME
+	bdr_get_my_cached_node_name(), BDR_LOCALID_FORMAT_ARGS
 
 /*
  * print helpers for node IDs, for use with BDR_NODEID_FORMAT.
@@ -71,10 +71,13 @@
  * up other node IDs, and will print (none) if the node ID passed isn't the
  * peer node ID.
  *
+ * TODO: If we add an eager nodecache that reloads on invalidations we can
+ * print all node names and get rid of this hack.
+ *
  * MULTIPLE EVALUATION HAZARD.
  */
 #define BDR_NODEID_FORMAT_WITHNAME_ARGS(node) \
-	bdr_get_my_cached_remote_name(&(node)), (node).sysid, (node).timeline, (node).dboid, EMPTY_REPLICATION_NAME
+	bdr_get_my_cached_remote_name(&(node)), BDR_NODEID_FORMAT_ARGS(node)
 
 #define BDR_INIT_REPLICA_CMD "bdr_initial_load"
 #define BDR_LIBRARY_NAME "bdr"

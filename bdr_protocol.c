@@ -20,15 +20,11 @@ bdr_getmsg_nodeid(StringInfo message, BDRNodeId * const nodeid, bool expect_empt
 					(errcode(ERRCODE_PROTOCOL_VIOLATION),
 					 errmsg("expected zero-length node name, got %d", namelen)));
 	}
-	elog(DEBUG1, "XXX received nodeid "BDR_NODEID_FORMAT" %s name",
-		 BDR_NODEID_FORMAT_ARGS(*nodeid), expect_empty_nodename ? "with" : "without");
 }
 
 void
 bdr_send_nodeid(StringInfo s, const BDRNodeId * const nodeid, bool include_empty_nodename)
 {
-	elog(DEBUG2, "XXX sending nodeid "BDR_NODEID_FORMAT" %s name",
-		 BDR_NODEID_FORMAT_ARGS(*nodeid), include_empty_nodename ? "with" : "without");
 	pq_sendint64(s, nodeid->sysid);
 	pq_sendint(s, nodeid->timeline, 4);
 	pq_sendint(s, nodeid->dboid, 4);

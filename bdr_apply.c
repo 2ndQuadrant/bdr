@@ -176,16 +176,16 @@ format_action_description(
 
 	if (replorigin_session_origin != InvalidRepOriginId)
 	{
-		appendStringInfo(si, " from node "BDR_NODEID_FORMAT,
-				BDR_NODEID_FORMAT_ARGS(origin));
+		appendStringInfo(si, " from node "BDR_NODEID_FORMAT_WITHNAME,
+				BDR_NODEID_FORMAT_WITHNAME_ARGS(origin));
 	}
 
 	if (remote_origin_id != InvalidRepOriginId)
 	{
-		appendStringInfo(si, " forwarded from commit %X/%X on node "BDR_NODEID_FORMAT,
+		appendStringInfo(si, " forwarded from commit %X/%X on node "BDR_NODEID_FORMAT_WITHNAME,
 				(uint32)(remote_origin_lsn>>32),
 				(uint32)remote_origin_lsn,
-				BDR_NODEID_FORMAT_ARGS(remote_origin));
+				BDR_NODEID_FORMAT_WITHNAME_ARGS(remote_origin));
 	}
 }
 

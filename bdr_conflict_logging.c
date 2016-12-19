@@ -591,10 +591,10 @@ bdr_conflict_log_serverlog(BdrApplyConflict *conflict)
 		case BdrConflictType_InsertUpdate:
 			ereport(LOG,
 					(errcode(ERRCODE_INTEGRITY_CONSTRAINT_VIOLATION),
-					 errmsg(CONFLICT_MSG_PREFIX " row was previously %s at node "BDR_NODEID_FORMAT". Resolution: %s; PKEY:%s",
+					 errmsg(CONFLICT_MSG_PREFIX " row was previously %s at node "BDR_NODEID_FORMAT_WITHNAME". Resolution: %s; PKEY:%s",
 							conflict->conflict_type == BdrConflictType_UpdateUpdate ? "UPDATE" : "INSERT",
 							conflict->conflict_type == BdrConflictType_InsertInsert ? "INSERTed" : "UPDATEd",
-							BDR_NODEID_FORMAT_ARGS(conflict->local_tuple_origin_node),
+							BDR_NODEID_FORMAT_WITHNAME_ARGS(conflict->local_tuple_origin_node),
 							resolution_name, s_key.data)));
 			break;
 		case BdrConflictType_UpdateDelete:
@@ -714,9 +714,8 @@ bdr_make_apply_conflict(BdrConflictType conflict_type,
 	}
 	else
 	{
-		conflict->local_tuple_origin_node.sysid = 0;
-		conflict->local_tuple_origin_node.timeline = 0;
-		conflict->local_tuple_origin_node.dboid = 0;
+		/* InvalidRepOriginId is used for locally originated tuples */
+		bdr_make_my_nodeid(&conflict->local_tuple_origin_node);
 	}
 
 	if (remote_tuple != NULL && bdr_conflict_logging_include_tuples)

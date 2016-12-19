@@ -309,6 +309,9 @@ const char * bdr_nodeid_name(const BDRNodeId * const node, bool missing_ok)
  *
  * Must be called after background worker setup so ThisTimeLineID
  * is initialized, while there's an open txn.
+ *
+ * TODO: If we made the nodecache eager, so it reloaded fully on
+ * invalidations, we could get rid of this hack.
  */
 void
 bdr_setup_my_cached_node_names()
