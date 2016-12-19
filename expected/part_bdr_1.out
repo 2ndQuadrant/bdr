@@ -25,7 +25,7 @@ SELECT node_name, node_status FROM bdr.bdr_nodes ORDER BY node_name;
 
 -- You can't part your own node
 SELECT bdr.bdr_part_by_node_names(ARRAY['node-regression']);
-ERROR:  Cannot part a node from its self
+ERROR:  cannot part a node from its self
 DETAIL:  Attempted to bdr_part_by_node_names(...) on node node-regression which is one of the nodes being parted
 HINT:  You must call call bdr_part_by_node_names on a node that is not being removed
 -- Or a nonexistent node
@@ -140,7 +140,7 @@ SELECT node_name, node_status FROM bdr.bdr_nodes ORDER BY node_name;
 -- If we try to part the same node again its state won't be 'r'
 -- so a warning will be generated.
 SELECT bdr.bdr_part_by_node_names(ARRAY['node-pg']);
-WARNING:  Node node-pg is in state k not expected 'r'. Attempting to remove anyway.
+INFO:  Node node-pgi is already parted, ignoring
  bdr_part_by_node_names 
 ------------------------
  
