@@ -2,7 +2,7 @@
  <title>Installing BDR from source</title>
 
  <sect2 id="installation-source-extension">
-  <title>Installation from source for Postgres-BDR 9.4</>
+  <title>Installation from source for Postgres-BDR 9.6</>
 
   <para>
    This section discusses installing BDR on PostgreSQL 9.6+. For instructions

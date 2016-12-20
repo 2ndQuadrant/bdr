@@ -33,9 +33,8 @@
  </para>
 
   <para>
-   To try out BDR you'll need to install the BDR extension and the modified
-   PostgreSQL release that it requires to run. Then it's necessary to
-   <application>initdb</application> new database install(s), edit their
+   To try out BDR you'll need to install the BDR extension. Then it's necessary
+   to <application>initdb</application> new database install(s), edit their
    configuration files to load BDR, and start them up.
   </para>
 

@@ -3,13 +3,9 @@
 
  <para>
   The &bdr; (Bi-Directional Replication) project adds multi-master replication
-  to PostgreSQL 9.4. This chapter explains what BDR is, how it works, and where
+  to PostgreSQL. This chapter explains what BDR is, how it works, and where
   to best apply it. See <xref linkend="bdr-concepts"> to learn about
   what &bdr; does and how it does it.
- </para>
-
- <para>
-  Because &bdr; requires a modified PostgreSQL 9.4.
  </para>
 
  <sect1 id="bdr-concepts" xreflabel="Concepts">
@@ -120,14 +116,14 @@
 
   <para>
    &bdr; is built on the <ulink url="http://www.postgresql.org/docs/current/static/logicaldecoding.html">
-   logical decoding</ulink> features developed by the &bdr; project and added
+   logical decoding</ulink> features developed by the &bdr; project since added
    to PostgreSQL 9.4. It also relies on other core PostgreSQL features that
    were added with &bdr; in mind, like background workers.
   </para>
 
   <para>
-   Because &bdr; needs some features that didn't make it into PostgreSQL by the
-   time 9.4 was released, it needs a modified PostgreSQL to run. See <xref
+   Because &bdr; needed some features that didn't make it into PostgreSQL 9.4
+   release, it needs a modified PostgreSQL 9.4 to run. See <xref
    linkend="install-requirements">.
   </para>
 
