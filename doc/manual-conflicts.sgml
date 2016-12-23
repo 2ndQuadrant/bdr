@@ -100,7 +100,7 @@
 
     <para>
      No special administrator action is required to deal with these conflicts,
-     but the user must undersand that <emphasis>one of the
+     but the user must understand that <emphasis>one of the
      <literal>INSERT</literal>ed tuples is effectively discarded on all
      nodes</emphasis> - there is no data merging done unless a user defined
      conflict handler does it.
