@@ -352,8 +352,8 @@ bdr_queue_ddl_command(char *command_tag, char *command)
 	RangeVar	   *rv;
 	Relation		queuedcmds;
 	HeapTuple		newtup = NULL;
-	Datum			values[5];
-	bool			nulls[5];
+	Datum			values[6];
+	bool			nulls[6];
 
 	elog(DEBUG2, "node " BDR_LOCALID_FORMAT " enqueuing DDL command \"%s\"",
 		 BDR_LOCALID_FORMAT_ARGS, command);
@@ -371,6 +371,11 @@ bdr_queue_ddl_command(char *command_tag, char *command)
 	values[2] = PointerGetDatum(cstring_to_text(GetUserNameFromId(GetUserId())));
 	values[3] = CStringGetTextDatum(command_tag);
 	values[4] = CStringGetTextDatum(command);
+	/*
+	 * search_path is always the empty string for commands logged on BDR 1.0.
+	 * This column was added in a point-release for BDR 2.0 compatibility.
+	 */
+	values[5] = CStringGetTextDatum("");
 	MemSet(nulls, 0, sizeof(nulls));
 
 	newtup = heap_form_tuple(RelationGetDescr(queuedcmds), values, nulls);

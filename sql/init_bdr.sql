@@ -18,6 +18,9 @@ SELECT bdr.bdr_is_active_in_db();
 
 SELECT bdr.bdr_is_active_in_db();
 
+-- must be empty on BDR 1.0
+SELECT search_path FROM bdr.bdr_queued_commands;
+
 SELECT bdr.bdr_group_join(
 	local_node_name := 'node-regression',
 	node_external_dsn := 'dbname=regression',

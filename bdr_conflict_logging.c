@@ -47,7 +47,7 @@ static Oid BdrConflictTypeOid = InvalidOid;
 static Oid BdrConflictResolutionOid = InvalidOid;
 static Oid BdrConflictHistorySeqId = InvalidOid;
 
-#define BDR_CONFLICT_HISTORY_COLS 30
+#define BDR_CONFLICT_HISTORY_COLS 34
 #define SYSID_DIGITS 33
 
 /* We want our own memory ctx to clean up easily & reliably */
@@ -501,6 +501,14 @@ bdr_conflict_log_table(BdrApplyConflict *conflict)
 
 		/* note: do NOT free the errordata, it's the caller's responsibility */
 	}
+
+	/*
+ 	 * Columns added for BDR 2.0 compatibility; these are always NULL on 1.0.
+	 */
+	nulls[attno++] = 1;
+	nulls[attno++] = 1;
+	nulls[attno++] = 1;
+	nulls[attno++] = 1;
 
 	/* Make sure assignments match allocated tuple size */
 	Assert(attno == BDR_CONFLICT_HISTORY_COLS);
