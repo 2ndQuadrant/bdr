@@ -100,7 +100,7 @@ bdr_relcache_initialize()
 	MemSet(&ctl, 0, sizeof(ctl));
 	ctl.keysize = sizeof(Oid);
 	ctl.entrysize = sizeof(BDRRelation);
-	ctl.hash = tag_hash;
+	ctl.hash = oid_hash;
 	ctl.hcxt = CacheMemoryContext;
 
 	BDRRelcacheHash = hash_create("BDR relation cache", 128, &ctl,

@@ -77,7 +77,7 @@ bdr_dbcache_initialize()
 	MemSet(&ctl, 0, sizeof(ctl));
 	ctl.keysize = sizeof(Oid);
 	ctl.entrysize = sizeof(BDRDatabaseCacheEntry);
-	ctl.hash = tag_hash;
+	ctl.hash = oid_hash;
 	ctl.hcxt = CacheMemoryContext;
 
 	BDRDatabaseCacheHash = hash_create("BDR database cache", 128, &ctl,
