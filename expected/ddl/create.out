@@ -673,6 +673,18 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
 \d+ test_tbl_inh_*
 \c regression
 \d+ test_tbl_inh_*
+CREATE TABLE test_tbl_exclude(val int PRIMARY KEY,EXCLUDE USING gist(id with =));
+ERROR:  EXCLUDE constraints are unsafe with BDR active
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+ pg_xlog_wait_remote_apply 
+---------------------------
+ 
+ 
+(2 rows)
+
+\d+ test_tbl_exclude
+\c postgres
+\d+ test_tbl_exclude
 -- ensure tables WITH OIDs can't be created
 SHOW default_with_oids;
  default_with_oids 

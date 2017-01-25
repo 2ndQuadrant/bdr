@@ -199,6 +199,12 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
 \c regression
 \d+ test_tbl_inh_*
 
+CREATE TABLE test_tbl_exclude(val int PRIMARY KEY,EXCLUDE USING gist(id with =));
+SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_replication;
+\d+ test_tbl_exclude
+\c postgres
+\d+ test_tbl_exclude
+
 -- ensure tables WITH OIDs can't be created
 SHOW default_with_oids;
 CREATE TABLE tbl_with_oids() WITH oids;
