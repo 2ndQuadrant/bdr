@@ -61,12 +61,12 @@
        <entry>
 	Create the first node in a future cluster of bdr nodes. May be run on
 	an empty database or one with existing data. An existing database may
-	be a previously standalone normal PostgreSQL databaseor an ex-BDR
+	be a previously standalone normal PostgreSQL database or an ex-BDR
 	database cleaned with <xref linkend="function-bdr-remove-bdr-from-local-node">.
 	The "dsn" (data source name) parameters are <ulink
 	url="https://www.postgresql.org/docs/9.4/static/libpq-connect.html#LIBPQ-CONNSTRING">libpq
 	connection strings</ulink>.
-	<replaceable>node_external_dsn</replaceable> is an arbitrary node name,
+	<replaceable>local_node_name</replaceable> is an arbitrary node name,
 	which must be unique across the BDR group.
 	<replaceable>node_external_dsn</replaceable> must be a connection
 	string other nodes can use to connect to this node. It must embed any
