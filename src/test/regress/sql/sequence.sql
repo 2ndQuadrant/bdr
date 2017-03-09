@@ -175,13 +175,26 @@ REVOKE ALL ON seq3 FROM seq_user;
 SELECT lastval();
 ROLLBACK;
 
+-- Test setval()
+CREATE TABLE setval_test (
+  id BIGINT PRIMARY KEY,
+  val TEXT
+);
+CREATE SEQUENCE setval_test_id_seq INCREMENT 10 OWNED BY setval_test.id;
+ALTER TABLE setval_test ALTER COLUMN id SET DEFAULT NEXTVAL('setval_test_id_seq');
+SELECT setval('setval_test_id_seq', 7);
+INSERT INTO setval_test (val) VALUES('insert 1');
+INSERT INTO setval_test (val) VALUES('insert 2');
+INSERT INTO setval_test (val) VALUES('insert 3');
+SELECT * FROM setval_test_id_seq;
+
 -- Sequences should get wiped out as well:
-DROP TABLE serialTest, serialTest2;
+DROP TABLE serialTest, serialTest2, setval_test;
 
 -- Make sure sequences are gone:
 SELECT * FROM information_schema.sequences WHERE sequence_name IN
   ('sequence_test2', 'serialtest2_f2_seq', 'serialtest2_f3_seq',
-   'serialtest2_f4_seq', 'serialtest2_f5_seq', 'serialtest2_f6_seq')
+   'serialtest2_f4_seq', 'serialtest2_f5_seq', 'serialtest2_f6_seq', 'setval_test_id_seq')
   ORDER BY sequence_name ASC;
 
 DROP USER seq_user;
