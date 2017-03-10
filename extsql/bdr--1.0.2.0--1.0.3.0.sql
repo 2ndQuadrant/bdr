@@ -10,14 +10,8 @@ SET LOCAL search_path = bdr;
 ALTER TABLE bdr_queued_commands
   ADD COLUMN search_path TEXT;
 
-UPDATE bdr_queued_commands
-SET search_path = '';
-
 ALTER TABLE bdr_queued_commands
   ALTER COLUMN search_path SET DEFAULT '';
-
-ALTER TABLE bdr_queued_commands
-  ALTER COLUMN search_path SET NOT NULL;
 
 ALTER TABLE bdr.bdr_nodes
   ADD COLUMN node_seq_id smallint;

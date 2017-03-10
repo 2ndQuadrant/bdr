@@ -1713,7 +1713,8 @@ process_queued_ddl_command(HeapTuple cmdtup, bool tx_just_started)
 
 	if (bdr_trace_replay)
 	{
-		elog(LOG, "TRACE: QUEUED_DDL: %s", cmdstr);
+		elog(LOG, "TRACE: QUEUED_DDL: [%s]",
+			 cmdstr);
 	}
 
 	bdr_execute_ddl_command(cmdstr, perpetrator, tx_just_started);
