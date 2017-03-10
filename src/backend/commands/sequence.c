@@ -687,12 +687,6 @@ do_setval(Oid relid, int64 next, bool iscalled)
 						bufv, RelationGetRelationName(seqrel),
 						bufm, bufx)));
 	}
-
-	/* In any case, forget any future cached numbers */
-	elm->cached = elm->last;
-
-	sequence_setval(seqrel, elm, buf, &seqtuple, next, iscalled);
-
 	Assert(seq->is_called == iscalled);
 
 	/* common logic we don't have to duplicate in every AM implementation */
@@ -703,6 +697,11 @@ do_setval(Oid relid, int64 next, bool iscalled)
 		elm->last = next;		/* last returned number */
 		elm->last_valid = true;
 	}
+
+	/* In any case, forget any future cached numbers */
+	elm->cached = elm->last;
+
+	sequence_setval(seqrel, elm, buf, &seqtuple, next, iscalled);
 
 	UnlockReleaseBuffer(buf);
 
