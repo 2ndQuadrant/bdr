@@ -687,7 +687,6 @@ do_setval(Oid relid, int64 next, bool iscalled)
 						bufv, RelationGetRelationName(seqrel),
 						bufm, bufx)));
 	}
-	Assert(seq->is_called == iscalled);
 
 	/* common logic we don't have to duplicate in every AM implementation */
 
@@ -702,6 +701,8 @@ do_setval(Oid relid, int64 next, bool iscalled)
 	elm->cached = elm->last;
 
 	sequence_setval(seqrel, elm, buf, &seqtuple, next, iscalled);
+
+	Assert(seq->is_called == iscalled);
 
 	UnlockReleaseBuffer(buf);
 
