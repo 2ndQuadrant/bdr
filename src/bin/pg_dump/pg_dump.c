@@ -95,7 +95,10 @@ static const char *lockWaitTimeout;
 /* subquery used to convert user ID (eg, datdba) to user name */
 static const char *username_subquery;
 
-/* obsolete as of 7.3: */
+/*
+ * For 8.0 and earlier servers, pulled from pg_database, for 8.1+ we use
+ * FirstNormalObjectId - 1.
+ */
 static Oid	g_last_builtin_oid; /* value of the last builtin oid */
 
 /*
@@ -634,7 +637,7 @@ main(int argc, char **argv)
 		|| numWorkers > MAXIMUM_WAIT_OBJECTS
 #endif
 		)
-		exit_horribly(NULL, "%s: invalid number of parallel jobs\n", progname);
+		exit_horribly(NULL, "invalid number of parallel jobs\n");
 
 	/* Parallel backup only in the directory archive format so far */
 	if (archiveFormat != archDirectory && numWorkers > 1)
@@ -715,17 +718,24 @@ main(int argc, char **argv)
 		exit_horribly(NULL,
 					  "Exported snapshots are not supported by this server version.\n");
 
-	/* Find the last built-in OID, if needed */
-	if (fout->remoteVersion < 70300)
+	/*
+	 * Find the last built-in OID, if needed (prior to 8.1)
+	 *
+	 * With 8.1 and above, we can just use FirstNormalObjectId - 1.
+	 */
+	if (fout->remoteVersion < 80100)
 	{
 		if (fout->remoteVersion >= 70100)
 			g_last_builtin_oid = findLastBuiltinOid_V71(fout,
 												  PQdb(GetConnection(fout)));
 		else
 			g_last_builtin_oid = findLastBuiltinOid_V70(fout);
-		if (g_verbose)
-			write_msg(NULL, "last built-in OID is %u\n", g_last_builtin_oid);
 	}
+	else
+		g_last_builtin_oid = FirstNormalObjectId - 1;
+
+	if (g_verbose)
+		write_msg(NULL, "last built-in OID is %u\n", g_last_builtin_oid);
 
 	/* Expand schema selection patterns into OID lists */
 	if (schema_include_patterns.head != NULL)
@@ -1442,7 +1452,7 @@ selectDumpableCast(CastInfo *cast)
 	if (checkExtensionMembership(&cast->dobj))
 		return;					/* extension membership overrides all else */
 
-	if (cast->dobj.catId.oid < (Oid) FirstNormalObjectId)
+	if (cast->dobj.catId.oid <= (Oid) g_last_builtin_oid)
 		cast->dobj.dump = false;
 	else
 		cast->dobj.dump = include_everything;
@@ -1462,7 +1472,7 @@ selectDumpableProcLang(ProcLangInfo *plang)
 	if (checkExtensionMembership(&plang->dobj))
 		return;					/* extension membership overrides all else */
 
-	if (plang->dobj.catId.oid < (Oid) FirstNormalObjectId)
+	if (plang->dobj.catId.oid <= (Oid) g_last_builtin_oid)
 		plang->dobj.dump = false;
 	else
 		plang->dobj.dump = include_everything;
@@ -1481,7 +1491,7 @@ selectDumpableProcLang(ProcLangInfo *plang)
 static void
 selectDumpableExtension(ExtensionInfo *extinfo)
 {
-	if (binary_upgrade && extinfo->dobj.catId.oid < (Oid) FirstNormalObjectId)
+	if (binary_upgrade && extinfo->dobj.catId.oid <= (Oid) g_last_builtin_oid)
 		extinfo->dobj.dump = false;
 	else
 		extinfo->dobj.dump = include_everything;
@@ -4246,7 +4256,9 @@ getFuncs(Archive *fout, int *numFuncs)
 	 * 3. Otherwise, we normally exclude functions in pg_catalog.  However, if
 	 * they're members of extensions and we are in binary-upgrade mode then
 	 * include them, since we want to dump extension members individually in
-	 * that mode.
+	 * that mode.  Also, if they are used by casts then we need to gather the
+	 * information about them, though they won't be dumped if they are
+	 * built-in.
 	 */
 
 	if (fout->remoteVersion >= 70300)
@@ -4264,11 +4276,15 @@ getFuncs(Archive *fout, int *numFuncs)
 							   "\n  AND NOT EXISTS (SELECT 1 FROM pg_depend "
 								 "WHERE classid = 'pg_proc'::regclass AND "
 								 "objid = p.oid AND deptype = 'i')");
-		appendPQExpBufferStr(query,
+		appendPQExpBuffer(query,
 							 "\n  AND ("
 							 "\n  pronamespace != "
 							 "(SELECT oid FROM pg_namespace "
-							 "WHERE nspname = 'pg_catalog')");
+							 "WHERE nspname = 'pg_catalog')"
+							 "\n  OR EXISTS (SELECT 1 FROM pg_cast"
+							 "\n  WHERE pg_cast.oid > '%u'::oid"
+							 "\n  AND p.oid = pg_cast.castfunc)",
+							 g_last_builtin_oid);
 		if (binary_upgrade && fout->remoteVersion >= 90100)
 			appendPQExpBufferStr(query,
 							   "\n  OR EXISTS(SELECT 1 FROM pg_depend WHERE "
@@ -8172,8 +8188,8 @@ dumpExtension(Archive *fout, ExtensionInfo *extinfo)
 		/*
 		 * We unconditionally create the extension, so we must drop it if it
 		 * exists.  This could happen if the user deleted 'plpgsql' and then
-		 * readded it, causing its oid to be greater than FirstNormalObjectId.
-		 * The FirstNormalObjectId test was kept to avoid repeatedly dropping
+		 * readded it, causing its oid to be greater than g_last_builtin_oid.
+		 * The g_last_builtin_oid test was kept to avoid repeatedly dropping
 		 * and recreating extensions like 'plpgsql'.
 		 */
 		appendPQExpBuffer(q, "DROP EXTENSION IF EXISTS %s;\n", qextname);
@@ -10299,7 +10315,8 @@ dumpCast(Archive *fout, CastInfo *cast)
 	{
 		funcInfo = findFuncByOid(cast->castfunc);
 		if (funcInfo == NULL)
-			return;
+			exit_horribly(NULL, "could not find function definition for function with OID %u\n",
+						  cast->castfunc);
 	}
 
 	/*
@@ -14270,10 +14287,10 @@ dumpTableConstraintComment(Archive *fout, ConstraintInfo *coninfo)
 }
 
 /*
- * findLastBuiltInOid -
+ * findLastBuiltinOid -
  * find the last built in oid
  *
- * For 7.1 and 7.2, we do this by retrieving datlastsysoid from the
+ * For 7.1 through 8.0, we do this by retrieving datlastsysoid from the
  * pg_database entry for the current database
  */
 static Oid
@@ -14295,7 +14312,7 @@ findLastBuiltinOid_V71(Archive *fout, const char *dbname)
 }
 
 /*
- * findLastBuiltInOid -
+ * findLastBuiltinOid -
  * find the last built in oid
  *
  * For 7.0, we do this by assuming that the last thing that initdb does is to

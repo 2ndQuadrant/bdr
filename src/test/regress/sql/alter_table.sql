@@ -254,7 +254,7 @@ INSERT INTO tmp3 values (5,50);
 -- Try (and fail) to add constraint due to invalid source columns
 ALTER TABLE tmp3 add constraint tmpconstr foreign key(c) references tmp2 match full;
 
--- Try (and fail) to add constraint due to invalide destination columns explicitly given
+-- Try (and fail) to add constraint due to invalid destination columns explicitly given
 ALTER TABLE tmp3 add constraint tmpconstr foreign key(a) references tmp2(b) match full;
 
 -- Try (and fail) to add constraint due to invalid data
@@ -403,6 +403,39 @@ ALTER TABLE FKTABLE ADD FOREIGN KEY(ftest1, ftest2)
 -- As does this...
 ALTER TABLE FKTABLE ADD FOREIGN KEY(ftest2, ftest1)
      references pktable(ptest1, ptest2);
+DROP TABLE FKTABLE;
+DROP TABLE PKTABLE;
+
+-- Test that ALTER CONSTRAINT updates trigger deferrability properly
+
+CREATE TEMP TABLE PKTABLE (ptest1 int primary key);
+CREATE TEMP TABLE FKTABLE (ftest1 int);
+
+ALTER TABLE FKTABLE ADD CONSTRAINT fknd FOREIGN KEY(ftest1) REFERENCES pktable
+  ON DELETE CASCADE ON UPDATE NO ACTION NOT DEFERRABLE;
+ALTER TABLE FKTABLE ADD CONSTRAINT fkdd FOREIGN KEY(ftest1) REFERENCES pktable
+  ON DELETE CASCADE ON UPDATE NO ACTION DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE FKTABLE ADD CONSTRAINT fkdi FOREIGN KEY(ftest1) REFERENCES pktable
+  ON DELETE CASCADE ON UPDATE NO ACTION DEFERRABLE INITIALLY IMMEDIATE;
+
+ALTER TABLE FKTABLE ADD CONSTRAINT fknd2 FOREIGN KEY(ftest1) REFERENCES pktable
+  ON DELETE CASCADE ON UPDATE NO ACTION DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE FKTABLE ALTER CONSTRAINT fknd2 NOT DEFERRABLE;
+ALTER TABLE FKTABLE ADD CONSTRAINT fkdd2 FOREIGN KEY(ftest1) REFERENCES pktable
+  ON DELETE CASCADE ON UPDATE NO ACTION NOT DEFERRABLE;
+ALTER TABLE FKTABLE ALTER CONSTRAINT fkdd2 DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE FKTABLE ADD CONSTRAINT fkdi2 FOREIGN KEY(ftest1) REFERENCES pktable
+  ON DELETE CASCADE ON UPDATE NO ACTION NOT DEFERRABLE;
+ALTER TABLE FKTABLE ALTER CONSTRAINT fkdi2 DEFERRABLE INITIALLY IMMEDIATE;
+
+SELECT conname, tgfoid::regproc, tgtype, tgdeferrable, tginitdeferred
+FROM pg_trigger JOIN pg_constraint con ON con.oid = tgconstraint
+WHERE tgrelid = 'pktable'::regclass
+ORDER BY 1,2,3;
+SELECT conname, tgfoid::regproc, tgtype, tgdeferrable, tginitdeferred
+FROM pg_trigger JOIN pg_constraint con ON con.oid = tgconstraint
+WHERE tgrelid = 'fktable'::regclass
+ORDER BY 1,2,3;
 
 -- temp tables should go away by themselves, need not drop them.
 

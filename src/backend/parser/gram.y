@@ -9971,7 +9971,7 @@ table_ref:	relation_expr opt_alias_clause
 					n->lateral = true;
 					n->subquery = $2;
 					n->alias = $3;
-					/* same coment as above */
+					/* same comment as above */
 					if ($3 == NULL)
 					{
 						if (IsA($2, SelectStmt) &&
@@ -14052,13 +14052,3 @@ parser_init(base_yy_extra_type *yyext)
 {
 	yyext->parsetree = NIL;		/* in case grammar forgets to set it */
 }
-
-/*
- * Must undefine this stuff before including scan.c, since it has different
- * definitions for these macros.
- */
-#undef yyerror
-#undef yylval
-#undef yylloc
-
-#include "scan.c"

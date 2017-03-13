@@ -5955,7 +5955,7 @@ ATAddCheckConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
 
 	/*
 	 * Check if ONLY was specified with ALTER TABLE.  If so, allow the
-	 * contraint creation only if there are no children currently.  Error out
+	 * constraint creation only if there are no children currently.  Error out
 	 * otherwise.
 	 */
 	if (!recurse && children != NIL)
@@ -6502,15 +6502,33 @@ ATExecAlterConstraint(Relation rel, AlterTableCmd *cmd,
 
 		while (HeapTupleIsValid(tgtuple = systable_getnext(tgscan)))
 		{
+			Form_pg_trigger tgform = (Form_pg_trigger) GETSTRUCT(tgtuple);
 			Form_pg_trigger copy_tg;
+
+			/*
+			 * Remember OIDs of other relation(s) involved in FK constraint.
+			 * (Note: it's likely that we could skip forcing a relcache inval
+			 * for other rels that don't have a trigger whose properties
+			 * change, but let's be conservative.)
+			 */
+			if (tgform->tgrelid != RelationGetRelid(rel))
+				otherrelids = list_append_unique_oid(otherrelids,
+													 tgform->tgrelid);
+
+			/*
+			 * Update deferrability of RI_FKey_noaction_del,
+			 * RI_FKey_noaction_upd, RI_FKey_check_ins and RI_FKey_check_upd
+			 * triggers, but not others; see createForeignKeyTriggers and
+			 * CreateFKCheckTrigger.
+			 */
+			if (tgform->tgfoid != F_RI_FKEY_NOACTION_DEL &&
+				tgform->tgfoid != F_RI_FKEY_NOACTION_UPD &&
+				tgform->tgfoid != F_RI_FKEY_CHECK_INS &&
+				tgform->tgfoid != F_RI_FKEY_CHECK_UPD)
+				continue;
 
 			copyTuple = heap_copytuple(tgtuple);
 			copy_tg = (Form_pg_trigger) GETSTRUCT(copyTuple);
-
-			/* Remember OIDs of other relation(s) involved in FK constraint */
-			if (copy_tg->tgrelid != RelationGetRelid(rel))
-				otherrelids = list_append_unique_oid(otherrelids,
-													 copy_tg->tgrelid);
 
 			copy_tg->tgdeferrable = cmdcon->deferrable;
 			copy_tg->tginitdeferred = cmdcon->initdeferred;
@@ -7258,6 +7276,9 @@ CreateFKCheckTrigger(Oid myRelOid, Oid refRelOid, Constraint *fkconstraint,
 
 /*
  * Create the triggers that implement an FK constraint.
+ *
+ * NB: if you change any trigger properties here, see also
+ * ATExecAlterConstraint.
  */
 static void
 createForeignKeyTriggers(Relation rel, Oid refRelOid, Constraint *fkconstraint,
@@ -7443,6 +7464,24 @@ ATExecDropConstraint(Relation rel, const char *constrName,
 							constrName, RelationGetRelationName(rel))));
 
 		is_no_inherit_constraint = con->connoinherit;
+
+		/*
+		 * If it's a foreign-key constraint, we'd better lock the referenced
+		 * table and check that that's not in use, just as we've already done
+		 * for the constrained table (else we might, eg, be dropping a trigger
+		 * that has unfired events).  But we can/must skip that in the
+		 * self-referential case.
+		 */
+		if (con->contype == CONSTRAINT_FOREIGN &&
+			con->confrelid != RelationGetRelid(rel))
+		{
+			Relation	frel;
+
+			/* Must match lock taken by RemoveTriggerById: */
+			frel = heap_open(con->confrelid, AccessExclusiveLock);
+			CheckTableNotInUse(frel, "ALTER TABLE");
+			heap_close(frel, NoLock);
+		}
 
 		/*
 		 * Perform the actual constraint deletion
@@ -9960,6 +9999,39 @@ MergeAttributesIntoExisting(Relation child_rel, Relation parent_rel)
 		}
 	}
 
+	/*
+	 * If the parent has an OID column, so must the child, and we'd better
+	 * update the child's attinhcount and attislocal the same as for normal
+	 * columns.  We needn't check data type or not-nullness though.
+	 */
+	if (tupleDesc->tdhasoid)
+	{
+		/*
+		 * Here we match by column number not name; the match *must* be the
+		 * system column, not some random column named "oid".
+		 */
+		tuple = SearchSysCacheCopy2(ATTNUM,
+							   ObjectIdGetDatum(RelationGetRelid(child_rel)),
+									Int16GetDatum(ObjectIdAttributeNumber));
+		if (HeapTupleIsValid(tuple))
+		{
+			Form_pg_attribute childatt = (Form_pg_attribute) GETSTRUCT(tuple);
+
+			/* See comments above; these changes should be the same */
+			childatt->attinhcount++;
+			simple_heap_update(attrrel, &tuple->t_self, tuple);
+			CatalogUpdateIndexes(attrrel, tuple);
+			heap_freetuple(tuple);
+		}
+		else
+		{
+			ereport(ERROR,
+					(errcode(ERRCODE_DATATYPE_MISMATCH),
+					 errmsg("child table is missing column \"%s\"",
+							"oid")));
+		}
+	}
+
 	heap_close(attrrel, RowExclusiveLock);
 }
 
@@ -10810,6 +10882,12 @@ ATExecGenericOptions(Relation rel, List *options)
 
 	simple_heap_update(ftrel, &tuple->t_self, tuple);
 	CatalogUpdateIndexes(ftrel, tuple);
+
+	/*
+	 * Invalidate relcache so that all sessions will refresh any cached plans
+	 * that might depend on the old options.
+	 */
+	CacheInvalidateRelcache(rel);
 
 	InvokeObjectPostAlterHook(ForeignTableRelationId,
 							  RelationGetRelid(rel), 0);
