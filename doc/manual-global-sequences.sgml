@@ -411,7 +411,7 @@
 
       CREATE SEQUENCE some_seq INCREMENT 1000 OWNED BY some_table.generated_value USING local;
 
-      ALTER TABLE some_table ALTER COLUMN generated_value DEFAULT nextval('some_seq');
+      ALTER TABLE some_table ALTER COLUMN generated_value SET DEFAULT nextval('some_seq');
     </programlisting>
     ... then on each node calling <function>setval</function> to give each node a
     different offset starting value, e.g.
