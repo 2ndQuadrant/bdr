@@ -144,7 +144,7 @@
  </sect1>
 
  <sect1 id="node-management-removing" xreflabel="Removing a node">
-  <title>Removing a node</title>
+  <title>Parting (removing) a node</title>
 
   <para>
    Because &bdr; can recover from extended node outages it is
@@ -209,7 +209,7 @@
  </sect1>
 
  <sect1 id="node-management-disabling" xreflabel="Turning a BDR node back into a normal database">
-  <title>Removing a node</title>
+  <title>Removing BDR from a parted node</title>
 
   <para>
    To take a BDR node that has already been parted, or one that has been
