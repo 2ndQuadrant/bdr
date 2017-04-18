@@ -409,8 +409,13 @@ process_remote_commit(StringInfo s)
 		cbarg.suppress_output = false;
 	}
 
-	Assert(commit_lsn == replication_origin_lsn);
 	Assert(committime == replication_origin_timestamp);
+	/*
+	 * BDR 2.0 compatibility, see d96d8bb5d and 2ndQuadrant/bdr-private#73
+	 */
+	Assert(replication_origin_lsn == end_lsn /* bdr 2.0 msg */
+		   || replication_origin_lsn == commit_lsn); /* bdr 1.0 msg */
+
 
 	if (started_transaction)
 	{
