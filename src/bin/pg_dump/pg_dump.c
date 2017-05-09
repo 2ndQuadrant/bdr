@@ -789,7 +789,15 @@ main(int argc, char **argv)
 			getTableDataFKConstraints();
 	}
 
-	if (outputBlobs)
+	/*
+	 * In binary-upgrade mode, we do not have to worry about the actual blob
+	 * data or the associated metadata that resides in the pg_largeobject and
+	 * pg_largeobject_metadata tables, respectivly.
+	 *
+	 * However, we do need to collect blob information as there may be
+	 * comments or other information on blobs that we do need to dump out.
+	 */
+	if (outputBlobs || binary_upgrade)
 		getBlobs(fout);
 
 	/*
@@ -863,6 +871,7 @@ main(int argc, char **argv)
 	ropt->noTablespace = outputNoTablespaces;
 	ropt->disable_triggers = disable_triggers;
 	ropt->use_setsessauth = use_setsessauth;
+	ropt->binary_upgrade = binary_upgrade;
 
 	if (compressLevel == -1)
 		ropt->compression = 0;
@@ -2821,8 +2830,14 @@ dumpBlob(Archive *fout, BlobInfo *binfo)
 				 NULL, binfo->rolname,
 				 binfo->dobj.catId, 0, binfo->dobj.dumpId);
 
-	/* Dump ACL if any */
-	if (binfo->blobacl)
+	/*
+	 * Dump ACL if any
+	 *
+	 * Do not dump the ACL in binary-upgrade mode, however, as the ACL will be
+	 * copied over by pg_upgrade as it is part of the pg_largeobject_metadata
+	 * table.
+	 */
+	if (binfo->blobacl && !binary_upgrade)
 		dumpACL(fout, binfo->dobj.catId, binfo->dobj.dumpId, "LARGE OBJECT",
 				binfo->dobj.name, NULL, cquery->data,
 				NULL, binfo->rolname, binfo->blobacl);
@@ -2846,6 +2861,13 @@ dumpBlobs(Archive *fout, void *arg)
 	int			ntups;
 	int			i;
 	int			cnt;
+
+	/*
+	 * Do not dump out blob data in binary-upgrade mode, pg_upgrade will copy
+	 * the pg_largeobject table over entirely from the old cluster.
+	 */
+	if (binary_upgrade)
+		return 1;
 
 	if (g_verbose)
 		write_msg(NULL, "saving large objects\n");
@@ -7655,7 +7677,8 @@ dumpComment(Archive *fout, const char *target,
 	}
 	else
 	{
-		if (schemaOnly)
+		/* We do dump blob comments in binary-upgrade mode */
+		if (schemaOnly && !binary_upgrade)
 			return;
 	}
 
@@ -9672,10 +9695,10 @@ dumpProcLang(Archive *fout, ProcLangInfo *plang)
 
 	/* Dump Proc Lang Comments and Security Labels */
 	dumpComment(fout, labelq->data,
-				NULL, "",
+				lanschema, plang->lanowner,
 				plang->dobj.catId, 0, plang->dobj.dumpId);
 	dumpSecLabel(fout, labelq->data,
-				 NULL, "",
+				 lanschema, plang->lanowner,
 				 plang->dobj.catId, 0, plang->dobj.dumpId);
 
 	if (plang->lanpltrusted)
@@ -10389,7 +10412,7 @@ dumpCast(Archive *fout, CastInfo *cast)
 
 	/* Dump Cast Comments */
 	dumpComment(fout, labelq->data,
-				NULL, "",
+				"pg_catalog", "",
 				cast->dobj.catId, 0, cast->dobj.dumpId);
 
 	destroyPQExpBuffer(defqry);
@@ -11147,7 +11170,7 @@ dumpOpclass(Archive *fout, OpclassInfo *opcinfo)
 
 	/* Dump Operator Class Comments */
 	dumpComment(fout, labelq->data,
-				NULL, opcinfo->rolname,
+				opcinfo->dobj.namespace->dobj.name, opcinfo->rolname,
 				opcinfo->dobj.catId, 0, opcinfo->dobj.dumpId);
 
 	free(amname);
@@ -11417,7 +11440,7 @@ dumpOpfamily(Archive *fout, OpfamilyInfo *opfinfo)
 
 	/* Dump Operator Family Comments */
 	dumpComment(fout, labelq->data,
-				NULL, opfinfo->rolname,
+				opfinfo->dobj.namespace->dobj.name, opfinfo->rolname,
 				opfinfo->dobj.catId, 0, opfinfo->dobj.dumpId);
 
 	free(amname);
@@ -12101,7 +12124,7 @@ dumpTSParser(Archive *fout, TSParserInfo *prsinfo)
 
 	/* Dump Parser Comments */
 	dumpComment(fout, labelq->data,
-				NULL, "",
+				prsinfo->dobj.namespace->dobj.name, "",
 				prsinfo->dobj.catId, 0, prsinfo->dobj.dumpId);
 
 	destroyPQExpBuffer(q);
@@ -12188,7 +12211,7 @@ dumpTSDictionary(Archive *fout, TSDictInfo *dictinfo)
 
 	/* Dump Dictionary Comments */
 	dumpComment(fout, labelq->data,
-				NULL, dictinfo->rolname,
+				dictinfo->dobj.namespace->dobj.name, dictinfo->rolname,
 				dictinfo->dobj.catId, 0, dictinfo->dobj.dumpId);
 
 	destroyPQExpBuffer(q);
@@ -12254,7 +12277,7 @@ dumpTSTemplate(Archive *fout, TSTemplateInfo *tmplinfo)
 
 	/* Dump Template Comments */
 	dumpComment(fout, labelq->data,
-				NULL, "",
+				tmplinfo->dobj.namespace->dobj.name, "",
 				tmplinfo->dobj.catId, 0, tmplinfo->dobj.dumpId);
 
 	destroyPQExpBuffer(q);
@@ -12382,7 +12405,7 @@ dumpTSConfig(Archive *fout, TSConfigInfo *cfginfo)
 
 	/* Dump Configuration Comments */
 	dumpComment(fout, labelq->data,
-				NULL, cfginfo->rolname,
+				cfginfo->dobj.namespace->dobj.name, cfginfo->rolname,
 				cfginfo->dobj.catId, 0, cfginfo->dobj.dumpId);
 
 	destroyPQExpBuffer(q);
@@ -12824,7 +12847,8 @@ dumpSecLabel(Archive *fout, const char *target,
 	}
 	else
 	{
-		if (schemaOnly)
+		/* We do dump blob security labels in binary-upgrade mode */
+		if (schemaOnly && !binary_upgrade)
 			return;
 	}
 

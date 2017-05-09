@@ -50,7 +50,7 @@ match properly on the old version.
 Time Zone code
 ==============
 
-The code in this directory is currently synced with tzcode release 2016j.
+The code in this directory is currently synced with tzcode release 2017b.
 There are many cosmetic (and not so cosmetic) differences from the
 original tzcode library, but diffs in the upstream version should usually
 be propagated to our version.  Here are some notes about that.
@@ -78,6 +78,9 @@ other exposed names.
 * We have exposed the tzload() and tzparse() internal functions, and
 slightly modified the API of the former, in part because it now relies
 on our own pg_open_tzfile() rather than opening files for itself.
+
+* tzparse() is adjusted to cache the result of loading the TZDEFRULES
+zone, so that that's not repeated more than once per process.
 
 * There's a fair amount of code we don't need and have removed,
 including all the nonstandard optional APIs.  We have also added

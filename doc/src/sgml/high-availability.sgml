@@ -76,9 +76,7 @@
 
  <para>
   The remainder of this section outlines various failover, replication,
-  and load balancing solutions.  A <ulink
-  url="http://www.postgres-r.org/documentation/terms">glossary</ulink> is
-  also available.
+  and load balancing solutions.
  </para>
 
  <sect1 id="different-replication-solutions">
@@ -209,7 +207,7 @@ protocol to make nodes agree on a serializable transactional order.
      middleware.  Care must also be taken that all
      transactions either commit or abort on all servers, perhaps
      using two-phase commit (<xref linkend="sql-prepare-transaction">
-     and <xref linkend="sql-commit-prepared">.
+     and <xref linkend="sql-commit-prepared">).
      <productname>Pgpool-II</> and <productname>Continuent Tungsten</>
      are examples of this type of replication.
     </para>
