@@ -658,7 +658,7 @@ bdr_acquire_ddl_lock(BDRLockType lock_type)
 	if (this_xact_acquired_lock)
 	{
 		elog(ddl_lock_log_level(DDL_LOCK_TRACE_STATEMENT),
-			LOCKTRACE "attempting to acquire in mode <%s> (upgrading from <%s>) for (" BDR_LOCALID_FORMAT ")",
+			LOCKTRACE "acquiring in mode <%s> (upgrading from <%s>) for (" BDR_LOCALID_FORMAT ")",
 			bdr_lock_type_to_name(lock_type),
 			bdr_lock_type_to_name(bdr_my_locks_database->lock_type),
 			BDR_LOCALID_FORMAT_ARGS);
@@ -666,7 +666,7 @@ bdr_acquire_ddl_lock(BDRLockType lock_type)
 	else
 	{
 		elog(ddl_lock_log_level(DDL_LOCK_TRACE_STATEMENT),
-			LOCKTRACE "attempting to acquire in mode <%s> for (" BDR_LOCALID_FORMAT ")",
+			LOCKTRACE "acquiring in mode <%s> for (" BDR_LOCALID_FORMAT ")",
 			bdr_lock_type_to_name(lock_type),
 			BDR_LOCALID_FORMAT_ARGS);
 	}
