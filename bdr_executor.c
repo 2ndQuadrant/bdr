@@ -1084,6 +1084,10 @@ BdrExecutorStart(QueryDesc *queryDesc, int eflags)
 	if (bdr_always_allow_writes)
 		goto done;
 
+	/* don't perform filtering while replaying */
+	if (replication_origin_id != InvalidRepNodeId)
+		goto done;
+
 	/* identify whether this is a modifying statement */
 	if (plannedstmt != NULL &&
 		(plannedstmt->hasModifyingCTE ||

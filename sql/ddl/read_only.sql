@@ -23,10 +23,7 @@ INSERT INTO public.test_read_only VALUES('foo');
 UPDATE public.test_read_only SET data = 'foo';
 DELETE FROM public.test_read_only;
 
-\copy public.test_read_only FROM stdin
-some_data
-other_data
-\.
+COPY public.test_read_only FROM '/tmp/nosuch.csv';
 
 WITH cte AS (
 	INSERT INTO public.test_read_only VALUES('foo') RETURNING *

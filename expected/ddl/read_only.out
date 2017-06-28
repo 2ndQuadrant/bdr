@@ -44,8 +44,8 @@ UPDATE public.test_read_only SET data = 'foo';
 ERROR:  UPDATE may only affect UNLOGGED or TEMPORARY tables on read-only BDR node; test_read_only is a regular table
 DELETE FROM public.test_read_only;
 ERROR:  DELETE may only affect UNLOGGED or TEMPORARY tables on read-only BDR node; test_read_only is a regular table
-\copy public.test_read_only FROM stdin
-ERROR:  COPY may only affect UNLOGGED or TEMPORARY tables on read-only BDR node; test_read_only is a regular table
+COPY public.test_read_only FROM '/tmp/nosuch.csv';
+ERROR:  Cannot run COPY FROM on read-only BDR node.
 WITH cte AS (
 	INSERT INTO public.test_read_only VALUES('foo') RETURNING *
 )
@@ -53,8 +53,8 @@ SELECT * FROM cte;
 ERROR:  DML may only affect UNLOGGED or TEMPORARY tables on read-only BDR node; test_read_only is a regular table
 -- Must be empty still
 SELECT * FROM public.test_read_only;
-    data    
-------------
+ data 
+------
 (0 rows)
 
 -- success
