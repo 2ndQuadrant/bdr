@@ -270,7 +270,7 @@ filter_AlterTableStmt(Node *parsetree,
 				case AT_DropCluster:	/* SET WITHOUT CLUSTER */
 				case AT_ChangeOwner:
 				case AT_SetStorage:
-					lock_type = BDR_LOCK_DDL;
+					*lock_type = BDR_LOCK_DDL;
 					break;
 
 				case AT_SetRelOptions:	/* SET (...) */
@@ -347,7 +347,7 @@ filter_AlterTableStmt(Node *parsetree,
 					 * It's safe to ALTER TABLE ... ENABLE|DISABLE TRIGGER
 					 * without blocking concurrent writes.
 					 */
-					lock_type = BDR_LOCK_DDL;
+					*lock_type = BDR_LOCK_DDL;
 					break;
 
 				case AT_EnableAlwaysTrig:
