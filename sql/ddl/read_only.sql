@@ -23,10 +23,18 @@ INSERT INTO public.test_read_only VALUES('foo');
 UPDATE public.test_read_only SET data = 'foo';
 DELETE FROM public.test_read_only;
 
+\copy public.test_read_only FROM stdin
+some_data
+other_data
+\.
+
 WITH cte AS (
 	INSERT INTO public.test_read_only VALUES('foo') RETURNING *
 )
 SELECT * FROM cte;
+
+-- Must be empty still
+SELECT * FROM public.test_read_only;
 
 -- success
 CREATE TEMP TABLE test_read_only_temp (
