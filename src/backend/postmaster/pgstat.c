@@ -92,6 +92,9 @@
 #define PGSTAT_POLL_LOOP_COUNT	(PGSTAT_MAX_WAIT_TIME / PGSTAT_RETRY_DELAY)
 #define PGSTAT_INQ_LOOP_COUNT	(PGSTAT_INQ_INTERVAL / PGSTAT_RETRY_DELAY)
 
+/* Minimum receive buffer size for the collector's socket. */
+#define PGSTAT_MIN_RCVBUF		(100 * 1024)
+
 
 /* ----------
  * The initial size hints for the hash tables used in the collector.
@@ -535,6 +538,35 @@ retry2:
 		goto startup_failed;
 	}
 
+	/*
+	 * Try to ensure that the socket's receive buffer is at least
+	 * PGSTAT_MIN_RCVBUF bytes, so that it won't easily overflow and lose
+	 * data.  Use of UDP protocol means that we are willing to lose data under
+	 * heavy load, but we don't want it to happen just because of ridiculously
+	 * small default buffer sizes (such as 8KB on older Windows versions).
+	 */
+	{
+		int			old_rcvbuf;
+		int			new_rcvbuf;
+		ACCEPT_TYPE_ARG3 rcvbufsize = sizeof(old_rcvbuf);
+
+		if (getsockopt(pgStatSock, SOL_SOCKET, SO_RCVBUF,
+					   (char *) &old_rcvbuf, &rcvbufsize) < 0)
+		{
+			elog(LOG, "getsockopt(SO_RCVBUF) failed: %m");
+			/* if we can't get existing size, always try to set it */
+			old_rcvbuf = 0;
+		}
+
+		new_rcvbuf = PGSTAT_MIN_RCVBUF;
+		if (old_rcvbuf < new_rcvbuf)
+		{
+			if (setsockopt(pgStatSock, SOL_SOCKET, SO_RCVBUF,
+						   (char *) &new_rcvbuf, sizeof(new_rcvbuf)) < 0)
+				elog(LOG, "setsockopt(SO_RCVBUF) failed: %m");
+		}
+	}
+
 	pg_freeaddrinfo_all(hints.ai_family, addrs);
 
 	return;
@@ -567,7 +599,7 @@ pgstat_reset_remove_files(const char *directory)
 {
 	DIR		   *dir;
 	struct dirent *entry;
-	char		fname[MAXPGPATH];
+	char		fname[MAXPGPATH * 2];
 
 	dir = AllocateDir(directory);
 	while ((entry = ReadDir(dir, directory)) != NULL)
@@ -597,7 +629,7 @@ pgstat_reset_remove_files(const char *directory)
 			strcmp(entry->d_name + nchars, "stat") != 0)
 			continue;
 
-		snprintf(fname, MAXPGPATH, "%s/%s", directory,
+		snprintf(fname, sizeof(fname), "%s/%s", directory,
 				 entry->d_name);
 		unlink(fname);
 	}
@@ -3945,8 +3977,19 @@ pgstat_read_statsfiles(Oid onlydb, bool permanent, bool deep)
 	{
 		ereport(pgStatRunningInCollector ? LOG : WARNING,
 				(errmsg("corrupted statistics file \"%s\"", statfile)));
+		memset(&globalStats, 0, sizeof(globalStats));
 		goto done;
 	}
+
+	/*
+	 * In the collector, disregard the timestamp we read from the permanent
+	 * stats file; we should be willing to write a temp stats file immediately
+	 * upon the first request from any backend.  This only matters if the old
+	 * file's timestamp is less than PGSTAT_STAT_INTERVAL ago, but that's not
+	 * an unusual scenario.
+	 */
+	if (pgStatRunningInCollector)
+		globalStats.stats_timestamp = 0;
 
 	/*
 	 * Read archiver stats struct
@@ -3955,6 +3998,7 @@ pgstat_read_statsfiles(Oid onlydb, bool permanent, bool deep)
 	{
 		ereport(pgStatRunningInCollector ? LOG : WARNING,
 				(errmsg("corrupted statistics file \"%s\"", statfile)));
+		memset(&archiverStats, 0, sizeof(archiverStats));
 		goto done;
 	}
 
@@ -3998,6 +4042,15 @@ pgstat_read_statsfiles(Oid onlydb, bool permanent, bool deep)
 				memcpy(dbentry, &dbbuf, sizeof(PgStat_StatDBEntry));
 				dbentry->tables = NULL;
 				dbentry->functions = NULL;
+
+				/*
+				 * In the collector, disregard the timestamp we read from the
+				 * permanent stats file; we should be willing to write a temp
+				 * stats file immediately upon the first request from any
+				 * backend.
+				 */
+				if (pgStatRunningInCollector)
+					dbentry->stats_timestamp = 0;
 
 				/*
 				 * Don't create tables/functions hashtables for uninteresting

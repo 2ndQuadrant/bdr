@@ -2291,7 +2291,7 @@ describeOneTableDetails(const char *schemaname,
 			}
 
 			/* Print server name */
-			printfPQExpBuffer(&buf, "Server: %s",
+			printfPQExpBuffer(&buf, _("Server: %s"),
 							  PQgetvalue(result, 0, 0));
 			printTableAddFooter(&cont, buf.data);
 
@@ -2299,7 +2299,7 @@ describeOneTableDetails(const char *schemaname,
 			ftoptions = PQgetvalue(result, 0, 1);
 			if (ftoptions && ftoptions[0] != '\0')
 			{
-				printfPQExpBuffer(&buf, "FDW Options: (%s)", ftoptions);
+				printfPQExpBuffer(&buf, _("FDW Options: (%s)"), ftoptions);
 				printTableAddFooter(&cont, buf.data);
 			}
 			PQclear(result);
@@ -2757,7 +2757,6 @@ listDbRoleSettings(const char *pattern, const char *pattern2)
  * s - sequences
  * E - foreign table (Note: different from 'f', the relkind value)
  * (any order of the above is fine)
- * If tabtypes is empty, we default to \dtvsE.
  */
 bool
 listTables(const char *tabtypes, const char *pattern, bool verbose, bool showSystem)
@@ -2774,6 +2773,7 @@ listTables(const char *tabtypes, const char *pattern, bool verbose, bool showSys
 	printQueryOpt myopt = pset.popt;
 	static const bool translate_columns[] = {false, false, true, false, false, false, false};
 
+	/* If tabtypes is empty, we default to \dtvmsE (but see also command.c) */
 	if (!(showTables || showIndexes || showViews || showMatViews || showSeq || showForeign))
 		showTables = showViews = showMatViews = showSeq = showForeign = true;
 

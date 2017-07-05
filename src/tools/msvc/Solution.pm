@@ -500,10 +500,20 @@ sub AddProject
 	if ($self->{options}->{openssl})
 	{
 		$proj->AddIncludeDir($self->{options}->{openssl} . '\include');
-		$proj->AddLibrary(
-			$self->{options}->{openssl} . '\lib\VC\ssleay32.lib', 1);
-		$proj->AddLibrary(
-			$self->{options}->{openssl} . '\lib\VC\libeay32.lib', 1);
+		if (-e "$self->{options}->{openssl}/lib/VC/ssleay32MD.lib")
+		{
+			$proj->AddLibrary(
+				$self->{options}->{openssl} . '\lib\VC\ssleay32.lib', 1);
+			$proj->AddLibrary(
+				$self->{options}->{openssl} . '\lib\VC\libeay32.lib', 1);
+		}
+		else
+		{
+			$proj->AddLibrary(
+				$self->{options}->{openssl} . '\lib\ssleay32.lib', 1);
+			$proj->AddLibrary(
+				$self->{options}->{openssl} . '\lib\libeay32.lib', 1);
+		}
 	}
 	if ($self->{options}->{nls})
 	{
@@ -525,6 +535,7 @@ sub AddProject
 	if ($self->{options}->{xml})
 	{
 		$proj->AddIncludeDir($self->{options}->{xml} . '\include');
+		$proj->AddIncludeDir($self->{options}->{xml} . '\include\libxml2');
 		$proj->AddLibrary($self->{options}->{xml} . '\lib\libxml2.lib');
 	}
 	if ($self->{options}->{xslt})

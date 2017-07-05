@@ -77,6 +77,7 @@ static char *restrict_env;
 #endif
 
 static uint64 GenerateSystemIdentifier(void);
+static void CheckDataVersion(void);
 static bool ReadControlFile(void);
 static void GuessControlValues(void);
 static void PrintControlValues(bool guessed);
@@ -312,6 +313,9 @@ main(int argc, char *argv[])
 		exit(1);
 	}
 
+	/* Check that data directory matches our server version */
+	CheckDataVersion();
+
 	/*
 	 * Check for a postmaster lock file --- if there is one, refuse to
 	 * proceed, on grounds we might be interfering with a live installation.
@@ -469,6 +473,69 @@ GenerateSystemIdentifier(void)
 	return sysidentifier;
 }
 
+/*
+ * Look at the version string stored in PG_VERSION and decide if this utility
+ * can be run safely or not.
+ *
+ * We don't want to inject pg_control and WAL files that are for a different
+ * major version; that can't do anything good.  Note that we don't treat
+ * mismatching version info in pg_control as a reason to bail out, because
+ * recovering from a corrupted pg_control is one of the main reasons for this
+ * program to exist at all.  However, PG_VERSION is unlikely to get corrupted,
+ * and if it were it would be easy to fix by hand.  So let's make this check
+ * to prevent simple user errors.
+ */
+static void
+CheckDataVersion(void)
+{
+	const char *ver_file = "PG_VERSION";
+	FILE	   *ver_fd;
+	char		rawline[64];
+	int			len;
+
+	if ((ver_fd = fopen(ver_file, "r")) == NULL)
+	{
+		fprintf(stderr, _("%s: could not open file \"%s\" for reading: %s\n"),
+				progname, ver_file, strerror(errno));
+		exit(1);
+	}
+
+	/* version number has to be the first line read */
+	if (!fgets(rawline, sizeof(rawline), ver_fd))
+	{
+		if (!ferror(ver_fd))
+		{
+			fprintf(stderr, _("%s: unexpected empty file \"%s\"\n"),
+					progname, ver_file);
+		}
+		else
+		{
+			fprintf(stderr, _("%s: could not read file \"%s\": %s\n"),
+					progname, ver_file, strerror(errno));
+		}
+		exit(1);
+	}
+
+	/* remove trailing newline, handling Windows newlines as well */
+	len = strlen(rawline);
+	if (len > 0 && rawline[len - 1] == '\n')
+	{
+		rawline[--len] = '\0';
+		if (len > 0 && rawline[len - 1] == '\r')
+			rawline[--len] = '\0';
+	}
+
+	if (strcmp(rawline, PG_MAJORVERSION) != 0)
+	{
+		fprintf(stderr, _("%s: data directory is of wrong version\n"
+						  "File \"%s\" contains \"%s\", which is not compatible with this program's version \"%s\".\n"),
+				progname, ver_file, rawline, PG_MAJORVERSION);
+		exit(1);
+	}
+
+	fclose(ver_fd);
+}
+
 
 /*
  * Try to read the existing pg_control file.
@@ -539,7 +606,7 @@ ReadControlFile(void)
 	}
 
 	/* Looks like it's a mess. */
-	fprintf(stderr, _("%s: pg_control exists but is broken or unknown version; ignoring it\n"),
+	fprintf(stderr, _("%s: pg_control exists but is broken or wrong version; ignoring it\n"),
 			progname);
 	return false;
 }
@@ -962,7 +1029,7 @@ KillExistingXLOG(void)
 {
 	DIR		   *xldir;
 	struct dirent *xlde;
-	char		path[MAXPGPATH];
+	char		path[MAXPGPATH + sizeof(XLOGDIR)];
 
 	xldir = opendir(XLOGDIR);
 	if (xldir == NULL)
@@ -977,7 +1044,7 @@ KillExistingXLOG(void)
 		if (strlen(xlde->d_name) == 24 &&
 			strspn(xlde->d_name, "0123456789ABCDEF") == 24)
 		{
-			snprintf(path, MAXPGPATH, "%s/%s", XLOGDIR, xlde->d_name);
+			snprintf(path, sizeof(path), "%s/%s", XLOGDIR, xlde->d_name);
 			if (unlink(path) < 0)
 			{
 				fprintf(stderr, _("%s: could not delete file \"%s\": %s\n"),
@@ -1009,11 +1076,11 @@ KillExistingXLOG(void)
 static void
 KillExistingArchiveStatus(void)
 {
+#define ARCHSTATDIR XLOGDIR "/archive_status"
+
 	DIR		   *xldir;
 	struct dirent *xlde;
-	char		path[MAXPGPATH];
-
-#define ARCHSTATDIR XLOGDIR "/archive_status"
+	char		path[MAXPGPATH + sizeof(ARCHSTATDIR)];
 
 	xldir = opendir(ARCHSTATDIR);
 	if (xldir == NULL)
@@ -1029,7 +1096,7 @@ KillExistingArchiveStatus(void)
 			(strcmp(xlde->d_name + 24, ".ready") == 0 ||
 			 strcmp(xlde->d_name + 24, ".done") == 0))
 		{
-			snprintf(path, MAXPGPATH, "%s/%s", ARCHSTATDIR, xlde->d_name);
+			snprintf(path, sizeof(path), "%s/%s", ARCHSTATDIR, xlde->d_name);
 			if (unlink(path) < 0)
 			{
 				fprintf(stderr, _("%s: could not delete file \"%s\": %s\n"),
