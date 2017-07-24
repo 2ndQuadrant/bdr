@@ -7,7 +7,7 @@ PGFILEDESC = "bdr - async multimaster logical replication"
 
 DATA = bdr--3.0.0.sql
 
-OBJS = bdr_pgl_plugin.o
+OBJS = bdr_pgl_plugin.o bdr_manager.o bdr_apply.o bdr_output.o bdr_sync.o bdr_worker.o
 
 REGRESS = 
 
@@ -68,7 +68,9 @@ $(control_path): bdr.control.in Makefile
 	sed 's/__BDR_VERSION_STR__/$(bdr_version_str)/' $(realpath $(srcdir)/bdr.control.in) > $(control_path)
 
 $(bdr_version_h): bdr_version.h.in Makefile
-	sed 's/__BDR_VERSION__/$(bdr_version)/;s/__BDR_VERSION_STR__/$(bdr_version_str)/;s/__BDR_VERSION_DATE__//;s/__BDR_VERSION_GITHASH__//;' $(realpath $(srcdir)/bdr_version.h.in) > $(bdr_version_h)
+	sed 's/__BDR_VERSION__/$(bdr_version)/;s/__BDR_VERSION_NUM__/$(bdr_version_num)/;s/__BDR_VERSION_DATE__/$(shell date -I)/;s/__BDR_VERSION_GITHASH__/$(GITHASH)/;' $(realpath $(srcdir)/bdr_version.h.in) > $(bdr_version_h)
+
+$(OBJS): $(bdr_version_h)
 
 all: $(control_path) $(bdr_version_h)
 
