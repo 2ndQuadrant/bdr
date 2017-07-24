@@ -7,7 +7,7 @@ PGFILEDESC = "bdr - async multimaster logical replication"
 
 DATA = bdr--3.0.0.sql
 
-OBJS = bdr_pgl_plugin.c
+OBJS = bdr_pgl_plugin.o
 
 REGRESS = 
 
@@ -23,7 +23,7 @@ PG_CONFIG ?= pg_config
 
 PGVER := $(shell $(PG_CONFIG) --version | sed 's/^[^0-9/]*\([0-9][0-9\.]\+\).*/\1/g' | awk -F . '{ print $$1$$2 }')
 
-PG_CPPFLAGS += -I$(libpq_srcdir) -I$(realpath $(srcdir)/compat$(PGVER))
+PG_CPPFLAGS += -I$(libpq_srcdir) -I$(realpath $(srcdir)/compat$(PGVER)) -I$(includedir)/pglogical
 SHLIB_LINK += $(libpq)
 
 OBJS += $(srcdir)/compat$(PGVER)/bdr_compat.o
@@ -60,6 +60,9 @@ regresscheck:
 	    $(REGRESS)
 
 check: install regresscheck
+
+# make doesn't figure out that these are the same thing unless we tell it
+bdr.control: $(control_path)
 
 $(control_path): bdr.control.in Makefile
 	sed 's/__BDR_VERSION_STR__/$(bdr_version_str)/' $(realpath $(srcdir)/bdr.control.in) > $(control_path)
