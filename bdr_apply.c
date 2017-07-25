@@ -13,6 +13,8 @@
  */
 #include "postgres.h"
 
+#include "utils/int8.h"
+
 #include "bdr_version.h"
 #include "bdr_worker.h"
 #include "bdr_apply.h"

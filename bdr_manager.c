@@ -13,6 +13,8 @@
  */
 #include "postgres.h"
 
+#include "bdr_manager.h"
+
 void
 bdr_manager_worker_start(void)
 {

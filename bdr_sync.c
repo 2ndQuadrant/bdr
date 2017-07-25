@@ -13,6 +13,8 @@
  */
 #include "postgres.h"
 
+#include "bdr_sync.h"
+
 void
 bdr_sync_worker_start(void)
 {
