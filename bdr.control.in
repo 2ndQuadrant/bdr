@@ -1,6 +1,6 @@
 # bdr extension
 comment = 'Bi-directional replication for PostgreSQL'
-default_version = '__BDR_VERSION_STR__'
+default_version = '__BDR_VERSION__'
 module_pathname = '$libdir/bdr'
 requires = pglogical
 relocatable = false

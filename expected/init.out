@@ -1,0 +1,3 @@
+\set VERBOSITY terse
+CREATE EXTENSION bdr CASCADE;
+NOTICE:  installing required extension "pglogical"
