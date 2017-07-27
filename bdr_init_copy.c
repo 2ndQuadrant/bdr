@@ -643,7 +643,7 @@ usage(void)
 	printf(_("                          can be either empty/non-existing directory,\n"));
 	printf(_("                          or directory populated using pg_basebackup -X stream\n"));
 	printf(_("                          command\n"));
-	printf(_("  -l, --log-file          log file name, default bdr_init_copy_postgres.log"));
+	printf(_("  -l, --log-file          log file name, default bdr_init_copy_postgres.log\n"));
 	printf(_("  -n, --node-name=NAME    name of the newly created node\n"));
 	printf(_("  --replication-sets=SETS comma separated list of replication set names to use\n"));
 	printf(_("  -s, --stop              stop the server once the initialization is done\n"));
