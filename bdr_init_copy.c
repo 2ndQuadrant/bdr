@@ -474,7 +474,8 @@ main(int argc, char **argv)
 								escape_single_quotes_ascii(remote_connstr));
 	}
 	else
-		printf(_("updating recovery target in existing recovery.conf\n"));
+		print_msg(VERBOSITY_NORMAL,
+				  _("updating recovery target in existing recovery.conf\n"));
 
 	appendPQExpBuffer(recoveryconfcontents, "recovery_target_name = '%s'\n", restore_point_name);
 	appendPQExpBuffer(recoveryconfcontents, "recovery_target_inclusive = true\n");
