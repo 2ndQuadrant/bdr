@@ -5,12 +5,12 @@
  </indexterm>
 
  <para>
-  &bdr;/&udr; provides a number of command-line utilities, which are installed
+  &bdr; provides a number of command-line utilities, which are installed
   to the PostgreSQL <filename>bin</filename> directory when the &bdr; extension
   is installed. The most important is <xref linkend="command-bdr-init-copy">,
   which is used when creating a new node.
  </para>
- 
+
  <para>
   Some of the commands installed are only intended for &bdr;'s internal use and
   are not documented here.
@@ -21,19 +21,38 @@
 
   <para>
    The <application>bdr_init_copy</> command is used to initialize a new
-   &udr;/&bdr; node by making physical copy of an existing node and
+   &bdr; node by making physical copy of an existing node and
    establishing a connection to the node that the clone was made from.
   </para>
 
-  <note><para>
-    Using <application>bdr_init_copy</application> will clone all
-    databases from the origin server, but only connect one database
-    as a subscriber.
-  </para></note>
+  <para>
+   Using <application>bdr_init_copy</application> will clone all databases
+   from the origin server. All BDR-enabled databases on the cloned peer will
+   be bought up for BDR on the downstream.
+  </para>
 
   <para>
    See <xref linkend="node-management"> for more information about node
    creation.
+  </para>
+
+  <para>
+   By default <application>bdr_init_copy</application> clones the source BDR
+   node using <application>pg_basebackup</application>. However, if the data
+   directory already contains a physical backup (clone) of the source database
+   it will be converted into a BDR node instead. The backup must be taken by
+   <application>pg_basebackup</application> or some other safe cloning method
+   like <literal>pg_start_backup()</literal> + <application>rsync</application>
+   + <literal>pg_stop_backup()</literal> + WAL archive replay or streaming. It
+   backup must have a <filename>recovery.conf</filename> that causes it to
+   stream changes from the upstream server's WAL archive via
+   <literal>restore_command</literal> or <literal>primary_conninfo</literal> so
+   it can continue to replay from the source node as a streaming replica when
+   it is started up. The backup must not already be running.
+   <application>bdr_init_copy</application> will override any existing recovery
+   target set in <filename>recovery.conf</filename>. See <ulink
+   url="https://www.postgresql.org/docs/current/static/continuous-archiving.html#BACKUP-LOWLEVEL-BASE-BACKUP">
+   the PostgreSQL manual</ulink> for information on creating base backups.
   </para>
 
   <cmdsynopsis>
@@ -59,9 +78,10 @@
         Data directory of the new node.
        </para>
        <para>
-        This can be either directory made using <application>pg_basebackup</> of
-        the source node or empty directory. In case of empty directory, the full
-        backup of the source node will be made.
+        This can be either a postgres data directory backed up from the source
+        node (as discussed above) or an empty directory. In case of empty
+        directory, the full backup of the source node will be made using
+        <application>pg_basebackup</application>.
        </para>
       </listitem>
      </varlistentry>
@@ -77,7 +97,7 @@
      </varlistentry>
 
      <varlistentry>
-      <term><option>--replication_sets=<replaceable class="parameter">sets</replaceable></option></term>
+      <term><option>--replication-sets=<replaceable class="parameter">sets</replaceable></option></term>
       <listitem>
        <para>
         Comma separated list of replication set names to use.
@@ -126,6 +146,29 @@
         This parameter is useful if you can't use streaming replication for
         initial synchronization and you want to use <varname>archive_command</>
         instead.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><option>--log-file=<replaceable class="parameter">bdr_init_copy_postgres.log</replaceable></option></term>
+      <listitem>
+       <para>
+        Path to the log file that bdr_init_copy will write <command>postgres</command>
+        output to when it starts temporary postgres instances during setup. Defaults
+        to <literal>bdr_init_copy_postgres.log</literal> in the current directory.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><option>--apply-delay=<replaceable class="parameter">0</replaceable></option></term>
+      <listitem>
+       <para>
+        This option is the same as the <replaceable>apply_delay</replaceable> option to
+        <function><link linkend="function-bdr-group-join">bdr_group_join</link></function>.
+        It is mainly useful for testing - including crude latency simulation -
+        and debugging.
        </para>
       </listitem>
      </varlistentry>
@@ -243,6 +286,14 @@
         Defaults to the <envar>PGPORT</envar> environment variable, if
         set, or a compiled-in default.
        </para>
+       <para>
+        <application>bdr_init_copy</application> does <emphasis>not</emphasis>
+        modify <filename>postgresql.conf</filename> on the new node to use this
+        port. If it is different to the remote port (e.g. when local and remote
+        nodes are on the same machine and would otherwise have conflicting
+        ports), supply a modified configuration with
+        <literal>--postgresql-conf</literal>.
+       </para>
       </listitem>
      </varlistentry>
 
@@ -266,7 +317,7 @@
 
   <para>
    <application>bdr_initial_load</application> is an internal utility command
-   invoked by &bdr;/&udr; when joining or subscribing. It is not intended for
+   invoked by &bdr; when joining or subscribing. It is not intended for
    end-user use, and may not be present in future versions of the system.
   </para>
 
