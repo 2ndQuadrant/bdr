@@ -15,6 +15,19 @@
   See also: <xref linkend="upgrade">.
  </para>
 
+ <sect1 id="release-1.0.3">
+  <title>Release 1.0.3</title>
+
+  <para><emphasis>Mon Jul 30, 2017</emphasis></para>
+
+  <para>
+   This BDR 1.0.3 maintenance release fixes a minor bug where DDL lock strength
+   was sometimes higher than required. It also improves some error messages to
+   make diagnosis of table structure mismatches easier. 
+  </para>
+
+ </sect1>
+
  <sect1 id="release-1.0.2">
   <title>Release 1.0.2</title>
 
