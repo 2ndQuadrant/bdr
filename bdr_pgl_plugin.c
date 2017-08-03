@@ -132,6 +132,12 @@ bdr_init_pgl_plugin(PG_FUNCTION_ARGS)
 	PG_RETURN_BOOL(true);
 }
 
+static void
+DefineGUCs(void)
+{
+	/* TODO: allow bdr_max_nodes to be configured? */
+}
+
 /*
  * This is the normal postgres extension entrypoint.
  *
@@ -150,6 +156,8 @@ _PG_init(void)
 
 	if (!process_shared_preload_libraries_in_progress)
 		elog(ERROR, "bdr is not in shared_preload_libraries");
+
+	DefineGUCs();
 
 	elog(DEBUG1, "loading bdr %s (%06d)", BDR_VERSION, BDR_VERSION_NUM);
 }

@@ -7,7 +7,16 @@ PGFILEDESC = "bdr - async multimaster logical replication"
 
 DATA = bdr--3.0.0.sql
 
-OBJS = bdr_pgl_plugin.o bdr_manager.o bdr_apply.o bdr_output.o bdr_sync.o bdr_worker.o bdr_functions.o
+OBJS = \
+	bdr_apply.o \
+	bdr_consensus.o \
+	bdr_functions.o \
+	bdr_manager.o \
+	bdr_msgbroker.o \
+	bdr_output.o \
+	bdr_pgl_plugin.o \
+	bdr_sync.o \
+	bdr_worker.o
 
 REGRESS = preseed init part
 
