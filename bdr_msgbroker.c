@@ -22,6 +22,13 @@
  * The message broker tries to be independent of the rest of BDR; we want to be
  * able to plug in an alternative transport, and/or re-use this for other
  * products.
+ *
+ * Messages are delivered to peers using libpq connections that make
+ * function calls on the other end. A log filter hook suppresses them
+ * from the statement logs. The functions deliver message payloads
+ * to the message broker via a shmem queue, which is read by the
+ * broker when the hosting process (bdr manager, in this case)'s latch
+ * is set.
  */
 #include "postgres.h"
 
