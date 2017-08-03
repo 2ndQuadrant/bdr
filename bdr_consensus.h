@@ -7,8 +7,8 @@ extern void consensus_alter_node(uint32 nodeid, const char *new_dsn);
 
 extern void consensus_remove_node(uint32 nodeid);
 
-extern void consensus_startup(uint32 my_nodeid, Name journal_schema,
-	Name journal_relname, int max_nodes);
+extern void consensus_startup(uint32 my_nodeid, const char * journal_schema,
+	const char * journal_relname, int max_nodes);
 
 extern void consensus_pump(void);
 

@@ -9,6 +9,8 @@ DATA = bdr--3.0.0.sql
 
 OBJS = \
 	bdr_apply.o \
+	bdr_catalogs.o \
+	bdr_catcache.o \
 	bdr_consensus.o \
 	bdr_functions.o \
 	bdr_manager.o \
