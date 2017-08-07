@@ -9,4 +9,6 @@ extern char peer_bdr_version_str[BDR_VERSION_STR_SIZE];
 
 #define PEER_HAS_BDR() (peer_bdr_version_num != -1)
 
+extern void bdr_ensure_active_db(void);
+
 #endif

@@ -19,3 +19,12 @@
 bool bdr_required_this_conn = false;
 int peer_bdr_version_num = -1;
 char peer_bdr_version_str[BDR_VERSION_STR_SIZE];
+
+/*
+ * TODO: ensure BDR is active in this database, ERROR if not active
+ */
+void
+bdr_ensure_active_db(void)
+{
+	elog(ERROR, "not implemented");
+}

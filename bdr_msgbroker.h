@@ -6,6 +6,14 @@
 struct WaitEventSet;
 struct WaitEvent;
 
+typedef enum MsgbSendStatus
+{
+	MSGB_MSGSTATUS_QUEUED,
+	MSGB_MSGSTATUS_SENDING,
+	MSGB_MSGSTATUS_DELIVERED,
+	MSGB_MSGSTATUS_NOTFOUND
+} MsgbSendStatus;
+
 typedef void (*msgb_received_hook_type)(uint32 origin, const char *payload, uint32 payload_size);
 
 extern msgb_received_hook_type msgb_received_hook;
@@ -22,9 +30,9 @@ extern void msgb_add_destination(uint32 destionation_id, const char *dsn);
 
 extern void msgb_remove_destination(uint32 destination_id);
 
-extern int msgb_queue_message(uint32 destination, const char * payload, uint32 payload_size);
+extern int msgb_queue_message(uint32 destination, const char * payload, Size payload_size);
 
-extern int msgb_message_status(int msgid);
+extern MsgbSendStatus msgb_message_status(uint32 destination, int msgid);
 
 extern void msgb_startup(int max_connections);
 
