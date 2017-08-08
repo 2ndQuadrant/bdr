@@ -15,9 +15,13 @@
  * all currently alive and reachable peer manager workers. It asynchronously
  * dispatches messages and processes replies from each worker.
  *
- * The message broker doesn't remember anything and has no persistent state.
- * It doesn't guarantee message reliability, we overlay a distributed
- * consensus protocol on top for that. See bdr_consensus.c.
+ * The message broker doesn't remember anything across crashes/restarts and has
+ * no persistent state.  It doesn't guarantee message reliability, we overlay a
+ * distributed consensus protocol on top for that. See bdr_consensus.c.
+ *
+ * It does try to redeliver messages after connection loss, so it's possible
+ * for a message to be delivered more than once. Recipients should disregard
+ * messages with a message_id less than or equal to the last message received.
  *
  * The message broker tries to be independent of the rest of BDR; we want to be
  * able to plug in an alternative transport, and/or re-use this for other
@@ -47,6 +51,8 @@
 
 #include "libpq-fe.h"
 
+#include "bdr_worker.h"
+#include "bdr_catcache.h"
 #include "bdr_msgbroker.h"
 
 typedef struct MsgbMessageBuffer
@@ -69,6 +75,12 @@ typedef struct MsgbConnection
 	/* TODO: need backoff timer */
 } MsgbConnection;
 
+typedef struct MsgbReceiveQueue
+{
+	uint32 sender_id;
+	int max_received_msgid;
+} MsgbReceiveQueue;
+
 msgb_received_hook_type msgb_received_hook = NULL;
 msgb_recreate_wait_event_set_hook_type msgb_recreate_wait_event_set_hook = NULL;
 
@@ -77,6 +89,7 @@ static WaitEventSet *wait_set = NULL;
 
 /* connection and peer state */
 static MsgbConnection *conns = NULL;
+static MsgbReceiveQueue *recvqueues = NULL;
 static int max_conns;
 
 static bool atexit_registered = false;
@@ -96,6 +109,12 @@ static uint32 origin_node = 0;
  * (sockets not created yet)?
  */
 static bool conns_polling = false;
+
+/*
+ * State used by normal backends acting as message receiver workers.
+ * Unused in the manager.
+ */
+uint32 connected_peer_id = 0;
 
 static void msgb_remove_destination_by_index(int index);
 static void msgb_atexit(int code, Datum arg);
@@ -138,13 +157,15 @@ msgb_connect(PG_FUNCTION_ARGS)
 
 	bdr_cache_local_nodeinfo();
 
-	if (destination_node != bdr_get_local_node_id())
+	if (destination_node != bdr_get_local_nodeid())
 		ereport(ERROR,
 				(errcode(ERRCODE_DATA_EXCEPTION),
 				 errmsg("peer %d expected to connect to our node with id %d but we are node %d",
-				 		origin_node, destination_node, bdr_get_local_node_id())));
+				 		origin_node, destination_node, bdr_get_local_nodeid())));
 
 	/* TODO find shmem mq and attach */
+
+	connected_peer_id = origin_node;
 
 	elog(ERROR, "not implemented");
 
@@ -154,18 +175,32 @@ msgb_connect(PG_FUNCTION_ARGS)
 
 /*
  * SQL-callable to deliver a message to the message broker on the receiving
- * side.
+ * side. This is the normal-backend half of receive processing.
  *
- * Uses a message buffer connection already established by msgb_connect.
+ * Uses a message buffer connection already established by msgb_connect
+ * to deliver the payload to the manager.
  */
 PG_FUNCTION_INFO_V1(msgb_deliver_message);
 
 Datum
 msgb_deliver_message(PG_FUNCTION_ARGS)
 {
-	uint32 destination_node = PG_GETARG_UINT32(0);
+	uint32 destination_id = PG_GETARG_UINT32(0);
 	int message_id = PG_GETARG_INT32(1);
 	bytea *payload = PG_GETARG_BYTEA_PP(2);
+	int idx, recvidx;
+	MsgbReceiveQueue *recvqueue;
+
+	if (connected_peer_id == 0)
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg_internal("no connected peer, use msgb_connect first")));
+
+	if (destination_id != bdr_get_local_nodeid())
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg_internal("message forwarding not supported yet, dest was %u sender %u",
+				 				 destination_id, connected_peer_id)));
 
 	/* TODO */
 
@@ -344,7 +379,7 @@ msgb_peer_connect(MsgbConnection *conn)
 
 	snprintf(destination_id, 30, "%u", conn->destination_id);
 	paramValues[0] = destination_id;
-	snprintf(origin_id, 30, "%u", bdr_get_local_node_id());
+	snprintf(origin_id, 30, "%u", bdr_get_local_nodeid());
 	paramValues[1] = origin_id;
 
 	/*
