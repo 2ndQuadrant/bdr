@@ -141,7 +141,26 @@ sub mkvcbuild
 		my $plperl =
 		  $solution->AddProject('plperl', 'dll', 'PLs', 'src\pl\plperl');
 		$plperl->AddIncludeDir($solution->{options}->{perl} . '/lib/CORE');
-		$plperl->AddDefine('PLPERL_HAVE_UID_GID');
+
+		# Add defines from Perl's ccflags; see PGAC_CHECK_PERL_EMBED_CCFLAGS
+		my @perl_embed_ccflags;
+		foreach my $f (split(" ",$Config{ccflags}))
+		{
+			if ($f =~ /^-D[^_]/)
+			{
+				$f =~ s/\-D//;
+				push(@perl_embed_ccflags, $f);
+			}
+		}
+
+		# XXX this probably is redundant now?
+		push(@perl_embed_ccflags, 'PLPERL_HAVE_UID_GID');
+
+		foreach my $f (@perl_embed_ccflags)
+		{
+			$plperl->AddDefine($f);
+		}
+
 		foreach my $xs ('SPI.xs', 'Util.xs')
 		{
 			(my $xsc = $xs) =~ s/\.xs/.c/;
@@ -256,7 +275,7 @@ sub mkvcbuild
 		$pltcl->AddIncludeDir($solution->{options}->{tcl} . '\include');
 		$pltcl->AddReference($postgres);
 
-		for my $tclver (qw(86t 85 84))
+		for my $tclver (qw(86t 86 85 84))
 		{
 			my $tcllib = $solution->{options}->{tcl} . "\\lib\\tcl$tclver.lib";
 			if (-e $tcllib)

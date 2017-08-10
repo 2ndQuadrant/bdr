@@ -14922,6 +14922,7 @@ static void
 dumpEventTrigger(Archive *fout, EventTriggerInfo *evtinfo)
 {
 	PQExpBuffer query;
+	PQExpBuffer delqry;
 	PQExpBuffer labelq;
 
 	/* Skip if not to be dumped */
@@ -14929,6 +14930,7 @@ dumpEventTrigger(Archive *fout, EventTriggerInfo *evtinfo)
 		return;
 
 	query = createPQExpBuffer();
+	delqry = createPQExpBuffer();
 	labelq = createPQExpBuffer();
 
 	appendPQExpBufferStr(query, "CREATE EVENT TRIGGER ");
@@ -14968,19 +14970,27 @@ dumpEventTrigger(Archive *fout, EventTriggerInfo *evtinfo)
 		}
 		appendPQExpBufferStr(query, ";\n");
 	}
+
+	appendPQExpBuffer(delqry, "DROP EVENT TRIGGER %s;\n",
+					  fmtId(evtinfo->dobj.name));
+
 	appendPQExpBuffer(labelq, "EVENT TRIGGER %s",
 					  fmtId(evtinfo->dobj.name));
 
 	ArchiveEntry(fout, evtinfo->dobj.catId, evtinfo->dobj.dumpId,
-				 evtinfo->dobj.name, NULL, NULL, evtinfo->evtowner, false,
+				 evtinfo->dobj.name, NULL, NULL,
+				 evtinfo->evtowner, false,
 				 "EVENT TRIGGER", SECTION_POST_DATA,
-				 query->data, "", NULL, NULL, 0, NULL, NULL);
+				 query->data, delqry->data, NULL,
+				 NULL, 0,
+				 NULL, NULL);
 
 	dumpComment(fout, labelq->data,
 				NULL, evtinfo->evtowner,
 				evtinfo->dobj.catId, 0, evtinfo->dobj.dumpId);
 
 	destroyPQExpBuffer(query);
+	destroyPQExpBuffer(delqry);
 	destroyPQExpBuffer(labelq);
 }
 

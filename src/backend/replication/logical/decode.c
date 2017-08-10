@@ -690,6 +690,7 @@ DecodeUpdate(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 	xl_heap_update *xlrec;
 	ReorderBufferChange *change;
 	char	   *data;
+	size_t		remlen = r->xl_len;
 
 	xlrec = (xl_heap_update *) buf->record_data;
 
@@ -704,6 +705,7 @@ DecodeUpdate(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 	/* caution, remaining data in record is not aligned */
 	data = buf->record_data + SizeOfHeapUpdate;
+	remlen -= SizeOfHeapUpdate;
 
 	if (xlrec->flags & XLOG_HEAP_CONTAINS_NEW_TUPLE)
 	{
@@ -715,6 +717,7 @@ DecodeUpdate(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 		memcpy(&xlhdr, data, sizeof(xlhdr));
 		data += offsetof(xl_heap_header_len, header);
+		remlen -= offsetof(xl_heap_header_len, header);
 
 		datalen = xlhdr.t_len + SizeOfHeapHeader;
 		tuplelen = xlhdr.t_len;
@@ -725,8 +728,10 @@ DecodeUpdate(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 		DecodeXLogTuple(data, datalen, change->data.tp.newtuple);
 		/* skip over the rest of the tuple header */
 		data += SizeOfHeapHeader;
+		remlen -= SizeOfHeapHeader;
 		/* skip over the tuple data */
 		data += xlhdr.t_len;
+		remlen -= xlhdr.t_len;
 	}
 
 	if (xlrec->flags & XLOG_HEAP_CONTAINS_OLD)
@@ -737,10 +742,17 @@ DecodeUpdate(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 		memcpy(&xlhdr, data, sizeof(xlhdr));
 		data += offsetof(xl_heap_header_len, header);
+		remlen -= offsetof(xl_heap_header_len, header);
 
-		/* t_len is inconsistent with other cases, see log_heap_update */
-		tuplelen = xlhdr.t_len - offsetof(HeapTupleHeaderData, t_bits);
-		datalen = tuplelen + SizeOfHeapHeader;
+		/*
+		 * NB: Even though xl_heap_header_len contains the tuple's length,
+		 * it's length field is not wide enough. Use the whole record length
+		 * minus the new tuple's length instead. We can't remove the record
+		 * length from the WAL record format in 9.4 due to compatibility
+		 * concerns - later versions don't have it anyway.
+		 */
+		datalen = remlen;
+		tuplelen = datalen - SizeOfHeapHeader;
 
 		change->data.tp.oldtuple =
 			ReorderBufferGetTupleBuf(ctx->reorder, tuplelen);
@@ -748,6 +760,7 @@ DecodeUpdate(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 		DecodeXLogTuple(data, datalen, change->data.tp.oldtuple);
 #ifdef NOT_USED
 		data += datalen;
+		remlen -= datalen;
 #endif
 	}
 

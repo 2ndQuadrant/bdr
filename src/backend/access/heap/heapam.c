@@ -5101,8 +5101,10 @@ l5:
  * with the given xid, does the current transaction need to wait, fail, or can
  * it continue if it wanted to acquire a lock of the given mode?  "needwait"
  * is set to true if waiting is necessary; if it can continue, then
- * HeapTupleMayBeUpdated is returned.  In case of a conflict, a different
- * HeapTupleSatisfiesUpdate return code is returned.
+ * HeapTupleMayBeUpdated is returned.  If the lock is already held by the
+ * current transaction, return HeapTupleSelfUpdated.  In case of a conflict
+ * with another transaction, a different HeapTupleSatisfiesUpdate return code
+ * is returned.
  *
  * The held status is said to be hypothetical because it might correspond to a
  * lock held by a single Xid, i.e. not a real MultiXactId; we express it this
@@ -5125,8 +5127,9 @@ test_lockmode_for_conflict(MultiXactStatus status, TransactionId xid,
 	if (TransactionIdIsCurrentTransactionId(xid))
 	{
 		/*
-		 * Updated by our own transaction? Just return failure.  This
-		 * shouldn't normally happen.
+		 * The tuple has already been locked by our own transaction.  This is
+		 * very rare but can happen if multiple transactions are trying to
+		 * lock an ancient version of the same tuple.
 		 */
 		return HeapTupleSelfUpdated;
 	}
@@ -5295,6 +5298,22 @@ l4:
 													 members[i].xid,
 													 mode, &needwait);
 
+					/*
+					 * If the tuple was already locked by ourselves in a
+					 * previous iteration of this (say heap_lock_tuple was
+					 * forced to restart the locking loop because of a change
+					 * in xmax), then we hold the lock already on this tuple
+					 * version and we don't need to do anything; and this is
+					 * not an error condition either.  We just need to skip
+					 * this tuple and continue locking the next version in the
+					 * update chain.
+					 */
+					if (res == HeapTupleSelfUpdated)
+					{
+						pfree(members);
+						goto next;
+					}
+
 					if (needwait)
 					{
 						LockBuffer(buf, BUFFER_LOCK_UNLOCK);
@@ -5357,6 +5376,19 @@ l4:
 
 				res = test_lockmode_for_conflict(status, rawxmax, mode,
 												 &needwait);
+
+				/*
+				 * If the tuple was already locked by ourselves in a previous
+				 * iteration of this (say heap_lock_tuple was forced to
+				 * restart the locking loop because of a change in xmax), then
+				 * we hold the lock already on this tuple version and we don't
+				 * need to do anything; and this is not an error condition
+				 * either.  We just need to skip this tuple and continue
+				 * locking the next version in the update chain.
+				 */
+				if (res == HeapTupleSelfUpdated)
+					goto next;
+
 				if (needwait)
 				{
 					LockBuffer(buf, BUFFER_LOCK_UNLOCK);
@@ -5419,6 +5451,7 @@ l4:
 
 		END_CRIT_SECTION();
 
+next:
 		/* if we find the end of update chain, we're done. */
 		if (mytup.t_data->t_infomask & HEAP_XMAX_INVALID ||
 			ItemPointerEquals(&mytup.t_self, &mytup.t_data->t_ctid) ||
@@ -5929,7 +5962,7 @@ heap_prepare_freeze_tuple(HeapTupleHeader tuple, TransactionId cutoff_xid,
 			frz->t_infomask &= ~HEAP_XMAX_BITS;
 			frz->xmax = newxmax;
 			if (flags & FRM_MARK_COMMITTED)
-				frz->t_infomask &= HEAP_XMAX_COMMITTED;
+				frz->t_infomask |= HEAP_XMAX_COMMITTED;
 			changed = true;
 		}
 		else if (flags & FRM_RETURN_IS_MULTI)
@@ -7053,7 +7086,13 @@ log_heap_update(Relation reln, Buffer oldbuf,
 		/* We need to log a tuple identity */
 		if (old_key_tuple)
 		{
-			/* don't really need this, but its more comfy to decode */
+			/*
+			 * This isn't needed, and can't actually capture the contents of
+			 * the tuple accurately (because t_len isn't guaranteed to be big
+			 * enough to contain old tuples which can be up to 1 GB long). But
+			 * previous versions of 9.4 used this, so we can't change the WAL
+			 * format.
+			 */
 			xlhdr_idx.header.t_infomask2 = old_key_tuple->t_data->t_infomask2;
 			xlhdr_idx.header.t_infomask = old_key_tuple->t_data->t_infomask;
 			xlhdr_idx.header.t_hoff = old_key_tuple->t_data->t_hoff;
