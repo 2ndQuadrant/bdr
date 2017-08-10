@@ -6,36 +6,19 @@
 struct WaitEventSet;
 struct WaitEvent;
 
-typedef enum MsgbSendStatus
-{
-	MSGB_MSGSTATUS_QUEUED,
-	MSGB_MSGSTATUS_SENDING,
-	MSGB_MSGSTATUS_DELIVERED,
-	MSGB_MSGSTATUS_NOTFOUND
-} MsgbSendStatus;
+extern void msgb_service_connections(struct WaitEvent *occurred_events, int nevents);
 
-typedef void (*msgb_received_hook_type)(uint32 origin, const char *payload, uint32 payload_size);
+extern void msgb_startup(int max_connections, Size recv_queue_size);
 
-extern msgb_received_hook_type msgb_received_hook;
+extern void msgb_shutdown(void);
 
-typedef struct WaitEventSet * (*msgb_recreate_wait_event_set_hook_type)(struct WaitEventSet *old_set, int max_entries);
-
-extern msgb_recreate_wait_event_set_hook_type msgb_recreate_wait_event_set_hook;
-
-extern void msgb_set_wait_event_set(struct WaitEventSet* set);
+extern void msgb_shmem_init(int max_local_nodes);
 
 extern void msgb_service_connections(struct WaitEvent *occurred_events, int nevents);
 
-extern void msgb_add_destination(uint32 destionation_id, const char *dsn);
+#define MSGB_SCHEMA "bdr"
 
-extern void msgb_remove_destination(uint32 destination_id);
-
-extern int msgb_queue_message(uint32 destination, const char * payload, Size payload_size);
-
-extern MsgbSendStatus msgb_message_status(uint32 destination, int msgid);
-
-extern void msgb_startup(int max_connections);
-
-extern void msgb_shutdown(void);
+/* Broker-internal use only */
+extern int msgb_max_peers;
 
 #endif

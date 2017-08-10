@@ -1,6 +1,8 @@
 #ifndef BDR_CONSENSUS_H
 #define BDR_CONSENSUS_H
 
+struct WaitEvent;
+
 extern void consensus_add_node(uint32 nodeid, const char *dsn);
 
 extern void consensus_alter_node(uint32 nodeid, const char *new_dsn);
@@ -10,7 +12,7 @@ extern void consensus_remove_node(uint32 nodeid);
 extern void consensus_startup(uint32 my_nodeid, const char * journal_schema,
 	const char * journal_relname, int max_nodes);
 
-extern void consensus_pump(void);
+extern void consensus_pump(struct WaitEvent *occurred_events, int nevents);
 
 extern void consensus_shutdown(void);
 

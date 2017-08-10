@@ -58,6 +58,8 @@
 #include "bdr_sync.h"
 #include "bdr_apply.h"
 #include "bdr_output.h"
+#include "bdr_msgbroker.h"
+#include "bdr_consensus.h"
 #include "bdr_manager.h"
 
 PG_MODULE_MAGIC;
@@ -65,6 +67,9 @@ PG_MODULE_MAGIC;
 PG_FUNCTION_INFO_V1(bdr_init_pgl_plugin);
 
 void _PG_init(void);
+
+/* FIXME: Get rid of this hardcoded limit */
+#define BDR_MAX_DATABASES 4
 
 static void
 bdr_worker_start(void)
@@ -133,7 +138,7 @@ bdr_init_pgl_plugin(PG_FUNCTION_ARGS)
 }
 
 static void
-DefineGUCs(void)
+bdr_define_gucs(void)
 {
 	/* TODO: allow bdr_max_nodes to be configured? */
 }
@@ -157,7 +162,9 @@ _PG_init(void)
 	if (!process_shared_preload_libraries_in_progress)
 		elog(ERROR, "bdr is not in shared_preload_libraries");
 
-	DefineGUCs();
+	bdr_define_gucs();
+
+	msgb_shmem_init(BDR_MAX_DATABASES);
 
 	elog(DEBUG1, "loading bdr %s (%06d)", BDR_VERSION, BDR_VERSION_NUM);
 }

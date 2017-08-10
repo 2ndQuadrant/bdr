@@ -15,6 +15,8 @@ OBJS = \
 	bdr_functions.o \
 	bdr_manager.o \
 	bdr_msgbroker.o \
+	bdr_msgbroker_receive.o \
+	bdr_msgbroker_send.o \
 	bdr_output.o \
 	bdr_pgl_plugin.o \
 	bdr_sync.o \
