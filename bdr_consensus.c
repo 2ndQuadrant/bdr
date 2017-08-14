@@ -36,7 +36,7 @@ consensus_message_committed_hooktype consensus_message_committed_hook = NULL;
 void
 consensus_add_node(uint32 nodeid, const char *dsn)
 {
-	msgb_add_destination(nodeid, dsn);
+	msgb_add_peer(nodeid, dsn);
 
 	elog(WARNING, "not implemented");
 }
@@ -44,8 +44,8 @@ consensus_add_node(uint32 nodeid, const char *dsn)
 void
 consensus_alter_node(uint32 nodeid, const char *new_dsn)
 {
-	msgb_remove_destination(nodeid);
-	msgb_add_destination(nodeid, new_dsn);
+	msgb_remove_peer(nodeid);
+	msgb_add_peer(nodeid, new_dsn);
 
 	elog(WARNING, "not implemented");
 }
@@ -53,7 +53,7 @@ consensus_alter_node(uint32 nodeid, const char *new_dsn)
 void
 consensus_remove_node(uint32 nodeid)
 {
-	msgb_remove_destination(nodeid);
+	msgb_remove_peer(nodeid);
 
 	elog(WARNING, "not implemented");
 }

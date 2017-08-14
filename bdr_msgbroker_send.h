@@ -19,10 +19,6 @@ typedef struct WaitEventSet * (*msgb_recreate_wait_event_set_hook_type)(struct W
 
 extern msgb_recreate_wait_event_set_hook_type msgb_recreate_wait_event_set_hook;
 
-extern void msgb_add_destination(uint32 destination_id, const char *dsn);
-
-extern void msgb_remove_destination(uint32 destination_id);
-
 extern int msgb_queue_message(uint32 destination, const char * payload, Size payload_size);
 
 extern MsgbSendStatus msgb_message_status(uint32 destination, int msgid);
