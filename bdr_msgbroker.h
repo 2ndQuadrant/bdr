@@ -16,6 +16,10 @@ extern void msgb_shmem_init(int max_local_nodes);
 
 extern void msgb_service_connections(struct WaitEvent *occurred_events, int nevents);
 
+extern void msgb_add_peer(uint32 peer_id, const char *dsn);
+
+extern void msgb_remove_peer(uint32 peer_id);
+
 #define MSGB_SCHEMA "bdr"
 
 /* Broker-internal use only */

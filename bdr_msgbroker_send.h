@@ -29,4 +29,8 @@ extern MsgbSendStatus msgb_message_status(uint32 destination, int msgid);
 
 extern void msgb_service_connections_send(WaitEvent *occurred_events, int nevents);
 
+extern void msgb_add_send_peer(uint32 destination_id, const char *dsn);
+
+extern void msgb_remove_send_peer(uint32 destination_id);
+
 #endif

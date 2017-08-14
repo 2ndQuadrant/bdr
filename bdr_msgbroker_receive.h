@@ -12,4 +12,7 @@ extern msgb_received_hook_type msgb_received_hook;
 
 extern void msgb_service_connections_receive(void);
 
+extern void msgb_add_receive_peer(uint32 origin_id);
+extern void msgb_remove_receive_peer(uint32 origin_id);
+
 #endif

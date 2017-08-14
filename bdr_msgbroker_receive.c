@@ -21,13 +21,6 @@
 #include "bdr_msgbroker_receive.h"
 #include "bdr_msgbroker.h"
 
-typedef enum MSgbShmQueueState
-{
-	MSGB_SHM_QUEUE_FREE,
-	MSGB_SHM_QUEUE_INUSE,
-	MSGB_SHM_QUEUE_
-};
-
 /*
  * Shared-memory queues used to deliver from origin_node_id to the associated
  * segment-handle's node_id are stored in dynamic shared memory, addressed
@@ -103,7 +96,7 @@ static int msgb_max_local_nodes = 0;
 typedef struct MsgbReceivePeer
 {
 	uint32			sender_id;
-	int				max_received_msgid;
+	uint32			max_received_msgid;
 	bool			pending_cleanup;
 	shm_mq_handle  *recvqueue;
 	/* Staging area for incomplete incoming messages */
@@ -113,6 +106,7 @@ typedef struct MsgbReceivePeer
 
 /* only valid for the broker not normal backends. */
 static MsgbReceivePeer *recvpeers = NULL;
+static dsm_segment *broker_dsm_seg = NULL;
 
 /*
  * State used by normal backends acting as message receiver workers.
@@ -120,6 +114,7 @@ static MsgbReceivePeer *recvpeers = NULL;
  */
 static uint32 connected_peer_id = 0;
 static shm_mq_handle *send_mq;
+static Size msgb_recv_queue_size = 0;
 
 static void msgb_connect_shmem(uint32 origin_node);
 
@@ -127,12 +122,17 @@ msgb_received_hook_type msgb_received_hook = NULL;
 
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
 
-static void msgb_mark_slot_for_cleanup(MsgbReceivePeer *peer);
-static void msgb_mq_for_node(uint32 nodeid, MsgbDSMHdr **hdr, int *hdr_idx, shm_mq **mq);
+static void msgb_mq_for_node(dsm_segment *seg, uint32 nodeid, MsgbDSMHdr **hdr, int *hdr_idx, shm_mq **mq);
+static void msgb_handle_peer_connect(MsgbReceivePeer *peer, const char *msg, Size msg_len);
+static void msgb_report_peer_connect(uint32 origin_id, uint32 last_sent_msgid);
 
 /*
  * In a normal user backend, attach to the manager's shmem queue for
  * the connecting peer and prepare to send messages.
+ *
+ * The peer must tell us the last message id it knows it delivered, or 0 if
+ * none delivered yet, so we can handle message id sequences changes if
+ * the peer restarts.
  */
 PG_FUNCTION_INFO_V1(msgb_connect);
 
@@ -141,6 +141,7 @@ msgb_connect(PG_FUNCTION_ARGS)
 {
 	uint32			origin_node = PG_GETARG_UINT32(0);
 	uint32			destination_node = PG_GETARG_UINT32(1);
+	uint32			last_sent_msgid = PG_GETARG_UINT32(2);
 
 	if (origin_node == 0 || destination_node == 0)
 		ereport(ERROR,
@@ -161,19 +162,15 @@ msgb_connect(PG_FUNCTION_ARGS)
 	Assert(msgb_ctx != NULL);
 
 	msgb_connect_shmem(origin_node);
-
-	/*
-	 * TODO: add a way to tell when the downstream broker has restarted and
-	 * reset its message IDs, so we know to start accepting lower message IDs
-	 * for the peer. Maybe we need to send a start timestamp here.
-	 */
+	msgb_report_peer_connect(origin_node, last_sent_msgid);
 
 	PG_RETURN_VOID();
 }
 
-static xx
-msgb_get_mq
-
+/*
+ * On a normal backend, find and attach to the DSM segment and then the shm_mq
+ * used to communicate with the broker.
+ */
 static void
 msgb_connect_shmem(uint32 origin_node)
 {
@@ -181,7 +178,7 @@ msgb_connect_shmem(uint32 origin_node)
 	dsm_segment	   *seg;
 	shm_toc		   *toc;
 	MsgbDSMHdr	   *hdr;
-	int				my_node_toc_entry, first_free_toc_entry;
+	int				my_node_toc_entry;
 	shm_mq		   *mq;
 	MemoryContext	old_ctx;
 	int				i;
@@ -308,6 +305,76 @@ msgb_connect_shmem(uint32 origin_node)
 	elog(DEBUG1, "peer %d connected message queue", origin_node);
 }
 
+/*
+ * When a peer (re)connects we must report that as the first message
+ * on the message queue, so the other end knows that the message
+ * counter sequence may have reset.
+ */
+static void
+msgb_report_peer_connect(uint32 origin_id, uint32 last_sent_msgid)
+{
+	shm_mq_result	res;
+	shm_mq_iovec	msg[2];
+	const uint32	message_id = 0;
+
+	Assert(connected_peer_id != 0);
+	Assert(send_mq != NULL);
+
+	msg[0].data = (void*)&message_id;
+	msg[0].len = sizeof(uint32);
+	msg[1].data = (void*)&last_sent_msgid;
+	msg[1].len = sizeof(uint32);
+
+	res = shm_mq_sendv(send_mq, msg, 2, false);
+	if (res != SHM_MQ_SUCCESS)
+		ereport(FATAL,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("message broker for node %u appears to have exited",
+						bdr_get_local_nodeid())));
+}
+
+/*
+ * Peer has (re)connected and sent us, via msgb_report_peer_connect,
+ * its idea of the last sent message id. If it's 0, the peer has
+ * restarted.
+ */
+static void
+msgb_handle_peer_connect(MsgbReceivePeer *peer, const char *msg, Size msg_len)
+{
+	uint32 last_sent_msgid;
+
+	if (msg_len != sizeof(uint32))
+	{
+		elog(WARNING, "reconnect message size was %zu, expected %zu; ignoring",
+			 msg_len, sizeof(uint32));
+		return;
+	}
+
+	last_sent_msgid = *((uint32*)msg);
+
+	if (peer->max_received_msgid >= last_sent_msgid)
+	{
+		/*
+		 * We should only see the seen message-id go backwards if it's reset to
+		 * zero for a peer restart, or if we received a message but the peer
+		 * didn't receive the function result. In the latter case we don't
+		 * want to redeliver locally.
+		 */
+		if (last_sent_msgid == 0)
+		{
+			peer->max_received_msgid = 0;
+			ereport(DEBUG2,
+					(errmsg("peer %u reconnecting to %u with reset message id after restart; was %u now 0",
+							peer->sender_id, bdr_get_local_nodeid(), peer->max_received_msgid)));
+		}
+		else
+			ereport(DEBUG2,
+					(errmsg("peer %u reconnecting to %u with last msgid %u but local %u is greater; ignoring",
+					 		peer->sender_id, bdr_get_local_nodeid(), last_sent_msgid, peer->max_received_msgid)));
+	}
+
+}
+
 
 /*
  * SQL-callable to deliver a message to the message broker on the receiving
@@ -343,13 +410,16 @@ msgb_deliver_message(PG_FUNCTION_ARGS)
 	/*
 	 * We're connected to the manager via the shmem queue, so we can just
 	 * deliver the message, fire-and-forget.
+	 *
+	 * If the broker already saw it, it'll filter it out after popping it
+	 * from the queue.
 	 */
-	msg[0].data = &message_id;
+	msg[0].data = (void*)&message_id;
 	msg[0].len = sizeof(int);
 	msg[1].data = VARDATA_ANY(payload);
 	msg[1].len = VARSIZE_ANY(payload);
 
-	res = shm_mq_sendv(send_mq, &msg, 2, false);
+	res = shm_mq_sendv(send_mq, msg, 2, false);
 	if (res != SHM_MQ_SUCCESS)
 		ereport(FATAL,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
@@ -364,11 +434,6 @@ msgb_deliver_message(PG_FUNCTION_ARGS)
 	 * message.
 	 */
 
-	/*
-	 * TODO FIXME: Right now ignoring "seen" message IDs will be wrong
-	 * if the remote broker has restarted, see comments in connect
-	 * function.
-	 */
 	PG_RETURN_VOID();
 }
 
@@ -388,7 +453,6 @@ void
 msgb_startup_receive(Size recv_queue_size)
 {
 	shm_toc_estimator e;
-	dsm_segment *seg;
 	shm_toc    *toc;
 	Size		hdr_size, segsize;
 	int			i;
@@ -430,6 +494,8 @@ msgb_startup_receive(Size recv_queue_size)
 
 	hdr_size = offsetof(MsgbDSMHdr, node_toc_map) + sizeof(uint32)*msgb_max_peers;
 
+	msgb_recv_queue_size = recv_queue_size;
+
 	/*
 	 * Prepare the ToC that maps node-ids to the associated shmem_mq.
 	 *
@@ -439,13 +505,13 @@ msgb_startup_receive(Size recv_queue_size)
 	shm_toc_initialize_estimator(&e);
 	shm_toc_estimate_chunk(&e, hdr_size);
 	for (i = 0; i <= msgb_max_peers; ++i)
-		shm_toc_estimate_chunk(&e, (Size) recv_queue_size);
+		shm_toc_estimate_chunk(&e, msgb_recv_queue_size);
 	shm_toc_estimate_keys(&e, msgb_max_peers);
 	segsize = shm_toc_estimate(&e);
 
 	/* Create the shared memory segment and establish a table of contents. */
-	seg = dsm_create(shm_toc_estimate(&e), 0);
-	toc = shm_toc_create(BDR_SHMEM_MAGIC, dsm_segment_address(seg),
+	broker_dsm_seg = dsm_create(shm_toc_estimate(&e), 0);
+	toc = shm_toc_create(BDR_SHMEM_MAGIC, dsm_segment_address(broker_dsm_seg),
 						 segsize);
 
 	/* set up the header */
@@ -464,13 +530,13 @@ msgb_startup_receive(Size recv_queue_size)
 	 */
 	for (i = 0; i < msgb_max_peers + 1; i++)
 	{
-		void	   *mq_off = shm_toc_allocate(toc, (Size) recv_queue_size)
+		void	   *mq_off = shm_toc_allocate(toc, msgb_recv_queue_size);
 		shm_toc_insert(toc, i+1, mq_off);
 	}
 
 	/* Store a handle to the DSM seg where others can find it */
 	LWLockAcquire(msgb_ctx->lock, LW_EXCLUSIVE);
-	msgb_my_seg->dsm_seg_handle = dsm_segment_handle(seg);
+	msgb_my_seg->dsm_seg_handle = dsm_segment_handle(broker_dsm_seg);
 	LWLockRelease(msgb_ctx->lock);
 }
 
@@ -484,14 +550,14 @@ void
 msgb_add_receive_peer(uint32 origin_id)
 {
 	int				i;
-	int				existing_id;
-	MsgbReceivePeer *p;
+	int				existing_id = -1;
+	MsgbReceivePeer *p = NULL;
 	shm_mq		   *mq;
-	dsm_segment	   *seg;
 	shm_toc		   *toc;
 	MsgbDSMHdr	   *hdr;
 	void		   *mq_addr;
-	int				my_node_toc_entry;
+	int				my_node_toc_entry, first_free_toc_entry;
+	MemoryContext	old_ctx;
 
 	/* Find local state space for the peer */
 	for (i = 0; i < msgb_max_peers; i++)
@@ -518,7 +584,7 @@ msgb_add_receive_peer(uint32 origin_id)
 				 		origin_id)));
 
 	/* Add this node to the header ToC entry and allocate a MQ for it. */
-	toc = shm_toc_attach(BDR_SHMEM_MAGIC, dsm_segment_address(seg));
+	toc = shm_toc_attach(BDR_SHMEM_MAGIC, broker_dsm_seg);
 	if (toc == NULL)
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
@@ -531,6 +597,7 @@ msgb_add_receive_peer(uint32 origin_id)
 	 */
 	hdr = shm_toc_lookup(toc, 0, false);
 	my_node_toc_entry = -1;
+	first_free_toc_entry = -1;
 	SpinLockAcquire(&hdr->mutex);
 	for (i = 0; i < hdr->node_toc_map_size; i++)
 	{
@@ -548,7 +615,7 @@ msgb_add_receive_peer(uint32 origin_id)
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg_internal("receiving node %u already has sending node %u registered in shmem",
-				 		local_node, origin_id)));
+				 		bdr_get_local_nodeid(), origin_id)));
 
 	/*
 	 * Even though we reserved local state for the peer earlier we could fail
@@ -560,7 +627,7 @@ msgb_add_receive_peer(uint32 origin_id)
 	ereport(ERROR,
 			(errcode(ERRCODE_INSUFFICIENT_RESOURCES),
 			 errmsg("no free shared memory slots on %u for message queue for node %u",
-			 		 local_node, origin_id)));
+			 		 bdr_get_local_nodeid(), origin_id)));
 
 	/*
 	 * The queue won't be created yet - we just allocated space for it earlier,
@@ -568,7 +635,7 @@ msgb_add_receive_peer(uint32 origin_id)
 	 * the space and attach to it.
 	 */
 	mq_addr = shm_toc_lookup(toc, my_node_toc_entry, false);
-	mq = shm_mq_create(mq_addr, (Size) recv_queue_size);
+	mq = shm_mq_create(mq_addr, msgb_recv_queue_size);
 	Assert(mq == mq_addr);
 
 	shm_mq_set_receiver(mq, MyProc);
@@ -577,7 +644,11 @@ msgb_add_receive_peer(uint32 origin_id)
 	p->sender_id = origin_id;
 	p->max_received_msgid = 0;
 	old_ctx = MemoryContextSwitchTo(TopMemoryContext);
-	p->recvqqueue = shm_mq_attach(mq, seg, NULL);
+	p->recvqueue = shm_mq_attach(mq, broker_dsm_seg, NULL);
+	p->recvsize = 0;
+	if (p->recvbuf != NULL)
+		pfree(p->recvbuf);
+	p->recvbuf = NULL;
 	(void) MemoryContextSwitchTo(old_ctx);
 
 	/* And allow this peer to connect by mapping the entry in the ToC */
@@ -594,10 +665,8 @@ void
 msgb_remove_receive_peer(uint32 origin_id)
 {
 	int				i;
-	MsgbReceivePeer *p;
-	dsm_segment	   *seg;
+	MsgbReceivePeer *p = NULL;
 	shm_mq		   *mq;
-	shm_toc		   *toc;
 	MsgbDSMHdr	   *hdr;
 	int				my_node_toc_entry;
 
@@ -611,15 +680,15 @@ msgb_remove_receive_peer(uint32 origin_id)
 		}
 	}
 
-	if (existing_id == -1)
+	if (p == NULL)
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("peer node %u is not registered with the broker",
 				 		origin_id)));
 
-	msgb_mq_for_node(origin_id, &hdr, &my_node_toc_entry, &mq);
+	msgb_mq_for_node(broker_dsm_seg, origin_id, &hdr, &my_node_toc_entry, &mq);
 	Assert(shm_mq_get_receiver(mq) == MyProc);
-	peer->pending_cleanup = true;
+	p->pending_cleanup = true;
 
 	shm_mq_detach(mq);
 
@@ -704,25 +773,58 @@ msgb_shmem_init_receive(int max_local_nodes)
 	shmem_startup_hook = msgb_shmem_startup_receive;
 }
 
+/*
+ * We've fully received a message over the shm mq and can deliver it to the
+ * waiting callback then discard it.
+ */
 static void
 msgb_deliver_msg(MsgbReceivePeer *peer)
 {
-	TODO
+	uint32 msgid = ((uint32*)peer->recvbuf)[0];
+	char *buf;
+	Size bufsize;
 
-	/*
-	 * We have a full message in the buffer.
-	 *
-	 * Read the msgid. If it's below our threshold, discard
-	 * it. Otherwise deliver the remainder of the message.
-	 * Then free the result.
-	 */
+	Assert(peer->recvsize > sizeof(uint32));
+	bufsize = peer->recvsize - sizeof(uint32);
+	buf = ((char*)peer->recvbuf) + sizeof(uint32);
+
+	if (msgid == 0)
+	{
+		/*
+		 * First message after peer connect, generated internally, is a report
+		 * of the current peer message id generator position.
+		 */
+		msgb_handle_peer_connect(peer, buf, bufsize);
+	}
+	else
+	{
+		if (msgid <= peer->max_received_msgid)
+			ereport(DEBUG1,
+					(errmsg_internal("discarding already processed message id %u from %u on %u; seen up to %u",
+									msgid, peer->sender_id, bdr_get_local_nodeid(), peer->max_received_msgid)));
+
+		if (msgid != peer->max_received_msgid + 1)
+			ereport(WARNING,
+					(errmsg_internal("peer %u sending to %u appears to have skipped from msgid %u to %u",
+									 peer->sender_id, bdr_get_local_nodeid(), peer->max_received_msgid, msgid)));
+
+		(msgb_received_hook)(msgid, buf, bufsize);
+
+		peer->max_received_msgid = msgid;
+	}
+
+	pfree(peer->recvbuf);
+	peer->recvbuf = NULL;
+	peer->recvsize = 0;
 }
 
 /* Look up a node in our shared memory state */
 static void
-msgb_mq_for_node(uint32 nodeid, MsgbDSMHdr **hdr, int *hdr_idx, shm_mq **mq)
+msgb_mq_for_node(dsm_segment *seg, uint32 nodeid, MsgbDSMHdr **hdr, int *hdr_idx, shm_mq **mq)
 {
-	shm_toc		   *toc;
+	shm_toc	   *toc;
+	int			my_node_toc_entry = -1;
+	int			i;
 
 	toc = shm_toc_attach(BDR_SHMEM_MAGIC, dsm_segment_address(seg));
 	if (toc == NULL)
@@ -731,22 +833,21 @@ msgb_mq_for_node(uint32 nodeid, MsgbDSMHdr **hdr, int *hdr_idx, shm_mq **mq)
 				 errmsg("bad magic number in dynamic shared memory segment")));
 
 	/* Look up shared state for the peer */
-	hdr = shm_toc_lookup(toc, 0, false);
-	my_node_toc_entry = -1;
-	SpinLockAcquire(&hdr->mutex);
-	for (i = 0; i < hdr->node_toc_map_size; i++)
+	*hdr = shm_toc_lookup(toc, 0, false);
+	SpinLockAcquire(&(*hdr)->mutex);
+	for (i = 0; i < (*hdr)->node_toc_map_size; i++)
 	{
-		if (hdr->node_toc_map[i] == nodeid)
+		if ((*hdr)->node_toc_map[i] == nodeid)
 			my_node_toc_entry = i;
 	}
-	SpinLockRelease(&hdr->mutex);
+	SpinLockRelease(&(*hdr)->mutex);
 
 	if (my_node_toc_entry == -1)
 		/* shouldn't happen */
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg_internal("receiving node %u not registered with broker shmem %u",
-				 		local_node, origin_id)));
+				 		bdr_get_local_nodeid(), nodeid)));
 
 	*mq = shm_toc_lookup(toc, my_node_toc_entry, false);
 }
@@ -769,8 +870,8 @@ msgb_try_cleanup_peer_slot(MsgbReceivePeer *peer)
 
 	Assert(peer->pending_cleanup == true);
 
-	msgb_mq_for_node(peer->sender_id, &hdr, &hdr_idx, &mq);
-	if (shm_mq_get_receiver(*mq) != NULL)
+	msgb_mq_for_node(broker_dsm_seg, peer->sender_id, &hdr, &hdr_idx, &mq);
+	if (shm_mq_get_receiver(mq) != NULL)
 		shm_mq_detach(mq);
 
 	if (shm_mq_get_sender(mq) == NULL)
@@ -791,7 +892,6 @@ void
 msgb_service_connections_receive(void)
 {
 	int				i;
-	shm_mq_result	res;
 
 	for (i = 0; i < msgb_max_peers; i++)
 	{
@@ -799,13 +899,14 @@ msgb_service_connections_receive(void)
 
 		if (recvpeers[i].sender_id != 0)
 		{
+			shm_mq_result	res;
 			/*
 			 * We must perform a non-blocking read of queue, since we don't know
 			 * if there's anything to read at all on this socket. Our latch got set
 			 * but we don't know by whom.
 			 */
-			ret = shm_mq_receive(p->recvqueue, &p->recvsize, &p->recvbuf, false);
-			switch (ret)
+			res = shm_mq_receive(p->recvqueue, &p->recvsize, &p->recvbuf, false);
+			switch (res)
 			{
 				case SHM_MQ_WOULD_BLOCK:
 					/*
@@ -835,4 +936,4 @@ msgb_service_connections_receive(void)
 		if (p->pending_cleanup)
 			msgb_try_cleanup_peer_slot(p);
 	}
-}c
+}

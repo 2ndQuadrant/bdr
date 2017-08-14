@@ -622,7 +622,7 @@ msgb_service_connections_send(WaitEvent *occurred_events, int nevents)
  * it.
  */
 void
-msgb_remove_destination(uint32 destination_id)
+msgb_remove_send_peer(uint32 destination_id)
 {
 	int idx = msgb_idx_for_destination(destination_id, "remove");
 	if (idx >= 0)
@@ -776,7 +776,7 @@ msgb_shutdown_send(void)
 }
 
 void
-msgb_add_destination(uint32 destination_id, const char *dsn)
+msgb_add_send_peer(uint32 destination_id, const char *dsn)
 {
 	int i;
 	MsgbConnection *conn = NULL;

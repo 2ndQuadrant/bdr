@@ -87,6 +87,20 @@ msgb_service_connections(WaitEvent *occurred_events, int nevents)
 	msgb_service_connections_receive();
 }
 
+void
+msgb_add_peer(uint32 peer_id, const char *dsn)
+{
+	msgb_add_receive_peer(peer_id);
+	msgb_add_send_peer(peer_id, dsn);
+}
+
+void
+msgb_remove_peer(uint32 peer_id)
+{
+	msgb_remove_receive_peer(peer_id);
+	msgb_remove_send_peer(peer_id);
+}
+
 /*
  * Disconnect from all peers, discard pending messages, and shut
  * down. Has no effect if not started.
