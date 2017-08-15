@@ -14,6 +14,7 @@ OBJS = \
 	bdr_consensus.o \
 	bdr_functions.o \
 	bdr_manager.o \
+	bdr_messaging.o \
 	bdr_msgbroker.o \
 	bdr_msgbroker_receive.o \
 	bdr_msgbroker_send.o \

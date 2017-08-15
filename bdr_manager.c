@@ -17,15 +17,23 @@
 
 #include "replication/slot.h"
 
+#include "storage/ipc.h"
+
 #include "miscadmin.h"
 
 #include "bdr_catalogs.h"
 #include "bdr_catcache.h"
-#include "bdr_consensus.h"
+#include "bdr_messaging.h"
 #include "bdr_manager.h"
 
 int bdr_max_nodes;
 
+static void bdr_manager_atexit(int code, Datum argument);
+
+/*
+ * This hook runs when pglogical's manager worker starts. It brings up the BDR
+ * subsystems needed to
+ */
 void
 bdr_manager_worker_start(void)
 {
@@ -37,10 +45,18 @@ bdr_manager_worker_start(void)
 	bdr_cache_local_nodeinfo();
 	CommitTransactionCommand();
 
-	consensus_begin_startup(bdr_get_local_nodeid(), BDR_SCHEMA_NAME,
-					  BDR_MSGJOURNAL_REL_NAME, bdr_max_nodes);
+	on_proc_exit(bdr_manager_atexit, (Datum)0);
 
-	/* TODO: add the nodes */
+	bdr_start_consensus(bdr_max_nodes);
 
-	consensus_finish_startup();
+    /*
+     * TODO: should cross-check known nodes with subscriptions and ensure we have
+     * subs for all nodes.
+     */
+}
+
+static void
+bdr_manager_atexit(int code, Datum argument)
+{
+	bdr_shutdown_consensus();
 }

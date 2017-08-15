@@ -1,6 +1,9 @@
 #ifndef BDR_CONSENSUS_H
 #define BDR_CONSENSUS_H
 
+#include "datatype/timestamp.h"
+#include "nodes/pg_list.h"
+
 struct WaitEvent;
 
 extern void consensus_add_node(uint32 nodeid, const char *dsn);
@@ -21,7 +24,7 @@ extern void consensus_shutdown(void);
 typedef struct ConsensusMessage {
 	uint32 sender_nodeid;
 	uint32 sender_local_msgnum;
-	uint64 sender_lsn;
+	XLogRecPtr sender_lsn;
 	TimestampTz sender_timestamp;
 	uint32 global_message_id;
 	uint16 message_type;
@@ -29,6 +32,14 @@ typedef struct ConsensusMessage {
 	char payload[FLEXIBLE_ARRAY_MEMBER];
 } ConsensusMessage;
 
+/*
+ * Put some a batch of messages on the send queue, to be delivered as a single
+ * unit (all succeed, or fail, together).
+ *
+ * A node must be prepared for its own messages to fail and be rolled back,
+ * so it should treat them the same way it does remote messages in receive.
+ * Don't do anything final until after the commit hook is called.
+ */
 extern uint64 consensus_enqueue_messages(struct ConsensusMessage *messages,
 					 int nmessages);
 
@@ -48,27 +59,36 @@ extern struct ConsensusMessage* consensus_get_message(uint32 message_id);
 
 /*
  * This hook is called when a message is received from the broker, before it is
- * inserted.
+ * inserted. It's also called for locally enqueued messages.
  *
- * The recipient may ERROR here if it knows it cannot honour the message.
- * Otherwise it may prepare any needed work within the transaction so that
- * the message can be acted on once committed. Or that work can be left
- * until the prepare hook is passed all the messages.
+ * The hook is not called for messages processed during crash recovery of
+ * a prepared but not yet committed message set.
  *
- * This hook is mainly for debugging/tracing. It MUST not have any side effects
- * outside the transaction.
+ * A message may be rejected by this hook, causing it and all messages that are
+ * part of the same message set to be nacked by this node. The xact will
+ * be rolled back. consensus_messages_rollback_hook is not called, since
+ * we never prepared the message set for commit.
+ *
+ * This hook is mainly for debugging/tracing. It should not have any state
+ * side effects outside the transaction.
+ *
+ * XXX TODO XXX make the message broker support loopback connections via shmem
+ * shortcut, and deliver-to-self? Simpler code path.
  */
-typedef void (*consensus_messages_receive_hooktype)(struct ConsensusMessage *message);
+typedef bool (*consensus_messages_receive_hooktype)(struct ConsensusMessage *message);
 
 extern consensus_messages_receive_hooktype consensus_messages_receive_hook;
 
 /*
  * This hook is called after a set of messages, already inserted into the
  * journal and passed to consensus_messages_receive_hook, is being prepared for
- * commit.  This is phase 1 in a 2PC process.
+ * commit.  This is phase 1 in a 2PC process and is called with an open
+ * transaction and the messages already inserted into the journal.
  *
- * Called with an open transaction, which will be PREPAREd after this hook
- * returns.
+ * It should return true if the xact should be prepared and an ack sent to
+ * peers, or false if it should be rolled back and a nack sent to peers.
+ * (A nack is still possible on true return if PREPARE TRANSATION its self
+ * fails).
  *
  * The hook must prepare any database work needed to make the messages final
  * and ensure they can be committed when the commit hook is called. If the node
@@ -76,15 +96,21 @@ extern consensus_messages_receive_hooktype consensus_messages_receive_hook;
  * to do so by raising a suitable ERROR.
  *
  * No final and irrevocable actions should be taken since the messages may
- * be rejected by another node and rolled back.
+ * be rejected by another node and rolled back. Side effects that aren't
+ * part of the transaction may be lost anyway, if we crash after prepare
+ * and before commit.
+ *
+ * This hook should try to behave the same whether the messages originated on
+ * this node or another node. Try to handle local changes by enqueuing messages
+ * then reacting to them when received.
  *
  * It's guaranteed that either consensus_message_commit_hook or
  * consensus_messages_rollback_hook will be called after
  * consensus_message_prepare_hook and before any other prepare hook.
  */
-typedef void (*consensus_messages_prepare_hooktype)(struct ConsensusMessage *messages, int nmessages);
+typedef bool (*consensus_messages_prepare_hooktype)(struct ConsensusMessage *messages, int nmessages);
 
-extern consensus_messages_prepare_hooktype consensus_message_prepare_hook;
+extern consensus_messages_prepare_hooktype consensus_messages_prepare_hook;
 
 /*
  * This hook is called once consensus_message_prepare_hook has returned
@@ -95,19 +121,38 @@ extern consensus_messages_prepare_hooktype consensus_message_prepare_hook;
  *
  * The committed hook should set in progress any actions required to
  * make the messages take effect on the recipient system.
+ *
+ * It is possible for invocation of this hook to be skipped if the node crashes
+ * after it does a local COMMIT PREPARED of an xact but before the hook is
+ * invoked.
+ *
+ * Note that these messages may be locally or remotely originated. They may be
+ * newly prepared in this session or may be recovered from after commit of a
+ * previously prepared xact before a crash. Either way they must be treated
+ * the same.
  */
-typedef void (*consensus_messages_commit_hooktype)();
+typedef void (*consensus_messages_commit_hooktype)(struct ConsensusMessage *messages, int nmessages);
 
-extern consensus_messages_commit_hooktype consensus_message_commit_hook;
+extern consensus_messages_commit_hooktype consensus_messages_commit_hook;
 
 /*
  * This hook is called instead of consensus_message_commit_hook if a peer node
- * rejects phase 1. The transaction from consensus_message_prepare_hook has
- * already been rolled back and phase 2 of the message exchange has failed.
+ * rejects phase 1 (including our own node). The transaction from
+ * consensus_message_prepare_hook has already been rolled back and phase 2 of
+ * the message exchange has failed.
  *
- * The recipient shouldn't generally need to do anything here because it
- * didn't do anything final in the prepare hook, but sometimes reality
- * differs.
+ * It is NOT called for a normal rollback before prepare. Use regular transaction
+ * hooks for that.
+ *
+ * The prepared xact has already rolled back, so the affected messages are
+ * no longer known. This hook has mainly diagnostic value.
+ *
+ * It is possible for invocation of this hook to be skipped if the node crashes
+ * after it does a local ROLLBACK PREPARED of an xact but before the hook is
+ * invoked.
+ *
+ * TODO: call it with the message-id and origin node at least, should be able to
+ * determine that much?
  */
 typedef void (*consensus_messages_rollback_hooktype)(void);
 

@@ -15,6 +15,46 @@
  * uses to achieve reliable majority or all-nodes consensus on cluster state
  * transitions.
  *
+ * The module is used by enqueueing messages, pumping its state, and handling
+ * the results with callbacks. Local state transitions that need to be agreed
+ * to by peers should be accomplished by enqueueing messages then processing
+ * them via the consensus system.
+ *
+ * The flow, where "Node X" may be the same node as "Our node" or some other
+ * peer, is:
+ *
+ * [Node X]   consensus_enqueue_messages
+ * [Our node]  consensus_messages_receive_hook
+ * [Our node]  sends NACK or ACK
+ * [Our node]  consensus_messages_receive_hook
+ * [Our node]  sends NACK or ACK
+ * ...
+ * [Node X]   sends prepare
+ * [Our node]  consensus_message_prepare_hook (unless locally aborted already)
+ * [Our node]  PREPARE TRANSACTION
+ * [Our node]  sends NACK or ACK based on outcome of hook+prepare
+ *
+ * Then if all nodes ACKed:
+ *
+ * [Node X]   sends commit
+ * [Our node]  COMMIT PREPARED
+ * [Our node]  consensus_message_commit_hook
+ *
+ * - or - if one or more nodes NACKed:
+ *
+ * [Node X]   sends rollback
+ * [Our node]  ROLLBACK PREPARED
+ * [Our node]  consensus_messages_rollback_hooktype
+ *
+ * During startup (including crash recovery) we may discover that we have
+ * prepared transactions from the consensus system. If so we must recover them.
+ * If they were locally originated we just send a rollback to all nodes. If
+ * they were remotely originated we must ask the remote what the outcome should
+ * be; if it already sent a commit, we can't rollback locally and vice versa.
+ * Then based on the remote's response we either locally commit or rollback as
+ * above. If it's a local commit, we commit then read the committed messages
+ * back out of the journal to pass to the hook.
+ *
  * FIXME: the current consensus module blindly assumes that all peers immediately
  * OK a message and invokes the callback as soon as the broker sends it. This is
  * obviously wrong, it's test skeleton code to exercise the broker and absolutely
@@ -148,7 +188,8 @@ consensus_remove_node(uint32 node_id)
 }
 
 /*
- * Insert a message into the persistent message journal
+ * Insert a message into the persistent message journal, so we can call
+ * bdr_messages_commit_hook again during crash recovery.
  */
 static void
 consensus_insert_message(ConsensusMessage *message)
@@ -190,6 +231,10 @@ consensus_received_msgb_message(uint32 origin, const char *payload, Size payload
 	if (consensus_messages_receive_hook != NULL)
 		(*consensus_messages_receive_hook)(message);
 
+    /*
+     * TODO: only user messages with payloads get inserted into the table,
+     * other messages are used for co-ordination.
+     */
 	consensus_insert_message(message);
 
 	(*consensus_messages_prepare_hook)(message, 1);
@@ -198,7 +243,13 @@ consensus_received_msgb_message(uint32 origin, const char *payload, Size payload
 
 	CommitTransactionCommand();
 
-	(*consensus_messages_commit_hook)();
+    /*
+     * After commit we must pass the messages again to the commit hook; if
+     * we're doing crash recovery after prepare but before commit it's the only
+     * hook we'd call and it needs to know what's being recovered.
+     */
+
+	(*consensus_messages_commit_hook)(message, 1);
 }
 
 /*
