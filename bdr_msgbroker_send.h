@@ -27,6 +27,8 @@ extern void msgb_service_connections_send(WaitEvent *occurred_events, int nevent
 
 extern void msgb_add_send_peer(uint32 destination_id, const char *dsn);
 
+extern void msgb_alter_send_peer(uint32 peer_id, const char *new_dsn);
+
 extern void msgb_remove_send_peer(uint32 destination_id);
 
 #endif

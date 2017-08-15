@@ -37,6 +37,10 @@ bdr_manager_worker_start(void)
 	bdr_cache_local_nodeinfo();
 	CommitTransactionCommand();
 
-	consensus_startup(bdr_get_local_nodeid(), BDR_SCHEMA_NAME,
+	consensus_begin_startup(bdr_get_local_nodeid(), BDR_SCHEMA_NAME,
 					  BDR_MSGJOURNAL_REL_NAME, bdr_max_nodes);
+
+	/* TODO: add the nodes */
+
+	consensus_finish_startup();
 }

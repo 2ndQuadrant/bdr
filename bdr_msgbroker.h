@@ -20,6 +20,8 @@ extern void msgb_add_peer(uint32 peer_id, const char *dsn);
 
 extern void msgb_remove_peer(uint32 peer_id);
 
+extern void msgb_alter_peer(uint32 peer_id, const char *dsn);
+
 #define MSGB_SCHEMA "bdr"
 
 /* Broker-internal use only */

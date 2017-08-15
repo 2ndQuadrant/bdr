@@ -95,6 +95,12 @@ msgb_add_peer(uint32 peer_id, const char *dsn)
 }
 
 void
+msgb_alter_peer(uint32 peer_id, const char *new_dsn)
+{
+	msgb_alter_send_peer(peer_id, new_dsn);
+}
+
+void
 msgb_remove_peer(uint32 peer_id)
 {
 	msgb_remove_receive_peer(peer_id);

@@ -350,7 +350,7 @@ msgb_handle_peer_connect(MsgbReceivePeer *peer, const char *msg, Size msg_len)
 		return;
 	}
 
-	last_sent_msgid = *((uint32*)msg);
+	last_sent_msgid = *((uint32*)msg); /* FIXME: alignment? */
 
 	if (peer->max_received_msgid >= last_sent_msgid)
 	{
@@ -780,7 +780,7 @@ msgb_shmem_init_receive(int max_local_nodes)
 static void
 msgb_deliver_msg(MsgbReceivePeer *peer)
 {
-	uint32 msgid = ((uint32*)peer->recvbuf)[0];
+	uint32 msgid = ((uint32*)peer->recvbuf)[0]; /* FIXME: alignment? */
 	char *buf;
 	Size bufsize;
 

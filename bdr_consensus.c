@@ -14,12 +14,25 @@
  * The message broker provides a message transport, which this consensus module
  * uses to achieve reliable majority or all-nodes consensus on cluster state
  * transitions.
+ *
+ * FIXME: the current consensus module blindly assumes that all peers immediately
+ * OK a message and invokes the callback as soon as the broker sends it. This is
+ * obviously wrong, it's test skeleton code to exercise the broker and absolutely
+ * minimal part/join.
  */
 #include "postgres.h"
+
+#include "access/xact.h"
+#include "access/xlog.h"
+
+#include "lib/stringinfo.h"
 
 #include "storage/latch.h"
 #include "storage/ipc.h"
 
+#include "utils/memutils.h"
+
+#include "bdr_catcache.h"
 #include "bdr_msgbroker_receive.h"
 #include "bdr_msgbroker_send.h"
 #include "bdr_msgbroker.h"
@@ -31,50 +44,216 @@
  */
 #define CONSENSUS_MSG_QUEUE_SIZE 512
 
-consensus_message_committed_hooktype consensus_message_committed_hook = NULL;
+typedef enum ConsensusState {
+	CONSENSUS_OFFLINE,
+	CONSENSUS_STARTING,
+	CONSENSUS_RESOLVING_IN_DOUBT,
+	CONSENSUS_ONLINE
+} ConsensusState;
 
-void
-consensus_add_node(uint32 nodeid, const char *dsn)
+/*
+ * Knowledge of peers is kept in local memory on the consensus system. It's
+ * expected that this will be maintained by the app based on some persistent
+ * storage of nodes.
+ */
+typedef struct ConsensusNode {
+	uint32 node_id;
+} ConsensusNode;
+
+static ConsensusState consensus_state = CONSENSUS_OFFLINE;
+
+consensus_messages_receive_hooktype consensus_messages_receive_hook = NULL;
+consensus_messages_prepare_hooktype consensus_messages_prepare_hook = NULL;
+consensus_messages_commit_hooktype consensus_messages_commit_hook = NULL;
+consensus_messages_rollback_hooktype consensus_messages_rollback_hook = NULL;
+
+static ConsensusNode *consensus_nodes = NULL;
+
+static int consensus_max_nodes = 0;
+
+static ConsensusMessage * consensus_deserialize_message(uint32 origin, const char *payload, Size payload_size);
+static void consensus_serialize_message(StringInfo si, ConsensusMessage *msg);
+static void consensus_insert_message(ConsensusMessage *message);
+
+static ConsensusNode *
+consensus_find_node_by_id(uint32 node_id, const char * find_reason)
 {
-	msgb_add_peer(nodeid, dsn);
+	int i;
+	ConsensusNode *node = NULL;
 
-	elog(WARNING, "not implemented");
+	for (i = 0; i < consensus_max_nodes; i++)
+		if (consensus_nodes[i].node_id == node_id)
+			node = &consensus_nodes[i];
+
+	if (node != NULL)
+		return node;
+	else
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("node %u not found while %s consensus manager",
+				 		node_id, find_reason)));
 }
 
 void
-consensus_alter_node(uint32 nodeid, const char *new_dsn)
+consensus_add_node(uint32 node_id, const char *dsn)
 {
-	msgb_remove_peer(nodeid);
-	msgb_add_peer(nodeid, new_dsn);
+	ConsensusNode *node = NULL;
+	int first_free = -1;
+	int i;
 
-	elog(WARNING, "not implemented");
+	if (consensus_state >= CONSENSUS_STARTING)
+		msgb_add_peer(node_id, dsn);
+
+	for (i = 0; i < consensus_max_nodes; i++)
+	{
+		if (consensus_nodes[i].node_id == node_id)
+			node = &consensus_nodes[i];
+		else if (consensus_nodes[i].node_id == 0 && first_free == -1)
+			first_free = i;
+	}
+
+	if (node != NULL)
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("node %u already registered in consensus manager",
+				 		node_id)));
+
+	node = &consensus_nodes[first_free];
+	node->node_id = node_id;
+
+	/* TODO: handle any in progress message */
 }
 
 void
-consensus_remove_node(uint32 nodeid)
+consensus_alter_node(uint32 node_id, const char *new_dsn)
 {
-	msgb_remove_peer(nodeid);
+	if (consensus_state >= CONSENSUS_STARTING)
+		msgb_alter_peer(node_id, new_dsn);
 
-	elog(WARNING, "not implemented");
+	/* TODO: handle any in progress message */
 }
 
+void
+consensus_remove_node(uint32 node_id)
+{
+	ConsensusNode *node;
+
+	if (consensus_state >= CONSENSUS_STARTING)
+		msgb_remove_peer(node_id);
+
+	node = consensus_find_node_by_id(node_id, "removing from");
+	node->node_id = 0;
+
+	/* TODO: handle any in progress message */
+}
+
+/*
+ * Insert a message into the persistent message journal
+ */
+static void
+consensus_insert_message(ConsensusMessage *message)
+{
+	/* TODO */
+}
+
+/*
+ * Callback invoked by message broker with the message we sent. We must
+ * determine whether it's a new negotiation, progress in an existing one,
+ * etc and act accordingly.
+ */
 static void
 consensus_received_msgb_message(uint32 origin, const char *payload, Size payload_size)
 {
+	ConsensusMessage *message;
+
 	/*
-	 * Must unpack payload to get bdr message type per docs, and act on it
-	 * based on consensus protocol.
+	 * TODO: For now we're ignoring all the consensus protocol stuff and
+	 * bypassing this layer, sending the nearly raw messages we sent on the
+	 * wire to receivers. No synchronisation, confirmation all nodes received,
+	 * unpacking, etc. Consequently the receive side here is similarly basic.
+	 *
+	 * What we'll do here in the real version is insert each message and
+	 * call a message received hook to ack/nack it, then reply with an ack/nack.
+	 *
+	 * When we get a commit we'll call the commit callback for all the messages
+	 * together.
+	 *
+	 * But for now we just treat each message as committed as soon as it
+	 * arrives.
 	 */
+
+	if (!IsTransactionState())
+		StartTransactionCommand();
+
+	message = consensus_deserialize_message(origin, payload, payload_size);
+
+	if (consensus_messages_receive_hook != NULL)
+		(*consensus_messages_receive_hook)(message);
+
+	consensus_insert_message(message);
+
+	(*consensus_messages_prepare_hook)(message, 1);
+
+	/* TODO: 2PC here. Prepare the xact, exchange messages with peers, and come back when they have confirmed prepare too so we can commit: */
+
+	CommitTransactionCommand();
+
+	(*consensus_messages_commit_hook)();
+}
+
+/*
+ * Start bringing up the consensus system: init the message
+ * broker, etc.
+ *
+ * The caller must now add all the currently known-active
+ * peer nodes that participate in the consensus group, then
+ * call consensus_finish_startup();
+ */
+void
+consensus_begin_startup(uint32 my_nodeid,
+	const char * journal_schema,
+	const char * journal_relname,
+	int max_nodes)
+{
+	if (consensus_state != CONSENSUS_OFFLINE)
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("consensus system already running")));
+
+	if (consensus_messages_prepare_hook == NULL
+		|| consensus_messages_commit_hook == NULL
+		|| consensus_messages_rollback_hook == NULL)
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg_internal("consensus message hooks not properly registered by caller")));
+
+	consensus_nodes = MemoryContextAlloc(TopMemoryContext,
+										 sizeof(ConsensusNode) * max_nodes);
+	memset(consensus_nodes, 0, sizeof(ConsensusNode) * max_nodes);
+
+	msgb_received_hook = consensus_received_msgb_message;
+	msgb_startup(max_nodes, CONSENSUS_MSG_QUEUE_SIZE);
+
+	consensus_state = CONSENSUS_STARTING;
+
+	consensus_max_nodes = max_nodes;
+
 	elog(WARNING, "not implemented");
 }
 
+/*
+ * consensus_begin_startup has been called and all peers have been added.
+ *
+ * Resolve any in-doubt message exchange and start accepting queue entries.
+ */
 void
-consensus_startup(uint32 my_nodeid, const char * journal_schema,
-	const char * journal_relname, int max_nodes)
+consensus_finish_startup(void)
 {
-	msgb_received_hook = consensus_received_msgb_message;
-	msgb_startup(max_nodes, CONSENSUS_MSG_QUEUE_SIZE);
-	elog(WARNING, "not implemented");
+	consensus_state = CONSENSUS_RESOLVING_IN_DOUBT;
+
+	/* TODO actually resolve things */
+
+	consensus_state = CONSENSUS_ONLINE;
 }
 
 /*
@@ -93,15 +272,99 @@ consensus_pump(struct WaitEvent *occurred_events, int nevents)
 void
 consensus_shutdown(void)
 {
+	/* TODO: some kind of graceful shutdown of active requests? */
+
 	msgb_shutdown();
-	elog(WARNING, "not implemented");
+
+	consensus_state = CONSENSUS_OFFLINE;
+	consensus_max_nodes = 0;
+	pfree(consensus_nodes);
+	consensus_nodes = NULL;
 }
 
+
+/*
+ * Given a serialized message in wire format, unpack it into a
+ * ConsensusMessage.
+ */
+static ConsensusMessage *
+consensus_deserialize_message(uint32 origin, const char *payload, Size payload_size)
+{
+	/*
+	 * FIXME, see consensus_serialize_message
+	 */
+	ConsensusMessage *message = palloc(payload_size);
+	memcpy(message, payload, payload_size);
+	return message;
+}
+
+static void
+consensus_serialize_message(StringInfo si, ConsensusMessage *msg)
+{
+	/*
+	 * FIXME: We shouldn't send the raw message struct
+	 * but should instead use the message building code
+	 * to prepare it properly. This is a hack to get the
+	 * minimum functionality in place.
+	 */
+	appendBinaryStringInfo(si, (const char*)msg, offsetof(ConsensusMessage, payload) + msg->payload_length);
+}
+
+/*
+ * Execute the consensus protocol for a batch of messages as a unit, such that
+ * all or none are handled by peers.
+ *
+ * Returns immediately, before messages are sent let alone before they're
+ * received and acted on. Use messages_status to check progress.
+ */
 uint64
 consensus_enqueue_messages(struct ConsensusMessage *messages,
 					 int nmessages)
 {
-	elog(WARNING, "not implemented");
+	int msgidx, nodeidx;
+	StringInfoData si;
+	uint32 local_node_id = bdr_get_local_nodeid();
+	XLogRecPtr cur_lsn = GetXLogWriteRecPtr();
+	TimestampTz cur_ts = GetCurrentTimestamp();
+
+	initStringInfo(&si);
+
+	/*
+	 * TODO: right now, all we do is fire and forget to the broker and trust
+	 * that all nodes will receive it. No attempt to handle failures is made.
+	 * No attempt to achieve consensus is made. Obviously that's broken, it's
+	 * just enough of a skeleton to let us start testing things out.
+	 *
+	 * We have to do distributed 2PC on this batch of messages, getting all
+	 * nodes' confirmation that they could all be applied before committing.
+	 * (Then later we'll upgrade to Raft or Paxos distributed majority
+	 * consensus).
+	 */
+	for (msgidx = 0; msgidx < nmessages; msgidx++)
+	{
+		ConsensusMessage *msg = &messages[msgidx];
+
+		msg->sender_nodeid = local_node_id;
+		msg->sender_local_msgnum = 0; /* TODO (or caller supplied?) */
+		msg->sender_lsn = cur_lsn;
+		msg->sender_timestamp = cur_ts;
+		msg->global_message_id = 0; /* TODO */
+
+		/* message_type, payload and length set by caller */
+
+		for (nodeidx = 0; nodeidx < consensus_max_nodes; nodeidx++)
+		{
+			ConsensusNode * const node = &consensus_nodes[nodeidx];
+			if (node->node_id == 0)
+				continue;
+			
+			consensus_serialize_message(&si, msg);
+			msgb_queue_message(node->node_id, si.data, si.len);
+			resetStringInfo(&si);
+		}
+	}
+
+	/* TODO: return msg number */
 	return 0;
 }
 

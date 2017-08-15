@@ -810,6 +810,21 @@ msgb_add_send_peer(uint32 destination_id, const char *dsn)
 	conns_polling = true;
 }
 
+void
+msgb_alter_send_peer(uint32 peer_id, const char *new_dsn)
+{
+	int idx = msgb_idx_for_destination(peer_id, "alter");
+	if (idx >= 0)
+	{
+		MsgbConnection * const conn = &conns[idx];
+		if (conn->dsn)
+			pfree(conn->dsn);
+		conn->dsn = MemoryContextStrdup(msgbuf_context, new_dsn);
+
+		msgb_clear_bad_connection(conn);
+	}
+}
+
 static int
 msgb_idx_for_destination(uint32 destination_id, const char *errm_action)
 {
