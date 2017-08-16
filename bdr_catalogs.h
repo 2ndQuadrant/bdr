@@ -14,6 +14,8 @@ typedef struct BdrNode
 {
     uint32 node_id;
     PGLogicalNode *pgl_node;
+	/* Only set for local node */
+	PGlogicalInterface *pgl_interface;
     uint32 node_group_id;
     int local_state; /* TODO */
     uint16 seq_id;
@@ -23,6 +25,8 @@ typedef struct BdrNode
 extern BdrNode * bdr_get_node(Oid nodeid, bool missing_ok);
 
 extern BdrNode * bdr_get_node_by_name(const char *name, bool missing_ok);
+
+extern BdrNode * bdr_get_local_node(bool missing_ok);
 
 extern List * bdr_get_nodes(void);
 

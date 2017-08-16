@@ -89,7 +89,8 @@ bdr_node_fromtuple(HeapTuple tuple)
 }
 
 static BdrNode *
-bdr_get_node_internal(Oid nodeid, bool missing_ok, PGLogicalNode *pglnode)
+bdr_get_node_internal(Oid nodeid, bool missing_ok, PGLogicalNode *pglnode,
+		PGlogicalInterface *pglinterface)
 {
 	BdrNode		   *node = NULL;
 	RangeVar	   *rv;
@@ -115,12 +116,15 @@ bdr_get_node_internal(Oid nodeid, bool missing_ok, PGLogicalNode *pglnode)
 		elog(ERROR, "node %u not found", nodeid);
 
 	if (HeapTupleIsValid(tuple))
+	{
 		node = bdr_node_fromtuple(tuple);
+		node->pgl_node = pglnode;
+		node->pgl_interface = pglinterface;
+	}
 
 	systable_endscan(scan);
 	heap_close(rel, RowExclusiveLock);
 
-	node->pgl_node = pglnode;
 
 	return node;
 }
@@ -133,7 +137,30 @@ BdrNode *
 bdr_get_node(Oid nodeid, bool missing_ok)
 {
 	return bdr_get_node_internal(nodeid, missing_ok,
-								 get_node(nodeid, missing_ok));
+								 get_node(nodeid, missing_ok),
+								 NULL);
+}
+
+/*
+ * Load the info for the local node
+ */
+BdrNode *
+bdr_get_local_node(bool missing_ok)
+{
+	BdrNode *node = NULL;
+	PGLogicalLocalNode *local_pgl_node = get_local_node(false, missing_ok);
+	if (local_pgl_node != NULL)
+	{
+		node = bdr_get_node_internal(local_pgl_node->node->id,
+									 missing_ok,
+									 local_pgl_node->node,
+									 local_pgl_node->node_if);
+		if (node == NULL)
+		{
+			/* TODO: free pgl node info? */
+		}
+	}
+	return node;
 }
 
 /*
@@ -145,7 +172,7 @@ bdr_get_node_by_name(const char *name, bool missing_ok)
 {
 	PGLogicalNode  *pglnode = get_node_by_name(name, missing_ok);
 
-	return bdr_get_node_internal(pglnode->id, missing_ok, pglnode);
+	return bdr_get_node_internal(pglnode->id, missing_ok, pglnode, NULL);
 }
 
 /*
