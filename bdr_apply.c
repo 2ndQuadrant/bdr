@@ -15,6 +15,7 @@
 
 #include "utils/int8.h"
 
+#include "bdr_catcache.h"
 #include "bdr_version.h"
 #include "bdr_worker.h"
 #include "bdr_apply.h"
@@ -22,8 +23,7 @@
 void
 bdr_apply_worker_start(void)
 {
-	/* TODO: figure out if we should be doing BDR with this peer or not */
-	bdr_required_this_conn = true;
+	bdr_required_this_conn = bdr_is_active_db();
 }
 
 /*

@@ -64,10 +64,24 @@ bdr_cache_local_nodeinfo(void)
 uint32
 bdr_get_local_nodeid(void)
 {
+	Assert(bdr_catcache_context != NULL);
 	if (local_bdr_node != NULL)
 		return local_bdr_node->node_id;
 	else
+	{
+		Assert(false); /* Crash here in CASSERT builds */
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("attempted to use BDR catalog cache when bdr is not active")));
+	}
+}
+
+uint32
+bdr_get_local_nodeid_if_exists(void)
+{
+	Assert(bdr_catcache_context != NULL);
+	if (local_bdr_node != NULL)
+		return local_bdr_node->node_id;
+	else
+		return 0;
 }

@@ -54,6 +54,7 @@
 #include "pglogical_output_plugin.h"
 
 #include "bdr_version.h"
+#include "bdr_catcache.h"
 #include "bdr_worker.h"
 #include "bdr_sync.h"
 #include "bdr_apply.h"
@@ -85,6 +86,13 @@ static const struct config_enum_entry bdr_debug_level_options[] = {
 static void
 bdr_worker_start(void)
 {
+	StartTransactionCommand();
+	bdr_cache_local_nodeinfo();
+	CommitTransactionCommand();
+
+	if (!bdr_is_active_db())
+		return;
+
 	switch (MyPGLogicalWorker->worker_type)
 	{
 		case PGLOGICAL_WORKER_SYNC:
@@ -135,6 +143,10 @@ bdr_init_pgl_plugin(PG_FUNCTION_ARGS)
 
 	strncpy(NameStr(plugin->plugin_name), "bdr", NAMEDATALEN);
 
+	/*
+	 * All these callbacks must be safe if BDR isn't actually active
+	 * in the DB, as pglogical will call them anyway.
+	 */
 	plugin->worker_start = bdr_worker_start;
 	plugin->output_start = bdr_output_start;
 	plugin->start_replication_params = bdr_start_replication_params;

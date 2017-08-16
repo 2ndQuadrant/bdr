@@ -43,6 +43,7 @@ bdr_process_output_params(struct DefElem *elem)
 {
 	if (elem == NULL)
 	{
+		/* end of parameters */
 		if (PEER_HAS_BDR())
 		{
 			elog(DEBUG2, "received connection from bdr node version %s (%06d)",

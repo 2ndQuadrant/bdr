@@ -221,5 +221,8 @@ bdr_messaging_wait_event(struct WaitEvent *events, int nevents)
 void
 bdr_messaging_wait_event_set_recreated(struct WaitEventSet *new_set)
 {
+	if (!bdr_is_active_db())
+		return;
+
 	msgb_wait_event_set_recreated(new_set);
 }
