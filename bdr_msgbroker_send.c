@@ -807,8 +807,11 @@ msgb_shutdown_send(void)
 
 	conns = NULL;
 
-	MemoryContextDelete(msgbuf_context);
-	msgbuf_context = NULL;
+	if (msgbuf_context != NULL)
+	{
+		MemoryContextDelete(msgbuf_context);
+		msgbuf_context = NULL;
+	}
 }
 
 void

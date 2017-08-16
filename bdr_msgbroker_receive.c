@@ -706,8 +706,11 @@ msgb_remove_receive_peer(uint32 origin_id)
 void
 msgb_shutdown_receive(void)
 {
-	pfree(recvpeers);
-	recvpeers = NULL;
+	if (recvpeers)
+	{
+		pfree(recvpeers);
+		recvpeers = NULL;
+	}
 
 	/*
 	 * We don't have to detach from our shmem queues etc. When the broker detaches
