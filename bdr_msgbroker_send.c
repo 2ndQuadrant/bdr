@@ -39,7 +39,7 @@ typedef struct MsgbConnection
 	/* TODO: need backoff timer */
 } MsgbConnection;
 
-msgb_recreate_wait_event_set_hook_type msgb_recreate_wait_event_set_hook = NULL;
+msgb_request_recreate_wait_event_set_hook_type msgb_request_recreate_wait_event_set_hook = NULL;
 
 /* The wait event set we maintain all our sockets in */
 static WaitEventSet *wait_set = NULL;
@@ -65,7 +65,7 @@ static int msgb_recv_pending(MsgbConnection *conn);
 static int msgb_idx_for_destination(uint32 destination, const char *errm_action);
 static int msgb_flush_conn(MsgbConnection *conn);
 
-static void msgb_recreate_wait_event_set(void);
+static void msgb_request_recreate_wait_event_set(void);
 
 static void msgb_register_wait_event(MsgbConnection *conn, int initial_flags);
 
@@ -75,20 +75,27 @@ static void msgb_register_wait_event(MsgbConnection *conn, int initial_flags);
  * We will register all our sockets in a wait-event set supplied by the caller
  * (via the wait set recreate hook), and set it as the active set that will be
  * maintained by future add/remove destination operations.
- *
- * Only one wait event set may be maintained at a time.
  */
 void
 msgb_startup_send(void)
 {
 	int i;
 
+	/*
+	 * Wait event sets lack support for removing or replacing socket,
+	 * so we must be able to re-create it.
+	 */
+	if (msgb_request_recreate_wait_event_set_hook == NULL)
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg_internal("caller must install msgb_request_recreate_wait_event_set_hook")));
+
 	if (msgbuf_context != NULL)
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg_internal("msgbroker already running")));
 
-	msgb_recreate_wait_event_set();
+	msgb_request_recreate_wait_event_set();
 
 	msgbuf_context = AllocSetContextCreate(TopMemoryContext,
 										   "msgbroker context",
@@ -141,7 +148,7 @@ msgb_clear_bad_connection(MsgbConnection *conn)
 	}
 
 	if (conn->wait_set_index != -1)
-		msgb_recreate_wait_event_set();
+		msgb_request_recreate_wait_event_set();
 }
 
 /*
@@ -537,13 +544,39 @@ msgb_service_connections_send(WaitEvent *occurred_events, int nevents)
 	 */
 	for (i = 0; i < nevents; i++)
 	{
-		WaitEvent const *e = &occurred_events[i];
-		MsgbConnection *conn = e->user_data;
-		int new_wait_flags = 0;
+		WaitEvent const	   *e = &occurred_events[i];
+		MsgbConnection	   *conn = NULL;
+		int					new_wait_flags = 0;
+		int					i;
+
+		/* Find the connection for this wait event */
+		for (i = 0; i < msgb_max_peers; i++)
+		{
+			if (conns[i].destination_id != 0 && conns[i].wait_set_index == e->pos)
+			{
+				conn = &conns[i];
+				/* Sanity check only */
+ 				Assert(conn == e->user_data);
+				break;
+			}
+		}
+
+		if (conn == NULL)
+		{
+			/*
+			 * It's OK not to find a connection; the wait event may be for
+			 * somebody else, a latch set, or whatever.
+			 */
+			continue;
+		}
+
 		if (e->events & WL_SOCKET_READABLE)
 			new_wait_flags |= msgb_recv_pending(conn);
+
 		if (e->events & WL_SOCKET_WRITEABLE)
 			new_wait_flags |= msgb_send_pending(conn);
+
+		/* Only try to set waits if we didn't lose our connection */
 		if (conn->pgconn != NULL)
 			ModifyWaitEvent(wait_set, conn->wait_set_index,
 				new_wait_flags, NULL);
@@ -737,8 +770,11 @@ msgb_remove_destination_by_index(int index)
 		 * http://www.postgresql.org/search/?m=1&q=CAMsr%2BYG8zjxu6WfAAA-i33PQ17jvgSO7_CfSh9cncg_kRQ2NDw%40mail.gmail.com
 		 * So we must work around it by dropping and re-creating the wait event set. This'll scan the connections
 		 * array and re-create it with only known valid sockets.
+		 *
+		 * If we're currently in event processing it'll be re-created when
+		 * we exit the event loop.
 		 */
-		msgb_recreate_wait_event_set();
+		msgb_request_recreate_wait_event_set();
 	}
 
 	if (conn->send_queue != NIL)
@@ -853,13 +889,18 @@ msgb_idx_for_destination(uint32 destination_id, const char *errm_action)
 /*
  * Pg 10 doesn't offer any interface to remove sockets from a wait event set.
  * So if a socket dies we must trash the wait event set and rebuild it.
+ *
+ * A wait set usually can't be recreated as soon as we find out we want to,
+ * since we might be in the middle of event loop processing. So we ask whatever
+ * is driving our event loop to re-create the set next time it's out of the
+ * loop and tell us about it here.
  */
-static void
-msgb_recreate_wait_event_set(void)
+void
+msgb_wait_event_set_recreated(WaitEventSet *new_wait_set)
 {
 	int i;
 
-	wait_set = msgb_recreate_wait_event_set_hook(wait_set, msgb_max_peers);
+	wait_set = new_wait_set;
 
 	for (i = 0; i < msgb_max_peers; i++)
 	{
@@ -876,4 +917,10 @@ msgb_recreate_wait_event_set(void)
 			msgb_register_wait_event(conn, WL_SOCKET_WRITEABLE|WL_SOCKET_READABLE);
 		}
 	}
+}
+
+static void
+msgb_request_recreate_wait_event_set(void)
+{
+	(*msgb_request_recreate_wait_event_set_hook)(wait_set, msgb_max_peers);
 }

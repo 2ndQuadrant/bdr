@@ -15,6 +15,15 @@
  * uses to achieve reliable majority or all-nodes consensus on cluster state
  * transitions.
  *
+ * The consensus manager runs entirely in one bgworker. If other workers want
+ * to enqueue messages, read them, etc, they must do so via the worker the
+ * consensus manager runs in.
+ *
+ * (TODO: message fetch/confirm should be handled in multiple backends since we
+ *  can just read message bodies from the journal and use a small static shmem
+ *  area for the progress info and a lock. Enqueuing is could also work from
+ *  any backend but we'd need IPC to send messages to the worker proc...)
+ *
  * The module is used by enqueueing messages, pumping its state, and handling
  * the results with callbacks. Local state transitions that need to be agreed
  * to by peers should be accomplished by enqueueing messages then processing
@@ -207,11 +216,18 @@ consensus_received_msgb_message(uint32 origin, const char *payload, Size payload
 {
 	ConsensusMessage *message;
 
-	/*
-	 * TODO: For now we're ignoring all the consensus protocol stuff and
-	 * bypassing this layer, sending the nearly raw messages we sent on the
-	 * wire to receivers. No synchronisation, confirmation all nodes received,
-	 * unpacking, etc. Consequently the receive side here is similarly basic.
+    /*
+     * FIXME: a ConsensusMessage is the proposal for, and outcome of, a
+     * negotiation. Not every message passed to this function will be a
+     * ConsensusMessage and we'll need a prefix message type, some unpacking
+     * logic for different kinds of message, etc. That way we'll be able
+     * to do propose/ack/nack/prepare/rollback exchanges, etc.
+     *
+     * TODO: For now we're ignoring all the consensus protocol stuff and pretty
+     * much bypassing this layer, sending the nearly raw messages we sent on
+     * the wire to receivers. No synchronisation, confirmation all nodes
+     * received, unpacking, etc. No message type header yet. Consequently the
+     * receive side here is similarly basic.
 	 *
 	 * What we'll do here in the real version is insert each message and
 	 * call a message received hook to ack/nack it, then reply with an ack/nack.
@@ -223,6 +239,11 @@ consensus_received_msgb_message(uint32 origin, const char *payload, Size payload
 	 * arrives.
 	 */
 
+    /*
+     * TODO: Check if this is a new proposal, an ack/nack, a prepare request,
+     * a commit or rollback, etc. Act accordingly.
+     */
+
 	if (!IsTransactionState())
 		StartTransactionCommand();
 
@@ -231,10 +252,6 @@ consensus_received_msgb_message(uint32 origin, const char *payload, Size payload
 	if (consensus_messages_receive_hook != NULL)
 		(*consensus_messages_receive_hook)(message);
 
-    /*
-     * TODO: only user messages with payloads get inserted into the table,
-     * other messages are used for co-ordination.
-     */
 	consensus_insert_message(message);
 
 	(*consensus_messages_prepare_hook)(message, 1);
@@ -427,28 +444,73 @@ enum ConsensusMessageStatus {
 };
 */
 
+
+/*
+ * Given the handle of a message from when it was proposed for
+ * delivery, look up its progress.
+ */
 enum ConsensusMessageStatus
-messages_status(uint64 handle)
+consensus_messages_status(uint64 handle)
 {
 	elog(WARNING, "not implemented");
 	return CONSENSUS_MESSAGE_FAILED;
 }
 
+/*
+ * Tell the consensus system that messages up to id 'n' are applied and fully
+ * acted on.
+ *
+ * The consensus sytem is also free to truncate them off the bottom of the
+ * journal.
+ *
+ * It is an ERROR to try to confirm past the max applyable message per
+ * consensus_messages_max_id.
+ */
 void
-consensus_messages_applied(struct ConsensusMessage *upto_incl_message)
+consensus_messages_applied(uint32 applied_upto)
 {
+    /* TODO: Needs shmem to coordinate apply progress */
 	elog(WARNING, "not implemented");
 }
 
+/*
+ * Find out how far ahead it's safe to request messages with
+ * consensus_get_message and apply them. Also reports the consensus
+ * manager's view of the last message applied by the system.
+ *
+ * During startup, call this to find out where to start applying messages. Then
+ * fetch each message with consensus_get_message, act on it and call
+ * consensus_messages_applied to advance the confirmation counter. When
+ * max_applyable is reached, call consensus_messages_max_id again.
+ */
 void
 consensus_messages_max_id(uint32 *max_applied, int32 *max_applyable)
 {
+    /* TODO: Needs shmem to coordinate apply progress */
 	elog(WARNING, "not implemented");
 }
 
+/*
+ * Given a globally message id (not a proposal handle), look up the message
+ * and return it.
+ *
+ * If the message-id is 0, return the next message after what was
+ * reported as applied to consensus_messages_applied(...).
+ *
+ * It is an ERROR to request a message greater than the max-applyable
+ * message, even if later messages may be committed. (This won't happen
+ * yet, but might once Raft/Paxos is added).
+ *
+ * It is an ERROR to request an uncommitted message, including PREPAREd
+ * but not committed messages.
+ *
+ * It is an ERROR to request an already-applied message.
+ */
 struct ConsensusMessage*
 consensus_get_message(uint32 message_id)
 {
+    /* TODO: Needs shmem to coordinate apply progress */
+    /* TODO: read message directly from table */
 	elog(WARNING, "not implemented");
 	return NULL;
 }

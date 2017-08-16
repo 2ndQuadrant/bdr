@@ -59,15 +59,6 @@ int msgb_max_peers;
 void
 msgb_startup(int max_connections, Size recv_queue_size)
 {
-	/*
-	 * Wait event sets lack support for removing or replacing socket,
-	 * so we must be able to re-create it.
-	 */
-	if (msgb_recreate_wait_event_set_hook == NULL)
-		ereport(ERROR,
-				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg_internal("caller must install msgb_recreate_wait_event_set_hook")));
-
 	if (!atexit_registered)
 		on_proc_exit(msgb_atexit, (Datum)0);
 

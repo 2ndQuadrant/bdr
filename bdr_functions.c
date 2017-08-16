@@ -15,6 +15,7 @@
 
 #include "fmgr.h"
 
+#include "bdr_messaging.h"
 #include "bdr_functions.h"
 
 PG_FUNCTION_INFO_V1(bdr_decode_message_payload);

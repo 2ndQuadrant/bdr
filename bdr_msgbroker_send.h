@@ -15,9 +15,22 @@ typedef enum MsgbSendStatus
 	MSGB_MSGSTATUS_NOTFOUND
 } MsgbSendStatus;
 
-typedef struct WaitEventSet * (*msgb_recreate_wait_event_set_hook_type)(struct WaitEventSet *old_set, int max_entries);
+/*
+ * This hook is invoked by the broker when the set of active sockets has
+ * changed, and it needs to generate a new wait-event set with the
+ * new sockets.
+ *
+ * This must (possibly after some delay) re-create the wait-event
+ * set with at least nentries_needed free entries. Then it must call
+ * msgb_wait_event_set_recreated with the new wait-set.
+ *
+ * Must be defined to use the broker.
+ */
+typedef void (*msgb_request_recreate_wait_event_set_hook_type)(WaitEventSet *old_set, int nentries_needed);
 
-extern msgb_recreate_wait_event_set_hook_type msgb_recreate_wait_event_set_hook;
+extern msgb_request_recreate_wait_event_set_hook_type msgb_request_recreate_wait_event_set_hook;
+
+extern void msgb_wait_event_set_recreated(WaitEventSet *new_wait_set);
 
 extern int msgb_queue_message(uint32 destination, const char * payload, Size payload_size);
 

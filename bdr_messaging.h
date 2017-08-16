@@ -1,6 +1,8 @@
 #ifndef BDR_MESSAGING_H
 #define BDR_MESSAGING_H
 
+#include "bdr_consensus.h"
+
 /*
  * All BDR subsystems use the BdrMessageType for their inter-node
  * communication. Messages get dispatched via the message module,
@@ -73,14 +75,22 @@ typedef struct BdrMessage
     BdrMessageType  message_type;
 
     /* Actual message contents are zero or more payload bytes */
-    Size            message_length;
-    char            message[FLEXIBLE_ARRAY_MEMBER];
+    Size            payload_length;
+    char            payload[FLEXIBLE_ARRAY_MEMBER];
 
 } BdrMessage;
 
 extern void bdr_start_consensus(int max_nodes);
 extern void bdr_shutdown_consensus(void);
 
-extern void bdr_msg_enqueue(BdrMessage *msgs, int nmessages);
+extern uint64 bdr_msgs_enqueue(BdrMessage *msgs, int nmessages);
+
+extern ConsensusMessageStatus bdr_msg_get_outcome(uint64 msg_handle);
+
+struct WaitEvent;
+extern void bdr_messaging_wait_event(struct WaitEvent *events, int nevents);
+
+struct WaitEventSet;
+extern void bdr_messaging_wait_event_set_recreated(struct WaitEventSet *new_set);
 
 #endif

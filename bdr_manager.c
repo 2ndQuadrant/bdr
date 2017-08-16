@@ -32,7 +32,7 @@ static void bdr_manager_atexit(int code, Datum argument);
 
 /*
  * This hook runs when pglogical's manager worker starts. It brings up the BDR
- * subsystems needed to
+ * subsystems needed to do inter-node state management.
  */
 void
 bdr_manager_worker_start(void)

@@ -60,6 +60,7 @@
 #include "bdr_output.h"
 #include "bdr_msgbroker.h"
 #include "bdr_consensus.h"
+#include "bdr_messaging.h"
 #include "bdr_manager.h"
 
 PG_MODULE_MAGIC;
@@ -130,6 +131,12 @@ bdr_init_pgl_plugin(PG_FUNCTION_ARGS)
 	plugin->handle_startup_param = bdr_handle_startup_param;
 	plugin->prepare_startup_params = bdr_prepare_startup_params;
 	plugin->process_output_param = bdr_process_output_params;
+	/*
+	 * Hook pglogical manager's event loop to be notified about
+	 * readable/writeable sockets in our async messaging system.
+	 */
+	plugin->manager_wait_event = bdr_messaging_wait_event;
+	plugin->manager_wait_event_set_recreated = bdr_messaging_wait_event_set_recreated;
 	
 	plugin_loaded = true;
 

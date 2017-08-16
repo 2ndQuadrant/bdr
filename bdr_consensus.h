@@ -1,6 +1,7 @@
 #ifndef BDR_CONSENSUS_H
 #define BDR_CONSENSUS_H
 
+#include "access/xlogdefs.h"
 #include "datatype/timestamp.h"
 #include "nodes/pg_list.h"
 
@@ -22,12 +23,14 @@ extern void consensus_pump(struct WaitEvent *occurred_events, int nevents);
 extern void consensus_shutdown(void);
 
 typedef struct ConsensusMessage {
+	/* These fields are assigned after enqueue */
 	uint32 sender_nodeid;
 	uint32 sender_local_msgnum;
 	XLogRecPtr sender_lsn;
 	TimestampTz sender_timestamp;
 	uint32 global_message_id;
 	uint16 message_type;
+	/* These fields must be set when submitting a message */
 	Size payload_length;
 	char payload[FLEXIBLE_ARRAY_MEMBER];
 } ConsensusMessage;
@@ -43,15 +46,15 @@ typedef struct ConsensusMessage {
 extern uint64 consensus_enqueue_messages(struct ConsensusMessage *messages,
 					 int nmessages);
 
-enum ConsensusMessageStatus {
+typedef enum ConsensusMessageStatus {
 	CONSENSUS_MESSAGE_IN_PROGRESS,
 	CONSENSUS_MESSAGE_ACCEPTED,
 	CONSENSUS_MESSAGE_FAILED
-};
+} ConsensusMessageStatus;
 
-extern enum ConsensusMessageStatus messages_status(uint64 handle);
+extern enum ConsensusMessageStatus consensus_messages_status(uint64 handle);
 
-extern void consensus_messages_applied(struct ConsensusMessage *upto_incl_message);
+extern void consensus_messages_applied(uint32 applied_upto);
 
 extern void consensus_messages_max_id(uint32 *max_applied, int32 *max_applyable);
 

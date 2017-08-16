@@ -19,13 +19,18 @@
 
 #include "access/xact.h"
 
+#include "storage/latch.h"
+
+#include "pglogical_worker.h"
+
 #include "bdr_catalogs.h"
 #include "bdr_catcache.h"
 #include "bdr_consensus.h"
+#include "bdr_msgbroker.h"
+#include "bdr_msgbroker_send.h"
 #include "bdr_messaging.h"
 
 static bool bdr_msgs_receive(ConsensusMessage *msg);
-static void bdr_msgs_enqueue(ConsensusMessage *msgs, int nmessages);
 static bool bdr_msgs_prepare(ConsensusMessage *msg, int nmessages);
 static void bdr_msgs_commit(ConsensusMessage *msg, int nmessages);
 static void bdr_msgs_rollback(void);
@@ -36,7 +41,10 @@ bdr_start_consensus(int bdr_max_nodes)
 	List	   *subs;
 	ListCell   *lc;
 
-    consensus_messages_receive_hook = bdr_msgs_receive;
+	Assert(MyPGLogicalWorker != NULL
+		   && MyPGLogicalWorker->worker_type == PGLOGICAL_WORKER_MANAGER);
+
+	consensus_messages_receive_hook = bdr_msgs_receive;
 	consensus_messages_prepare_hook = bdr_msgs_prepare;
 	consensus_messages_commit_hook = bdr_msgs_commit;
 	consensus_messages_rollback_hook = bdr_msgs_rollback;
@@ -65,16 +73,105 @@ bdr_shutdown_consensus(void)
     consensus_shutdown();
 }
 
-void
-bdr_msgs_enqueue(ConsensusMessage *msgs, int nmessages)
+static ConsensusMessage *
+bdr_msgs_format(BdrMessage *msgs, int nmessages)
+{
+	ConsensusMessage *result;
+	BdrMessage *msg;
+	Size consensus_msg_size;
+
+	if (nmessages > 1)
+		elog(ERROR, "multiple messages not supported yet, api borked");
+	
+	/*
+	 * FIXME: should be formatting messages on the wire not copying
+	 * the structs directly.
+	 */
+	msg = &msgs[0];
+	consensus_msg_size = offsetof(ConsensusMessage,payload) +
+						 offsetof(BdrMessage,payload) +
+						 msg->payload_length;
+	result = palloc(consensus_msg_size);
+	memset(result, 0, consensus_msg_size);
+
+	/*
+	 * Copy BdrMessage verbatim into payload
+	 * and leave the rest of the ConsensusMessage to be populated by the
+	 * consensus sytem
+	 */
+	memcpy(result->payload, msg, offsetof(BdrMessage,payload) + msg->payload_length);
+	result->payload_length = offsetof(BdrMessage,payload) + msg->payload_length;
+
+	return result;
+}
+
+
+
+/*
+ * Enqueue a message for processing on other peers.
+ *
+ * Returns a handle that can be used to determine when the final message in the
+ * set is finalized and what the outcome was. Use bdr_msg_get_outcome(...)
+ * to look up the status.
+ *
+ * TODO: replace this with an iovec-likes structure (and so on down to the
+ * broker)
+ */
+uint64
+bdr_msgs_enqueue(BdrMessage *msgs, int nmessages)
+{
+	if (MyPGLogicalWorker != NULL && MyPGLogicalWorker->worker_type == PGLOGICAL_WORKER_MANAGER)
+	{
+		/*
+		 * No need for IPC to enqueue this message, we're on the manager
+		 * already.
+		 *
+		 * Wrap the BDR message up in a ConsensusMessage and dispatch it
+		 * for processing.
+		 */
+		ConsensusMessage *consensus_msgs = bdr_msgs_format(msgs, nmessages);
+		return consensus_enqueue_messages(consensus_msgs, nmessages);
+	}
+	else
+	{
+		/*
+		 * TODO support messaging from other peers.
+		 *
+		 * We need to get the message to the manager worker to submit, then get the
+		 * result back.
+		 *
+		 * One way is to use paired shm memory queues to exchange the message
+		 * between bdr workers, normal backends requesting ddl locks, etc and the
+		 * manager.
+		 *
+		 * Alternately we can use the journal table. We can't easily just have
+		 * the consensus manager insert the row from the current backend; it'd
+		 * still have to read it from the manager to send it on the wire via
+		 * the message broker. The row would be uncommitted and we'd have to do
+		 * a dirty read, worry about the initating proc dying (and telling
+		 * peers about it), etc. The IPC requirement just moves from
+		 * worker<->consensus to consensus<->broker, so it doesn't seem
+		 * like a win.
+		 *
+		 * Either way, TODO.
+		 */
+		elog(ERROR, "not implemented");
+	}
+}
+
+/*
+ * Given a handle from bdr_msgs_enqueue, look up whether
+ * a message is committed or not.
+ */
+ConsensusMessageStatus bdr_msg_get_outcome(uint64 msg_handle)
 {
 	/*
-	 * Enqueue the messages and don't bother waiting for results. We'll see
-	 * them in the handler callbacks anyway.
-	 *
-	 * TODO: can we cut the status interface as wholly pointless?
+	 * TODO: For now only works in manager worker, see comments
+	 * in bdr_consensus.c prelude for how to change that.
 	 */
-	(void) consensus_enqueue_messages(msgs, nmessages);
+	Assert(MyPGLogicalWorker != NULL && MyPGLogicalWorker->worker_type == PGLOGICAL_WORKER_MANAGER);
+
+	return consensus_messages_status(msg_handle);
 }
 
 static bool
@@ -113,4 +210,16 @@ bdr_msgs_rollback(void)
 	elog(LOG, "XXX ROLLBACK"); /* TODO */
 
     /* TODO: here's where we wind back any temporary state changes */
+}
+
+void
+bdr_messaging_wait_event(struct WaitEvent *events, int nevents)
+{
+	consensus_pump(events, nevents);
+}
+
+void
+bdr_messaging_wait_event_set_recreated(struct WaitEventSet *new_set)
+{
+	msgb_wait_event_set_recreated(new_set);
 }
