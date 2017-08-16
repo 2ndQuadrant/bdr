@@ -135,7 +135,7 @@ bdr_init_pgl_plugin(PG_FUNCTION_ARGS)
 	 * Hook pglogical manager's event loop to be notified about
 	 * readable/writeable sockets in our async messaging system.
 	 */
-	plugin->manager_wait_event = bdr_messaging_wait_event;
+	plugin->manager_wait_event = bdr_manager_wait_event;
 	plugin->manager_wait_event_set_recreated = bdr_messaging_wait_event_set_recreated;
 	
 	plugin_loaded = true;

@@ -60,3 +60,30 @@ bdr_manager_atexit(int code, Datum argument)
 {
 	bdr_shutdown_consensus();
 }
+
+/*
+ * Intercept pglogical's main loop during wait-event processing
+ */
+void
+bdr_manager_wait_event(struct WaitEvent *events, int nevents)
+{
+	BdrMessage *msg;
+	const char *dummy_payload;
+	Size dummy_payload_length;
+
+	bdr_messaging_wait_event(events, nevents);
+
+	/*
+	 * For testing purposes, enqueue some messages here and expect to receive
+	 * them through the receive/prepare/commit process.
+	 */
+	dummy_payload = "dummy payload";
+	dummy_payload_length = strlen(dummy_payload);
+
+	msg = palloc(offsetof(BdrMessage,payload) + dummy_payload_length);
+	msg->message_type = BDR_MSG_NOOP;
+	msg->payload_length = dummy_payload_length;
+	memcpy(msg->payload, dummy_payload, dummy_payload_length);
+
+	(void) bdr_msgs_enqueue(msg, 1);
+}
