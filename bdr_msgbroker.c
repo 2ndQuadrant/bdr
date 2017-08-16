@@ -44,8 +44,15 @@
 #include "utils/elog.h"
 #include "utils/memutils.h"
 
+/*
+ * Trying to totally isolate the message broker from BDR would probably be
+ * silly over-engineering, so let it do things like look up its local node-id
+ * directly. It's easy enough to abstract out if we decide to split this off
+ * into its own extension for re-use later.
+ */
 #include "bdr_worker.h"
 #include "bdr_catcache.h"
+
 #include "bdr_msgbroker_receive.h"
 #include "bdr_msgbroker_send.h"
 #include "bdr_msgbroker.h"
@@ -69,6 +76,8 @@ msgb_startup(int max_connections, Size recv_queue_size)
 	msgb_max_peers = max_connections;
 	msgb_startup_send();
 	msgb_startup_receive(recv_queue_size);
+	elog(bdr_debug_level, "BDR msgbroker: started (max %d conns)",
+		 max_connections);
 }
 
 void
@@ -83,12 +92,14 @@ msgb_add_peer(uint32 peer_id, const char *dsn)
 {
 	msgb_add_receive_peer(peer_id);
 	msgb_add_send_peer(peer_id, dsn);
+	elog(bdr_debug_level, "BDR msgbroker: added peer %u with dsn '%s'", peer_id, dsn);
 }
 
 void
 msgb_alter_peer(uint32 peer_id, const char *new_dsn)
 {
 	msgb_alter_send_peer(peer_id, new_dsn);
+	elog(bdr_debug_level, "BDR msgbroker: peer %u dsn changed to '%s'", peer_id, new_dsn);
 }
 
 void
@@ -96,6 +107,7 @@ msgb_remove_peer(uint32 peer_id)
 {
 	msgb_remove_receive_peer(peer_id);
 	msgb_remove_send_peer(peer_id);
+	elog(bdr_debug_level, "BDR msgbroker: peer %u removed", peer_id);
 }
 
 /*
@@ -107,6 +119,7 @@ msgb_shutdown(void)
 {
 	msgb_shutdown_send();
 	msgb_shutdown_receive();
+	elog(bdr_debug_level, "BDR msgbroker: stopped");
 }
 
 void

@@ -11,4 +11,6 @@ extern char peer_bdr_version_str[BDR_VERSION_STR_SIZE];
 
 extern void bdr_ensure_active_db(void);
 
+extern int bdr_debug_level;
+
 #endif

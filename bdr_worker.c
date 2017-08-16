@@ -21,6 +21,16 @@ int peer_bdr_version_num = -1;
 char peer_bdr_version_str[BDR_VERSION_STR_SIZE];
 
 /*
+ * GUC storage for bdr.debug_level
+ *
+ * Not everything should use this, just debug messages you don't usually want
+ * to see at all. It's primary utility is to promote BDR messages from debug2
+ * or lower, where they'd be lost in the general postgres spam at
+ * debug2/debug3, to a useful level when we want to do BDR debugging.
+ */
+int bdr_debug_level;
+
+/*
  * TODO: ensure BDR is active in this database, ERROR if not active
  */
 void

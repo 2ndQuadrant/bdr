@@ -72,6 +72,16 @@ void _PG_init(void);
 /* FIXME: Get rid of this hardcoded limit */
 #define BDR_MAX_DATABASES 4
 
+static const struct config_enum_entry bdr_debug_level_options[] = {
+	{"debug5", DEBUG5, false},
+	{"debug4", DEBUG4, false},
+	{"debug3", DEBUG3, false},
+	{"debug2", DEBUG2, false},
+	{"debug1", DEBUG1, false},
+	{"log", LOG, false},
+	{NULL, 0, false}
+};
+
 static void
 bdr_worker_start(void)
 {
@@ -147,7 +157,17 @@ bdr_init_pgl_plugin(PG_FUNCTION_ARGS)
 static void
 bdr_define_gucs(void)
 {
+	DefineCustomEnumVariable("bdr.debug_level",
+							 "log level for BDR debug output",
+							 "log level for BDR debug output - may be debug5 through debug1, or log",
+							 &bdr_debug_level,
+							 DEBUG2,
+							 &bdr_debug_level_options[0],
+							 PGC_USERSET,
+							 0, NULL, NULL, NULL);
+
 	/* TODO: allow bdr_max_nodes to be configured? */
+
 }
 
 /*

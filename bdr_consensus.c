@@ -85,6 +85,7 @@
 #include "bdr_msgbroker_receive.h"
 #include "bdr_msgbroker_send.h"
 #include "bdr_msgbroker.h"
+#include "bdr_worker.h"
 #include "bdr_consensus.h"
 
 /*
@@ -123,6 +124,9 @@ static int consensus_max_nodes = 0;
 static ConsensusMessage * consensus_deserialize_message(uint32 origin, const char *payload, Size payload_size);
 static void consensus_serialize_message(StringInfo si, ConsensusMessage *msg);
 static void consensus_insert_message(ConsensusMessage *message);
+static void consensus_received_msgb_unformatted(ConsensusMessage *message);
+
+static bool consensus_started_txn = false;
 
 static ConsensusNode *
 consensus_find_node_by_id(uint32 node_id, const char * find_reason)
@@ -214,8 +218,12 @@ consensus_insert_message(ConsensusMessage *message)
 static void
 consensus_received_msgb_message(uint32 origin, const char *payload, Size payload_size)
 {
-	ConsensusMessage *message;
+	consensus_received_msgb_unformatted(consensus_deserialize_message(origin, payload, payload_size));
+}
 
+static void
+consensus_received_msgb_unformatted(ConsensusMessage *message)
+{
     /*
      * FIXME: a ConsensusMessage is the proposal for, and outcome of, a
      * negotiation. Not every message passed to this function will be a
@@ -243,11 +251,16 @@ consensus_received_msgb_message(uint32 origin, const char *payload, Size payload
      * TODO: Check if this is a new proposal, an ack/nack, a prepare request,
      * a commit or rollback, etc. Act accordingly.
      */
-
 	if (!IsTransactionState())
+	{
 		StartTransactionCommand();
-
-	message = consensus_deserialize_message(origin, payload, payload_size);
+		consensus_started_txn = true;
+	}
+	else
+	{
+		/* cannot be called within a txn someone else started */
+		Assert(consensus_started_txn);
+	}
 
 	if (consensus_messages_receive_hook != NULL)
 		(*consensus_messages_receive_hook)(message);
@@ -259,6 +272,7 @@ consensus_received_msgb_message(uint32 origin, const char *payload, Size payload
 	/* TODO: 2PC here. Prepare the xact, exchange messages with peers, and come back when they have confirmed prepare too so we can commit: */
 
 	CommitTransactionCommand();
+	consensus_started_txn = false;
 
     /*
      * After commit we must pass the messages again to the commit hook; if
@@ -306,7 +320,7 @@ consensus_begin_startup(uint32 my_nodeid,
 
 	consensus_max_nodes = max_nodes;
 
-	elog(WARNING, "not implemented");
+	elog(WARNING, "not fully implemented");
 }
 
 /*
@@ -384,6 +398,10 @@ consensus_serialize_message(StringInfo si, ConsensusMessage *msg)
  *
  * Returns immediately, before messages are sent let alone before they're
  * received and acted on. Use messages_status to check progress.
+ *
+ * May not be called from within an existing transaction, since the consensus
+ * broker needs to handle a 2PC commit and doesn't want to get mixed up with
+ * whatever else is already going on.
  */
 uint64
 consensus_enqueue_messages(struct ConsensusMessage *messages,
@@ -394,6 +412,8 @@ consensus_enqueue_messages(struct ConsensusMessage *messages,
 	uint32 local_node_id = bdr_get_local_nodeid();
 	XLogRecPtr cur_lsn = GetXLogWriteRecPtr();
 	TimestampTz cur_ts = GetCurrentTimestamp();
+
+	Assert(!IsTransactionState());
 
 	initStringInfo(&si);
 
@@ -419,6 +439,10 @@ consensus_enqueue_messages(struct ConsensusMessage *messages,
 		msg->global_message_id = 0; /* TODO */
 
 		/* message_type, payload and length set by caller */
+		consensus_serialize_message(&si, msg);
+
+		/* A sending node receives its own message immediately. */
+		consensus_received_msgb_unformatted(msg);
 
 		for (nodeidx = 0; nodeidx < consensus_max_nodes; nodeidx++)
 		{
@@ -426,10 +450,16 @@ consensus_enqueue_messages(struct ConsensusMessage *messages,
 			if (node->node_id == 0)
 				continue;
 			
-			consensus_serialize_message(&si, msg);
+			/*
+			 * TODO: We could possibly have a smarter api here where message
+			 * data is shared across all recipients when a message id
+			 * dispatched to a list of recipients. But that'd be hard to manage
+			 * memory and failure for. THis wastes memory temporarily, but
+			 * it's simpler.
+			 */
 			msgb_queue_message(node->node_id, si.data, si.len);
-			resetStringInfo(&si);
 		}
+		resetStringInfo(&si);
 	}
 
 	/* TODO: return msg number */
