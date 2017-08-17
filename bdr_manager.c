@@ -39,14 +39,14 @@ void
 bdr_manager_worker_start(void)
 {
 	bdr_max_nodes = Min(max_worker_processes, max_replication_slots);
-	elog(bdr_debug_level, "configuring BDR for up to %d nodes (unless other resource limits hit)",
-		 bdr_max_nodes);
-
 	if (!bdr_is_active_db())
 	{
 		elog(bdr_debug_level, "BDR not configured on db %u", MyDatabaseId);
 		return;
 	}
+
+	elog(bdr_debug_level, "configuring BDR for up to %d nodes (unless other resource limits hit)",
+		 bdr_max_nodes);
 
 	on_proc_exit(bdr_manager_atexit, (Datum)0);
 

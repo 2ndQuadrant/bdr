@@ -91,7 +91,12 @@ bdr_worker_start(void)
 	CommitTransactionCommand();
 
 	if (!bdr_is_active_db())
+	{
+		elog(LOG, "BDR not active");
 		return;
+	}
+	else
+		elog(LOG, "BDR is active");
 
 	switch (MyPGLogicalWorker->worker_type)
 	{
@@ -130,6 +135,8 @@ bdr_init_pgl_plugin(PG_FUNCTION_ARGS)
 
 	Assert(type != PGLOGICAL_WORKER_NONE);
 
+	elog(bdr_debug_level, "pglogical loading BDR plugin");
+
 	if (plugin_loaded)
 		PG_RETURN_BOOL(false);
 
@@ -138,7 +145,7 @@ bdr_init_pgl_plugin(PG_FUNCTION_ARGS)
 	 * doesn't match at runtime. Currently an exact match is required.
 	 */
 	if (pglogical_version != PGLOGICAL_VERSION_NUM)
-		elog(ERROR, "compiled against pglogical version %d but got %d",
+		elog(ERROR, "BDR compiled against pglogical version %d but got %d",
 			 PGLOGICAL_VERSION_NUM, pglogical_version);
 
 	strncpy(NameStr(plugin->plugin_name), "bdr", NAMEDATALEN);
@@ -161,6 +168,8 @@ bdr_init_pgl_plugin(PG_FUNCTION_ARGS)
 	plugin->manager_wait_event_set_recreated = bdr_messaging_wait_event_set_recreated;
 	
 	plugin_loaded = true;
+
+	elog(bdr_debug_level, "BDR plugin loaded by pglogical");
 
 	/* enable plugin */
 	PG_RETURN_BOOL(true);
@@ -205,5 +214,5 @@ _PG_init(void)
 
 	msgb_shmem_init(BDR_MAX_DATABASES);
 
-	elog(DEBUG1, "loading bdr %s (%06d)", BDR_VERSION, BDR_VERSION_NUM);
+	elog(LOG, "loading BDR %s (%06d)", BDR_VERSION, BDR_VERSION_NUM);
 }
