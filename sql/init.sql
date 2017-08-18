@@ -24,16 +24,19 @@ VALUES (4, 'dummy_nodegroup');
 INSERT INTO bdr.node(pglogical_node_id, node_group_id)
 SELECT node_id, 4 FROM pglogical.local_node;
 
+SET client_min_messages = error;
+
+CREATE TEMPORARY TABLE throwaway AS
 SELECT pg_terminate_backend(pid)
 FROM pg_stat_activity
 WHERE pid <> pg_backend_pid();
 
-SELECT pg_sleep(10);
+DROP TABLE throwaway;
 
-SELECT application_name
-FROM pg_stat_activity
-WHERE application_name LIKE 'pglogical%';
+SET client_min_messages = notice;
+
+SELECT pg_sleep(10);
 
 -- Give the master time to start up and chat to its self
 -- so we can hopefully see some messaging happening
-SELECT pg_sleep(10);
+SELECT pg_sleep(30);
