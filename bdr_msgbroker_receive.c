@@ -254,7 +254,7 @@ msgb_connect_shmem(uint32 origin_node)
 				 		local_node, origin_node)));
 
 
-	mq = shm_toc_lookup(toc, my_node_toc_entry, false);
+	mq = shm_toc_lookup(toc, my_node_toc_entry+1, false);
 
 	/*
 	 * We need to associate ourselves with the queue under the mq spinlock
@@ -469,12 +469,14 @@ msgb_startup_receive(Size recv_queue_size)
 	memset(recvpeers, 0, sizeof(MsgbReceivePeer) * msgb_max_local_nodes);
 
 	/*
-	 * Allocate an entry for ourselves in the static shmem, so workers
-	 * can find our dynamic shmem: segment and know who we are.
+	 * Allocate an entry for the broker in the static shmem, so workers can use
+	 * it to find our dynamic shmem segment containing the delivery memory
+	 * queues.
 	 */
 	Assert(msgb_ctx != NULL);
 	Assert(msgb_my_seg == NULL);
 	LWLockAcquire(msgb_ctx->lock, LW_EXCLUSIVE);
+	Assert(msgb_ctx->msgb_max_local_nodes >= 1);
 	for (i = 0; i < msgb_ctx->msgb_max_local_nodes; i++)
 	{
 		if (msgb_ctx->shmem_mq_seg[i].node_id == 0)
@@ -518,6 +520,7 @@ msgb_startup_receive(Size recv_queue_size)
 	hdr = shm_toc_allocate(toc, hdr_size);
 	SpinLockInit(&hdr->mutex);
 	hdr->node_toc_map_size = msgb_max_peers;
+	Assert(hdr_size > sizeof(uint32)*msgb_max_peers);
 	memset(hdr->node_toc_map, 0, sizeof(uint32)*msgb_max_peers);
 	shm_toc_insert(toc, 0, hdr);
 
@@ -528,7 +531,7 @@ msgb_startup_receive(Size recv_queue_size)
 	 * re-init them for re-use after they get released, so might as well delay
 	 * initial init too.
 	 */
-	for (i = 0; i < msgb_max_peers + 1; i++)
+	for (i = 0; i < msgb_max_peers; i++)
 	{
 		void	   *mq_off = shm_toc_allocate(toc, msgb_recv_queue_size);
 		shm_toc_insert(toc, i+1, mq_off);
@@ -633,8 +636,10 @@ msgb_add_receive_peer(uint32 origin_id)
 	 * The queue won't be created yet - we just allocated space for it earlier,
 	 * or it's one that's been cleaned up for re-use. So write a queue into
 	 * the space and attach to it.
+	 *
+	 * Remember ToC is 1-indexed due to header entry
 	 */
-	mq_addr = shm_toc_lookup(toc, my_node_toc_entry, false);
+	mq_addr = shm_toc_lookup(toc, my_node_toc_entry+1, false);
 	mq = shm_mq_create(mq_addr, msgb_recv_queue_size);
 	Assert(mq == mq_addr);
 
@@ -751,6 +756,7 @@ msgb_shmem_startup_receive(void)
 	{
 		memset(msgb_ctx, 0, msgb_calc_shmem_size());
 		msgb_ctx->lock = &(GetNamedLWLockTranche("msgb"))->lock;
+		msgb_ctx->msgb_max_local_nodes = msgb_max_local_nodes;
 	}
 }
 
@@ -852,7 +858,7 @@ msgb_mq_for_node(dsm_segment *seg, uint32 nodeid, MsgbDSMHdr **hdr, int *hdr_idx
 				 errmsg_internal("receiving node %u not registered with broker shmem %u",
 				 		bdr_get_local_nodeid(), nodeid)));
 
-	*mq = shm_toc_lookup(toc, my_node_toc_entry, false);
+	*mq = shm_toc_lookup(toc, my_node_toc_entry+1, false);
 }
 
 /*
@@ -896,6 +902,12 @@ msgb_service_connections_receive(void)
 {
 	int				i;
 
+	if (recvpeers == NULL)
+	{
+		/* Do nothing if broker is shut down */
+		return;
+	}
+
 	for (i = 0; i < msgb_max_peers; i++)
 	{
 		MsgbReceivePeer * const p = &recvpeers[i];
@@ -903,6 +915,10 @@ msgb_service_connections_receive(void)
 		if (recvpeers[i].sender_id != 0)
 		{
 			shm_mq_result	res;
+
+			/* If a sender_id is set, there must be an associated queue */
+			Assert(p->recvqueue != NULL);
+
 			/*
 			 * We must perform a non-blocking read of queue, since we don't know
 			 * if there's anything to read at all on this socket. Our latch got set
