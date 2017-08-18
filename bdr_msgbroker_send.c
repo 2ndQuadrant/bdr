@@ -529,15 +529,11 @@ msgb_send_pending(MsgbConnection *conn)
  * sendable, flush the libpq buffer where writeable, read from the socket and
  * determine message send outcomes where readable.
  */
-void
-msgb_service_connections_send(WaitEvent *occurred_events, int nevents)
+static void
+msgb_service_connections_events(WaitEvent *occurred_events, int nevents)
 {
-	bool new_conns_polling = false;
 	int i;
 
-	if (nevents == 0 && !conns_polling)
-		return;
-	
 	/*
 	 * Service connections for which wait events flagged
 	 * activity.
@@ -581,6 +577,18 @@ msgb_service_connections_send(WaitEvent *occurred_events, int nevents)
 			ModifyWaitEvent(wait_set, conn->wait_set_index,
 				new_wait_flags, NULL);
 	}
+}
+
+/*
+ * Service connections that need polling because they aren't ready to switch
+ * over to wait events yet. This is mainly required for connections that are in
+ * libpq's async handshake process.
+ */
+static void
+msgb_service_connections_polling(void)
+{
+	bool new_conns_polling = false;
+	int i;
 
 	/*
 	 * Do connection maintenance that cannot be done via
@@ -648,6 +656,21 @@ msgb_service_connections_send(WaitEvent *occurred_events, int nevents)
 	 * to servicing connections on wait events?
 	 */
 	conns_polling = new_conns_polling;
+}
+
+/*
+ * Handle connection maintenance, both wait-event driven activity
+ * and polling for connections that are still being set up.
+ */
+void
+msgb_service_connections_send(WaitEvent *occurred_events, int nevents)
+{
+
+	if (nevents == 0 && !conns_polling)
+		return;
+
+	msgb_service_connections_events(occurred_events, nevents);
+	msgb_service_connections_polling();
 }
 
 /*
@@ -802,10 +825,13 @@ msgb_shutdown_send(void)
 	/* Don't free the wait event set, it was passed in by caller */
 	wait_set = NULL;
 
-	for (i = 0; i < msgb_max_peers; i++)
-		msgb_remove_destination_by_index(i);
+	if (conns != NULL)
+	{
+		for (i = 0; i < msgb_max_peers; i++)
+			msgb_remove_destination_by_index(i);
 
-	conns = NULL;
+		conns = NULL;
+	}
 
 	if (msgbuf_context != NULL)
 	{
@@ -902,6 +928,10 @@ void
 msgb_wait_event_set_recreated(WaitEventSet *new_wait_set)
 {
 	int i;
+
+	/* Don't do anything if the broker is shut down */
+	if (conns == NULL)
+		return;
 
 	wait_set = new_wait_set;
 
