@@ -465,8 +465,8 @@ msgb_startup_receive(Size recv_queue_size)
 	 * Prepare space to store the receive side handles for the queues
 	 * and the information mapping them to attached nodes.
 	 */
-	recvpeers = MemoryContextAlloc(TopMemoryContext, sizeof(MsgbReceivePeer) * msgb_max_local_nodes);
-	memset(recvpeers, 0, sizeof(MsgbReceivePeer) * msgb_max_local_nodes);
+	recvpeers = MemoryContextAlloc(TopMemoryContext, sizeof(MsgbReceivePeer) * msgb_max_peers);
+	memset(recvpeers, 0, sizeof(MsgbReceivePeer) * msgb_max_peers);
 
 	/*
 	 * Allocate an entry for the broker in the static shmem, so workers can use
