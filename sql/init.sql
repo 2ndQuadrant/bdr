@@ -60,8 +60,8 @@ UPDATE pglogical.subscription SET sub_isinternal = true;
 -- Subscribe to the second node and make the subscription 'internal'
 -- but this time don't sync structure.
 SELECT * FROM pglogical.create_subscription(
-    subscription_name := 'to_node1',
-    provider_dsn := ( :'node1_dsn' || ' user=super' ),
+    subscription_name := 'to_node2',
+    provider_dsn := ( :'node2_dsn' || ' user=super' ),
     synchronize_structure := false,
     forward_origins := '{}');
 
