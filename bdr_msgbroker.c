@@ -69,11 +69,12 @@ msgb_startup(int max_connections, Size recv_queue_size)
 	if (!atexit_registered)
 		on_proc_exit(msgb_atexit, (Datum)0);
 
+	msgb_max_peers = max_connections;
+
 	if (msgb_max_peers <= 0)
 		ereport(ERROR,
 				(errmsg_internal("max conns must be positive")));
 
-	msgb_max_peers = max_connections;
 	msgb_startup_send();
 	msgb_startup_receive(recv_queue_size);
 	elog(bdr_debug_level, "BDR msgbroker: started (max %d conns)",
