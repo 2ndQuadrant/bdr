@@ -22,6 +22,7 @@
 #include "storage/latch.h"
 
 #include "pglogical_worker.h"
+#include "pglogical_plugins.h"
 
 #include "bdr_catalogs.h"
 #include "bdr_catcache.h"
@@ -34,6 +35,7 @@ static bool bdr_msgs_receive(ConsensusMessage *msg);
 static bool bdr_msgs_prepare(ConsensusMessage *msg, int nmessages);
 static void bdr_msgs_commit(ConsensusMessage *msg, int nmessages);
 static void bdr_msgs_rollback(void);
+static void bdr_request_recreate_wait_event_set_hook(WaitEventSet *old_set, int required_entries);
 
 void
 bdr_start_consensus(int bdr_max_nodes)
@@ -48,6 +50,7 @@ bdr_start_consensus(int bdr_max_nodes)
 	consensus_messages_prepare_hook = bdr_msgs_prepare;
 	consensus_messages_commit_hook = bdr_msgs_commit;
 	consensus_messages_rollback_hook = bdr_msgs_rollback;
+	msgb_request_recreate_wait_event_set_hook = bdr_request_recreate_wait_event_set_hook;
 
 	StartTransactionCommand();
 
@@ -225,4 +228,11 @@ bdr_messaging_wait_event_set_recreated(struct WaitEventSet *new_set)
 		return;
 
 	msgb_wait_event_set_recreated(new_set);
+}
+
+static void
+bdr_request_recreate_wait_event_set_hook(WaitEventSet *old_set, int required_entries)
+{
+	/* TODO: pass required_entries */
+	pglogical_manager_recreate_wait_event_set();
 }
