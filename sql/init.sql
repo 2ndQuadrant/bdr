@@ -2,7 +2,14 @@ SELECT * FROM bdr_regress_variables()
 \gset
 
 \set VERBOSITY terse
+
+\c :node1_dsn
 CREATE EXTENSION bdr CASCADE;
+
+\c :node2_dsn
+CREATE EXTENSION bdr CASCADE;
+
+\c :node1_dsn
 
 -- We should be doing a bdr node create/join here but we don't yet have the
 -- interfaces for that. We're just dummied up so far. So create a pglogical
@@ -10,7 +17,7 @@ CREATE EXTENSION bdr CASCADE;
 -- though no actual BDR node is created yet.
 
 SELECT *
-FROM pglogical.create_node(node_name := 'test_node', dsn := (SELECT node1_dsn FROM bdr_regress_variables()) || ' user=super');
+FROM pglogical.create_node(node_name := 'node1', dsn := :'node1_dsn' || ' user=super');
 
 -- Create the BDR node
 --
@@ -24,6 +31,46 @@ VALUES (4, 'dummy_nodegroup');
 INSERT INTO bdr.node(pglogical_node_id, node_group_id)
 SELECT node_id, 4 FROM pglogical.local_node;
 
+
+\c :node2_dsn
+
+-- Manually create a second node
+SELECT *
+FROM pglogical.create_node(node_name := 'node2', dsn := :'node2_dsn' || ' user=super');
+
+INSERT INTO bdr.node_group(node_group_id, node_group_name)
+VALUES (4, 'dummy_nodegroup');
+
+INSERT INTO bdr.node(pglogical_node_id, node_group_id)
+SELECT node_id, 4 FROM pglogical.local_node;
+
+-- Subscribe to the first node
+SELECT * FROM pglogical.create_subscription(
+    subscription_name := 'to_node1',
+    provider_dsn := ( :'node1_dsn' || ' user=super' ),
+    synchronize_structure := true,
+    forward_origins := '{}');
+
+-- and set the subscription as 'isinternal' so BDR thinks BDR owns it.
+UPDATE pglogical.subscription SET sub_isinternal = true;
+
+
+\c :node1_dsn
+
+-- Subscribe to the second node and make the subscription 'internal'
+-- but this time don't sync structure.
+SELECT * FROM pglogical.create_subscription(
+    subscription_name := 'to_node1',
+    provider_dsn := ( :'node1_dsn' || ' user=super' ),
+    synchronize_structure := false,
+    forward_origins := '{}');
+
+UPDATE pglogical.subscription SET sub_isinternal = true;
+
+-- Now, since BDR doesn't know we changed any catalogs etc,
+-- restart pglogical to make the plugin re-read its config
+
+
 SET client_min_messages = error;
 
 CREATE TEMPORARY TABLE throwaway AS
@@ -35,8 +82,15 @@ DROP TABLE throwaway;
 
 SET client_min_messages = notice;
 
+-- Wait for it to start up
 SELECT pg_sleep(10);
 
--- Give the master time to start up and chat to its self
--- so we can hopefully see some messaging happening
+-- ... and watch what happens. They should chat to each other
+-- over their message brokers, delivering consensus messages
+-- to each other.
 SELECT pg_sleep(30);
+
+
+SELECT * FROM pg_stat_replication;
+SELECT * FROM pg_replication_slots;
+SELECT * FROM pg_stat_activity;

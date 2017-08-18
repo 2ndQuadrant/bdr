@@ -297,6 +297,8 @@ consensus_begin_startup(uint32 my_nodeid,
 	const char * journal_relname,
 	int max_nodes)
 {
+	elog(bdr_debug_level, "BDR consensus system starting up");
+
 	if (consensus_state != CONSENSUS_OFFLINE)
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
@@ -319,8 +321,6 @@ consensus_begin_startup(uint32 my_nodeid,
 	consensus_state = CONSENSUS_STARTING;
 
 	consensus_max_nodes = max_nodes;
-
-	elog(WARNING, "not fully implemented");
 }
 
 /*
@@ -336,6 +336,8 @@ consensus_finish_startup(void)
 	/* TODO actually resolve things */
 
 	consensus_state = CONSENSUS_ONLINE;
+
+	elog(bdr_debug_level, "BDR consensus system started up");
 }
 
 /*

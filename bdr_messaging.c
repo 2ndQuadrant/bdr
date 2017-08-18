@@ -181,7 +181,8 @@ static bool
 bdr_msgs_receive(ConsensusMessage *msg)
 {
 	/* note, we receive our own messages too */
-	elog(LOG, "XXX RECEIVE FROM %u", msg->sender_nodeid);
+	elog(LOG, "XXX RECEIVE FROM %u, my id is %u",
+		msg->sender_nodeid, bdr_get_local_nodeid());
 
     /* TODO: can nack messages here */
     return true;

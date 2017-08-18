@@ -437,6 +437,12 @@ msgb_deliver_message(PG_FUNCTION_ARGS)
 	PG_RETURN_VOID();
 }
 
+static void
+broker_on_detach(dsm_segment * seg, Datum arg)
+{
+	broker_dsm_seg = NULL;
+}
+
 /*
  * Start up the dynamic shared memory and shmem memory queues needed to
  * communicate with the normal backends that will deliver messages to us.
@@ -485,6 +491,7 @@ msgb_startup_receive(Size recv_queue_size)
 			msgb_my_seg->node_id = bdr_get_local_nodeid();
 			msgb_my_seg->manager = MyProc;
 			Assert(msgb_my_seg->dsm_seg_handle == 0);
+			break;
 		}
 	}
 	LWLockRelease(msgb_ctx->lock);
@@ -492,7 +499,9 @@ msgb_startup_receive(Size recv_queue_size)
 	if (msgb_my_seg == NULL)
 		ereport(ERROR,
 				(errcode(ERRCODE_INSUFFICIENT_RESOURCES),
-				 errmsg("maximum number of message brokers exceeded")));
+				 errmsg("maximum number of message brokers exceeded"),
+				 errdetail("all %d local broker slots are in use",
+						   msgb_ctx->msgb_max_local_nodes)));
 
 	hdr_size = offsetof(MsgbDSMHdr, node_toc_map) + sizeof(uint32)*msgb_max_peers;
 
@@ -512,6 +521,7 @@ msgb_startup_receive(Size recv_queue_size)
 	segsize = shm_toc_estimate(&e);
 
 	/* Create the shared memory segment and establish a table of contents. */
+	Assert(broker_dsm_seg == NULL);
 	broker_dsm_seg = dsm_create(shm_toc_estimate(&e), 0);
 	toc = shm_toc_create(BDR_SHMEM_MAGIC, dsm_segment_address(broker_dsm_seg),
 						 segsize);
@@ -537,8 +547,16 @@ msgb_startup_receive(Size recv_queue_size)
 		shm_toc_insert(toc, i+1, mq_off);
 	}
 
+	on_dsm_detach(broker_dsm_seg, broker_on_detach, (Datum)0);
+
+	/*
+	 * Stay attached to the DSM segment now we're set up successfully.
+	 */
+	dsm_pin_mapping(broker_dsm_seg);
+
 	/* Store a handle to the DSM seg where others can find it */
 	LWLockAcquire(msgb_ctx->lock, LW_EXCLUSIVE);
+	Assert(msgb_my_seg->dsm_seg_handle == 0);
 	msgb_my_seg->dsm_seg_handle = dsm_segment_handle(broker_dsm_seg);
 	LWLockRelease(msgb_ctx->lock);
 }
@@ -561,6 +579,9 @@ msgb_add_receive_peer(uint32 origin_id)
 	void		   *mq_addr;
 	int				my_node_toc_entry, first_free_toc_entry;
 	MemoryContext	old_ctx;
+
+	Assert(broker_dsm_seg != NULL);
+	Assert(recvpeers != NULL);
 
 	/* Find local state space for the peer */
 	for (i = 0; i < msgb_max_peers; i++)
@@ -721,6 +742,11 @@ msgb_shutdown_receive(void)
 	 * We don't have to detach from our shmem queues etc. When the broker detaches
 	 * from the DSM segment it'll all get cleaned up.
 	 */
+	if (broker_dsm_seg != NULL)
+	{
+		dsm_detach(broker_dsm_seg);
+		Assert(broker_dsm_seg == NULL);
+	}
 }
 
 static Size
