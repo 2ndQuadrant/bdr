@@ -608,7 +608,7 @@ msgb_add_receive_peer(uint32 origin_id)
 				 		origin_id)));
 
 	/* Add this node to the header ToC entry and allocate a MQ for it. */
-	toc = shm_toc_attach(BDR_SHMEM_MAGIC, broker_dsm_seg);
+	toc = shm_toc_attach(BDR_SHMEM_MAGIC, dsm_segment_address(broker_dsm_seg));
 	if (toc == NULL)
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
