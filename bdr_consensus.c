@@ -523,6 +523,7 @@ consensus_enqueue_message(const char * payload, Size payload_length)
 	msg->payload_length = payload_length;
 
 	/* message_type, payload and length set by caller */
+	initStringInfo(&si);
 	consensus_serialize_message(&si, msg);
 
 	/* A sending node receives its own message immediately. */
