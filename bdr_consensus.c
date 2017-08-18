@@ -32,12 +32,14 @@
  * The flow, where "Node X" may be the same node as "Our node" or some other
  * peer, is:
  *
- * [Node X]   consensus_enqueue_messages
+ * [Node X]   consensus_begin_enqueue
+ * [Node X]   consensus_enqueue_message
  * [Our node]  consensus_messages_receive_hook
  * [Our node]  sends NACK or ACK
  * [Our node]  consensus_messages_receive_hook
  * [Our node]  sends NACK or ACK
  * ...
+ * [Node X]   consensus_finish_enqueue
  * [Node X]   sends prepare
  * [Our node]  consensus_message_prepare_hook (unless locally aborted already)
  * [Our node]  PREPARE TRANSACTION
@@ -124,9 +126,11 @@ static int consensus_max_nodes = 0;
 static ConsensusMessage * consensus_deserialize_message(uint32 origin, const char *payload, Size payload_size);
 static void consensus_serialize_message(StringInfo si, ConsensusMessage *msg);
 static void consensus_insert_message(ConsensusMessage *message);
-static void consensus_received_msgb_unformatted(ConsensusMessage *message);
+static void consensus_received_new_message(ConsensusMessage *message);
 
 static bool consensus_started_txn = false;
+static List *cur_txn_messages = NIL;
+static MemoryContext cur_txn_context = NULL;
 
 static ConsensusNode *
 consensus_find_node_by_id(uint32 node_id, const char * find_reason)
@@ -218,12 +222,32 @@ consensus_insert_message(ConsensusMessage *message)
 static void
 consensus_received_msgb_message(uint32 origin, const char *payload, Size payload_size)
 {
-	consensus_received_msgb_unformatted(consensus_deserialize_message(origin, payload, payload_size));
+    /*
+     * TODO: Check if this is a new proposal, an ack/nack, a prepare request,
+     * a commit or rollback, etc. Act accordingly.
+     */
+	if (!IsTransactionState())
+	{
+		StartTransactionCommand();
+		consensus_started_txn = true;
+	}
+	else
+	{
+		/* cannot be called within a txn someone else started */
+		Assert(consensus_started_txn);
+	}
+
+	/* TODO: handle 2pc prepare and commit requests from peer too */
+	/* by invoking consensus_prepare_transaction, consensus_commit_prepared, consensus_rollback_prepared */
+
+	consensus_received_new_message(consensus_deserialize_message(origin, payload, payload_size));
 }
 
 static void
-consensus_received_msgb_unformatted(ConsensusMessage *message)
+consensus_received_new_message(ConsensusMessage *message)
 {
+	MemoryContext old_ctx;
+
     /*
      * FIXME: a ConsensusMessage is the proposal for, and outcome of, a
      * negotiation. Not every message passed to this function will be a
@@ -246,31 +270,36 @@ consensus_received_msgb_unformatted(ConsensusMessage *message)
 	 * But for now we just treat each message as committed as soon as it
 	 * arrives.
 	 */
-
-    /*
-     * TODO: Check if this is a new proposal, an ack/nack, a prepare request,
-     * a commit or rollback, etc. Act accordingly.
-     */
-	if (!IsTransactionState())
-	{
-		StartTransactionCommand();
-		consensus_started_txn = true;
-	}
-	else
-	{
-		/* cannot be called within a txn someone else started */
-		Assert(consensus_started_txn);
-	}
+	Assert(IsTransactionState() && consensus_started_txn);
 
 	if (consensus_messages_receive_hook != NULL)
 		(*consensus_messages_receive_hook)(message);
 
 	consensus_insert_message(message);
 
-	(*consensus_messages_prepare_hook)(message, 1);
+	old_ctx = MemoryContextSwitchTo(cur_txn_context);
+	cur_txn_messages = lappend(cur_txn_messages, message);
+	(void) MemoryContextSwitchTo(old_ctx);
+}
+
+static void
+consensus_prepare_transaction(void)
+{
+	(*consensus_messages_prepare_hook)(cur_txn_messages);
 
 	/* TODO: 2PC here. Prepare the xact, exchange messages with peers, and come back when they have confirmed prepare too so we can commit: */
+}
 
+static void
+consensus_commit_prepared(void)
+{
+	/*
+	 * TODO: do real 2PC here
+	 *
+	 * This func should be called in response to a remote initiated commit-prepared message, or
+	 * when we detect that a locally submitted consensus request has been acked by all peers.
+	 * (Or later a quorum once we do raft/paxos).
+	 */
 	CommitTransactionCommand();
 	consensus_started_txn = false;
 
@@ -278,9 +307,25 @@ consensus_received_msgb_unformatted(ConsensusMessage *message)
      * After commit we must pass the messages again to the commit hook; if
      * we're doing crash recovery after prepare but before commit it's the only
      * hook we'd call and it needs to know what's being recovered.
+	 *
+	 * TODO: re-read the messages from the table
      */
+	(*consensus_messages_commit_hook)(cur_txn_messages);
 
-	(*consensus_messages_commit_hook)(message, 1);
+	MemoryContextReset(cur_txn_context);
+	cur_txn_messages = NIL;
+}
+
+static void
+consensus_rollback_prepared(void)
+{
+	AbortCurrentTransaction();
+	consensus_started_txn = false;
+
+	(*consensus_messages_rollback_hook)();
+
+	cur_txn_messages = NIL;
+	MemoryContextReset(cur_txn_context);
 }
 
 /*
@@ -319,6 +364,15 @@ consensus_begin_startup(uint32 my_nodeid,
 	msgb_startup(max_nodes, CONSENSUS_MSG_QUEUE_SIZE);
 
 	consensus_state = CONSENSUS_STARTING;
+
+	/*
+	 * We need a memory context that lives longer than the current transaction
+	 * so we can pass the consensus messages to the prepared and committed
+	 * hooks before freeing them.
+	 */
+	cur_txn_context = AllocSetContextCreate(TopMemoryContext,
+								"consensus transaction",
+								ALLOCSET_DEFAULT_SIZES);
 
 	consensus_max_nodes = max_nodes;
 }
@@ -360,6 +414,14 @@ consensus_shutdown(void)
 
 	msgb_shutdown();
 
+	if (cur_txn_context != NULL)
+	{
+		MemoryContextDelete(cur_txn_context);
+		cur_txn_context = NULL;
+	}
+
+	cur_txn_messages = NIL;
+
 	consensus_state = CONSENSUS_OFFLINE;
 	consensus_max_nodes = 0;
 	pfree(consensus_nodes);
@@ -377,7 +439,7 @@ consensus_deserialize_message(uint32 origin, const char *payload, Size payload_s
 	/*
 	 * FIXME, see consensus_serialize_message
 	 */
-	ConsensusMessage *message = palloc(payload_size);
+	ConsensusMessage *message = MemoryContextAlloc(cur_txn_context, payload_size);
 	memcpy(message, payload, payload_size);
 	return message;
 }
@@ -394,6 +456,24 @@ consensus_serialize_message(StringInfo si, ConsensusMessage *msg)
 	appendBinaryStringInfo(si, (const char*)msg, offsetof(ConsensusMessage, payload) + msg->payload_length);
 }
 
+void
+consensus_begin_enqueue(void)
+{
+	if (IsTransactionState())
+	{
+		if (consensus_started_txn)
+			elog(ERROR, "Consensus transaction already open");
+		else
+			elog(ERROR, "Database transaction not started by consensus manager already open");
+	}
+
+	Assert(!consensus_started_txn);
+	StartTransactionCommand();
+	consensus_started_txn = true;
+
+	/* TODO: Make sure the local queue is empty */
+}
+
 /*
  * Execute the consensus protocol for a batch of messages as a unit, such that
  * all or none are handled by peers.
@@ -406,18 +486,19 @@ consensus_serialize_message(StringInfo si, ConsensusMessage *msg)
  * whatever else is already going on.
  */
 uint64
-consensus_enqueue_messages(struct ConsensusMessage *messages,
-					 int nmessages)
+consensus_enqueue_message(const char * payload, Size payload_length)
 {
-	int msgidx, nodeidx;
+	int nodeidx;
 	StringInfoData si;
-	uint32 local_node_id = bdr_get_local_nodeid();
-	XLogRecPtr cur_lsn = GetXLogWriteRecPtr();
-	TimestampTz cur_ts = GetCurrentTimestamp();
+	ConsensusMessage *msg;
+	Size msg_size;
 
-	Assert(!IsTransactionState());
+	Assert(IsTransactionState() && consensus_started_txn);
 
-	initStringInfo(&si);
+	/*
+	 * TODO: here we should check if our consensus txn is already nack'd
+	 * by a peer and if so, reject this submit.
+	 */
 
 	/*
 	 * TODO: right now, all we do is fire and forget to the broker and trust
@@ -430,41 +511,66 @@ consensus_enqueue_messages(struct ConsensusMessage *messages,
 	 * (Then later we'll upgrade to Raft or Paxos distributed majority
 	 * consensus).
 	 */
-	for (msgidx = 0; msgidx < nmessages; msgidx++)
+
+	msg_size = offsetof(ConsensusMessage, payload) + payload_length;
+	msg = MemoryContextAlloc(cur_txn_context, msg_size);
+	msg->sender_nodeid = bdr_get_local_nodeid();
+	msg->sender_local_msgnum = 0; /* TODO (or caller supplied?) */
+	msg->sender_lsn = GetXLogWriteRecPtr();
+	msg->sender_timestamp = GetCurrentTimestamp();
+	msg->global_message_id = 0; /* TODO */
+	memcpy(msg->payload, payload, payload_length);
+	msg->payload_length = payload_length;
+
+	/* message_type, payload and length set by caller */
+	consensus_serialize_message(&si, msg);
+
+	/* A sending node receives its own message immediately. */
+	consensus_received_new_message(msg);
+
+	for (nodeidx = 0; nodeidx < consensus_max_nodes; nodeidx++)
 	{
-		ConsensusMessage *msg = &messages[msgidx];
-
-		msg->sender_nodeid = local_node_id;
-		msg->sender_local_msgnum = 0; /* TODO (or caller supplied?) */
-		msg->sender_lsn = cur_lsn;
-		msg->sender_timestamp = cur_ts;
-		msg->global_message_id = 0; /* TODO */
-
-		/* message_type, payload and length set by caller */
-		consensus_serialize_message(&si, msg);
-
-		/* A sending node receives its own message immediately. */
-		consensus_received_msgb_unformatted(msg);
-
-		for (nodeidx = 0; nodeidx < consensus_max_nodes; nodeidx++)
-		{
-			ConsensusNode * const node = &consensus_nodes[nodeidx];
-			if (node->node_id == 0)
-				continue;
-			
-			/*
-			 * TODO: We could possibly have a smarter api here where message
-			 * data is shared across all recipients when a message id
-			 * dispatched to a list of recipients. But that'd be hard to manage
-			 * memory and failure for. THis wastes memory temporarily, but
-			 * it's simpler.
-			 */
-			msgb_queue_message(node->node_id, si.data, si.len);
-		}
-		resetStringInfo(&si);
+		ConsensusNode * const node = &consensus_nodes[nodeidx];
+		if (node->node_id == 0)
+			continue;
+		
+		/*
+		 * TODO: We could possibly have a smarter api here where message
+		 * data is shared across all recipients when a message id
+		 * dispatched to a list of recipients. But that'd be hard to manage
+		 * memory and failure for. THis wastes memory temporarily, but
+		 * it's simpler.
+		 */
+		msgb_queue_message(node->node_id, si.data, si.len);
 	}
+	resetStringInfo(&si);
 
 	/* TODO: return msg number */
+	return 0;
+}
+
+uint64
+consensus_finish_enqueue(void)
+{
+	Assert(IsTransactionState() && consensus_started_txn);
+
+	/*
+	 * All local messages have been passed through the local receive hook and
+	 * have been submitted to the broker for sending to peers. Prepare the
+	 * transaction locally.
+	 *
+	 * TODO: send out prepare to peers too
+	 */
+	consensus_prepare_transaction();
+
+	/*
+	 * TODO: this commit should happen in response to 2PC consensus, not
+	 * immediately here. If all peers agreed we should commit then send
+	 * a commit to peers, and not before.
+	 */
+	consensus_commit_prepared();
+
+	/* TODO: return last msg number */
 	return 0;
 }
 

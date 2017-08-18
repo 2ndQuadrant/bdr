@@ -23,28 +23,49 @@ extern void consensus_pump(struct WaitEvent *occurred_events, int nevents);
 extern void consensus_shutdown(void);
 
 typedef struct ConsensusMessage {
-	/* These fields are assigned after enqueue */
 	uint32 sender_nodeid;
 	uint32 sender_local_msgnum;
 	XLogRecPtr sender_lsn;
 	TimestampTz sender_timestamp;
 	uint32 global_message_id;
 	uint16 message_type;
-	/* These fields must be set when submitting a message */
 	Size payload_length;
 	char payload[FLEXIBLE_ARRAY_MEMBER];
 } ConsensusMessage;
 
 /*
- * Put some a batch of messages on the send queue, to be delivered as a single
- * unit (all succeed, or fail, together).
+ * Start a batch of consensus messages to be delivered as a unit
+ * when consensus_end_batch() is called.
+ *
+ * This will start a local database transaction. No transaction may already be
+ * open.
+ */
+extern void consensus_begin_enqueue(void);
+
+/*
+ * Add a message to a batch of messages on the send queue.
+ *
+ * There must be an open consensus message transaction from
+ * consensus_begin_enqueue()
  *
  * A node must be prepared for its own messages to fail and be rolled back,
  * so it should treat them the same way it does remote messages in receive.
  * Don't do anything final until after the commit hook is called.
+ *
+ * The returned handle may be used to query the progress of the message.
  */
-extern uint64 consensus_enqueue_messages(struct ConsensusMessage *messages,
-					 int nmessages);
+extern uint64 consensus_enqueue_message(const char *payload, Size payload_size);
+
+/*
+ * Finish preparing a set of messages and submit them as a unit.  This node and
+ * all other peers will prepare and commit all, or none, of the messages.
+ *
+ * Nodes may receive only a subset if the txn is already aborted on some other
+ * nodes.
+ *
+ * Returns a handle that can be used to query the progress of the submission.
+ */
+extern uint64 consensus_finish_enqueue(void);
 
 typedef enum ConsensusMessageStatus {
 	CONSENSUS_MESSAGE_IN_PROGRESS,
@@ -111,7 +132,7 @@ extern consensus_messages_receive_hooktype consensus_messages_receive_hook;
  * consensus_messages_rollback_hook will be called after
  * consensus_message_prepare_hook and before any other prepare hook.
  */
-typedef bool (*consensus_messages_prepare_hooktype)(struct ConsensusMessage *messages, int nmessages);
+typedef bool (*consensus_messages_prepare_hooktype)(List *messages);
 
 extern consensus_messages_prepare_hooktype consensus_messages_prepare_hook;
 
@@ -134,7 +155,7 @@ extern consensus_messages_prepare_hooktype consensus_messages_prepare_hook;
  * previously prepared xact before a crash. Either way they must be treated
  * the same.
  */
-typedef void (*consensus_messages_commit_hooktype)(struct ConsensusMessage *messages, int nmessages);
+typedef void (*consensus_messages_commit_hooktype)(List *messages);
 
 extern consensus_messages_commit_hooktype consensus_messages_commit_hook;
 

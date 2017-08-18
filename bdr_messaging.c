@@ -32,8 +32,8 @@
 #include "bdr_messaging.h"
 
 static bool bdr_msgs_receive(ConsensusMessage *msg);
-static bool bdr_msgs_prepare(ConsensusMessage *msg, int nmessages);
-static void bdr_msgs_commit(ConsensusMessage *msg, int nmessages);
+static bool bdr_msgs_prepare(List *messages);
+static void bdr_msgs_commit(List *messages);
 static void bdr_msgs_rollback(void);
 static void bdr_request_recreate_wait_event_set_hook(WaitEventSet *old_set, int required_entries);
 
@@ -76,39 +76,14 @@ bdr_shutdown_consensus(void)
     consensus_shutdown();
 }
 
-static ConsensusMessage *
-bdr_msgs_format(BdrMessage *msgs, int nmessages)
+void
+bdr_msgs_begin_enqueue(void)
 {
-	ConsensusMessage *result;
-	BdrMessage *msg;
-	Size consensus_msg_size;
-
-	if (nmessages > 1)
-		elog(ERROR, "multiple messages not supported yet, api borked");
-	
-	/*
-	 * FIXME: should be formatting messages on the wire not copying
-	 * the structs directly.
-	 */
-	msg = &msgs[0];
-	consensus_msg_size = offsetof(ConsensusMessage,payload) +
-						 offsetof(BdrMessage,payload) +
-						 msg->payload_length;
-	result = palloc(consensus_msg_size);
-	memset(result, 0, consensus_msg_size);
-
-	/*
-	 * Copy BdrMessage verbatim into payload
-	 * and leave the rest of the ConsensusMessage to be populated by the
-	 * consensus sytem
-	 */
-	memcpy(result->payload, msg, offsetof(BdrMessage,payload) + msg->payload_length);
-	result->payload_length = offsetof(BdrMessage,payload) + msg->payload_length;
-
-	return result;
+	if (MyPGLogicalWorker != NULL && MyPGLogicalWorker->worker_type == PGLOGICAL_WORKER_MANAGER)
+		consensus_begin_enqueue();
+	else
+		elog(ERROR, "not implemented");
 }
-
-
 
 /*
  * Enqueue a message for processing on other peers.
@@ -116,24 +91,17 @@ bdr_msgs_format(BdrMessage *msgs, int nmessages)
  * Returns a handle that can be used to determine when the final message in the
  * set is finalized and what the outcome was. Use bdr_msg_get_outcome(...)
  * to look up the status.
- *
- * TODO: replace this with an iovec-likes structure (and so on down to the
- * broker)
  */
 uint64
-bdr_msgs_enqueue(BdrMessage *msgs, int nmessages)
+bdr_msgs_enqueue(BdrMessage *message)
 {
 	if (MyPGLogicalWorker != NULL && MyPGLogicalWorker->worker_type == PGLOGICAL_WORKER_MANAGER)
 	{
 		/*
 		 * No need for IPC to enqueue this message, we're on the manager
 		 * already.
-		 *
-		 * Wrap the BDR message up in a ConsensusMessage and dispatch it
-		 * for processing.
 		 */
-		ConsensusMessage *consensus_msgs = bdr_msgs_format(msgs, nmessages);
-		return consensus_enqueue_messages(consensus_msgs, nmessages);
+		return consensus_enqueue_message((const char*)message, BdrMessageSize(message));
 	}
 	else
 	{
@@ -160,6 +128,15 @@ bdr_msgs_enqueue(BdrMessage *msgs, int nmessages)
 		 */
 		elog(ERROR, "not implemented");
 	}
+}
+
+uint64
+bdr_msgs_finish_enqueue(void)
+{
+	if (MyPGLogicalWorker != NULL && MyPGLogicalWorker->worker_type == PGLOGICAL_WORKER_MANAGER)
+		return consensus_finish_enqueue();
+	else
+		elog(ERROR, "not implemented");
 }
 
 /*
@@ -189,7 +166,7 @@ bdr_msgs_receive(ConsensusMessage *msg)
 }
 
 static bool
-bdr_msgs_prepare(ConsensusMessage *msg, int nmessages)
+bdr_msgs_prepare(List *messages)
 {
 	elog(LOG, "XXX PREPARE"); /* TODO */
 
@@ -200,7 +177,7 @@ bdr_msgs_prepare(ConsensusMessage *msg, int nmessages)
 }
 
 static void
-bdr_msgs_commit(ConsensusMessage *msg, int nmessages)
+bdr_msgs_commit(List *messages)
 {
 	elog(LOG, "XXX COMMIT"); /* TODO */
 

@@ -91,5 +91,5 @@ bdr_manager_wait_event(struct WaitEvent *events, int nevents)
 	msg->payload_length = dummy_payload_length;
 	memcpy(msg->payload, dummy_payload, dummy_payload_length);
 
-	(void) bdr_msgs_enqueue(msg, 1);
+	(void) bdr_msgs_enqueue_one(msg);
 }
