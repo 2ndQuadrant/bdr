@@ -4,6 +4,8 @@
 
 #include "fmgr.h"
 
+#include "miscadmin.h"
+
 #include "nodes/pg_list.h"
 
 #include "storage/latch.h"
@@ -576,6 +578,8 @@ msgb_service_connections_events(WaitEvent *occurred_events, int nevents)
 		if (conn->pgconn != NULL)
 			ModifyWaitEvent(wait_set, conn->wait_set_index,
 				new_wait_flags, NULL);
+
+		CHECK_FOR_INTERRUPTS();
 	}
 }
 
@@ -598,7 +602,7 @@ msgb_service_connections_polling(void)
 	{
 		for (i = 0; i < msgb_max_peers; i++)
 		{
-			MsgbConnection *conn = NULL;
+			MsgbConnection * const conn = &conns[i];
 
 			/*
 			 * connection removal is done immediately, so
@@ -648,6 +652,8 @@ msgb_service_connections_polling(void)
 			}
 
 			Assert(new_conns_polling || conn->wait_set_index != 0);
+
+			CHECK_FOR_INTERRUPTS();
 		}
 	}
 

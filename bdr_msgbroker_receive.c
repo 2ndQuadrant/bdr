@@ -126,6 +126,12 @@ static void msgb_mq_for_node(dsm_segment *seg, uint32 nodeid, MsgbDSMHdr **hdr, 
 static void msgb_handle_peer_connect(MsgbReceivePeer *peer, const char *msg, Size msg_len);
 static void msgb_report_peer_connect(uint32 origin_id, uint32 last_sent_msgid);
 
+inline static bool
+InBrokerProcess(void)
+{
+	return recvpeers != NULL;
+}
+
 /*
  * In a normal user backend, attach to the manager's shmem queue for
  * the connecting peer and prepare to send messages.
@@ -142,6 +148,8 @@ msgb_connect(PG_FUNCTION_ARGS)
 	uint32			origin_node = PG_GETARG_UINT32(0);
 	uint32			destination_node = PG_GETARG_UINT32(1);
 	uint32			last_sent_msgid = PG_GETARG_UINT32(2);
+
+	Assert(!InBrokerProcess());
 
 	if (origin_node == 0 || destination_node == 0)
 		ereport(ERROR,
@@ -183,6 +191,8 @@ msgb_connect_shmem(uint32 origin_node)
 	MemoryContext	old_ctx;
 	int				i;
 	PGPROC*			cur_receiver;
+
+	Assert(!InBrokerProcess());
 
 	/*
 	 * Find the static shmem control segment for the message broker we want to
@@ -320,6 +330,8 @@ msgb_report_peer_connect(uint32 origin_id, uint32 last_sent_msgid)
 	Assert(connected_peer_id != 0);
 	Assert(send_mq != NULL);
 
+	Assert(!InBrokerProcess());
+
 	msg[0].data = (void*)&message_id;
 	msg[0].len = sizeof(uint32);
 	msg[1].data = (void*)&last_sent_msgid;
@@ -342,6 +354,8 @@ static void
 msgb_handle_peer_connect(MsgbReceivePeer *peer, const char *msg, Size msg_len)
 {
 	uint32 last_sent_msgid;
+
+	Assert(InBrokerProcess());
 
 	if (msg_len != sizeof(uint32))
 	{
@@ -393,6 +407,8 @@ msgb_deliver_message(PG_FUNCTION_ARGS)
 	bytea		   *payload = PG_GETARG_BYTEA_PP(2);
 	shm_mq_result	res;
 	shm_mq_iovec	msg[2];
+
+	Assert(!InBrokerProcess());
 
 	if (connected_peer_id == 0)
 		ereport(ERROR,
@@ -467,12 +483,16 @@ msgb_startup_receive(Size recv_queue_size)
 	if (msgb_received_hook == NULL)
 		ereport(ERROR, (errmsg_internal("no message receive hook is registered")));
 
+	Assert(!InBrokerProcess());
+
 	/*
 	 * Prepare space to store the receive side handles for the queues
 	 * and the information mapping them to attached nodes.
 	 */
 	recvpeers = MemoryContextAlloc(TopMemoryContext, sizeof(MsgbReceivePeer) * msgb_max_peers);
 	memset(recvpeers, 0, sizeof(MsgbReceivePeer) * msgb_max_peers);
+
+	Assert(InBrokerProcess()); /* well duh */
 
 	/*
 	 * Allocate an entry for the broker in the static shmem, so workers can use
@@ -566,6 +586,9 @@ msgb_startup_receive(Size recv_queue_size)
  * messages from.
  *
  * No locking required, it's broker-local and the MQ attach does its own.
+ *
+ * It's legal (but weird) to specify the local node as an origin; you could
+ * use the msgbroker for a loopback if you wanted.
  */
 void
 msgb_add_receive_peer(uint32 origin_id)
@@ -581,7 +604,7 @@ msgb_add_receive_peer(uint32 origin_id)
 	MemoryContext	old_ctx;
 
 	Assert(broker_dsm_seg != NULL);
-	Assert(recvpeers != NULL);
+	Assert(InBrokerProcess());
 
 	/* Find local state space for the peer */
 	for (i = 0; i < msgb_max_peers; i++)
@@ -648,10 +671,17 @@ msgb_add_receive_peer(uint32 origin_id)
 	 *
 	 * TODO: handle running out of memqueues more gracefully on peer add
 	 */
-	ereport(ERROR,
-			(errcode(ERRCODE_INSUFFICIENT_RESOURCES),
-			 errmsg("no free shared memory slots on %u for message queue for node %u",
-			 		 bdr_get_local_nodeid(), origin_id)));
+	if (first_free_toc_entry == -1)
+		ereport(ERROR,
+				(errcode(ERRCODE_INSUFFICIENT_RESOURCES),
+				 errmsg("no free shared memory slots on %u for message queue for node %u while adding peer",
+				 		 bdr_get_local_nodeid(), origin_id)));
+
+	/*
+	 * We already claimed this entry while holding the spinlock,
+	 * if there was one free
+	 */
+	my_node_toc_entry = first_free_toc_entry;
 
 	/*
 	 * The queue won't be created yet - we just allocated space for it earlier,
@@ -695,6 +725,8 @@ msgb_remove_receive_peer(uint32 origin_id)
 	shm_mq		   *mq;
 	MsgbDSMHdr	   *hdr;
 	int				my_node_toc_entry;
+
+	Assert(InBrokerProcess());
 
 	/* look up broker-local state for peer */
 	for (i = 0; i < msgb_max_peers; i++)
@@ -819,6 +851,8 @@ msgb_deliver_msg(MsgbReceivePeer *peer)
 	char *buf;
 	Size bufsize;
 
+	Assert(InBrokerProcess());
+
 	Assert(peer->recvsize > sizeof(uint32));
 	bufsize = peer->recvsize - sizeof(uint32);
 	buf = ((char*)peer->recvbuf) + sizeof(uint32);
@@ -860,6 +894,8 @@ msgb_mq_for_node(dsm_segment *seg, uint32 nodeid, MsgbDSMHdr **hdr, int *hdr_idx
 	shm_toc	   *toc;
 	int			my_node_toc_entry = -1;
 	int			i;
+
+	Assert(InBrokerProcess());
 
 	toc = shm_toc_attach(BDR_SHMEM_MAGIC, dsm_segment_address(seg));
 	if (toc == NULL)
@@ -904,6 +940,7 @@ msgb_try_cleanup_peer_slot(MsgbReceivePeer *peer)
 	shm_mq *mq;
 
 	Assert(peer->pending_cleanup == true);
+	Assert(InBrokerProcess());
 
 	msgb_mq_for_node(broker_dsm_seg, peer->sender_id, &hdr, &hdr_idx, &mq);
 	if (shm_mq_get_receiver(mq) != NULL)
@@ -933,6 +970,8 @@ msgb_service_connections_receive(void)
 		/* Do nothing if broker is shut down */
 		return;
 	}
+
+	Assert(InBrokerProcess());
 
 	for (i = 0; i < msgb_max_peers; i++)
 	{
@@ -980,5 +1019,7 @@ msgb_service_connections_receive(void)
 
 		if (p->pending_cleanup)
 			msgb_try_cleanup_peer_slot(p);
+
+		CHECK_FOR_INTERRUPTS();
 	}
 }

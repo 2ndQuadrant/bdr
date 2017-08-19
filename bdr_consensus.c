@@ -78,6 +78,8 @@
 
 #include "lib/stringinfo.h"
 
+#include "miscadmin.h"
+
 #include "storage/latch.h"
 #include "storage/ipc.h"
 
@@ -405,6 +407,7 @@ void
 consensus_pump(struct WaitEvent *occurred_events, int nevents)
 {
 	msgb_service_connections(occurred_events, nevents);
+	CHECK_FOR_INTERRUPTS();
 }
 
 void
