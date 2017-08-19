@@ -54,6 +54,27 @@ SELECT * FROM pglogical.create_subscription(
 -- and set the subscription as 'isinternal' so BDR thinks BDR owns it.
 UPDATE pglogical.subscription SET sub_isinternal = true;
 
+-- Wait for the initial copy to finish
+--
+-- If we don't do this, we'll usually kill the apply worker during init
+-- and it won't retry since it doesn't know if the restore was partial
+-- last time around
+
+DO LANGUAGE plpgsql $$
+BEGIN
+  WHILE (SELECT status <> 'replicating' FROM pglogical.show_subscription_status())
+  LOOP
+    PERFORM pg_sleep(0.5);
+  END LOOP;
+END;
+$$;
+
+
+SELECT * FROM pglogical.show_subscription_status();
+
+SELECT pg_sleep(5);
+
+SELECT * FROM pglogical.show_subscription_status();
 
 \c :node1_dsn
 
@@ -66,6 +87,15 @@ SELECT * FROM pglogical.create_subscription(
     forward_origins := '{}');
 
 UPDATE pglogical.subscription SET sub_isinternal = true;
+
+DO LANGUAGE plpgsql $$
+BEGIN
+  WHILE (SELECT status <> 'replicating' FROM pglogical.show_subscription_status())
+  LOOP
+    PERFORM pg_sleep(0.5);
+  END LOOP;
+END;
+$$;
 
 -- Now, since BDR doesn't know we changed any catalogs etc,
 -- restart pglogical to make the plugin re-read its config
