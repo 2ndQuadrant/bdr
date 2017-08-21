@@ -62,7 +62,7 @@ bdr_start_consensus(int bdr_max_nodes)
 	foreach (lc, subs)
 	{
 		PGLogicalSubscription *sub = lfirst(lc);
-		consensus_add_node(sub->target->id, sub->target_if->dsn);
+		consensus_add_node(sub->origin->id, sub->origin_if->dsn);
 	}
 
 	consensus_finish_startup();
