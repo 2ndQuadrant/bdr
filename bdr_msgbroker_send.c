@@ -299,7 +299,8 @@ msgb_finish_connect(MsgbConnection *conn)
 	 * ensure it's ready to process messages, so dispatch the query for that...
 	 */
 	initial_wait_flags = msgb_peer_connect(conn);
-	Assert(conn->pgconn != NULL);
+	if (conn->pgconn == NULL)
+		return;
 
 	/* And begin event based processing */
 	msgb_register_wait_event(conn, initial_wait_flags);
