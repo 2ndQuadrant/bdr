@@ -17,17 +17,17 @@
 
   <para>
    BDR 1.0.0 cannot join a BDR 0.9.3 group, so upgrades may not be performed
-   by adding new nodes and retiring the old ones. Attempting to join 1.0.0 to
+   by adding new nodes and retiring the old ones. Attempting to join 1.0.x to
    a 0.9.3 node will fail.
   </para>
 
   <para>
-   BDR cannot be downgraded from 1.0.0 to a 0.9.x release since the BDR
+   BDR cannot be downgraded from 1.0.x to a 0.9.x release since the BDR
    extension catalogs have changed.
   </para>
 
   <para>
-   Before or at the same time as upgrading the BDR plugin to 1.0.0, make sure
+   Before or at the same time as upgrading the BDR plugin to 1.0.x, make sure
    to upgrade bdr-pg to at least 9.4.9. This will be done automatically if
    you've installed BDR from packages. If you're installing from source,
    make sure to install the latest <literal>bdr-pg/REL9_4_STABLE</literal>
@@ -36,12 +36,12 @@
   </para>
 
   <para>
-   To upgrade 0.9.x to 1.0.0 the extension must be updated and the database
+   To upgrade 0.9.x to 1.0.x the extension must be updated and the database
    server restarted. You may complete the upgrade steps on one node before
    starting on the next node or perform the steps in parallel across all nodes
    at once.
    <itemizedlist>
-    <listitem><para>If the node is not yet running at least BDR-postgres 9.4.9, install BDR-postgres 9.4.9</para></listitem>
+    <listitem><para>If the node is not yet running at least BDR-postgres 9.4.9, install BDR-postgres 9.4.9 or above</para></listitem>
     <listitem><para>Stop the node by shutting down PostgreSQL</para></listitem>
     <listitem><para>Install the BDR 1.0 extension from packages or source code</para></listitem>
     <listitem><para>Start the node by starting PostgreSQL again</para></listitem>
@@ -71,7 +71,7 @@
    <programlisting>
    SELECT bdr.bdr_version(), (SELECT extversion FROM pg_extension WHERE extname = 'bdr') AS extversion
    </programlisting>
-   and confirm that both version numbers shown are 1.0.0. Typical output looks like:
+   and confirm that both version numbers shown are 1.0.x. Typical output for 1.0.0 looks like:
    <programlisting>
    bdr_testdb=# SELECT bdr.bdr_version(), (SELECT extversion FROM pg_extension WHERE extname = 'bdr') AS extversion;
           bdr_version        | extversion 
@@ -87,7 +87,7 @@
   <title>Upgrading 0.8.x to 1.0</title>
 
   <para>
-   First, upgrade to 0.9.3, then follow the 0.9.3 to 1.0.0 upgrade steps given above.
+   First, upgrade to 0.9.3, then follow the 0.9.3 to 1.0.x upgrade steps given above.
    See the manual for 0.9.3 for upgrade steps.
   </para>
 
