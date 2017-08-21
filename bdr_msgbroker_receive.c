@@ -296,10 +296,10 @@ msgb_connect_shmem(uint32 origin_node)
 	}
 
 	old_ctx = MemoryContextSwitchTo(TopMemoryContext);
-	send_mq = shm_mq_attach(mq, seg, NULL);
+	send_mq = bdr_shm_mq_attach(mq, seg, NULL);
 	(void) MemoryContextSwitchTo(old_ctx);
 
-	if (shm_mq_wait_for_attach(send_mq) != SHM_MQ_SUCCESS)
+	if (bdr_shm_mq_wait_for_attach(send_mq) != SHM_MQ_SUCCESS)
 		ereport(FATAL,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("message broker for node %u appears to have exited",
@@ -337,7 +337,7 @@ msgb_report_peer_connect(uint32 origin_id, uint32 last_sent_msgid)
 	msg[1].data = (void*)&last_sent_msgid;
 	msg[1].len = sizeof(uint32);
 
-	res = shm_mq_sendv(send_mq, msg, 2, false);
+	res = bdr_shm_mq_sendv(send_mq, msg, 2, false);
 	if (res != SHM_MQ_SUCCESS)
 		ereport(FATAL,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
@@ -435,7 +435,7 @@ msgb_deliver_message(PG_FUNCTION_ARGS)
 	msg[1].data = VARDATA_ANY(payload);
 	msg[1].len = VARSIZE_ANY(payload);
 
-	res = shm_mq_sendv(send_mq, msg, 2, false);
+	res = bdr_shm_mq_sendv(send_mq, msg, 2, false);
 	if (res != SHM_MQ_SUCCESS)
 		ereport(FATAL,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
@@ -700,7 +700,7 @@ msgb_add_receive_peer(uint32 origin_id)
 	p->sender_id = origin_id;
 	p->max_received_msgid = 0;
 	old_ctx = MemoryContextSwitchTo(TopMemoryContext);
-	p->recvqueue = shm_mq_attach(mq, broker_dsm_seg, NULL);
+	p->recvqueue = bdr_shm_mq_attach(mq, broker_dsm_seg, NULL);
 	p->recvsize = 0;
 	if (p->recvbuf != NULL)
 		pfree(p->recvbuf);
@@ -988,8 +988,11 @@ msgb_service_connections_receive(void)
 			 * We must perform a non-blocking read of queue, since we don't know
 			 * if there's anything to read at all on this socket. Our latch got set
 			 * but we don't know by whom.
+			 *
+			 * It's a nonblocking read so we can avoid the in_shm_mq dance with
+			 * the bdr_shm_mq_receive wrapper, we can't get stuck in shm_mq_wait_internal.
 			 */
-			res = shm_mq_receive(p->recvqueue, &p->recvsize, &p->recvbuf, false);
+			res = shm_mq_receive(p->recvqueue, &p->recvsize, &p->recvbuf, true);
 			switch (res)
 			{
 				case SHM_MQ_WOULD_BLOCK:
