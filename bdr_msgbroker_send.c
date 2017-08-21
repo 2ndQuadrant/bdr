@@ -291,6 +291,7 @@ msgb_finish_connect(MsgbConnection *conn)
 		elog(WARNING, "failed to put connection in non-blocking mode: %s",
 					  PQerrorMessage(conn->pgconn));
 		msgb_clear_bad_connection(conn);
+		return;
 	}
 
 	/*
