@@ -160,6 +160,13 @@ consensus_add_node(uint32 node_id, const char *dsn)
 	int first_free = -1;
 	int i;
 
+	if (node_id == bdr_get_local_nodeid())
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("cannot add own node to consensus manager")));
+	}
+
 	if (consensus_state >= CONSENSUS_STARTING)
 		msgb_add_peer(node_id, dsn);
 
