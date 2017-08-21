@@ -23,7 +23,7 @@ OBJS = \
 	bdr_sync.o \
 	bdr_worker.o
 
-REGRESS = preseed init part
+REGRESS = preseed init simple part
 
 EXTRA_CLEAN += 
 

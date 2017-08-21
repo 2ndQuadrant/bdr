@@ -19,6 +19,14 @@ CREATE EXTENSION bdr CASCADE;
 SELECT *
 FROM pglogical.create_node(node_name := 'node1', dsn := :'node1_dsn' || ' user=super');
 
+CREATE FUNCTION
+pglogical_wait_slot_confirm_lsn(slotname name, target pg_lsn)
+RETURNS void LANGUAGE c AS 'pglogical','pglogical_wait_slot_confirm_lsn';
+
+-- BDR would usually auto-create this but it doesn't know how
+-- yet, so do it manually
+SELECT pglogical.create_replication_set('dummy_nodegroup');
+
 -- Create the BDR node
 --
 -- Doing it in this order is racey since pglogical will start the manager before
@@ -49,10 +57,15 @@ SELECT * FROM pglogical.create_subscription(
     subscription_name := 'to_node1',
     provider_dsn := ( :'node1_dsn' || ' user=super' ),
     synchronize_structure := true,
-    forward_origins := '{}');
+    forward_origins := '{}',
+    replication_sets := ARRAY['dummy_nodegroup']);
 
 -- and set the subscription as 'isinternal' so BDR thinks BDR owns it.
 UPDATE pglogical.subscription SET sub_isinternal = true;
+
+-- BDR would usually auto-create this but it doesn't know how
+-- yet, so do it manually
+SELECT pglogical.create_replication_set('dummy_nodegroup');
 
 -- Wait for the initial copy to finish
 --
@@ -84,7 +97,8 @@ SELECT * FROM pglogical.create_subscription(
     subscription_name := 'to_node2',
     provider_dsn := ( :'node2_dsn' || ' user=super' ),
     synchronize_structure := false,
-    forward_origins := '{}');
+    forward_origins := '{}',
+    replication_sets := ARRAY['dummy_nodegroup']);
 
 UPDATE pglogical.subscription SET sub_isinternal = true;
 
@@ -113,13 +127,22 @@ DROP TABLE throwaway;
 SET client_min_messages = notice;
 
 -- Wait for it to start up
-SELECT pg_sleep(10);
 
--- ... and watch what happens. They should chat to each other
--- over their message brokers, delivering consensus messages
--- to each other.
-SELECT pg_sleep(30);
+-- We already created the slots so all we have to do here is wait for
+-- the slots to be in sync once we do some WAL-logged work on the
+-- upstreams.
 
+CREATE TABLE throwaway AS SELECT 1;
+
+\c :node2_dsn
+
+CREATE TABLE throwaway AS SELECT 1;
+
+\c :node1_dsn
+
+SELECT pglogical_wait_slot_confirm_lsn(NULL, NULL);
+
+-- Debug data
 
 SELECT * FROM pg_stat_replication;
 SELECT * FROM pg_replication_slots;
