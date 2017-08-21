@@ -58,7 +58,7 @@ SELECT * FROM pglogical.create_subscription(
     provider_dsn := ( :'node1_dsn' || ' user=super' ),
     synchronize_structure := true,
     forward_origins := '{}',
-    replication_sets := ARRAY['dummy_nodegroup']);
+    replication_sets := ARRAY['dummy_nodegroup','ddl_sql']);
 
 -- and set the subscription as 'isinternal' so BDR thinks BDR owns it.
 UPDATE pglogical.subscription SET sub_isinternal = true;
@@ -98,7 +98,7 @@ SELECT * FROM pglogical.create_subscription(
     provider_dsn := ( :'node2_dsn' || ' user=super' ),
     synchronize_structure := false,
     forward_origins := '{}',
-    replication_sets := ARRAY['dummy_nodegroup']);
+    replication_sets := ARRAY['dummy_nodegroup','ddl_sql']);
 
 UPDATE pglogical.subscription SET sub_isinternal = true;
 
