@@ -406,19 +406,26 @@ static void
 msgb_peer_connect(MsgbConnection *conn)
 {
 	int ret;
-	const int nParams = 2;
-	Oid paramTypes[2] = { OIDOID, OIDOID };
-	const char * paramValues[2];
+	const int nParams = 3;
+	Oid paramTypes[3] = { OIDOID, OIDOID, OIDOID };
+	const char * paramValues[3];
 	char destination_id[30];
 	char origin_id[30];
+	char last_message_id[30];
 
 	Assert(conn->conn_status == MSGB_SEND_CONN_POLLING_DONE);
 	msgb_status_invariant(conn);
 
-	snprintf(destination_id, 30, "%u", conn->destination_id);
-	paramValues[0] = destination_id;
 	snprintf(origin_id, 30, "%u", bdr_get_local_nodeid());
-	paramValues[1] = origin_id;
+	paramValues[0] = origin_id;
+	snprintf(destination_id, 30, "%u", conn->destination_id);
+	paramValues[1] = destination_id;
+	/*
+	 * The msgid counter is the *next* message-id and we want to send the id of
+	 * the last message sent, or 0 if none sent by this broker instance yet.
+	 */
+	snprintf(last_message_id, 30, "%u", conn->msgb_msgid_counter - 1);
+	paramValues[2] = last_message_id;
 
 	ret = PQsendQueryParams(conn->pgconn, "SELECT "MSGB_SCHEMA".msgb_connect($1, $2, $3)", nParams,
 							paramTypes, paramValues, NULL, NULL, 0);

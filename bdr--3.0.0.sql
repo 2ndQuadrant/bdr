@@ -94,3 +94,16 @@ REVOKE ALL ON bdr.state_journal FROM public;
 
 CREATE FUNCTION bdr.decode_state(state integer, state_data bytea)
 RETURNS text LANGUAGE c AS 'MODULE_PATHNAME','bdr_decode_state';
+
+/*
+ * Interface for BDR message broker
+ */
+CREATE FUNCTION bdr.msgb_connect(origin_node oid, destination_node oid, last_sent_msgid oid)
+RETURNS void LANGUAGE c AS 'MODULE_PATHNAME','msgb_connect';
+
+REVOKE ALL ON FUNCTION bdr.msgb_connect(oid,oid,oid) FROM public;
+
+CREATE FUNCTION bdr.msgb_deliver_message(destination_node oid, message_id oid, payload bytea)
+RETURNS void LANGUAGE c AS 'MODULE_PATHNAME','msgb_deliver_message';
+
+REVOKE ALL ON FUNCTION bdr.msgb_deliver_message(oid,oid,bytea) FROM public;
