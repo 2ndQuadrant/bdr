@@ -30,12 +30,27 @@ typedef struct MsgbMessageBuffer
 	char payload[FLEXIBLE_ARRAY_MEMBER];
 } MsgbMessageBuffer;
 
+/*
+ * The connection status is used to check the
+ * connection state against our expectations.
+ */
+typedef enum MsgbConnStatus
+{
+	MSGB_SEND_CONN_UNUSED,
+	MSGB_SEND_CONN_PENDING_START,
+	MSGB_SEND_CONN_POLLING,
+	MSGB_SEND_CONN_POLLING_DONE,
+	MSGB_SEND_CONN_EVENT_DRIVEN
+} MsgbConnStatus;
+
 typedef struct MsgbConnection
 {
+	MsgbConnStatus conn_status;
 	uint32 destination_id;
 	char *dsn;
 	PGconn *pgconn;
 	int wait_set_index;				/* wait-set index or -1 if none assigned */
+	int wait_flags;					/* for re-creating wait-event sets */
 	int msgb_msgid_counter;			/* next message ID to allocate */
 	MemoryContext queue_context;	/* memory context for MsgbMessageBuffer */
 	List *send_queue;				/* List of MsgbMessageBuffer */
@@ -57,6 +72,7 @@ static MemoryContext msgbuf_context = NULL;
  * (sockets not created yet)?
  */
 static bool conns_polling = false;
+static bool wait_set_recreate_pending = false;
 
 static void msgb_remove_destination_by_index(int index);
 static void msgb_start_connect(MsgbConnection *conn);
@@ -71,6 +87,103 @@ static int msgb_flush_conn(MsgbConnection *conn);
 static void msgb_request_recreate_wait_event_set(void);
 
 static void msgb_register_wait_event(MsgbConnection *conn, int initial_flags);
+
+static void
+msgb_status_invariant(MsgbConnection *conn)
+{
+	ListCell *lc;
+	Assert(conn != NULL);
+
+	switch (conn->conn_status)
+	{
+		case MSGB_SEND_CONN_UNUSED:
+			Assert(conn->destination_id == 0);
+			Assert(conn->dsn == NULL);
+			Assert(conn->pgconn == NULL);
+			Assert(conn->wait_set_index == -1);
+			Assert(conn->wait_flags == 0);
+			Assert(conn->queue_context == NULL);
+			Assert(conn->msgb_msgid_counter == 1);
+			Assert(conn->send_queue == NIL);
+			break;
+		case MSGB_SEND_CONN_PENDING_START:
+			Assert(conn->destination_id != 0);
+			Assert(conn->dsn != NULL);
+			Assert(conn->pgconn == NULL);
+			Assert(conn->wait_set_index == -1);
+			Assert(conn->wait_flags == 0);
+			Assert(conn->queue_context != NULL);
+			/* Items can be queued now */
+			Assert(conn->msgb_msgid_counter >= 1);
+			Assert(list_length(conn->send_queue) >= 0);
+			/* Messages can't be in-progress if conn not online */
+			foreach (lc, conn->send_queue)
+			{
+				MsgbMessageBuffer *buf = lfirst(lc);
+				Assert(buf->send_status == MSGB_MSGSTATUS_QUEUED);
+			}
+			/* We must be polling */
+			Assert(conns_polling);
+			break;
+		case MSGB_SEND_CONN_POLLING:
+		case MSGB_SEND_CONN_POLLING_DONE:
+			Assert(conn->destination_id != 0);
+			Assert(conn->dsn != NULL);
+			Assert(conn->pgconn != NULL);
+			Assert(conn->wait_set_index == -1);
+			/*
+			 * We might set wait-flags while still polling, in preparation for
+			 * going to event driven.
+			 */
+			Assert(conn->wait_flags >= 0);
+			Assert(conn->queue_context != NULL);
+			/* Items can be queued now */
+			Assert(conn->msgb_msgid_counter >= 1);
+			Assert(list_length(conn->send_queue) >= 0);
+			/* Messages can't be in-progress if conn establishing */
+			foreach (lc, conn->send_queue)
+			{
+				MsgbMessageBuffer *buf = lfirst(lc);
+				Assert(buf->send_status == MSGB_MSGSTATUS_QUEUED);
+			}
+			/* We must be polling */
+			Assert(conns_polling);
+			break;
+		case MSGB_SEND_CONN_EVENT_DRIVEN:
+			Assert(conn->destination_id != 0);
+			Assert(conn->dsn != NULL);
+			Assert(conn->pgconn != NULL);
+			/*
+			 * We must have a defined wait-event index unless we're in the
+			 * middle of rebuilding the wait-event set, in which case we may
+			 * have deferred a wait-event slot allocation for a newly
+			 * event-driven connection.
+			 */
+			if (!wait_set_recreate_pending)
+				Assert(conn->wait_set_index >= 0);
+			/*
+			 * An active connection must be waiting on receive and/or send.
+			 * Even if there's no wait-event set, this is what we'll register
+			 * for when we do create the wait-event set entry and it must be
+			 * correct otherwise we'll fall over when we exit polling.
+			 */
+			Assert(conn->wait_flags > 0);
+			Assert(conn->queue_context != NULL);
+			/* Items can be queued now */
+			Assert(conn->msgb_msgid_counter >= 1);
+			Assert(list_length(conn->send_queue) >= 0);
+			/* Items in the list can never be delivered, we pop them */
+			foreach (lc, conn->send_queue)
+			{
+				MsgbMessageBuffer *buf = lfirst(lc);
+				Assert(buf->send_status == MSGB_MSGSTATUS_QUEUED
+					   || buf->send_status == MSGB_MSGSTATUS_SENDING);
+			}
+			break;
+		default:
+			Assert(false); /* unhandled state! */
+	}
+}
 
 /*
  * Start up the message broker's libpq-based message delivery system.
@@ -133,6 +246,10 @@ msgb_clear_bad_connection(MsgbConnection *conn)
 {
 	ListCell *lc;
 
+	elog(WARNING, "XXX clearing bad conn for %u", conn->destination_id);
+
+	msgb_status_invariant(conn);
+
 	if (conn->pgconn)
 	{
 		ereport(WARNING,
@@ -151,7 +268,22 @@ msgb_clear_bad_connection(MsgbConnection *conn)
 	}
 
 	if (conn->wait_set_index != -1)
+	{
 		msgb_request_recreate_wait_event_set();
+		/*
+		 * The recreate may not be immediate, but we can safely abandon
+		 * the wait-set entry knowing the whole set will get recreated.
+		 */
+		conn->wait_set_index = -1;
+	}
+
+	/* Reconnect please */
+	conn->conn_status = MSGB_SEND_CONN_PENDING_START;
+
+	/* remember to reconnect */
+	conns_polling = true;
+
+	msgb_status_invariant(conn);
 }
 
 /*
@@ -163,10 +295,8 @@ msgb_start_connect(MsgbConnection *conn)
 {
 	int status;
 
-	Assert(conn->pgconn == NULL);
-	Assert(conn->destination_id != 0);
-	Assert(conn->wait_set_index == -1);
-	Assert(conn->dsn != NULL);
+	Assert(conn->conn_status == MSGB_SEND_CONN_PENDING_START);
+	msgb_status_invariant(conn);
 
 	conn->pgconn = PQconnectStart(conn->dsn);
 	if (conn->pgconn == NULL)
@@ -186,6 +316,8 @@ msgb_start_connect(MsgbConnection *conn)
 	 *
 	 * So we need to keep polling the connection.
 	 */
+	conn->conn_status = MSGB_SEND_CONN_POLLING;
+	msgb_status_invariant(conn);
 }
 
 /*
@@ -200,20 +332,45 @@ msgb_start_connect(MsgbConnection *conn)
 static void
 msgb_continue_async_connect(MsgbConnection *conn)
 {
-	int pollstatus = PQconnectPoll(conn->pgconn);
+	int pollstatus;
+
+	Assert(conn->conn_status == MSGB_SEND_CONN_POLLING);
+	msgb_status_invariant(conn);
+
+ 	pollstatus = PQconnectPoll(conn->pgconn);
 
 	switch (pollstatus)
 	{
 		case PGRES_POLLING_OK:
+			conn->conn_status = MSGB_SEND_CONN_POLLING_DONE;
+			elog(WARNING, "XXX connected to peer %u, backend pid is %d",
+				 conn->destination_id, PQbackendPID(conn->pgconn)); /* XXX keep this one */
 			msgb_finish_connect(conn);
+			break;
 		case PGRES_POLLING_READING:
 		case PGRES_POLLING_WRITING:
 			/* nothing to do but wait until socket readable/writeable again */
+			elog(WARNING, "XXX continuing polling on %u", conn->destination_id);
 			break;
 		case PGRES_POLLING_FAILED:
+			if (PQconnectionNeedsPassword(conn->pgconn))
+				ereport(WARNING,
+						(errcode(ERRCODE_INVALID_PASSWORD),
+						 errmsg("XXX connection to node %u needs password, but none was supplied: %s",
+						 		conn->destination_id, PQerrorMessage(conn->pgconn)))); /* XXX keep this one */
+			else
+				ereport(WARNING,
+						(errcode(ERRCODE_CONNECTION_FAILURE),
+						 errmsg("XXX connecting to %u failed: %s",
+								conn->destination_id, PQerrorMessage(conn->pgconn)))); /* XXX keep this one */
 			msgb_clear_bad_connection(conn);	
 			break;
 	}
+
+	/* We can exit in almost any state here */
+	Assert(conn->conn_status != MSGB_SEND_CONN_UNUSED);
+
+	msgb_status_invariant(conn);
 }
 
 /*
@@ -232,6 +389,9 @@ msgb_peer_connect(MsgbConnection *conn)
 	char destination_id[30];
 	char origin_id[30];
 	MemoryContext old_mctx;
+
+	Assert(conn->conn_status == MSGB_SEND_CONN_POLLING_DONE);
+	msgb_status_invariant(conn);
 
 	snprintf(destination_id, 30, "%u", conn->destination_id);
 	paramValues[0] = destination_id;
@@ -271,7 +431,7 @@ msgb_peer_connect(MsgbConnection *conn)
 		return 0;
 	}
 
-	elog(bdr_debug_level, "libpq connected to peer %u", conn->destination_id);
+	msgb_status_invariant(conn);
 }
 
 /*
@@ -283,10 +443,8 @@ msgb_finish_connect(MsgbConnection *conn)
 {
 	int initial_wait_flags;
 
-	Assert(conn->pgconn != NULL);
-	Assert(conn->destination_id != 0);
-	Assert(conn->wait_set_index == -1);
-	Assert(conn->dsn != NULL);
+	Assert(conn->conn_status = MSGB_SEND_CONN_POLLING_DONE);
+	msgb_status_invariant(conn);
 
 	if (PQsetnonblocking(conn->pgconn, 1) != 0)
 	{
@@ -294,42 +452,70 @@ msgb_finish_connect(MsgbConnection *conn)
 		elog(WARNING, "failed to put connection in non-blocking mode: %s",
 					  PQerrorMessage(conn->pgconn));
 		msgb_clear_bad_connection(conn);
-		return;
+	}
+	else
+	{
+		/*
+		 * Now we have to attach to the shmem memory queue on the other end and
+		 * ensure it's ready to process messages, so dispatch the query for that.
+		 *
+		 * It won't finish immediately, but we'll switch to wait-event based
+		 * processing and consume the result when we're woken on the socket.
+		 */
+		initial_wait_flags = msgb_peer_connect(conn);
+		if (conn->pgconn != NULL)
+		{
+			/* Begin event based processing if we didn't fail */
+			Assert(initial_wait_flags != 0);
+			msgb_register_wait_event(conn, initial_wait_flags);
+
+			if (conn->conn_status == MSGB_SEND_CONN_EVENT_DRIVEN)
+				elog(bdr_debug_level, "peer %u established", conn->destination_id);
+		}
 	}
 
 	/*
-	 * Now we have to attach to the shmem memory queue on the other end and
-	 * ensure it's ready to process messages, so dispatch the query for that...
+	 * Since the connection can break we can be in almost any state here,
+	 * but we can't be back to polling
 	 */
-	initial_wait_flags = msgb_peer_connect(conn);
-	if (conn->pgconn == NULL)
-		return;
-
-	/* And begin event based processing */
-	msgb_register_wait_event(conn, initial_wait_flags);
-
-	elog(bdr_debug_level, "peer %u established", conn->destination_id);
+	Assert(conn->conn_status != MSGB_SEND_CONN_POLLING_DONE
+		   && conn->conn_status != MSGB_SEND_CONN_POLLING
+		   && conn->conn_status != MSGB_SEND_CONN_UNUSED);
+	msgb_status_invariant(conn);
 }
 
 static void
 msgb_register_wait_event(MsgbConnection *conn, int initial_wait_flags)
 {
-	Assert(conn->pgconn != NULL);
-	Assert(conn->destination_id != 0);
-	Assert(conn->wait_set_index == -1);
+	Assert(conn->conn_status = MSGB_SEND_CONN_POLLING_DONE);
+	msgb_status_invariant(conn);
 
 	/*
 	 * Register the connection in our wait event set.
 	 *
 	 * We'll stop polling the connection when we see a wait_set_index for it.
+	 *
+	 * If we're currently busy doing event processing and have asked for the
+	 * wait-event set to be re-created there's no point doing this.
 	 */
-	conn->wait_set_index = AddWaitEventToSet(wait_set,
-											 initial_wait_flags,
-											 PQsocket(conn->pgconn),
-											 NULL, (void*)conn);
+	if (!wait_set_recreate_pending)
+	{
+		conn->wait_set_index = AddWaitEventToSet(wait_set,
+												 initial_wait_flags,
+												 PQsocket(conn->pgconn),
+												 NULL, (void*)conn);
 
-	/* AddWaitEventToSet Will elog(...) on failure */
-	Assert(conn->wait_set_index != -1);
+		/* AddWaitEventToSet Will elog(...) on failure */
+		Assert(conn->wait_set_index != -1);
+	}
+
+	/*
+	 * Mark the conn as being event-driven now so we know to register
+	 * it in the wait-set on re-create.
+	 */
+	conn->conn_status = MSGB_SEND_CONN_EVENT_DRIVEN;
+
+	msgb_status_invariant(conn);
 }
 
 /*
@@ -337,7 +523,8 @@ msgb_register_wait_event(MsgbConnection *conn, int initial_wait_flags)
  *
  * Returns WL_SOCKET_WRITEABLE|WL_SOCKET_READABLE if more data is still pending to be sent,
  * since we might also have to consume input to let the server read from its own recv
- * buffer and free up ours.
+ * buffer and free up ours. This will be ignored by a caller that's still polling, but
+ * is needed if the connection is event-driven.
  *
  * If there's nothing more to send, return WL_SOCKET_READABLE on the assumption we
  * expect a reply.
@@ -345,21 +532,46 @@ msgb_register_wait_event(MsgbConnection *conn, int initial_wait_flags)
 static int
 msgb_flush_conn(MsgbConnection *conn)
 {
-	int ret = PQflush(conn->pgconn);
-	if (ret == -1)
+	int ret;
+
+	/* Cannot flush unused connection */
+	Assert(conn->conn_status != MSGB_SEND_CONN_UNUSED);
+	Assert(conn->destination_id != 0);
+
+	msgb_status_invariant(conn);
+
+	if (conn->pgconn == NULL)
 	{
-		ereport(WARNING,
-				(errcode(ERRCODE_CONNECTION_FAILURE),
-				 errmsg("failed to flush output to %u: %s",
-						conn->destination_id, PQerrorMessage(conn->pgconn))));
-		/* Assume bad connection */
-		msgb_clear_bad_connection(conn);
-		return 0;
+		/*
+		 * Can't flush broken connection. We flush lots of places where we
+		 * might have just detected a broken connection so this is OK if
+		 * we're set to poll (so we reconnect).
+		 */
+		Assert(conns_polling == true);
+		Assert(conn->conn_status == MSGB_SEND_CONN_PENDING_START);
+		ret = 0;
 	}
-	else if (ret == 1)
-		return WL_SOCKET_WRITEABLE|WL_SOCKET_READABLE;
 	else
-		return WL_SOCKET_READABLE;
+	{
+		ret = PQflush(conn->pgconn);
+		if (ret == -1)
+		{
+			ereport(WARNING,
+					(errcode(ERRCODE_CONNECTION_FAILURE),
+					 errmsg("failed to flush output to %u: %s",
+							conn->destination_id, PQerrorMessage(conn->pgconn))));
+			/* Assume bad connection */
+			msgb_clear_bad_connection(conn);
+			ret = 0;
+		}
+		else if (ret == 1)
+			ret = WL_SOCKET_WRITEABLE|WL_SOCKET_READABLE;
+		else
+			ret = WL_SOCKET_READABLE;
+	}
+
+	msgb_status_invariant(conn);
+	return ret;
 }
 
 /*
@@ -372,16 +584,26 @@ msgb_flush_conn(MsgbConnection *conn)
 static bool
 msgb_process_result(MsgbConnection *conn)
 {
-	PGresult *res = PQgetResult(conn->pgconn);
+	PGresult *res;
 	MsgbMessageBuffer *buf;
+	bool more_pending;
+
+	Assert(conn->destination_id != 0);
+	/* don't call with broken connection */
+	Assert(conn->pgconn != NULL);
+
+	/* Async result processing only happens in event driven mode */
+	Assert(conn->conn_status == MSGB_SEND_CONN_EVENT_DRIVEN);
+
+	msgb_status_invariant(conn);
+
+	res = PQgetResult(conn->pgconn);
 
 	if (res == NULL)
 	{
-		/* no more results pending */
-		return false;
+		more_pending = false;
 	}
-
-	if (PQresultStatus(res) != PGRES_TUPLES_OK)
+	else if (PQresultStatus(res) != PGRES_TUPLES_OK)
 	{
 		ereport(WARNING,
 				(errcode(ERRCODE_CONNECTION_EXCEPTION),
@@ -389,23 +611,28 @@ msgb_process_result(MsgbConnection *conn)
 				 		conn->destination_id, PQerrorMessage(conn->pgconn))));
 		PQclear(res);
 		msgb_clear_bad_connection(conn);
-		return false;
+		more_pending = false;
+	}
+	else
+	{
+		/* Our SQL functions return void */
+		Assert(PQntuples(res) == 0);
+		Assert(PQnfields(res) == 0);
+
+		/* Message delivered */
+		buf = linitial(conn->send_queue);
+		Assert(buf->send_status = MSGB_MSGSTATUS_SENDING);
+		conn->send_queue = list_delete_first(conn->send_queue);
+		pfree(buf);
+
+		PQclear(res);
+
+		/* PQgetResult didn't return NULL, might be more results */
+		more_pending = true;
 	}
 
-	/* Our functions return void */
-	Assert(PQntuples(res) == 0);
-	Assert(PQnfields(res) == 0);
-
-	/* Message delivered */
-	buf = linitial(conn->send_queue);
-	Assert(buf->send_status = MSGB_MSGSTATUS_SENDING);
-	conn->send_queue = list_delete_first(conn->send_queue);
-	pfree(buf);
-
-	PQclear(res);
-
-	/* PQgetResult didn't return NULL, might be more results */
-	return true;
+	msgb_status_invariant(conn);
+	return more_pending;
 }
 
 /*
@@ -422,6 +649,11 @@ msgb_process_result(MsgbConnection *conn)
 static int
 msgb_recv_pending(MsgbConnection *conn)
 {
+	bool wait_flags;
+
+	Assert(conn->conn_status == MSGB_SEND_CONN_EVENT_DRIVEN);
+	msgb_status_invariant(conn);
+
 	if (PQconsumeInput(conn->pgconn) == 0)
 	{
 		ereport(WARNING,
@@ -429,18 +661,29 @@ msgb_recv_pending(MsgbConnection *conn)
 				 errmsg("while receiving from node %u: %s",
 				 		conn->destination_id, PQerrorMessage(conn->pgconn))));
 		msgb_clear_bad_connection(conn);
-		return 0;
+		wait_flags = 0;
 	}
 	else
 	{
 		bool need_recv_more = true;
 
+		/*
+		 * Keep reading until we'd block, we've read eveything
+		 * we need to, or the connection breaks.
+		 */
 		while (need_recv_more && !PQisBusy(conn->pgconn))
 			need_recv_more = msgb_process_result(conn);
 
-		/* always marks socket want-read, maybe write too */
-		return msgb_flush_conn(conn);
+		/*
+		 * Always marks socket want-read, maybe write too, unless the
+		 * connection broke during the above.
+		 */
+		wait_flags = msgb_flush_conn(conn);
 	}
+
+	Assert(conn->conn_status != MSGB_SEND_CONN_UNUSED);
+	msgb_status_invariant(conn);
+	return wait_flags;
 }
 
 /*
@@ -461,8 +704,12 @@ msgb_send_next(MsgbConnection *conn)
 	char msgid_str[30];
 	size_t escapedLen;
 	int ret;
+	int wait_flags;
 
 	const char * const msg_send_query = "SELECT msgb_deliver_message($1, $2, $3)";
+
+	Assert(conn->conn_status == MSGB_SEND_CONN_EVENT_DRIVEN);
+	msgb_status_invariant(conn);
 
 	Assert(conn->send_queue != NIL);
 	buf = linitial(conn->send_queue);
@@ -483,11 +730,11 @@ msgb_send_next(MsgbConnection *conn)
 	/* TODO: prepared statements */
 	ret = PQsendQueryParams(conn->pgconn, msg_send_query, nParams, paramTypes,
 							paramValues, NULL, NULL, 0);
-	if (!ret)
+	if (ret)
 	{
 		buf->send_status = MSGB_MSGSTATUS_SENDING;
 		/* always wants read, maybe more write too */
-		return msgb_flush_conn(conn);
+		wait_flags = msgb_flush_conn(conn);
 	}
 	else
 	{
@@ -497,8 +744,12 @@ msgb_send_next(MsgbConnection *conn)
 						conn->destination_id, PQerrorMessage(conn->pgconn))));
 		/* Assume bad connection */
 		msgb_clear_bad_connection(conn);
-		return 0;
+		wait_flags = 0;
 	}
+
+	Assert(conn->conn_status != MSGB_SEND_CONN_UNUSED);
+	msgb_status_invariant(conn);
+	return wait_flags;
 }
 
 /*
@@ -510,6 +761,11 @@ msgb_send_next(MsgbConnection *conn)
 static int
 msgb_send_pending(MsgbConnection *conn)
 {
+	int wait_flags;
+
+	Assert(conn->conn_status == MSGB_SEND_CONN_EVENT_DRIVEN);
+	msgb_status_invariant(conn);
+
 	if (conn->send_queue == NIL)
 	{
 		/*
@@ -518,18 +774,32 @@ msgb_send_pending(MsgbConnection *conn)
 		 * want to hear about it if the server asynchronously
 		 * notifies us of something.
 		 */
-		return WL_SOCKET_READABLE;
+		wait_flags = WL_SOCKET_READABLE;
 	}
 	else
 	{
 		MsgbMessageBuffer *buf = linitial(conn->send_queue);
 		if (buf->send_status == MSGB_MSGSTATUS_SENDING)
-			return msgb_flush_conn(conn);
+			wait_flags = msgb_flush_conn(conn);
 		else if (buf->send_status == MSGB_MSGSTATUS_QUEUED)
-			return msgb_send_next(conn);
+			wait_flags = msgb_send_next(conn);
 		else
 			ereport(ERROR, (errmsg_internal("unexpected send status %d", buf->send_status)));
 	}
+
+	Assert(conn->conn_status != MSGB_SEND_CONN_UNUSED);
+	msgb_status_invariant(conn);
+	return wait_flags;
+}
+
+static void
+msgb_conn_set_wait_flags(MsgbConnection *conn, int flags)
+{
+	conn->wait_flags = flags;
+
+	if (conn->conn_status == MSGB_SEND_CONN_EVENT_DRIVEN && !wait_set_recreate_pending)
+		ModifyWaitEvent(wait_set, conn->wait_set_index,
+			flags, NULL);
 }
 
 /*
@@ -552,7 +822,6 @@ msgb_service_connections_events(WaitEvent *occurred_events, int nevents)
 	{
 		WaitEvent const	   *e = &occurred_events[i];
 		MsgbConnection	   *conn = NULL;
-		int					new_wait_flags = 0;
 		int					i;
 
 		/* Find the connection for this wait event */
@@ -572,22 +841,41 @@ msgb_service_connections_events(WaitEvent *occurred_events, int nevents)
 			/*
 			 * It's OK not to find a connection; the wait event may be for
 			 * somebody else, a latch set, or whatever.
+			 *
+			 * For now assume we're the only plugin and the manager doesn't
+			 * use its own sockets, so any socket wait event should be
+			 * for us.
 			 */
+			if (!(e->events & (WL_SOCKET_READABLE|WL_SOCKET_WRITEABLE)))
+				elog(bdr_debug_level, "message buffer could not find socket associated with wait event");
 			continue;
 		}
 
-		if (e->events & WL_SOCKET_READABLE)
-			new_wait_flags |= msgb_recv_pending(conn);
+		msgb_status_invariant(conn);
 
-		if (e->events & WL_SOCKET_WRITEABLE)
-			new_wait_flags |= msgb_send_pending(conn);
+		elog(WARNING, "XXX wait event with flags %d matched to conn to %u", e->events, conn->destination_id);
 
-		/* Only try to set waits if we didn't lose our connection */
-		if (conn->pgconn != NULL)
-			ModifyWaitEvent(wait_set, conn->wait_set_index,
-				new_wait_flags, NULL);
+		/*
+		 * Ignore the wait event unless the connection is expecting events;
+		 * it's possible we've cleared it, removed it, etc but not re-created
+		 * the wait event set, in which case we'll be polling or ignoring it.
+		 */
+		if (conn->conn_status == MSGB_SEND_CONN_EVENT_DRIVEN)
+		{
+			int new_wait_flags = 0;
+
+			if (e->events & WL_SOCKET_READABLE)
+				new_wait_flags |= msgb_recv_pending(conn);
+
+			if (e->events & WL_SOCKET_WRITEABLE)
+				new_wait_flags |= msgb_send_pending(conn);
+
+			msgb_conn_set_wait_flags(conn, new_wait_flags);
+		}
 
 		CHECK_FOR_INTERRUPTS();
+
+		msgb_status_invariant(conn);
 	}
 }
 
@@ -608,60 +896,95 @@ msgb_service_connections_polling(void)
 	 */
 	if (conns_polling)
 	{
+		elog(WARNING, "XXX conns polling");
+
 		for (i = 0; i < msgb_max_peers; i++)
 		{
 			MsgbConnection * const conn = &conns[i];
+
+			msgb_status_invariant(conn);
 
 			/*
 			 * connection removal is done immediately, so
 			 * can't be any maintenance tasks here.
 			 */
-			if (conn->destination_id == 0)
+			if (conn->conn_status == MSGB_SEND_CONN_UNUSED)
 				continue;
 
 			/*
-			 * A connection died and needs to be re-established. Start
-			 * connecting and wait for a socket to be available.
+			 * Start a new or replacement connection and start polling until
+			 * completed.
 			 */
-			if (conn->pgconn == NULL)
+			if (conn->conn_status == MSGB_SEND_CONN_PENDING_START)
 			{
+				elog(WARNING, "XXX starting connect %d for %u", i, conn->destination_id);
 				msgb_start_connect(conn);
 				new_conns_polling = true;
-				break;
+				/*
+				 * Deliberately fall through to start polling if conn was
+				 * started OK.
+				 */
 			}
 
-			switch (PQstatus(conn->pgconn))
+			if (conn->conn_status == MSGB_SEND_CONN_POLLING)
 			{
-				case CONNECTION_OK:
-					if (conn->wait_set_index == -1)
-					{
+				switch (PQstatus(conn->pgconn))
+				{
+					case CONNECTION_OK:
+						conn->conn_status = MSGB_SEND_CONN_POLLING_DONE;
+						elog(WARNING, "XXX finished connect %d for %u", i, conn->destination_id);
 						msgb_finish_connect(conn);
-						Assert(conn->wait_set_index != -1);
-					}
-					break;
-					
-				case CONNECTION_BAD:
-					/*
-					 * failed, must ensure wait event cleared and reconnect
-					 * next time around.
-					 */
-					msgb_clear_bad_connection(conn);
-					new_conns_polling = true;
-					break;
-				default:
-					/*
-					 * All other states are async connect progress states
-					 * where we must continue to PQconnectPoll(...)
-					 */
-					msgb_continue_async_connect(conn);
-					/* Might've finished establishing connection */
-					new_conns_polling |= conn->wait_set_index == -1;
-					break;
+						break;
+						
+					case CONNECTION_BAD:
+						/*
+						 * failed, must ensure wait event cleared and reconnect
+						 * next time around.
+						 */
+						elog(WARNING, "XXX bad connect %d for %u", i, conn->destination_id);
+						msgb_clear_bad_connection(conn);
+						/*
+						 * msgb_clear_bad_connection set conns_polling, but
+						 * we'd clobber it if we didn't remember it here since
+						 * we already read it above and won't re-read it.
+						 */
+						new_conns_polling = true;
+						break;
+
+					default:
+						/*
+						 * All other states are async connect progress states
+						 * where we must continue to PQconnectPoll(...)
+						 */
+						elog(WARNING, "XXX continuing connect %d for %u state %d", i, conn->destination_id, PQstatus(conn->pgconn));
+						msgb_continue_async_connect(conn);
+						/*
+						 * The conn could've switched to async events now but
+						 * it's harmless to poll again, and simpler.
+						 */
+						new_conns_polling = true;
+						break;
+				}
 			}
 
-			Assert(new_conns_polling || conn->wait_set_index != 0);
+			msgb_status_invariant(conn);
+
+			/*
+			 * If we're polling we examine connections that we think are active
+			 * too, because we might lose events while re-creating a wait-event
+			 * set.
+			 */
+			if (conn->conn_status == MSGB_SEND_CONN_EVENT_DRIVEN)
+			{
+				int new_wait_flags = 0;
+				new_wait_flags |= msgb_recv_pending(conn);
+				new_wait_flags |= msgb_send_pending(conn);
+				msgb_conn_set_wait_flags(conn, new_wait_flags);
+			}
 
 			CHECK_FOR_INTERRUPTS();
+
+			msgb_status_invariant(conn);
 		}
 	}
 
@@ -684,12 +1007,21 @@ msgb_service_connections_send(WaitEvent *occurred_events, int nevents,
 	if (nevents == 0 && !conns_polling)
 		return;
 
+	/*
+	 * Any requested wait-set re-creation must finish before the next time the
+	 * event loop is serviced.
+	 */
+	Assert(!wait_set_recreate_pending);
+
+	elog(WARNING, "XXX servicing connections");
 	msgb_service_connections_events(occurred_events, nevents);
 	msgb_service_connections_polling();
 
 	/* Don't let the host proc sleep too long if polling */
 	if (conns_polling)
 		*max_next_wait_ms = Min(*max_next_wait_ms, 200L);
+		
+	elog(WARNING, "XXX serviced connections");
 }
 
 /*
@@ -723,6 +1055,8 @@ msgb_queue_message(uint32 destination, const char * payload, Size payload_size)
 
 	conn = &conns[idx];
 
+	msgb_status_invariant(conn);
+
 	/* TODO: queue length limit for memory safety? */
 
 	old_mctx = MemoryContextSwitchTo(conn->queue_context);
@@ -737,6 +1071,8 @@ msgb_queue_message(uint32 destination, const char * payload, Size payload_size)
 	conn->send_queue = lappend(conn->send_queue, msg);
 
 	(void) MemoryContextSwitchTo(old_mctx);
+
+	msgb_status_invariant(conn);
 
 	return msg->msgid;
 }
@@ -759,6 +1095,8 @@ msgb_message_status(uint32 destination, int msgid)
 		return MSGB_MSGSTATUS_NOTFOUND;
 
 	conn = &conns[idx];
+
+	msgb_status_invariant(conn);
 
 	if (conn->send_queue == NIL)
 		return MSGB_MSGSTATUS_NOTFOUND;
@@ -787,6 +1125,8 @@ static void
 msgb_remove_destination_by_index(int index)
 {
 	MsgbConnection *conn = &conns[index];
+
+	msgb_status_invariant(conn);
 
 	conn->destination_id = 0;
 
@@ -834,6 +1174,12 @@ msgb_remove_destination_by_index(int index)
 		MemoryContextDelete(conn->queue_context);
 		conn->queue_context = NULL;
 	}
+
+	conn->msgb_msgid_counter = 1;
+
+	conn->conn_status = MSGB_SEND_CONN_UNUSED;
+
+	msgb_status_invariant(conn);
 }	
 
 void
@@ -880,6 +1226,9 @@ msgb_add_send_peer(uint32 destination_id, const char *dsn)
 				 errmsg("no free message broker slots"),
 				 errdetail("All %d message broker slots already in use", msgb_max_peers)));
 
+	msgb_status_invariant(conn);
+
+	conn->conn_status = MSGB_SEND_CONN_PENDING_START;
 	conn->pgconn = NULL;
 	conn->destination_id = destination_id;
 	conn->dsn = MemoryContextStrdup(msgbuf_context, dsn);
@@ -891,9 +1240,13 @@ msgb_add_send_peer(uint32 destination_id, const char *dsn)
 										   "msgbroker queue",
 										   ALLOCSET_DEFAULT_SIZES);
 
+	elog(WARNING, "added peer %u with dsn %s; enabling polling", destination_id, dsn);
+
 	conns_polling = true;
 	/* Skip any pending sleep, so we start work on connecting immediately */
 	SetLatch(&MyProc->procLatch);
+
+	msgb_status_invariant(conn);
 }
 
 void
@@ -903,6 +1256,9 @@ msgb_alter_send_peer(uint32 peer_id, const char *new_dsn)
 	if (idx >= 0)
 	{
 		MsgbConnection * const conn = &conns[idx];
+
+		msgb_status_invariant(conn);
+
 		if (conn->dsn)
 			pfree(conn->dsn);
 		conn->dsn = MemoryContextStrdup(msgbuf_context, new_dsn);
@@ -959,17 +1315,14 @@ msgb_wait_event_set_recreated(WaitEventSet *new_wait_set)
 	for (i = 0; i < msgb_max_peers; i++)
 	{
 		MsgbConnection *conn = &conns[i];
+		msgb_status_invariant(conn);
+
 		conn->wait_set_index = -1;
 
 		if (conn->pgconn != NULL && PQstatus(conn->pgconn) == CONNECTION_OK)
-		{
-			/*
-			 * The wait-set API doesn't let us get current flags so we
-			 * initially select all sockets. PQconsumeInput and PQflush will
-			 * let us reset the states.
-			 */
-			msgb_register_wait_event(conn, WL_SOCKET_WRITEABLE|WL_SOCKET_READABLE);
-		}
+			msgb_register_wait_event(conn, conn->wait_flags);
+
+		msgb_status_invariant(conn);
 	}
 }
 
