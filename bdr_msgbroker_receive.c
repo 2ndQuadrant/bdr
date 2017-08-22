@@ -98,6 +98,7 @@ typedef struct MsgbReceivePeer
 	uint32			sender_id;
 	uint32			max_received_msgid;
 	bool			pending_cleanup;
+	MemoryContext	queue_context;
 	shm_mq_handle  *recvqueue;
 	/* Staging area for incomplete incoming messages */
 	Size			recvsize;
@@ -492,6 +493,18 @@ msgb_startup_receive(Size recv_queue_size)
 	recvpeers = MemoryContextAlloc(TopMemoryContext, sizeof(MsgbReceivePeer) * msgb_max_peers);
 	memset(recvpeers, 0, sizeof(MsgbReceivePeer) * msgb_max_peers);
 
+	/*
+	 * Create a memory context for use in the receive side of each shm_mq.
+	 * We need this to ensure the queue is fully cleaned up, including any
+	 * overflow buffers etc, when we destroy it.
+	 */
+	for (i = 0; i < msgb_max_peers; i++)
+	{
+		recvpeers[i].queue_context = AllocSetContextCreate(TopMemoryContext,
+														   "msgbroker receive queue",
+														   ALLOCSET_DEFAULT_SIZES);
+	}
+
 	Assert(InBrokerProcess()); /* well duh */
 
 	/*
@@ -667,7 +680,8 @@ msgb_add_receive_peer(uint32 origin_id)
 	/*
 	 * Even though we reserved local state for the peer earlier we could fail
 	 * to get space in the shmem queues array for it if the array was recently
-	 * full and a peer is being laggard about exiting so we can clean up.
+	 * full and a recently-removed peer is being laggard about exiting so we
+	 * can clean up.
 	 *
 	 * TODO: handle running out of memqueues more gracefully on peer add
 	 */
@@ -691,6 +705,7 @@ msgb_add_receive_peer(uint32 origin_id)
 	 * Remember ToC is 1-indexed due to header entry
 	 */
 	mq_addr = shm_toc_lookup(toc, my_node_toc_entry+1, false);
+	old_ctx = MemoryContextSwitchTo(p->queue_context);
 	mq = shm_mq_create(mq_addr, msgb_recv_queue_size);
 	Assert(mq == mq_addr);
 
@@ -699,11 +714,13 @@ msgb_add_receive_peer(uint32 origin_id)
 	/* Finish setting up broker-side state */
 	p->sender_id = origin_id;
 	p->max_received_msgid = 0;
-	old_ctx = MemoryContextSwitchTo(TopMemoryContext);
 	p->recvqueue = bdr_shm_mq_attach(mq, broker_dsm_seg, NULL);
 	p->recvsize = 0;
-	if (p->recvbuf != NULL)
-		pfree(p->recvbuf);
+	/*
+	 * Any old buffer was owned by the shm_mq that's gone away
+	 * and it was cleared when that queue's memory context was
+	 * reset. We can't pfree() it and don't need to.
+	 */
 	p->recvbuf = NULL;
 	(void) MemoryContextSwitchTo(old_ctx);
 
@@ -853,6 +870,7 @@ msgb_deliver_msg(MsgbReceivePeer *peer)
 
 	Assert(InBrokerProcess());
 
+	/* Must receive at least a message-id in all msgs */
 	Assert(peer->recvsize > sizeof(uint32));
 	bufsize = peer->recvsize - sizeof(uint32);
 	buf = ((char*)peer->recvbuf) + sizeof(uint32);
@@ -882,9 +900,11 @@ msgb_deliver_msg(MsgbReceivePeer *peer)
 		peer->max_received_msgid = msgid;
 	}
 
-	pfree(peer->recvbuf);
-	peer->recvbuf = NULL;
-	peer->recvsize = 0;
+	/*
+	 * shmem_mq_receive owns the buffer in peer->recvbuf,
+	 * we're not allowed to pfree() it and it may point
+	 * straight to shmem anyway.
+	 */
 }
 
 /* Look up a node in our shared memory state */
@@ -948,6 +968,9 @@ msgb_try_cleanup_peer_slot(MsgbReceivePeer *peer)
 
 	if (shm_mq_get_sender(mq) == NULL)
 	{
+		/* Free any memory the shm_mq allocated for temporary buffers, etc. */
+		MemoryContextReset(peer->queue_context);
+
 		SpinLockAcquire(&hdr->mutex);
 		hdr->node_toc_map[hdr_idx] = 0;
 		SpinLockRelease(&hdr->mutex);
@@ -1001,7 +1024,7 @@ msgb_service_connections_receive(void)
 					 * but not all of it fit in the buffer. Either way we preserve
 					 * state and wait until our latch is set again.
 					 */
-					continue;
+					break;
 				case SHM_MQ_SUCCESS:
 					/*
 					 * Yay, we can deliver the message. We need to read out the

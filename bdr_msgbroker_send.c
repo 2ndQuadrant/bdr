@@ -1283,7 +1283,7 @@ msgb_add_send_peer(uint32 destination_id, const char *dsn)
 	Assert(conn->send_queue == NIL);
 
 	conn->queue_context = AllocSetContextCreate(TopMemoryContext,
-										   "msgbroker queue",
+										   "msgbroker send queue",
 										   ALLOCSET_DEFAULT_SIZES);
 
 	elog(WARNING, "added peer %u with dsn %s; enabling polling", destination_id, dsn);
