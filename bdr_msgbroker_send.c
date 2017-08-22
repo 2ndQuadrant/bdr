@@ -10,6 +10,7 @@
 
 #include "storage/latch.h"
 #include "storage/ipc.h"
+#include "storage/proc.h"
 
 #include "libpq-fe.h"
 
@@ -250,25 +251,27 @@ msgb_peer_connect(MsgbConnection *conn)
 	conns->send_queue = lcons(buf, conn->send_queue);
 	(void) MemoryContextSwitchTo(old_mctx);
 
-	ret = PQsendQueryParams(conn->pgconn, MSGB_SCHEMA".msgb_connect($1, $2, $3)", nParams,
+	ret = PQsendQueryParams(conn->pgconn, "SELECT "MSGB_SCHEMA".msgb_connect($1, $2, $3)", nParams,
 							paramTypes, paramValues, NULL, NULL, 0);
 
-	if (!ret)
+	if (ret)
 	{
 		buf->send_status = MSGB_MSGSTATUS_SENDING;
 		/* always wants read, maybe more write too */
 		return msgb_flush_conn(conn);
 	}
-	else
+	else 
 	{
 		ereport(WARNING,
 				(errcode(ERRCODE_CONNECTION_FAILURE),
-				 errmsg("failed to dispatch message to %u: %s",
+				 errmsg("failed to establish remote shared memory connection to peer %u: %s",
 						conn->destination_id, PQerrorMessage(conn->pgconn))));
 		/* Assume bad connection */
 		msgb_clear_bad_connection(conn);
 		return 0;
 	}
+
+	elog(bdr_debug_level, "libpq connected to peer %u", conn->destination_id);
 }
 
 /*
@@ -304,6 +307,8 @@ msgb_finish_connect(MsgbConnection *conn)
 
 	/* And begin event based processing */
 	msgb_register_wait_event(conn, initial_wait_flags);
+
+	elog(bdr_debug_level, "peer %u established", conn->destination_id);
 }
 
 static void
@@ -672,7 +677,8 @@ msgb_service_connections_polling(void)
  * and polling for connections that are still being set up.
  */
 void
-msgb_service_connections_send(WaitEvent *occurred_events, int nevents)
+msgb_service_connections_send(WaitEvent *occurred_events, int nevents,
+							  long *max_next_wait_ms)
 {
 
 	if (nevents == 0 && !conns_polling)
@@ -680,6 +686,10 @@ msgb_service_connections_send(WaitEvent *occurred_events, int nevents)
 
 	msgb_service_connections_events(occurred_events, nevents);
 	msgb_service_connections_polling();
+
+	/* Don't let the host proc sleep too long if polling */
+	if (conns_polling)
+		*max_next_wait_ms = Min(*max_next_wait_ms, 200L);
 }
 
 /*
@@ -882,6 +892,8 @@ msgb_add_send_peer(uint32 destination_id, const char *dsn)
 										   ALLOCSET_DEFAULT_SIZES);
 
 	conns_polling = true;
+	/* Skip any pending sleep, so we start work on connecting immediately */
+	SetLatch(&MyProc->procLatch);
 }
 
 void
@@ -964,5 +976,11 @@ msgb_wait_event_set_recreated(WaitEventSet *new_wait_set)
 static void
 msgb_request_recreate_wait_event_set(void)
 {
-	(*msgb_request_recreate_wait_event_set_hook)(wait_set, msgb_max_peers);
+	(*msgb_request_recreate_wait_event_set_hook)(wait_set);
+}
+
+int
+msgb_get_wait_event_space_needed(void)
+{
+	return msgb_max_peers;
 }

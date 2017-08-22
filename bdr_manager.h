@@ -6,6 +6,7 @@ extern int max_bdr_nodes;
 extern void bdr_manager_worker_start(void);
 
 struct WaitEvent;
-extern void bdr_manager_wait_event(struct WaitEvent *events, int nevents);
+extern void bdr_manager_wait_event(struct WaitEvent *events, int nevents,
+								   long  *max_next_wait_ms);
 
 #endif

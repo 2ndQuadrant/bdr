@@ -15,9 +15,12 @@
 
 #include "access/xact.h"
 
+#include "miscadmin.h"
+
 #include "replication/slot.h"
 
 #include "storage/ipc.h"
+#include "storage/proc.h"
 
 #include "miscadmin.h"
 
@@ -68,7 +71,8 @@ bdr_manager_atexit(int code, Datum argument)
  * Intercept pglogical's main loop during wait-event processing
  */
 void
-bdr_manager_wait_event(struct WaitEvent *events, int nevents)
+bdr_manager_wait_event(struct WaitEvent *events, int nevents,
+					   long *max_next_wait_msecs)
 {
 	BdrMessage *msg;
 	const char *dummy_payload;
@@ -77,7 +81,7 @@ bdr_manager_wait_event(struct WaitEvent *events, int nevents)
 	if (!bdr_is_active_db())
 		return;
 
-	bdr_messaging_wait_event(events, nevents);
+	bdr_messaging_wait_event(events, nevents, max_next_wait_msecs);
 
 	/*
 	 * For testing purposes, enqueue some messages here and expect to receive

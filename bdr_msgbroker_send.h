@@ -20,15 +20,17 @@ typedef enum MsgbSendStatus
  * changed, and it needs to generate a new wait-event set with the
  * new sockets.
  *
- * This must (possibly after some delay) re-create the wait-event
- * set with at least nentries_needed free entries. Then it must call
- * msgb_wait_event_set_recreated with the new wait-set.
+ * This must (possibly after some delay) re-create the wait-event set with at
+ * least msgb_get_wait_event_space_needed() entries then call
+ *msgb_get_wait_event_space_needed msgb_wait_event_set_recreated with the new wait-set.
  *
  * Must be defined to use the broker.
  */
-typedef void (*msgb_request_recreate_wait_event_set_hook_type)(WaitEventSet *old_set, int nentries_needed);
+typedef void (*msgb_request_recreate_wait_event_set_hook_type)(WaitEventSet *old_set);
 
 extern msgb_request_recreate_wait_event_set_hook_type msgb_request_recreate_wait_event_set_hook;
+
+extern int msgb_get_wait_event_space_needed(void);
 
 extern void msgb_wait_event_set_recreated(WaitEventSet *new_wait_set);
 
@@ -36,7 +38,7 @@ extern int msgb_queue_message(uint32 destination, const char * payload, Size pay
 
 extern MsgbSendStatus msgb_message_status(uint32 destination, int msgid);
 
-extern void msgb_service_connections_send(WaitEvent *occurred_events, int nevents);
+extern void msgb_service_connections_send(WaitEvent *occurred_events, int nevents, long *max_next_wait_ms);
 
 extern void msgb_add_send_peer(uint32 destination_id, const char *dsn);
 

@@ -35,16 +35,19 @@ static bool bdr_msgs_receive(ConsensusMessage *msg);
 static bool bdr_msgs_prepare(List *messages);
 static void bdr_msgs_commit(List *messages);
 static void bdr_msgs_rollback(void);
-static void bdr_request_recreate_wait_event_set_hook(WaitEventSet *old_set, int required_entries);
+static void bdr_request_recreate_wait_event_set_hook(WaitEventSet *old_set);
 
 void
 bdr_start_consensus(int bdr_max_nodes)
 {
 	List	   *subs;
 	ListCell   *lc;
+	StringInfoData si;
 
 	Assert(MyPGLogicalWorker != NULL
 		   && MyPGLogicalWorker->worker_type == PGLOGICAL_WORKER_MANAGER);
+
+	initStringInfo(&si);
 
 	consensus_messages_receive_hook = bdr_msgs_receive;
 	consensus_messages_prepare_hook = bdr_msgs_prepare;
@@ -62,10 +65,17 @@ bdr_start_consensus(int bdr_max_nodes)
 	foreach (lc, subs)
 	{
 		PGLogicalSubscription *sub = lfirst(lc);
+		resetStringInfo(&si);
+		appendStringInfoString(&si, sub->origin_if->dsn);
+		appendStringInfo(&si, " application_name='bdr_msgbroker %i'",
+						 bdr_get_local_nodeid());
+		Assert(sub->target->id == bdr_get_local_nodeid());
 		consensus_add_node(sub->origin->id, sub->origin_if->dsn);
 	}
 
 	consensus_finish_startup();
+
+	pfree(si.data);
 
 	CommitTransactionCommand();
 }
@@ -194,9 +204,10 @@ bdr_msgs_rollback(void)
 }
 
 void
-bdr_messaging_wait_event(struct WaitEvent *events, int nevents)
+bdr_messaging_wait_event(struct WaitEvent *events, int nevents,
+						 long *max_next_wait_ms)
 {
-	consensus_pump(events, nevents);
+	consensus_pump(events, nevents, max_next_wait_ms);
 }
 
 void
@@ -209,8 +220,13 @@ bdr_messaging_wait_event_set_recreated(struct WaitEventSet *new_set)
 }
 
 static void
-bdr_request_recreate_wait_event_set_hook(WaitEventSet *old_set, int required_entries)
+bdr_request_recreate_wait_event_set_hook(WaitEventSet *old_set)
 {
-	/* TODO: pass required_entries */
 	pglogical_manager_recreate_wait_event_set();
+}
+
+int
+bdr_get_wait_event_space_needed(void)
+{
+	return msgb_get_wait_event_space_needed();
 }

@@ -18,7 +18,8 @@ extern void consensus_begin_startup(uint32 my_nodeid, const char * journal_schem
 
 void consensus_finish_startup(void);
 
-extern void consensus_pump(struct WaitEvent *occurred_events, int nevents);
+extern void consensus_pump(struct WaitEvent *occurred_events, int nevents,
+			   long *max_next_wait_ms);
 
 extern void consensus_shutdown(void);
 

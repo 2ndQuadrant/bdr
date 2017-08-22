@@ -411,9 +411,10 @@ consensus_finish_startup(void)
  * such as when a latch set triggers a queue pump.
  */
 void
-consensus_pump(struct WaitEvent *occurred_events, int nevents)
+consensus_pump(struct WaitEvent *occurred_events, int nevents,
+			   long *max_next_wait_ms)
 {
-	msgb_service_connections(occurred_events, nevents);
+	msgb_service_connections(occurred_events, nevents, max_next_wait_ms);
 	CHECK_FOR_INTERRUPTS();
 }
 

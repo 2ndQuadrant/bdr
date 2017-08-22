@@ -82,9 +82,11 @@ msgb_startup(int max_connections, Size recv_queue_size)
 }
 
 void
-msgb_service_connections(WaitEvent *occurred_events, int nevents)
+msgb_service_connections(WaitEvent *occurred_events, int nevents,
+						 long *max_next_wait_ms)
 {
-	msgb_service_connections_send(occurred_events, nevents);
+	msgb_service_connections_send(occurred_events, nevents,
+								  max_next_wait_ms);
 	msgb_service_connections_receive();
 }
 

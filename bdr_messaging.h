@@ -108,9 +108,12 @@ bdr_msgs_enqueue_one(BdrMessage *message)
 extern ConsensusMessageStatus bdr_msg_get_outcome(uint64 msg_handle);
 
 struct WaitEvent;
-extern void bdr_messaging_wait_event(struct WaitEvent *events, int nevents);
+extern void bdr_messaging_wait_event(struct WaitEvent *events, int nevents,
+									 long *max_next_wait_ms);
 
 struct WaitEventSet;
 extern void bdr_messaging_wait_event_set_recreated(struct WaitEventSet *new_set);
+
+extern int bdr_get_wait_event_space_needed(void);
 
 #endif

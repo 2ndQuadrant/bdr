@@ -166,6 +166,7 @@ bdr_init_pgl_plugin(PG_FUNCTION_ARGS)
 	 */
 	plugin->manager_wait_event = bdr_manager_wait_event;
 	plugin->manager_wait_event_set_recreated = bdr_messaging_wait_event_set_recreated;
+	plugin->manager_get_required_wait_event_space = bdr_get_wait_event_space_needed;
 	
 	plugin_loaded = true;
 

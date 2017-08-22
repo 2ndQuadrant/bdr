@@ -6,15 +6,14 @@
 struct WaitEventSet;
 struct WaitEvent;
 
-extern void msgb_service_connections(struct WaitEvent *occurred_events, int nevents);
+extern void msgb_service_connections(struct WaitEvent *occurred_events, int nevents,
+									 long *max_next_wait_ms);
 
 extern void msgb_startup(int max_connections, Size recv_queue_size);
 
 extern void msgb_shutdown(void);
 
 extern void msgb_shmem_init(int max_local_nodes);
-
-extern void msgb_service_connections(struct WaitEvent *occurred_events, int nevents);
 
 extern void msgb_add_peer(uint32 peer_id, const char *dsn);
 
