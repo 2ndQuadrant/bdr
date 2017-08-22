@@ -89,7 +89,7 @@ extern void bdr_shutdown_consensus(void);
  * This API wraps bdr_consensus.c and adds IPC to allow submissions
  * from other backends.
  */
-extern void bdr_msgs_begin_enqueue(void);
+extern bool bdr_msgs_begin_enqueue(void);
 extern uint64 bdr_msgs_enqueue(BdrMessage *message);
 extern uint64 bdr_msgs_finish_enqueue(void);
 
@@ -98,7 +98,8 @@ bdr_msgs_enqueue_one(BdrMessage *message)
 {
 	uint64 handle2;
 	uint64 handle PG_USED_FOR_ASSERTS_ONLY;
-	bdr_msgs_begin_enqueue();
+	if (!bdr_msgs_begin_enqueue())
+		return 0;
 	handle = bdr_msgs_enqueue(message);
 	handle2 = bdr_msgs_finish_enqueue();
 	Assert(handle == handle2);

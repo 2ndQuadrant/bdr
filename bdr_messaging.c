@@ -55,6 +55,7 @@ bdr_start_consensus(int bdr_max_nodes)
 	consensus_messages_rollback_hook = bdr_msgs_rollback;
 	msgb_request_recreate_wait_event_set_hook = bdr_request_recreate_wait_event_set_hook;
 
+	Assert(!IsTransactionState());
 	StartTransactionCommand();
 
 	consensus_begin_startup(bdr_get_local_nodeid(), BDR_SCHEMA_NAME,
@@ -86,11 +87,11 @@ bdr_shutdown_consensus(void)
     consensus_shutdown();
 }
 
-void
+bool
 bdr_msgs_begin_enqueue(void)
 {
 	if (MyPGLogicalWorker != NULL && MyPGLogicalWorker->worker_type == PGLOGICAL_WORKER_MANAGER)
-		consensus_begin_enqueue();
+		return consensus_begin_enqueue();
 	else
 		elog(ERROR, "not implemented");
 }

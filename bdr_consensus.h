@@ -39,9 +39,13 @@ typedef struct ConsensusMessage {
  * when consensus_end_batch() is called.
  *
  * This will start a local database transaction. No transaction may already be
- * open.
+ * open, either a consensus transaction initiated by the local node or
+ * a non-consensus-manager-related local DB transaction.
+ *
+ * If a consensus manager transaction initiated by a remote node is
+ * active, returns false. Try again later.
  */
-extern void consensus_begin_enqueue(void);
+extern bool consensus_begin_enqueue(void);
 
 /*
  * Add a message to a batch of messages on the send queue.

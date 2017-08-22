@@ -130,7 +130,7 @@ static void consensus_serialize_message(StringInfo si, ConsensusMessage *msg);
 static void consensus_insert_message(ConsensusMessage *message);
 static void consensus_received_new_message(ConsensusMessage *message);
 
-static bool consensus_started_txn = false;
+static uint32 consensus_started_txn = 0;
 static List *cur_txn_messages = NIL;
 static MemoryContext cur_txn_context = NULL;
 
@@ -238,12 +238,28 @@ consensus_received_msgb_message(uint32 origin, const char *payload, Size payload
 	if (!IsTransactionState())
 	{
 		StartTransactionCommand();
-		consensus_started_txn = true;
+		consensus_started_txn = origin;
 	}
-	else
+	else if (consensus_started_txn == 0)
 	{
-		/* cannot be called within a txn someone else started */
-		Assert(consensus_started_txn);
+		/* cannot be called within a txn someone else started; internal error */
+		elog(ERROR, "attempt to start consensus receive within exiting txn");
+	}
+	else if (consensus_started_txn != origin)
+	{
+		/*
+		 * The consensus system is processing a request from another node right
+		 * now. We don't yet support any blocking/queuing here. Our node has
+		 * already accepted the message, we can't ERROR on delivery. So we 
+		 * must dispatch our own NACK as a reply.
+		 */
+
+		/*
+		 * TODO: send NACK instead of ignoring message
+		 */
+		elog(WARNING, "ignoring message from %u due to existing local consensus transaction from %u",
+			 origin, consensus_started_txn);
+		return;
 	}
 
 	/* TODO: handle 2pc prepare and commit requests from peer too */
@@ -310,7 +326,7 @@ consensus_commit_prepared(void)
 	 * (Or later a quorum once we do raft/paxos).
 	 */
 	CommitTransactionCommand();
-	consensus_started_txn = false;
+	consensus_started_txn = 0;
 
     /*
      * After commit we must pass the messages again to the commit hook; if
@@ -329,7 +345,7 @@ static void
 consensus_rollback_prepared(void)
 {
 	AbortCurrentTransaction();
-	consensus_started_txn = false;
+	consensus_started_txn = 0;
 
 	(*consensus_messages_rollback_hook)();
 
@@ -384,6 +400,7 @@ consensus_begin_startup(uint32 my_nodeid,
 								ALLOCSET_DEFAULT_SIZES);
 
 	consensus_max_nodes = max_nodes;
+	consensus_started_txn = 0;
 }
 
 /*
@@ -437,6 +454,8 @@ consensus_shutdown(void)
 	consensus_max_nodes = 0;
 	pfree(consensus_nodes);
 	consensus_nodes = NULL;
+
+	consensus_started_txn = 0;
 }
 
 
@@ -467,22 +486,29 @@ consensus_serialize_message(StringInfo si, ConsensusMessage *msg)
 	appendBinaryStringInfo(si, (const char*)msg, offsetof(ConsensusMessage, payload) + msg->payload_length);
 }
 
-void
+bool
 consensus_begin_enqueue(void)
 {
 	if (IsTransactionState())
 	{
-		if (consensus_started_txn)
-			elog(ERROR, "Consensus transaction already open");
+		if (consensus_started_txn == bdr_get_local_nodeid())
+			elog(ERROR, "consensus transaction already open by local node");
+		else if (consensus_started_txn != 0)
+		{
+			elog(bdr_debug_level, "consensus transaction already open by %u",
+				 consensus_started_txn);
+			return false;
+		}
 		else
-			elog(ERROR, "Database transaction not started by consensus manager already open");
+			elog(ERROR, "database transaction already open that was not started by consensus manager");
 	}
 
-	Assert(!consensus_started_txn);
+	Assert(consensus_started_txn == 0);
+	Assert(!IsTransactionState());
 	StartTransactionCommand();
-	consensus_started_txn = true;
+	consensus_started_txn = bdr_get_local_nodeid();
 
-	/* TODO: Make sure the local queue is empty */
+	return true;
 }
 
 /*
@@ -504,7 +530,7 @@ consensus_enqueue_message(const char * payload, Size payload_length)
 	ConsensusMessage *msg;
 	Size msg_size;
 
-	Assert(IsTransactionState() && consensus_started_txn);
+	Assert(IsTransactionState() && consensus_started_txn == bdr_get_local_nodeid());
 
 	/*
 	 * TODO: here we should check if our consensus txn is already nack'd
@@ -564,7 +590,7 @@ consensus_enqueue_message(const char * payload, Size payload_length)
 uint64
 consensus_finish_enqueue(void)
 {
-	Assert(IsTransactionState() && consensus_started_txn);
+	Assert(IsTransactionState() && consensus_started_txn == bdr_get_local_nodeid());
 
 	/*
 	 * All local messages have been passed through the local receive hook and

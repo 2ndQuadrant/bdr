@@ -77,6 +77,7 @@ bdr_manager_wait_event(struct WaitEvent *events, int nevents,
 	BdrMessage *msg;
 	const char *dummy_payload;
 	Size dummy_payload_length;
+	uint64 handle;
 
 	if (!bdr_is_active_db())
 		return;
@@ -95,5 +96,9 @@ bdr_manager_wait_event(struct WaitEvent *events, int nevents,
 	msg->payload_length = dummy_payload_length;
 	memcpy(msg->payload, dummy_payload, dummy_payload_length);
 
-	(void) bdr_msgs_enqueue_one(msg);
+	handle = bdr_msgs_enqueue_one(msg);
+	if (handle == 0)
+		elog(WARNING, "XXX manager couldn't enqueue message, will try again later"); /* XXX */
+	else
+		elog(WARNING, "XXX manager enqueued message with handle "UINT64_FORMAT, handle); /* XXX */
 }
