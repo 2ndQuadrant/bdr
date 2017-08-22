@@ -738,7 +738,7 @@ msgb_send_next(MsgbConnection *conn)
 {
 	MsgbMessageBuffer *buf;
 	const int nParams = 3;
-	Oid paramTypes[3] = { OIDOID, INT4OID, BYTEAOID };
+	Oid paramTypes[3] = { OIDOID, OIDOID, BYTEAOID };
 	const char * paramValues[3];
 	char destination_id[30];
 	char msgid_str[30];
@@ -746,7 +746,7 @@ msgb_send_next(MsgbConnection *conn)
 	int ret;
 	int wait_flags;
 
-	const char * const msg_send_query = "SELECT * FROM msgb_deliver_message($1, $2, $3)";
+	const char * const msg_send_query = "SELECT * FROM "MSGB_SCHEMA".msgb_deliver_message($1, $2, $3)";
 
 	Assert(conn->conn_status == MSGB_SEND_CONN_READY);
 	msgb_status_invariant(conn);
