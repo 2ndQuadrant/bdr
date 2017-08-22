@@ -427,7 +427,7 @@ msgb_peer_connect(MsgbConnection *conn)
 	snprintf(last_message_id, 30, "%u", conn->msgb_msgid_counter - 1);
 	paramValues[2] = last_message_id;
 
-	ret = PQsendQueryParams(conn->pgconn, "SELECT "MSGB_SCHEMA".msgb_connect($1, $2, $3)", nParams,
+	ret = PQsendQueryParams(conn->pgconn, "SELECT * FROM "MSGB_SCHEMA".msgb_connect($1, $2, $3)", nParams,
 							paramTypes, paramValues, NULL, NULL, 0);
 
 	if (ret)
@@ -639,8 +639,9 @@ msgb_process_result(MsgbConnection *conn)
 	else
 	{
 		/* Our SQL functions return void */
-		Assert(PQntuples(res) == 0);
-		Assert(PQnfields(res) == 0);
+		Assert(PQntuples(res) == 1);
+		Assert(PQnfields(res) == 1);
+		Assert(PQftype(res, 0) == VOIDOID);
 
 		if (conn->conn_status == MSGB_SEND_CONN_CONNECTING_REMOTE_SHMEM)
 		{
@@ -745,7 +746,7 @@ msgb_send_next(MsgbConnection *conn)
 	int ret;
 	int wait_flags;
 
-	const char * const msg_send_query = "SELECT msgb_deliver_message($1, $2, $3)";
+	const char * const msg_send_query = "SELECT * FROM msgb_deliver_message($1, $2, $3)";
 
 	Assert(conn->conn_status == MSGB_SEND_CONN_READY);
 	msgb_status_invariant(conn);

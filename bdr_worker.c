@@ -14,6 +14,9 @@
 
 #include "postgres.h"
 
+#include "access/xact.h"
+
+#include "bdr_catcache.h"
 #include "bdr_worker.h"
 
 bool bdr_required_this_conn = false;
@@ -31,10 +34,21 @@ char peer_bdr_version_str[BDR_VERSION_STR_SIZE];
 int bdr_debug_level;
 
 /*
- * TODO: ensure BDR is active in this database, ERROR if not active
+ * Ensure BDR is active in this database, ERROR if not active.
+ *
+ * Will init the catcache if not already initalised, if a txn
+ * is open.
  */
 void
 bdr_ensure_active_db(void)
 {
-	elog(ERROR, "not implemented");
+	if (IsTransactionState() && !bdr_catcache_initialised())
+		bdr_cache_local_nodeinfo();
+
+	if (!bdr_is_active_db())
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("BDR is not active in this database")));
+	}
 }

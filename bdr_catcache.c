@@ -61,10 +61,16 @@ bdr_cache_local_nodeinfo(void)
 	(void) MemoryContextSwitchTo(old_ctx);
 }
 
+bool
+bdr_catcache_initialised(void)
+{
+	return bdr_catcache_context != NULL;
+}
+
 uint32
 bdr_get_local_nodeid(void)
 {
-	Assert(bdr_catcache_context != NULL);
+	Assert(bdr_catcache_initialised());
 	if (local_bdr_node != NULL)
 		return local_bdr_node->node_id;
 	else
@@ -79,7 +85,7 @@ bdr_get_local_nodeid(void)
 uint32
 bdr_get_local_nodeid_if_exists(void)
 {
-	Assert(bdr_catcache_context != NULL);
+	Assert(bdr_catcache_initialised());
 	if (local_bdr_node != NULL)
 		return local_bdr_node->node_id;
 	else
