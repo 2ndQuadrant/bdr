@@ -11,37 +11,37 @@
  * consensus negotiation using unreliable messaging
  *-------------------------------------------------------------------------
  *
- * The message broker provides a message transport, which this consensus module
+ * The message broker provides a mssage transport, which this consensus module
  * uses to achieve reliable majority or all-nodes consensus on cluster state
  * transitions.
  *
  * The consensus manager runs entirely in one bgworker. If other workers want
- * to enqueue messages, read them, etc, they must do so via the worker the
+ * to enqueue proposals, read them, etc, they must do so via the worker the
  * consensus manager runs in.
  *
- * (TODO: message fetch/confirm should be handled in multiple backends since we
- *  can just read message bodies from the journal and use a small static shmem
+ * (TODO: proposal fetch/confirm should be handled in multiple backends since we
+ *  can just read proposal bodies from the journal and use a small static shmem
  *  area for the progress info and a lock. Enqueuing is could also work from
- *  any backend but we'd need IPC to send messages to the worker proc...)
+ *  any backend but we'd need IPC to send proposals to the worker proc...)
  *
- * The module is used by enqueueing messages, pumping its state, and handling
+ * The module is used by enqueueing proposals, pumping its state, and handling
  * the results with callbacks. Local state transitions that need to be agreed
- * to by peers should be accomplished by enqueueing messages then processing
+ * to by peers should be accomplished by enqueueing proposals then processing
  * them via the consensus system.
  *
  * The flow, where "Node X" may be the same node as "Our node" or some other
  * peer, is:
  *
  * [Node X]   consensus_begin_enqueue
- * [Node X]   consensus_enqueue_message
- * [Our node]  consensus_messages_receive_hook
+ * [Node X]   consensus_enqueue_proposal
+ * [Our node]  consensus_proposals_receive_hook
  * [Our node]  sends NACK or ACK
- * [Our node]  consensus_messages_receive_hook
+ * [Our node]  consensus_proposals_receive_hook
  * [Our node]  sends NACK or ACK
  * ...
  * [Node X]   consensus_finish_enqueue
  * [Node X]   sends prepare
- * [Our node]  consensus_message_prepare_hook (unless locally aborted already)
+ * [Our node]  consensus_proposal_prepare_hook (unless locally aborted already)
  * [Our node]  PREPARE TRANSACTION
  * [Our node]  sends NACK or ACK based on outcome of hook+prepare
  *
@@ -49,13 +49,13 @@
  *
  * [Node X]   sends commit
  * [Our node]  COMMIT PREPARED
- * [Our node]  consensus_message_commit_hook
+ * [Our node]  consensus_proposal_commit_hook
  *
  * - or - if one or more nodes NACKed:
  *
  * [Node X]   sends rollback
  * [Our node]  ROLLBACK PREPARED
- * [Our node]  consensus_messages_rollback_hooktype
+ * [Our node]  consensus_proposals_rollback_hooktype
  *
  * During startup (including crash recovery) we may discover that we have
  * prepared transactions from the consensus system. If so we must recover them.
@@ -63,11 +63,11 @@
  * they were remotely originated we must ask the remote what the outcome should
  * be; if it already sent a commit, we can't rollback locally and vice versa.
  * Then based on the remote's response we either locally commit or rollback as
- * above. If it's a local commit, we commit then read the committed messages
+ * above. If it's a local commit, we commit then read the committed proposals
  * back out of the journal to pass to the hook.
  *
  * FIXME: the current consensus module blindly assumes that all peers immediately
- * OK a message and invokes the callback as soon as the broker sends it. This is
+ * OK a proposal and invokes the callback as soon as the broker sends it. This is
  * obviously wrong, it's test skeleton code to exercise the broker and absolutely
  * minimal part/join.
  */
@@ -116,22 +116,25 @@ typedef struct ConsensusNode {
 
 static ConsensusState consensus_state = CONSENSUS_OFFLINE;
 
-consensus_messages_receive_hooktype consensus_messages_receive_hook = NULL;
-consensus_messages_prepare_hooktype consensus_messages_prepare_hook = NULL;
-consensus_messages_commit_hooktype consensus_messages_commit_hook = NULL;
-consensus_messages_rollback_hooktype consensus_messages_rollback_hook = NULL;
+consensus_proposals_receive_hooktype consensus_proposals_receive_hook = NULL;
+consensus_proposals_prepare_hooktype consensus_proposals_prepare_hook = NULL;
+consensus_proposals_commit_hooktype consensus_proposals_commit_hook = NULL;
+consensus_proposals_rollback_hooktype consensus_proposals_rollback_hook = NULL;
 
 static ConsensusNode *consensus_nodes = NULL;
 
 static int consensus_max_nodes = 0;
 
-static ConsensusMessage * consensus_deserialize_message(uint32 origin, const char *payload, Size payload_size);
-static void consensus_serialize_message(StringInfo si, ConsensusMessage *msg);
-static void consensus_insert_message(ConsensusMessage *message);
-static void consensus_received_new_message(ConsensusMessage *message);
+static ConsensusProposal * consensus_deserialize_proposal(uint32 origin, const char *payload, Size payload_size);
+static void consensus_serialize_proposal(StringInfo si, ConsensusProposal *msg);
+static void consensus_insert_proposal(ConsensusProposal *proposal);
+static void consensus_received_new_proposal(ConsensusProposal *proposal);
+static void consensus_prepare_transaction(void);
+static void consensus_commit_prepared(void);
+static void consensus_rollback_prepared(void);
 
 static uint32 consensus_started_txn = 0;
-static List *cur_txn_messages = NIL;
+static List *cur_txn_proposals = NIL;
 static MemoryContext cur_txn_context = NULL;
 
 static ConsensusNode *
@@ -187,7 +190,7 @@ consensus_add_node(uint32 node_id, const char *dsn)
 	node = &consensus_nodes[first_free];
 	node->node_id = node_id;
 
-	/* TODO: handle any in progress message */
+	/* TODO: handle any in progress proposal */
 }
 
 void
@@ -196,7 +199,7 @@ consensus_alter_node(uint32 node_id, const char *new_dsn)
 	if (consensus_state >= CONSENSUS_STARTING)
 		msgb_alter_peer(node_id, new_dsn);
 
-	/* TODO: handle any in progress message */
+	/* TODO: handle any in progress proposal */
 }
 
 void
@@ -210,21 +213,21 @@ consensus_remove_node(uint32 node_id)
 	node = consensus_find_node_by_id(node_id, "removing from");
 	node->node_id = 0;
 
-	/* TODO: handle any in progress message */
+	/* TODO: handle any in progress proposal */
 }
 
 /*
- * Insert a message into the persistent message journal, so we can call
- * bdr_messages_commit_hook again during crash recovery.
+ * Insert a proposal into the persistent proposal journal, so we can call
+ * bdr_proposals_commit_hook again during crash recovery.
  */
 static void
-consensus_insert_message(ConsensusMessage *message)
+consensus_insert_proposal(ConsensusProposal *proposal)
 {
 	/* TODO */
 }
 
 /*
- * Callback invoked by message broker with the message we sent. We must
+ * Callback invoked by message broker with the proposal we sent. We must
  * determine whether it's a new negotiation, progress in an existing one,
  * etc and act accordingly.
  */
@@ -250,14 +253,14 @@ consensus_received_msgb_message(uint32 origin, const char *payload, Size payload
 		/*
 		 * The consensus system is processing a request from another node right
 		 * now. We don't yet support any blocking/queuing here. Our node has
-		 * already accepted the message, we can't ERROR on delivery. So we 
+		 * already accepted the proposal, we can't ERROR on delivery. So we 
 		 * must dispatch our own NACK as a reply.
 		 */
 
 		/*
-		 * TODO: send NACK instead of ignoring message
+		 * TODO: send NACK instead of ignoring proposal
 		 */
-		elog(WARNING, "ignoring message from %u due to existing local consensus transaction from %u",
+		elog(WARNING, "ignoring proposal from %u due to existing local consensus transaction from %u",
 			 origin, consensus_started_txn);
 		return;
 	}
@@ -265,54 +268,63 @@ consensus_received_msgb_message(uint32 origin, const char *payload, Size payload
 	/* TODO: handle 2pc prepare and commit requests from peer too */
 	/* by invoking consensus_prepare_transaction, consensus_commit_prepared, consensus_rollback_prepared */
 
-	consensus_received_new_message(consensus_deserialize_message(origin, payload, payload_size));
+	consensus_received_new_proposal(consensus_deserialize_proposal(origin, payload, payload_size));
+    
+	/*
+     * TODO: For now we're ignoring all the consensus protocol stuff and pretty
+     * much bypassing this layer, sending the nearly raw proposals we sent on
+     * the wire to receivers. No synchronisation, confirmation all nodes
+     * received, unpacking, etc. No proposal type header yet. Consequently the
+     * receive side here is similarly basic.
+	 *
+	 * What we'll do here in the real version is insert each proposal and
+	 * call a proposal received hook to ack/nack it, then reply with an ack/nack.
+	 *
+	 * When we get a commit we'll call the commit callback for all the proposals
+	 * together.
+	 *
+	 * But for now we just treat each proposal as committed as soon as it
+	 * arrives.
+	 */
+	consensus_prepare_transaction();
 }
 
 static void
-consensus_received_new_message(ConsensusMessage *message)
+consensus_received_new_proposal(ConsensusProposal *proposal)
 {
 	MemoryContext old_ctx;
 
     /*
-     * FIXME: a ConsensusMessage is the proposal for, and outcome of, a
+     * FIXME: a ConsensusProposal is the proposal for, and outcome of, a
      * negotiation. Not every message passed to this function will be a
-     * ConsensusMessage and we'll need a prefix message type, some unpacking
-     * logic for different kinds of message, etc. That way we'll be able
-     * to do propose/ack/nack/prepare/rollback exchanges, etc.
-     *
-     * TODO: For now we're ignoring all the consensus protocol stuff and pretty
-     * much bypassing this layer, sending the nearly raw messages we sent on
-     * the wire to receivers. No synchronisation, confirmation all nodes
-     * received, unpacking, etc. No message type header yet. Consequently the
-     * receive side here is similarly basic.
-	 *
-	 * What we'll do here in the real version is insert each message and
-	 * call a message received hook to ack/nack it, then reply with an ack/nack.
-	 *
-	 * When we get a commit we'll call the commit callback for all the messages
-	 * together.
-	 *
-	 * But for now we just treat each message as committed as soon as it
-	 * arrives.
-	 */
+     * ConsensusProposal. We need a ConsensusMessage that wraps ConsensusProposal
+     * with a message type field (ack/nack etc).
+     */
 	Assert(IsTransactionState() && consensus_started_txn);
 
-	if (consensus_messages_receive_hook != NULL)
-		(*consensus_messages_receive_hook)(message);
+	if (consensus_proposals_receive_hook != NULL)
+		(*consensus_proposals_receive_hook)(proposal);
 
-	consensus_insert_message(message);
+	consensus_insert_proposal(proposal);
 
 	old_ctx = MemoryContextSwitchTo(cur_txn_context);
-	cur_txn_messages = lappend(cur_txn_messages, message);
+	cur_txn_proposals = lappend(cur_txn_proposals, proposal);
 	(void) MemoryContextSwitchTo(old_ctx);
 }
 
 static void
 consensus_prepare_transaction(void)
 {
-	(*consensus_messages_prepare_hook)(cur_txn_messages);
+	(*consensus_proposals_prepare_hook)(cur_txn_proposals);
 
-	/* TODO: 2PC here. Prepare the xact, exchange messages with peers, and come back when they have confirmed prepare too so we can commit: */
+	/* TODO: 2PC here. Prepare the xact, exchange proposals with peers, and come back when they have confirmed prepare too so we can commit: */
+
+	/*
+	 * TODO: this commit should happen in response to 2PC consensus, not
+	 * immediately here. If all peers agreed we should commit then send
+	 * a commit to peers, and not before.
+	 */
+	consensus_commit_prepared();
 }
 
 static void
@@ -321,7 +333,7 @@ consensus_commit_prepared(void)
 	/*
 	 * TODO: do real 2PC here
 	 *
-	 * This func should be called in response to a remote initiated commit-prepared message, or
+	 * This func should be called in response to a remote initiated commit-prepared proposal, or
 	 * when we detect that a locally submitted consensus request has been acked by all peers.
 	 * (Or later a quorum once we do raft/paxos).
 	 */
@@ -329,16 +341,16 @@ consensus_commit_prepared(void)
 	consensus_started_txn = 0;
 
     /*
-     * After commit we must pass the messages again to the commit hook; if
+     * After commit we must pass the proposals again to the commit hook; if
      * we're doing crash recovery after prepare but before commit it's the only
      * hook we'd call and it needs to know what's being recovered.
 	 *
-	 * TODO: re-read the messages from the table
+	 * TODO: re-read the proposals from the table
      */
-	(*consensus_messages_commit_hook)(cur_txn_messages);
+	(*consensus_proposals_commit_hook)(cur_txn_proposals);
 
 	MemoryContextReset(cur_txn_context);
-	cur_txn_messages = NIL;
+	cur_txn_proposals = NIL;
 }
 
 static void
@@ -347,14 +359,14 @@ consensus_rollback_prepared(void)
 	AbortCurrentTransaction();
 	consensus_started_txn = 0;
 
-	(*consensus_messages_rollback_hook)();
+	(*consensus_proposals_rollback_hook)();
 
-	cur_txn_messages = NIL;
+	cur_txn_proposals = NIL;
 	MemoryContextReset(cur_txn_context);
 }
 
 /*
- * Start bringing up the consensus system: init the message
+ * Start bringing up the consensus system: init the proposal
  * broker, etc.
  *
  * The caller must now add all the currently known-active
@@ -374,12 +386,12 @@ consensus_begin_startup(uint32 my_nodeid,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("consensus system already running")));
 
-	if (consensus_messages_prepare_hook == NULL
-		|| consensus_messages_commit_hook == NULL
-		|| consensus_messages_rollback_hook == NULL)
+	if (consensus_proposals_prepare_hook == NULL
+		|| consensus_proposals_commit_hook == NULL
+		|| consensus_proposals_rollback_hook == NULL)
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg_internal("consensus message hooks not properly registered by caller")));
+				 errmsg_internal("consensus proposal hooks not properly registered by caller")));
 
 	consensus_nodes = MemoryContextAlloc(TopMemoryContext,
 										 sizeof(ConsensusNode) * max_nodes);
@@ -392,7 +404,7 @@ consensus_begin_startup(uint32 my_nodeid,
 
 	/*
 	 * We need a memory context that lives longer than the current transaction
-	 * so we can pass the consensus messages to the prepared and committed
+	 * so we can pass the consensus proposals to the prepared and committed
 	 * hooks before freeing them.
 	 */
 	cur_txn_context = AllocSetContextCreate(TopMemoryContext,
@@ -406,7 +418,7 @@ consensus_begin_startup(uint32 my_nodeid,
 /*
  * consensus_begin_startup has been called and all peers have been added.
  *
- * Resolve any in-doubt message exchange and start accepting queue entries.
+ * Resolve any in-doubt proposal exchange and start accepting queue entries.
  */
 void
 consensus_finish_startup(void)
@@ -421,7 +433,7 @@ consensus_finish_startup(void)
 }
 
 /*
- * Try to progress message exchange in response to a socket becoming
+ * Try to progress proposal exchange in response to a socket becoming
  * ready or our latch being set.
  *
  * Pass NULL as occurred_events and 0 as nevents if there are no wait events,
@@ -448,7 +460,7 @@ consensus_shutdown(void)
 		cur_txn_context = NULL;
 	}
 
-	cur_txn_messages = NIL;
+	cur_txn_proposals = NIL;
 
 	consensus_state = CONSENSUS_OFFLINE;
 	consensus_max_nodes = 0;
@@ -460,32 +472,44 @@ consensus_shutdown(void)
 
 
 /*
- * Given a serialized message in wire format, unpack it into a
- * ConsensusMessage.
+ * Given a serialized proposal in wire format, unpack it into a
+ * ConsensusProposal.
  */
-static ConsensusMessage *
-consensus_deserialize_message(uint32 origin, const char *payload, Size payload_size)
+static ConsensusProposal *
+consensus_deserialize_proposal(uint32 origin, const char *payload, Size payload_size)
 {
 	/*
-	 * FIXME, see consensus_serialize_message
+	 * FIXME, see consensus_serialize_proposal
 	 */
-	ConsensusMessage *message = MemoryContextAlloc(cur_txn_context, payload_size);
-	memcpy(message, payload, payload_size);
-	return message;
+	ConsensusProposal *proposal = MemoryContextAlloc(cur_txn_context, payload_size);
+	memcpy(proposal, payload, payload_size);
+	return proposal;
 }
 
 static void
-consensus_serialize_message(StringInfo si, ConsensusMessage *msg)
+consensus_serialize_proposal(StringInfo si, ConsensusProposal *msg)
 {
 	/*
-	 * FIXME: We shouldn't send the raw message struct
-	 * but should instead use the message building code
+	 * FIXME: We shouldn't send the raw proposal struct
+	 * but should instead use the proposal building code
 	 * to prepare it properly. This is a hack to get the
 	 * minimum functionality in place.
+	 *
+	 * Proposals should be wrapped in a ConsensusMessage that's packed on send
+	 * and unpacked on receive.  We should only send the proposal fields that
+	 * aren't part of the ConsensusMessage. The ConsensusMessage should carry
+	 * the message type (ack/nack etc) and optional payload
 	 */
-	appendBinaryStringInfo(si, (const char*)msg, offsetof(ConsensusMessage, payload) + msg->payload_length);
+	appendBinaryStringInfo(si, (const char*)msg, offsetof(ConsensusProposal, payload) + msg->payload_length);
 }
 
+/*
+ * Start a batch of consensus proposals to be delivered as a unit
+ * when consensus_end_batch() is called.
+ *
+ * If a consensus manager transaction initiated by a remote node is
+ * active, returns false. Try again later.
+ */
 bool
 consensus_begin_enqueue(void)
 {
@@ -512,22 +536,23 @@ consensus_begin_enqueue(void)
 }
 
 /*
- * Execute the consensus protocol for a batch of messages as a unit, such that
- * all or none are handled by peers.
+ * Add a proposal to a batch of proposals on the send queue.
  *
- * Returns immediately, before messages are sent let alone before they're
- * received and acted on. Use messages_status to check progress.
+ * There must be an open consensus proposal transaction from
+ * consensus_begin_enqueue()
  *
- * May not be called from within an existing transaction, since the consensus
- * broker needs to handle a 2PC commit and doesn't want to get mixed up with
- * whatever else is already going on.
+ * A node must be prepared for its own proposals to fail and be rolled back,
+ * so it should treat them the same way it does remote proposals in receive.
+ * Don't do anything final until after the commit hook is called.
+ *
+ * The returned handle may be used to query the progress of the proposal.
  */
 uint64
-consensus_enqueue_message(const char * payload, Size payload_length)
+consensus_enqueue_proposal(const char * payload, Size payload_length)
 {
 	int nodeidx;
 	StringInfoData si;
-	ConsensusMessage *msg;
+	ConsensusProposal *msg;
 	Size msg_size;
 
 	Assert(IsTransactionState() && consensus_started_txn == bdr_get_local_nodeid());
@@ -538,33 +563,34 @@ consensus_enqueue_message(const char * payload, Size payload_length)
 	 */
 
 	/*
-	 * TODO: right now, all we do is fire and forget to the broker and trust
-	 * that all nodes will receive it. No attempt to handle failures is made.
-	 * No attempt to achieve consensus is made. Obviously that's broken, it's
-	 * just enough of a skeleton to let us start testing things out.
+	 * TODO: right now, all we do is commit locally then fire and forget to the
+	 * broker and trust that all nodes will receive it. No attempt to handle
+	 * failures is made.  No attempt to achieve consensus is made. Obviously
+	 * that's broken, it's just enough of a skeleton to let us start testing
+	 * things out.
 	 *
-	 * We have to do distributed 2PC on this batch of messages, getting all
+	 * We have to do distributed 2PC on this batch of proposals, getting all
 	 * nodes' confirmation that they could all be applied before committing.
 	 * (Then later we'll upgrade to Raft or Paxos distributed majority
 	 * consensus).
 	 */
 
-	msg_size = offsetof(ConsensusMessage, payload) + payload_length;
+	msg_size = offsetof(ConsensusProposal, payload) + payload_length;
 	msg = MemoryContextAlloc(cur_txn_context, msg_size);
 	msg->sender_nodeid = bdr_get_local_nodeid();
 	msg->sender_local_msgnum = 0; /* TODO (or caller supplied?) */
 	msg->sender_lsn = GetXLogWriteRecPtr();
 	msg->sender_timestamp = GetCurrentTimestamp();
-	msg->global_message_id = 0; /* TODO */
+	msg->global_proposal_id = 0; /* TODO */
 	memcpy(msg->payload, payload, payload_length);
 	msg->payload_length = payload_length;
 
-	/* message_type, payload and length set by caller */
+	/* payload and length set by caller */
 	initStringInfo(&si);
-	consensus_serialize_message(&si, msg);
+	consensus_serialize_proposal(&si, msg);
 
-	/* A sending node receives its own message immediately. */
-	consensus_received_new_message(msg);
+	/* A sending node receives its own proposal immediately. */
+	consensus_received_new_proposal(msg);
 
 	for (nodeidx = 0; nodeidx < consensus_max_nodes; nodeidx++)
 	{
@@ -587,33 +613,38 @@ consensus_enqueue_message(const char * payload, Size payload_length)
 	return 0;
 }
 
+/*
+ * Finish preparing a set of proposals and submit them as a unit.  This node and
+ * all other peers will prepare and commit all, or none, of the proposals.
+ *
+ * Nodes may receive only a subset if the txn is already aborted on some other
+ * nodes.
+ *
+ * Returns a handle that can be used to query the progress of the submission.
+ */
 uint64
 consensus_finish_enqueue(void)
 {
 	Assert(IsTransactionState() && consensus_started_txn == bdr_get_local_nodeid());
 
 	/*
-	 * All local messages have been passed through the local receive hook and
+	 * All local proposals have been passed through the local receive hook and
 	 * have been submitted to the broker for sending to peers. Prepare the
 	 * transaction locally.
+	 *
+	 * This should do the full 2PC dance and commit only once all peers have
+	 * acked.
 	 *
 	 * TODO: send out prepare to peers too
 	 */
 	consensus_prepare_transaction();
-
-	/*
-	 * TODO: this commit should happen in response to 2PC consensus, not
-	 * immediately here. If all peers agreed we should commit then send
-	 * a commit to peers, and not before.
-	 */
-	consensus_commit_prepared();
 
 	/* TODO: return last msg number */
 	return 0;
 }
 
 /*
-enum ConsensusMessageStatus {
+enum ConsensusProposalStatus {
 	CONSENSUS_MESSAGE_IN_PROGRESS,
 	CONSENSUS_MESSAGE_ACCEPTED,
 	CONSENSUS_MESSAGE_FAILED
@@ -622,71 +653,71 @@ enum ConsensusMessageStatus {
 
 
 /*
- * Given the handle of a message from when it was proposed for
+ * Given the handle of a proposal from when it was proposed for
  * delivery, look up its progress.
  */
-enum ConsensusMessageStatus
-consensus_messages_status(uint64 handle)
+enum ConsensusProposalStatus
+consensus_proposals_status(uint64 handle)
 {
 	elog(WARNING, "not implemented");
 	return CONSENSUS_MESSAGE_FAILED;
 }
 
 /*
- * Tell the consensus system that messages up to id 'n' are applied and fully
+ * Tell the consensus system that proposals up to id 'n' are applied and fully
  * acted on.
  *
  * The consensus sytem is also free to truncate them off the bottom of the
  * journal.
  *
- * It is an ERROR to try to confirm past the max applyable message per
- * consensus_messages_max_id.
+ * It is an ERROR to try to confirm past the max applyable proposal per
+ * consensus_proposals_max_id.
  */
 void
-consensus_messages_applied(uint32 applied_upto)
+consensus_proposals_applied(uint32 applied_upto)
 {
     /* TODO: Needs shmem to coordinate apply progress */
 	elog(WARNING, "not implemented");
 }
 
 /*
- * Find out how far ahead it's safe to request messages with
- * consensus_get_message and apply them. Also reports the consensus
- * manager's view of the last message applied by the system.
+ * Find out how far ahead it's safe to request proposals with
+ * consensus_get_proposal and apply them. Also reports the consensus
+ * manager's view of the last proposal applied by the system.
  *
- * During startup, call this to find out where to start applying messages. Then
- * fetch each message with consensus_get_message, act on it and call
- * consensus_messages_applied to advance the confirmation counter. When
- * max_applyable is reached, call consensus_messages_max_id again.
+ * During startup, call this to find out where to start applying proposals. Then
+ * fetch each proposal with consensus_get_proposal, act on it and call
+ * consensus_proposals_applied to advance the confirmation counter. When
+ * max_applyable is reached, call consensus_proposals_max_id again.
  */
 void
-consensus_messages_max_id(uint32 *max_applied, int32 *max_applyable)
+consensus_proposals_max_id(uint32 *max_applied, int32 *max_applyable)
 {
     /* TODO: Needs shmem to coordinate apply progress */
 	elog(WARNING, "not implemented");
 }
 
 /*
- * Given a globally message id (not a proposal handle), look up the message
+ * Given a globally proposal id (not a proposal handle), look up the proposal
  * and return it.
  *
- * If the message-id is 0, return the next message after what was
- * reported as applied to consensus_messages_applied(...).
+ * If the proposal-id is 0, return the next proposal after what was
+ * reported as applied to consensus_proposals_applied(...).
  *
- * It is an ERROR to request a message greater than the max-applyable
- * message, even if later messages may be committed. (This won't happen
+ * It is an ERROR to request a proposal greater than the max-applyable
+ * proposal, even if later proposals may be committed. (This won't happen
  * yet, but might once Raft/Paxos is added).
  *
- * It is an ERROR to request an uncommitted message, including PREPAREd
- * but not committed messages.
+ * It is an ERROR to request an uncommitted proposal, including PREPAREd
+ * but not committed proposals.
  *
- * It is an ERROR to request an already-applied message.
+ * It is an ERROR to request an already-applied proposal.
  */
-struct ConsensusMessage*
-consensus_get_message(uint32 message_id)
+struct ConsensusProposal*
+consensus_get_proposal(uint32 proposal_id)
 {
     /* TODO: Needs shmem to coordinate apply progress */
-    /* TODO: read message directly from table */
+    /* TODO: read proposal directly from table */
 	elog(WARNING, "not implemented");
 	return NULL;
 }

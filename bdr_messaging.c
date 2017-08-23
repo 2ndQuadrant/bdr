@@ -31,10 +31,10 @@
 #include "bdr_msgbroker_send.h"
 #include "bdr_messaging.h"
 
-static bool bdr_msgs_receive(ConsensusMessage *msg);
-static bool bdr_msgs_prepare(List *messages);
-static void bdr_msgs_commit(List *messages);
-static void bdr_msgs_rollback(void);
+static bool bdr_proposals_receive(ConsensusProposal *msg);
+static bool bdr_proposals_prepare(List *messages);
+static void bdr_proposals_commit(List *messages);
+static void bdr_proposals_rollback(void);
 static void bdr_request_recreate_wait_event_set_hook(WaitEventSet *old_set);
 
 void
@@ -49,10 +49,10 @@ bdr_start_consensus(int bdr_max_nodes)
 
 	initStringInfo(&si);
 
-	consensus_messages_receive_hook = bdr_msgs_receive;
-	consensus_messages_prepare_hook = bdr_msgs_prepare;
-	consensus_messages_commit_hook = bdr_msgs_commit;
-	consensus_messages_rollback_hook = bdr_msgs_rollback;
+	consensus_proposals_receive_hook = bdr_proposals_receive;
+	consensus_proposals_prepare_hook = bdr_proposals_prepare;
+	consensus_proposals_commit_hook = bdr_proposals_commit;
+	consensus_proposals_rollback_hook = bdr_proposals_rollback;
 	msgb_request_recreate_wait_event_set_hook = bdr_request_recreate_wait_event_set_hook;
 
 	Assert(!IsTransactionState());
@@ -112,7 +112,7 @@ bdr_msgs_enqueue(BdrMessage *message)
 		 * No need for IPC to enqueue this message, we're on the manager
 		 * already.
 		 */
-		return consensus_enqueue_message((const char*)message, BdrMessageSize(message));
+		return consensus_enqueue_proposal((const char*)message, BdrMessageSize(message));
 	}
 	else
 	{
@@ -151,10 +151,10 @@ bdr_msgs_finish_enqueue(void)
 }
 
 /*
- * Given a handle from bdr_msgs_enqueue, look up whether
+ * Given a handle from bdr_proposals_enqueue, look up whether
  * a message is committed or not.
  */
-ConsensusMessageStatus bdr_msg_get_outcome(uint64 msg_handle)
+ConsensusProposalStatus bdr_msg_get_outcome(uint64 msg_handle)
 {
 	/*
 	 * TODO: For now only works in manager worker, see comments
@@ -162,11 +162,11 @@ ConsensusMessageStatus bdr_msg_get_outcome(uint64 msg_handle)
 	 */
 	Assert(MyPGLogicalWorker != NULL && MyPGLogicalWorker->worker_type == PGLOGICAL_WORKER_MANAGER);
 
-	return consensus_messages_status(msg_handle);
+	return consensus_proposals_status(msg_handle);
 }
 
 static bool
-bdr_msgs_receive(ConsensusMessage *msg)
+bdr_proposals_receive(ConsensusProposal *msg)
 {
 	/* note, we receive our own messages too */
 	elog(LOG, "XXX RECEIVE FROM %u, my id is %u",
@@ -177,7 +177,7 @@ bdr_msgs_receive(ConsensusMessage *msg)
 }
 
 static bool
-bdr_msgs_prepare(List *messages)
+bdr_proposals_prepare(List *messages)
 {
 	elog(LOG, "XXX PREPARE"); /* TODO */
 
@@ -188,7 +188,7 @@ bdr_msgs_prepare(List *messages)
 }
 
 static void
-bdr_msgs_commit(List *messages)
+bdr_proposals_commit(List *messages)
 {
 	elog(LOG, "XXX COMMIT"); /* TODO */
 
@@ -197,7 +197,7 @@ bdr_msgs_commit(List *messages)
 
 /* TODO add message-id ranges rejected */
 static void
-bdr_msgs_rollback(void)
+bdr_proposals_rollback(void)
 {
 	elog(LOG, "XXX ROLLBACK"); /* TODO */
 

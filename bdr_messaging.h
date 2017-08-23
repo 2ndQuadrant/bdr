@@ -106,7 +106,7 @@ bdr_msgs_enqueue_one(BdrMessage *message)
 	return handle2;
 }
 
-extern ConsensusMessageStatus bdr_msg_get_outcome(uint64 msg_handle);
+extern ConsensusProposalStatus bdr_msg_get_outcome(uint64 msg_handle);
 
 struct WaitEvent;
 extern void bdr_messaging_wait_event(struct WaitEvent *events, int nevents,
