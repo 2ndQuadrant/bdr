@@ -16,7 +16,7 @@ CREATE EXTENSION bdr CASCADE;
 -- node, and let that bring up BDR because the BDR plugin is loaded, even
 -- though no actual BDR node is created yet.
 
-SELECT *
+SELECT 1
 FROM pglogical.create_node(node_name := 'node1', dsn := :'node1_dsn' || ' user=super');
 
 CREATE FUNCTION
@@ -43,7 +43,7 @@ SELECT node_id, 4 FROM pglogical.local_node;
 \c :node2_dsn
 
 -- Manually create a second node
-SELECT *
+SELECT 1
 FROM pglogical.create_node(node_name := 'node2', dsn := :'node2_dsn' || ' user=super');
 
 INSERT INTO bdr.node_group(node_group_id, node_group_name)
@@ -53,7 +53,7 @@ INSERT INTO bdr.node(pglogical_node_id, node_group_id)
 SELECT node_id, 4 FROM pglogical.local_node;
 
 -- Subscribe to the first node
-SELECT * FROM pglogical.create_subscription(
+SELECT 1 FROM pglogical.create_subscription(
     subscription_name := 'to_node1',
     provider_dsn := ( :'node1_dsn' || ' user=super' ),
     synchronize_structure := true,
@@ -82,18 +82,14 @@ BEGIN
 END;
 $$;
 
-
-SELECT * FROM pglogical.show_subscription_status();
-
-SELECT pg_sleep(5);
-
-SELECT * FROM pglogical.show_subscription_status();
+SELECT subscription_name, status, provider_node, slot_name, replication_sets
+FROM pglogical.show_subscription_status();
 
 \c :node1_dsn
 
 -- Subscribe to the second node and make the subscription 'internal'
 -- but this time don't sync structure.
-SELECT * FROM pglogical.create_subscription(
+SELECT 1 FROM pglogical.create_subscription(
     subscription_name := 'to_node2',
     provider_dsn := ( :'node2_dsn' || ' user=super' ),
     synchronize_structure := false,
@@ -111,9 +107,11 @@ BEGIN
 END;
 $$;
 
+SELECT subscription_name, status, provider_node, slot_name, replication_sets
+FROM pglogical.show_subscription_status();
+
 -- Now, since BDR doesn't know we changed any catalogs etc,
 -- restart pglogical to make the plugin re-read its config
-
 
 SET client_min_messages = error;
 
@@ -142,8 +140,15 @@ CREATE TABLE throwaway AS SELECT 1;
 
 SELECT pglogical_wait_slot_confirm_lsn(NULL, NULL);
 
--- Debug data
+SELECT application_name, sync_state
+FROM pg_stat_replication
+ORDER BY application_name;
 
-SELECT * FROM pg_stat_replication;
-SELECT * FROM pg_replication_slots;
-SELECT * FROM pg_stat_activity;
+SELECT slot_name, plugin, slot_type, database, temporary, active
+FROM pg_replication_slots ORDER BY slot_name;
+
+SELECT
+    backend_type,
+    regexp_replace(application_name, '[[:digit:]]', 'n', 'g') AS appname
+FROM pg_stat_activity
+WHERE application_name LIKE 'pglogical%';

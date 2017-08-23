@@ -17,19 +17,11 @@ SELECT pglogical.replication_set_add_table('dummy_nodegroup', 'demo');
  t
 (1 row)
 
-SELECT * FROM pglogical.tables;
- relid | nspname |           relname           |    set_name     
--------+---------+-----------------------------+-----------------
- 16583 | bdr     | node_peer_progress          | 
- 16568 | bdr     | node                        | 
- 16850 | public  | throwaway                   | 
- 16561 | bdr     | node_group                  | 
- 16578 | bdr     | node_subscriptions          | 
- 16856 | public  | demo                        | dummy_nodegroup
- 16607 | bdr     | state_journal               | 
- 16596 | bdr     | distributed_message_journal | 
- 16591 | bdr     | node_part_progress          | 
-(9 rows)
+SELECT nspname, relname FROM pglogical.tables WHERE set_name = 'dummy_nodegroup';
+ nspname | relname 
+---------+---------
+ public  | demo
+(1 row)
 
 INSERT INTO demo(id) VALUES (42);
 \c :node2_dsn
@@ -51,19 +43,11 @@ SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' A
  demo
 (1 row)
 
-SELECT * FROM pglogical.tables;
- relid | nspname |           relname           |    set_name     
--------+---------+-----------------------------+-----------------
- 16821 | bdr     | distributed_message_journal | 
- 16803 | bdr     | node_subscriptions          | 
- 16786 | bdr     | node_group                  | 
- 16853 | public  | throwaway                   | 
- 16793 | bdr     | node                        | 
- 16808 | bdr     | node_peer_progress          | 
- 16832 | bdr     | state_journal               | 
- 16861 | public  | demo                        | dummy_nodegroup
- 16816 | bdr     | node_part_progress          | 
-(9 rows)
+SELECT nspname, relname FROM pglogical.tables WHERE set_name = 'dummy_nodegroup';
+ nspname | relname 
+---------+---------
+ public  | demo
+(1 row)
 
 SELECT id FROM demo ORDER BY id;
  id 

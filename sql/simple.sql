@@ -11,7 +11,7 @@ $DDL$);
 
 SELECT pglogical.replication_set_add_table('dummy_nodegroup', 'demo');
 
-SELECT * FROM pglogical.tables;
+SELECT nspname, relname FROM pglogical.tables WHERE set_name = 'dummy_nodegroup';
 
 INSERT INTO demo(id) VALUES (42);
 
@@ -23,7 +23,7 @@ SELECT pglogical.replication_set_add_table('dummy_nodegroup', 'demo');
 
 SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'demo';
 
-SELECT * FROM pglogical.tables;
+SELECT nspname, relname FROM pglogical.tables WHERE set_name = 'dummy_nodegroup';
 
 SELECT id FROM demo ORDER BY id;
 
