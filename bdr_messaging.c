@@ -117,27 +117,17 @@ bdr_msgs_enqueue(BdrMessage *message)
 	else
 	{
 		/*
-		 * TODO support messaging from other peers.
+		 * We're not running in the manager. So we need IPC to get the message to the
+		 * consensus manager in the pglogical manager worker.
 		 *
-		 * We need to get the message to the manager worker to submit, then get the
-		 * result back.
+		 * The submitting backend could be a bgworker or a normal Pg backend.
 		 *
-		 * One way is to use paired shm memory queues to exchange the message
-		 * between bdr workers, normal backends requesting ddl locks, etc and the
-		 * manager.
-		 *
-		 * Alternately we can use the journal table. We can't easily just have
-		 * the consensus manager insert the row from the current backend; it'd
-		 * still have to read it from the manager to send it on the wire via
-		 * the message broker. The row would be uncommitted and we'd have to do
-		 * a dirty read, worry about the initating proc dying (and telling
-		 * peers about it), etc. The IPC requirement just moves from
-		 * worker<->consensus to consensus<->broker, so it doesn't seem
-		 * like a win.
-		 *
-		 * Either way, TODO.
+		 * To handle this we keep a small pool of shm_mq's (actually, currently just one!)
+		 * owned by the BDR plugin's messaging module, and we look it up via static
+		 * shmem. (This looks very much like how the message broker's receiver works).
+		 * We attach to paired send and receive queues, provided then do our business
+		 * and detach.
 		 */
-		elog(ERROR, "not implemented");
 	}
 }
 
