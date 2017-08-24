@@ -1,0 +1,137 @@
+BDR3's inter-node messaging is a key part of the new system.
+
+It's structured into a few modular components.
+
+bdr_msgbroker
+---
+
+The message broker provides unreliable, non-persistent messaging between BDR
+peers. Messages are sent to peers using async libpq connections by a broker
+running in the bdr manager worker (bdr_msgbroker_send). They are delivered via
+SQL function calls in normal backends, which connect to a shared memory queue
+attached to the recipient's pglogical manager (bdr_msgbroker_receive). The
+delivery function passes the message over the queue to the recipient manager,
+where it's dispatched to a receive callback.
+
+It forgets all its state on restart/crash. It'll try to resend queued
+messages after a libpq reconnect, transient error, etc, but that's it.
+
+Messages in the message broker are all unicast, point-to-point.
+
+The message broker tries to be quite isolated from knowledge about BDR, and
+should be re-usable elsewhere. It should be easy to turn into its own
+extension.
+
+[Implementation complete]
+
+
+bdr_consensus
+---
+
+The consensus manager builds on the message broker, adding network two phase
+commit for reliable messaging. It accepts consensus proposals from the local
+node and from peer nodes and negotiates with peers to achieve consensus on
+whether a proposal should be accepted or rejected. Then it commits the proposal
+in persistent storage to the local node and all peers.
+
+It keeps track of which proposals have been acted on locally (replay progress),
+manages global uniqueness of proposal numbering, etc. The local node consumes
+accepted proposals from the consensus manager to drive its state transitions,
+and injects new proposals into the consensus manager for negotation with peers.
+
+It takes care of crash safety, so if a node crashes after it promises to be
+able to commit a proposal but before it gets a final commit or rollback
+from the proposer, it can recover when it comes back up. Similarly, it handles
+crash of a proposer by finishing an incomplete consensus negotiation. (Details
+in comments).
+
+The consensus manager will later be extended to support majority consensus
+voting on proposals. Initially it only does all-nodes consensus.
+
+The consensus manager tries to be quite abstracted from BDR and should
+be able to be put into its own extension for re-use elsewhere.
+
+[Implementation WIP: no consensus, crash safety, 2PC]
+
+
+bdr_messaging
+---
+
+The BDR messaging layer contains the BDR knowledge. It sets up the message
+broker and consensus manager's knowledge of peer nodes from the BDR catalogs,
+reports added/removed nodes, etc. It also integrates them into pglogical's
+wait-event loop so their own event loops can be serviced.
+
+In addition to wrapping the consensus manager, the BDR messaging layer adds
+knowledge of BDR-specific message types to be carried by the consensus manager.
+It has a dispatcher for invoking appropriate BDR subsystems in response to
+accepted consensus proposals.
+
+Since the message broker only has limited IPC to receive messages from remote
+peers, and the consensus manager runs wholly within the manager worker, we also
+need a way for other BDR backends to submit BDR messages and learn of the
+outcomes. The BDR messaging layer provides this with shmem memory queues 
+that other BDR backends (bgworker or hook in user backend) can attach to and
+use to communicate with the manager worker.
+
+(TODO: this probably makes more sense to have in the consensus layer,
+really, and for the BDR messaging layer to wrap it in each proc. So should
+move the submit queue stuff from bdr_shmem.[ch] and bdr_messaging.[ch]
+into bdr_consensus.[ch])
+
+
+bdr_manager
+---
+
+The manager worker co-ordinates all messaging activity on a node,
+driving the event loops for the messaging layers, installing
+needed hooks, etc.
+
+It plugs in to the pglogical manager to intercept its event
+loop.
+
+Message flow
+----
+
+[<node1,backend> bdr backend]
+   | submits proposal to
+[<node1,backend> bdr_messaging]
+   | finds manager in shmem
+   | sends over shm_mq to
+[<node1,manager> bdr_messaging]
+   | submits bdr message to
+[<node1,manager> bdr_consensus]
+   | wraps bdr message in consensus proposal
+   | sends consensus proposal to all peers node2..noden
+[<node1,manager> bdr_msgbroker]
+[<node1,manager> bdr_msgbroker_send]
+   | sends msgs over libpq to normal backend to destinations
+
+... network libpq protocol ...
+
+   | SELECT msgb_deliver_message(...)
+[<node2,backend> bdr_msgbroker_receive]
+   | finds manager in shmem
+   | relays over shmem_mq to
+[<node2,manager> bdr_msgbroker_receive]
+[<node2,manager> bdr_msgbroker]
+   | passes to consensus manager's receive hook
+[<node2,manager> bdr_consensus]
+   | calls proposal received hook
+   | executes consensus algorithm for msg
+   |-> changes local db state if needed
+   |-> dispatches message replies back to msgbroker
+   |-> {loop of message exchanges until consensus achieved}
+   | calls proposal committed hook
+[<node2,manager> bdr_msgbroker]
+   | unpacks bdr message from accepted consensus proposal
+   | dispatches bdr message to interested subsystem(s)
+
+
+The details of the consensus protocol are deliberately elided here. They don't
+matter to the outer layers, which can just find out the outcome of a proposal
+they submitted, and learn of new accepted proposals.
+
+Initially it'll be a simpleish network 2PC. Later it'll be promoted to Raft or
+Paxos majority consensus (with an all-nodes consensus option still available
+for use when needed).
