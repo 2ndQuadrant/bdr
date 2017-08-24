@@ -67,7 +67,7 @@ void
 msgb_startup(int max_connections, Size recv_queue_size)
 {
 	if (!atexit_registered)
-		on_proc_exit(msgb_atexit, (Datum)0);
+		before_shmem_exit(msgb_atexit, (Datum)0);
 
 	msgb_max_peers = max_connections;
 

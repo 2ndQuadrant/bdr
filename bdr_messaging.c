@@ -113,6 +113,8 @@ static void bdr_detach_manager_queue(void);
 
 static BdrManagerShmem *my_manager;
 
+static bool atexit_registered = false;
+
 static inline bool
 is_bdr_manager(void)
 {
@@ -175,7 +177,11 @@ static void
 bdr_startup_submit_shm_mq(void)
 {
 	submit_mq.state = MQ_NEED_REINIT;
-	on_proc_exit(bdr_messaging_atexit, (Datum)0);
+	if (!atexit_registered)
+	{
+		before_shmem_exit(bdr_messaging_atexit, (Datum)0);
+		atexit_registered = true;
+	}
 
 	Assert(submit_mq.mq_context == NULL);
 	submit_mq.mq_context  = AllocSetContextCreate(TopMemoryContext,
@@ -433,7 +439,11 @@ bdr_attach_manager_queue(void)
 	recvq = (void*)my_manager->shm_send_mq;
 	sendq = (void*)my_manager->shm_recv_mq;
 
-	on_proc_exit(bdr_messaging_atexit, (Datum)0);
+	if (!atexit_registered)
+	{
+		before_shmem_exit(bdr_messaging_atexit, (Datum)0);
+		atexit_registered = true;
+	}
 
 	/*
 	 * We must attach to both queues under a lock that prevents

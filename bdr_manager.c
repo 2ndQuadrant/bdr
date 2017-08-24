@@ -37,6 +37,8 @@ static void bdr_manager_atexit(int code, Datum argument);
 
 static BdrManagerShmem *my_manager = NULL;
 
+static bool atexit_registered = false;
+
 /*
  * This hook runs when pglogical's manager worker starts. It brings up the BDR
  * subsystems needed to do inter-node state management.
@@ -54,7 +56,11 @@ bdr_manager_worker_start(void)
 	elog(bdr_debug_level, "configuring BDR for up to %d nodes (unless other resource limits hit)",
 		 bdr_max_nodes);
 
-	on_proc_exit(bdr_manager_atexit, (Datum)0);
+	if (!atexit_registered)
+	{
+		before_shmem_exit(bdr_manager_atexit, (Datum)0);
+		atexit_registered = true;
+	}
 
 	my_manager = bdr_shmem_allocate_manager_segment(bdr_get_local_nodeid());
 
