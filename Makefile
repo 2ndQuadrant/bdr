@@ -21,6 +21,7 @@ OBJS = \
 	bdr_output.o \
 	bdr_pgl_plugin.o \
 	bdr_sync.o \
+	bdr_shmem.o \
 	bdr_worker.o
 
 REGRESS = preseed init simple wait part

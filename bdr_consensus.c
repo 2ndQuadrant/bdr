@@ -464,8 +464,11 @@ consensus_shutdown(void)
 
 	consensus_state = CONSENSUS_OFFLINE;
 	consensus_max_nodes = 0;
-	pfree(consensus_nodes);
-	consensus_nodes = NULL;
+	if (consensus_nodes != NULL)
+	{
+		pfree(consensus_nodes);
+		consensus_nodes = NULL;
+	}
 
 	consensus_started_txn = 0;
 }

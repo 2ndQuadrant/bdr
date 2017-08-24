@@ -799,7 +799,7 @@ msgb_shutdown_receive(void)
 }
 
 static Size
-msgb_calc_shmem_size()
+msgb_calc_shmem_size(void)
 {
 	Assert(msgb_max_local_nodes >= 1);
 	return offsetof(MsgbShmemContext, shmem_mq_seg)

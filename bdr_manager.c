@@ -28,11 +28,14 @@
 #include "bdr_catcache.h"
 #include "bdr_messaging.h"
 #include "bdr_manager.h"
+#include "bdr_shmem.h"
 #include "bdr_worker.h"
 
 int bdr_max_nodes;
 
 static void bdr_manager_atexit(int code, Datum argument);
+
+static BdrManagerShmem *my_manager = NULL;
 
 /*
  * This hook runs when pglogical's manager worker starts. It brings up the BDR
@@ -53,6 +56,8 @@ bdr_manager_worker_start(void)
 
 	on_proc_exit(bdr_manager_atexit, (Datum)0);
 
+	my_manager = bdr_shmem_allocate_manager_segment(bdr_get_local_nodeid());
+
 	bdr_start_consensus(bdr_max_nodes);
 
 	/*
@@ -65,6 +70,11 @@ static void
 bdr_manager_atexit(int code, Datum argument)
 {
 	bdr_shutdown_consensus();
+	if (my_manager != NULL)
+	{
+		bdr_shmem_release_manager_segment(my_manager);
+		my_manager = NULL;
+	}
 }
 
 /*

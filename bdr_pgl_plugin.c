@@ -55,12 +55,13 @@
 
 #include "bdr_version.h"
 #include "bdr_catcache.h"
+#include "bdr_consensus.h"
 #include "bdr_worker.h"
 #include "bdr_sync.h"
 #include "bdr_apply.h"
 #include "bdr_output.h"
 #include "bdr_msgbroker.h"
-#include "bdr_consensus.h"
+#include "bdr_shmem.h"
 #include "bdr_messaging.h"
 #include "bdr_manager.h"
 
@@ -214,6 +215,7 @@ _PG_init(void)
 	bdr_define_gucs();
 
 	msgb_shmem_init(BDR_MAX_DATABASES);
+    bdr_shmem_init(BDR_MAX_DATABASES);
 
 	elog(LOG, "loading BDR %s (%06d)", BDR_VERSION, BDR_VERSION_NUM);
 }
