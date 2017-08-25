@@ -519,7 +519,18 @@ consensus_begin_enqueue(void)
 	if (IsTransactionState())
 	{
 		if (consensus_started_txn == bdr_get_local_nodeid())
-			elog(ERROR, "consensus transaction already open by local node");
+		{
+			/*
+			 * This isn't an error condition because another backend could've
+			 * started the transaction. Only one can win and start it
+			 * successfully if multiple backends try at once. We can't just
+			 * block because we'd hold up the whole event loop.
+			 *
+			 * TODO: some shmem signalling so backends can negotiate this more nicely. Seems like another good reason to move the MQ's into consensus manager.
+			 */
+			elog(bdr_debug_level, "consensus transaction already open by local node");
+			return false;
+		}
 		else if (consensus_started_txn != 0)
 		{
 			elog(bdr_debug_level, "consensus transaction already open by %u",
@@ -527,7 +538,8 @@ consensus_begin_enqueue(void)
 			return false;
 		}
 		else
-			elog(ERROR, "database transaction already open that was not started by consensus manager");
+			elog(WARNING, "database transaction already open that was not started by consensus manager");
+			return false;
 	}
 
 	Assert(consensus_started_txn == 0);

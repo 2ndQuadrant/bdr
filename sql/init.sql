@@ -11,6 +11,10 @@ CREATE EXTENSION bdr CASCADE;
 
 \c :node1_dsn
 
+-- Only used in tests
+CREATE FUNCTION bdr_submit_message(message text)
+RETURNS text LANGUAGE c STRICT AS 'bdr','bdr_submit_message';
+
 -- We should be doing a bdr node create/join here but we don't yet have the
 -- interfaces for that. We're just dummied up so far. So create a pglogical
 -- node, and let that bring up BDR because the BDR plugin is loaded, even
@@ -152,7 +156,3 @@ SELECT
     regexp_replace(application_name, '[[:digit:]]', 'n', 'g') AS appname
 FROM pg_stat_activity
 WHERE application_name LIKE 'pglogical%';
-
--- Only used in tests
-CREATE FUNCTION bdr.submit_message(message text)
-RETURNS text LANGUAGE c STRICT AS 'bdr','bdr_submit_message';

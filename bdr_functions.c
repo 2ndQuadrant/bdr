@@ -60,7 +60,7 @@ bdr_submit_message(PG_FUNCTION_ARGS)
 	if (!bdr_is_active_db())
 		elog(ERROR, "BDR is not active in this database");
 
-	dummy_payload_length = strlen(dummy_payload);
+	dummy_payload_length = strlen(dummy_payload)+ 1;
 
 	msg = palloc(offsetof(BdrMessage,payload) + dummy_payload_length);
 	msg->message_type = BDR_MSG_NOOP;

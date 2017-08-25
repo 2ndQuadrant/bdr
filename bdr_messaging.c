@@ -186,8 +186,8 @@ bdr_startup_submit_shm_mq(void)
 
 	Assert(submit_mq.mq_context == NULL);
 	submit_mq.mq_context  = AllocSetContextCreate(TopMemoryContext,
-														"bdr messaging mgr shm_mq IPC",
-														ALLOCSET_DEFAULT_SIZES);
+												  "bdr messaging mgr shm_mq IPC",
+												  ALLOCSET_DEFAULT_SIZES);
 
 	bdr_reinit_submit_shm_mq();
 }
@@ -247,9 +247,11 @@ submit_mq_detach(void)
 		recvq = tempq;
 	}
 
+	if (submit_mq.mq_context == NULL)
+		Assert(submit_mq.sendq_handle == NULL && submit_mq.recvq_handle == NULL);
+
 	if (submit_mq.recvq_handle != NULL)
 	{
-		Assert(recvq == shm_mq_get_queue(submit_mq.recvq_handle));
 		shm_mq_detach(recvq);
 		submit_mq.recvq_handle = NULL;
 		submit_mq.recvbuf = NULL;
@@ -257,7 +259,6 @@ submit_mq_detach(void)
 	}
 	if (submit_mq.sendq_handle != NULL)
 	{
-		Assert(sendq == shm_mq_get_queue(submit_mq.sendq_handle));
 		shm_mq_detach(sendq);
 		submit_mq.sendq_handle = NULL;
 		submit_mq.sendbuf = NULL;
@@ -275,6 +276,12 @@ static void
 bdr_detach_submit_shm_mq(void)
 {
 	shm_mq *sendq, *recvq;
+
+	if (submit_mq.mq_context == NULL)
+	{
+		/* We're shut down */
+		return;
+	}
 
 	Assert(is_bdr_manager());
 
@@ -722,6 +729,8 @@ bdr_shutdown_submit_shm_mq(void)
 	bdr_detach_submit_shm_mq();
 	if (submit_mq.mq_context != NULL)
 	{
+		Assert(submit_mq.recvq_handle == NULL);
+		Assert(submit_mq.sendq_handle == NULL);
 		MemoryContextDelete(submit_mq.mq_context);
 		submit_mq.mq_context = NULL;
 	}
