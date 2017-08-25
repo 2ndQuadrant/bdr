@@ -38,7 +38,7 @@ PG_CONFIG ?= pg_config
 
 PGVER := $(shell $(PG_CONFIG) --version | sed 's/^[^0-9/]*\([0-9][0-9\.]\+\).*/\1/g' | awk -F . '{ print $$1$$2 }')
 
-PG_CPPFLAGS += -I$(libpq_srcdir) -I$(realpath $(srcdir)/compat$(PGVER)) -I$(includedir)/pglogical
+PG_CPPFLAGS += -I$(libpq_srcdir) -I$(realpath $(srcdir)/compat$(PGVER)) -I$(includedir)/pglogical -O0 -ggdb
 SHLIB_LINK += $(libpq)
 
 OBJS += $(srcdir)/compat$(PGVER)/bdr_compat.o

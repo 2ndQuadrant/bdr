@@ -152,3 +152,7 @@ SELECT
     regexp_replace(application_name, '[[:digit:]]', 'n', 'g') AS appname
 FROM pg_stat_activity
 WHERE application_name LIKE 'pglogical%';
+
+-- Only used in tests
+CREATE FUNCTION bdr.submit_message(message text)
+RETURNS text LANGUAGE c STRICT AS 'bdr','bdr_submit_message';

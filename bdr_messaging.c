@@ -45,6 +45,7 @@
 
 typedef enum SubmitMQMessageType
 {
+	MSG_UNUSED_TYPE = 0,
 	MSG_START_ENQUEUE,
 	MSG_START_ENQUEUE_RESULT,
 	MSG_ENQUEUE_PROPOSAL,
@@ -227,15 +228,24 @@ bdr_reinit_submit_shm_mq(void)
 
 /*
  * Do local-side shmem detach. Same in manager and
- * peer.
+ * peer except that we swap "send" and "receive"
+ * in peer.
  */
 static void
 submit_mq_detach(void)
 {
-	shm_mq *sendq, *recvq;
+	shm_mq *sendq, *recvq, *tempq;
 
 	sendq = (void*)my_manager->shm_send_mq;
 	recvq = (void*)my_manager->shm_recv_mq;
+
+	if (!is_bdr_manager())
+	{
+		/* "send" and "receive" are reversed on peer */
+		tempq = sendq;
+		sendq = recvq;
+		recvq = tempq;
+	}
 
 	if (submit_mq.recvq_handle != NULL)
 	{
@@ -309,9 +319,6 @@ bdr_make_msg_submit_shm_mq(SubmitMQMessageType msgtype, Size payload_size,
 	 * It's OK to abandon any data here, shm_mq's handle remembers it
 	 * and will clean it up if needed when we try to send the next msg
 	 */
-	submit_mq.sendbufsize = 0;
-	submit_mq.sendbuf = NULL;
-
 	submit_mq.sendbufsize = offsetof(SubmitMQMessage,payload) + payload_size;
 	submit_mq.sendbuf = MemoryContextAlloc(submit_mq.mq_context,
 										   submit_mq.sendbufsize);
@@ -320,6 +327,8 @@ bdr_make_msg_submit_shm_mq(SubmitMQMessageType msgtype, Size payload_size,
 	msg->msg_type = msgtype;
 	msg->payload_length = payload_size;
 	memcpy(msg->payload, payload, payload_size);
+
+	Assert(submit_mq.sendbufsize == offsetof(SubmitMQMessage,payload) + msg->payload_length);
 }
 
 /*
@@ -382,9 +391,15 @@ bdr_received_submit_shm_mq(void)
 			bdr_make_msg_submit_shm_mq(MSG_QUERY_STATUS_RESULT,
 									   sizeof(ConsensusProposalStatus),
 									   &status);
+			break;
 		}
-		default:
-			elog(ERROR, "unhandled case");
+		case MSG_UNUSED_TYPE:
+		case MSG_START_ENQUEUE_RESULT:
+		case MSG_ENQUEUE_RESULT:
+		case MSG_FINISH_ENQUEUE_RESULT:
+		case MSG_QUERY_STATUS_RESULT:
+			elog(ERROR, "peer sent unsupported message type %u to manager, shmem protocol violation",
+				 msg->msg_type);
 	}
 	
 	/* reply queued */
@@ -429,8 +444,8 @@ bdr_attach_manager_queue(void)
 	}
 
 	submit_mq.mq_context  = AllocSetContextCreate(TopMemoryContext,
-														"bdr messaging peer shm_mq IPC",
-														ALLOCSET_DEFAULT_SIZES);
+												  "bdr messaging peer shm_mq IPC",
+												  ALLOCSET_DEFAULT_SIZES);
 
 	my_manager = bdr_shmem_lookup_manager_segment(bdr_get_local_nodeid(),
 												  false);
@@ -486,9 +501,13 @@ static SubmitMQMessage*
 bdr_submit_manager_queue(SubmitMQMessageType msgtype, Size payload_size,
 						 void *payload)
 {
-	SubmitMQMessage *msg;
+	SubmitMQMessage *reply_msg;
 
 	Assert(!is_bdr_manager());
+
+	Assert(my_manager != NULL);
+	Assert(submit_mq.sendq_handle != NULL);
+	Assert(submit_mq.recvq_handle != NULL);
 
 	/* Populates submit_mq.sendbuf and sendbufsize */
 	bdr_make_msg_submit_shm_mq(msgtype, payload_size, payload);
@@ -504,15 +523,16 @@ bdr_submit_manager_queue(SubmitMQMessageType msgtype, Size payload_size,
 			bdr_detach_manager_queue();
 			/* TODO: better error */
 			elog(ERROR, "manager detached during message submit");
-			break;
 		case SHM_MQ_WOULD_BLOCK:
 			Assert(false);
 			break;
 	}
 
-	switch (shm_mq_receive(submit_mq.sendq_handle,
-						   &submit_mq.recvbufsize,
-						   &submit_mq.recvbuf, false))
+	submit_mq.recvbufsize = 0;
+	submit_mq.recvbuf = NULL;
+	switch (bdr_shm_mq_receive(submit_mq.recvq_handle,
+							   &submit_mq.recvbufsize,
+							   &submit_mq.recvbuf, false))
 	{
 		case SHM_MQ_SUCCESS:
 			break;
@@ -520,16 +540,15 @@ bdr_submit_manager_queue(SubmitMQMessageType msgtype, Size payload_size,
 			bdr_detach_manager_queue();
 			/* TODO: better error */
 			elog(ERROR, "manager detached during message reply receive");
-			break;
 		case SHM_MQ_WOULD_BLOCK:
 			Assert(false);
 			break;
 	}
 
-	msg = submit_mq.recvbuf;
-	Assert(submit_mq.recvbufsize == offsetof(SubmitMQMessage,payload) + msg->payload_length);
+	reply_msg = submit_mq.recvbuf;
+	Assert(submit_mq.recvbufsize == offsetof(SubmitMQMessage,payload) + reply_msg->payload_length);
 
-	return msg;
+	return reply_msg;
 }
 
 static void
@@ -542,6 +561,46 @@ bdr_detach_manager_queue(void)
 	 * or wait for the manager to detach. It just closes down.
 	 */
 	submit_mq_detach();
+}
+
+/*
+ * Test to see if the reply we sent is what we should be sending
+ * for a given incoming message
+ */
+static void
+check_allowed_reply_type(void)
+{
+	SubmitMQMessageType inbound, reply;
+	bool ok;
+
+	Assert(submit_mq.recvbuf != NULL);
+	Assert(submit_mq.sendbuf != NULL);
+	inbound = ((SubmitMQMessage*)submit_mq.recvbuf)->msg_type;
+	reply = ((SubmitMQMessage*)submit_mq.sendbuf)->msg_type;
+
+	switch (inbound)
+	{
+		case MSG_START_ENQUEUE:
+			ok = (reply == MSG_START_ENQUEUE_RESULT); break;
+		case MSG_ENQUEUE_PROPOSAL:
+			ok = (reply == MSG_ENQUEUE_RESULT); break;
+		case MSG_FINISH_ENQUEUE:
+			ok = (reply == MSG_FINISH_ENQUEUE_RESULT); break;
+		case MSG_QUERY_STATUS:
+			ok = (reply == MSG_QUERY_STATUS_RESULT); break;
+		case MSG_START_ENQUEUE_RESULT:
+		case MSG_UNUSED_TYPE:
+		case MSG_ENQUEUE_RESULT:
+		case MSG_FINISH_ENQUEUE_RESULT:
+		case MSG_QUERY_STATUS_RESULT:
+			/* not allowed as replies from manager */
+			ok = false;
+			break;
+	}
+
+	if (!ok)
+		elog(ERROR, "internal error: tried to reply to message %u with message %u",
+			 inbound, reply);
 }
 
 static void
@@ -584,6 +643,9 @@ bdr_service_submit_shmem_mq(void)
 	 *
 	 * We don't need to explicitly acquire any lock here; the shm_mq does its
 	 * own locking, and we're the only process that can overwrite it.
+	 *
+	 * TODO: allow a batch of messages to be consumed and processed in one go
+	 * with replies queued up, so we can free up the bus faster.
 	 */
 	if (submit_mq.state == MQ_WAIT_PEER_MESSAGE)
 	{
@@ -618,9 +680,10 @@ bdr_service_submit_shmem_mq(void)
 
 	if (submit_mq.state == MQ_REPLY_PENDING)
 	{
+		check_allowed_reply_type();
 		switch (bdr_shm_mq_send(submit_mq.sendq_handle,
 								submit_mq.sendbufsize,
-								submit_mq.recvbuf, true))
+								submit_mq.sendbuf, true))
 		{
 			case SHM_MQ_SUCCESS:
 				/* Peer might send again or detach */
@@ -689,7 +752,9 @@ bool
 bdr_msgs_begin_enqueue(void)
 {
 	if (is_bdr_manager())
+	{
 		return consensus_begin_enqueue();
+	}
 	else
 	{
 		/*
@@ -774,8 +839,8 @@ static bool
 bdr_proposals_receive(ConsensusProposal *msg)
 {
 	/* note, we receive our own messages too */
-	elog(LOG, "XXX RECEIVE FROM %u, my id is %u",
-		msg->sender_nodeid, bdr_get_local_nodeid());
+	elog(LOG, "XXX RECEIVE FROM %u, my id is %u, payload is \"%s\"",
+		msg->sender_nodeid, bdr_get_local_nodeid(), msg->payload);
 
     /* TODO: can nack messages here */
     return true;

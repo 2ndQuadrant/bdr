@@ -95,6 +95,8 @@ bdr_manager_wait_event(struct WaitEvent *events, int nevents,
 	Size dummy_payload_length;
 	uint64 handle;
 
+	static bool iteration_counter = 0;
+
 	if (!bdr_is_active_db())
 		return;
 
@@ -103,18 +105,23 @@ bdr_manager_wait_event(struct WaitEvent *events, int nevents,
 	/*
 	 * For testing purposes, enqueue some messages here and expect to receive
 	 * them through the receive/prepare/commit process.
+	 *
+	 * Submit messages only intermittently.
 	 */
-	dummy_payload = "dummy payload";
-	dummy_payload_length = strlen(dummy_payload);
+	if ((iteration_counter ++) % 5 == 0)
+	{
+		dummy_payload = "dummy payload";
+		dummy_payload_length = strlen(dummy_payload);
 
-	msg = palloc(offsetof(BdrMessage,payload) + dummy_payload_length);
-	msg->message_type = BDR_MSG_NOOP;
-	msg->payload_length = dummy_payload_length;
-	memcpy(msg->payload, dummy_payload, dummy_payload_length);
+		msg = palloc(offsetof(BdrMessage,payload) + dummy_payload_length);
+		msg->message_type = BDR_MSG_NOOP;
+		msg->payload_length = dummy_payload_length;
+		memcpy(msg->payload, dummy_payload, dummy_payload_length);
 
-	handle = bdr_msgs_enqueue_one(msg);
-	if (handle == 0)
-		elog(WARNING, "XXX manager couldn't enqueue message, will try again later"); /* XXX */
-	else
-		elog(WARNING, "XXX manager enqueued message with handle "UINT64_FORMAT, handle); /* XXX */
+		handle = bdr_msgs_enqueue_one(msg);
+		if (handle == 0)
+			elog(WARNING, "XXX manager couldn't enqueue message, will try again later"); /* XXX */
+		else
+			elog(WARNING, "XXX manager enqueued message with handle "UINT64_FORMAT, handle); /* XXX */
+	}
 }

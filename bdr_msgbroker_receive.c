@@ -232,7 +232,8 @@ msgb_connect_shmem(uint32 origin_node)
 	if (seg == NULL)
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg_internal("no shared memory segment found")));
+				 errmsg_internal("no dynamic shared memory segment found when attaching to shm mq on %u",
+				 				 local_node)));
 
 	toc = shm_toc_attach(BDR_SHMEM_MAGIC, dsm_segment_address(seg));
 	if (toc == NULL)

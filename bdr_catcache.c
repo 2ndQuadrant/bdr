@@ -41,18 +41,12 @@ bdr_cache_local_nodeinfo(void)
 {
 	MemoryContext old_ctx;
 
-	if (bdr_catcache_context == NULL)
-	{
-		bdr_catcache_context = AllocSetContextCreate(CacheMemoryContext,
-											  "bdr_catcache",
-											  ALLOCSET_DEFAULT_SIZES);
-	}
-	else
-	{
-		elog(bdr_debug_level, "BDR re-initing catcache");
-		local_bdr_node = NULL;
-		MemoryContextReset(bdr_catcache_context);
-	}
+	if (bdr_catcache_context != NULL)
+		return;
+
+	bdr_catcache_context = AllocSetContextCreate(CacheMemoryContext,
+												 "bdr_catcache",
+												 ALLOCSET_DEFAULT_SIZES);
 
 	old_ctx = MemoryContextSwitchTo(bdr_catcache_context);
 
@@ -85,6 +79,13 @@ bdr_get_local_nodeid(void)
 uint32
 bdr_get_local_nodeid_if_exists(void)
 {
+	if (!bdr_catcache_initialised())
+	{
+		if (IsTransactionState())
+			bdr_cache_local_nodeinfo();
+		else
+			elog(ERROR, "attempted to use BDR catalog cache outside transaction without prior init");
+	}
 	Assert(bdr_catcache_initialised());
 	if (local_bdr_node != NULL)
 		return local_bdr_node->node_id;
