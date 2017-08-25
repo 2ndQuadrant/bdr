@@ -838,9 +838,16 @@ bdr_msg_get_outcome(uint64 msg_handle)
 static bool
 bdr_proposals_receive(ConsensusProposal *msg)
 {
+	BdrMessage *bmsg;
 	/* note, we receive our own messages too */
-	elog(LOG, "XXX RECEIVE FROM %u, my id is %u, payload is \"%s\"",
-		msg->sender_nodeid, bdr_get_local_nodeid(), msg->payload);
+	elog(LOG, "XXX RECEIVE FROM %u, my id is %u, payload size %lu",
+		msg->sender_nodeid, bdr_get_local_nodeid(), msg->payload_length);
+
+	Assert(msg->payload_length >= sizeof(BdrMessage));
+	bmsg = (BdrMessage*)msg->payload;
+	Assert(msg->payload_length == sizeof(BdrMessage) + bmsg->payload_length);
+
+	elog(LOG, "XXX RECEIVE BDRMSG payload \"%s\"", bmsg->payload); /* XXX Temporary */
 
     /* TODO: can nack messages here */
     return true;
