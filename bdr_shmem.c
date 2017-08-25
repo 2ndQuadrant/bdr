@@ -71,7 +71,6 @@ bdr_shmem_allocate_manager_segment(uint32 node_id)
 	int first_free_idx = -1, found_existing = -1;
 	BdrManagerShmem *seg = NULL;
 	LWLockAcquire(bdr_ctx->lock, LW_EXCLUSIVE);
-	elog(LOG, "XXX got lock");
 	for (i = 0; i < bdr_ctx->max_local_nodes; i++)
 	{
 		if (first_free_idx == -1 && bdr_ctx->managers[i].node_id == 0)
@@ -86,11 +85,10 @@ bdr_shmem_allocate_manager_segment(uint32 node_id)
 	if (found_existing == -1 && first_free_idx != -1)
 	{
 		/* claim while still locked */
-		seg = &bdr_ctx->managers[i];
+		seg = &bdr_ctx->managers[first_free_idx];
 		seg->node_id = node_id;
 		seg->manager = MyProc;
 	}
-	elog(LOG, "XXX released lock");
 	LWLockRelease(bdr_ctx->lock);
 
 	if (found_existing != -1)
@@ -99,7 +97,8 @@ bdr_shmem_allocate_manager_segment(uint32 node_id)
 	if (first_free_idx == -1)
 		elog(ERROR, "no free shmem slots for bdr manager %u", node_id);
 
-	Assert(seg != NULL);
+	/* We're the only proc who should be releasing the seg, so */
+	Assert(seg == &bdr_ctx->managers[first_free_idx] && seg->node_id == node_id && seg->manager == MyProc);
 	return seg;
 }
 
@@ -107,6 +106,7 @@ void
 bdr_shmem_release_manager_segment(BdrManagerShmem *seg)
 {
 	int i;
+	bool found = false;
 
 	if (seg == NULL)
 		return;
@@ -133,10 +133,13 @@ bdr_shmem_release_manager_segment(BdrManagerShmem *seg)
 			Assert (seg == &bdr_ctx->managers[i]);
 			seg->node_id = 0;
 			seg->manager = NULL;
+			found = true;
 			break;
 		}
 	}
 	LWLockRelease(bdr_ctx->lock);
+
+	Assert(found);
 }
 
 static void

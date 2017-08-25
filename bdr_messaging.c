@@ -213,6 +213,9 @@ bdr_reinit_submit_shm_mq(void)
 	Assert((void*)sendq == (void*)my_manager->shm_send_mq);
 	Assert((void*)recvq == (void*)my_manager->shm_recv_mq);
 
+	shm_mq_set_receiver(recvq, MyProc);
+	shm_mq_set_sender(sendq, MyProc);
+
 	old_ctx = MemoryContextSwitchTo(submit_mq.mq_context);
 	submit_mq.recvq_handle = shm_mq_attach(recvq, NULL, NULL);
 	submit_mq.sendq_handle = shm_mq_attach(sendq, NULL, NULL);
@@ -454,6 +457,8 @@ bdr_attach_manager_queue(void)
 	 * we can't copy them into shmem because they're an opaque struct.
 	 */
 	LWLockAcquire(bdr_ctx->lock, LW_EXCLUSIVE);
+	shm_mq_set_receiver(recvq, MyProc);
+	shm_mq_set_sender(sendq, MyProc);
 	submit_mq.sendq_handle = bdr_shm_mq_attach(sendq, NULL, NULL);
 	submit_mq.recvq_handle = bdr_shm_mq_attach(recvq, NULL, NULL);
 	LWLockRelease(bdr_ctx->lock);
