@@ -12,8 +12,8 @@ CREATE EXTENSION bdr CASCADE;
 \c :node1_dsn
 
 -- Only used in tests
-CREATE FUNCTION bdr_submit_message(message text)
-RETURNS text LANGUAGE c STRICT AS 'bdr','bdr_submit_message';
+CREATE FUNCTION bdr_submit_comment(message text)
+RETURNS text LANGUAGE c STRICT AS 'bdr','bdr_submit_comment';
 
 -- We should be doing a bdr node create/join here but we don't yet have the
 -- interfaces for that. We're just dummied up so far. So create a pglogical

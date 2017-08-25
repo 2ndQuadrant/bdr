@@ -42,6 +42,7 @@
 #include "bdr_msgbroker.h"
 #include "bdr_msgbroker_send.h"
 #include "bdr_messaging.h"
+#include "bdr_worker.h"
 
 typedef enum SubmitMQMessageType
 {
@@ -856,7 +857,11 @@ bdr_proposals_receive(ConsensusProposal *msg)
 	bmsg = (BdrMessage*)msg->payload;
 	Assert(msg->payload_length == sizeof(BdrMessage) + bmsg->payload_length);
 
-	elog(LOG, "XXX RECEIVE BDRMSG payload \"%s\"", bmsg->payload); /* XXX Temporary */
+	if (bmsg->message_type == BDR_MSG_COMMENT)
+	{
+		elog(bdr_debug_level, "BDR comment msg from %u: \"%s\"",
+			 msg->sender_nodeid, bmsg->payload);
+	}
 
     /* TODO: can nack messages here */
     return true;

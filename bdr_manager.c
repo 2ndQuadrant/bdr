@@ -114,7 +114,7 @@ bdr_manager_wait_event(struct WaitEvent *events, int nevents,
 		dummy_payload_length = strlen(dummy_payload) + 1;
 
 		msg = palloc(offsetof(BdrMessage,payload) + dummy_payload_length);
-		msg->message_type = BDR_MSG_NOOP;
+		msg->message_type = BDR_MSG_COMMENT;
 		msg->payload_length = dummy_payload_length;
 		memcpy(msg->payload, dummy_payload, dummy_payload_length);
 

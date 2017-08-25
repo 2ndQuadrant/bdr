@@ -17,6 +17,8 @@ typedef enum BdrMessageType
 {
     /* Just because we don't want anything real at zero */
     BDR_MSG_NOOP = 0,
+	/* Pretty much just for testing, add a comment */
+	BDR_MSG_COMMENT = 1,
 
     /* Node part/join management */
     BDR_MSG_NODE_NAME_RESERVE = 100,

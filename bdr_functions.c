@@ -42,14 +42,14 @@ bdr_decode_state(PG_FUNCTION_ARGS)
 			 errmsg("unimplemented")));
 }
 
-PG_FUNCTION_INFO_V1(bdr_submit_message);
+PG_FUNCTION_INFO_V1(bdr_submit_comment);
 
 /*
  * Test function to submit a no-op message into the consensus
  * messaging system for replay to peer nodes.
  */
 Datum
-bdr_submit_message(PG_FUNCTION_ARGS)
+bdr_submit_comment(PG_FUNCTION_ARGS)
 {
 	BdrMessage *msg;
 	const char *dummy_payload = text_to_cstring(PG_GETARG_TEXT_P(0));
@@ -63,15 +63,18 @@ bdr_submit_message(PG_FUNCTION_ARGS)
 	dummy_payload_length = strlen(dummy_payload)+ 1;
 
 	msg = palloc(offsetof(BdrMessage,payload) + dummy_payload_length);
-	msg->message_type = BDR_MSG_NOOP;
+	msg->message_type = BDR_MSG_COMMENT;
 	msg->payload_length = dummy_payload_length;
 	memcpy(msg->payload, dummy_payload, dummy_payload_length);
 
 	handle = bdr_msgs_enqueue_one(msg);
 	if (handle == 0)
+		/*
+		 * TODO: block
+		 */
 		elog(WARNING, "manager couldn't enqueue message, try again later");
 	else
-		elog(WARNING, "manager enqueued message with handle "UINT64_FORMAT, handle);
+		elog(INFO, "manager enqueued message with handle "UINT64_FORMAT, handle);
 
 	snprintf(&handle_str[0], 33, UINT64_FORMAT, handle);
 	PG_RETURN_TEXT_P(cstring_to_text(handle_str));
