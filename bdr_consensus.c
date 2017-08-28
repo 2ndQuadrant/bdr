@@ -625,7 +625,7 @@ consensus_enqueue_proposal(const char * payload, Size payload_length)
 	resetStringInfo(&si);
 
 	/* TODO: return msg number */
-	return 0;
+	return 1;
 }
 
 /*
@@ -655,7 +655,7 @@ consensus_finish_enqueue(void)
 	consensus_prepare_transaction();
 
 	/* TODO: return last msg number */
-	return 0;
+	return 1;
 }
 
 /*
