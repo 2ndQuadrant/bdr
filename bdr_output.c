@@ -67,18 +67,3 @@ bdr_process_output_params(struct DefElem *elem)
 
 	return false;
 }
-
-/*
- * Add extra startup-message parameters to be sent back to the connected worker,
- * for processing in bdr_handle_startup_param(...)
- */
-List*
-bdr_prepare_startup_params(List *params)
-{
-	if (bdr_required_this_conn)
-	{
-		params = add_startup_msg_i(params, "bdr_version_num", BDR_VERSION_NUM);
-		params = add_startup_msg_s(params, "bdr_version_str", BDR_VERSION);
-	}
-	return params;
-}

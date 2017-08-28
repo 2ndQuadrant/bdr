@@ -87,6 +87,8 @@ static const struct config_enum_entry bdr_debug_level_options[] = {
 static void
 bdr_worker_start(void)
 {
+	const uint32 roles = MyPGLogicalWorker->worker_roles;
+
 	StartTransactionCommand();
 	bdr_cache_local_nodeinfo();
 	CommitTransactionCommand();
@@ -99,24 +101,19 @@ bdr_worker_start(void)
 	else
 		elog(LOG, "BDR is active");
 
-	switch (MyPGLogicalWorker->worker_type)
-	{
-		case PGLOGICAL_WORKER_SYNC:
-			bdr_sync_worker_start();
-			break;
-		case PGLOGICAL_WORKER_MANAGER:
-			bdr_manager_worker_start();
-			break;
-		case PGLOGICAL_WORKER_APPLY:
-			bdr_apply_worker_start();
-			break;
-		case PGLOGICAL_WORKER_OUTPUT:
-			ereport(ERROR,
-				(errmsg_internal("bdr_worker_start() called for output plugin instead of bdr_init_pgl_plugin")));
-		case PGLOGICAL_WORKER_NONE:
-			ereport(ERROR,
-				(errmsg_internal("bdr_worker_start() called for empty worker slot")));
-	}
+	if (roles == PGLOGICAL_WORKER_NONE)
+		ereport(ERROR,
+			(errmsg_internal("bdr_worker_start() called for empty worker slot")));
+
+	if (roles & PGLOGICAL_WORKER_OUTPUT)
+		ereport(ERROR,
+			(errmsg_internal("bdr_worker_start() called for output plugin instead of bdr_init_pgl_plugin")));
+
+	if (roles & PGLOGICAL_WORKER_MANAGER)
+		bdr_manager_worker_start();
+
+	if (roles & (PGLOGICAL_WORKER_WRITER|PGLOGICAL_WORKER_RECEIVER))
+		bdr_receiver_writer_start();
 }
 
 /*
@@ -130,7 +127,7 @@ Datum
 bdr_init_pgl_plugin(PG_FUNCTION_ARGS)
 {
 	int pglogical_version = PG_GETARG_INT32(0);
-	PGLogicalWorkerType type PG_USED_FOR_ASSERTS_ONLY = PG_GETARG_INT32(1);
+	uint32 type PG_USED_FOR_ASSERTS_ONLY = PG_GETARG_INT32(1);
 	PGLPlugin *plugin = (PGLPlugin*)PG_GETARG_POINTER(2);
 	static int plugin_loaded = false;
 
@@ -158,8 +155,6 @@ bdr_init_pgl_plugin(PG_FUNCTION_ARGS)
 	plugin->worker_start = bdr_worker_start;
 	plugin->output_start = bdr_output_start;
 	plugin->start_replication_params = bdr_start_replication_params;
-	plugin->handle_startup_param = bdr_handle_startup_param;
-	plugin->prepare_startup_params = bdr_prepare_startup_params;
 	plugin->process_output_param = bdr_process_output_params;
 	/*
 	 * Hook pglogical manager's event loop to be notified about

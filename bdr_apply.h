@@ -3,7 +3,7 @@
 
 #include "lib/stringinfo.h"
 
-extern void bdr_apply_worker_start(void);
+extern void bdr_receiver_writer_start(void);
 
 extern void bdr_start_replication_params(StringInfo s);
 
