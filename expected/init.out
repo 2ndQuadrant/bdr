@@ -4,10 +4,17 @@ SELECT * FROM bdr_regress_variables()
 \c :node1_dsn
 CREATE EXTENSION bdr CASCADE;
 NOTICE:  installing required extension "pglogical"
+SELECT E'\'' || current_database() || E'\'' AS node1_db
+\gset
 \c :node2_dsn
 CREATE EXTENSION bdr CASCADE;
 NOTICE:  installing required extension "pglogical"
+SELECT E'\'' || current_database() || E'\'' AS node2_db
+\gset
 \c :node1_dsn
+-- Only used in tests
+CREATE FUNCTION bdr_submit_comment(message text)
+RETURNS text LANGUAGE c STRICT AS 'bdr','bdr_submit_comment';
 -- We should be doing a bdr node create/join here but we don't yet have the
 -- interfaces for that. We're just dummied up so far. So create a pglogical
 -- node, and let that bring up BDR because the BDR plugin is loaded, even
@@ -39,6 +46,14 @@ INSERT INTO bdr.node_group(node_group_id, node_group_name)
 VALUES (4, 'dummy_nodegroup');
 INSERT INTO bdr.node(pglogical_node_id, node_group_id)
 SELECT node_id, 4 FROM pglogical.local_node;
+-- We must create a slot before creating the subscription to work
+-- around the deadlock in 2ndQuadrant/pglogical_internal#152
+SELECT slot_name FROM pg_create_logical_replication_slot(pglogical.pglogical_gen_slot_name(:node2_db, 'node1', 'bdr'), 'pglogical');
+       slot_name        
+------------------------
+ pgl_postgres_node1_bdr
+(1 row)
+
 \c :node2_dsn
 -- Manually create a second node
 SELECT 1
@@ -53,12 +68,14 @@ VALUES (4, 'dummy_nodegroup');
 INSERT INTO bdr.node(pglogical_node_id, node_group_id)
 SELECT node_id, 4 FROM pglogical.local_node;
 -- Subscribe to the first node
+-- See GH#152 for why we don't create the slot
 SELECT 1 FROM pglogical.create_subscription(
-    subscription_name := 'to_node1',
+    subscription_name := 'bdr',
     provider_dsn := ( :'node1_dsn' || ' user=super' ),
     synchronize_structure := true,
     forward_origins := '{}',
-    replication_sets := ARRAY['dummy_nodegroup','ddl_sql']);
+    replication_sets := ARRAY['dummy_nodegroup','ddl_sql'],
+	create_slot := false);
  ?column? 
 ----------
         1
@@ -89,20 +106,30 @@ END;
 $$;
 SELECT subscription_name, status, provider_node, slot_name, replication_sets
 FROM pglogical.show_subscription_status();
- subscription_name |   status    | provider_node |          slot_name          |     replication_sets      
--------------------+-------------+---------------+-----------------------------+---------------------------
- to_node1          | replicating | node1         | pgl_postgres_node1_to_node1 | {dummy_nodegroup,ddl_sql}
+ subscription_name |   status    | provider_node |       slot_name        |     replication_sets      
+-------------------+-------------+---------------+------------------------+---------------------------
+ bdr               | replicating | node1         | pgl_postgres_node1_bdr | {dummy_nodegroup,ddl_sql}
+(1 row)
+
+-- See above...
+SELECT slot_name FROM pg_create_logical_replication_slot(pglogical.pglogical_gen_slot_name(:node1_db, 'node2', 'bdr'), 'pglogical');
+        slot_name         
+--------------------------
+ pgl_regression_node2_bdr
 (1 row)
 
 \c :node1_dsn
 -- Subscribe to the second node and make the subscription 'internal'
 -- but this time don't sync structure.
+--
+-- See GH#152 for why we don't create the slot
 SELECT 1 FROM pglogical.create_subscription(
-    subscription_name := 'to_node2',
+    subscription_name := 'bdr',
     provider_dsn := ( :'node2_dsn' || ' user=super' ),
     synchronize_structure := false,
     forward_origins := '{}',
-    replication_sets := ARRAY['dummy_nodegroup','ddl_sql']);
+    replication_sets := ARRAY['dummy_nodegroup','ddl_sql'],
+    create_slot := false);
  ?column? 
 ----------
         1
@@ -119,9 +146,9 @@ END;
 $$;
 SELECT subscription_name, status, provider_node, slot_name, replication_sets
 FROM pglogical.show_subscription_status();
- subscription_name |   status    | provider_node |           slot_name           |     replication_sets      
--------------------+-------------+---------------+-------------------------------+---------------------------
- to_node2          | replicating | node2         | pgl_regression_node2_to_node2 | {dummy_nodegroup,ddl_sql}
+ subscription_name |   status    | provider_node |        slot_name         |     replication_sets      
+-------------------+-------------+---------------+--------------------------+---------------------------
+ bdr               | replicating | node2         | pgl_regression_node2_bdr | {dummy_nodegroup,ddl_sql}
 (1 row)
 
 -- Now, since BDR doesn't know we changed any catalogs etc,
@@ -152,16 +179,16 @@ FROM pg_stat_replication
 ORDER BY application_name;
  application_name | sync_state 
 ------------------+------------
- to_node1         | async
- to_node2         | async
+ bdr              | async
+ bdr              | async
 (2 rows)
 
 SELECT slot_name, plugin, slot_type, database, temporary, active
 FROM pg_replication_slots ORDER BY slot_name;
-           slot_name           |      plugin      | slot_type |  database  | temporary | active 
--------------------------------+------------------+-----------+------------+-----------+--------
- pgl_postgres_node1_to_node1   | pglogical_output | logical   | regression | f         | t
- pgl_regression_node2_to_node2 | pglogical_output | logical   | postgres   | f         | t
+        slot_name         |  plugin   | slot_type |  database  | temporary | active 
+--------------------------+-----------+-----------+------------+-----------+--------
+ pgl_postgres_node1_bdr   | pglogical | logical   | regression | f         | t
+ pgl_regression_node2_bdr | pglogical | logical   | postgres   | f         | t
 (2 rows)
 
 SELECT
@@ -169,12 +196,12 @@ SELECT
     regexp_replace(application_name, '[[:digit:]]', 'n', 'g') AS appname
 FROM pg_stat_activity
 WHERE application_name LIKE 'pglogical%';
-   backend_type    |             appname              
--------------------+----------------------------------
+   backend_type    |               appname               
+-------------------+-------------------------------------
  background worker | pglogical supervisor
  background worker | pglogical manager nnnnn
- background worker | pglogical apply nnnnn:nnnnnnnnnn
+ background worker | pglogical receiver nnnnn:nnnnnnnnnn
  background worker | pglogical manager nnnnn
- background worker | pglogical apply nnnnn:nnnnnnnnnn
+ background worker | pglogical receiver nnnnn:nnnnnnnnnn
 (5 rows)
 

@@ -6,8 +6,14 @@ SELECT * FROM bdr_regress_variables()
 \c :node1_dsn
 CREATE EXTENSION bdr CASCADE;
 
+SELECT E'\'' || current_database() || E'\'' AS node1_db
+\gset
+
 \c :node2_dsn
 CREATE EXTENSION bdr CASCADE;
+
+SELECT E'\'' || current_database() || E'\'' AS node2_db
+\gset
 
 \c :node1_dsn
 
@@ -43,6 +49,9 @@ VALUES (4, 'dummy_nodegroup');
 INSERT INTO bdr.node(pglogical_node_id, node_group_id)
 SELECT node_id, 4 FROM pglogical.local_node;
 
+-- We must create a slot before creating the subscription to work
+-- around the deadlock in 2ndQuadrant/pglogical_internal#152
+SELECT slot_name FROM pg_create_logical_replication_slot(pglogical.pglogical_gen_slot_name(:node2_db, 'node1', 'bdr'), 'pglogical');
 
 \c :node2_dsn
 
@@ -57,12 +66,14 @@ INSERT INTO bdr.node(pglogical_node_id, node_group_id)
 SELECT node_id, 4 FROM pglogical.local_node;
 
 -- Subscribe to the first node
+-- See GH#152 for why we don't create the slot
 SELECT 1 FROM pglogical.create_subscription(
-    subscription_name := 'to_node1',
+    subscription_name := 'bdr',
     provider_dsn := ( :'node1_dsn' || ' user=super' ),
     synchronize_structure := true,
     forward_origins := '{}',
-    replication_sets := ARRAY['dummy_nodegroup','ddl_sql']);
+    replication_sets := ARRAY['dummy_nodegroup','ddl_sql'],
+	create_slot := false);
 
 -- and set the subscription as 'isinternal' so BDR thinks BDR owns it.
 UPDATE pglogical.subscription SET sub_isinternal = true;
@@ -89,16 +100,22 @@ $$;
 SELECT subscription_name, status, provider_node, slot_name, replication_sets
 FROM pglogical.show_subscription_status();
 
+-- See above...
+SELECT slot_name FROM pg_create_logical_replication_slot(pglogical.pglogical_gen_slot_name(:node1_db, 'node2', 'bdr'), 'pglogical');
+
 \c :node1_dsn
 
 -- Subscribe to the second node and make the subscription 'internal'
 -- but this time don't sync structure.
+--
+-- See GH#152 for why we don't create the slot
 SELECT 1 FROM pglogical.create_subscription(
-    subscription_name := 'to_node2',
+    subscription_name := 'bdr',
     provider_dsn := ( :'node2_dsn' || ' user=super' ),
     synchronize_structure := false,
     forward_origins := '{}',
-    replication_sets := ARRAY['dummy_nodegroup','ddl_sql']);
+    replication_sets := ARRAY['dummy_nodegroup','ddl_sql'],
+    create_slot := false);
 
 UPDATE pglogical.subscription SET sub_isinternal = true;
 
