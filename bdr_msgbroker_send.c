@@ -887,13 +887,7 @@ msgb_service_connections_events(WaitEvent *occurred_events, int nevents)
 			/*
 			 * It's OK not to find a connection; the wait event may be for
 			 * somebody else, a latch set, or whatever.
-			 *
-			 * For now assume we're the only plugin and the manager doesn't
-			 * use its own sockets, so any socket wait event should be
-			 * for us.
 			 */
-			if (!(e->events & (WL_SOCKET_READABLE|WL_SOCKET_WRITEABLE)))
-				elog(bdr_debug_level, "message buffer could not find socket associated with wait event");
 			continue;
 		}
 
