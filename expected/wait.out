@@ -1,7 +1,31 @@
+SELECT * FROM bdr_regress_variables()
+\gset
 --
 -- This dummy "test" is used while debugging messaging, since
 -- we need the system to idle for a while after coming up.
 --
+\c :node1_dsn
+SELECT bdr_submit_comment('XXX test1');
+INFO:  manager enqueued message with handle 1
+ bdr_submit_comment 
+--------------------
+ 1
+(1 row)
+
+\c :node2_dsn
+SELECT pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+SELECT bdr_submit_comment('XXX test2');
+INFO:  manager enqueued message with handle 1
+ bdr_submit_comment 
+--------------------
+ 1
+(1 row)
+
 select pg_sleep(30);
  pg_sleep 
 ----------
