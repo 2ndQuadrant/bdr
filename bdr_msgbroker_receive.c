@@ -298,10 +298,10 @@ msgb_connect_shmem(uint32 origin_node)
 	}
 
 	old_ctx = MemoryContextSwitchTo(TopMemoryContext);
-	send_mq = bdr_shm_mq_attach(mq, seg, NULL);
+	send_mq = shm_mq_attach(mq, seg, NULL);
 	(void) MemoryContextSwitchTo(old_ctx);
 
-	if (bdr_shm_mq_wait_for_attach(send_mq) != SHM_MQ_SUCCESS)
+	if (shm_mq_wait_for_attach(send_mq) != SHM_MQ_SUCCESS)
 		ereport(FATAL,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("message broker for node %u appears to have exited",
@@ -339,7 +339,7 @@ msgb_report_peer_connect(uint32 origin_id, uint32 last_sent_msgid)
 	msg[1].data = (void*)&last_sent_msgid;
 	msg[1].len = sizeof(uint32);
 
-	res = bdr_shm_mq_sendv(send_mq, msg, 2, false);
+	res = shm_mq_sendv(send_mq, msg, 2, false);
 	if (res != SHM_MQ_SUCCESS)
 		ereport(FATAL,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
@@ -437,7 +437,7 @@ msgb_deliver_message(PG_FUNCTION_ARGS)
 	msg[1].data = VARDATA_ANY(payload);
 	msg[1].len = VARSIZE_ANY(payload);
 
-	res = bdr_shm_mq_sendv(send_mq, msg, 2, false);
+	res = shm_mq_sendv(send_mq, msg, 2, false);
 	if (res != SHM_MQ_SUCCESS)
 		ereport(FATAL,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
@@ -715,7 +715,7 @@ msgb_add_receive_peer(uint32 origin_id)
 	/* Finish setting up broker-side state */
 	p->sender_id = origin_id;
 	p->max_received_msgid = 0;
-	p->recvqueue = bdr_shm_mq_attach(mq, broker_dsm_seg, NULL);
+	p->recvqueue = shm_mq_attach(mq, broker_dsm_seg, NULL);
 	p->recvsize = 0;
 	/*
 	 * Any old buffer was owned by the shm_mq that's gone away
@@ -1014,7 +1014,7 @@ msgb_service_connections_receive(void)
 			 * but we don't know by whom.
 			 *
 			 * It's a nonblocking read so we can avoid the in_shm_mq dance with
-			 * the bdr_shm_mq_receive wrapper, we can't get stuck in shm_mq_wait_internal.
+			 * the shm_mq_receive wrapper, we can't get stuck in shm_mq_wait_internal.
 			 */
 			res = shm_mq_receive(p->recvqueue, &p->recvsize, &p->recvbuf, true);
 			switch (res)

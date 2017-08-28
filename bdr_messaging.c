@@ -120,7 +120,7 @@ static bool atexit_registered = false;
 static inline bool
 is_bdr_manager(void)
 {
-	return MyPGLogicalWorker != NULL && MyPGLogicalWorker->worker_type == PGLOGICAL_WORKER_MANAGER;
+	return MyPGLogicalWorker != NULL && MyPGLogicalWorker->worker_roles & PGLOGICAL_WORKER_MANAGER;
 }
 
 /*
@@ -482,8 +482,8 @@ bdr_attach_manager_queue(void)
 	LWLockAcquire(bdr_ctx->lock, LW_EXCLUSIVE);
 	shm_mq_set_receiver(recvq, MyProc);
 	shm_mq_set_sender(sendq, MyProc);
-	submit_mq.sendq_handle = bdr_shm_mq_attach(sendq, NULL, NULL);
-	submit_mq.recvq_handle = bdr_shm_mq_attach(recvq, NULL, NULL);
+	submit_mq.sendq_handle = shm_mq_attach(sendq, NULL, NULL);
+	submit_mq.recvq_handle = shm_mq_attach(recvq, NULL, NULL);
 	LWLockRelease(bdr_ctx->lock);
 
 	submit_mq.recvbuf = NULL;
@@ -521,7 +521,7 @@ bdr_submit_manager_queue(SubmitMQMessageType msgtype, Size payload_size,
 	bdr_make_msg_submit_shm_mq(msgtype, payload_size, payload);
 
 	/* Exchange a pair of messages with the manager */
-	switch (bdr_shm_mq_send(submit_mq.sendq_handle,
+	switch (shm_mq_send(submit_mq.sendq_handle,
 							submit_mq.sendbufsize,
 							submit_mq.sendbuf, false))
 	{
@@ -538,7 +538,7 @@ bdr_submit_manager_queue(SubmitMQMessageType msgtype, Size payload_size,
 
 	submit_mq.recvbufsize = 0;
 	submit_mq.recvbuf = NULL;
-	switch (bdr_shm_mq_receive(submit_mq.recvq_handle,
+	switch (shm_mq_receive(submit_mq.recvq_handle,
 							   &submit_mq.recvbufsize,
 							   &submit_mq.recvbuf, false))
 	{
@@ -689,7 +689,7 @@ bdr_service_submit_shmem_mq(void)
 	if (submit_mq.state == MQ_REPLY_PENDING)
 	{
 		check_allowed_reply_type();
-		switch (bdr_shm_mq_send(submit_mq.sendq_handle,
+		switch (shm_mq_send(submit_mq.sendq_handle,
 								submit_mq.sendbufsize,
 								submit_mq.sendbuf, true))
 		{
