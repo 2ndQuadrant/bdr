@@ -35,7 +35,7 @@ RETURNS void LANGUAGE c AS 'pglogical','pglogical_wait_slot_confirm_lsn';
 
 -- BDR would usually auto-create this but it doesn't know how
 -- yet, so do it manually
-SELECT pglogical.create_replication_set('dummy_nodegroup');
+SELECT 1 FROM pglogical.create_replication_set('dummy_nodegroup');
 
 -- Create the BDR node
 --
@@ -80,7 +80,7 @@ UPDATE pglogical.subscription SET sub_isinternal = true;
 
 -- BDR would usually auto-create this but it doesn't know how
 -- yet, so do it manually
-SELECT pglogical.create_replication_set('dummy_nodegroup');
+SELECT 1 FROM pglogical.create_replication_set('dummy_nodegroup');
 
 -- Wait for the initial copy to finish
 --
