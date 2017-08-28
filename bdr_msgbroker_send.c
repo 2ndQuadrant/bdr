@@ -83,7 +83,7 @@ static MemoryContext msgbuf_context = NULL;
 static bool conns_polling = false;
 static bool wait_set_recreate_pending = false;
 
-static void msgb_remove_destination_by_index(int index);
+static void msgb_remove_destination_by_index(int index, bool recreate_eventset);
 static void msgb_start_connect(MsgbConnection *conn);
 static void msgb_continue_async_connect(MsgbConnection *conn);
 static void msgb_finish_connect(MsgbConnection *conn);
@@ -1079,7 +1079,7 @@ msgb_remove_send_peer(uint32 destination_id)
 {
 	int idx = msgb_idx_for_destination(destination_id, "remove");
 	if (idx >= 0)
-		msgb_remove_destination_by_index(idx);
+		msgb_remove_destination_by_index(idx, true);
 }
 
 /*
@@ -1168,7 +1168,7 @@ msgb_message_status(uint32 destination, int msgid)
 }
 
 static void
-msgb_remove_destination_by_index(int index)
+msgb_remove_destination_by_index(int index, bool recreate_eventset)
 {
 	MsgbConnection *conn = &conns[index];
 
@@ -1189,9 +1189,13 @@ msgb_remove_destination_by_index(int index)
 		conn->dsn = NULL;
 	}
 
+	conn->wait_flags = 0;
 
 	if (conn->wait_set_index != -1)
 	{
+		conn->wait_set_index = -1;
+
+		if (recreate_eventset)
 		/*
 		 * There's no API in 9.6 or Pg10 to remove a socket being waited
 		 * on from a wait set. See
@@ -1204,6 +1208,8 @@ msgb_remove_destination_by_index(int index)
 		 */
 		msgb_request_recreate_wait_event_set();
 	}
+
+	Assert(conn->wait_set_index == -1);
 
 	if (conn->send_queue != NIL)
 	{
@@ -1233,16 +1239,19 @@ msgb_shutdown_send(void)
 {
 	int i;
 
-	/* Don't free the wait event set, it was passed in by caller */
-	wait_set = NULL;
-
 	if (conns != NULL)
 	{
 		for (i = 0; i < msgb_max_peers; i++)
-			msgb_remove_destination_by_index(i);
+			msgb_remove_destination_by_index(i, false);
 
 		conns = NULL;
 	}
+
+	/* Re-create the event set without any of our events in it */
+	msgb_request_recreate_wait_event_set();
+
+	/* Don't free the wait event set, it was passed in by caller */
+	wait_set = NULL;
 
 	if (msgbuf_context != NULL)
 	{
