@@ -25,6 +25,21 @@
 #include "bdr_messaging.h"
 #include "bdr_functions.h"
 
+static BdrNodeInfo *
+bdr_check_local_node(bool for_update)
+{
+	BdrNodeInfo *nodeinfo;
+
+	nodeinfo = bdr_get_local_node_info(for_update, true);
+	if (nodeinfo == NULL || nodeinfo->bdr_node == NULL)
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("current database is not configured as bdr node"),
+				 errhint("create bdr node first")));
+
+	return node;
+}
+
 PG_FUNCTION_INFO_V1(bdr_create_node_sql);
 
 /*
@@ -49,6 +64,7 @@ bdr_create_node_sql(PG_FUNCTION_ARGS)
 	if (!PG_ARGISNULL(1))
 		local_dsn = text_to_cstring(PG_GETARG_TEXT_P(1));
 	
+	/* Look up underlying pglogical node (if any) */
 	pgllocal = get_local_node(false, true);
 
 	/*
@@ -110,11 +126,7 @@ bdr_create_nodegroup_sql(PG_FUNCTION_ARGS)
 				(errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
 				 errmsg("node group name may not be null")));
 
-	info = bdr_get_local_node_info(true);
-	if (info == NULL || info->bdr_node == NULL)
-		ereport(ERROR,
-				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("no local BDR node exists to assign to new node group")));
+	info = bdr_check_local_node(true);
 
 	if (info->bdr_node->node_group_id != InvalidOid)
 	{
@@ -159,13 +171,144 @@ bdr_create_nodegroup_sql(PG_FUNCTION_ARGS)
 	 * management functions.
 	 */
 	repset.isinternal = false;
-	create_replication_set(&repset);
+	nodegroup.default_repset = create_replication_set(&repset);
 
 	/* Assign the nodegroup to the local node */
 	info->bdr_node->node_group_id = nodegroup.id;
 	bdr_modify_node(info->bdr_node);
 
 	PG_RETURN_OID(nodegroup.id);
+}
+
+PG_FUNCTION_INFO_V1(bdr_replication_set_add_table);
+
+/*
+ * BDR wrapper around pglogical's pglogical.replication_set_add_table
+ * that adds a node to repsets on all nodes.
+ *
+ * If no repset is named, the default repset for the current node group
+ * is used.
+ */
+Datum
+bdr_replication_set_add_table(PG_FUNCTION_ARGS)
+{
+	Oid					reloid;
+	bool				synchronize = false;
+	Node			   *row_filter = NULL;
+	List			   *att_list = NIL;
+	PGLogicalRepSet    *repset = NULL;
+	Relation			rel;
+	TupleDesc			tupDesc;
+	char			   *nspname;
+	char			   *relname;
+	StringInfoData		json;
+	BdrNodeInfo		   *local;
+
+	local = bdr_check_local_node(true);
+
+	if (PG_ARGISNULL(0))
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("relation cannot be NULL")));
+
+	reloid = PG_GETARG_OID(0);
+
+	if (PG_ARGISNULL(1))
+	{
+		/* Find default repset for local node's nodegroup */
+		repset = get_replication_set(local->bdr_nodegroup->default_repset);
+	}
+	else
+	{
+		const char *repset_name = text_to_cstring(PG_GETARG_TEXT_P(1));
+		repset = get_replication_set_by_name(repset_name, false);
+		if (!repset->isinternal)
+		{
+			/*
+			 * TODO: we should be checking a "bdr nodegroup repsets" catalog here to be sure
+			 * it's really ours, but for now we don't actually support creation of repsets
+			 * other than the default so it's kind of moot.
+			 */
+			elog(ERROR, "replication set '%s' does not appear to owned by a BDR node group",
+				 repset->name);
+		}
+	}
+
+	Assert(repset != NULL);
+
+	if (!PG_ARGISNULL(2) && PG_GETARG_BOOL(2))
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("initial table synchronisation not supported on bdr replication sets yet")));
+
+	if (!PG_ARGISNULL(3))
+		/* TODO Need to generalise and call the code in pglogical_replication_set_add_table */
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("column filter not supported on bdr replication sets yet")));
+
+	if (!PG_ARGISNULL(4))
+		/* TODO Need to generalise and call the code in pglogical_replication_set_add_table */
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("row filter not supported on bdr replication sets yet")));
+
+	replication_set_add_table(repset->id, reloid, att_list, row_filter);
+
+	/* Cleanup. */
+	heap_close(rel, NoLock);
+
+	PG_RETURN_VOID();
+}
+
+PG_FUNCTION_INFO_V1(bdr_replication_set_remove_table);
+
+/*
+ * BDR wrapper around pglogical's pglogical.replication_set_add_table that
+ * removes a table from the nodegroup's repset on all nodes.
+ */
+Datum
+bdr_replication_set_remove_table(PG_FUNCTION_ARGS)
+{
+	Oid			reloid = PG_GETARG_OID(0);
+	PGLogicalRepSet    *repset;
+	BdrNodeInfo		   *local;
+
+	local = bdr_check_local_node(true);
+
+	if (PG_ARGISNULL(0))
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("relation cannot be NULL")));
+
+	reloid = PG_GETARG_OID(0);
+
+	if (PG_ARGISNULL(1))
+	{
+		/* Find default repset for local node's nodegroup */
+		repset = get_replication_set(local->bdr_nodegroup->default_repset);
+	}
+	else
+	{
+		const char *repset_name = text_to_cstring(PG_GETARG_TEXT_P(1));
+		repset = get_replication_set_by_name(repset_name, false);
+		if (!repset->isinternal)
+		{
+			/*
+			 * TODO: we should be checking a "bdr nodegroup repsets" catalog here to be sure
+			 * it's really ours, but for now we don't actually support creation of repsets
+			 * other than the default so it's kind of moot.
+			 */
+			elog(ERROR, "replication set '%s' does not appear to owned by a BDR node group",
+				 repset->name);
+		}
+	}
+
+	Assert(repset != NULL);
+
+	replication_set_remove_table(repset->id, reloid, false);
+
+	PG_RETURN_VOID();
 }
 
 PG_FUNCTION_INFO_V1(bdr_decode_message_payload);

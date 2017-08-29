@@ -110,6 +110,13 @@ RETURNS oid LANGUAGE c AS 'MODULE_PATHNAME','bdr_create_nodegroup_sql';
 COMMENT ON FUNCTION bdr.create_node_group(text) IS
 'Create a new local BDR node group and make the local node the first member';
 
+CREATE FUNCTION bdr.replication_set_add_table(relation regclass, set_name text, synchronize_data boolean DEFAULT false,
+	columns text[] DEFAULT NULL, row_filter text DEFAULT NULL)
+RETURNS boolean CALLED ON NULL INPUT VOLATILE LANGUAGE c AS 'MODULE_PATHNAME', 'bdr_replication_set_add_table';
+
+CREATE FUNCTION bdr.replication_set_remove_table(relation regclass, set_name text)
+RETURNS boolean STRICT VOLATILE LANGUAGE c AS 'MODULE_PATHNAME', 'bdr_replication_set_remove_table';
+
 /*
  * Interface for BDR message broker
  */

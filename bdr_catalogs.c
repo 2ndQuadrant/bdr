@@ -62,11 +62,13 @@ typedef struct NodeGroupTuple
 {
 	Oid			node_group_id;
 	NameData	node_group_name;
+	Oid			node_group_default_repset;
 } NodeGroupTuple;
 
-#define Natts_node_group		2
+#define Natts_node_group		3
 #define Anum_node_group_id		1
 #define Anum_node_group_name	2
+#define Anum_node_group_default_repset	3
 
 static BdrNodeGroup *
 bdr_nodegroup_fromtuple(HeapTuple tuple)
@@ -75,6 +77,7 @@ bdr_nodegroup_fromtuple(HeapTuple tuple)
 	BdrNodeGroup *nodegroup = palloc(sizeof(BdrNodeGroup));
 	nodegroup->id = nodegtup->node_group_id;
 	nodegroup->name = pstrdup(NameStr(nodegtup->node_group_name));
+	nodegroup->default_repset = nodegtup->node_group_default_repset;
 	return nodegroup;
 }
 
@@ -184,6 +187,7 @@ bdr_nodegroup_create(BdrNodeGroup *nodegroup)
 	memset(nulls, false, sizeof(nulls));
 	values[Anum_node_group_id - 1] = ObjectIdGetDatum(nodegroup->id);
 	values[Anum_node_group_name - 1] = CStringGetDatum(nodegroup->name);
+	values[Anum_node_group_default_repset - 1] = ObjectIdGetDatum(nodegroup->default_repset);
 
 	tup = heap_form_tuple(tupDesc, values, nulls);
 
@@ -287,12 +291,19 @@ bdr_get_node_info(Oid nodeid, bool missing_ok)
  * So take care.
  *
  * The nodegroup gets loaded if the local node is a member of one.
+ *
+ * The pglogical local_node is used as an interlock like in pglogical its self.
  */
 BdrNodeInfo *
-bdr_get_local_node_info(bool missing_ok)
+bdr_get_local_node_info(bool for_update, bool missing_ok)
 {
 	BdrNodeInfo *nodeinfo = NULL;
-	PGLogicalLocalNode *local_pgl_node = get_local_node(false, missing_ok);
+	PGLogicalLocalNode *local_pgl_node = get_local_node(for_update, true);
+	if (local_pgl_node == NULL && !missing_ok)
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("local node not found")));
+
 	if (local_pgl_node != NULL)
 	{
 		nodeinfo = palloc(sizeof(BdrNodeInfo));

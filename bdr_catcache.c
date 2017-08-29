@@ -52,7 +52,7 @@ bdr_cache_local_nodeinfo(void)
 
 	old_ctx = MemoryContextSwitchTo(bdr_catcache_context);
 
-	local_bdr_node_info = bdr_get_local_node_info(true);
+	local_bdr_node_info = bdr_get_local_node_info(false, true);
 
 	(void) MemoryContextSwitchTo(old_ctx);
 }

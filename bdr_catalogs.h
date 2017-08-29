@@ -14,6 +14,7 @@ typedef struct BdrNodeGroup
 {
 	uint32		id;
 	const char *name;
+	uint32		default_repset;
 } BdrNodeGroup;
 
 typedef struct BdrNode
@@ -54,7 +55,7 @@ extern BdrNodeInfo * bdr_get_node_info(Oid nodeid, bool missing_ok);
 
 extern BdrNodeInfo * bdr_get_node_info_by_name(const char *name, bool missing_ok);
 
-extern BdrNodeInfo * bdr_get_local_node_info(bool missing_ok);
+extern BdrNodeInfo * bdr_get_local_node_info(bool for_update, bool missing_ok);
 
 /* List of BdrNode */
 extern List * bdr_get_nodes_info(void);
