@@ -23,7 +23,7 @@
 #include "bdr_catcache.h"
 #include "bdr_worker.h"
 
-static BdrNode			   *local_bdr_node;
+static BdrNodeInfo 		   *local_bdr_node_info;
 static MemoryContext		bdr_catcache_context;
 
 /*
@@ -35,6 +35,8 @@ static MemoryContext		bdr_catcache_context;
  *
  * Otherwise we'd need an xact whenever we looked up these caches, so we could
  * handle possibly reloading them.
+ *
+ * TODO: invalidations/resets
  */
 void
 bdr_cache_local_nodeinfo(void)
@@ -50,7 +52,7 @@ bdr_cache_local_nodeinfo(void)
 
 	old_ctx = MemoryContextSwitchTo(bdr_catcache_context);
 
-	local_bdr_node = bdr_get_local_node(true);
+	local_bdr_node_info = bdr_get_local_node_info(true);
 
 	(void) MemoryContextSwitchTo(old_ctx);
 }
@@ -65,8 +67,8 @@ uint32
 bdr_get_local_nodeid(void)
 {
 	Assert(bdr_catcache_initialised());
-	if (local_bdr_node != NULL)
-		return local_bdr_node->node_id;
+	if (local_bdr_node_info != NULL && local_bdr_node_info->bdr_node != NULL)
+		return local_bdr_node_info->bdr_node->node_id;
 	else
 	{
 		Assert(false); /* Crash here in CASSERT builds */
@@ -87,8 +89,8 @@ bdr_get_local_nodeid_if_exists(void)
 			elog(ERROR, "attempted to use BDR catalog cache outside transaction without prior init");
 	}
 	Assert(bdr_catcache_initialised());
-	if (local_bdr_node != NULL)
-		return local_bdr_node->node_id;
+	if (local_bdr_node_info != NULL && local_bdr_node_info->bdr_node != NULL)
+		return local_bdr_node_info->bdr_node->node_id;
 	else
 		return 0;
 }
