@@ -96,6 +96,21 @@ CREATE FUNCTION bdr.decode_state(state integer, state_data bytea)
 RETURNS text LANGUAGE c AS 'MODULE_PATHNAME','bdr_decode_state';
 
 /*
+ * BDR node manipulation
+ */
+CREATE FUNCTION bdr.create_node(node_name text, local_dsn text)
+RETURNS oid LANGUAGE c AS 'MODULE_PATHNAME','bdr_create_node_sql';
+
+COMMENT ON FUNCTION bdr.create_node(text, text) IS
+'Create a new local BDR node';
+
+CREATE FUNCTION bdr.create_node_group(node_group_name text)
+RETURNS oid LANGUAGE c AS 'MODULE_PATHNAME','bdr_create_nodegroup_sql';
+
+COMMENT ON FUNCTION bdr.create_node_group(text) IS
+'Create a new local BDR node group and make the local node the first member';
+
+/*
  * Interface for BDR message broker
  */
 CREATE FUNCTION bdr.msgb_connect(origin_node oid, destination_node oid, last_sent_msgid oid)

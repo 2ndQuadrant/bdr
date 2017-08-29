@@ -64,8 +64,9 @@ extern List * bdr_get_node_subscriptions(uint32 node_id);
 
 extern void bdr_node_create(BdrNode *node);
 
-extern void bdr_create_node_defaults(uint32 nodegroup_id,
-									 const char *node_name,
+extern void bdr_modify_node(BdrNode *node);
+
+extern void bdr_create_node_defaults(const char *node_name,
 									 const char *local_dsn);
 
 #endif

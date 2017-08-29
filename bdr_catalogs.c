@@ -164,6 +164,7 @@ bdr_nodegroup_create(BdrNodeGroup *nodegroup)
 	HeapTuple	tup;
 	Datum		values[Natts_node_group];
 	bool		nulls[Natts_node_group];
+	BdrNodeGroup *existing;
 
 	rv = makeRangeVar(BDR_EXTENSION_NAME, CATALOG_NODE_GROUP, -1);
 	rel = heap_openrv(rv, RowExclusiveLock);
@@ -257,6 +258,9 @@ bdr_get_node(Oid nodeid, bool missing_ok)
 /*
  * Load the info for specific node by node-id (the same
  * node-id as the pglogical node).
+ *
+ * If the node is part of a nodegroup, the nodegroup is loaded too.
+ * (We assume a single nodegroup only for now)
  */
 BdrNodeInfo *
 bdr_get_node_info(Oid nodeid, bool missing_ok)
@@ -269,7 +273,7 @@ bdr_get_node_info(Oid nodeid, bool missing_ok)
 		nodeinfo->bdr_node = node;
 		nodeinfo->pgl_node = get_node(nodeid, missing_ok);
 		nodeinfo->bdr_node_group = nodeinfo->bdr_node == NULL ? NULL :
-								   bdr_get_nodegroup(nodeinfo->bdr_node->node_group_id, missing_ok);
+								   bdr_get_nodegroup(nodeinfo->bdr_node->node_group_id, true);
 		nodeinfo->pgl_interface = NULL;
 	}
 	return nodeinfo;
@@ -282,6 +286,8 @@ bdr_get_node_info(Oid nodeid, bool missing_ok)
  * with a null BdrNode entry and the pglogical node info populated.
  *
  * So take care.
+ *
+ * The nodegroup gets loaded if the local node is a member of one.
  */
 BdrNodeInfo *
 bdr_get_local_node_info(bool missing_ok)
@@ -294,7 +300,7 @@ bdr_get_local_node_info(bool missing_ok)
 		nodeinfo->bdr_node = bdr_get_node(local_pgl_node->node->id,
 										  missing_ok);
 		nodeinfo->bdr_node_group = nodeinfo->bdr_node == NULL ? NULL : 
-								   bdr_get_nodegroup(nodeinfo->bdr_node->node_group_id, false);
+								   bdr_get_nodegroup(nodeinfo->bdr_node->node_group_id, true);
 		nodeinfo->pgl_node = local_pgl_node->node;
 		nodeinfo->pgl_interface = local_pgl_node->node_if;
 		pfree(local_pgl_node);
@@ -305,6 +311,9 @@ bdr_get_local_node_info(bool missing_ok)
 /*
  * Get the BDR node info for a node by its pglogical
  * node name.
+ *
+ * If the node is a member of a locally defined nodegroup,
+ * load it too.
  */
 BdrNodeInfo *
 bdr_get_node_info_by_name(const char *name, bool missing_ok)
@@ -317,7 +326,7 @@ bdr_get_node_info_by_name(const char *name, bool missing_ok)
 		nodeinfo->bdr_node = bdr_get_node(pglnode->id,
 										  missing_ok);
 		nodeinfo->bdr_node_group = nodeinfo->bdr_node == NULL ? NULL : 
-								   bdr_get_nodegroup(nodeinfo->bdr_node->node_group_id, false);
+								   bdr_get_nodegroup(nodeinfo->bdr_node->node_group_id, true);
 		nodeinfo->pgl_node = pglnode;
 		nodeinfo->pgl_interface = NULL;
 		pfree(pglnode);
@@ -381,55 +390,64 @@ bdr_node_create(BdrNode *node)
 }
 
 /*
- * Make a BDR node and the underlying pglogical node.
- *
- * If a local pglogical node already exists it must have the same name
- * as supplied here.
- *
- * TODO: most of this should move into the SQL func
+ * Update a BDR node tuple
  */
 void
-bdr_create_node_defaults(uint32 nodegroup_id, const char *node_name, const char *local_dsn)
+bdr_modify_node(BdrNode *node)
 {
-	BdrNode bnode;
-	PGLogicalLocalNode *pgllocal = get_local_node(false, true);
+	RangeVar   *rv;
+	Relation	rel;
+	TupleDesc	tupDesc;
+	SysScanDesc	scan;
+	BdrNodeTuple	*oldnode;
+	HeapTuple	oldtup,
+				newtup;
+	ScanKeyData	key[1];
+	Datum		values[Natts_node];
+	bool		nulls[Natts_node];
+	bool		replaces[Natts_node];
+	NameData	sub_slot_name;
 
-	/* Validate that nodegroup exists locally */
-	(void) bdr_get_nodegroup(nodegroup_id, false);
+	rv = makeRangeVar(BDR_EXTENSION_NAME, CATALOG_NODE, -1);
+	rel = heap_openrv(rv, RowExclusiveLock);
+	tupDesc = RelationGetDescr(rel);
 
-	/* Ensure local pglogical node exists and has matching characteristics */
-	if (pgllocal == NULL)
-	{
-		/* no local pglogical node, make one */
-		if (node_name == NULL || local_dsn == NULL)
-			ereport(ERROR,
-					(errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
-					 errmsg("node name and connection string must be specified when no local pglogical node already exists")));
-		create_node_defaults((char*)node_name, (char*)local_dsn);
-		pgllocal = get_local_node(false, false);
-	}
-	else if (node_name != NULL && strcmp(pgllocal->node->name, node_name) != 0)
-	{
-		ereport(ERROR,
-				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("A local pglogical node with name %s exists, cannot create node with name %s",
-						pgllocal->node->name, node_name)));
-	}
-	else if (local_dsn != NULL && strcmp(pgllocal->node_if->dsn, local_dsn) != 0)
-	{
-		ereport(WARNING,
-				(errmsg("connection string for existing local node does not match supplied connstring"),
-				 errhint("Check the connection string for the local pglogical interface after node creation")));
-	}
+	/* Search the catalog. */
+	ScanKeyInit(&key[0],
+				Anum_node_pglogical_node_id,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(node->node_id));
 
-	/* then make the BDR node on top */
-	bnode.node_id = pgllocal->node->id;
-	bnode.node_group_id = nodegroup_id;
-	/* To be assigned later */
-	bnode.seq_id = -1;
-	bnode.confirmed_our_join = false;
+	scan = systable_beginscan(rel, 0, true, NULL, 1, key);
+	oldtup = systable_getnext(scan);
 
-	bdr_node_create(&bnode);
+	if (!HeapTupleIsValid(oldtup))
+		elog(ERROR, "node %u not found", sub->id);
+
+	oldnode = (BdrNodeTuple *) GETSTRUCT(oldtup);
+
+	/* Form a tuple. */
+	memset(nulls, false, sizeof(nulls));
+	memset(replaces, true, sizeof(replaces));
+
+	replaces[Anum_node_pglogical_node_id, - 1] = false;
+
+	values[Anum_node_node_group_id - 1] = ObjectIdGetDatum(node->node_group_id);
+	values[Anum_node_local_state - 1] = ObjectIdGetDatum(node->local_state);
+	values[Anum_node_seq_id - 1] = Int32GetDatum(node->seq_id);
+	values[Anum_node_confirmed_our_join - 1] = BoolGetDatum(node->confirmed_our_join);
+
+	newtup = heap_modify_tuple(oldtup, tupDesc, values, nulls, replaces);
+
+	/* Update the tuple in catalog. */
+	CatalogTupleUpdate(rel, &oldtup->t_self, newtup);
+
+	/* Cleanup. */
+	heap_freetuple(newtup);
+	systable_endscan(scan);
+	heap_close(rel, NoLock);
+
+	CommandCounterIncrement();
 }
 
 /*
