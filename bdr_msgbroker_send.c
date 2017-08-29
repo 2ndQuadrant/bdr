@@ -1381,7 +1381,8 @@ static void
 msgb_request_recreate_wait_event_set(void)
 {
 	wait_set_recreate_pending = true;
-	(*msgb_request_recreate_wait_event_set_hook)(wait_set);
+	if (msgb_request_recreate_wait_event_set_hook)
+		(*msgb_request_recreate_wait_event_set_hook)(wait_set);
 }
 
 int

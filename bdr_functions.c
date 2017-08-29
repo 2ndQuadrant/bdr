@@ -17,11 +17,15 @@
 
 #include "utils/builtins.h"
 
+#include "pglogical_node.h"
+#include "pglogical_repset.h"
+
+#include "bdr_catalogs.h"
 #include "bdr_catcache.h"
 #include "bdr_messaging.h"
 #include "bdr_functions.h"
 
-PG_FUNCTION_INFO_V1(bdr_create_node_sql)
+PG_FUNCTION_INFO_V1(bdr_create_node_sql);
 
 /*
  * Create a new local BDR node.
@@ -97,9 +101,9 @@ PG_FUNCTION_INFO_V1(bdr_create_nodegroup_sql);
 Datum
 bdr_create_nodegroup_sql(PG_FUNCTION_ARGS)
 {
-	const char *nodegroup_name;
-	BdrNodeGroup *nodegroup;
+	BdrNodeGroup nodegroup;
 	BdrNodeInfo *info;
+	PGLogicalRepSet		repset;
 
 	if (PG_ARGISNULL(0))
 		ereport(ERROR,
@@ -107,9 +111,9 @@ bdr_create_nodegroup_sql(PG_FUNCTION_ARGS)
 				 errmsg("node group name may not be null")));
 
 	info = bdr_get_local_node_info(true);
-	if (info->bdr_node == NULL)
+	if (info == NULL || info->bdr_node == NULL)
 		ereport(ERROR,
-				(errcode(ERRCODE_NOT_IN_PREREQUISITE_STATE),
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("no local BDR node exists to assign to new node group")));
 
 	if (info->bdr_node->node_group_id != InvalidOid)
@@ -125,7 +129,7 @@ bdr_create_nodegroup_sql(PG_FUNCTION_ARGS)
 			elog(ERROR, "bdr node exists but no local pglogical node");
 		}
 		ereport(ERROR,
-				(errcode(ERRCODE_NOT_IN_PREREQUISITE_STATE),
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("local BDR node %s is already a member of a node group named %s",
 				 		info->pgl_node->name, info->bdr_node_group->name)));
 	}
@@ -136,8 +140,28 @@ bdr_create_nodegroup_sql(PG_FUNCTION_ARGS)
 
 	nodegroup.id = InvalidOid;
 	nodegroup.name = text_to_cstring(PG_GETARG_TEXT_P(0));
-	nodegroup.id  = bdr_nodegroup_create(&nodegroup);
+	nodegroup.id = bdr_nodegroup_create(&nodegroup);
 
+	/*
+	 * BDR creates an 'internal' replication set with the same name as the BDR
+	 * node group.
+	 */
+	repset.id = InvalidOid;
+	repset.nodeid = info->bdr_node->node_id;
+	repset.name = (char*)nodegroup.name;
+	repset.replicate_insert = true;
+	repset.replicate_update = true;
+	repset.replicate_delete = true;
+	repset.replicate_truncate = true;
+	/*
+	 * TODO: We should be creating repsets as 'isinternal' but we cannot do so
+	 * until BDR auto-adds persistent tables to repsets, or exposes repset
+	 * management functions.
+	 */
+	repset.isinternal = false;
+	create_replication_set(&repset);
+
+	/* Assign the nodegroup to the local node */
 	info->bdr_node->node_group_id = nodegroup.id;
 	bdr_modify_node(info->bdr_node);
 

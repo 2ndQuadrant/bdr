@@ -9,21 +9,23 @@ CREATE TABLE public.demo(
 );
 $DDL$);
 
-SELECT pglogical.replication_set_add_table('dummy_nodegroup', 'demo');
+-- TODO: This should happen automatically with BDR
+SELECT pglogical.replication_set_add_table('bdrgroup', 'demo');
 
-SELECT nspname, relname FROM pglogical.tables WHERE set_name = 'dummy_nodegroup';
+SELECT nspname, relname FROM pglogical.tables WHERE set_name = 'bdrgroup';
 
 INSERT INTO demo(id) VALUES (42);
 
 \c :node2_dsn
 
-SELECT pglogical_wait_slot_confirm_lsn(NULL, NULL);
+SELECT pglogical.wait_slot_confirm_lsn(NULL, NULL);
 
-SELECT pglogical.replication_set_add_table('dummy_nodegroup', 'demo');
+-- TODO: This should happen automatically with BDR
+SELECT pglogical.replication_set_add_table('bdrgroup', 'demo');
 
 SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'demo';
 
-SELECT nspname, relname FROM pglogical.tables WHERE set_name = 'dummy_nodegroup';
+SELECT nspname, relname FROM pglogical.tables WHERE set_name = 'bdrgroup';
 
 SELECT id FROM demo ORDER BY id;
 
@@ -31,6 +33,6 @@ INSERT INTO demo(id) VALUES (43);
 
 \c :node1_dsn
 
-SELECT pglogical_wait_slot_confirm_lsn(NULL, NULL);
+SELECT pglogical.wait_slot_confirm_lsn(NULL, NULL);
 
 SELECT id FROM demo ORDER BY id;

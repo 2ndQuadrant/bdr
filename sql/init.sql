@@ -21,58 +21,50 @@ SELECT E'\'' || current_database() || E'\'' AS node2_db
 CREATE FUNCTION bdr_submit_comment(message text)
 RETURNS text LANGUAGE c STRICT AS 'bdr','bdr_submit_comment';
 
--- We should be doing a bdr node create/join here but we don't yet have the
--- interfaces for that. We're just dummied up so far. So create a pglogical
--- node, and let that bring up BDR because the BDR plugin is loaded, even
--- though no actual BDR node is created yet.
+SELECT 1
+FROM bdr.create_node(node_name := 'node1', local_dsn := :'node1_dsn' || ' user=super');
 
 SELECT 1
-FROM pglogical.create_node(node_name := 'node1', dsn := :'node1_dsn' || ' user=super');
+FROM bdr.create_node_group('bdrgroup');
 
-CREATE FUNCTION
-pglogical_wait_slot_confirm_lsn(slotname name, target pg_lsn)
-RETURNS void LANGUAGE c AS 'pglogical','pglogical_wait_slot_confirm_lsn';
-
--- BDR would usually auto-create this but it doesn't know how
--- yet, so do it manually
-SELECT 1 FROM pglogical.create_replication_set('dummy_nodegroup');
-
--- Create the BDR node
---
--- Doing it in this order is racey since pglogical will start the manager before
--- we can reliably create the bdr node entries. We'll have to restart pglogical
--- with pg_terminate_backend afterwards.
-
-INSERT INTO bdr.node_group(node_group_id, node_group_name)
-VALUES (4, 'dummy_nodegroup');
-
-INSERT INTO bdr.node(pglogical_node_id, node_group_id)
-SELECT node_id, 4 FROM pglogical.local_node;
+-- TODO: we should have a view for this
+SELECT g.node_group_name, l.node_name, s.set_name, s.set_isinternal
+FROM bdr.node n
+LEFT JOIN bdr.node_group g ON (g.node_group_id = g.node_group_id)
+LEFT JOIN pglogical.node l ON (n.pglogical_node_id = l.node_id)
+LEFT JOIN pglogical.replication_set s ON (s.set_nodeid = l.node_id)
+ORDER BY set_name;
 
 -- We must create a slot before creating the subscription to work
 -- around the deadlock in 2ndQuadrant/pglogical_internal#152
-SELECT slot_name FROM pg_create_logical_replication_slot(pglogical.pglogical_gen_slot_name(:node2_db, 'node1', 'bdr'), 'pglogical');
+-- TODO: BDR should do this automatically
+SELECT slot_name FROM pg_create_logical_replication_slot(pglogical.pglogical_gen_slot_name(:node2_db, 'node1', 'bdrgroup'), 'pglogical');
 
 \c :node2_dsn
 
--- Manually create a second node
 SELECT 1
-FROM pglogical.create_node(node_name := 'node2', dsn := :'node2_dsn' || ' user=super');
+FROM bdr.create_node(node_name := 'node2', local_dsn := :'node2_dsn' || ' user=super');
 
-INSERT INTO bdr.node_group(node_group_id, node_group_name)
-VALUES (4, 'dummy_nodegroup');
+-- TODO:  BDR should do this for us when we join the nodegroup
+-- but for now we have to make it locally
+SELECT 1 FROM pglogical.create_replication_set('bdrgroup');
 
-INSERT INTO bdr.node(pglogical_node_id, node_group_id)
-SELECT node_id, 4 FROM pglogical.local_node;
+
+SELECT g.node_group_name, l.node_name, s.set_name, s.set_isinternal
+FROM bdr.node n
+LEFT JOIN bdr.node_group g ON (g.node_group_id = g.node_group_id)
+LEFT JOIN pglogical.node l ON (n.pglogical_node_id = l.node_id)
+LEFT JOIN pglogical.replication_set s ON (s.set_nodeid = l.node_id)
+ORDER BY set_name;
 
 -- Subscribe to the first node
 -- See GH#152 for why we don't create the slot
 SELECT 1 FROM pglogical.create_subscription(
-    subscription_name := 'bdr',
+    subscription_name := 'bdrgroup',
     provider_dsn := ( :'node1_dsn' || ' user=super' ),
     synchronize_structure := true,
     forward_origins := '{}',
-    replication_sets := ARRAY['dummy_nodegroup','ddl_sql'],
+    replication_sets := ARRAY['bdrgroup','ddl_sql'],
 	create_slot := false);
 
 -- and set the subscription as 'isinternal' so BDR thinks BDR owns it.
@@ -87,10 +79,9 @@ SELECT 1 FROM pglogical.create_replication_set('dummy_nodegroup');
 -- If we don't do this, we'll usually kill the apply worker during init
 -- and it won't retry since it doesn't know if the restore was partial
 -- last time around
-
 DO LANGUAGE plpgsql $$
 BEGIN
-  WHILE (SELECT status <> 'replicating' FROM pglogical.show_subscription_status())
+  WHILE NOT EXISTS (SELECT 1 FROM pglogical.show_subscription_status() WHERE status = 'replicating')
   LOOP
     PERFORM pg_sleep(0.5);
   END LOOP;
@@ -101,7 +92,8 @@ SELECT subscription_name, status, provider_node, slot_name, replication_sets
 FROM pglogical.show_subscription_status();
 
 -- See above...
-SELECT slot_name FROM pg_create_logical_replication_slot(pglogical.pglogical_gen_slot_name(:node1_db, 'node2', 'bdr'), 'pglogical');
+-- TODO: BDR should do this automatically
+SELECT slot_name FROM pg_create_logical_replication_slot(pglogical.pglogical_gen_slot_name(:node1_db, 'node2', 'bdrgroup'), 'pglogical');
 
 \c :node1_dsn
 
@@ -110,18 +102,18 @@ SELECT slot_name FROM pg_create_logical_replication_slot(pglogical.pglogical_gen
 --
 -- See GH#152 for why we don't create the slot
 SELECT 1 FROM pglogical.create_subscription(
-    subscription_name := 'bdr',
+    subscription_name := 'bdrgroup',
     provider_dsn := ( :'node2_dsn' || ' user=super' ),
     synchronize_structure := false,
     forward_origins := '{}',
-    replication_sets := ARRAY['dummy_nodegroup','ddl_sql'],
+    replication_sets := ARRAY['bdrgroup','ddl_sql'],
     create_slot := false);
 
 UPDATE pglogical.subscription SET sub_isinternal = true;
 
 DO LANGUAGE plpgsql $$
 BEGIN
-  WHILE (SELECT status <> 'replicating' FROM pglogical.show_subscription_status())
+  WHILE NOT EXISTS (SELECT 1 FROM pglogical.show_subscription_status() WHERE status = 'replicating')
   LOOP
     PERFORM pg_sleep(0.5);
   END LOOP;
@@ -159,7 +151,7 @@ CREATE TABLE throwaway AS SELECT 1;
 
 \c :node1_dsn
 
-SELECT pglogical_wait_slot_confirm_lsn(NULL, NULL);
+SELECT pglogical.wait_slot_confirm_lsn(NULL, NULL);
 
 SELECT application_name, sync_state
 FROM pg_stat_replication

@@ -164,7 +164,6 @@ bdr_nodegroup_create(BdrNodeGroup *nodegroup)
 	HeapTuple	tup;
 	Datum		values[Natts_node_group];
 	bool		nulls[Natts_node_group];
-	BdrNodeGroup *existing;
 
 	rv = makeRangeVar(BDR_EXTENSION_NAME, CATALOG_NODE_GROUP, -1);
 	rel = heap_openrv(rv, RowExclusiveLock);
@@ -184,7 +183,7 @@ bdr_nodegroup_create(BdrNodeGroup *nodegroup)
 	/* Form a tuple. */
 	memset(nulls, false, sizeof(nulls));
 	values[Anum_node_group_id - 1] = ObjectIdGetDatum(nodegroup->id);
-	values[Anum_node_group_name - 1] = CStringGetTextDatum(nodegroup->name);
+	values[Anum_node_group_name - 1] = CStringGetDatum(nodegroup->name);
 
 	tup = heap_form_tuple(tupDesc, values, nulls);
 
@@ -399,14 +398,12 @@ bdr_modify_node(BdrNode *node)
 	Relation	rel;
 	TupleDesc	tupDesc;
 	SysScanDesc	scan;
-	BdrNodeTuple	*oldnode;
 	HeapTuple	oldtup,
 				newtup;
 	ScanKeyData	key[1];
 	Datum		values[Natts_node];
 	bool		nulls[Natts_node];
 	bool		replaces[Natts_node];
-	NameData	sub_slot_name;
 
 	rv = makeRangeVar(BDR_EXTENSION_NAME, CATALOG_NODE, -1);
 	rel = heap_openrv(rv, RowExclusiveLock);
@@ -422,15 +419,13 @@ bdr_modify_node(BdrNode *node)
 	oldtup = systable_getnext(scan);
 
 	if (!HeapTupleIsValid(oldtup))
-		elog(ERROR, "node %u not found", sub->id);
-
-	oldnode = (BdrNodeTuple *) GETSTRUCT(oldtup);
+		elog(ERROR, "node %u not found", node->node_id);
 
 	/* Form a tuple. */
 	memset(nulls, false, sizeof(nulls));
 	memset(replaces, true, sizeof(replaces));
 
-	replaces[Anum_node_pglogical_node_id, - 1] = false;
+	replaces[Anum_node_pglogical_node_id - 1] = false;
 
 	values[Anum_node_node_group_id - 1] = ObjectIdGetDatum(node->node_group_id);
 	values[Anum_node_local_state - 1] = ObjectIdGetDatum(node->local_state);
