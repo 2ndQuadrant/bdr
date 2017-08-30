@@ -15,7 +15,8 @@ VALUES ('bdr','bdr_init_pgl_plugin');
 CREATE TABLE bdr.node_group
 (
 	node_group_id oid NOT NULL PRIMARY KEY,
-	node_group_name name NOT NULL UNIQUE
+	node_group_name name NOT NULL UNIQUE,
+	node_group_default_repset oid NOT NULL
 );
 
 REVOKE ALL ON bdr.node_group FROM public;
@@ -110,12 +111,12 @@ RETURNS oid LANGUAGE c AS 'MODULE_PATHNAME','bdr_create_nodegroup_sql';
 COMMENT ON FUNCTION bdr.create_node_group(text) IS
 'Create a new local BDR node group and make the local node the first member';
 
-CREATE FUNCTION bdr.replication_set_add_table(relation regclass, set_name text, synchronize_data boolean DEFAULT false,
+CREATE FUNCTION bdr.replication_set_add_table(relation regclass, set_name text DEFAULT NULL, synchronize_data boolean DEFAULT false,
 	columns text[] DEFAULT NULL, row_filter text DEFAULT NULL)
-RETURNS boolean CALLED ON NULL INPUT VOLATILE LANGUAGE c AS 'MODULE_PATHNAME', 'bdr_replication_set_add_table';
+RETURNS void CALLED ON NULL INPUT VOLATILE LANGUAGE c AS 'MODULE_PATHNAME', 'bdr_replication_set_add_table';
 
-CREATE FUNCTION bdr.replication_set_remove_table(relation regclass, set_name text)
-RETURNS boolean STRICT VOLATILE LANGUAGE c AS 'MODULE_PATHNAME', 'bdr_replication_set_remove_table';
+CREATE FUNCTION bdr.replication_set_remove_table(relation regclass, set_name text DEFAULT NULL)
+RETURNS void CALLED ON NULL INPUT VOLATILE LANGUAGE c AS 'MODULE_PATHNAME', 'bdr_replication_set_remove_table';
 
 /*
  * Interface for BDR message broker

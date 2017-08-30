@@ -168,6 +168,9 @@ bdr_nodegroup_create(BdrNodeGroup *nodegroup)
 	Datum		values[Natts_node_group];
 	bool		nulls[Natts_node_group];
 
+	if (nodegroup->default_repset == InvalidOid)
+		elog(ERROR, "nodegroup may not have default repset 0");
+
 	rv = makeRangeVar(BDR_EXTENSION_NAME, CATALOG_NODE_GROUP, -1);
 	rel = heap_openrv(rv, RowExclusiveLock);
 	tupDesc = RelationGetDescr(rel);

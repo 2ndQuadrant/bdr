@@ -9,8 +9,9 @@ CREATE TABLE public.demo(
 );
 $DDL$);
 
--- TODO: This should happen automatically with BDR
-SELECT pglogical.replication_set_add_table('bdrgroup', 'demo');
+-- TODO: This should happen automatically with BDR, adding tables to
+-- the default repset on creation.
+SELECT bdr.replication_set_add_table('demo');
 
 SELECT nspname, relname FROM pglogical.tables WHERE set_name = 'bdrgroup';
 
@@ -21,7 +22,7 @@ INSERT INTO demo(id) VALUES (42);
 SELECT pglogical.wait_slot_confirm_lsn(NULL, NULL);
 
 -- TODO: This should happen automatically with BDR
-SELECT pglogical.replication_set_add_table('bdrgroup', 'demo');
+SELECT bdr.replication_set_add_table('demo');
 
 SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'demo';
 

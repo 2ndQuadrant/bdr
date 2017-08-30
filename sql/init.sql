@@ -46,9 +46,13 @@ SELECT 1
 FROM bdr.create_node(node_name := 'node2', local_dsn := :'node2_dsn' || ' user=super');
 
 -- TODO:  BDR should do this for us when we join the nodegroup
--- but for now we have to make it locally
+-- but for now we have to make the repset locally, fake up a node group,
+-- etc.
 SELECT 1 FROM pglogical.create_replication_set('bdrgroup');
-
+UPDATE pglogical.replication_set SET set_isinternal = 't' WHERE set_name = 'bdrgroup';
+INSERT INTO bdr.node_group (node_group_id, node_group_name, node_group_default_repset)
+SELECT 1, 'bdrgroup', set_id FROM pglogical.replication_set WHERE set_name = 'bdrgroup';
+UPDATE bdr.node SET node_group_id = (SELECT node_group_id FROM bdr.node_group WHERE node_group_name = 'bdrgroup');
 
 SELECT g.node_group_name, l.node_name, s.set_name, s.set_isinternal
 FROM bdr.node n

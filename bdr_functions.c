@@ -25,6 +25,9 @@
 #include "bdr_messaging.h"
 #include "bdr_functions.h"
 
+/*
+ * Ensure that the local BDR node exists
+ */
 static BdrNodeInfo *
 bdr_check_local_node(bool for_update)
 {
@@ -37,7 +40,7 @@ bdr_check_local_node(bool for_update)
 				 errmsg("current database is not configured as bdr node"),
 				 errhint("create bdr node first")));
 
-	return node;
+	return nodeinfo;
 }
 
 PG_FUNCTION_INFO_V1(bdr_create_node_sql);
@@ -120,11 +123,14 @@ bdr_create_nodegroup_sql(PG_FUNCTION_ARGS)
 	BdrNodeGroup nodegroup;
 	BdrNodeInfo *info;
 	PGLogicalRepSet		repset;
+	char * nodegroup_name;
 
 	if (PG_ARGISNULL(0))
 		ereport(ERROR,
 				(errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
 				 errmsg("node group name may not be null")));
+
+	nodegroup_name = text_to_cstring(PG_GETARG_TEXT_P(0));
 
 	info = bdr_check_local_node(true);
 
@@ -150,28 +156,23 @@ bdr_create_nodegroup_sql(PG_FUNCTION_ARGS)
 		Assert(info->bdr_node_group == NULL);
 	}
 
-	nodegroup.id = InvalidOid;
-	nodegroup.name = text_to_cstring(PG_GETARG_TEXT_P(0));
-	nodegroup.id = bdr_nodegroup_create(&nodegroup);
-
 	/*
 	 * BDR creates an 'internal' replication set with the same name as the BDR
 	 * node group.
 	 */
 	repset.id = InvalidOid;
 	repset.nodeid = info->bdr_node->node_id;
-	repset.name = (char*)nodegroup.name;
+	repset.name = nodegroup_name;
 	repset.replicate_insert = true;
 	repset.replicate_update = true;
 	repset.replicate_delete = true;
 	repset.replicate_truncate = true;
-	/*
-	 * TODO: We should be creating repsets as 'isinternal' but we cannot do so
-	 * until BDR auto-adds persistent tables to repsets, or exposes repset
-	 * management functions.
-	 */
-	repset.isinternal = false;
+	repset.isinternal = true;
+
+	nodegroup.id = InvalidOid;
+	nodegroup.name = nodegroup_name;
 	nodegroup.default_repset = create_replication_set(&repset);
+	nodegroup.id = bdr_nodegroup_create(&nodegroup);
 
 	/* Assign the nodegroup to the local node */
 	info->bdr_node->node_group_id = nodegroup.id;
@@ -193,15 +194,9 @@ Datum
 bdr_replication_set_add_table(PG_FUNCTION_ARGS)
 {
 	Oid					reloid;
-	bool				synchronize = false;
 	Node			   *row_filter = NULL;
 	List			   *att_list = NIL;
 	PGLogicalRepSet    *repset = NULL;
-	Relation			rel;
-	TupleDesc			tupDesc;
-	char			   *nspname;
-	char			   *relname;
-	StringInfoData		json;
 	BdrNodeInfo		   *local;
 
 	local = bdr_check_local_node(true);
@@ -211,17 +206,22 @@ bdr_replication_set_add_table(PG_FUNCTION_ARGS)
 				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 				 errmsg("relation cannot be NULL")));
 
+	if (local->bdr_node_group == NULL)
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("this bdr node is not part of a node group, cannot alter replication sets")));
+
 	reloid = PG_GETARG_OID(0);
 
 	if (PG_ARGISNULL(1))
 	{
 		/* Find default repset for local node's nodegroup */
-		repset = get_replication_set(local->bdr_nodegroup->default_repset);
+		repset = get_replication_set(local->bdr_node_group->default_repset);
 	}
 	else
 	{
 		const char *repset_name = text_to_cstring(PG_GETARG_TEXT_P(1));
-		repset = get_replication_set_by_name(repset_name, false);
+		repset = get_replication_set_by_name(local->bdr_node->node_id, repset_name, false);
 		if (!repset->isinternal)
 		{
 			/*
@@ -255,9 +255,6 @@ bdr_replication_set_add_table(PG_FUNCTION_ARGS)
 
 	replication_set_add_table(repset->id, reloid, att_list, row_filter);
 
-	/* Cleanup. */
-	heap_close(rel, NoLock);
-
 	PG_RETURN_VOID();
 }
 
@@ -281,17 +278,22 @@ bdr_replication_set_remove_table(PG_FUNCTION_ARGS)
 				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 				 errmsg("relation cannot be NULL")));
 
+	if (local->bdr_node_group == NULL)
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("this bdr node is not part of a node group, cannot alter replication sets")));
+
 	reloid = PG_GETARG_OID(0);
 
 	if (PG_ARGISNULL(1))
 	{
 		/* Find default repset for local node's nodegroup */
-		repset = get_replication_set(local->bdr_nodegroup->default_repset);
+		repset = get_replication_set(local->bdr_node_group->default_repset);
 	}
 	else
 	{
 		const char *repset_name = text_to_cstring(PG_GETARG_TEXT_P(1));
-		repset = get_replication_set_by_name(repset_name, false);
+		repset = get_replication_set_by_name(local->bdr_node->node_id, repset_name, false);
 		if (!repset->isinternal)
 		{
 			/*
