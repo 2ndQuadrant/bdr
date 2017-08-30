@@ -27,13 +27,7 @@ FROM bdr.create_node(node_name := 'node1', local_dsn := :'node1_dsn' || ' user=s
 SELECT 1
 FROM bdr.create_node_group('bdrgroup');
 
--- TODO: we should have a view for this
-SELECT g.node_group_name, l.node_name, s.set_name, s.set_isinternal
-FROM bdr.node n
-LEFT JOIN bdr.node_group g ON (g.node_group_id = g.node_group_id)
-LEFT JOIN pglogical.node l ON (n.pglogical_node_id = l.node_id)
-LEFT JOIN pglogical.replication_set s ON (s.set_nodeid = l.node_id)
-ORDER BY set_name;
+SELECT * FROM bdr.node_group_replication_sets;
 
 -- We must create a slot before creating the subscription to work
 -- around the deadlock in 2ndQuadrant/pglogical_internal#152
@@ -54,12 +48,7 @@ INSERT INTO bdr.node_group (node_group_id, node_group_name, node_group_default_r
 SELECT 1, 'bdrgroup', set_id FROM pglogical.replication_set WHERE set_name = 'bdrgroup';
 UPDATE bdr.node SET node_group_id = (SELECT node_group_id FROM bdr.node_group WHERE node_group_name = 'bdrgroup');
 
-SELECT g.node_group_name, l.node_name, s.set_name, s.set_isinternal
-FROM bdr.node n
-LEFT JOIN bdr.node_group g ON (g.node_group_id = g.node_group_id)
-LEFT JOIN pglogical.node l ON (n.pglogical_node_id = l.node_id)
-LEFT JOIN pglogical.replication_set s ON (s.set_nodeid = l.node_id)
-ORDER BY set_name;
+SELECT * FROM bdr.node_group_replication_sets;
 
 -- Subscribe to the first node
 -- See GH#152 for why we don't create the slot

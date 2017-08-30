@@ -130,3 +130,18 @@ CREATE FUNCTION bdr.msgb_deliver_message(destination_node oid, message_id oid, p
 RETURNS void LANGUAGE c AS 'MODULE_PATHNAME','msgb_deliver_message';
 
 REVOKE ALL ON FUNCTION bdr.msgb_deliver_message(oid,oid,bytea) FROM public;
+
+/*
+ * Helper views
+ */
+CREATE VIEW bdr.node_group_replication_sets AS
+SELECT g.node_group_name, l.node_name, s.set_name
+FROM bdr.node n
+LEFT JOIN bdr.node_group g ON (g.node_group_id = g.node_group_id)
+LEFT JOIN pglogical.node l ON (n.pglogical_node_id = l.node_id)
+LEFT JOIN pglogical.replication_set s ON (s.set_nodeid = l.node_id)
+WHERE s.set_isinternal
+ORDER BY set_name;
+
+COMMENT ON VIEW bdr.node_group_replication_sets IS
+'BDR replication sets for local node groups';
