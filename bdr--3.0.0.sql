@@ -17,7 +17,7 @@ CREATE TABLE bdr.node_group
 	node_group_id oid NOT NULL PRIMARY KEY,
 	node_group_name name NOT NULL UNIQUE,
 	node_group_default_repset oid NOT NULL
-);
+) WITH (user_catalog_table=true);
 
 REVOKE ALL ON bdr.node_group FROM public;
 
@@ -25,7 +25,10 @@ CREATE TABLE bdr.node
 (
 	pglogical_node_id oid NOT NULL PRIMARY KEY,
 	node_group_id oid NOT NULL REFERENCES bdr.node_group(node_group_id)
-);
+	local_state oid NOT NULL,
+	seq_id integer NOT NULL,
+	confirmed_our_join bool NOT NULL
+) WITH (user_catalog_table=true);
 
 REVOKE ALL ON bdr.node FROM public;
 
@@ -89,7 +92,7 @@ CREATE TABLE bdr.state_journal
 	state integer NOT NULL,
 	state_data bytea,
 	global_consensus_no integer
-);
+) WITH (user_catalog_table=true);
 
 REVOKE ALL ON bdr.state_journal FROM public;
 

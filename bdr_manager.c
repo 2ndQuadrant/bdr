@@ -64,6 +64,9 @@ bdr_manager_worker_start(void)
 
 	my_manager = bdr_shmem_allocate_manager_segment(bdr_get_local_nodeid());
 
+	/*
+	 * TODO: delay startup of consensus messaging until nodegroup creation/join
+	 */
 	bdr_start_consensus(bdr_max_nodes);
 
 	/*

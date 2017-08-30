@@ -181,6 +181,207 @@ bdr_create_nodegroup_sql(PG_FUNCTION_ARGS)
 	PG_RETURN_OID(nodegroup.id);
 }
 
+PG_FUNCTION_INFO_V1(bdr_join_nodegroup_sql);
+
+/*
+ * Join a local BDR node with no nodegroup to a peer node's nodegroup
+ * and establish replication with all existing peers of the nodegroup.
+ *
+ * This is the guts of BDR's node join. It's too complex to be documented
+ * entirely here. The final result is to:
+ *
+ * - Create bdr.nodes entry for this node on peer nodes, in catchup status
+ *   (Reserves the node's name as unique across the nodegroup)
+ * - Discover all other nodes and create local bdr.node entries for them
+ * - Create slots on all other nodes for this node
+ * - 
+ * 
+ * Later, we'll split out these later steps into a separate promote function
+ * and optionally run promotion immediately or delayed:
+ *
+ * - Create slots for peer nodes on this node
+ * - Allocate a global sequence ID to the node
+ * - Start replicating from this node to remote nodes
+ * - Create bdr.node entries for this node on remotes
+ * - Make node read/write
+ */
+Datum
+bdr_join_nodegroup_sql(PG_FUNCTION_ARGS)
+{
+	const char *join_target_dsn;
+	const char *nodegroup_name = NULL;
+	BdrNodeInfo *local;
+	BdrMessage *msg;
+	PGconn *conn;
+	Oid nodegroup_id;
+
+	if (PG_ARGISNULL(0))
+		ereport(ERROR,
+				(errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+				 errmsg("node join target connection string may not be null")));
+
+	join_target_dsn = text_to_cstring(PG_GETARG_TEXT_P(0));
+
+	if (!PG_ARGISNULL(1))
+	{
+		nodegroup_name = text_to_cstring(PG_GETARG_TEXT_P(1));
+		/*
+		 * TODO: allow explicit naming of nodegroup and check it's the same as
+		 * remote's nodegroup when we fetch remote info later.
+		 */
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("specifying a nodegroup to join is not yet supported")));
+	}
+
+	localinfo = bdr_check_local_node(true);
+
+	if (localinfo->bdr_nodegroup != NULL)
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("local node is already a member of a nodegroup, cannot join")));
+
+	/*
+	 * OK, so here what are our minimal requirements?
+	 *
+	 * - Tell remote node we exist
+	 * - Discover remote nodes
+	 * - Make local slots
+	 * - Make remote slots
+	 * - subscribe remote
+	 * - subscribe other remotes
+	 *
+	 * Let the dirty hacks commence!
+	 *
+	 * The *right* way this should work later is:
+	 *
+	 * - Take node state machine lock
+	 * - Propose state transition to 'initially joining'
+	 *    (attach join target dsn as extradata)
+	 * - wake the manager
+	 *
+	 * .. then the manager executes the join, appending states as it goes.
+	 *
+	 * But we're going to do absolutely none of that now. Instead it's time
+	 * for fire and forget submission of a remote join request message, then
+	 * blind local creation of the local side state.
+	 */
+	conn = bdr_join_connect_remote(join_target_dsn);
+
+	PG_TRY();
+	{
+		/*
+		 * Ask the join target to reserve our name on all peers
+		 * (in the process telling them we're joining).
+		 *
+		 * TODO: the manager should be doing all this asynchronously
+		 */
+		bdr_join_submit_request(conn, nodegroup_name,
+								localinfo->pgl_node->node_name);
+
+		/*
+		 * TODO: wait until join request succeeds
+		 */
+
+		nodegroup_id = bdr_join_copy_remote_nodegroup(conn, nodegroup_name, local);
+
+		/*
+		 * TODO: start up messaging system. We need it running early so that we
+		 * can update node statuses, etc. Peers know about us now since we got
+		 * consensus for our name allocation, so they'll be ready to talk to us.
+		 */
+		bdr_join_start_messaging();
+
+		/*
+		 * Subscribe to join target
+		 * TODO: but pause before starting actual data replay from target
+		 */
+		bdr_join_subscribe_join_target(conn, local);
+
+		bdr_join_copy_repset_memberships(conn, local);
+
+		bdr_join_copy_remote_nodes(conn, local);
+
+		/* TODO: copy initial consensus message position */
+		bdr_join_init_consensus_messages(conn, local);
+
+		/*
+		 * TODO: wait for subscription dump+restore to finish (in
+		 * state machine); can't do that when still in function....
+		 */
+
+		/*
+		 * Make origins for non-join-target peers. The join target origin
+		 * already exists. Then subscribe to all peers.
+		 *
+		 * We don't need inbound slots for peers to connect to us until
+		 * we plan to go read/write and promote.
+		 */
+		bdr_join_create_origins(local);
+
+		/*
+		 * Create subscriptions to peers, disabled until we go-live.
+		 *
+		 * TODO: enable subscriptions in fast-forward only mode to
+		 * get rid of excess resource retention on peers.
+		 */
+		bdr_join_create_subscriptions(local);
+
+		min_catchup_lsn = bdr_get_remote_insert_lsn(conn);
+		/*
+		 * TODO: record min catchup lsn in join progress/state
+		 */
+
+		/*
+		 * Tell peers we exist so they can make slots for us
+		 * to use. No need for them to subscribe yet.
+		 */
+		bdr_join_send_catchup_announce(local);
+
+		/*
+		 * We're now in catchup mode, waiting to be
+		 * ready to promote. Yay!
+		 *
+		 * TODO: but we ignore that, and node confirmations,
+		 * etc, and go straight to:
+		 */
+
+		/*
+		 * Ask join target to get us a node seq id, since we're planning on
+		 * going live.
+		 */
+		//bdr_join_send_seq_id_alloc_request(local); // TODO
+
+		/*
+		 * TODO: wait for node seq id assignment and all peers to have
+		 * confirmed our prior standby announce message so we know we have
+		 * slots, and ensure we replayed past join target's min catchup lsn,
+		 * then:
+		 */
+		bdr_join_create_slots(local);
+
+		/*
+		 * Become active by sending consensus message to peers via our join
+		 * target (or failing that, some other live peer). 
+		 */
+		bdr_join_send_active_announce(local);
+
+		/*
+		 * Finish join, switching to direct replay from peers, and
+		 * go read/write.
+		 */
+		bdr_join_go_active();
+	}
+	PG_CATCH();
+	{
+		PQfinish(conn);
+		PG_RE_THROW();
+	}
+	PG_END_TRY();
+
+	PQfinish(conn);
+}
+
 PG_FUNCTION_INFO_V1(bdr_replication_set_add_table);
 
 /*
@@ -371,3 +572,5 @@ bdr_submit_comment(PG_FUNCTION_ARGS)
 	snprintf(&handle_str[0], 33, UINT64_FORMAT, handle);
 	PG_RETURN_TEXT_P(cstring_to_text(handle_str));
 }
+
+PG_FUNCTION_INFO_V1(bdr.local_node_info);

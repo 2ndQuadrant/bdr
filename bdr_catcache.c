@@ -63,6 +63,21 @@ bdr_catcache_initialised(void)
 	return bdr_catcache_context != NULL;
 }
 
+const char *
+bdr_get_local_node_name(void)
+{
+	Assert(bdr_catcache_initialised());
+	if (local_bdr_node_info != NULL && local_bdr_node_info->bdr_node != NULL)
+		return local_bdr_node_info->pgl_node->node_name;
+	else
+	{
+		Assert(false); /* Crash here in CASSERT builds */
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("attempted to use BDR catalog cache when bdr is not active")));
+	}
+}
+
 uint32
 bdr_get_local_nodeid(void)
 {
