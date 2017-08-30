@@ -67,8 +67,6 @@
 
 PG_MODULE_MAGIC;
 
-PG_FUNCTION_INFO_V1(bdr_init_pgl_plugin);
-
 void _PG_init(void);
 
 /* FIXME: Get rid of this hardcoded limit */
@@ -117,59 +115,43 @@ bdr_worker_start(void)
 }
 
 /*
- * pglogical calls this plugin entrypoint when it sees our
- * 'bdr','bdr_init_pgl_plugin' row in the pglogical.plugins table.
- *
  * Here we register all the pglogical hooks and callbacks we need
  * to implement full BDR on top of pglogical. See pglogical_plugins.[ch]
  */
-Datum
-bdr_init_pgl_plugin(PG_FUNCTION_ARGS)
+static void
+bdr_register_pgl_plugin(void)
 {
-	int pglogical_version = PG_GETARG_INT32(0);
-	uint32 type PG_USED_FOR_ASSERTS_ONLY = PG_GETARG_INT32(1);
-	PGLPlugin *plugin = (PGLPlugin*)PG_GETARG_POINTER(2);
-	static int plugin_loaded = false;
-
-	Assert(type != PGLOGICAL_WORKER_NONE);
-
-	elog(bdr_debug_level, "pglogical loading BDR plugin");
-
-	if (plugin_loaded)
-		PG_RETURN_BOOL(false);
+	PGLPlugin		plugin;
 
 	/*
 	 * We record the pglogical version we were built against and complain if it
 	 * doesn't match at runtime. Currently an exact match is required.
 	 */
-	if (pglogical_version != PGLOGICAL_VERSION_NUM)
+	if (pgl_version_num() != PGLOGICAL_VERSION_NUM)
 		elog(ERROR, "BDR compiled against pglogical version %d but got %d",
-			 PGLOGICAL_VERSION_NUM, pglogical_version);
+			 PGLOGICAL_VERSION_NUM, pgl_version_num());
 
-	strncpy(NameStr(plugin->plugin_name), "bdr", NAMEDATALEN);
+	strncpy(NameStr(plugin.plugin_name), "bdr", NAMEDATALEN);
 
 	/*
 	 * All these callbacks must be safe if BDR isn't actually active
 	 * in the DB, as pglogical will call them anyway.
 	 */
-	plugin->worker_start = bdr_worker_start;
-	plugin->output_start = bdr_output_start;
-	plugin->start_replication_params = bdr_start_replication_params;
-	plugin->process_output_param = bdr_process_output_params;
+	plugin.worker_start = bdr_worker_start;
+	plugin.output_start = bdr_output_start;
+	plugin.start_replication_params = bdr_start_replication_params;
+	plugin.process_output_param = bdr_process_output_params;
 	/*
 	 * Hook pglogical manager's event loop to be notified about
 	 * readable/writeable sockets in our async messaging system.
 	 */
-	plugin->manager_wait_event = bdr_manager_wait_event;
-	plugin->manager_wait_event_set_recreated = bdr_messaging_wait_event_set_recreated;
-	plugin->manager_get_required_wait_event_space = bdr_get_wait_event_space_needed;
-	
-	plugin_loaded = true;
+	plugin.manager_wait_event = bdr_manager_wait_event;
+	plugin.manager_wait_event_set_recreated = bdr_messaging_wait_event_set_recreated;
+	plugin.manager_get_required_wait_event_space = bdr_get_wait_event_space_needed;
 
-	elog(bdr_debug_level, "BDR plugin loaded by pglogical");
+	pgl_register_plugin(&plugin);
 
-	/* enable plugin */
-	PG_RETURN_BOOL(true);
+	elog(bdr_debug_level, "BDR plugin for pglogical registered");
 }
 
 static void

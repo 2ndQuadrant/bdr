@@ -7,11 +7,6 @@ REVOKE ALL ON SCHEMA bdr FROM public;
 -- Necessary because we'll reference triggers and so on:
 GRANT USAGE ON SCHEMA bdr TO public;
 
--- BDR wants to be loaded by pglogical as a plugin, so it must register its
--- self with pglogical.
-INSERT INTO pglogical.plugins (plugin_module, plugin_entrypoint)
-VALUES ('bdr','bdr_init_pgl_plugin');
-
 CREATE TABLE bdr.node_group
 (
 	node_group_id oid NOT NULL PRIMARY KEY,
