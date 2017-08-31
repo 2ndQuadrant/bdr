@@ -1,5 +1,10 @@
 BDR3's inter-node messaging is a key part of the new system.
 
+At a high level, managers perform a 2PC consensus negotiation where all bdr
+managers accept and commit a consensus proposal, or none of them do. This is
+implemented through lower level message exchanges between managers, with normal
+backends and SQL function calls acting as a delivery transport.
+
 It's structured into a few modular components.
 
 bdr_msgbroker
@@ -135,3 +140,17 @@ they submitted, and learn of new accepted proposals.
 Initially it'll be a simpleish network 2PC. Later it'll be promoted to Raft or
 Paxos majority consensus (with an all-nodes consensus option still available
 for use when needed).
+
+Future work
+---
+
+In the near future we need to refactor this a bit, so both shm_mq facilities
+are merged together and shared. The merged facility should have two-way
+communication, a defined protocol between the peers, and the ability to send a
+batch of messages at once.
+
+* extract bdr_msgbuf_receive.c's shmem worker pool;
+* make it into coupled pairs of in and out queues like bdr_messaging.c uses, so we can reply;
+* adopt the same protocol and state tracking as used for bdr_messaging.c in the new queue;
+* extend it so it allows submission of multiple multiple messages in a single batch so we don't have to pass through the event loop each time;
+* expand the pool with a set of extra queues used first-come first-served by normal user backends and other bdr bgworkers - for ddl lock requests, ipc with manager, etc etc.
