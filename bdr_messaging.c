@@ -903,7 +903,12 @@ bdr_proposals_prepare(List *messages)
 				bdr_join_handle_join_proposal(msg);
 				break;
 			default:
-				elog(ERROR, "unhandled message type %u in prepare proposal",
+				/* 
+				 * TODO: should really ERROR here, but we'd have to fix shm mq 
+				 * submitters/receivers to recover more gracefully from manager
+				 * exits. Currently they get stuck if the manager dies.
+				 */
+				elog(WARNING, "unhandled message type %u in prepare proposal",
 					 msg->message_type);
 		}
 	}

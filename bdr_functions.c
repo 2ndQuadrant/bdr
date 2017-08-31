@@ -263,6 +263,8 @@ bdr_join_node_group_sql(PG_FUNCTION_ARGS)
 	 */
 	local = bdr_check_local_node(false);
 
+	bdr_cache_local_nodeinfo();
+
 	if (local->bdr_node_group != NULL)
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
@@ -306,7 +308,7 @@ bdr_join_node_group_sql(PG_FUNCTION_ARGS)
 		Assert(remote->pgl_node->id == remote->bdr_node->node_id);
 
 		if (remote->bdr_node_group->name != NULL
-			&& strcmp(remote->bdr_node_group->name, node_group_name) == 0)
+			&& strcmp(remote->bdr_node_group->name, node_group_name) != 0)
 		{
 			elog(ERROR, "remote node is member of nodegroup %s but we asked to join nodegroup %s",
 				 remote->bdr_node_group->name, node_group_name);

@@ -22,7 +22,7 @@ HACKS TO PAY DOWN AND TODOs TO FINISH
 
 - Permission checks in BDR internal SQL functions for join, messaging, etc
 
-- Move join process into manager
+- Move node join process into manager
 
 - Instead of restarting manager, notice when we add new nodes / remove nodes
 
@@ -43,6 +43,11 @@ HACKS TO PAY DOWN AND TODOs TO FINISH
 - move bdr_messaging IPC into bdr_consensus,
   unify with bdr_msgbroker_recieve so we have a single pool of
   workers that can accept submits  (see README.messaging "future work")
+
+- Fix submit of messages to manager so it doesn't hang indefinitely if
+  manager dies. Need to either get bgworker handle (struct is private, but
+  we can cheat), or switch to non-blocking MQs and check for pid change
+  in manager PGPROC as found in bdr shmem seg
 
 FUTURE WORK
 ---
