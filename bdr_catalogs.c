@@ -482,7 +482,7 @@ bdr_get_nodes_info(Oid in_group_id)
 	{
 		BdrNode *bnode = bdr_node_fromtuple(tuple);
 
-		if (in_group_id != 0 && nodeinfo->bdr_node->node_group_id != in_group_id)
+		if (in_group_id != 0 && bnode->node_group_id != in_group_id)
 			continue;
 
 		nodeinfo = palloc(sizeof(BdrNodeInfo));
