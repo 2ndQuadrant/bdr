@@ -860,10 +860,12 @@ bdr_proposals_receive(ConsensusProposal *msg)
 	}
 	else if (bmsg->message_type == BDR_MSG_NODE_JOIN_REQUEST)
 	{
+		/* Print the message. Bit verbose.... */
 		BdrMsgJoinRequest req;
 		StringInfoData buf, loginfo;
 		wrapInStringInfo(&buf, msg->payload, msg->payload_length);
 		msg_deserialize_join_request(&buf, &req);
+		initStringInfo(&loginfo);
 		msg_stringify_join_request(&loginfo, &req);
 		elog(bdr_debug_level, "BDR join request message from %u: %s",
 			msg->sender_nodeid, loginfo.data);
