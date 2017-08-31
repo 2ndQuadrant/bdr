@@ -35,14 +35,15 @@
 #include "pglogical_worker.h"
 #include "pglogical_plugins.h"
 
-#include "bdr_shmem.h"
 #include "bdr_catalogs.h"
 #include "bdr_catcache.h"
 #include "bdr_consensus.h"
 #include "bdr_join.h"
+#include "bdr_messaging.h"
 #include "bdr_msgbroker.h"
 #include "bdr_msgbroker_send.h"
-#include "bdr_messaging.h"
+#include "bdr_msgformats.h"
+#include "bdr_shmem.h"
 #include "bdr_worker.h"
 
 typedef enum SubmitMQMessageType
@@ -856,6 +857,22 @@ bdr_proposals_receive(ConsensusProposal *msg)
 	{
 		elog(bdr_debug_level, "BDR comment msg from %u: \"%s\"",
 			 msg->sender_nodeid, bmsg->payload);
+	}
+	else if (bmsg->message_type == BDR_MSG_NODE_JOIN_REQUEST)
+	{
+		BdrMsgJoinRequest req;
+		StringInfoData buf, loginfo;
+		wrapInStringInfo(&buf, msg->payload, msg->payload_length);
+		msg_deserialize_join_request(&buf, &req);
+		msg_stringify_join_request(&loginfo, &req);
+		elog(bdr_debug_level, "BDR join request message from %u: %s",
+			msg->sender_nodeid, loginfo.data);
+		pfree(loginfo.data);
+	}
+	else
+	{
+		elog(bdr_debug_level, "unrecognised BDR message type %d ignored",
+			 bmsg->message_type);
 	}
 
     /* TODO: can nack messages here */

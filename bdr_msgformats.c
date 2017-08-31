@@ -24,6 +24,7 @@
 void
 wrapInStringInfo(StringInfo si, char *data, Size length)
 {
+	Assert(si->data != NULL);
 	si->data = data;
 	si->len = length;
 	si->maxlen = -1;
@@ -61,4 +62,22 @@ msg_deserialize_join_request(StringInfo join_request,
 	request->joining_node_if_dsn = pq_getmsgstring(join_request);
 	request->join_target_node_name = pq_getmsgstring(join_request);
 	request->join_target_node_id = pq_getmsgint(join_request, 4);
+}
+
+void
+msg_stringify_join_request(StringInfo out, BdrMsgJoinRequest *request)
+{
+	appendStringInfo(out,
+		"nodegroup: name %s, id: %u; ",
+		request->nodegroup_name, request->nodegroup_id);
+
+	appendStringInfo(out,
+		"joining node: name %s, id %u, state %d, ifname %s, ifid %u, dsn %s; ",
+		request->joining_node_name, request->joining_node_id,
+		request->joining_node_state, request->joining_node_if_name,
+		request->joining_node_if_id, request->joining_node_if_dsn);
+
+	appendStringInfo(out,
+		"join target: name %s, id %u",
+		request->join_target_node_name, request->join_target_node_id);
 }

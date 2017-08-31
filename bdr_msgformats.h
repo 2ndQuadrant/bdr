@@ -28,6 +28,8 @@ extern void msg_serialize_join_request(StringInfo join_request,
 	BdrMsgJoinRequest *request);
 extern void msg_deserialize_join_request(StringInfo join_request,
 	BdrMsgJoinRequest *request);
+extern void msg_stringify_join_request(StringInfo out,
+	BdrMsgJoinRequest *request);
 
 extern void wrapInStringInfo(StringInfo si, char *data, Size length);
 

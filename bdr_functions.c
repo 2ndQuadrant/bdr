@@ -254,7 +254,14 @@ bdr_join_node_group_sql(PG_FUNCTION_ARGS)
 	if (!PG_ARGISNULL(1))
 		node_group_name = text_to_cstring(PG_GETARG_TEXT_P(1));
 
-	local = bdr_check_local_node(true);
+	/*
+	 * TODO FIXME should take for-update lock here
+	 *
+	 * We should probably lock our local node for update, but if we do that at
+	 * the moment we'll deadlock with the manager's attempts to manage apply
+	 * workers.
+	 */
+	local = bdr_check_local_node(false);
 
 	if (local->bdr_node_group != NULL)
 		ereport(ERROR,
