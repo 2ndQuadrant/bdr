@@ -1,0 +1,53 @@
+NEXT STEPS TO PROGRESS
+----
+
+- Finish bdr_join_copy_remote_nodes (copy pgl nodes too, factor out 'existing_origin' stuff from 'pglogical_create_subscription')
+- Finish rest of funcs in bdr_join_nodegroup_sql
+- Delay starting messaging until have nodelist and nodegroup (manager)
+- Implement consensus operation handlers for (not real consensus yet, but)
+  - node name reserve
+  - node standby (make slots)
+  - node active (make origins+subscriptions, start replaying)
+
+then BDR will work. So long as you don't expect consisent join. Or part.
+Or crash safety. Or anything else, really.
+
+COMPAT STUFF
+---
+
+bdr.bdr_group_create wrapper around bdr.create_node and bdr.create_node_group
+
+HACKS TO PAY DOWN AND TODOs TO FINISH
+----
+
+- Move the messaging into a separate worker, lifetime managed by the pgl manager,
+  and do all the bdr IPC/messaging via it. Fixes issues with long running xacts
+  in manager, event loop spam, etc. Then unhack pglogical manager accordingly.
+
+- allow submission of multiple msgs in a loop on shmem so we don't have
+  to re-enter event loop with xact held open. can still happen due to
+  buffer sizes etc, but less likely. (see README.messaging "future work")
+
+- move bdr_messaging IPC into bdr_consensus,
+  unify with bdr_msgbroker_recieve so we have a single pool of
+  workers that can accept submits  (see README.messaging "future work")
+
+FUTURE WORK
+---
+
+- Split out pglogical_replication_set_add_table row filter / attribute filter
+  setup code for re-use by BDR
+
+- one day we'll need a "domain" for consensus messages, with per-domain
+  counters, to support multiple nodegroups...
+
+SANITY CHECKS AND DEFENSES NEEDED
+---
+
+- In output plugin check that repsets subscribed-to are bdr sets
+
+- Starting join should make node read-only
+
+- Disallow consensus messages until part of a nodegroup
+
+- Check pg_depend for relationship to local pglogical node
