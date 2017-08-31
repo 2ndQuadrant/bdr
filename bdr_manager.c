@@ -104,27 +104,4 @@ bdr_manager_wait_event(struct WaitEvent *events, int nevents,
 		return;
 
 	bdr_messaging_wait_event(events, nevents, max_next_wait_msecs);
-
-	/*
-	 * For testing purposes, enqueue some messages here and expect to receive
-	 * them through the receive/prepare/commit process.
-	 *
-	 * Submit messages only intermittently.
-	 */
-	if ((iteration_counter ++) % 5 == 0)
-	{
-		dummy_payload = "dummy payload";
-		dummy_payload_length = strlen(dummy_payload) + 1;
-
-		msg = palloc(offsetof(BdrMessage,payload) + dummy_payload_length);
-		msg->message_type = BDR_MSG_COMMENT;
-		msg->payload_length = dummy_payload_length;
-		memcpy(msg->payload, dummy_payload, dummy_payload_length);
-
-		handle = bdr_msgs_enqueue_one(msg);
-		if (handle == 0)
-			elog(WARNING, "XXX manager couldn't enqueue message, will try again later"); /* XXX */
-		else
-			elog(WARNING, "XXX manager enqueued message with handle "UINT64_FORMAT, handle); /* XXX */
-	}
 }
