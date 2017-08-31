@@ -1,6 +1,9 @@
 #ifndef BDR_MSGFORMATS_H
 #define BDR_MSGFORMATS_H
 
+#define MAX_DIGITS_INT32 11
+#define MAX_DIGITS_INT64 21
+
 /*
  * A request to join a peer node.
  *

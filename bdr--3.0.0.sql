@@ -158,8 +158,10 @@ RETURNS TABLE (node_id oid, node_name text, bdr_local_state oid, bdr_seq_id inte
 CALLED ON NULL INPUT VOLATILE
 LANGUAGE c AS 'MODULE_PATHNAME','bdr_node_group_member_info';
 
-CREATE FUNCTION bdr.internal_submit_join_request(nodegroup_id oid,
-	joining_node_name text, joining_node_id oid)
+CREATE FUNCTION bdr.internal_submit_join_request(nodegroup_name text,
+	joining_node_name text, joining_node_id oid, joining_node_state oid,
+	joining_node_if_name text, joining_node_if_id oid,
+	joining_node_if_connstr text)
 RETURNS text /* actually uint64 */
 CALLED ON NULL INPUT VOLATILE
 LANGUAGE c AS 'MODULE_PATHNAME','bdr_internal_submit_join_request';

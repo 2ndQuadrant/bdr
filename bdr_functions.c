@@ -447,42 +447,61 @@ PG_FUNCTION_INFO_V1(bdr_internal_submit_join_request);
 Datum
 bdr_internal_submit_join_request(PG_FUNCTION_ARGS)
 {
-	const char *nodegroup_name;
-	const char *remote_node_name;
-	Oid remote_node_id;
-	int remote_node_state;
 	BdrNodeInfo *local;
-	char handle_str[30];
+	char handle_str[MAX_DIGITS_INT64];
 	uint64 handle;
 	StringInfoData reqbuf;
 	BdrMsgJoinRequest jreq;
 	BdrMessage *msg;
 
+	memset(&jreq, 0, sizeof(BdrMsgJoinRequest));
+
 	if (PG_ARGISNULL(0))
-		nodegroup_name = NULL;
+		jreq.nodegroup_name = NULL;
 	else
-		nodegroup_name = text_to_cstring(PG_GETARG_TEXT_P(0));
+		jreq.nodegroup_name = text_to_cstring(PG_GETARG_TEXT_P(0));
 
 	if (PG_ARGISNULL(1))
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 				 errmsg("remote node name cannot be NULL")));
 
-	remote_node_name = text_to_cstring(PG_GETARG_TEXT_P(1));
+	jreq.joining_node_name = text_to_cstring(PG_GETARG_TEXT_P(1));
 
 	if (PG_ARGISNULL(2))
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 				 errmsg("remote node id cannot be NULL")));
 
-	remote_node_id = PG_GETARG_OID(2);
+	jreq.joining_node_id = PG_GETARG_OID(2);
 
 	if (PG_ARGISNULL(3))
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 				 errmsg("remote node state cannot be NULL")));
 
-	remote_node_state = PG_GETARG_OID(3);
+	jreq.joining_node_state = PG_GETARG_INT32(3);
+
+	if (PG_ARGISNULL(4))
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("remote node interface name cannot be NULL")));
+
+	jreq.joining_node_if_name = text_to_cstring(PG_GETARG_TEXT_P(4));
+
+	if (PG_ARGISNULL(5))
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("remote node interface id cannot be NULL")));
+
+	jreq.joining_node_if_id = PG_GETARG_OID(5);
+
+	if (PG_ARGISNULL(6))
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("remote node interface connection string cannot be NULL")));
+
+	jreq.joining_node_if_dsn = text_to_cstring(PG_GETARG_TEXT_P(6));
 
 	local = bdr_check_local_node(true);
 
@@ -490,27 +509,21 @@ bdr_internal_submit_join_request(PG_FUNCTION_ARGS)
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("this bdr node %s is not part of a node group, cannot be used as join target by node %s",
-				 		local->pgl_node->name, remote_node_name)));
+				 		local->pgl_node->name, jreq.joining_node_name)));
 
-	if (nodegroup_name == NULL)
-		nodegroup_name = local->bdr_node_group->name;
-	else if (strcmp(nodegroup_name, local->bdr_node_group->name) != 0)
+	if (jreq.nodegroup_name == NULL)
+		jreq.nodegroup_name = local->bdr_node_group->name;
+	else if (strcmp(jreq.nodegroup_name, local->bdr_node_group->name) != 0)
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("this bdr node %s is a member of nodegroup %s, joining peer %s cannot join to %s",
 				 		local->pgl_node->name, local->bdr_node_group->name,
-						remote_node_name, nodegroup_name)));
-
+						jreq.joining_node_name, jreq.nodegroup_name)));
 	/*
 	 * Submit a consensus proposal to the local manager node, asking
 	 * that the new node be allowed to join the node group.
 	 */
-	memset(&jreq, 0, sizeof(BdrMsgJoinRequest));
-	jreq.nodegroup_name = nodegroup_name;
 	jreq.nodegroup_id = local->bdr_node_group->id;
-	jreq.joining_node_name = remote_node_name;
-	jreq.joining_node_id = remote_node_id;
-	jreq.joining_node_state = remote_node_state;
 	jreq.join_target_node_name = local->pgl_node->name;
 	jreq.join_target_node_id = local->pgl_node->id;
 	msg_serialize_join_request(&reqbuf, &jreq);
@@ -520,9 +533,10 @@ bdr_internal_submit_join_request(PG_FUNCTION_ARGS)
 	msg->payload_length = reqbuf.len;
 	memcpy(msg->payload, reqbuf.data, reqbuf.len);
 
+	bdr_cache_local_nodeinfo();
 	handle = bdr_msgs_enqueue_one(msg);
 
-	snprintf(handle_str, 30, UINT64_FORMAT, handle);
+	snprintf(handle_str, MAX_DIGITS_INT64, UINT64_FORMAT, handle);
 	PG_RETURN_TEXT_P(cstring_to_text(handle_str));
 }
 

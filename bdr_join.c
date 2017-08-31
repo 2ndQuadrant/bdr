@@ -81,22 +81,32 @@ uint64
 bdr_join_submit_request(PGconn *conn, const char * node_group_name,
 						BdrNodeInfo *local)
 {
-	Oid paramTypes[4] = {TEXTOID, TEXTOID, OIDOID, OIDOID};
-	const char *paramValues[4];
+	Oid paramTypes[7] = {TEXTOID, TEXTOID, OIDOID, INT4OID, TEXTOID, OIDOID, TEXTOID};
+	const char *paramValues[7];
 	const char *val;
-	char my_node_id[30];
-	char my_node_initial_state[30];
+	char my_node_id[MAX_DIGITS_INT32];
+	char my_node_initial_state[MAX_DIGITS_INT32];
+	char my_node_if_id[MAX_DIGITS_INT32];
 	uint64 consensus_msg_handle;
 	PGresult *res;
 
+	Assert(local->pgl_interface != NULL);
+
 	paramValues[0] = node_group_name;
 	paramValues[1] = local->pgl_node->name;
-	snprintf(my_node_id, 30, "%u", local->bdr_node->node_id);
+	snprintf(my_node_id, MAX_DIGITS_INT32, "%u",
+		local->bdr_node->node_id);
 	paramValues[2] = my_node_id;
-	snprintf(my_node_initial_state, 30, "%u", local->bdr_node->local_state);
+	snprintf(my_node_initial_state, MAX_DIGITS_INT32, "%d",
+		local->bdr_node->local_state);
 	paramValues[3] = my_node_initial_state;
-	res = PQexecParams(conn, "SELECT bdr.internal_submit_join_request($1, $2, $3, $4)",
-					   4, paramTypes, paramValues, NULL, NULL, 0);
+	paramValues[4] = local->pgl_interface->name;
+	snprintf(my_node_if_id, MAX_DIGITS_INT32, "%u",
+		local->pgl_interface->id);
+	paramValues[5] = my_node_if_id;
+	paramValues[6] = local->pgl_interface->dsn;
+	res = PQexecParams(conn, "SELECT bdr.internal_submit_join_request($1, $2, $3, $4, $5, $6, $7)",
+					   7, paramTypes, paramValues, NULL, NULL, 0);
 
 	if (PQresultStatus(res) != PGRES_TUPLES_OK)
 	{
@@ -283,7 +293,7 @@ bdr_join_copy_remote_nodes(PGconn *conn, BdrNodeInfo *local)
 {
 	Oid			paramTypes[1] = {OIDOID};
 	const char *paramValues[1];
-	char		nodeid[30];
+	char		nodeid[MAX_DIGITS_INT32];
 	int			i;
 	PGresult   *res;
 	Oid			node_group_id = local->bdr_node_group->id;
