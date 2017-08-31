@@ -503,7 +503,8 @@ bdr_internal_submit_join_request(PG_FUNCTION_ARGS)
 
 	jreq.joining_node_if_dsn = text_to_cstring(PG_GETARG_TEXT_P(6));
 
-	local = bdr_check_local_node(true);
+	/* We're not updating the node, just asking the manager to */
+	local = bdr_check_local_node(false);
 
 	if (local->bdr_node_group == NULL)
 		ereport(ERROR,
