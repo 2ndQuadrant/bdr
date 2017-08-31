@@ -119,14 +119,14 @@ bdr_create_node_sql(PG_FUNCTION_ARGS)
 	PG_RETURN_OID(bnode.node_id);
 }
 
-PG_FUNCTION_INFO_V1(bdr_create_nodegroup_sql);
+PG_FUNCTION_INFO_V1(bdr_create_node_group_sql);
 
 /*
  * Create a new BDR nodegroup and make it the nodegroup
  * of the local BDR node.
  */
 Datum
-bdr_create_nodegroup_sql(PG_FUNCTION_ARGS)
+bdr_create_node_group_sql(PG_FUNCTION_ARGS)
 {
 	BdrNodeGroup nodegroup;
 	BdrNodeInfo *info;

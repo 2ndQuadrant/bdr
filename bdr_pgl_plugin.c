@@ -131,6 +131,8 @@ bdr_register_pgl_plugin(void)
 		elog(ERROR, "BDR compiled against pglogical version %d but got %d",
 			 PGLOGICAL_VERSION_NUM, pgl_version_num());
 
+	memset(&plugin, 0, sizeof(plugin));
+
 	strncpy(NameStr(plugin.plugin_name), "bdr", NAMEDATALEN);
 
 	/*

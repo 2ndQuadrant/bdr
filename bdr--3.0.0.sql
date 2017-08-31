@@ -19,7 +19,7 @@ REVOKE ALL ON bdr.node_group FROM public;
 CREATE TABLE bdr.node
 (
 	pglogical_node_id oid NOT NULL PRIMARY KEY,
-	node_group_id oid NOT NULL REFERENCES bdr.node_group(node_group_id)
+	node_group_id oid NOT NULL REFERENCES bdr.node_group(node_group_id),
 	local_state oid NOT NULL,
 	seq_id integer NOT NULL,
 	confirmed_our_join bool NOT NULL
@@ -104,16 +104,16 @@ LANGUAGE c AS 'MODULE_PATHNAME','bdr_create_node_sql';
 COMMENT ON FUNCTION bdr.create_node(text, text) IS
 'Create a new local BDR node';
 
-CREATE FUNCTION bdr.create_node_group(nod e_group_name text)
+CREATE FUNCTION bdr.create_node_group(node_group_name text)
 RETURNS oid CALLED ON NULL INPUT VOLATILE
-LANGUAGE c AS 'MODULE_PATHNAME','bdr_create_nodegroup_sql';
+LANGUAGE c AS 'MODULE_PATHNAME','bdr_create_node_group_sql';
 
 COMMENT ON FUNCTION bdr.create_node_group(text) IS
 'Create a new local BDR node group and make the local node the first member';
 
 CREATE FUNCTION bdr.join_node_group(join_target_dsn text, node_group_name text)
 RETURNS void CALLED ON NULL INPUT VOLATILE
-LANGUAGE c AS 'MODULE_PATHNAME','bdr_create_node_group_sql';
+LANGUAGE c AS 'MODULE_PATHNAME','bdr_join_node_group_sql';
 
 COMMENT ON FUNCTION bdr.join_node_group(text,text) IS
 'Join an existing BDR node group on peer at ''dsn''';
@@ -151,7 +151,7 @@ CREATE FUNCTION bdr.local_node_info(
 	nodegroup_id OUT oid,
 	nodegroup_name OUT text
 )
-RETURNS record VOLATILE LANGUAGE c AS 'MODULE_PATHNAME','bdr_local_node_info';
+RETURNS record VOLATILE LANGUAGE c AS 'MODULE_PATHNAME','bdr_local_node_info_sql';
 
 CREATE FUNCTION bdr.node_group_member_info(nodegroup_id oid)
 RETURNS TABLE (node_id oid, node_name text, bdr_local_state oid, bdr_seq_id integer)
@@ -163,9 +163,6 @@ CREATE FUNCTION bdr.internal_submit_join_request(nodegroup_id oid,
 RETURNS text /* actually uint64 */
 CALLED ON NULL INPUT VOLATILE
 LANGUAGE c AS 'MODULE_PATHNAME','bdr_internal_submit_join_request';
-
-Datum
-bdr_internal_submit_join_request(PG_FUNCTION_ARGS)
 
 /*
  * Helper views

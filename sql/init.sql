@@ -21,17 +21,17 @@ SELECT E'\'' || current_database() || E'\'' AS node2_db
 CREATE FUNCTION bdr_submit_comment(message text)
 RETURNS text LANGUAGE c STRICT AS 'bdr','bdr_submit_comment';
 
-SELECT * FROM bdr_node_group_member_info(NULL);
+SELECT * FROM bdr.node_group_member_info(NULL);
 
 SELECT 1
 FROM bdr.create_node(node_name := 'node1', local_dsn := :'node1_dsn' || ' user=super');
 
-SELECT * FROM bdr_node_group_member_info(NULL);
+SELECT * FROM bdr.node_group_member_info(NULL);
 
 SELECT 1
 FROM bdr.create_node_group('bdrgroup');
 
-SELECT * FROM bdr_node_group_member_info((SELECT node_group_id FROM bdr.node_group));
+SELECT * FROM bdr.node_group_member_info((SELECT node_group_id FROM bdr.node_group));
 
 SELECT * FROM bdr.node_group_replication_sets;
 
@@ -42,7 +42,7 @@ SELECT slot_name FROM pg_create_logical_replication_slot(pglogical.pglogical_gen
 
 \c :node2_dsn
 
-SELECT * FROM bdr_node_group_member_info(NULL);
+SELECT * FROM bdr.node_group_member_info(NULL);
 
 SELECT 1
 FROM bdr.create_node(node_name := 'node2', local_dsn := :'node2_dsn' || ' user=super');
@@ -50,12 +50,12 @@ FROM bdr.create_node(node_name := 'node2', local_dsn := :'node2_dsn' || ' user=s
 SELECT 1
 FROM bdr.join_node_group(:'node1_dsn', 'nosuch-nodegroup');
 
-SELECT * FROM bdr_node_group_member_info((SELECT node_group_id FROM bdr.node_group));
+SELECT * FROM bdr.node_group_member_info((SELECT node_group_id FROM bdr.node_group));
 
 SELECT 1
 FROM bdr.join_node_group(:'node1_dsn', 'bdrgroup');
 
-SELECT * FROM bdr_node_group_member_info((SELECT node_group_id FROM bdr.node_group));
+SELECT * FROM bdr.node_group_member_info((SELECT node_group_id FROM bdr.node_group));
 SELECT * FROM bdr.node_group_replication_sets;
 
 -- Subscribe to the first node
