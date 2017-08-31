@@ -68,7 +68,7 @@ bdr_get_local_node_name(void)
 {
 	Assert(bdr_catcache_initialised());
 	if (local_bdr_node_info != NULL && local_bdr_node_info->bdr_node != NULL)
-		return local_bdr_node_info->pgl_node->node_name;
+		return local_bdr_node_info->pgl_node->name;
 	else
 	{
 		Assert(false); /* Crash here in CASSERT builds */

@@ -16,27 +16,36 @@
  */
 #include "postgres.h"
 
+#include "catalog/pg_type.h"
+
 #include "fmgr.h"
 
+#include "libpq-fe.h"
+
 #include "utils/builtins.h"
+#include "utils/pg_lsn.h"
 
 #include "pglogical_node.h"
 #include "pglogical_repset.h"
 
-#include "bdr_catalogs.h"
 #include "bdr_catcache.h"
 #include "bdr_messaging.h"
+#include "bdr_msgformats.h"
 #include "bdr_functions.h"
+#include "bdr_join.h"
+#include "bdr_worker.h"
 
 PGconn *
-bdr_join_connect_remote(const char * remote_node_dsn)
+bdr_join_connect_remote(const char * remote_node_dsn,
+	BdrNodeInfo *local)
 {
-	char *connkeys[3] = {"dbname", "application_name", NULL};
-	char *connvalues[3]
-	PGConn *conn;
+	const char *connkeys[3] = {"dbname", "application_name", NULL};
+	const char *connvalues[3];
+	PGconn *conn;
 	char appname[NAMEDATALEN];
 
-	snprintf(appname, NAMEDATALEN, "bdr join: %s", my_node_name);
+	snprintf(appname, NAMEDATALEN, "bdr join: %s",
+		local->pgl_node->name);
 	appname[NAMEDATALEN-1] = '\0';
 
 	connvalues[0] = remote_node_dsn;
@@ -51,6 +60,12 @@ bdr_join_connect_remote(const char * remote_node_dsn)
 	return conn;
 }
 
+void
+bdr_finish_connect_remote(PGconn *conn)
+{
+	PQfinish(conn);
+}
+
 /*
  * Make a normal libpq connection to the remote node and submit a node-join
  * request.
@@ -62,17 +77,26 @@ bdr_join_connect_remote(const char * remote_node_dsn)
  * 		 join progress. That way we know it's us that joined successfully
  * 		 not someone else when we poll for success.
  */
-void
+uint64
 bdr_join_submit_request(PGconn *conn, const char * node_group_name,
-						const char *my_node_name)
+						BdrNodeInfo *local)
 {
-	Oid paramTypes[2] = {TEXTOID, TEXTOID};
-	char *paramValues[2];
+	Oid paramTypes[4] = {TEXTOID, TEXTOID, OIDOID, OIDOID};
+	const char *paramValues[4];
+	const char *val;
+	char my_node_id[30];
+	char my_node_initial_state[30];
+	uint64 consensus_msg_handle;
+	PGresult *res;
 
 	paramValues[0] = node_group_name;
-	paramValues[1] = my_node_name;
-	res = PQexecParams(conn, "SELECT bdr.internal_submit_join_request($1, $2)",
-					   2, paramTypes, paramValues, NULL, NULL, 0);
+	paramValues[1] = local->pgl_node->name;
+	snprintf(my_node_id, 30, "%u", local->bdr_node->node_id);
+	paramValues[2] = my_node_id;
+	snprintf(my_node_initial_state, 30, "%u", local->bdr_node->local_state);
+	paramValues[3] = my_node_initial_state;
+	res = PQexecParams(conn, "SELECT bdr.internal_submit_join_request($1, $2, $3, $4)",
+					   4, paramTypes, paramValues, NULL, NULL, 0);
 
 	if (PQresultStatus(res) != PGRES_TUPLES_OK)
 	{
@@ -81,34 +105,80 @@ bdr_join_submit_request(PGconn *conn, const char * node_group_name,
 				(errmsg("failed to submit join request on join target: %s", PQerrorMessage(conn))));
 	}
 
+	val = PQgetvalue(res, 0, 0);
+	if (sscanf(val, UINT64_FORMAT, &consensus_msg_handle) != 1)
+		elog(ERROR, "could not parse consensus message handle from remote");
+
 	PQclear(res);
+
+	return consensus_msg_handle;
 }
 
 /*
- * Clone a remote BDR node's nodegroup to the local node and make the local node
- * a member of it. Create the default repset for the nodegroup in the process.
+ * Handle a remote request to join by creating the remote node entry.
  *
- * Returns the created nodegroup id.
+ * At this point the proposal isn't committed yet, and we're in a
+ * consensus manager transaction that'll prepare it if we succeed.
  */
-Oid
-bdr_join_copy_remote_nodegroup(PGconn *conn, const char *node_group_name, BdrNodeInfo *local)
+void
+bdr_join_handle_join_proposal(BdrMessage *msg)
 {
-	BdrNodeGroup		nodegroup;
-	BdrNodeInfo		   *info;
-	PGLogicalRepSet		repset;
-	PGresult			res;
-	const char		   *remote_group_name;
-	Oid					remote_group_id;
+	BdrMsgJoinRequest req;
+	StringInfoData si;
+	BdrNodeGroup *local_nodegroup;
+	BdrNode bnode;
+	PGLogicalNode pnode;
+	PGlogicalInterface pnodeif;
+
+	Assert(is_bdr_manager());
+
+	wrapInStringInfo(&si, msg->payload, msg->payload_length);
+	msg_deserialize_join_request(&si, &req);
+
+	local_nodegroup = bdr_get_nodegroup_by_name(req.nodegroup_name, false);
+	if (req.nodegroup_id != 0 && local_nodegroup->id != req.nodegroup_id)
+		elog(ERROR, "expected nodegroup %s to have id %u but local nodegroup id is %u",
+			 req.nodegroup_name, req.nodegroup_id, local_nodegroup->id);
+
+	if (req.joining_node_id == 0)
+		elog(ERROR, "joining node id must be nonzero");
+
+	pnode.id = req.joining_node_id;
+	pnode.name = (char*)req.joining_node_name;
+
+	bnode.node_id = req.joining_node_id;
+	bnode.node_group_id = local_nodegroup->id;
+	bnode.local_state = req.joining_node_state;
+	bnode.seq_id = 0;
+
+	pnodeif.id = req.joining_node_if_id;
+	pnodeif.name = req.joining_node_if_name;
+	pnodeif.nodeid = pnode.id;
+	pnodeif.dsn = req.joining_node_if_dsn;
 
 	/*
-	 * Look up the local node on the remote so we can get the info
-	 * we need about the nodegroup.
+	 * TODO: should treat node as join-confirmed if we're an active
+	 * node ourselves.
 	 */
-	/*
-	 * TODO: hide behind info func to ease future catalog changes?
-	 * Right now assumes there's only one nodegroup, no nodegroups can exist in catalog that aren't associated with local node, etc....
-	 */
-	res = PQexec(conn, "SELECT node_group_id, node_group_name FROM bdr.node_group");
+	bnode.confirmed_our_join = false;
+	/* Ignoring join_target_node_name and join_target_node_id for now */
+
+	create_node(&pnode);
+	create_node_interface(&pnodeif);
+	bdr_node_create(&bnode);
+}
+
+/*
+ * Probe a remote node to get BdrNodeInfo for the node.
+ */
+BdrNodeInfo *
+get_remote_node_info(PGconn *conn)
+{
+	BdrNodeInfo    *remote;
+	char		   *val;
+	PGresult	   *res;
+
+	res = PQexec(conn, "SELECT node_id, node_name, node_local_state, node_seq_id, nodegroup_id, nodegroup_name FROM bdr.local_node_info()");
 	if (PQresultStatus(res) != PGRES_TUPLES_OK)
 	{
 		PQclear(res);
@@ -121,52 +191,87 @@ bdr_join_copy_remote_nodegroup(PGconn *conn, const char *node_group_name, BdrNod
 		int ntuples = PQntuples(res);
 		PQclear(res);
 		ereport(ERROR,
-				(errmsg("expected only one nodegroup on remote, found %d", ntuples));
+				(errmsg("expected only one row from bdr.local_node_info(), got %d", ntuples)));
 	}
 
-	remote_group_name = PQgetvalue(res, 0, 0);
+	remote = palloc(sizeof(BdrNodeInfo));
+	remote->bdr_node = palloc(sizeof(BdrNode));
+	remote->bdr_node_group = palloc(sizeof(BdrNodeGroup));
+	remote->pgl_node = palloc(sizeof(PGLogicalNode));
+	remote->pgl_interface = NULL;
 
-	if (node_group_name != NULL && strcmp(remote_group_name, node_group_name) == 0)
-	{
-		elog(ERROR, "remote node is member of nodegroup %s but we asked to join nodegroup %s",
-			 remote_group_name, node_group_name);
-	}
+	val = PQgetvalue(res, 0, 0);
+	if (sscanf(val, "%u", &remote->bdr_node->node_id) != 1)
+		elog(ERROR, "could not parse remote node id");
 
-	if (sscanf(PQgetvalue(res, 0, 1), "%u", &remote_group_id) != 1)
+	remote->pgl_node->id = remote->bdr_node->node_id;
+
+	remote->pgl_node->name = pstrdup(PQgetvalue(res, 0, 1));
+
+	val = PQgetvalue(res, 0, 2);
+	if (sscanf(val, "%u", &remote->bdr_node->local_state) != 1)
+		elog(ERROR, "could not parse remote node state");
+
+	val = PQgetvalue(res, 0, 3);
+	if (sscanf(val, "%d", &remote->bdr_node->seq_id) != 1)
+		elog(ERROR, "could not parse remote node sequence id");
+
+	val = PQgetvalue(res, 0, 4);
+	if (sscanf(val, "%u", &remote->bdr_node_group->id) != 1)
 		elog(ERROR, "could not parse remote nodegroup id");
 
-	if (remote_group_id == 0)
-		elog(ERROR, "invalid remote nodegroup id 0");
+	remote->bdr_node_group->name = pstrdup(PQgetvalue(res, 0, 5));
+
+	return remote;
+}
+
+/*
+ * Clone a remote BDR node's nodegroup to the local node and make the local node
+ * a member of it. Create the default repset for the nodegroup in the process.
+ *
+ * Returns the created nodegroup id.
+ */
+void
+bdr_join_copy_remote_nodegroup(BdrNodeInfo *local, BdrNodeInfo *remote)
+{
+	BdrNodeGroup	   *newgroup = palloc(sizeof(BdrNodeGroup));
+	PGLogicalRepSet		repset;
 
 	/*
-	 * Create local nodegroup with the same ID, a matching replication set, and
+	 * Look up the local node on the remote so we can get the info
+	 * we need about the newgroup.
+	 */
+	Assert(local->bdr_node_group == NULL);
+
+	/*
+	 * Create local newgroup with the same ID, a matching replication set, and
 	 * bind our node to it. Very similar to what happens in
-	 * bdr_create_nodegroup_sql().
+	 * bdr_create_newgroup_sql().
 	 */
 	repset.id = InvalidOid;
 	repset.nodeid = local->bdr_node->node_id;
-	repset.name = remote_group_name;
+	repset.name = (char*)remote->bdr_node_group->name;
 	repset.replicate_insert = true;
 	repset.replicate_update = true;
 	repset.replicate_delete = true;
 	repset.replicate_truncate = true;
 	repset.isinternal = true;
 
-	nodegroup.id = remote_group_id;
-	nodegroup.name = remote_group_name;
-	nodegroup.default_repset = create_replication_set(&repset);
-	if (bdr_nodegroup_create(&nodegroup) != remote_group_id)
+	newgroup->id = remote->bdr_node_group->id;
+	newgroup->name = remote->bdr_node_group->name;
+	newgroup->default_repset = create_replication_set(&repset);
+	if (bdr_nodegroup_create(newgroup) != remote->bdr_node_group->id)
 	{
 		/* shouldn't happen */
-		elog(ERROR, "failed to create nodegroup with id %u");
+		elog(ERROR, "failed to create newgroup with id %u",
+			 remote->bdr_node_group->id);
 	}
 
-	/* Assign the nodegroup to the local node */
-	Assert(local->bdr_node_group == NULL);
-	info->bdr_node->node_group_id = nodegroup.id;
-	bdr_modify_node(info->bdr_node);
+	/* Assign the newgroup to the local node */
+	local->bdr_node->node_group_id = newgroup->id;
+	bdr_modify_node(local->bdr_node);
 
-	return nodegroup.id;
+	local->bdr_node_group = newgroup;
 }
 
 /*
@@ -174,16 +279,23 @@ bdr_join_copy_remote_nodegroup(PGconn *conn, const char *node_group_name, BdrNod
  * nodegroup to the local node.
  */
 void
-bdr_join_copy_remote_nodes(PGconn *conn, Oid nodegroup_id)
+bdr_join_copy_remote_nodes(PGconn *conn, BdrNodeInfo *local)
 {
-	Oid paramTypes[1] = {OIDOID}
-	char *paramValues[1];
-	char nodeid[30];
-	int i;
+	Oid			paramTypes[1] = {OIDOID};
+	const char *paramValues[1];
+	char		nodeid[30];
+	int			i;
+	PGresult   *res;
+	Oid			node_group_id = local->bdr_node_group->id;
 
+	/*
+	 * We use a helper function on the other end to collect the info, shielding
+	 * us somewhat from catalog changes and letting us fetch the pgl and bdr info
+	 * all at once.
+	 */
 	snprintf(nodeid, 30, "%u", node_group_id);
 	paramValues[0] = nodeid;
-	res = PQexecParams(conn, "SELECT pglogical_node_id, local_state, seq_id FROM bdr.node WHERE node_group_id = $1",
+	res = PQexecParams(conn, "SELECT node_id, node_name, bdr_local_state, bdr_seq_id FROM bdr.node_group_member_info($1)",
 					   1, paramTypes, paramValues, NULL, NULL, 0);
 
 	if (PQresultStatus(res) != PGRES_TUPLES_OK)
@@ -197,89 +309,121 @@ bdr_join_copy_remote_nodes(PGconn *conn, Oid nodegroup_id)
 	{
 		PQclear(res);
 		ereport(ERROR,
-				(errmsg("failed to get remote node list: no remote nodes found with nodegroup id %u", nodegroup_id)));
+				(errmsg("failed to get remote node list: no remote nodes found with nodegroup id %u", node_group_id)));
 	}
 
 	for (i = 0; i < PQntuples(res); i++)
 	{
-		BdrNode node;
+		BdrNode bnode;
+		PGLogicalNode pnode;
+		const char *val;
 
-		node.node_id = /* copy */
-		node.node_group_id = nodegroup_id;
-		node.local_state = /* copy */
-		node.seq_id = /* copy */
-		node.confirmed_our_join = false;
+		val = PQgetvalue(res, i, 0);
+		if (sscanf(val, "%u", &bnode.node_id) != 1)
+			elog(ERROR, "cannot parse '%s' as uint32", val);
+
+		pnode.id = bnode.node_id;
+
+		pnode.name = pstrdup(PQgetvalue(res, i, 1));
+
+		val = PQgetvalue(res, i, 2);
+		if (sscanf(val, "%u", &bnode.local_state) == 1)
+			elog(ERROR, "cannot parse '%s' as uint32", val);
+
+		val = PQgetvalue(res, i, 3);
+		if (sscanf(val, "%d", &bnode.seq_id) == 1)
+			elog(ERROR, "cannot parse '%s' as int", val);
+
+		bnode.node_group_id = node_group_id;
+		bnode.confirmed_our_join = false;
 
 		/* create */
-		XXXX
+		bdr_node_create(&bnode);
+		create_node(&pnode);
 	}
 }
 
-void do_the_join()
+XLogRecPtr
+bdr_get_remote_insert_lsn(PGconn *conn)
 {
-	/*
-	 * Look up current join progress
-	 */
+	PGresult   *res;
+	const char *val;
+	XLogRecPtr	min_lsn;
 
-	/*
-	 * Connect to join target and validate the connection.
-	 *
-	 * TODO: should call an information func on remote end to collect
-	 * extra data like BDR version too
-	 */
-	BdrNodeInfo *remoteinfo = NULL;
-	/*
-	remoteinfo = bdr_get_remote_node_info(join_target_dsn);
-	*/
+	res = PQexec(conn, "SELECT pg_current_wal_insert_lsn()");
 
-	if (remoteinfo->bdr_node == NULL)
-		ereport(ERROR,
-				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("no BDR node exists on join target")));
-
-	if (remoteinfo->bdr_node_group == NULL)
-		ereport(ERROR,
-				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("BDR node on join target has no node group, cannot join")));
-
-	if (remoteinfo->pgl_node == NULL || remoteinfo->pgl_interface == NULL)
+	if (PQresultStatus(res) != PGRES_TUPLES_OK)
 	{
-		/* Shouldn't happen */
+		PQclear(res);
 		ereport(ERROR,
-				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("remote BDR node has no pglogical node")));
+				(errmsg("failed to get remote insert lsn: %s", PQerrorMessage(conn))));
 	}
 
-	if (strcmp(remoteinfo->pgl_node->name, localinfo->pgl_node->name) == 0)
-		ereport(ERROR,
-				(errcode(ERRCODE_UNIQUE_VIOLATION),
-				 errmsg("local node and remote node have the same node name"),
-				 errhint("Make sure you didn't specify the local node's connection string as the join target")));
+	Assert(PQntuples(res) == 1);
 
-	/*
-	 * TODO: further checking on version support flags, etc fetched from the remote
-	 * node.
-	 */
+	val = PQgetvalue(res, 0, 0);
+	min_lsn = DatumGetLSN(DirectFunctionCall1(pg_lsn_in, CStringGetDatum(val)));
 
-	/*
-	 * Ask the join target to add our nodes entry on all peers, ensuring our
-	 * node name is unique. Submit a random cookie with the request so we can
-	 * tell if it was our request that won in case of multiple requests for the
-	 * same name by concurrently joining nodes.
-	 */
+	PQclear(res);
+	return min_lsn;
+}
 
-	/* Monitor remote's consensus journal until we see our
-	 * request confirmed. (We can't just watch its bdr.node table since we need
-	 * to know it was our request that "won" the name, which we can tell using
-	 * the cookie submitted along with the join message).
-	 */
+/*
+ * Create a subscription to the join target node, so we can dump its
+ * data/schema.
+ *
+ * TODO: start paused, or pause after dump+restore completes
+ */
+void
+bdr_join_subscribe_join_target(PGconn *conn, BdrNodeInfo *local)
+{
+	elog(WARNING, "not implemented");
+}
 
-	/*
-	 * Update local node status to 'name reserved'
-	 */
+void
+bdr_join_copy_repset_memberships(PGconn *conn, BdrNodeInfo *local)
+{
+	elog(WARNING, "not implemented");
+}
 
-	/*
-	 * Create subscription to target node
-	 */
+void
+bdr_join_init_consensus_messages(PGconn *conn, BdrNodeInfo *local)
+{
+	elog(WARNING, "not implemented");
+}
 
+void
+bdr_join_create_origins(BdrNodeInfo *local)
+{
+	elog(WARNING, "not implemented");
+}
+
+void
+bdr_join_create_subscriptions(BdrNodeInfo *local)
+{
+	elog(WARNING, "not implemented");
+}
+
+void
+bdr_join_send_catchup_announce(BdrNodeInfo *local)
+{
+	elog(WARNING, "not implemented");
+}
+
+void
+bdr_join_create_slots(BdrNodeInfo *local)
+{
+	elog(WARNING, "not implemented");
+}
+
+void
+bdr_join_send_active_announce(BdrNodeInfo *local)
+{
+	elog(WARNING, "not implemented");
+}
+
+void
+bdr_join_go_active(BdrNodeInfo *local)
+{
+	elog(WARNING, "not implemented");
 }

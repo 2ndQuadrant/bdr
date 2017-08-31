@@ -194,5 +194,7 @@ _PG_init(void)
 	msgb_shmem_init(BDR_MAX_DATABASES);
     bdr_shmem_init(BDR_MAX_DATABASES);
 
+	bdr_register_pgl_plugin();
+
 	elog(LOG, "loading BDR %s (%06d)", BDR_VERSION, BDR_VERSION_NUM);
 }

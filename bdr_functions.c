@@ -14,6 +14,11 @@
 #include "postgres.h"
 
 #include "fmgr.h"
+#include "funcapi.h"
+
+#include "access/xact.h"
+
+#include "storage/lwlock.h"
 
 #include "utils/builtins.h"
 
@@ -22,8 +27,11 @@
 
 #include "bdr_catalogs.h"
 #include "bdr_catcache.h"
-#include "bdr_messaging.h"
 #include "bdr_functions.h"
+#include "bdr_join.h"
+#include "bdr_messaging.h"
+#include "bdr_msgformats.h"
+#include "bdr_shmem.h"
 
 /*
  * Ensure that the local BDR node exists
@@ -181,7 +189,28 @@ bdr_create_nodegroup_sql(PG_FUNCTION_ARGS)
 	PG_RETURN_OID(nodegroup.id);
 }
 
-PG_FUNCTION_INFO_V1(bdr_join_nodegroup_sql);
+static void
+kill_manager_callback(XactEvent event, void *arg)
+{
+	/*
+	 * TODO: get rid of this entirely once join moves into manager
+	 */
+	int i;
+	LWLockAcquire(bdr_ctx->lock, LW_SHARED);
+	for (i = 0; i < bdr_ctx->max_local_nodes; i++)
+	{
+		if (bdr_ctx->managers[i].node_id == bdr_get_local_nodeid())
+		{
+			BdrManagerShmem *manager = &bdr_ctx->managers[i];
+			if (manager->manager != NULL && manager->manager->pid != 0)
+				kill(manager->manager->pid, SIGTERM);
+		}
+	}
+
+	LWLockRelease(bdr_ctx->lock);
+}
+
+PG_FUNCTION_INFO_V1(bdr_join_node_group_sql);
 
 /*
  * Join a local BDR node with no nodegroup to a peer node's nodegroup
@@ -206,14 +235,14 @@ PG_FUNCTION_INFO_V1(bdr_join_nodegroup_sql);
  * - Make node read/write
  */
 Datum
-bdr_join_nodegroup_sql(PG_FUNCTION_ARGS)
+bdr_join_node_group_sql(PG_FUNCTION_ARGS)
 {
 	const char *join_target_dsn;
-	const char *nodegroup_name = NULL;
+	const char *node_group_name = NULL;
 	BdrNodeInfo *local;
-	BdrMessage *msg;
+	BdrNodeInfo *remote;
 	PGconn *conn;
-	Oid nodegroup_id;
+	XLogRecPtr min_catchup_lsn;
 
 	if (PG_ARGISNULL(0))
 		ereport(ERROR,
@@ -223,23 +252,15 @@ bdr_join_nodegroup_sql(PG_FUNCTION_ARGS)
 	join_target_dsn = text_to_cstring(PG_GETARG_TEXT_P(0));
 
 	if (!PG_ARGISNULL(1))
-	{
-		nodegroup_name = text_to_cstring(PG_GETARG_TEXT_P(1));
-		/*
-		 * TODO: allow explicit naming of nodegroup and check it's the same as
-		 * remote's nodegroup when we fetch remote info later.
-		 */
-		ereport(ERROR,
-				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("specifying a nodegroup to join is not yet supported")));
-	}
+		node_group_name = text_to_cstring(PG_GETARG_TEXT_P(1));
 
-	localinfo = bdr_check_local_node(true);
+	local = bdr_check_local_node(true);
 
-	if (localinfo->bdr_nodegroup != NULL)
+	if (local->bdr_node_group != NULL)
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("local node is already a member of a nodegroup, cannot join")));
+				 errmsg("local node is already a member of a nodegroup (%s), cannot join",
+				 		local->bdr_node_group->name)));
 
 	/*
 	 * OK, so here what are our minimal requirements?
@@ -266,31 +287,57 @@ bdr_join_nodegroup_sql(PG_FUNCTION_ARGS)
 	 * for fire and forget submission of a remote join request message, then
 	 * blind local creation of the local side state.
 	 */
-	conn = bdr_join_connect_remote(join_target_dsn);
+	conn = bdr_join_connect_remote(join_target_dsn, local);
 
 	PG_TRY();
 	{
+		remote = get_remote_node_info(conn);
+
+		if (remote->bdr_node->node_id == 0)
+			elog(ERROR, "no BDR node found on join target");
+
+		Assert(remote->pgl_node->id == remote->bdr_node->node_id);
+
+		if (remote->bdr_node_group->name != NULL
+			&& strcmp(remote->bdr_node_group->name, node_group_name) == 0)
+		{
+			elog(ERROR, "remote node is member of nodegroup %s but we asked to join nodegroup %s",
+				 remote->bdr_node_group->name, node_group_name);
+		}
+		node_group_name = remote->bdr_node_group->name;
+
+		if (remote->bdr_node_group->id == 0)
+			elog(ERROR, "invalid remote nodegroup id 0");
+
+		elog(NOTICE, "joining nodegroup %s (%u) via remote node %s (node_id %u)",
+			 remote->bdr_node_group->name, remote->bdr_node_group->id,
+			 remote->pgl_node->name, remote->bdr_node->node_id);
+
 		/*
 		 * Ask the join target to reserve our name on all peers
 		 * (in the process telling them we're joining).
 		 *
 		 * TODO: the manager should be doing all this asynchronously
 		 */
-		bdr_join_submit_request(conn, nodegroup_name,
-								localinfo->pgl_node->node_name);
+		bdr_join_submit_request(conn, node_group_name, local);
 
 		/*
 		 * TODO: wait until join request succeeds
 		 */
 
-		nodegroup_id = bdr_join_copy_remote_nodegroup(conn, nodegroup_name, local);
+		bdr_join_copy_remote_nodegroup(local, remote);
 
 		/*
 		 * TODO: start up messaging system. We need it running early so that we
 		 * can update node statuses, etc. Peers know about us now since we got
 		 * consensus for our name allocation, so they'll be ready to talk to us.
+		 *
+		 * TODO Can't do this until we run in the manager. So for now we'll have
+		 * to kill the manager and let it restart to start doing messaging. At
+		 * commit time, because we cannot see the nodes until then.
 		 */
-		bdr_join_start_messaging();
+		//bdr_join_start_messaging();
+		RegisterXactCallback(kill_manager_callback, NULL);
 
 		/*
 		 * Subscribe to join target
@@ -328,6 +375,9 @@ bdr_join_nodegroup_sql(PG_FUNCTION_ARGS)
 		bdr_join_create_subscriptions(local);
 
 		min_catchup_lsn = bdr_get_remote_insert_lsn(conn);
+		elog(WARNING, "ignoring minimum catchup lsn: %X/%X",
+			 (uint32)(min_catchup_lsn>>32),
+			 (uint32)min_catchup_lsn);
 		/*
 		 * TODO: record min catchup lsn in join progress/state
 		 */
@@ -357,6 +407,9 @@ bdr_join_nodegroup_sql(PG_FUNCTION_ARGS)
 		 * confirmed our prior standby announce message so we know we have
 		 * slots, and ensure we replayed past join target's min catchup lsn,
 		 * then:
+		 *
+		 * TODO: allow specification of pre-created slots, for testing
+		 * purposes
 		 */
 		bdr_join_create_slots(local);
 
@@ -370,16 +423,107 @@ bdr_join_nodegroup_sql(PG_FUNCTION_ARGS)
 		 * Finish join, switching to direct replay from peers, and
 		 * go read/write.
 		 */
-		bdr_join_go_active();
+		bdr_join_go_active(local);
 	}
 	PG_CATCH();
 	{
-		PQfinish(conn);
+		bdr_finish_connect_remote(conn);
 		PG_RE_THROW();
 	}
 	PG_END_TRY();
 
-	PQfinish(conn);
+	bdr_finish_connect_remote(conn);
+
+	PG_RETURN_VOID();
+}
+
+PG_FUNCTION_INFO_V1(bdr_internal_submit_join_request);
+
+/*
+ * Remote node is asking to join this node's nodegroup.
+ *
+ * Called via bdr_submit_join_request (bdr_join.c)
+ */
+Datum
+bdr_internal_submit_join_request(PG_FUNCTION_ARGS)
+{
+	const char *nodegroup_name;
+	const char *remote_node_name;
+	Oid remote_node_id;
+	int remote_node_state;
+	BdrNodeInfo *local;
+	char handle_str[30];
+	uint64 handle;
+	StringInfoData reqbuf;
+	BdrMsgJoinRequest jreq;
+	BdrMessage *msg;
+
+	if (PG_ARGISNULL(0))
+		nodegroup_name = NULL;
+	else
+		nodegroup_name = text_to_cstring(PG_GETARG_TEXT_P(0));
+
+	if (PG_ARGISNULL(1))
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("remote node name cannot be NULL")));
+
+	remote_node_name = text_to_cstring(PG_GETARG_TEXT_P(1));
+
+	if (PG_ARGISNULL(2))
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("remote node id cannot be NULL")));
+
+	remote_node_id = PG_GETARG_OID(2);
+
+	if (PG_ARGISNULL(3))
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("remote node state cannot be NULL")));
+
+	remote_node_state = PG_GETARG_OID(3);
+
+	local = bdr_check_local_node(true);
+
+	if (local->bdr_node_group == NULL)
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("this bdr node %s is not part of a node group, cannot be used as join target by node %s",
+				 		local->pgl_node->name, remote_node_name)));
+
+	if (nodegroup_name == NULL)
+		nodegroup_name = local->bdr_node_group->name;
+	else if (strcmp(nodegroup_name, local->bdr_node_group->name) != 0)
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("this bdr node %s is a member of nodegroup %s, joining peer %s cannot join to %s",
+				 		local->pgl_node->name, local->bdr_node_group->name,
+						remote_node_name, nodegroup_name)));
+
+	/*
+	 * Submit a consensus proposal to the local manager node, asking
+	 * that the new node be allowed to join the node group.
+	 */
+	memset(&jreq, 0, sizeof(BdrMsgJoinRequest));
+	jreq.nodegroup_name = nodegroup_name;
+	jreq.nodegroup_id = local->bdr_node_group->id;
+	jreq.joining_node_name = remote_node_name;
+	jreq.joining_node_id = remote_node_id;
+	jreq.joining_node_state = remote_node_state;
+	jreq.join_target_node_name = local->pgl_node->name;
+	jreq.join_target_node_id = local->pgl_node->id;
+	msg_serialize_join_request(&reqbuf, &jreq);
+
+	msg = palloc0(offsetof(BdrMessage,payload) + reqbuf.len);
+	msg->message_type = BDR_MSG_NODE_JOIN_REQUEST;
+	msg->payload_length = reqbuf.len;
+	memcpy(msg->payload, reqbuf.data, reqbuf.len);
+
+	handle = bdr_msgs_enqueue_one(msg);
+
+	snprintf(handle_str, 30, UINT64_FORMAT, handle);
+	PG_RETURN_TEXT_P(cstring_to_text(handle_str));
 }
 
 PG_FUNCTION_INFO_V1(bdr_replication_set_add_table);
@@ -514,6 +658,134 @@ bdr_replication_set_remove_table(PG_FUNCTION_ARGS)
 	PG_RETURN_VOID();
 }
 
+PG_FUNCTION_INFO_V1(bdr_local_node_info_sql);
+
+/*
+ * Look up details of the BDR node and node group.
+ *
+ * Don't change it too casually (except adding cols) as you'll break join by
+ * older versions. See bdr_join.c
+ */
+Datum
+bdr_local_node_info_sql(PG_FUNCTION_ARGS)
+{
+	TupleDesc			tupdesc;
+
+	Datum				values[6];
+	bool				nulls[6];
+	HeapTuple			htup;
+	BdrNodeInfo		   *info;
+
+	if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("function returning record called in context "
+					 "that cannot accept type record")));
+
+	tupdesc = BlessTupleDesc(tupdesc);
+
+	info = bdr_get_local_node_info(false, true);
+
+	memset(nulls, 0, sizeof(nulls));
+	/* node_id, node_name, node_local_state, node_seq_id, nodegroup_id, nodegroup_name */
+	values[0] = ObjectIdGetDatum(info->pgl_node->id);
+	values[1] = CStringGetTextDatum(info->pgl_node->name);
+	values[2] = ObjectIdGetDatum(info->bdr_node->local_state);
+	values[3] = Int32GetDatum(info->bdr_node->seq_id);
+	values[4] = ObjectIdGetDatum(info->bdr_node_group->id);
+	values[5] = CStringGetTextDatum(info->bdr_node_group->name);
+
+	htup = heap_form_tuple(tupdesc, values, nulls);
+
+	PG_RETURN_DATUM(HeapTupleGetDatum(htup));
+}
+
+PG_FUNCTION_INFO_V1(bdr_node_group_member_info);
+
+/*
+ * Look up a nodegroup and report bdr and pglogical node information for
+ * the nodegroup.
+ *
+ * This is used during node join to try to shield from catalog changes;
+ * we can make new versions of this function if needed, add cols, etc.
+ *
+ * Don't change it too casually (except adding cols) as you'll break join by
+ * older versions. See bdr_join_copy_remote_nodes(...).
+ */
+Datum
+bdr_node_group_member_info(PG_FUNCTION_ARGS)
+{
+	TupleDesc			tupdesc;
+	FuncCallContext	   *funcctx;
+	ListCell		   *lc;
+
+	if (SRF_IS_FIRSTCALL())
+	{
+		Oid				nodegroup_id;
+		List		   *nodes;
+		MemoryContext   oldcontext;
+
+		funcctx = SRF_FIRSTCALL_INIT();
+		oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+		funcctx->max_calls = PG_GETARG_UINT32(0);
+
+		if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
+			ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 errmsg("function returning record called in context "
+						 "that cannot accept type record")));
+
+		funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+		tupdesc = funcctx->tuple_desc;
+
+		if (PG_ARGISNULL(0))
+			nodegroup_id = 0;
+		else
+			nodegroup_id = PG_GETARG_OID(0);
+
+		/* Prepare to iterate the node-list */
+		nodes = bdr_get_nodes_info(nodegroup_id);
+		funcctx->user_fctx = list_head(nodes);
+		lc = funcctx->user_fctx;
+
+		(void) MemoryContextSwitchTo(oldcontext);
+	}
+
+    funcctx = SRF_PERCALL_SETUP();
+	
+	if (lc != NULL)
+	{
+		Datum				values[4];
+		bool				nulls[4];
+		HeapTuple			htup;
+		BdrNodeInfo		   *info;
+
+		info = lfirst(lc);
+
+		Assert(info->bdr_node != NULL);
+		Assert(info->bdr_node_group != NULL);
+		Assert(info->pgl_node != NULL);
+
+		memset(nulls, 0, sizeof(nulls));
+		/* node_id, node_name, bdr_local_state, bdr_seq_id */
+		values[0] = ObjectIdGetDatum(info->pgl_node->id);
+		values[1] = CStringGetTextDatum(info->pgl_node->name);
+		values[2] = ObjectIdGetDatum(info->bdr_node->local_state);
+		values[3] = Int32GetDatum(info->bdr_node->seq_id);
+
+		htup = heap_form_tuple(tupdesc, values, nulls);
+
+		SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(htup));
+
+		lc = lnext(lc);
+	}
+	else
+	{
+		SRF_RETURN_DONE(funcctx);
+	}
+
+}
+
 PG_FUNCTION_INFO_V1(bdr_decode_message_payload);
 
 Datum
@@ -572,5 +844,3 @@ bdr_submit_comment(PG_FUNCTION_ARGS)
 	snprintf(&handle_str[0], 33, UINT64_FORMAT, handle);
 	PG_RETURN_TEXT_P(cstring_to_text(handle_str));
 }
-
-PG_FUNCTION_INFO_V1(bdr.local_node_info);

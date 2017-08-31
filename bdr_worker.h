@@ -13,4 +13,6 @@ extern void bdr_ensure_active_db(void);
 
 extern int bdr_debug_level;
 
+extern bool is_bdr_manager(void);
+
 #endif

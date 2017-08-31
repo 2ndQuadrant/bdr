@@ -58,7 +58,7 @@ extern BdrNodeInfo * bdr_get_node_info_by_name(const char *name, bool missing_ok
 extern BdrNodeInfo * bdr_get_local_node_info(bool for_update, bool missing_ok);
 
 /* List of BdrNode */
-extern List * bdr_get_nodes_info(void);
+extern List * bdr_get_nodes_info(Oid in_group_id);
 
 /* List of PGLogicalSubscription */
 extern List * bdr_get_node_subscriptions(uint32 node_id);

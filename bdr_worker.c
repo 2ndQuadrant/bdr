@@ -16,6 +16,8 @@
 
 #include "access/xact.h"
 
+#include "pglogical_worker.h"
+
 #include "bdr_catcache.h"
 #include "bdr_worker.h"
 
@@ -51,4 +53,10 @@ bdr_ensure_active_db(void)
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("BDR is not active in this database")));
 	}
+}
+
+bool
+is_bdr_manager(void)
+{
+	return MyPGLogicalWorker != NULL && MyPGLogicalWorker->worker_roles & PGLOGICAL_WORKER_MANAGER;
 }

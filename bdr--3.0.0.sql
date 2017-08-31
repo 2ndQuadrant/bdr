@@ -98,16 +98,25 @@ RETURNS text LANGUAGE c AS 'MODULE_PATHNAME','bdr_decode_state';
  * BDR node manipulation
  */
 CREATE FUNCTION bdr.create_node(node_name text, local_dsn text)
-RETURNS oid LANGUAGE c AS 'MODULE_PATHNAME','bdr_create_node_sql';
+RETURNS oid CALLED ON NULL INPUT VOLATILE
+LANGUAGE c AS 'MODULE_PATHNAME','bdr_create_node_sql';
 
 COMMENT ON FUNCTION bdr.create_node(text, text) IS
 'Create a new local BDR node';
 
-CREATE FUNCTION bdr.create_node_group(node_group_name text)
-RETURNS oid LANGUAGE c AS 'MODULE_PATHNAME','bdr_create_nodegroup_sql';
+CREATE FUNCTION bdr.create_node_group(nod e_group_name text)
+RETURNS oid CALLED ON NULL INPUT VOLATILE
+LANGUAGE c AS 'MODULE_PATHNAME','bdr_create_nodegroup_sql';
 
 COMMENT ON FUNCTION bdr.create_node_group(text) IS
 'Create a new local BDR node group and make the local node the first member';
+
+CREATE FUNCTION bdr.join_node_group(join_target_dsn text, node_group_name text)
+RETURNS void CALLED ON NULL INPUT VOLATILE
+LANGUAGE c AS 'MODULE_PATHNAME','bdr_create_node_group_sql';
+
+COMMENT ON FUNCTION bdr.join_node_group(text,text) IS
+'Join an existing BDR node group on peer at ''dsn''';
 
 CREATE FUNCTION bdr.replication_set_add_table(relation regclass, set_name text DEFAULT NULL, synchronize_data boolean DEFAULT false,
 	columns text[] DEFAULT NULL, row_filter text DEFAULT NULL)
@@ -128,6 +137,35 @@ CREATE FUNCTION bdr.msgb_deliver_message(destination_node oid, message_id oid, p
 RETURNS void LANGUAGE c AS 'MODULE_PATHNAME','msgb_deliver_message';
 
 REVOKE ALL ON FUNCTION bdr.msgb_deliver_message(oid,oid,bytea) FROM public;
+
+/*
+ * Functions used to query remote node info. Don't change these without caution,
+ * as they're relied on by node join.
+ */
+
+CREATE FUNCTION bdr.local_node_info(
+	node_id OUT oid,
+	node_name OUT text,
+	node_local_state OUT oid,
+	node_seq_id OUT integer,
+	nodegroup_id OUT oid,
+	nodegroup_name OUT text
+)
+RETURNS record VOLATILE LANGUAGE c AS 'MODULE_PATHNAME','bdr_local_node_info';
+
+CREATE FUNCTION bdr.node_group_member_info(nodegroup_id oid)
+RETURNS TABLE (node_id oid, node_name text, bdr_local_state oid, bdr_seq_id integer)
+CALLED ON NULL INPUT VOLATILE
+LANGUAGE c AS 'MODULE_PATHNAME','bdr_node_group_member_info';
+
+CREATE FUNCTION bdr.internal_submit_join_request(nodegroup_id oid,
+	joining_node_name text, joining_node_id oid)
+RETURNS text /* actually uint64 */
+CALLED ON NULL INPUT VOLATILE
+LANGUAGE c AS 'MODULE_PATHNAME','bdr_internal_submit_join_request';
+
+Datum
+bdr_internal_submit_join_request(PG_FUNCTION_ARGS)
 
 /*
  * Helper views

@@ -39,6 +39,7 @@
 #include "bdr_catalogs.h"
 #include "bdr_catcache.h"
 #include "bdr_consensus.h"
+#include "bdr_join.h"
 #include "bdr_msgbroker.h"
 #include "bdr_msgbroker_send.h"
 #include "bdr_messaging.h"
@@ -116,12 +117,6 @@ static void bdr_detach_manager_queue(void);
 static BdrManagerShmem *my_manager;
 
 static bool atexit_registered = false;
-
-static inline bool
-is_bdr_manager(void)
-{
-	return MyPGLogicalWorker != NULL && MyPGLogicalWorker->worker_roles & PGLOGICAL_WORKER_MANAGER;
-}
 
 /*
  * TODO this is a single-queue-pair hack to let us do basic
@@ -870,7 +865,29 @@ bdr_proposals_receive(ConsensusProposal *msg)
 static bool
 bdr_proposals_prepare(List *messages)
 {
+	ListCell *lc;
+
 	elog(LOG, "XXX PREPARE"); /* TODO */
+
+	foreach (lc, messages)
+	{
+		BdrMessage *msg = lfirst(lc);
+		/*
+		 * TODO: should dispatch message processing via the local node state
+		 * machine, but for now we'll do it directly here
+		 */
+		switch (msg->message_type)
+		{
+			case BDR_MSG_COMMENT:
+				break;
+			case BDR_MSG_NODE_JOIN_REQUEST:
+				bdr_join_handle_join_proposal(msg);
+				break;
+			default:
+				elog(ERROR, "unhandled message type %u in prepare proposal",
+					 msg->message_type);
+		}
+	}
 
     /* TODO: here's where we apply in-transaction state changes like insert nodes */
 

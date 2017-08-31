@@ -93,13 +93,6 @@ void
 bdr_manager_wait_event(struct WaitEvent *events, int nevents,
 					   long *max_next_wait_msecs)
 {
-	BdrMessage *msg;
-	const char *dummy_payload;
-	Size dummy_payload_length;
-	uint64 handle;
-
-	static bool iteration_counter = 0;
-
 	if (!bdr_is_active_db())
 		return;
 

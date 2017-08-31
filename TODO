@@ -1,7 +1,7 @@
 NEXT STEPS TO PROGRESS
 ----
 
-- Finish bdr_join_copy_remote_nodes (copy pgl nodes too, factor out 'existing_origin' stuff from 'pglogical_create_subscription')
+- Test current node join progress
 - Finish rest of funcs in bdr_join_nodegroup_sql
 - Delay starting messaging until have nodelist and nodegroup (manager)
 - Implement consensus operation handlers for (not real consensus yet, but)
@@ -19,6 +19,18 @@ bdr.bdr_group_create wrapper around bdr.create_node and bdr.create_node_group
 
 HACKS TO PAY DOWN AND TODOs TO FINISH
 ----
+
+- Permission checks in BDR internal SQL functions for join, messaging, etc
+
+- Move join process into manager
+
+- Instead of restarting manager, notice when we add new nodes / remove nodes
+
+- Do message serialization and deserialization for BdrMessage, ConsensusMessage
+  using pqformat, not just memcpy'ing the structs.
+
+- Submit messages as msgtype, payload and length, not formed BdrMessage with a bunch
+  of unused fields.
 
 - Move the messaging into a separate worker, lifetime managed by the pgl manager,
   and do all the bdr IPC/messaging via it. Fixes issues with long running xacts

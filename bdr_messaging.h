@@ -21,8 +21,10 @@ typedef enum BdrMessageType
 	BDR_MSG_COMMENT = 1,
 
     /* Node part/join management */
-    BDR_MSG_NODE_NAME_RESERVE = 100,
+    BDR_MSG_NODE_JOIN_REQUEST = 100,
     BDR_MSG_NODE_ID_SEQ_ALLOCATE,
+	BDR_MSG_NODE_CATCHUP_READY,
+	BDR_MSG_NODE_ACTIVE,
 
     /* Global DDL locking */
     BDR_MSG_DDL_LOCK_REQUEST = 200,

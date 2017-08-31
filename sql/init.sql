@@ -21,11 +21,17 @@ SELECT E'\'' || current_database() || E'\'' AS node2_db
 CREATE FUNCTION bdr_submit_comment(message text)
 RETURNS text LANGUAGE c STRICT AS 'bdr','bdr_submit_comment';
 
+SELECT * FROM bdr_node_group_member_info(NULL);
+
 SELECT 1
 FROM bdr.create_node(node_name := 'node1', local_dsn := :'node1_dsn' || ' user=super');
 
+SELECT * FROM bdr_node_group_member_info(NULL);
+
 SELECT 1
 FROM bdr.create_node_group('bdrgroup');
+
+SELECT * FROM bdr_node_group_member_info((SELECT node_group_id FROM bdr.node_group));
 
 SELECT * FROM bdr.node_group_replication_sets;
 
@@ -36,22 +42,25 @@ SELECT slot_name FROM pg_create_logical_replication_slot(pglogical.pglogical_gen
 
 \c :node2_dsn
 
+SELECT * FROM bdr_node_group_member_info(NULL);
+
 SELECT 1
 FROM bdr.create_node(node_name := 'node2', local_dsn := :'node2_dsn' || ' user=super');
 
--- TODO:  BDR should do this for us when we join the nodegroup
--- but for now we have to make the repset locally, fake up a node group,
--- etc.
-SELECT 1 FROM pglogical.create_replication_set('bdrgroup');
-UPDATE pglogical.replication_set SET set_isinternal = 't' WHERE set_name = 'bdrgroup';
-INSERT INTO bdr.node_group (node_group_id, node_group_name, node_group_default_repset)
-SELECT 1, 'bdrgroup', set_id FROM pglogical.replication_set WHERE set_name = 'bdrgroup';
-UPDATE bdr.node SET node_group_id = (SELECT node_group_id FROM bdr.node_group WHERE node_group_name = 'bdrgroup');
+SELECT 1
+FROM bdr.join_node_group(:'node1_dsn', 'nosuch-nodegroup');
 
+SELECT * FROM bdr_node_group_member_info((SELECT node_group_id FROM bdr.node_group));
+
+SELECT 1
+FROM bdr.join_node_group(:'node1_dsn', 'bdrgroup');
+
+SELECT * FROM bdr_node_group_member_info((SELECT node_group_id FROM bdr.node_group));
 SELECT * FROM bdr.node_group_replication_sets;
 
 -- Subscribe to the first node
 -- See GH#152 for why we don't create the slot
+-- TODO: BDR should do this for us
 SELECT 1 FROM pglogical.create_subscription(
     subscription_name := 'bdrgroup',
     provider_dsn := ( :'node1_dsn' || ' user=super' ),
@@ -59,7 +68,6 @@ SELECT 1 FROM pglogical.create_subscription(
     forward_origins := '{}',
     replication_sets := ARRAY['bdrgroup','ddl_sql'],
 	create_slot := false);
-
 -- and set the subscription as 'isinternal' so BDR thinks BDR owns it.
 UPDATE pglogical.subscription SET sub_isinternal = true;
 

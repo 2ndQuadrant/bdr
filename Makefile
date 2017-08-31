@@ -13,15 +13,17 @@ OBJS = \
 	bdr_catcache.o \
 	bdr_consensus.o \
 	bdr_functions.o \
+	bdr_join.o \
 	bdr_manager.o \
 	bdr_messaging.o \
 	bdr_msgbroker.o \
 	bdr_msgbroker_receive.o \
 	bdr_msgbroker_send.o \
+	bdr_msgformats.o\
 	bdr_output.o \
 	bdr_pgl_plugin.o \
-	bdr_sync.o \
 	bdr_shmem.o \
+	bdr_sync.o \
 	bdr_worker.o
 
 REGRESS = preseed init simple wait part

@@ -464,7 +464,7 @@ bdr_modify_node(BdrNode *node)
  * as BdrNodeInfo, allocated in the current memory context.
  */
 List *
-bdr_get_nodes_info(void)
+bdr_get_nodes_info(Oid in_group_id)
 {
 	BdrNodeInfo	   *nodeinfo;
 	RangeVar	   *rv;
@@ -480,6 +480,9 @@ bdr_get_nodes_info(void)
 
 	while (HeapTupleIsValid(tuple = systable_getnext(scan)))
 	{
+		if (in_group_id != 0 && nodeinfo->bdr_node->node_group_id != in_group_id)
+			continue;
+
 		nodeinfo = palloc(sizeof(BdrNodeInfo));
 		nodeinfo->bdr_node = bdr_node_fromtuple(tuple);
 		nodeinfo->bdr_node_group = bdr_get_nodegroup(nodeinfo->bdr_node->node_group_id, false);
