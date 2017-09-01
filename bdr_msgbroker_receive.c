@@ -481,6 +481,7 @@ msgb_startup_receive(Size recv_queue_size)
 	Size		hdr_size, segsize;
 	int			i;
 	MsgbDSMHdr *hdr;
+	uint32		mynodeid;
 
 	if (msgb_received_hook == NULL)
 		ereport(ERROR, (errmsg_internal("no message receive hook is registered")));
@@ -517,15 +518,27 @@ msgb_startup_receive(Size recv_queue_size)
 	Assert(msgb_my_seg == NULL);
 	LWLockAcquire(msgb_ctx->lock, LW_EXCLUSIVE);
 	Assert(msgb_ctx->msgb_max_local_nodes >= 1);
+	mynodeid = bdr_get_local_nodeid();
 	for (i = 0; i < msgb_ctx->msgb_max_local_nodes; i++)
 	{
 		if (msgb_ctx->shmem_mq_seg[i].node_id == 0)
 		{
 			msgb_my_seg = &msgb_ctx->shmem_mq_seg[i];
-			msgb_my_seg->node_id = bdr_get_local_nodeid();
+			msgb_my_seg->node_id = mynodeid;
 			msgb_my_seg->manager = MyProc;
 			Assert(msgb_my_seg->dsm_seg_handle == 0);
 			break;
+		}
+		else if (msgb_ctx->shmem_mq_seg[i].node_id == mynodeid)
+		{
+			/*
+			 * A manager is already registered in shmem for this
+			 * slot. Whoops!
+			 */
+			ereport(ERROR,
+					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+					 errmsg("node %u is already registered as a message broker",
+					 		mynodeid)));
 		}
 	}
 	LWLockRelease(msgb_ctx->lock);
@@ -796,6 +809,15 @@ msgb_shutdown_receive(void)
 	{
 		dsm_detach(broker_dsm_seg);
 		Assert(broker_dsm_seg == NULL);
+	}
+
+	/* Release the shmem segment */
+	if (msgb_my_seg != NULL)
+	{
+		msgb_my_seg->node_id = 0;
+		msgb_my_seg->manager = NULL;
+		msgb_my_seg->dsm_seg_handle = NULL;
+		msgb_my_seg = NULL;
 	}
 }
 
