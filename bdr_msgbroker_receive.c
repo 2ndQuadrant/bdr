@@ -816,7 +816,7 @@ msgb_shutdown_receive(void)
 	{
 		msgb_my_seg->node_id = 0;
 		msgb_my_seg->manager = NULL;
-		msgb_my_seg->dsm_seg_handle = NULL;
+		msgb_my_seg->dsm_seg_handle = 0;
 		msgb_my_seg = NULL;
 	}
 }
