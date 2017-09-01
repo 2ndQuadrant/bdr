@@ -91,6 +91,14 @@ bdr_get_nodegroup(Oid node_group_id, bool missing_ok)
 	HeapTuple		tuple;
 	ScanKeyData		key[1];
 
+	if (node_group_id == 0)
+	{
+		Assert(false);
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("node group id may not be 0")));
+	}
+
 	rv = makeRangeVar(BDR_EXTENSION_NAME, CATALOG_NODE_GROUP, -1);
 	rel = heap_openrv(rv, RowExclusiveLock);
 
@@ -278,8 +286,9 @@ bdr_get_node_info(Oid nodeid, bool missing_ok)
 		nodeinfo = palloc(sizeof(BdrNodeInfo));
 		nodeinfo->bdr_node = node;
 		nodeinfo->pgl_node = get_node(nodeid, missing_ok);
-		nodeinfo->bdr_node_group = nodeinfo->bdr_node == NULL ? NULL :
-								   bdr_get_nodegroup(nodeinfo->bdr_node->node_group_id, true);
+		nodeinfo->bdr_node_group = NULL;
+		if (nodeinfo->bdr_node != NULL && nodeinfo->bdr_node->node_group_id != 0)
+			nodeinfo->bdr_node_group = bdr_get_nodegroup(nodeinfo->bdr_node->node_group_id, true);
 		nodeinfo->pgl_interface = NULL;
 	}
 	return nodeinfo;
@@ -312,8 +321,10 @@ bdr_get_local_node_info(bool for_update, bool missing_ok)
 		nodeinfo = palloc(sizeof(BdrNodeInfo));
 		nodeinfo->bdr_node = bdr_get_node(local_pgl_node->node->id,
 										  missing_ok);
-		nodeinfo->bdr_node_group = nodeinfo->bdr_node == NULL ? NULL : 
-								   bdr_get_nodegroup(nodeinfo->bdr_node->node_group_id, true);
+		if (nodeinfo->bdr_node != NULL && nodeinfo->bdr_node->node_group_id != 0)
+			nodeinfo->bdr_node_group = bdr_get_nodegroup(nodeinfo->bdr_node->node_group_id, true);
+		else
+			nodeinfo->bdr_node_group = NULL;
 		nodeinfo->pgl_node = local_pgl_node->node;
 		nodeinfo->pgl_interface = local_pgl_node->node_if;
 		pfree(local_pgl_node);
@@ -473,7 +484,7 @@ bdr_get_nodes_info(Oid in_group_id)
 	HeapTuple		tuple;
 	List		   *res = NIL;
 
-	rv = makeRangeVar(BDR_EXTENSION_NAME, CATALOG_NODE_GROUP, -1);
+	rv = makeRangeVar(BDR_EXTENSION_NAME, CATALOG_NODE, -1);
 	rel = heap_openrv(rv, RowExclusiveLock);
 
 	scan = systable_beginscan(rel, 0, true, NULL, 0, NULL);
@@ -482,12 +493,17 @@ bdr_get_nodes_info(Oid in_group_id)
 	{
 		BdrNode *bnode = bdr_node_fromtuple(tuple);
 
+		elog(WARNING, "XXX examining node %d in group %d; looking for %d", bnode->node_id, bnode->node_group_id, in_group_id);
+
 		if (in_group_id != 0 && bnode->node_group_id != in_group_id)
 			continue;
 
 		nodeinfo = palloc(sizeof(BdrNodeInfo));
 		nodeinfo->bdr_node = bnode;
-		nodeinfo->bdr_node_group = bdr_get_nodegroup(nodeinfo->bdr_node->node_group_id, false);
+		if (nodeinfo->bdr_node->node_group_id == 0)
+			nodeinfo->bdr_node_group = NULL;
+		else
+			nodeinfo->bdr_node_group = bdr_get_nodegroup(nodeinfo->bdr_node->node_group_id, false);
 		nodeinfo->pgl_node = get_node(nodeinfo->bdr_node->node_id, false);
 		nodeinfo->pgl_interface = NULL;
 

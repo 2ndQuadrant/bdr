@@ -31,7 +31,10 @@ SELECT * FROM bdr.node_group_member_info(NULL);
 SELECT 1
 FROM bdr.create_node_group('bdrgroup');
 
+SELECT * FROM bdr.node_group_member_info(NULL);
 SELECT * FROM bdr.node_group_member_info((SELECT node_group_id FROM bdr.node_group));
+SELECT * FROM bdr.node;
+SELECT * FROM bdr.node_group;
 
 SELECT * FROM bdr.node_group_replication_sets;
 

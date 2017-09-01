@@ -154,7 +154,7 @@ CREATE FUNCTION bdr.local_node_info(
 RETURNS record VOLATILE LANGUAGE c AS 'MODULE_PATHNAME','bdr_local_node_info_sql';
 
 CREATE FUNCTION bdr.node_group_member_info(nodegroup_id oid)
-RETURNS TABLE (node_id oid, node_name text, bdr_local_state oid, bdr_seq_id integer)
+RETURNS TABLE (node_id oid, node_name text, node_group_id oid, bdr_local_state oid, bdr_seq_id integer)
 CALLED ON NULL INPUT VOLATILE
 LANGUAGE c AS 'MODULE_PATHNAME','bdr_node_group_member_info';
 

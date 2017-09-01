@@ -770,32 +770,35 @@ bdr_node_group_member_info(PG_FUNCTION_ARGS)
 		/* Prepare to iterate the node-list */
 		nodes = bdr_get_nodes_info(nodegroup_id);
 		funcctx->user_fctx = list_head(nodes);
-		lc = funcctx->user_fctx;
 
 		(void) MemoryContextSwitchTo(oldcontext);
 	}
 
     funcctx = SRF_PERCALL_SETUP();
+	lc = funcctx->user_fctx;
 	
 	if (lc != NULL)
 	{
-		Datum				values[4];
-		bool				nulls[4];
+		Datum				values[5];
+		bool				nulls[5];
 		HeapTuple			htup;
 		BdrNodeInfo		   *info;
 
 		info = lfirst(lc);
 
 		Assert(info->bdr_node != NULL);
-		Assert(info->bdr_node_group != NULL);
 		Assert(info->pgl_node != NULL);
 
 		memset(nulls, 0, sizeof(nulls));
-		/* node_id, node_name, bdr_local_state, bdr_seq_id */
+		/* node_id, node_name, nodegroup_id, bdr_local_state, bdr_seq_id */
 		values[0] = ObjectIdGetDatum(info->pgl_node->id);
 		values[1] = CStringGetTextDatum(info->pgl_node->name);
-		values[2] = ObjectIdGetDatum(info->bdr_node->local_state);
-		values[3] = Int32GetDatum(info->bdr_node->seq_id);
+		if (info->bdr_node->node_group_id == 0)
+			nulls[2] = true;
+		else
+			values[2] = ObjectIdGetDatum(info->bdr_node->node_group_id);
+		values[3] = ObjectIdGetDatum(info->bdr_node->local_state);
+		values[4] = Int32GetDatum(info->bdr_node->seq_id);
 
 		htup = heap_form_tuple(tupdesc, values, nulls);
 
