@@ -21,20 +21,18 @@ SELECT E'\'' || current_database() || E'\'' AS node2_db
 CREATE FUNCTION bdr_submit_comment(message text)
 RETURNS text LANGUAGE c STRICT AS 'bdr','bdr_submit_comment';
 
-SELECT * FROM bdr.node_group_member_info(NULL);
+SELECT node_name, bdr_local_state, node_if_name FROM bdr.node_group_member_info(NULL);
 
 SELECT 1
 FROM bdr.create_node(node_name := 'node1', local_dsn := :'node1_dsn' || ' user=super');
 
-SELECT * FROM bdr.node_group_member_info(NULL);
+SELECT node_name, bdr_local_state, node_if_name FROM bdr.node_group_member_info(NULL);
 
 SELECT 1
 FROM bdr.create_node_group('bdrgroup');
 
-SELECT * FROM bdr.node_group_member_info(NULL);
-SELECT * FROM bdr.node_group_member_info((SELECT node_group_id FROM bdr.node_group));
-SELECT * FROM bdr.node;
-SELECT * FROM bdr.node_group;
+SELECT node_name, bdr_local_state, node_if_name FROM bdr.node_group_member_info(NULL);
+SELECT node_name, bdr_local_state, node_if_name FROM bdr.node_group_member_info((SELECT node_group_id FROM bdr.node_group));
 
 SELECT * FROM bdr.node_group_replication_sets;
 
@@ -45,7 +43,7 @@ SELECT slot_name FROM pg_create_logical_replication_slot(pglogical.pglogical_gen
 
 \c :node2_dsn
 
-SELECT * FROM bdr.node_group_member_info(NULL);
+SELECT node_name, bdr_local_state, node_if_name FROM bdr.node_group_member_info(NULL);
 
 SELECT 1
 FROM bdr.create_node(node_name := 'node2', local_dsn := :'node2_dsn' || ' user=super');
@@ -53,21 +51,17 @@ FROM bdr.create_node(node_name := 'node2', local_dsn := :'node2_dsn' || ' user=s
 SELECT 1
 FROM bdr.join_node_group(:'node1_dsn', 'nosuch-nodegroup');
 
-SELECT * FROM bdr.node_group_member_info((SELECT node_group_id FROM bdr.node_group));
+SELECT node_name, bdr_local_state, node_if_name FROM bdr.node_group_member_info((SELECT node_group_id FROM bdr.node_group));
 
 SELECT 1
 FROM bdr.join_node_group(:'node1_dsn', 'bdrgroup');
 
-SELECT * FROM bdr.node_group_member_info((SELECT node_group_id FROM bdr.node_group));
+SELECT node_name, bdr_local_state, node_if_name FROM bdr.node_group_member_info((SELECT node_group_id FROM bdr.node_group));
 SELECT * FROM bdr.node_group_replication_sets;
 
 -- Subscribe to the first node
 -- See GH#152 for why we don't create the slot
 -- TODO: BDR should do this for us
-
-SELECT * FROM pglogical.node;
-SELECT * FROM pglogical.node_interface;
-
 SELECT 1 FROM pglogical.create_subscription(
     subscription_name := 'bdrgroup',
     provider_dsn := ( :'node1_dsn' || ' user=super' ),
@@ -77,10 +71,6 @@ SELECT 1 FROM pglogical.create_subscription(
 	create_slot := false);
 -- and set the subscription as 'isinternal' so BDR thinks BDR owns it.
 UPDATE pglogical.subscription SET sub_isinternal = true;
-
--- BDR would usually auto-create this but it doesn't know how
--- yet, so do it manually
-SELECT 1 FROM pglogical.create_replication_set('dummy_nodegroup');
 
 -- Wait for the initial copy to finish
 --

@@ -53,6 +53,9 @@ HACKS TO PAY DOWN AND TODOs TO FINISH
   we can cheat), or switch to non-blocking MQs and check for pid change
   in manager PGPROC as found in bdr shmem seg
 
+- Add a log filter hook to suppress logging output for
+  bdr message submissions
+
 FUTURE WORK
 ---
 
