@@ -760,7 +760,6 @@ bdr_node_group_member_info(PG_FUNCTION_ARGS)
 						 "that cannot accept type record")));
 
 		funcctx->tuple_desc = BlessTupleDesc(tupdesc);
-		tupdesc = funcctx->tuple_desc;
 
 		if (PG_ARGISNULL(0))
 			nodegroup_id = 0;
@@ -776,11 +775,12 @@ bdr_node_group_member_info(PG_FUNCTION_ARGS)
 
     funcctx = SRF_PERCALL_SETUP();
 	lc = funcctx->user_fctx;
+	tupdesc = funcctx->tuple_desc;
 	
 	if (lc != NULL)
 	{
-		Datum				values[5];
-		bool				nulls[5];
+		Datum				values[8];
+		bool				nulls[8];
 		HeapTuple			htup;
 		BdrNodeInfo		   *info;
 
@@ -790,7 +790,8 @@ bdr_node_group_member_info(PG_FUNCTION_ARGS)
 		Assert(info->pgl_node != NULL);
 
 		memset(nulls, 0, sizeof(nulls));
-		/* node_id, node_name, nodegroup_id, bdr_local_state, bdr_seq_id */
+		/* node_id, node_name, nodegroup_id, bdr_local_state, bdr_seq_id,
+		 * node_if_id, node_if_name, node_if_dsn */
 		values[0] = ObjectIdGetDatum(info->pgl_node->id);
 		values[1] = CStringGetTextDatum(info->pgl_node->name);
 		if (info->bdr_node->node_group_id == 0)
@@ -799,12 +800,15 @@ bdr_node_group_member_info(PG_FUNCTION_ARGS)
 			values[2] = ObjectIdGetDatum(info->bdr_node->node_group_id);
 		values[3] = ObjectIdGetDatum(info->bdr_node->local_state);
 		values[4] = Int32GetDatum(info->bdr_node->seq_id);
+		values[5] = ObjectIdGetDatum(info->pgl_interface->id);
+		values[6] = CStringGetTextDatum(info->pgl_interface->name);
+		values[7] = CStringGetTextDatum(info->pgl_interface->dsn);
 
 		htup = heap_form_tuple(tupdesc, values, nulls);
 
-		SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(htup));
+		funcctx->user_fctx = lnext(lc);
 
-		lc = lnext(lc);
+		SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(htup));
 	}
 	else
 	{

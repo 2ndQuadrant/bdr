@@ -493,8 +493,6 @@ bdr_get_nodes_info(Oid in_group_id)
 	{
 		BdrNode *bnode = bdr_node_fromtuple(tuple);
 
-		elog(WARNING, "XXX examining node %d in group %d; looking for %d", bnode->node_id, bnode->node_group_id, in_group_id);
-
 		if (in_group_id != 0 && bnode->node_group_id != in_group_id)
 			continue;
 

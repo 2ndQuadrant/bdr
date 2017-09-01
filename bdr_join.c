@@ -305,7 +305,7 @@ bdr_join_copy_remote_nodes(PGconn *conn, BdrNodeInfo *local)
 	 */
 	snprintf(nodeid, 30, "%u", node_group_id);
 	paramValues[0] = nodeid;
-	res = PQexecParams(conn, "SELECT node_id, node_name, bdr_local_state, bdr_seq_id FROM bdr.node_group_member_info($1)",
+	res = PQexecParams(conn, "SELECT node_id, node_name, bdr_local_state, bdr_seq_id, node_if_id, node_if_name, node_if_dsn FROM bdr.node_group_member_info($1)",
 					   1, paramTypes, paramValues, NULL, NULL, 0);
 
 	if (PQresultStatus(res) != PGRES_TUPLES_OK)
@@ -337,11 +337,11 @@ bdr_join_copy_remote_nodes(PGconn *conn, BdrNodeInfo *local)
 		pnode.name = pstrdup(PQgetvalue(res, i, 1));
 
 		val = PQgetvalue(res, i, 2);
-		if (sscanf(val, "%u", &bnode.local_state) == 1)
+		if (sscanf(val, "%u", &bnode.local_state) != 1)
 			elog(ERROR, "cannot parse '%s' as uint32", val);
 
 		val = PQgetvalue(res, i, 3);
-		if (sscanf(val, "%d", &bnode.seq_id) == 1)
+		if (sscanf(val, "%d", &bnode.seq_id) != 1)
 			elog(ERROR, "cannot parse '%s' as int", val);
 
 		bnode.node_group_id = node_group_id;

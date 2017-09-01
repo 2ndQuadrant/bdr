@@ -1,7 +1,7 @@
 SELECT * FROM bdr_regress_variables()
 \gset
 
-\set VERBOSITY terse
+\set VERBOSITY verbose
 
 \c :node1_dsn
 CREATE EXTENSION bdr CASCADE;
@@ -64,6 +64,10 @@ SELECT * FROM bdr.node_group_replication_sets;
 -- Subscribe to the first node
 -- See GH#152 for why we don't create the slot
 -- TODO: BDR should do this for us
+
+SELECT * FROM pglogical.node;
+SELECT * FROM pglogical.node_interface;
+
 SELECT 1 FROM pglogical.create_subscription(
     subscription_name := 'bdrgroup',
     provider_dsn := ( :'node1_dsn' || ' user=super' ),
