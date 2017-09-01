@@ -326,6 +326,7 @@ bdr_join_copy_remote_nodes(PGconn *conn, BdrNodeInfo *local)
 	{
 		BdrNode bnode;
 		PGLogicalNode pnode;
+		PGlogicalInterface pinterface;
 		const char *val;
 
 		val = PQgetvalue(res, i, 0);
@@ -347,9 +348,18 @@ bdr_join_copy_remote_nodes(PGconn *conn, BdrNodeInfo *local)
 		bnode.node_group_id = node_group_id;
 		bnode.confirmed_our_join = false;
 
+		val = PQgetvalue(res, i, 4);
+		if (sscanf(val, "%u", &pinterface.id) != 1)
+			elog(ERROR, "cannot parse '%s' as uint32", val);
+
+		pinterface.name = PQgetvalue(res, i, 5);
+		pinterface.dsn = PQgetvalue(res, i, 6);
+		pinterface.nodeid = bnode.node_id;
+
 		/* create */
 		bdr_node_create(&bnode);
 		create_node(&pnode);
+		create_node_interface(&pinterface);
 	}
 }
 

@@ -1,7 +1,7 @@
 SELECT * FROM bdr_regress_variables()
 \gset
 
-\set VERBOSITY verbose
+\set VERBOSITY terse
 
 \c :node1_dsn
 CREATE EXTENSION bdr CASCADE;

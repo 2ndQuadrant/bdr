@@ -48,6 +48,12 @@ bdr_check_local_node(bool for_update)
 				 errmsg("current database is not configured as bdr node"),
 				 errhint("create bdr node first")));
 
+	if (strcmp(nodeinfo->pgl_node->name, nodeinfo->pgl_interface->name) != 0)
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("bdr requires that the pglogical interface %s have the same name as the pglogical node %s",
+				        nodeinfo->pgl_interface->name, nodeinfo->pgl_node->name)));
+
 	return nodeinfo;
 }
 
@@ -105,6 +111,12 @@ bdr_create_node_sql(PG_FUNCTION_ARGS)
 				(errmsg("connection string for existing local node does not match supplied connstring"),
 				 errhint("Check the connection string for the local pglogical interface after node creation")));
 	}
+
+	if (strcmp(pgllocal->node->name, pgllocal->node_if->name) != 0)
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("bdr requires that the pglogical interface %s have the same name as the pglogical node %s",
+				        pgllocal->node_if->name, pgllocal->node->name)));
 
 	/*
 	 * Then make the BDR node on top. Most of the node is populated later.
@@ -336,6 +348,8 @@ bdr_join_node_group_sql(PG_FUNCTION_ARGS)
 
 		bdr_join_copy_remote_nodegroup(local, remote);
 
+		bdr_join_copy_remote_nodes(conn, local);
+
 		/*
 		 * TODO: start up messaging system. We need it running early so that we
 		 * can update node statuses, etc. Peers know about us now since we got
@@ -355,8 +369,6 @@ bdr_join_node_group_sql(PG_FUNCTION_ARGS)
 		bdr_join_subscribe_join_target(conn, local);
 
 		bdr_join_copy_repset_memberships(conn, local);
-
-		bdr_join_copy_remote_nodes(conn, local);
 
 		/* TODO: copy initial consensus message position */
 		bdr_join_init_consensus_messages(conn, local);

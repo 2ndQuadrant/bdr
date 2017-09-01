@@ -20,6 +20,10 @@ bdr.bdr_group_create wrapper around bdr.create_node and bdr.create_node_group
 HACKS TO PAY DOWN AND TODOs TO FINISH
 ----
 
+- Instead of assuming there's an interface with the same name as the node,
+  look up the interfaces being used by the join target node for its bdr
+  subscriptions to peer nodes and use them.
+
 - Permission checks in BDR internal SQL functions for join, messaging, etc
 
 - Move node join process into manager
@@ -57,6 +61,8 @@ FUTURE WORK
 
 - one day we'll need a "domain" for consensus messages, with per-domain
   counters, to support multiple nodegroups...
+
+- some way to specify non-default interfaces for each node when joining
 
 SANITY CHECKS AND DEFENSES NEEDED
 ---

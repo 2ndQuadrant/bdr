@@ -284,12 +284,31 @@ bdr_get_node_info(Oid nodeid, bool missing_ok)
 	if (node != NULL)
 	{
 		nodeinfo = palloc(sizeof(BdrNodeInfo));
+
 		nodeinfo->bdr_node = node;
-		nodeinfo->pgl_node = get_node(nodeid, missing_ok);
+
+		nodeinfo->pgl_node = get_node(nodeid, true);
+		if (nodeinfo->pgl_node == NULL && !missing_ok)
+			ereport(ERROR,
+					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+					 errmsg("bdr %u doesn't have corresponding pglogical node with same id",
+				  		nodeinfo->bdr_node->node_id)));
+
 		nodeinfo->bdr_node_group = NULL;
 		if (nodeinfo->bdr_node != NULL && nodeinfo->bdr_node->node_group_id != 0)
-			nodeinfo->bdr_node_group = bdr_get_nodegroup(nodeinfo->bdr_node->node_group_id, true);
-		nodeinfo->pgl_interface = NULL;
+			nodeinfo->bdr_node_group = bdr_get_nodegroup(nodeinfo->bdr_node->node_group_id, false);
+
+		/*
+		 * TODO: bdr currently assumes that there's an interface by the same name
+		 * as the node, and we can use it. That's a bit hacky, though we enforce
+		 * it in group creation and join so it should be OK.
+		 */
+		nodeinfo->pgl_interface = get_node_interface_by_name(nodeinfo->pgl_node->id, nodeinfo->pgl_node->name, true);
+		if (nodeinfo->pgl_interface == NULL)
+			ereport(ERROR,
+					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+					 errmsg("node %s doesn't have corresponding interface with same name",
+						 nodeinfo->pgl_node->name)));
 	}
 	return nodeinfo;
 }
@@ -327,6 +346,13 @@ bdr_get_local_node_info(bool for_update, bool missing_ok)
 			nodeinfo->bdr_node_group = NULL;
 		nodeinfo->pgl_node = local_pgl_node->node;
 		nodeinfo->pgl_interface = local_pgl_node->node_if;
+
+		if (strcmp(nodeinfo->pgl_node->name, nodeinfo->pgl_interface->name) != 0)
+			ereport(ERROR,
+					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+					 errmsg("bdr requires that the pglogical interface %s have the same name as the pglogical node %s",
+					        nodeinfo->pgl_interface->name, nodeinfo->pgl_node->name)));
+
 		pfree(local_pgl_node);
 	}
 	return nodeinfo;
@@ -342,21 +368,12 @@ bdr_get_local_node_info(bool for_update, bool missing_ok)
 BdrNodeInfo *
 bdr_get_node_info_by_name(const char *name, bool missing_ok)
 {
-	BdrNodeInfo *nodeinfo = NULL;
 	PGLogicalNode  *pglnode = get_node_by_name(name, missing_ok);
-	if (pglnode != NULL)
-	{
-		nodeinfo = palloc(sizeof(BdrNodeInfo));
-		nodeinfo->bdr_node = bdr_get_node(pglnode->id,
-										  missing_ok);
-		nodeinfo->bdr_node_group = nodeinfo->bdr_node == NULL ? NULL : 
-								   bdr_get_nodegroup(nodeinfo->bdr_node->node_group_id, true);
-		nodeinfo->pgl_node = pglnode;
-		nodeinfo->pgl_interface = NULL;
-		pfree(pglnode);
-	}
-
-	return nodeinfo;
+	/* Wastes a pglogical node lookup, but meh */
+	if (pglnode == NULL)
+		return NULL;
+	else
+		return bdr_get_node_info(pglnode->id, missing_ok);
 }
 
 /*
@@ -497,13 +514,32 @@ bdr_get_nodes_info(Oid in_group_id)
 			continue;
 
 		nodeinfo = palloc(sizeof(BdrNodeInfo));
+
 		nodeinfo->bdr_node = bnode;
+
 		if (nodeinfo->bdr_node->node_group_id == 0)
 			nodeinfo->bdr_node_group = NULL;
 		else
 			nodeinfo->bdr_node_group = bdr_get_nodegroup(nodeinfo->bdr_node->node_group_id, false);
-		nodeinfo->pgl_node = get_node(nodeinfo->bdr_node->node_id, false);
-		nodeinfo->pgl_interface = NULL;
+
+		nodeinfo->pgl_node = get_node(nodeinfo->bdr_node->node_id, true);
+		if (nodeinfo->pgl_node == NULL)
+			ereport(ERROR,
+					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+					 errmsg("bdr %u doesn't have corresponding pglogical node with same id",
+						 nodeinfo->bdr_node->node_id)));
+
+		/*
+		 * TODO: bdr currently assumes that there's an interface by the same name
+		 * as the node, and we can use it. That's a bit hacky, though we enforce
+		 * it in group creation and join so it should be OK.
+		 */
+		nodeinfo->pgl_interface = get_node_interface_by_name(nodeinfo->pgl_node->id, nodeinfo->pgl_node->name, true);
+		if (nodeinfo->pgl_interface == NULL)
+			ereport(ERROR,
+					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+					 errmsg("node %s doesn't have corresponding interface with same name",
+						 nodeinfo->pgl_node->name)));
 
 		res = lappend(res, nodeinfo);
 	}
