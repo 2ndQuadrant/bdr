@@ -39,7 +39,7 @@ SELECT * FROM bdr.node_group_replication_sets;
 -- We must create a slot before creating the subscription to work
 -- around the deadlock in 2ndQuadrant/pglogical_internal#152
 -- TODO: BDR should do this automatically
-SELECT slot_name FROM pg_create_logical_replication_slot(pglogical.pglogical_gen_slot_name(:node2_db, 'node1', 'bdrgroup'), 'pglogical');
+SELECT slot_name FROM pg_create_logical_replication_slot(pglogical.pglogical_gen_slot_name(:node2_db, 'node1', 'bdrgroup_node1'), 'pglogical');
 
 \c :node2_dsn
 
@@ -58,19 +58,6 @@ FROM bdr.join_node_group(:'node1_dsn', 'bdrgroup');
 
 SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info((SELECT node_group_id FROM bdr.node_group));
 SELECT * FROM bdr.node_group_replication_sets;
-
--- Subscribe to the first node
--- See GH#152 for why we don't create the slot
--- TODO: BDR should do this for us
-SELECT 1 FROM pglogical.create_subscription(
-    subscription_name := 'bdrgroup',
-    provider_dsn := ( :'node1_dsn' || ' user=super' ),
-    synchronize_structure := true,
-    forward_origins := '{}',
-    replication_sets := ARRAY['bdrgroup','ddl_sql'],
-	create_slot := false);
--- and set the subscription as 'isinternal' so BDR thinks BDR owns it.
-UPDATE pglogical.subscription SET sub_isinternal = true;
 
 -- Wait for the initial copy to finish
 --
@@ -91,7 +78,7 @@ FROM pglogical.show_subscription_status();
 
 -- See above...
 -- TODO: BDR should do this automatically
-SELECT slot_name FROM pg_create_logical_replication_slot(pglogical.pglogical_gen_slot_name(:node1_db, 'node2', 'bdrgroup'), 'pglogical');
+SELECT slot_name FROM pg_create_logical_replication_slot(pglogical.pglogical_gen_slot_name(:node1_db, 'node2', 'bdrgroup_node2'), 'pglogical');
 
 \c :node1_dsn
 

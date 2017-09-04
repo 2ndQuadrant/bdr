@@ -430,7 +430,7 @@ bdr_gen_sub_name(BdrNodeInfo *subscriber, BdrNodeInfo *provider)
 	 * end, since it also has the subscriber name in it, but not much to be
 	 * done about it.
 	 */
-	appendStringInfo(&sub_name, "bdr_%s_%s",
+	appendStringInfo(&sub_name, "%s_%s",
 		provider->bdr_node_group->name,
 		provider->pgl_node->name);
 	return sub_name.data;
@@ -675,6 +675,9 @@ bdr_join_create_slots(BdrNodeInfo *local)
 		BdrNodeInfo *remote = lfirst(lc);
 		char		*sub_name;
 		NameData	slot_name;
+
+		if (remote->bdr_node->node_id == local->bdr_node->node_id)
+			continue;
 
 		/*
 		 * Subscription names here are from the PoV of the remote
