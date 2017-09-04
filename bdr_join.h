@@ -20,6 +20,10 @@ extern uint64 bdr_join_submit_request(PGconn *conn, const char * node_group_name
 
 extern void bdr_join_handle_join_proposal(struct BdrMessage *msg);
 
+extern void bdr_join_handle_catchup_proposal(struct BdrMessage *msg);
+
+extern void bdr_join_handle_active_proposal(struct BdrMessage *msg);
+
 extern BdrNodeInfo *get_remote_node_info(PGconn *conn);
 
 extern void bdr_join_copy_remote_nodegroup(BdrNodeInfo *local,
@@ -37,11 +41,11 @@ extern void bdr_join_create_subscriptions(BdrNodeInfo *local, BdrNodeInfo *join_
 
 extern XLogRecPtr bdr_get_remote_insert_lsn(PGconn *conn);
 
-extern void bdr_join_send_catchup_announce(BdrNodeInfo *local);
+extern uint64 bdr_join_send_catchup_ready(BdrNodeInfo *local);
 
 extern void bdr_join_create_slots(BdrNodeInfo *local);
 
-extern void bdr_join_send_active_announce(BdrNodeInfo *local);
+extern uint64 bdr_join_send_active_announce(BdrNodeInfo *local);
 
 extern void bdr_join_go_active(BdrNodeInfo *local);
 

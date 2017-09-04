@@ -1,9 +1,16 @@
 NEXT STEPS TO PROGRESS
 ----
 
-- Test current node join progress
-- Finish rest of funcs in bdr_join_nodegroup_sql
+- Figure out why node isn't added in response to join message,
+  so we cannot communicate
+
+  "ERROR:  receiving node 1148549230 does not know about sending node 3367056606 and cannot receive messages from it"
+
+- Wake supervisor to tell it about the new node, figure out why it
+  isn't starting manager
+
 - Delay starting messaging until have nodelist and nodegroup (manager)
+
 - Implement consensus operation handlers for (not real consensus yet, but)
   - node name reserve
   - node standby (make slots)

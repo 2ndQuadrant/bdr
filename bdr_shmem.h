@@ -64,4 +64,6 @@ extern BdrManagerShmem* bdr_shmem_allocate_manager_segment(uint32 node_id);
 
 extern void bdr_shmem_release_manager_segment(BdrManagerShmem *seg);
 
+extern void wait_for_manager_shmem_attach(uint32 myid);
+
 #endif

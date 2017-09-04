@@ -871,6 +871,9 @@ bdr_proposals_receive(ConsensusProposal *msg)
 			msg->sender_nodeid, loginfo.data);
 		pfree(loginfo.data);
 	}
+	else if (bmsg->message_type == BDR_MSG_NODE_CATCHUP_READY)
+	{
+	}
 	else
 	{
 		elog(bdr_debug_level, "unrecognised BDR message type %d ignored",
@@ -901,6 +904,12 @@ bdr_proposals_prepare(List *messages)
 				break;
 			case BDR_MSG_NODE_JOIN_REQUEST:
 				bdr_join_handle_join_proposal(msg);
+				break;
+			case BDR_MSG_NODE_CATCHUP_READY:
+				bdr_join_handle_catchup_proposal(msg);
+				break;
+			case BDR_MSG_NODE_ACTIVE:
+				bdr_join_handle_active_proposal(msg);
 				break;
 			default:
 				/* 
@@ -973,4 +982,16 @@ int
 bdr_get_wait_event_space_needed(void)
 {
 	return msgb_get_wait_event_space_needed();
+}
+
+void
+bdr_messaging_add_peer(uint32 node_id, const char *dsn)
+{
+	consensus_add_node(node_id, dsn);
+}
+
+void
+bdr_messaging_remove_peer(uint32 node_id)
+{
+	consensus_remove_node(node_id);
 }

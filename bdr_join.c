@@ -43,6 +43,9 @@
 #include "bdr_join.h"
 #include "bdr_worker.h"
 
+static void bdr_join_create_slot(BdrNodeInfo *local, BdrNodeInfo *remote);
+static void bdr_create_subscription(BdrNodeInfo *local, BdrNodeInfo *remote, int apply_delay_ms, bool for_join);
+
 PGconn *
 bdr_join_connect_remote(const char * remote_node_dsn,
 	BdrNodeInfo *local)
@@ -166,6 +169,9 @@ bdr_join_handle_join_proposal(BdrMessage *msg)
 
 	bnode.node_id = req.joining_node_id;
 	bnode.node_group_id = local_nodegroup->id;
+	/*
+	 * TODO: should set local state to joining
+	 */
 	bnode.local_state = req.joining_node_state;
 	bnode.seq_id = 0;
 
@@ -188,6 +194,102 @@ bdr_join_handle_join_proposal(BdrMessage *msg)
 	/*
 	 * We don't subscribe to the node yet, that only happens once it goes
 	 * active.
+	 */
+
+	/*
+	 * TODO: move addition of the peer node from prepare
+	 * phase to accept phase callback
+	 */
+	bdr_messaging_add_peer(bnode.node_id, pnodeif.dsn);
+}
+
+uint64
+bdr_join_send_catchup_ready(BdrNodeInfo *local)
+{
+	BdrMessage *msg = palloc0(sizeof(BdrMessage));
+	msg->message_type = BDR_MSG_NODE_CATCHUP_READY;
+	msg->payload_length = 0;
+	return bdr_msgs_enqueue_one(msg);
+}
+
+/*
+ * A peer node says it wants to go into catchup mode.
+ *
+ * (This won't really require consensus, but it's simplest to treat it as if it does)
+ *
+ * At this point we need to create slots for the peer to use. The peer won't
+ * be replaying data from them yet, but it should connect and advance them
+ * so we don't retain excess resources. (TODO)
+ *
+ * TODO: should create an ephemeral slot here, and make it permanent on commit?
+ */
+void
+bdr_join_handle_catchup_proposal(BdrMessage *msg)
+{
+	BdrNodeInfo		   *local, *remote;
+
+	Assert(is_bdr_manager());
+
+	/*
+	 * Catchup ready announcements are empty, with no payload,
+	 * but we might want to add one later, so we don't check.
+	 */
+
+	local = bdr_get_local_node_info(false, false);
+	remote = bdr_get_node_info(msg->originator_id, false);
+
+	bdr_join_create_slot(local, remote);
+
+	/*
+	 * TODO: should set local state to catchup
+	 */
+
+	/*
+	 * TODO: write a catchup-confirmation message
+	 * here, so the peer can tally join confirmations
+	 */
+}
+
+uint64
+bdr_join_send_active_announce(BdrNodeInfo *local)
+{
+	BdrMessage *msg = palloc0(sizeof(BdrMessage));
+	msg->message_type = BDR_MSG_NODE_ACTIVE;
+	msg->payload_length = 0;
+	return bdr_msgs_enqueue_one(msg);
+}
+
+/*
+ * A node in catchup mode announces that it wants to join as a full peer.
+ */
+void
+bdr_join_handle_active_proposal(BdrMessage *msg)
+{
+	BdrNodeInfo		   *local, *remote;
+
+	Assert(is_bdr_manager());
+
+	/*
+	 * Catchup ready announcements are empty, with no payload,
+	 * but we might want to add one later, so we don't check.
+	 */
+
+	local = bdr_get_local_node_info(false, false);
+	remote = bdr_get_node_info(msg->originator_id, false);
+
+	/*
+	 * We can now create a subscription to the node, to be started
+	 * once we commit.
+	 */
+	bdr_create_subscription(local, remote, 0, false);
+
+	/*
+	 * TODO: should set local state to active/ready
+	 */
+
+	/*
+	 * TODO: should signal the manager to start the subscription
+	 * once we commit
 	 */
 }
 
@@ -590,12 +692,6 @@ bdr_join_create_subscriptions(BdrNodeInfo *local, BdrNodeInfo *join_target)
 	}
 }
 
-void
-bdr_join_send_catchup_announce(BdrNodeInfo *local)
-{
-	elog(WARNING, "sending catchup announce not implemented");
-}
-
 /*
  *
  * Pg's replication slots code lacks any interface to check if a slot exists.
@@ -653,6 +749,41 @@ bdr_replication_slot_exists(Name slot_name)
 	return found != NULL;
 }
 
+static void
+bdr_join_create_slot(BdrNodeInfo *local, BdrNodeInfo *remote)
+{
+	char		*sub_name;
+	NameData	slot_name;
+
+	/*
+	 * Subscription names here are from the PoV of the remote
+	 * node, since this creation is happening on the provider.
+	 */
+	sub_name = bdr_gen_sub_name(remote, local);
+
+	gen_slot_name(&slot_name, remote->bdr_node->dbname,
+				  local->pgl_node->name, sub_name);
+
+	/*
+	 * Slot creation is NOT transactional. If we're being asked to create a
+	 * slot for peers we could've failed after some slots were created, so
+	 * we can't assume a clean slate here.
+	 *
+	 * An already-existing pglogical slot for this db with the right name
+	 * is fine to use, since it must be at or behind the position a new
+	 * slot would get created at.
+	 *
+	 * We don't hold a lock over these two, so someone could create the
+	 * slot after we check it, but then we'll just ERROR in creation and
+	 * retry.
+	 */
+	if (bdr_replication_slot_exists(&slot_name))
+		return;
+
+	ReplicationSlotCreate(NameStr(slot_name), true, RS_PERSISTENT);
+	ReplicationSlotRelease();
+}
+
 /*
  * Unlike for pglogical, BDR creates replication slots for its peers directly.
  * The peers don't have to ask for slot creation via a walsender command or SQL
@@ -673,50 +804,12 @@ bdr_join_create_slots(BdrNodeInfo *local)
 	foreach (lc, nodes)
 	{
 		BdrNodeInfo *remote = lfirst(lc);
-		char		*sub_name;
-		NameData	slot_name;
 
 		if (remote->bdr_node->node_id == local->bdr_node->node_id)
 			continue;
 
-		/*
-		 * Subscription names here are from the PoV of the remote
-		 * node, since this creation is happening on the provider.
-		 */
-		sub_name = bdr_gen_sub_name(remote, local);
-
-		gen_slot_name(&slot_name, remote->bdr_node->dbname,
-					  local->pgl_node->name, sub_name);
-
-		/*
-		 * Slot creation is NOT transactional. If we're being asked to create a
-		 * slot for peers we could've failed after some slots were created, so
-		 * we can't assume a clean slate here.
-		 *
-		 * An already-existing pglogical slot for this db with the right name
-		 * is fine to use, since it must be at or behind the position a new
-		 * slot would get created at.
-		 *
-		 * We don't hold a lock over these two, so someone could create the
-		 * slot after we check it, but then we'll just ERROR in creation and
-		 * retry.
-		 */
-		if (bdr_replication_slot_exists(&slot_name))
-			continue;
-
-		ReplicationSlotCreate(NameStr(slot_name), true, RS_PERSISTENT);
-		ReplicationSlotRelease();
+		bdr_join_create_slot(local, remote);
 	}
-}
-
-void
-bdr_join_send_active_announce(BdrNodeInfo *local)
-{
-	/*
-	 * TODO: send "going active" consensus message
-	 */
-
-	elog(WARNING, "sending active announce not implemented");
 }
 
 void

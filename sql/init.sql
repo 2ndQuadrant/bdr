@@ -59,20 +59,6 @@ FROM bdr.join_node_group(:'node1_dsn', 'bdrgroup');
 SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info((SELECT node_group_id FROM bdr.node_group));
 SELECT * FROM bdr.node_group_replication_sets;
 
--- Wait for the initial copy to finish
---
--- If we don't do this, we'll usually kill the apply worker during init
--- and it won't retry since it doesn't know if the restore was partial
--- last time around
-DO LANGUAGE plpgsql $$
-BEGIN
-  WHILE NOT EXISTS (SELECT 1 FROM pglogical.show_subscription_status() WHERE status = 'replicating')
-  LOOP
-    PERFORM pg_sleep(0.5);
-  END LOOP;
-END;
-$$;
-
 SELECT subscription_name, status, provider_node, slot_name, replication_sets
 FROM pglogical.show_subscription_status();
 
@@ -82,20 +68,6 @@ SELECT slot_name FROM pg_create_logical_replication_slot(pglogical.pglogical_gen
 
 \c :node1_dsn
 
--- Subscribe to the second node and make the subscription 'internal'
--- but this time don't sync structure.
---
--- See GH#152 for why we don't create the slot
-SELECT 1 FROM pglogical.create_subscription(
-    subscription_name := 'bdrgroup',
-    provider_dsn := ( :'node2_dsn' || ' user=super' ),
-    synchronize_structure := false,
-    forward_origins := '{}',
-    replication_sets := ARRAY['bdrgroup','ddl_sql'],
-    create_slot := false);
-
-UPDATE pglogical.subscription SET sub_isinternal = true;
-
 DO LANGUAGE plpgsql $$
 BEGIN
   WHILE NOT EXISTS (SELECT 1 FROM pglogical.show_subscription_status() WHERE status = 'replicating')
@@ -107,18 +79,6 @@ $$;
 
 SELECT subscription_name, status, provider_node, slot_name, replication_sets
 FROM pglogical.show_subscription_status();
-
--- Now, since BDR doesn't know we changed any catalogs etc,
--- restart pglogical to make the plugin re-read its config
-
-SET client_min_messages = error;
-
-CREATE TEMPORARY TABLE throwaway AS
-SELECT pg_terminate_backend(pid)
-FROM pg_stat_activity
-WHERE pid <> pg_backend_pid();
-
-DROP TABLE throwaway;
 
 SET client_min_messages = notice;
 

@@ -289,6 +289,12 @@ bdr_join_node_group_sql(PG_FUNCTION_ARGS)
 				 		local->bdr_node_group->name)));
 
 	/*
+	 * There's a race with manager startup here, if we just created
+	 * the node. Wait for the manager to become available.
+	 */
+	wait_for_manager_shmem_attach(local->bdr_node->node_id);
+
+	/*
 	 * OK, so here what are our minimal requirements?
 	 *
 	 * - Tell remote node we exist
@@ -407,7 +413,7 @@ bdr_join_node_group_sql(PG_FUNCTION_ARGS)
 		 * Tell peers we exist so they can make slots for us
 		 * to use. No need for them to subscribe yet.
 		 */
-		bdr_join_send_catchup_announce(local);
+		bdr_join_send_catchup_ready(local);
 
 		/*
 		 * We're now in catchup mode, waiting to be

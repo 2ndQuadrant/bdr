@@ -21,6 +21,8 @@
 
 #include "miscadmin.h"
 
+#include "pgstat.h"
+
 #include "storage/ipc.h"
 #include "storage/latch.h"
 #include "storage/shmem.h"
@@ -183,4 +185,32 @@ bdr_shmem_init(int maxnodes)
 
 	prev_shmem_startup_hook = shmem_startup_hook;
 	shmem_startup_hook = bdr_shmem_startup;
+}
+
+/*
+ * From a non-manager process, poll shmem until we see the manager process
+ * start up.
+ *
+ * We could avoid polling by having a wait-list in shmem, but it's hardly
+ * worth the trouble for something that won't happen much or for long.
+ */
+void
+wait_for_manager_shmem_attach(uint32 myid)
+{
+	while (bdr_shmem_lookup_manager_segment(myid, true) == NULL)
+	{
+		int rc;
+
+		rc = WaitLatch(&MyProc->procLatch,
+					   WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
+					   1000L, PG_WAIT_EXTENSION);
+
+        ResetLatch(&MyProc->procLatch);
+
+		/* emergency bailout if postmaster has died */
+		if (rc & WL_POSTMASTER_DEATH)
+			proc_exit(1);
+
+		CHECK_FOR_INTERRUPTS();
+	}
 }

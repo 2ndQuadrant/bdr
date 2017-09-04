@@ -121,4 +121,7 @@ extern void bdr_messaging_wait_event_set_recreated(struct WaitEventSet *new_set)
 
 extern int bdr_get_wait_event_space_needed(void);
 
+extern void bdr_messaging_add_peer(uint32 node_id, const char *dsn);
+extern void bdr_messaging_remove_peer(uint32 node_id);
+
 #endif
