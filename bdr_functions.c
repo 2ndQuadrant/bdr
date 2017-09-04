@@ -18,6 +18,10 @@
 
 #include "access/xact.h"
 
+#include "commands/dbcommands.h"
+
+#include "miscadmin.h"
+
 #include "storage/lwlock.h"
 
 #include "utils/builtins.h"
@@ -125,6 +129,7 @@ bdr_create_node_sql(PG_FUNCTION_ARGS)
 	bnode.seq_id = -1;
 	bnode.confirmed_our_join = false;
 	bnode.node_group_id = InvalidOid;
+	bnode.dbname = get_database_name(MyDatabaseId);
 
 	bdr_node_create(&bnode);
 
@@ -366,7 +371,7 @@ bdr_join_node_group_sql(PG_FUNCTION_ARGS)
 		 * Subscribe to join target
 		 * TODO: but pause before starting actual data replay from target
 		 */
-		bdr_join_subscribe_join_target(conn, local);
+		bdr_join_subscribe_join_target(conn, local, remote);
 
 		bdr_join_copy_repset_memberships(conn, local);
 
@@ -379,26 +384,21 @@ bdr_join_node_group_sql(PG_FUNCTION_ARGS)
 		 */
 
 		/*
-		 * Make origins for non-join-target peers. The join target origin
-		 * already exists. Then subscribe to all peers.
-		 *
-		 * We don't need inbound slots for peers to connect to us until
-		 * we plan to go read/write and promote.
-		 */
-		bdr_join_create_origins(local);
-
-		/*
 		 * Create subscriptions to peers, disabled until we go-live.
+		 *
+		 * This also makes the replication origins for the peers,
+		 * so catchup mode can advance them.
 		 *
 		 * TODO: enable subscriptions in fast-forward only mode to
 		 * get rid of excess resource retention on peers.
 		 */
-		bdr_join_create_subscriptions(local);
+		bdr_join_create_subscriptions(local, remote);
 
 		min_catchup_lsn = bdr_get_remote_insert_lsn(conn);
 		elog(WARNING, "ignoring minimum catchup lsn: %X/%X",
 			 (uint32)(min_catchup_lsn>>32),
 			 (uint32)min_catchup_lsn);
+
 		/*
 		 * TODO: record min catchup lsn in join progress/state
 		 */
@@ -694,6 +694,62 @@ bdr_replication_set_remove_table(PG_FUNCTION_ARGS)
 	PG_RETURN_VOID();
 }
 
+/*
+ * Both bdr_local_node_info_sql and bdr_node_group_member_info share
+ * the same output tuple format, prepared here.
+ */
+static HeapTuple
+make_nodeinfo_result(BdrNodeInfo *info, TupleDesc tupdesc)
+{
+	Datum				values[10];
+	bool				nulls[10];
+
+	check_nodeinfo(info);
+
+	memset(nulls, 1, sizeof(nulls));
+	/* node_id, node_name */
+	if (info->pgl_node != NULL)
+	{
+		values[0] = ObjectIdGetDatum(info->pgl_node->id);
+		nulls[0] = false;
+		values[1] = CStringGetTextDatum(info->pgl_node->name);
+		nulls[1] = false;
+	}
+
+	/* node_local_state, node_seq_id */
+	if (info->bdr_node != NULL)
+	{
+		values[2] = ObjectIdGetDatum(info->bdr_node->local_state);
+		nulls[2] = false;
+		values[3] = Int32GetDatum(info->bdr_node->seq_id);
+		nulls[3] = false;
+		values[9] = CStringGetTextDatum(info->bdr_node->dbname);
+		nulls[9] = false;
+	}
+
+	/* node_group_id, node_group_name */
+	if (info->bdr_node_group != NULL)
+	{
+		values[4] = ObjectIdGetDatum(info->bdr_node_group->id);
+		nulls[4] = false;
+		values[5] = CStringGetTextDatum(info->bdr_node_group->name);
+		nulls[5] = false;
+	}
+
+	/* interface_id, interface_name, interface_dsn */
+	if (info->pgl_interface != NULL)
+	{
+		values[6] = ObjectIdGetDatum(info->pgl_interface->id);
+		nulls[6] = false;
+		values[7] = CStringGetTextDatum(info->pgl_interface->name);
+		nulls[7] = false;
+		values[8] = CStringGetTextDatum(info->pgl_interface->dsn);
+		nulls[8] = false;
+	}
+
+	return heap_form_tuple(tupdesc, values, nulls);
+}
+
 PG_FUNCTION_INFO_V1(bdr_local_node_info_sql);
 
 /*
@@ -706,9 +762,6 @@ Datum
 bdr_local_node_info_sql(PG_FUNCTION_ARGS)
 {
 	TupleDesc			tupdesc;
-
-	Datum				values[6];
-	bool				nulls[6];
 	HeapTuple			htup;
 	BdrNodeInfo		   *info;
 
@@ -722,16 +775,7 @@ bdr_local_node_info_sql(PG_FUNCTION_ARGS)
 
 	info = bdr_get_local_node_info(false, true);
 
-	memset(nulls, 0, sizeof(nulls));
-	/* node_id, node_name, node_local_state, node_seq_id, nodegroup_id, nodegroup_name */
-	values[0] = ObjectIdGetDatum(info->pgl_node->id);
-	values[1] = CStringGetTextDatum(info->pgl_node->name);
-	values[2] = ObjectIdGetDatum(info->bdr_node->local_state);
-	values[3] = Int32GetDatum(info->bdr_node->seq_id);
-	values[4] = ObjectIdGetDatum(info->bdr_node_group->id);
-	values[5] = CStringGetTextDatum(info->bdr_node_group->name);
-
-	htup = heap_form_tuple(tupdesc, values, nulls);
+	htup = make_nodeinfo_result(info, tupdesc);
 
 	PG_RETURN_DATUM(HeapTupleGetDatum(htup));
 }
@@ -791,8 +835,6 @@ bdr_node_group_member_info(PG_FUNCTION_ARGS)
 	
 	if (lc != NULL)
 	{
-		Datum				values[8];
-		bool				nulls[8];
 		HeapTuple			htup;
 		BdrNodeInfo		   *info;
 
@@ -801,22 +843,7 @@ bdr_node_group_member_info(PG_FUNCTION_ARGS)
 		Assert(info->bdr_node != NULL);
 		Assert(info->pgl_node != NULL);
 
-		memset(nulls, 0, sizeof(nulls));
-		/* node_id, node_name, nodegroup_id, bdr_local_state, bdr_seq_id,
-		 * node_if_id, node_if_name, node_if_dsn */
-		values[0] = ObjectIdGetDatum(info->pgl_node->id);
-		values[1] = CStringGetTextDatum(info->pgl_node->name);
-		if (info->bdr_node->node_group_id == 0)
-			nulls[2] = true;
-		else
-			values[2] = ObjectIdGetDatum(info->bdr_node->node_group_id);
-		values[3] = ObjectIdGetDatum(info->bdr_node->local_state);
-		values[4] = Int32GetDatum(info->bdr_node->seq_id);
-		values[5] = ObjectIdGetDatum(info->pgl_interface->id);
-		values[6] = CStringGetTextDatum(info->pgl_interface->name);
-		values[7] = CStringGetTextDatum(info->pgl_interface->dsn);
-
-		htup = heap_form_tuple(tupdesc, values, nulls);
+		htup = make_nodeinfo_result(info, tupdesc);
 
 		funcctx->user_fctx = lnext(lc);
 

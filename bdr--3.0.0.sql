@@ -22,7 +22,8 @@ CREATE TABLE bdr.node
 	node_group_id oid NOT NULL REFERENCES bdr.node_group(node_group_id),
 	local_state oid NOT NULL,
 	seq_id integer NOT NULL,
-	confirmed_our_join bool NOT NULL
+	confirmed_our_join bool NOT NULL,
+	dbname name NOT NULL
 ) WITH (user_catalog_table=true);
 
 REVOKE ALL ON bdr.node FROM public;
@@ -142,19 +143,26 @@ REVOKE ALL ON FUNCTION bdr.msgb_deliver_message(oid,oid,bytea) FROM public;
  * Functions used to query remote node info. Don't change these without caution,
  * as they're relied on by node join.
  */
+CREATE TYPE bdr.node_info_type AS
+(
+	node_id oid,
+	node_name text,
+	node_local_state oid,
+	node_seq_id integer,
+	nodegroup_id oid,
+	nodegroup_name text,
+	pgl_interface_id oid,
+	pgl_interface_name text,
+	pgl_interface_dsn text,
+	bdr_dbname text
+);
 
-CREATE FUNCTION bdr.local_node_info(
-	node_id OUT oid,
-	node_name OUT text,
-	node_local_state OUT oid,
-	node_seq_id OUT integer,
-	nodegroup_id OUT oid,
-	nodegroup_name OUT text
-)
-RETURNS record VOLATILE LANGUAGE c AS 'MODULE_PATHNAME','bdr_local_node_info_sql';
+CREATE FUNCTION bdr.local_node_info()
+RETURNS bdr.node_info_type
+VOLATILE LANGUAGE c AS 'MODULE_PATHNAME','bdr_local_node_info_sql';
 
 CREATE FUNCTION bdr.node_group_member_info(nodegroup_id oid)
-RETURNS TABLE (node_id oid, node_name text, node_group_id oid, bdr_local_state oid, bdr_seq_id integer, node_if_id oid, node_if_name text, node_if_dsn text)
+RETURNS SETOF bdr.node_info_type
 CALLED ON NULL INPUT VOLATILE
 LANGUAGE c AS 'MODULE_PATHNAME','bdr_node_group_member_info';
 

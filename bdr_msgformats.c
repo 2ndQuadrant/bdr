@@ -24,7 +24,6 @@
 void
 wrapInStringInfo(StringInfo si, char *data, Size length)
 {
-	Assert(si->data != NULL);
 	si->data = data;
 	si->len = length;
 	si->maxlen = -1;

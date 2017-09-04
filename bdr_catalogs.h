@@ -8,6 +8,8 @@
 
 #include "nodes/pg_list.h"
 
+#include "datatype/timestamp.h"
+
 #include "pglogical_node.h"
 
 typedef struct BdrNodeGroup
@@ -22,8 +24,9 @@ typedef struct BdrNode
     uint32		node_id;
     uint32		node_group_id;
     uint32		local_state; /* TODO */
-    int			seq_id;
+    int32		seq_id;
     bool		confirmed_our_join;
+	const char *dbname;
 } BdrNode;
 
 /*
@@ -38,7 +41,6 @@ typedef struct BdrNodeInfo
 	BdrNode			   *bdr_node;
 	BdrNodeGroup	   *bdr_node_group;
     PGLogicalNode	   *pgl_node;
-	/* Only set when the local node is fetched, or on request */
 	PGlogicalInterface *pgl_interface;
 } BdrNodeInfo;
 
@@ -69,5 +71,10 @@ extern void bdr_modify_node(BdrNode *node);
 
 extern void bdr_create_node_defaults(const char *node_name,
 									 const char *local_dsn);
+
+/* Random helpers related to working with pgl/bdr catalogs */
+extern void interval_from_ms(int ms, Interval *interval);
+
+extern void check_nodeinfo(BdrNodeInfo* nodeinfo);
 
 #endif

@@ -30,12 +30,15 @@
 
 #include "nodes/makefuncs.h"
 
+#include "pgtime.h"
+
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
+#include "utils/timestamp.h"
 
 #include "bdr_catalogs.h"
 
@@ -47,16 +50,18 @@ typedef struct NodeTuple
 	Oid			pglogical_node_id;
 	Oid			node_group_id;
 	int32		local_state;
-	int16		seq_id;
+	int32		seq_id;
 	bool		confirmed_our_join;
+	NameData	dbname;
 } NodeTuple;
 
-#define Natts_node						5
+#define Natts_node						6
 #define Anum_node_pglogical_node_id		1
 #define Anum_node_node_group_id			2
 #define Anum_node_local_state			3
 #define Anum_node_seq_id				4
 #define Anum_node_confirmed_our_join	5
+#define Anum_node_dbname				6
 
 typedef struct NodeGroupTuple
 {
@@ -225,6 +230,8 @@ bdr_node_fromtuple(HeapTuple tuple)
 	node->local_state = nodetup->local_state;
 	node->seq_id = nodetup->seq_id;
 	node->confirmed_our_join = nodetup->confirmed_our_join;
+	node->dbname = pstrdup(NameStr(nodetup->dbname));
+
 	/*
 	 * Attributes after this could be NULL or varlena and cannot be accessed
 	 * via GETSRUCT directly. If we add any we'll need a TupleDesc
@@ -270,6 +277,38 @@ bdr_get_node(Oid nodeid, bool missing_ok)
 }
 
 /*
+ * Validate that a nodeinfo meets the constaints the rest of the code expects
+ * when working with them.
+ */
+void
+check_nodeinfo(BdrNodeInfo* nodeinfo)
+{
+	if (nodeinfo == NULL)
+		return;
+
+	/* Must be a bdr node if there's a nodegroup */
+	if (nodeinfo->bdr_node_group != NULL)
+	{
+		Assert(nodeinfo->bdr_node != NULL);
+		Assert(nodeinfo->bdr_node->node_group_id == nodeinfo->bdr_node_group->id);
+	}
+
+	/* Must be a pglogical node if there's a BDR node */
+	if (nodeinfo->bdr_node != NULL)
+	{
+		Assert(nodeinfo->pgl_node != NULL);
+		Assert(nodeinfo->pgl_node->id == nodeinfo->bdr_node->node_id);
+	}
+
+	/* Must be a pgl interface if there's a pgl node */
+	if (nodeinfo->pgl_node != NULL)
+	{
+		Assert(nodeinfo->pgl_interface != NULL);
+		Assert(nodeinfo->pgl_interface->nodeid == nodeinfo->pgl_node->id);
+	}
+}
+
+/*
  * Load the info for specific node by node-id (the same
  * node-id as the pglogical node).
  *
@@ -310,6 +349,7 @@ bdr_get_node_info(Oid nodeid, bool missing_ok)
 					 errmsg("node %s doesn't have corresponding interface with same name",
 						 nodeinfo->pgl_node->name)));
 	}
+	check_nodeinfo(nodeinfo);
 	return nodeinfo;
 }
 
@@ -355,6 +395,7 @@ bdr_get_local_node_info(bool for_update, bool missing_ok)
 
 		pfree(local_pgl_node);
 	}
+	check_nodeinfo(nodeinfo);
 	return nodeinfo;
 }
 
@@ -413,6 +454,7 @@ bdr_node_create(BdrNode *node)
 	values[Anum_node_local_state - 1] = ObjectIdGetDatum(node->local_state);
 	values[Anum_node_seq_id - 1] = Int32GetDatum(node->seq_id);
 	values[Anum_node_confirmed_our_join - 1] = BoolGetDatum(node->confirmed_our_join);
+	values[Anum_node_dbname - 1] = CStringGetDatum(node->dbname);
 
 	tup = heap_form_tuple(tupDesc, values, nulls);
 
@@ -473,6 +515,8 @@ bdr_modify_node(BdrNode *node)
 	values[Anum_node_local_state - 1] = ObjectIdGetDatum(node->local_state);
 	values[Anum_node_seq_id - 1] = Int32GetDatum(node->seq_id);
 	values[Anum_node_confirmed_our_join - 1] = BoolGetDatum(node->confirmed_our_join);
+	/* dbname can change if db is renamed, though currently we won't notice */
+	values[Anum_node_dbname - 1] = CStringGetDatum(node->dbname);
 
 	newtup = heap_modify_tuple(oldtup, tupDesc, values, nulls, replaces);
 
@@ -541,6 +585,7 @@ bdr_get_nodes_info(Oid in_group_id)
 					 errmsg("node %s doesn't have corresponding interface with same name",
 						 nodeinfo->pgl_node->name)));
 
+		check_nodeinfo(nodeinfo);
 		res = lappend(res, nodeinfo);
 	}
 
@@ -585,4 +630,25 @@ bdr_get_node_subscriptions(uint32 node_id)
 	}
 
 	return subs;
+}
+
+void
+interval_from_ms(int ms, Interval *interval)
+{
+	struct pg_tm	tm;
+	fsec_t			micros;
+
+	/*
+	 * The non-fractional part must fit into tm_sec
+	 */
+	memset(&tm, 0, sizeof(struct pg_tm));
+	tm.tm_sec = ms / 1000;
+
+	/*
+	 * Store the subsecond part in the fractional seconds, as microseconds.
+	 */
+	micros = (ms % 1000) * 1000;
+
+	if (tm2interval(&tm, micros, interval) != 0)
+		elog(ERROR, "error converting %d ms to interval", ms);
 }

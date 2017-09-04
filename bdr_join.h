@@ -27,15 +27,13 @@ extern void bdr_join_copy_remote_nodegroup(BdrNodeInfo *local,
 
 extern void bdr_join_copy_remote_nodes(PGconn *conn, BdrNodeInfo *local);
 
-extern void bdr_join_subscribe_join_target(PGconn *conn, BdrNodeInfo *local);
+extern void bdr_join_subscribe_join_target(PGconn *conn, BdrNodeInfo *local, BdrNodeInfo *remote);
 
 extern void bdr_join_copy_repset_memberships(PGconn *conn, BdrNodeInfo *local);
 
 extern void bdr_join_init_consensus_messages(PGconn *conn, BdrNodeInfo *local);
 
-extern void bdr_join_create_origins(BdrNodeInfo *local);
-
-extern void bdr_join_create_subscriptions(BdrNodeInfo *local);
+extern void bdr_join_create_subscriptions(BdrNodeInfo *local, BdrNodeInfo *join_target);
 
 extern XLogRecPtr bdr_get_remote_insert_lsn(PGconn *conn);
 
