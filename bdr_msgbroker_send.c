@@ -1053,15 +1053,12 @@ msgb_service_connections_send(WaitEvent *occurred_events, int nevents,
 	 */
 	Assert(!wait_set_recreate_pending);
 
-	elog(WARNING, "XXX servicing connections");
 	msgb_service_connections_events(occurred_events, nevents);
 	msgb_service_connections_polling();
 
 	/* Don't let the host proc sleep too long if polling */
 	if (conns_polling)
 		*max_next_wait_ms = Min(*max_next_wait_ms, 200L);
-		
-	elog(WARNING, "XXX serviced connections");
 }
 
 /*
