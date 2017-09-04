@@ -1,10 +1,14 @@
 NEXT STEPS TO PROGRESS
 ----
 
-- Figure out why node isn't added in response to join message,
-  so we cannot communicate
+- Debug "unhandled message type 2139062143 in prepare proposal"
 
-  "ERROR:  receiving node 1148549230 does not know about sending node 3367056606 and cannot receive messages from it"
+  Seems to be join msgs
+
+  aha, "hex(2139062143)" = 0x7f7f7f7f, so we're clobbering our xact context
+  prematurely
+
+  fix, ensure node is properly added in response to join-request proposal
 
 - Wake supervisor to tell it about the new node, figure out why it
   isn't starting manager
