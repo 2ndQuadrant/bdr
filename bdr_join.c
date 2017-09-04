@@ -184,6 +184,11 @@ bdr_join_handle_join_proposal(BdrMessage *msg)
 	create_node(&pnode);
 	create_node_interface(&pnodeif);
 	bdr_node_create(&bnode);
+
+	/*
+	 * We don't subscribe to the node yet, that only happens once it goes
+	 * active.
+	 */
 }
 
 /*
@@ -463,6 +468,12 @@ bdr_create_subscription(BdrNodeInfo *local, BdrNodeInfo *remote, int apply_delay
 	check_nodeinfo(local);
 	check_nodeinfo(remote);
 
+	if (local->bdr_node->node_id == remote->bdr_node->node_id)
+	{
+		Assert(false);
+		elog(ERROR, "attempt to subscribe to own node");
+	}
+
 	/*
 	 * Create the subscription using the remote node and interface
 	 * we copied earlier.
@@ -570,6 +581,9 @@ bdr_join_create_subscriptions(BdrNodeInfo *local, BdrNodeInfo *join_target)
 		BdrNodeInfo *remote = lfirst(lc);
 
 		if (remote->bdr_node->node_id == join_target->bdr_node->node_id)
+			continue;
+
+		if (remote->bdr_node->node_id == local->bdr_node->node_id)
 			continue;
 
 		bdr_create_subscription(local, remote, 0, false);
