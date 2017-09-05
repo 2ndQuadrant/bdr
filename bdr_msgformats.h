@@ -33,4 +33,11 @@ extern void msg_stringify_join_request(StringInfo out,
 
 extern void wrapInStringInfo(StringInfo si, char *data, Size length);
 
+enum BdrMessageType;
+extern void msg_serialize_proposal(StringInfo out, enum BdrMessageType message_type, void* message);
+
+struct ConsensusProposal;
+struct BdrMessage;
+extern struct BdrMessage* msg_deserialize_proposal(struct ConsensusProposal *in);
+
 #endif

@@ -19,6 +19,8 @@
 
 #include "libpq/pqformat.h"
 
+#include "bdr_worker.h"
+#include "bdr_messaging.h"
 #include "bdr_msgformats.h"
 
 void
@@ -30,11 +32,118 @@ wrapInStringInfo(StringInfo si, char *data, Size length)
 	si->cursor = -1;
 }
 
+/*
+ * Size of the BdrMessage header when sent as part of a ConsensusMessage
+ * payload. Most of the BdrMessage gets copied from the ConsensusMessage
+ * so there's only a small unique part: currently the message type
+ */
+#define SizeOfBdrMsgHeader (sizeof(uint32))
+
+/*
+ * Serialize a BDR message proposal for submission to the consensus
+ * system or over shmem. This is the BDR specific header that'll
+ * be added to consensus messages before the payload.
+ */
+void
+msg_serialize_proposal(StringInfo out, BdrMessageType message_type,
+	void* message)
+{
+	int *lengthword;
+	int headercursor;
+
+	pq_sendint(out, message_type, 4);
+	Assert(out->len == SizeOfBdrMsgHeader);
+
+	/*
+	 * We now need a payload length word, but we don't know the payload length
+	 * yet. We could pre-format the message, but instead lets cheat - we'll
+	 * write it now, then come back and overwrite it once we know the real
+	 * value.
+	 */
+	pq_sendint(out, 0, 4);
+	lengthword = (int*)(out->data + out->cursor - sizeof(int32));
+	Assert(lengthword == (void*)(out->data + SizeOfBdrMsgHeader));
+	headercursor = out->cursor;
+
+	switch (message_type)
+	{
+		case BDR_MSG_COMMENT:
+			pq_sendstring(out, message);
+			break;
+		case BDR_MSG_NODE_JOIN_REQUEST:
+			msg_serialize_join_request(out, message);
+			break;
+		case BDR_MSG_NODE_CATCHUP_READY:
+		case BDR_MSG_NODE_ACTIVE:
+			/* Empty messages */
+			Assert(message == NULL);
+			break;
+		default:
+			Assert(false);
+			elog(ERROR, "serialization for message %d not implemented",
+				 message_type);
+			break;
+	}
+
+	*lengthword = out->cursor - headercursor;
+}
+
+/*
+ * Deserialization of a BdrMessage copies fields from the ConsensusMessage it
+ * came from into the BdrMessage header, so it needs more than the
+ * ConsensusMessage's payload.
+ *
+ * Thus this isn't an exact mirror of msg_serialize_proposal.
+ */
+BdrMessage*
+msg_deserialize_proposal(ConsensusProposal *in)
+{
+	BdrMessage *out;
+	StringInfoData si;
+
+	out = palloc(sizeof(BdrMessage));
+
+	out->global_consensus_no = in->global_proposal_id;
+	out->originator_id = in->sender_nodeid;
+	out->originator_propose_time = in->sender_timestamp;
+	out->originator_propose_lsn = in->sender_lsn;
+	/* TODO: support majority consensus */
+	out->majority_consensus_ok = false;
+
+	wrapInStringInfo(&si, in->payload, in->payload_length);
+	out->message_type = pq_getmsgint(&si, 4);
+
+	switch (out->message_type)
+	{
+		case BDR_MSG_COMMENT:
+			out->message = (char*)pq_getmsgstring(&si);
+			break;
+		case BDR_MSG_NODE_JOIN_REQUEST:
+			out->message = palloc(sizeof(BdrMsgJoinRequest));
+			msg_deserialize_join_request(&si, out->message);
+			break;
+		case BDR_MSG_NODE_CATCHUP_READY:
+		case BDR_MSG_NODE_ACTIVE:
+			/*
+			 * Empty messages, at least as far as we know, but later
+			 * verisons might add fields so we won't assert anything.
+			 */
+			out->message = NULL;
+			break;
+		default:
+			elog(bdr_debug_level, "ignored payload of unsupported bdr message type %u from node %u",
+				 out->message_type, in->sender_nodeid);
+			out->message = NULL;
+			break;
+	}
+
+	return out;
+}
+
 void
 msg_serialize_join_request(StringInfo join_request,
 	BdrMsgJoinRequest *request)
 {
-	initStringInfo(join_request);
 	pq_sendstring(join_request, request->nodegroup_name);
 	pq_sendint(join_request, request->nodegroup_id, 4);
 	pq_sendstring(join_request, request->joining_node_name);

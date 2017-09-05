@@ -371,12 +371,9 @@ bdr_received_submit_shm_mq(void)
 		{
 			uint64 handle;
 			/*
-			 * FIXME: should be doing message serialization/deserialization
-			 * here, not passing around struct BdrMessage. See bdr_msgs_enqueue.
-			 *
 			 * TODO: error reporting to peers on submit failure
 			 */
-			handle = bdr_msgs_enqueue((BdrMessage*)msg->payload);
+			handle = consensus_enqueue_proposal(msg->payload, msg->payload_length);
 			bdr_make_msg_submit_shm_mq(MSG_ENQUEUE_RESULT, sizeof(uint64),
 									   &handle);
 			break;
@@ -782,28 +779,34 @@ bdr_msgs_begin_enqueue(void)
 }
 
 /*
- * Enqueue a message for processing on other peers.
+ * Enqueue a message for processing on other peers. The message data, if passed,
+ * must match the type and be recognised by msg_serialize_proposal /
+ * msg_deserialize_proposal.
  *
  * Returns a handle that can be used to determine when the final message in the
  * set is finalized and what the outcome was. Use bdr_msg_get_outcome(...)
  * to look up the status.
  */
 uint64
-bdr_msgs_enqueue(BdrMessage *message)
+bdr_msgs_enqueue(BdrMessageType message_type, void* message)
 {
+	StringInfoData bmsg;
+	initStringInfo(&bmsg);
+	msg_serialize_proposal(&bmsg, message_type, message);
+
 	if (is_bdr_manager())
 	{
 		/*
 		 * No need for IPC to enqueue this message, we're on the manager
 		 * already.
 		 */
-		return consensus_enqueue_proposal((const char*)message, BdrMessageSize(message));
+		return consensus_enqueue_proposal(bmsg.data, bmsg.len);
 	}
 	else
 	{
 		SubmitMQMessage *msg;
 		msg = bdr_submit_manager_queue(MSG_ENQUEUE_PROPOSAL,
-									   BdrMessageSize(message), (void*)message);
+									   bmsg.len, bmsg.data);
 		Assert(msg->msg_type == MSG_ENQUEUE_RESULT);
 		Assert(msg->payload_length == sizeof(uint64));
 		return *((uint64*)msg->payload);
@@ -845,42 +848,43 @@ static bool
 bdr_proposals_receive(ConsensusProposal *msg)
 {
 	BdrMessage *bmsg;
+
 	/* note, we receive our own messages too */
-	elog(LOG, "XXX RECEIVE FROM %u, my id is %u, payload size %lu",
-		msg->sender_nodeid, bdr_get_local_nodeid(), msg->payload_length);
+	elog(LOG, "XXX RECEIVE FROM %u (%s), payload size %lu",
+		msg->sender_nodeid, 
+		msg->sender_nodeid == bdr_get_local_nodeid() ? "self" : "peer",
+		msg->payload_length);
 
-	Assert(msg->payload_length >= sizeof(BdrMessage));
-	bmsg = (BdrMessage*)msg->payload;
-	Assert(msg->payload_length == sizeof(BdrMessage) + bmsg->payload_length);
+	bmsg = msg_deserialize_proposal(msg);
 
-	if (bmsg->message_type == BDR_MSG_COMMENT)
+	switch (bmsg->message_type)
 	{
-		elog(bdr_debug_level, "BDR comment msg from %u: \"%s\"",
-			 msg->sender_nodeid, bmsg->payload);
-	}
-	else if (bmsg->message_type == BDR_MSG_NODE_JOIN_REQUEST)
-	{
-		/* Print the message. Bit verbose.... */
-		BdrMsgJoinRequest req;
-		StringInfoData buf, loginfo;
-		wrapInStringInfo(&buf, msg->payload, msg->payload_length);
-		msg_deserialize_join_request(&buf, &req);
-		initStringInfo(&loginfo);
-		msg_stringify_join_request(&loginfo, &req);
-		elog(bdr_debug_level, "BDR join request message from %u: %s",
-			msg->sender_nodeid, loginfo.data);
-		pfree(loginfo.data);
-	}
-	else if (bmsg->message_type == BDR_MSG_NODE_CATCHUP_READY)
-	{
-	}
-	else
-	{
-		elog(bdr_debug_level, "unrecognised BDR message type %d ignored",
-			 bmsg->message_type);
+		case BDR_MSG_COMMENT:
+			elog(bdr_debug_level, "BDR comment msg from %u: \"%s\"",
+				 msg->sender_nodeid, (char*)bmsg->message);
+			break;
+		case BDR_MSG_NODE_JOIN_REQUEST:
+		{
+			StringInfoData logmsg;
+			initStringInfo(&logmsg);
+			msg_stringify_join_request(&logmsg, bmsg->message);
+			elog(bdr_debug_level, "BDR join request message from %u: %s",
+				msg->sender_nodeid, logmsg.data);
+			pfree(logmsg.data);
+			break;
+		}
+		case BDR_MSG_NODE_CATCHUP_READY:
+			elog(bdr_debug_level, "BDR catchup ready from %u", msg->sender_nodeid);
+			break;
+		case BDR_MSG_NODE_ACTIVE:
+			elog(bdr_debug_level, "BDR node active from %u", msg->sender_nodeid);
+			break;
+		default:
+			elog(bdr_debug_level, "unrecognised BDR message type %d ignored",
+				 bmsg->message_type);
 	}
 
-    /* TODO: can nack messages here */
+    /* TODO: can nack messages here to abort consensus txn early */
     return true;
 }
 
@@ -889,36 +893,40 @@ bdr_proposals_prepare(List *messages)
 {
 	ListCell *lc;
 
-	elog(LOG, "XXX PREPARE"); /* TODO */
-
 	foreach (lc, messages)
 	{
-		BdrMessage *msg = lfirst(lc);
+		ConsensusProposal  *msg = lfirst(lc);
+		BdrMessage		   *bmsg;
+
+		bmsg = msg_deserialize_proposal(msg);
+
 		/*
 		 * TODO: should dispatch message processing via the local node state
-		 * machine, but for now we'll do it directly here
+		 * machine, but for now we'll do it directly here.
 		 */
-		switch (msg->message_type)
+		switch (bmsg->message_type)
 		{
 			case BDR_MSG_COMMENT:
 				break;
 			case BDR_MSG_NODE_JOIN_REQUEST:
-				bdr_join_handle_join_proposal(msg);
+				bdr_join_handle_join_proposal(bmsg);
 				break;
 			case BDR_MSG_NODE_CATCHUP_READY:
-				bdr_join_handle_catchup_proposal(msg);
+				bdr_join_handle_catchup_proposal(bmsg);
 				break;
 			case BDR_MSG_NODE_ACTIVE:
-				bdr_join_handle_active_proposal(msg);
+				bdr_join_handle_active_proposal(bmsg);
 				break;
 			default:
 				/* 
 				 * TODO: should really ERROR here, but we'd have to fix shm mq 
 				 * submitters/receivers to recover more gracefully from manager
-				 * exits. Currently they get stuck if the manager dies.
+				 * exits. Currently they get stuck if the manager dies because
+				 * they don't have its BackgroundWorkerHandle or a dsm segment
+				 * to use to tell if it's gone.
 				 */
 				elog(WARNING, "unhandled message type %u in prepare proposal",
-					 msg->message_type);
+					 bmsg->message_type);
 		}
 	}
 

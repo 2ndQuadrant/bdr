@@ -477,9 +477,7 @@ bdr_internal_submit_join_request(PG_FUNCTION_ARGS)
 	BdrNodeInfo *local;
 	char handle_str[MAX_DIGITS_INT64];
 	uint64 handle;
-	StringInfoData reqbuf;
 	BdrMsgJoinRequest jreq;
-	BdrMessage *msg;
 
 	memset(&jreq, 0, sizeof(BdrMsgJoinRequest));
 
@@ -554,15 +552,9 @@ bdr_internal_submit_join_request(PG_FUNCTION_ARGS)
 	jreq.nodegroup_id = local->bdr_node_group->id;
 	jreq.join_target_node_name = local->pgl_node->name;
 	jreq.join_target_node_id = local->pgl_node->id;
-	msg_serialize_join_request(&reqbuf, &jreq);
-
-	msg = palloc0(offsetof(BdrMessage,payload) + reqbuf.len);
-	msg->message_type = BDR_MSG_NODE_JOIN_REQUEST;
-	msg->payload_length = reqbuf.len;
-	memcpy(msg->payload, reqbuf.data, reqbuf.len);
 
 	bdr_cache_local_nodeinfo();
-	handle = bdr_msgs_enqueue_one(msg);
+	handle = bdr_msgs_enqueue_one(BDR_MSG_NODE_JOIN_REQUEST, &jreq);
 
 	snprintf(handle_str, MAX_DIGITS_INT64, UINT64_FORMAT, handle);
 	PG_RETURN_TEXT_P(cstring_to_text(handle_str));
@@ -892,23 +884,14 @@ PG_FUNCTION_INFO_V1(bdr_submit_comment);
 Datum
 bdr_submit_comment(PG_FUNCTION_ARGS)
 {
-	BdrMessage *msg;
 	const char *dummy_payload = text_to_cstring(PG_GETARG_TEXT_P(0));
-	Size dummy_payload_length;
 	uint64 handle;
 	char handle_str[33];
 
 	if (!bdr_is_active_db())
 		elog(ERROR, "BDR is not active in this database");
 
-	dummy_payload_length = strlen(dummy_payload)+ 1;
-
-	msg = palloc(offsetof(BdrMessage,payload) + dummy_payload_length);
-	msg->message_type = BDR_MSG_COMMENT;
-	msg->payload_length = dummy_payload_length;
-	memcpy(msg->payload, dummy_payload, dummy_payload_length);
-
-	handle = bdr_msgs_enqueue_one(msg);
+	handle = bdr_msgs_enqueue_one(BDR_MSG_COMMENT, (void*)dummy_payload);
 	if (handle == 0)
 		/*
 		 * TODO: block

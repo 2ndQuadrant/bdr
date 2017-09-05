@@ -45,14 +45,15 @@ typedef enum BdrMessageType
  *     ...fields specific to ConsensusMessage ...
  *     payload: serialized BdrMessage
  *       ... fields specific to BdrMessage ...
+ *       payload:
+ *         ... fields from BdrMessage message type ...
  *
- * but this is what we actually care about: messages proposed by the current
- * node or peer nodes for BDR to act on to perform state changes to the
- * system.
+ * but this struct encapsulates all the relevant fields from every level
+ * and is what we work with when handling received messages.
  *
- * Note that on the wire, some of these fields are actually in the consensus
- * message in which this message is a payload; they're just copied to/from the
- * bdr message struct for convenience.
+ * On the wire, some of these fields are actually in the consensus message in
+ * which this message is a payload; they're just copied to/from the bdr message
+ * struct for convenience.
  */
 typedef struct BdrMessage
 {
@@ -78,10 +79,8 @@ typedef struct BdrMessage
     /* Message type determines meaning of payload */
     BdrMessageType  message_type;
 
-    /* Actual message contents are zero or more payload bytes */
-    Size            payload_length;
-    char            payload[FLEXIBLE_ARRAY_MEMBER];
-
+	/* Payload is a separate message struct, determined by message_type, or null */
+	void*			message;
 } BdrMessage;
 
 #define BdrMessageSize(msg) (offsetof(BdrMessage, payload) + msg->payload_length)
@@ -94,17 +93,17 @@ extern void bdr_shutdown_consensus(void);
  * from other backends.
  */
 extern bool bdr_msgs_begin_enqueue(void);
-extern uint64 bdr_msgs_enqueue(BdrMessage *message);
+extern uint64 bdr_msgs_enqueue(BdrMessageType message_type, void* message);
 extern uint64 bdr_msgs_finish_enqueue(void);
 
 static inline uint64
-bdr_msgs_enqueue_one(BdrMessage *message)
+bdr_msgs_enqueue_one(BdrMessageType message_type, void *message)
 {
 	uint64 handle2;
 	uint64 handle PG_USED_FOR_ASSERTS_ONLY;
 	if (!bdr_msgs_begin_enqueue())
 		return 0;
-	handle = bdr_msgs_enqueue(message);
+	handle = bdr_msgs_enqueue(message_type, message);
 	handle2 = bdr_msgs_finish_enqueue();
 	Assert(handle == handle2);
 	return handle2;

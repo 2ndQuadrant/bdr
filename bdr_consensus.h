@@ -34,7 +34,7 @@ typedef struct ConsensusProposal {
 } ConsensusProposal;
 
 extern bool consensus_begin_enqueue(void);
-extern uint64 consensus_enqueue_proposal(const char *payload, Size payload_size);
+extern uint64 consensus_enqueue_proposal(void *payload, Size payload_size);
 extern uint64 consensus_finish_enqueue(void);
 
 typedef enum ConsensusProposalStatus {

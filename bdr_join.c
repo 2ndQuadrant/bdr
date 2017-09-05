@@ -144,8 +144,7 @@ bdr_join_submit_request(PGconn *conn, const char * node_group_name,
 void
 bdr_join_handle_join_proposal(BdrMessage *msg)
 {
-	BdrMsgJoinRequest req;
-	StringInfoData si;
+	BdrMsgJoinRequest *req = msg->message;
 	BdrNodeGroup *local_nodegroup;
 	BdrNode bnode;
 	PGLogicalNode pnode;
@@ -153,32 +152,29 @@ bdr_join_handle_join_proposal(BdrMessage *msg)
 
 	Assert(is_bdr_manager());
 
-	wrapInStringInfo(&si, msg->payload, msg->payload_length);
-	msg_deserialize_join_request(&si, &req);
-
-	local_nodegroup = bdr_get_nodegroup_by_name(req.nodegroup_name, false);
-	if (req.nodegroup_id != 0 && local_nodegroup->id != req.nodegroup_id)
+	local_nodegroup = bdr_get_nodegroup_by_name(req->nodegroup_name, false);
+	if (req->nodegroup_id != 0 && local_nodegroup->id != req->nodegroup_id)
 		elog(ERROR, "expected nodegroup %s to have id %u but local nodegroup id is %u",
-			 req.nodegroup_name, req.nodegroup_id, local_nodegroup->id);
+			 req->nodegroup_name, req->nodegroup_id, local_nodegroup->id);
 
-	if (req.joining_node_id == 0)
+	if (req->joining_node_id == 0)
 		elog(ERROR, "joining node id must be nonzero");
 
-	pnode.id = req.joining_node_id;
-	pnode.name = (char*)req.joining_node_name;
+	pnode.id = req->joining_node_id;
+	pnode.name = (char*)req->joining_node_name;
 
-	bnode.node_id = req.joining_node_id;
+	bnode.node_id = req->joining_node_id;
 	bnode.node_group_id = local_nodegroup->id;
 	/*
 	 * TODO: should set local state to joining
 	 */
-	bnode.local_state = req.joining_node_state;
+	bnode.local_state = req->joining_node_state;
 	bnode.seq_id = 0;
 
-	pnodeif.id = req.joining_node_if_id;
-	pnodeif.name = req.joining_node_if_name;
+	pnodeif.id = req->joining_node_if_id;
+	pnodeif.name = req->joining_node_if_name;
 	pnodeif.nodeid = pnode.id;
-	pnodeif.dsn = req.joining_node_if_dsn;
+	pnodeif.dsn = req->joining_node_if_dsn;
 
 	/*
 	 * TODO: should treat node as join-confirmed if we're an active
@@ -206,10 +202,7 @@ bdr_join_handle_join_proposal(BdrMessage *msg)
 uint64
 bdr_join_send_catchup_ready(BdrNodeInfo *local)
 {
-	BdrMessage *msg = palloc0(sizeof(BdrMessage));
-	msg->message_type = BDR_MSG_NODE_CATCHUP_READY;
-	msg->payload_length = 0;
-	return bdr_msgs_enqueue_one(msg);
+	return bdr_msgs_enqueue_one(BDR_MSG_NODE_CATCHUP_READY, NULL);
 }
 
 /*
@@ -253,10 +246,7 @@ bdr_join_handle_catchup_proposal(BdrMessage *msg)
 uint64
 bdr_join_send_active_announce(BdrNodeInfo *local)
 {
-	BdrMessage *msg = palloc0(sizeof(BdrMessage));
-	msg->message_type = BDR_MSG_NODE_ACTIVE;
-	msg->payload_length = 0;
-	return bdr_msgs_enqueue_one(msg);
+	return bdr_msgs_enqueue_one(BDR_MSG_NODE_ACTIVE, NULL);
 }
 
 /*

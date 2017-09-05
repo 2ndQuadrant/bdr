@@ -563,7 +563,7 @@ consensus_begin_enqueue(void)
  * The returned handle may be used to query the progress of the proposal.
  */
 uint64
-consensus_enqueue_proposal(const char * payload, Size payload_length)
+consensus_enqueue_proposal(void * payload, Size payload_length)
 {
 	int nodeidx;
 	StringInfoData si;
