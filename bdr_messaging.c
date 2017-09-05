@@ -233,6 +233,8 @@ submit_mq_detach(void)
 {
 	shm_mq *sendq, *recvq, *tempq;
 
+	LWLockAcquire(bdr_ctx->lock, LW_EXCLUSIVE);
+
 	sendq = (void*)my_manager->shm_send_mq;
 	recvq = (void*)my_manager->shm_recv_mq;
 
@@ -249,20 +251,24 @@ submit_mq_detach(void)
 
 	if (submit_mq.recvq_handle != NULL)
 	{
-		shm_mq_detach(recvq);
+		if (shm_mq_get_receiver(recvq))
+			shm_mq_detach(recvq);
 		submit_mq.recvq_handle = NULL;
 		submit_mq.recvbuf = NULL;
 		submit_mq.recvbufsize = 0;
 	}
 	if (submit_mq.sendq_handle != NULL)
 	{
-		shm_mq_detach(sendq);
+		if (shm_mq_get_sender(recvq))
+			shm_mq_detach(sendq);
 		submit_mq.sendq_handle = NULL;
 		submit_mq.sendbuf = NULL;
 		submit_mq.sendbufsize = 0;
 	}
 	if (submit_mq.mq_context != NULL)
 		MemoryContextReset(submit_mq.mq_context);
+
+	LWLockRelease(bdr_ctx->lock);
 }
 
 /*
@@ -995,11 +1001,15 @@ bdr_get_wait_event_space_needed(void)
 void
 bdr_messaging_add_peer(uint32 node_id, const char *dsn)
 {
+	Assert(is_bdr_manager());
+	elog(LOG, "adding new bdr node %u", node_id);
 	consensus_add_node(node_id, dsn);
 }
 
 void
 bdr_messaging_remove_peer(uint32 node_id)
 {
+	Assert(is_bdr_manager());
+	elog(LOG, "removing new bdr node %u", node_id);
 	consensus_remove_node(node_id);
 }
