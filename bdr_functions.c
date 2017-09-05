@@ -232,6 +232,12 @@ kill_manager_callback(XactEvent event, void *arg)
 	else
 		elog(WARNING, "couldn't kill pglogical manager for db %u",
 			 MyDatabaseId);
+
+	LWLockAcquire(PGLogicalCtx->lock, LW_EXCLUSIVE);
+	PGLogicalCtx->subscriptions_changed = true;
+	if (&PGLogicalCtx->supervisor)
+		SetLatch(&PGLogicalCtx->supervisor->procLatch);
+	LWLockRelease(PGLogicalCtx->lock);
 }
 
 PG_FUNCTION_INFO_V1(bdr_join_node_group_sql);
