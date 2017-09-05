@@ -103,7 +103,7 @@ typedef struct SubmitMQ
 	Size			sendbufsize;
 } SubmitMQ;
 
-static SubmitMQ submit_mq;
+static SubmitMQ submit_mq = { MQ_NEED_REINIT, NULL, NULL, NULL, NULL, 0, NULL, 0 };
 
 static bool bdr_proposals_receive(ConsensusProposal *msg);
 static bool bdr_proposals_prepare(List *messages);
@@ -174,6 +174,7 @@ bdr_start_consensus(int bdr_max_nodes)
 static void
 bdr_startup_submit_shm_mq(void)
 {
+	memset(&submit_mq, 0, sizeof(submit_mq));
 	submit_mq.state = MQ_NEED_REINIT;
 	if (!atexit_registered)
 	{
@@ -259,7 +260,7 @@ submit_mq_detach(void)
 	}
 	if (submit_mq.sendq_handle != NULL)
 	{
-		if (shm_mq_get_sender(recvq))
+		if (shm_mq_get_sender(sendq))
 			shm_mq_detach(sendq);
 		submit_mq.sendq_handle = NULL;
 		submit_mq.sendbuf = NULL;
