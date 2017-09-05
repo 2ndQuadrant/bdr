@@ -61,9 +61,9 @@ msg_serialize_proposal(StringInfo out, BdrMessageType message_type,
 	 * value.
 	 */
 	pq_sendint(out, 0, 4);
-	lengthword = (int*)(out->data + out->cursor - sizeof(int32));
-	Assert(lengthword == (void*)(out->data + SizeOfBdrMsgHeader));
-	headercursor = out->cursor;
+	lengthword = (int*)(out->data + out->len - 4);
+	Assert((void*)lengthword == (void*)(out->data + SizeOfBdrMsgHeader));
+	headercursor = out->len;
 
 	switch (message_type)
 	{
@@ -85,7 +85,7 @@ msg_serialize_proposal(StringInfo out, BdrMessageType message_type,
 			break;
 	}
 
-	*lengthword = out->cursor - headercursor;
+	*lengthword = out->len - headercursor;
 }
 
 /*

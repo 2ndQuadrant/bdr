@@ -10,9 +10,6 @@ NEXT STEPS TO PROGRESS
 
   fix, ensure node is properly added in response to join-request proposal
 
-- Wake supervisor to tell it about the new node, figure out why it
-  isn't starting manager
-
 - Delay starting messaging until have nodelist and nodegroup (manager)
 
 - Implement consensus operation handlers for (not real consensus yet, but)

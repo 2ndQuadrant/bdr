@@ -35,6 +35,7 @@
 #include "pglogical_node.h"
 #include "pglogical_repset.h"
 #include "pglogical_sync.h"
+#include "pglogical_worker.h"
 
 #include "bdr_catcache.h"
 #include "bdr_messaging.h"
@@ -627,6 +628,8 @@ bdr_create_subscription(BdrNodeInfo *local, BdrNodeInfo *remote, int apply_delay
 
 	/* Create the replication origin */
 	(void) replorigin_create(sub.slot_name);
+
+	pglogical_subscription_changed(sub.id);
 
 	/*
 	 * TODO: create bdr.subscriptions entry for this sub

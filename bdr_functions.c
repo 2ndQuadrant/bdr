@@ -28,6 +28,7 @@
 
 #include "pglogical_node.h"
 #include "pglogical_repset.h"
+#include "pglogical_worker.h"
 
 #include "bdr_catalogs.h"
 #include "bdr_catcache.h"
@@ -133,6 +134,8 @@ bdr_create_node_sql(PG_FUNCTION_ARGS)
 
 	bdr_node_create(&bnode);
 
+	pglogical_subscription_changed(InvalidOid);
+
 	PG_RETURN_OID(bnode.node_id);
 }
 
@@ -203,6 +206,8 @@ bdr_create_node_group_sql(PG_FUNCTION_ARGS)
 	info->bdr_node->node_group_id = nodegroup.id;
 	bdr_modify_node(info->bdr_node);
 
+	pglogical_subscription_changed(InvalidOid);
+
 	PG_RETURN_OID(nodegroup.id);
 }
 
@@ -212,19 +217,21 @@ kill_manager_callback(XactEvent event, void *arg)
 	/*
 	 * TODO: get rid of this entirely once join moves into manager
 	 */
-	int i;
-	LWLockAcquire(bdr_ctx->lock, LW_SHARED);
-	for (i = 0; i < bdr_ctx->max_local_nodes; i++)
-	{
-		if (bdr_ctx->managers[i].node_id == bdr_get_local_nodeid())
-		{
-			BdrManagerShmem *manager = &bdr_ctx->managers[i];
-			if (manager->manager != NULL && manager->manager->pid != 0)
-				kill(manager->manager->pid, SIGTERM);
-		}
-	}
+	PGLWorkerHandle handle;
+	PGLogicalWorker *manager;
 
-	LWLockRelease(bdr_ctx->lock);
+	LWLockAcquire(PGLogicalCtx->lock, LW_EXCLUSIVE);
+	manager = pglogical_manager_find(MyDatabaseId, &handle);
+	LWLockRelease(PGLogicalCtx->lock);
+
+	if (manager != NULL)
+	{
+		elog(WARNING, "killed manager for db %u", MyDatabaseId);
+		pglogical_worker_kill(&handle);
+	}
+	else
+		elog(WARNING, "couldn't kill pglogical manager for db %u",
+			 MyDatabaseId);
 }
 
 PG_FUNCTION_INFO_V1(bdr_join_node_group_sql);
