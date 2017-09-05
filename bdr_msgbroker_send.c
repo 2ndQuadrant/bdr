@@ -1286,9 +1286,9 @@ msgb_add_send_peer(uint32 destination_id, const char *dsn)
 										   "msgbroker send queue",
 										   ALLOCSET_DEFAULT_SIZES);
 
-	elog(WARNING, "added peer %u with dsn %s; enabling polling", destination_id, dsn);
-
 	conns_polling = true;
+
+	elog(WARNING, "added peer %u with dsn %s; enabling polling", destination_id, dsn);
 	/* Skip any pending sleep, so we start work on connecting immediately */
 	SetLatch(&MyProc->procLatch);
 
