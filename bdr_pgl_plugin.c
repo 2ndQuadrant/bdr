@@ -85,7 +85,18 @@ static const struct config_enum_entry bdr_debug_level_options[] = {
 static void
 bdr_worker_start(void)
 {
-	const uint32 roles = MyPGLogicalWorker->worker_roles;
+	uint32 roles;
+
+	if (MyPGLogicalWorker == NULL)
+	{
+		/*
+		 * Some workers, like the supervisor, don't have an associated
+		 * MyPGLogicalWorker. Currently we aren't interested in them.
+		 *
+		 * TODO: add a way to tell which is which
+		 */
+		return;
+	}
 
 	StartTransactionCommand();
 	bdr_cache_local_nodeinfo();
@@ -98,6 +109,8 @@ bdr_worker_start(void)
 	}
 	else
 		elog(LOG, "BDR is active");
+
+	roles = MyPGLogicalWorker->worker_roles;
 
 	if (roles == PGLOGICAL_WORKER_NONE)
 		ereport(ERROR,
