@@ -26,6 +26,8 @@
 
 #include "miscadmin.h"
 
+#include "replication/logicalfuncs.h"
+#include "replication/logical.h"
 #include "replication/origin.h"
 #include "replication/slot.h"
 
@@ -855,6 +857,7 @@ bdr_join_create_slot(BdrNodeInfo *local, BdrNodeInfo *remote)
 {
 	char		*sub_name;
 	NameData	slot_name;
+	LogicalDecodingContext *ctx = NULL;
 
 	/*
 	 * Subscription names here are from the PoV of the remote
@@ -884,10 +887,43 @@ bdr_join_create_slot(BdrNodeInfo *local, BdrNodeInfo *remote)
 		return;
 	}
 
-	elog(LOG, "XXX slot %s does not exist", NameStr(slot_name));
-	ReplicationSlotCreate(NameStr(slot_name), true, RS_PERSISTENT);
-	elog(LOG, "XXX slot %s created", NameStr(slot_name));
+	elog(LOG, "XXX slot %s does not exist, creating", NameStr(slot_name));
+
+	/*
+	 * See: pg_create_logical_replication_slot for all this stuff; rest is mostly
+	 * verbatim from there.
+	 */
+	CheckLogicalDecodingRequirements();
+
+	/*
+	 * Acquire a logical decoding slot, this will check for conflicting names.
+	 * Initially create persistent slot as ephemeral - that allows us to
+	 * nicely handle errors during initialization because it'll get dropped if
+	 * this transaction fails. We'll make it persistent at the end. Temporary
+	 * slots can be created as temporary from beginning as they get dropped on
+	 * error as well.
+	 */
+	ReplicationSlotCreate(NameStr(slot_name), true, RS_TEMPORARY);
+
+	/*
+	 * Create logical decoding context, to build the initial snapshot.
+	 */
+	ctx = CreateInitDecodingContext("pglogical", NIL,
+									false,	/* do not build snapshot */
+									logical_read_local_xlog_page, NULL, NULL,
+									NULL);
+
+	/* build initial snapshot, might take a while */
+	DecodingContextFindStartpoint(ctx);
+
+	/* don't need the decoding context anymore */
+	FreeDecodingContext(ctx);
+
+	/* ok, slot is now fully created, mark it as persistent if needed */
+	ReplicationSlotPersist();
 	ReplicationSlotRelease();
+
+	elog(LOG, "XXX slot %s created", NameStr(slot_name));
 }
 
 /*
