@@ -34,8 +34,6 @@ FROM bdr.create_node_group('bdrgroup');
 SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info(NULL);
 SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info((SELECT node_group_id FROM bdr.node_group));
 
-SELECT * FROM bdr.node_group_replication_sets;
-
 -- We must create a slot before creating the subscription to work
 -- around the deadlock in 2ndQuadrant/pglogical_internal#152
 -- TODO: BDR should do this automatically
@@ -56,12 +54,9 @@ SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.
 SELECT 1
 FROM bdr.join_node_group(:'node1_dsn', 'bdrgroup');
 SELECT pg_sleep(1);
-SELECT * FROM bdr.node_group;
-SELECT * FROM bdr.node;
 SELECT 1 FROM bdr.join_node_group_finish(); -- XXX should go away soon
 
 SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info((SELECT node_group_id FROM bdr.node_group));
-SELECT * FROM bdr.node_group_replication_sets;
 
 SELECT subscription_name, status, provider_node, slot_name, replication_sets
 FROM pglogical.show_subscription_status();
