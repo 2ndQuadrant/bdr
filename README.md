@@ -26,8 +26,23 @@ See sql/init.sql and sql/simple.sql
     
      ... do ddl ...
 
+# Prominent bugs
+
 The answer to most "how do I" questions beyond this is still "you don't".
 This is early days work.
+
+Only really tested in a single-cluster setup so far. Expect bugs.
+
+There's a known deadlock when creating slots. You must pre-create
+the slots if using in a single-cluster setup. See `sql/init.sql` and
+`2ndQuadrant/pglogical_internal#152`. Same issue exists in pglogical.
+
+Sometimes have to SIGUSR1 the pglogical supervisor to make it
+notice the need to relaunch a manager. Occasionally have to kill
+manager and supervisor instead. Issues will go away with pending
+join process changes.
+
+    pkill -USR1 -f supervisor
 
 # VPATH BUILDS
 
