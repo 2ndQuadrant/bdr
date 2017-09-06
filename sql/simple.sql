@@ -7,7 +7,7 @@ SELECT pglogical.replicate_ddl_command($DDL$
 CREATE TABLE public.demo(
     id integer primary key
 );
-$DDL$);
+$DDL$, 'bdrgroup');
 
 -- TODO: This should happen automatically with BDR, adding tables to
 -- the default repset on creation.
