@@ -149,6 +149,7 @@ msg_serialize_join_request(StringInfo join_request,
 	pq_sendstring(join_request, request->joining_node_if_name);
 	pq_sendint(join_request, request->joining_node_if_id, 4);
 	pq_sendstring(join_request, request->joining_node_if_dsn);
+	pq_sendstring(join_request, request->joining_node_dbname);
 	pq_sendstring(join_request, request->join_target_node_name);
 	pq_sendint(join_request, request->join_target_node_id, 4);
 }
@@ -165,6 +166,7 @@ msg_deserialize_join_request(StringInfo join_request,
 	request->joining_node_if_name = pq_getmsgstring(join_request);
 	request->joining_node_if_id = pq_getmsgint(join_request, 4);
 	request->joining_node_if_dsn = pq_getmsgstring(join_request);
+	request->joining_node_dbname = pq_getmsgstring(join_request);
 	request->join_target_node_name = pq_getmsgstring(join_request);
 	request->join_target_node_id = pq_getmsgint(join_request, 4);
 }
@@ -177,10 +179,11 @@ msg_stringify_join_request(StringInfo out, BdrMsgJoinRequest *request)
 		request->nodegroup_name, request->nodegroup_id);
 
 	appendStringInfo(out,
-		"joining node: name %s, id %u, state %d, ifname %s, ifid %u, dsn %s; ",
+		"joining node: name %s, id %u, state %d, ifname %s, ifid %u, dsn %s; dbname %s",
 		request->joining_node_name, request->joining_node_id,
 		request->joining_node_state, request->joining_node_if_name,
-		request->joining_node_if_id, request->joining_node_if_dsn);
+		request->joining_node_if_id, request->joining_node_if_dsn,
+		request->joining_node_dbname);
 
 	appendStringInfo(out,
 		"join target: name %s, id %u",

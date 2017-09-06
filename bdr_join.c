@@ -93,8 +93,8 @@ uint64
 bdr_join_submit_request(PGconn *conn, const char * node_group_name,
 						BdrNodeInfo *local)
 {
-	Oid paramTypes[7] = {TEXTOID, TEXTOID, OIDOID, INT4OID, TEXTOID, OIDOID, TEXTOID};
-	const char *paramValues[7];
+	Oid paramTypes[8] = {TEXTOID, TEXTOID, OIDOID, INT4OID, TEXTOID, OIDOID, TEXTOID, TEXTOID};
+	const char *paramValues[8];
 	const char *val;
 	char my_node_id[MAX_DIGITS_INT32];
 	char my_node_initial_state[MAX_DIGITS_INT32];
@@ -117,8 +117,9 @@ bdr_join_submit_request(PGconn *conn, const char * node_group_name,
 		local->pgl_interface->id);
 	paramValues[5] = my_node_if_id;
 	paramValues[6] = local->pgl_interface->dsn;
-	res = PQexecParams(conn, "SELECT bdr.internal_submit_join_request($1, $2, $3, $4, $5, $6, $7)",
-					   7, paramTypes, paramValues, NULL, NULL, 0);
+	paramValues[7] = get_database_name(MyDatabaseId);
+	res = PQexecParams(conn, "SELECT bdr.internal_submit_join_request($1, $2, $3, $4, $5, $6, $7, $8)",
+					   8, paramTypes, paramValues, NULL, NULL, 0);
 
 	if (PQresultStatus(res) != PGRES_TUPLES_OK)
 	{
@@ -186,6 +187,7 @@ bdr_join_handle_join_proposal(BdrMessage *msg)
 	 */
 	bnode.local_state = req->joining_node_state;
 	bnode.seq_id = 0;
+	bnode.dbname = req->joining_node_dbname;
 
 	pnodeif.id = req->joining_node_if_id;
 	pnodeif.name = req->joining_node_if_name;
@@ -332,6 +334,41 @@ bdr_join_handle_active_proposal(BdrMessage *msg)
 		 * once we commit.
 		 */
 		bdr_create_subscription(local, remote, 0, false);
+
+		/*
+		 * TODO: since we currently don't do 2PC messaging, force
+		 * it to start immediately.
+		 */
+		
+	}
+	else
+	{
+		/*
+		 * We're the joining node, so enable our subs to all peers.
+		 */
+		List	   *nodes;
+		ListCell   *lc;
+		nodes = bdr_get_nodes_info(local->bdr_node_group->id);
+
+		/*
+		 * TODO: later we'll instead be switching these from catchup-only mode
+		 * to actually replaying directly, after first switching the join
+		 * subscription from catchup to normal replay.
+		 */
+		foreach (lc, nodes)
+		{
+			BdrNodeInfo	   *remote = lfirst(lc);
+			List		   *subs;
+			ListCell	   *lcsub;
+
+			subs = bdr_get_node_subscriptions(remote->bdr_node->node_id);
+			foreach (lcsub, subs)
+			{
+				PGLogicalSubscription *sub = lfirst(lcsub);
+				sub->enabled = true;
+				alter_subscription(sub);
+			}
+		}
 	}
 
 	/*
@@ -599,7 +636,7 @@ bdr_gen_sub_name(BdrNodeInfo *subscriber, BdrNodeInfo *provider)
 }
 
 /*
- * Create a subscription, initially disabled, from 'local' to 'remote, possibly
+ * Create a subscription, optionally initially disabled, from 'local' to 'remote, possibly
  * dumping data too.
  */
 static void
@@ -654,13 +691,10 @@ bdr_create_subscription(BdrNodeInfo *local, BdrNodeInfo *remote, int apply_delay
 	 */
 	sub.forward_origins = NIL;
 	/*
-	 * Only the join target sub starts enabled. The others get enabled
-	 * later.
-	 *
-	 * TODO: once we have catchup mode subs that just forward, we'll
-	 * want to enable all subs initially
+	 * TODO: in future we should enable subs in catchup-only mode
+	 * of some kind.
 	 */
-	sub.enabled = for_join;
+	sub.enabled = true;
 	gen_slot_name(&slot_name, get_database_name(MyDatabaseId),
 				  remote->pgl_node->name, sub_name);
 	sub.slot_name = pstrdup(NameStr(slot_name));
@@ -887,30 +921,4 @@ bdr_join_create_slots(BdrNodeInfo *local)
 void
 bdr_join_go_active(BdrNodeInfo *local)
 {
-	List	   *nodes;
-	ListCell   *lc;
-
-	nodes = bdr_get_nodes_info(local->bdr_node_group->id);
-
-	/*
-	 * Enable subscriptions
-	 *
-	 * TODO: later we'll instead be switching these from catchup-only mode
-	 * to actually replaying directly, after first switching the join
-	 * subscription from catchup to normal replay.
-	 */
-	foreach (lc, nodes)
-	{
-		BdrNodeInfo	   *remote = lfirst(lc);
-		List		   *subs;
-		ListCell	   *lcsub;
-
-		subs = bdr_get_node_subscriptions(remote->bdr_node->node_id);
-		foreach (lcsub, subs)
-		{
-			PGLogicalSubscription *sub = lfirst(lcsub);
-			sub->enabled = true;
-			alter_subscription(sub);
-		}
-	}
 }

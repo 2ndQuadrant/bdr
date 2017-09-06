@@ -20,6 +20,7 @@ typedef struct BdrMsgJoinRequest
 	const char *joining_node_if_name;
 	Oid			joining_node_if_id;
 	const char *joining_node_if_dsn;
+	const char *joining_node_dbname;
 	const char *join_target_node_name;
 	Oid			join_target_node_id;
 } BdrMsgJoinRequest;

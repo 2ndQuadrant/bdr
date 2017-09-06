@@ -175,7 +175,7 @@ LANGUAGE c AS 'MODULE_PATHNAME','bdr_node_group_member_info';
 CREATE FUNCTION bdr.internal_submit_join_request(nodegroup_name text,
 	joining_node_name text, joining_node_id oid, joining_node_state oid,
 	joining_node_if_name text, joining_node_if_id oid,
-	joining_node_if_connstr text)
+	joining_node_if_connstr text, joining_node_dbname text)
 RETURNS text /* actually uint64 */
 CALLED ON NULL INPUT VOLATILE
 LANGUAGE c AS 'MODULE_PATHNAME','bdr_internal_submit_join_request';

@@ -1,17 +1,10 @@
 NEXT STEPS TO PROGRESS
 ----
 
+- Work out why subs exit; it's NEARLY working now
+
 - remove vile hack at end of bdr_join_handle_join_proposal
   in favour of moving the whole thing into the manager
-
-WTF:
-
-regression=# select * from bdr.node;
- pglogical_node_id | node_group_id | local_state | seq_id | confirmed_our_join |   dbname   
--------------------+---------------+-------------+--------+--------------------+------------
-        1148549230 |    1360502012 |     8644737 |     -1 | f                  | regression
-        3367056606 |    1360502012 |     8644737 |      0 | f                  | nxuD
-(2 rows)
 
 - Look into why supervisor doesn't reliably restart manager in timely way
 
