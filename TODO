@@ -1,7 +1,8 @@
 NEXT STEPS TO PROGRESS
 ----
 
-startup races
+- remove vile hack at end of bdr_join_handle_join_proposal
+  in favour of moving the whole thing into the manager
 
 WTF:
 
@@ -12,34 +13,27 @@ regression=# select * from bdr.node;
         3367056606 |    1360502012 |     8644737 |      0 | f                  | nxuD
 (2 rows)
 
-
-- "pending_cleanup" is too simplistic, need state fields. We have to track
-   "peer just detached, needs reinit", "waiting for peer to detach so we can clear slot", etc.
- 
-  REALLY need to merge with bdr_messaging.c for queue state tracking, and in the process
-  fix the reliance on getting pids in bdr_messaging.c
-
-- Make use of active_pid == -1 consistently mean "busy in manager",
-  make peer detach set it to hand over to manager for cleanup. Get rid
-  of pending_cleanup flag in favour of testing pid array?
-
-  active_pid = 0, node_id = 0 => empty slot, assert it to be so
-
-- Finish conversion of adding active_pid
-
-- fix FIXME in msgb_try_cleanup_peer_slot re detach of broker side
-
 - Look into why supervisor doesn't reliably restart manager in timely way
 
 - Delay starting messaging until have nodelist and nodegroup (manager)
 
-- Implement consensus operation handlers for (not real consensus yet, but)
-  - node name reserve
-  - node standby (make slots)
-  - node active (make origins+subscriptions, start replaying)
-
 then BDR will work. So long as you don't expect consisent join. Or part.
 Or crash safety. Or anything else, really.
+
+MQ REFACTOr
+----
+
+Needed pretty urgently now
+
+- 2-way comms
+- pool of slots
+- assign slots for peer message submit and for local ipc from same pool
+- detach protocol is that manager always detaches last; if it wants a peer
+  to go away it sends a shm_mq message to it instead of detaching, and
+  if it fails to detach, sends a signal. So we never have doubt as to whether
+  the peer is still attached.
+  
+
 
 COMPAT STUFF
 ---

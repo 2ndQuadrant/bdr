@@ -174,6 +174,8 @@ bdr_join_handle_join_proposal(BdrMessage *msg)
 				 errmsg("node %u received its own join request", req->joining_node_id)));
 	}
 
+	elog(LOG, "XXX forming node tuples for join request");
+
 	pnode.id = req->joining_node_id;
 	pnode.name = (char*)req->joining_node_name;
 
@@ -198,8 +200,11 @@ bdr_join_handle_join_proposal(BdrMessage *msg)
 	/* Ignoring join_target_node_name and join_target_node_id for now */
 
 	/* TODO: do upserts here in case pgl node or even bdr node exists already */
+	elog(LOG, "XXX creating node for join request");
 	create_node(&pnode);
+	elog(LOG, "XXX creating node interface for join request");
 	create_node_interface(&pnodeif);
+	elog(LOG, "XXX creating bdr node for join request");
 	bdr_node_create(&bnode);
 
 	/*
@@ -211,13 +216,42 @@ bdr_join_handle_join_proposal(BdrMessage *msg)
 	 * TODO: move addition of the peer node from prepare
 	 * phase to accept phase callback
 	 */
+	elog(LOG, "XXX adding messaging peer for node join request");
 	bdr_messaging_add_peer(bnode.node_id, pnodeif.dsn);
+	elog(LOG, "XXX added messaging peer for node join request");
+
+	/*
+	 * TODO FIXME XXX: ugly, ugly hack here. Because of races during join, we can't
+	 * reliably expect to receive catchup-ready or node-active messages from a
+	 * joining peer yet. So we act as if they came along with the join request.
+	 * They only need the origin-id from messages so far so we can just pass
+	 * our message to them (ew).
+	 *
+	 * The need for this will go away when we can properly refresh the manager's
+	 * peer list and join is moved into the manager.
+	 */
+	elog(LOG, "XXX faking catchup proposal for node join request");
+	/*
+	 * TODO XXX FIXME Lie and pretend the message came from the joining node
+	 * like it really will later, once we have proper join.
+	 */
+	msg->originator_id = req->joining_node_id;
+	bdr_join_handle_catchup_proposal(msg);
+	elog(LOG, "XXX faking active proposal for node join request");
+	bdr_join_handle_active_proposal(msg);
+	elog(LOG, "XXX finished processing for node join request");
 }
 
 uint64
 bdr_join_send_catchup_ready(BdrNodeInfo *local)
 {
+	/*
+	 * TODO XXX disabled, because we fake this up on receiver
+	 * side for now, see bdr_join_handle_join_proposal
+	 *
 	return bdr_msgs_enqueue_one(BDR_MSG_NODE_CATCHUP_READY, NULL);
+	*/
+	return 1;
 }
 
 /*
@@ -264,7 +298,13 @@ bdr_join_handle_catchup_proposal(BdrMessage *msg)
 uint64
 bdr_join_send_active_announce(BdrNodeInfo *local)
 {
+	return 1;
+	/*
+	 * TODO XXX disabled, because we fake this up on receiver
+	 * side for now, see bdr_join_handle_join_proposal
+	 *
 	return bdr_msgs_enqueue_one(BDR_MSG_NODE_ACTIVE, NULL);
+	*/
 }
 
 /*

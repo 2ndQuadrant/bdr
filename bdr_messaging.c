@@ -157,12 +157,7 @@ bdr_start_consensus(int bdr_max_nodes)
 	foreach (lc, subs)
 	{
 		PGLogicalSubscription *sub = lfirst(lc);
-		resetStringInfo(&si);
-		appendStringInfoString(&si, sub->origin_if->dsn);
-		appendStringInfo(&si, " application_name='bdr_msgbroker %u'",
-						 bdr_get_local_nodeid());
-		Assert(sub->target->id == bdr_get_local_nodeid());
-		consensus_add_node(sub->origin->id, si.data);
+		bdr_messaging_add_peer(sub->origin->id, sub->origin_if->dsn);
 	}
 
 	consensus_finish_startup();
@@ -1036,9 +1031,17 @@ bdr_get_wait_event_space_needed(void)
 void
 bdr_messaging_add_peer(uint32 node_id, const char *dsn)
 {
+	StringInfoData si;
+
 	Assert(is_bdr_manager());
-	elog(LOG, "adding new bdr node %u", node_id);
-	consensus_add_node(node_id, dsn);
+	initStringInfo(&si);
+	appendStringInfoString(&si, dsn);
+	appendStringInfo(&si, " application_name='bdr_msgbroker %u'",
+					 bdr_get_local_nodeid());
+	consensus_add_node(node_id, si.data);
+	elog(bdr_debug_level, "%u added new bdr node %u to consensus system",
+		 bdr_get_local_nodeid(), node_id);
+	pfree(si.data);
 }
 
 void
