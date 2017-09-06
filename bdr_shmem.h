@@ -35,10 +35,15 @@ typedef struct BdrManagerShmem
 	 *
 	 * recv and send are from manager's PoV
 	 *
-	 * Take bdr_ctx->lock in shared mode before attaching to these. This guards
-	 * against them being overwritten (after another peer detaches) during an
-	 * attach attempt. TODO: finer grained locking?
+	 * Take bdr_ctx->lock in shared mode while attaching to these, release
+	 * after attached. This guards against them being overwritten (after
+	 * another peer detaches). The manager must set manager_attached
+	 * before attaching to the queues themselves, and a peer must set
+	 * peer_attached. (see discussion in bdr_msgbroker_receiver for
+	 * why we need this extra interlock).
 	 */
+	bool		manager_attached;
+	bool		peer_attached;
 	char		shm_recv_mq[SHM_MQ_SIZE];
 	char		shm_send_mq[SHM_MQ_SIZE];
 } BdrManagerShmem;

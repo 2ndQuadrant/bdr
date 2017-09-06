@@ -170,6 +170,8 @@ bdr_start_consensus(int bdr_max_nodes)
 static void
 bdr_startup_submit_shm_mq(void)
 {
+	Assert(is_bdr_manager());
+
 	memset(&submit_mq, 0, sizeof(submit_mq));
 	submit_mq.state = MQ_NEED_REINIT;
 	if (!atexit_registered)
@@ -188,7 +190,7 @@ bdr_startup_submit_shm_mq(void)
 
 /*
  * Create and attach to the mq's, either for initial startup or after
- * a detach.
+ * a detach. Runs in the manager.
  */
 static void
 bdr_reinit_submit_shm_mq(void)
@@ -196,6 +198,7 @@ bdr_reinit_submit_shm_mq(void)
 	shm_mq *sendq, *recvq;
 	MemoryContext old_ctx;
 
+	Assert(is_bdr_manager());
 	Assert(submit_mq.state == MQ_NEED_REINIT);
 	Assert(submit_mq.recvq_handle == NULL);
 	Assert(submit_mq.sendq_handle == NULL);
@@ -203,6 +206,7 @@ bdr_reinit_submit_shm_mq(void)
 	LWLockAcquire(bdr_ctx->lock, LW_EXCLUSIVE);
 
 	Assert(my_manager != NULL);
+	Assert(!my_manager->peer_attached);
 	sendq = shm_mq_create((void*)my_manager->shm_send_mq, SHM_MQ_SIZE);
 	recvq = shm_mq_create((void*)my_manager->shm_recv_mq, SHM_MQ_SIZE);
 	Assert((void*)sendq == (void*)my_manager->shm_send_mq);
@@ -214,6 +218,8 @@ bdr_reinit_submit_shm_mq(void)
 	old_ctx = MemoryContextSwitchTo(submit_mq.mq_context);
 	submit_mq.recvq_handle = shm_mq_attach(recvq, NULL, NULL);
 	submit_mq.sendq_handle = shm_mq_attach(sendq, NULL, NULL);
+
+	my_manager->manager_attached = true;
 	(void) MemoryContextSwitchTo(old_ctx);
 	LWLockRelease(bdr_ctx->lock);
 
@@ -248,22 +254,27 @@ submit_mq_detach(void)
 
 	if (submit_mq.recvq_handle != NULL)
 	{
-		if (shm_mq_get_receiver(recvq))
-			shm_mq_detach(recvq);
+		shm_mq_detach(recvq);
 		submit_mq.recvq_handle = NULL;
 		submit_mq.recvbuf = NULL;
 		submit_mq.recvbufsize = 0;
 	}
+
 	if (submit_mq.sendq_handle != NULL)
 	{
-		if (shm_mq_get_sender(sendq))
-			shm_mq_detach(sendq);
+		shm_mq_detach(sendq);
 		submit_mq.sendq_handle = NULL;
 		submit_mq.sendbuf = NULL;
 		submit_mq.sendbufsize = 0;
 	}
+
 	if (submit_mq.mq_context != NULL)
 		MemoryContextReset(submit_mq.mq_context);
+
+	if (is_bdr_manager())
+		my_manager->manager_attached = false;
+	else
+		my_manager->peer_attached = false;
 
 	LWLockRelease(bdr_ctx->lock);
 }
@@ -275,8 +286,6 @@ submit_mq_detach(void)
 static void
 bdr_detach_submit_shm_mq(void)
 {
-	shm_mq *sendq, *recvq;
-
 	if (submit_mq.mq_context == NULL)
 	{
 		/* We're shut down */
@@ -287,9 +296,6 @@ bdr_detach_submit_shm_mq(void)
 
 	if (submit_mq.state == MQ_NEED_REINIT)
 		return;
-
-	sendq = (void*)my_manager->shm_send_mq;
-	recvq = (void*)my_manager->shm_recv_mq;
 
 	if (submit_mq.state != MQ_WAIT_PEER_DETACH)
 		/* Do the local-side detach work */
@@ -303,12 +309,14 @@ bdr_detach_submit_shm_mq(void)
 	 */
 	submit_mq.state = MQ_WAIT_PEER_DETACH;
 
-	if (shm_mq_get_sender(recvq) == NULL && shm_mq_get_receiver(sendq) == NULL)
+	LWLockAcquire(bdr_ctx->lock, LW_EXCLUSIVE);
+	if (!my_manager->peer_attached)
 	{
+		Assert(!my_manager->manager_attached);
 		/* Peer is gone */
 		submit_mq.state = MQ_NEED_REINIT;
 	}
-
+	LWLockRelease(bdr_ctx->lock);
 }
 
 /*
@@ -480,6 +488,7 @@ bdr_attach_manager_queue(void)
 	shm_mq_set_sender(sendq, MyProc);
 	submit_mq.sendq_handle = shm_mq_attach(sendq, NULL, NULL);
 	submit_mq.recvq_handle = shm_mq_attach(recvq, NULL, NULL);
+	my_manager->peer_attached = true;
 	LWLockRelease(bdr_ctx->lock);
 
 	submit_mq.recvbuf = NULL;
@@ -490,8 +499,8 @@ bdr_attach_manager_queue(void)
 	/*
 	 * Manager should already be attached, but just in case.
 	 *
-	 * Waits forever unless interrupted by fatal signal.
-	 * TODO: nonblocking mode where we retry later?
+	 * Waits forever unless interrupted by fatal signal or
+	 * manager attach.
 	 */
 	(void) shm_mq_wait_for_attach(submit_mq.sendq_handle);
 	(void) shm_mq_wait_for_attach(submit_mq.recvq_handle);

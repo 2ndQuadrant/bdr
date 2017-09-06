@@ -152,5 +152,8 @@ batch of messages at once.
 * extract bdr_msgbuf_receive.c's shmem worker pool;
 * make it into coupled pairs of in and out queues like bdr_messaging.c uses, so we can reply;
 * adopt the same protocol and state tracking as used for bdr_messaging.c in the new queue;
+* fix it so that it does not rely on shm_mq_get_receiver or shm_mq_get_sender returning
+  null after detach; requires in-band signalling of intent to detach, ordering restrictions
+  requiring manager to only detach after worker gone, or similar.
 * extend it so it allows submission of multiple multiple messages in a single batch so we don't have to pass through the event loop each time;
 * expand the pool with a set of extra queues used first-come first-served by normal user backends and other bdr bgworkers - for ddl lock requests, ipc with manager, etc etc.

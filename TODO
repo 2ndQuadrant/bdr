@@ -1,19 +1,30 @@
 NEXT STEPS TO PROGRESS
 ----
 
-- Work out why subs exit; it's NEARLY working now
+- clean tests
 
-- remove vile hack at end of bdr_join_handle_join_proposal
-  in favour of moving the whole thing into the manager
+- minimal docs
 
-- Look into why supervisor doesn't reliably restart manager in timely way
+- tag alpha
+
+- move node join into manager
+
+- File bug on supervisor doesn't reliably restart manager in timely way
+  then ignore it!
 
 - Delay starting messaging until have nodelist and nodegroup (manager)
 
-then BDR will work. So long as you don't expect consisent join. Or part.
-Or crash safety. Or anything else, really.
+- replicate replication sets on join
 
-MQ REFACTOr
+- replicate replication set memberships on change
+
+- do MQ refactor
+
+- write persistence for consensus messages
+- write db read-out for consensus messages
+- write proper consensus 2pc
+
+MQ REFACTOR
 ----
 
 Needed pretty urgently now
@@ -26,6 +37,8 @@ Needed pretty urgently now
   if it fails to detach, sends a signal. So we never have doubt as to whether
   the peer is still attached.
   
+more in README.messaging
+
 
 
 COMPAT STUFF

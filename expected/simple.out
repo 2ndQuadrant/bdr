@@ -5,7 +5,7 @@ SELECT pglogical.replicate_ddl_command($DDL$
 CREATE TABLE public.demo(
     id integer primary key
 );
-$DDL$);
+$DDL$, ARRAY['bdrgroup']);
  replicate_ddl_command 
 -----------------------
  t
