@@ -108,4 +108,5 @@ SELECT
     backend_type,
     regexp_replace(application_name, '[[:digit:]]', 'n', 'g') AS appname
 FROM pg_stat_activity
-WHERE application_name LIKE 'pglogical%';
+WHERE application_name LIKE 'pglogical%'
+ORDER BY appname;

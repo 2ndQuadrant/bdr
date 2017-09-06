@@ -15,9 +15,9 @@ SELECT E'\'' || current_database() || E'\'' AS node2_db
 -- Only used in tests
 CREATE FUNCTION bdr_submit_comment(message text)
 RETURNS text LANGUAGE c STRICT AS 'bdr','bdr_submit_comment';
-SELECT node_name, bdr_local_state, node_if_name FROM bdr.node_group_member_info(NULL);
- node_name | bdr_local_state | node_if_name 
------------+-----------------+--------------
+SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info(NULL);
+ node_name | node_local_state | nodegroup_name | pgl_interface_name 
+-----------+------------------+----------------+--------------------
 (0 rows)
 
 SELECT 1
@@ -28,10 +28,10 @@ NOTICE:  creating new pglogical node
         1
 (1 row)
 
-SELECT node_name, bdr_local_state, node_if_name FROM bdr.node_group_member_info(NULL);
- node_name | bdr_local_state | node_if_name 
------------+-----------------+--------------
- node1     |              98 | node1
+SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info(NULL);
+ node_name | node_local_state | nodegroup_name | pgl_interface_name 
+-----------+------------------+----------------+--------------------
+ node1     |          8644737 |                | node1
 (1 row)
 
 SELECT 1
@@ -41,37 +41,31 @@ FROM bdr.create_node_group('bdrgroup');
         1
 (1 row)
 
-SELECT node_name, bdr_local_state, node_if_name FROM bdr.node_group_member_info(NULL);
- node_name | bdr_local_state | node_if_name 
------------+-----------------+--------------
- node1     |              98 | node1
+SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info(NULL);
+ node_name | node_local_state | nodegroup_name | pgl_interface_name 
+-----------+------------------+----------------+--------------------
+ node1     |          8644737 | bdrgroup       | node1
 (1 row)
 
-SELECT node_name, bdr_local_state, node_if_name FROM bdr.node_group_member_info((SELECT node_group_id FROM bdr.node_group));
- node_name | bdr_local_state | node_if_name 
------------+-----------------+--------------
- node1     |              98 | node1
-(1 row)
-
-SELECT * FROM bdr.node_group_replication_sets;
- node_group_name | node_name | set_name 
------------------+-----------+----------
- bdrgroup        | node1     | bdrgroup
+SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info((SELECT node_group_id FROM bdr.node_group));
+ node_name | node_local_state | nodegroup_name | pgl_interface_name 
+-----------+------------------+----------------+--------------------
+ node1     |          8644737 | bdrgroup       | node1
 (1 row)
 
 -- We must create a slot before creating the subscription to work
 -- around the deadlock in 2ndQuadrant/pglogical_internal#152
 -- TODO: BDR should do this automatically
-SELECT slot_name FROM pg_create_logical_replication_slot(pglogical.pglogical_gen_slot_name(:node2_db, 'node1', 'bdrgroup'), 'pglogical');
-          slot_name          
------------------------------
- pgl_postgres_node1_bdrgroup
+SELECT slot_name FROM pg_create_logical_replication_slot(pglogical.pglogical_gen_slot_name(:node2_db, 'node1', 'bdrgroup_node1'), 'pglogical');
+             slot_name             
+-----------------------------------
+ pgl_postgres_node1_bdrgroup_node1
 (1 row)
 
 \c :node2_dsn
-SELECT node_name, bdr_local_state, node_if_name FROM bdr.node_group_member_info(NULL);
- node_name | bdr_local_state | node_if_name 
------------+-----------------+--------------
+SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info(NULL);
+ node_name | node_local_state | nodegroup_name | pgl_interface_name 
+-----------+------------------+----------------+--------------------
 (0 rows)
 
 SELECT 1
@@ -85,106 +79,55 @@ NOTICE:  creating new pglogical node
 SELECT 1
 FROM bdr.join_node_group(:'node1_dsn', 'nosuch-nodegroup');
 ERROR:  remote node is member of nodegroup bdrgroup but we asked to join nodegroup nosuch-nodegroup
-SELECT node_name, bdr_local_state, node_if_name FROM bdr.node_group_member_info((SELECT node_group_id FROM bdr.node_group));
- node_name | bdr_local_state | node_if_name 
------------+-----------------+--------------
- node2     |              98 | node2
+SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info((SELECT node_group_id FROM bdr.node_group));
+ node_name | node_local_state | nodegroup_name | pgl_interface_name 
+-----------+------------------+----------------+--------------------
+ node2     |          8644737 |                | node2
 (1 row)
 
 SELECT 1
 FROM bdr.join_node_group(:'node1_dsn', 'bdrgroup');
-NOTICE:  joining nodegroup bdrgroup (1360502012) via remote node node1 (node_id 1148549230)
-WARNING:  not implemented
-WARNING:  not implemented
-WARNING:  not implemented
-WARNING:  not implemented
-WARNING:  not implemented
-WARNING:  ignoring minimum catchup lsn: 0/17F5888
-WARNING:  not implemented
-WARNING:  not implemented
-WARNING:  not implemented
-WARNING:  not implemented
+NOTICE:  3367056606 joining nodegroup bdrgroup (1360502012) via remote node node1 (node_id 1148549230)
+WARNING:  replication set memberships copy not implemented
+WARNING:  bringing up consensus manager not implemented
+WARNING:  ignoring minimum catchup lsn: 0/1817A90
+WARNING:  killed manager for db 13246
  ?column? 
 ----------
         1
 (1 row)
 
-SELECT node_name, bdr_local_state, node_if_name FROM bdr.node_group_member_info((SELECT node_group_id FROM bdr.node_group));
- node_name | bdr_local_state | node_if_name 
------------+-----------------+--------------
- node2     |              98 | node2
- node1     |              98 | node1
+SELECT pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+SELECT 1 FROM bdr.join_node_group_finish(); -- XXX should go away soon
+ ?column? 
+----------
+        1
+(1 row)
+
+SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info((SELECT node_group_id FROM bdr.node_group));
+ node_name | node_local_state | nodegroup_name | pgl_interface_name 
+-----------+------------------+----------------+--------------------
+ node2     |          8644737 | bdrgroup       | node2
+ node1     |          8644737 | bdrgroup       | node1
 (2 rows)
 
-SELECT * FROM bdr.node_group_replication_sets;
- node_group_name | node_name | set_name 
------------------+-----------+----------
- bdrgroup        | node2     | bdrgroup
-(1 row)
-
--- Subscribe to the first node
--- See GH#152 for why we don't create the slot
--- TODO: BDR should do this for us
-SELECT 1 FROM pglogical.create_subscription(
-    subscription_name := 'bdrgroup',
-    provider_dsn := ( :'node1_dsn' || ' user=super' ),
-    synchronize_structure := true,
-    forward_origins := '{}',
-    replication_sets := ARRAY['bdrgroup','ddl_sql'],
-	create_slot := false);
- ?column? 
-----------
-        1
-(1 row)
-
--- and set the subscription as 'isinternal' so BDR thinks BDR owns it.
-UPDATE pglogical.subscription SET sub_isinternal = true;
--- Wait for the initial copy to finish
---
--- If we don't do this, we'll usually kill the apply worker during init
--- and it won't retry since it doesn't know if the restore was partial
--- last time around
-DO LANGUAGE plpgsql $$
-BEGIN
-  WHILE NOT EXISTS (SELECT 1 FROM pglogical.show_subscription_status() WHERE status = 'replicating')
-  LOOP
-    PERFORM pg_sleep(0.5);
-  END LOOP;
-END;
-$$;
 SELECT subscription_name, status, provider_node, slot_name, replication_sets
 FROM pglogical.show_subscription_status();
- subscription_name |   status    | provider_node |          slot_name          |  replication_sets  
--------------------+-------------+---------------+-----------------------------+--------------------
- bdrgroup          | replicating | node1         | pgl_postgres_node1_bdrgroup | {bdrgroup,ddl_sql}
+ subscription_name |   status    | provider_node |             slot_name             | replication_sets 
+-------------------+-------------+---------------+-----------------------------------+------------------
+ bdrgroup_node1    | replicating | node1         | pgl_postgres_node1_bdrgroup_node1 | {bdrgroup}
 (1 row)
 
 -- See above...
 -- TODO: BDR should do this automatically
-SELECT slot_name FROM pg_create_logical_replication_slot(pglogical.pglogical_gen_slot_name(:node1_db, 'node2', 'bdrgroup'), 'pglogical');
-           slot_name           
--------------------------------
- pgl_regression_node2_bdrgroup
-(1 row)
-
+SELECT slot_name FROM pg_create_logical_replication_slot(pglogical.pglogical_gen_slot_name(:node1_db, 'node2', 'bdrgroup_node2'), 'pglogical');
+ERROR:  replication slot "pgl_regression_node2_bdrgroup_node2" already exists
 \c :node1_dsn
--- Subscribe to the second node and make the subscription 'internal'
--- but this time don't sync structure.
---
--- See GH#152 for why we don't create the slot
-SELECT 1 FROM pglogical.create_subscription(
-    subscription_name := 'bdrgroup',
-    provider_dsn := ( :'node2_dsn' || ' user=super' ),
-    synchronize_structure := false,
-    forward_origins := '{}',
-    replication_sets := ARRAY['bdrgroup','ddl_sql'],
-    create_slot := false);
- ?column? 
-----------
-        1
-(1 row)
-
-UPDATE pglogical.subscription SET sub_isinternal = true;
 DO LANGUAGE plpgsql $$
 BEGIN
   WHILE NOT EXISTS (SELECT 1 FROM pglogical.show_subscription_status() WHERE status = 'replicating')
@@ -195,19 +138,11 @@ END;
 $$;
 SELECT subscription_name, status, provider_node, slot_name, replication_sets
 FROM pglogical.show_subscription_status();
- subscription_name |   status    | provider_node |           slot_name           |  replication_sets  
--------------------+-------------+---------------+-------------------------------+--------------------
- bdrgroup          | replicating | node2         | pgl_regression_node2_bdrgroup | {bdrgroup,ddl_sql}
+ subscription_name |   status    | provider_node |              slot_name              | replication_sets 
+-------------------+-------------+---------------+-------------------------------------+------------------
+ bdrgroup_node2    | replicating | node2         | pgl_regression_node2_bdrgroup_node2 | {bdrgroup}
 (1 row)
 
--- Now, since BDR doesn't know we changed any catalogs etc,
--- restart pglogical to make the plugin re-read its config
-SET client_min_messages = error;
-CREATE TEMPORARY TABLE throwaway AS
-SELECT pg_terminate_backend(pid)
-FROM pg_stat_activity
-WHERE pid <> pg_backend_pid();
-DROP TABLE throwaway;
 SET client_min_messages = notice;
 -- Wait for it to start up
 -- We already created the slots so all we have to do here is wait for
@@ -228,29 +163,30 @@ FROM pg_stat_replication
 ORDER BY application_name;
  application_name | sync_state 
 ------------------+------------
- bdrgroup         | async
- bdrgroup         | async
+ bdrgroup_node1   | async
+ bdrgroup_node2   | async
 (2 rows)
 
 SELECT slot_name, plugin, slot_type, database, temporary, active
 FROM pg_replication_slots ORDER BY slot_name;
-           slot_name           |  plugin   | slot_type |  database  | temporary | active 
--------------------------------+-----------+-----------+------------+-----------+--------
- pgl_postgres_node1_bdrgroup   | pglogical | logical   | regression | f         | t
- pgl_regression_node2_bdrgroup | pglogical | logical   | postgres   | f         | t
+              slot_name              |  plugin   | slot_type |  database  | temporary | active 
+-------------------------------------+-----------+-----------+------------+-----------+--------
+ pgl_postgres_node1_bdrgroup_node1   | pglogical | logical   | regression | f         | t
+ pgl_regression_node2_bdrgroup_node2 | pglogical | logical   | postgres   | f         | t
 (2 rows)
 
 SELECT
     backend_type,
     regexp_replace(application_name, '[[:digit:]]', 'n', 'g') AS appname
 FROM pg_stat_activity
-WHERE application_name LIKE 'pglogical%';
+WHERE application_name LIKE 'pglogical%'
+ORDER BY appname;
    backend_type    |               appname               
 -------------------+-------------------------------------
+ background worker | pglogical manager nnnnn
+ background worker | pglogical manager nnnnn
+ background worker | pglogical receiver nnnnn:nnnnnnnnnn
+ background worker | pglogical receiver nnnnn:nnnnnnnnnn
  background worker | pglogical supervisor
- background worker | pglogical manager nnnnn
- background worker | pglogical receiver nnnnn:nnnnnnnnnn
- background worker | pglogical manager nnnnn
- background worker | pglogical receiver nnnnn:nnnnnnnnnn
 (5 rows)
 

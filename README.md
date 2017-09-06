@@ -31,6 +31,8 @@ See sql/init.sql and sql/simple.sql
 The answer to most "how do I" questions beyond this is still "you don't".
 This is early days work.
 
+The init tests fail (diff mismatches), the others shouldn't.
+
 Only really tested in a single-cluster setup so far. Expect bugs.
 
 There's a known deadlock when creating slots. You must pre-create
