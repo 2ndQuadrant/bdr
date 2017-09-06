@@ -114,6 +114,7 @@ static void bdr_messaging_atexit(int code, Datum argument);
 static void bdr_startup_submit_shm_mq(void);
 static void bdr_reinit_submit_shm_mq(void);
 static void bdr_detach_manager_queue(void);
+static uint64 bdr_msgs_enqueue_internal(void * payload, Size payload_length);
 
 static BdrManagerShmem *my_manager;
 
@@ -158,10 +159,10 @@ bdr_start_consensus(int bdr_max_nodes)
 		PGLogicalSubscription *sub = lfirst(lc);
 		resetStringInfo(&si);
 		appendStringInfoString(&si, sub->origin_if->dsn);
-		appendStringInfo(&si, " application_name='bdr_msgbroker %i'",
+		appendStringInfo(&si, " application_name='bdr_msgbroker %u'",
 						 bdr_get_local_nodeid());
 		Assert(sub->target->id == bdr_get_local_nodeid());
-		consensus_add_node(sub->origin->id, sub->origin_if->dsn);
+		consensus_add_node(sub->origin->id, si.data);
 	}
 
 	consensus_finish_startup();
@@ -380,7 +381,7 @@ bdr_received_submit_shm_mq(void)
 			/*
 			 * TODO: error reporting to peers on submit failure
 			 */
-			handle = consensus_enqueue_proposal(msg->payload, msg->payload_length);
+			handle = bdr_msgs_enqueue_internal(msg->payload, msg->payload_length);
 			bdr_make_msg_submit_shm_mq(MSG_ENQUEUE_RESULT, sizeof(uint64),
 									   &handle);
 			break;
@@ -785,6 +786,12 @@ bdr_msgs_begin_enqueue(void)
 	}
 }
 
+static uint64
+bdr_msgs_enqueue_internal(void * payload, Size payload_length)
+{
+	return consensus_enqueue_proposal(payload, payload_length);
+}
+
 /*
  * Enqueue a message for processing on other peers. The message data, if passed,
  * must match the type and be recognised by msg_serialize_proposal /
@@ -797,8 +804,11 @@ bdr_msgs_begin_enqueue(void)
 uint64
 bdr_msgs_enqueue(BdrMessageType message_type, void* message)
 {
+	uint64 handle;
 	StringInfoData bmsg;
+
 	initStringInfo(&bmsg);
+
 	msg_serialize_proposal(&bmsg, message_type, message);
 
 	if (is_bdr_manager())
@@ -807,7 +817,7 @@ bdr_msgs_enqueue(BdrMessageType message_type, void* message)
 		 * No need for IPC to enqueue this message, we're on the manager
 		 * already.
 		 */
-		return consensus_enqueue_proposal(bmsg.data, bmsg.len);
+		handle = bdr_msgs_enqueue_internal(bmsg.data, bmsg.len);
 	}
 	else
 	{
@@ -816,23 +826,35 @@ bdr_msgs_enqueue(BdrMessageType message_type, void* message)
 									   bmsg.len, bmsg.data);
 		Assert(msg->msg_type == MSG_ENQUEUE_RESULT);
 		Assert(msg->payload_length == sizeof(uint64));
-		return *((uint64*)msg->payload);
+		handle = *((uint64*)msg->payload);
 	}
+
+	elog(bdr_debug_level, "%u enqueued proposal of type %d with handle "UINT64_FORMAT,
+		 bdr_get_local_nodeid(), message_type, handle);
+
+	return handle;
 }
 
 uint64
 bdr_msgs_finish_enqueue(void)
 {
+	uint64 handle;
+
 	if (is_bdr_manager())
-		return consensus_finish_enqueue();
+		handle = consensus_finish_enqueue();
 	else
 	{
 		SubmitMQMessage *msg;
 		msg = bdr_submit_manager_queue(MSG_FINISH_ENQUEUE, 0, NULL);
 		Assert(msg->msg_type == MSG_FINISH_ENQUEUE_RESULT);
 		Assert(msg->payload_length == sizeof(uint64));
-		return *((uint64*)msg->payload);
+		handle = *((uint64*)msg->payload);
 	}
+
+	elog(bdr_debug_level, "%u finished enqueueing batch",
+		 bdr_get_local_nodeid());
+
+	return handle;
 }
 
 /*
@@ -856,39 +878,45 @@ bdr_proposals_receive(ConsensusProposal *msg)
 {
 	BdrMessage *bmsg;
 
-	/* note, we receive our own messages too */
-	elog(LOG, "XXX RECEIVE FROM %u (%s), payload size %lu",
-		msg->sender_nodeid, 
-		msg->sender_nodeid == bdr_get_local_nodeid() ? "self" : "peer",
-		msg->payload_length);
-
 	bmsg = msg_deserialize_proposal(msg);
+
+	if (!bmsg)
+	{
+		/*
+		 * Bad message. TODO: abort txn
+		 */
+		return false;
+	}
 
 	switch (bmsg->message_type)
 	{
 		case BDR_MSG_COMMENT:
-			elog(bdr_debug_level, "BDR comment msg from %u: \"%s\"",
-				 msg->sender_nodeid, (char*)bmsg->message);
+			elog(bdr_debug_level, "%u BDR comment msg from %u: \"%s\"",
+				 bdr_get_local_nodeid(), msg->sender_nodeid, (char*)bmsg->message);
 			break;
 		case BDR_MSG_NODE_JOIN_REQUEST:
 		{
 			StringInfoData logmsg;
 			initStringInfo(&logmsg);
 			msg_stringify_join_request(&logmsg, bmsg->message);
-			elog(bdr_debug_level, "BDR join request message from %u: %s",
-				msg->sender_nodeid, logmsg.data);
+			elog(bdr_debug_level, "%u BDR join request message from %u: %s",
+				 bdr_get_local_nodeid(), msg->sender_nodeid, logmsg.data);
 			pfree(logmsg.data);
 			break;
 		}
 		case BDR_MSG_NODE_CATCHUP_READY:
-			elog(bdr_debug_level, "BDR catchup ready from %u", msg->sender_nodeid);
+			elog(bdr_debug_level, "%u BDR catchup ready from %u",
+				 bdr_get_local_nodeid(), msg->sender_nodeid);
 			break;
 		case BDR_MSG_NODE_ACTIVE:
-			elog(bdr_debug_level, "BDR node active from %u", msg->sender_nodeid);
+			elog(bdr_debug_level, "%u BDR node active from %u",
+				 bdr_get_local_nodeid(), msg->sender_nodeid);
 			break;
 		default:
-			elog(bdr_debug_level, "unrecognised BDR message type %d ignored",
-				 bmsg->message_type);
+			elog(bdr_debug_level,
+				 "%u unrecognised BDR message type %d ignored",
+				 bdr_get_local_nodeid(), bmsg->message_type);
+			return false;
 	}
 
     /* TODO: can nack messages here to abort consensus txn early */
@@ -900,12 +928,18 @@ bdr_proposals_prepare(List *messages)
 {
 	ListCell *lc;
 
+	elog(bdr_debug_level, "%u handling PREPARE for %d message transaction",
+		 bdr_get_local_nodeid(), list_length(messages));
+
 	foreach (lc, messages)
 	{
 		ConsensusProposal  *msg = lfirst(lc);
 		BdrMessage		   *bmsg;
 
 		bmsg = msg_deserialize_proposal(msg);
+
+		elog(bdr_debug_level, "%u dispatching prepare of proposal %u from %u",
+			 bdr_get_local_nodeid(), bmsg->message_type, bmsg->originator_id);
 
 		/*
 		 * TODO: should dispatch message processing via the local node state

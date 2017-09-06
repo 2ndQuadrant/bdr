@@ -1,14 +1,33 @@
 NEXT STEPS TO PROGRESS
 ----
 
-- Debug "unhandled message type 2139062143 in prepare proposal"
+startup races
 
-  Seems to be join msgs
+WTF:
 
-  aha, "hex(2139062143)" = 0x7f7f7f7f, so we're clobbering our xact context
-  prematurely
+regression=# select * from bdr.node;
+ pglogical_node_id | node_group_id | local_state | seq_id | confirmed_our_join |   dbname   
+-------------------+---------------+-------------+--------+--------------------+------------
+        1148549230 |    1360502012 |     8644737 |     -1 | f                  | regression
+        3367056606 |    1360502012 |     8644737 |      0 | f                  | nxuD
+(2 rows)
 
-  fix, ensure node is properly added in response to join-request proposal
+
+- "pending_cleanup" is too simplistic, need state fields. We have to track
+   "peer just detached, needs reinit", "waiting for peer to detach so we can clear slot", etc.
+ 
+  REALLY need to merge with bdr_messaging.c for queue state tracking, and in the process
+  fix the reliance on getting pids in bdr_messaging.c
+
+- Make use of active_pid == -1 consistently mean "busy in manager",
+  make peer detach set it to hand over to manager for cleanup. Get rid
+  of pending_cleanup flag in favour of testing pid array?
+
+  active_pid = 0, node_id = 0 => empty slot, assert it to be so
+
+- Finish conversion of adding active_pid
+
+- fix FIXME in msgb_try_cleanup_peer_slot re detach of broker side
 
 - Look into why supervisor doesn't reliably restart manager in timely way
 
@@ -69,6 +88,8 @@ HACKS TO PAY DOWN AND TODOs TO FINISH
 FUTURE WORK
 ---
 
+- see if we can get bgworkers to show application_name in logs
+
 - Split out pglogical_replication_set_add_table row filter / attribute filter
   setup code for re-use by BDR
 
@@ -76,6 +97,14 @@ FUTURE WORK
   counters, to support multiple nodegroups...
 
 - some way to specify non-default interfaces for each node when joining
+
+- make bdr_debug_level a function like
+  bdr_debug_level(DEBUG2)
+  that promotes anything <= the current bdr_debug_level setting to LOG
+  so we can still filter out really noisy stuff
+
+  and add a subsystem identifier so we can trace just messaging, for 
+  example
 
 SANITY CHECKS AND DEFENSES NEEDED
 ---

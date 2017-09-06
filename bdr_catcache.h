@@ -3,6 +3,8 @@
 
 extern void bdr_cache_local_nodeinfo(void);
 
+extern void bdr_refresh_cache_local_nodeinfo(void);
+
 extern uint32 bdr_get_local_nodeid(void);
 
 extern const char * bdr_get_local_node_name(void);

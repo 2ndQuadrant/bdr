@@ -26,12 +26,33 @@
 static BdrNodeInfo 		   *local_bdr_node_info;
 static MemoryContext		bdr_catcache_context;
 
+void
+bdr_refresh_cache_local_nodeinfo(void)
+{
+	MemoryContext old_ctx;
+
+	if (bdr_catcache_context != NULL)
+		MemoryContextReset(bdr_catcache_context);
+	else
+		bdr_catcache_context = AllocSetContextCreate(CacheMemoryContext,
+													 "bdr_catcache",
+													 ALLOCSET_DEFAULT_SIZES);
+
+	old_ctx = MemoryContextSwitchTo(bdr_catcache_context);
+
+	local_bdr_node_info = bdr_get_local_node_info(false, true);
+
+	(void) MemoryContextSwitchTo(old_ctx);
+}
+
 /*
  * Look up our local node information in the BDR catalogs for
  * this database and cache it in a global.
  *
- * No invalidations are handled. If the local node info changes the
- * managers and workers must be signalled to restart.
+ * No invalidations are handled. If the local node info changes the managers
+ * and workers must be signalled to restart, or a manual refresh may be
+ * requested with bdr_refresh_cache_local_nodeinfo.  (This renders any
+ * references to old cache entries invalid, though).
  *
  * Otherwise we'd need an xact whenever we looked up these caches, so we could
  * handle possibly reloading them.
@@ -39,22 +60,12 @@ static MemoryContext		bdr_catcache_context;
  * TODO: invalidations/resets
  */
 void
-bdr_cache_local_nodeinfo(void)
+bdr_cache_local_nodeinfo()
 {
-	MemoryContext old_ctx;
-
 	if (bdr_catcache_context != NULL)
 		return;
 
-	bdr_catcache_context = AllocSetContextCreate(CacheMemoryContext,
-												 "bdr_catcache",
-												 ALLOCSET_DEFAULT_SIZES);
-
-	old_ctx = MemoryContextSwitchTo(bdr_catcache_context);
-
-	local_bdr_node_info = bdr_get_local_node_info(false, true);
-
-	(void) MemoryContextSwitchTo(old_ctx);
+	bdr_refresh_cache_local_nodeinfo();
 }
 
 bool

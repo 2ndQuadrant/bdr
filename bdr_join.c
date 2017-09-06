@@ -153,6 +153,8 @@ bdr_join_handle_join_proposal(BdrMessage *msg)
 
 	Assert(is_bdr_manager());
 
+	elog(LOG, "XXX processing join request for %u", req->joining_node_id);
+
 	local_nodegroup = bdr_get_nodegroup_by_name(req->nodegroup_name, false);
 	if (req->nodegroup_id != 0 && local_nodegroup->id != req->nodegroup_id)
 		elog(ERROR, "expected nodegroup %s to have id %u but local nodegroup id is %u",
@@ -160,6 +162,17 @@ bdr_join_handle_join_proposal(BdrMessage *msg)
 
 	if (req->joining_node_id == 0)
 		elog(ERROR, "joining node id must be nonzero");
+
+	if (req->joining_node_id == bdr_get_local_nodeid())
+	{
+		/*
+		 * Join requests are not received by the node being joined, because
+		 * it's not yet part of the consensus system. So this shouldn't happen.
+		 */
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("node %u received its own join request", req->joining_node_id)));
+	}
 
 	pnode.id = req->joining_node_id;
 	pnode.name = (char*)req->joining_node_name;
@@ -184,6 +197,7 @@ bdr_join_handle_join_proposal(BdrMessage *msg)
 	bnode.confirmed_our_join = false;
 	/* Ignoring join_target_node_name and join_target_node_id for now */
 
+	/* TODO: do upserts here in case pgl node or even bdr node exists already */
 	create_node(&pnode);
 	create_node_interface(&pnodeif);
 	bdr_node_create(&bnode);
@@ -232,16 +246,19 @@ bdr_join_handle_catchup_proposal(BdrMessage *msg)
 	local = bdr_get_local_node_info(false, false);
 	remote = bdr_get_node_info(msg->originator_id, false);
 
-	bdr_join_create_slot(local, remote);
+	if (local->bdr_node->node_id != remote->bdr_node->node_id)
+	{
+		bdr_join_create_slot(local, remote);
 
-	/*
-	 * TODO: should set local state to catchup
-	 */
+		/*
+		 * TODO: should set local state to catchup
+		 */
 
-	/*
-	 * TODO: write a catchup-confirmation message
-	 * here, so the peer can tally join confirmations
-	 */
+		/*
+		 * TODO: write a catchup-confirmation message
+		 * here, so the peer can tally join confirmations
+		 */
+	}
 }
 
 uint64
@@ -268,11 +285,14 @@ bdr_join_handle_active_proposal(BdrMessage *msg)
 	local = bdr_get_local_node_info(false, false);
 	remote = bdr_get_node_info(msg->originator_id, false);
 
-	/*
-	 * We can now create a subscription to the node, to be started
-	 * once we commit.
-	 */
-	bdr_create_subscription(local, remote, 0, false);
+	if (local->bdr_node->node_id != remote->bdr_node->node_id)
+	{
+		/*
+		 * We can now create a subscription to the node, to be started
+		 * once we commit.
+		 */
+		bdr_create_subscription(local, remote, 0, false);
+	}
 
 	/*
 	 * TODO: should set local state to active/ready
@@ -474,6 +494,14 @@ bdr_join_copy_remote_nodes(PGconn *conn, BdrNodeInfo *local)
 	{
 		BdrNodeInfo *peer = read_nodeinfo_result(res, i);
 		Assert(peer->bdr_node_group->id == local->bdr_node_group->id);
+
+		if (peer->bdr_node->node_id == local->bdr_node->node_id)
+			continue;
+
+		/*
+		 * TODO: upsert here, in case we already have the pgl node
+		 * from some prior subscription
+		 */
 		create_node(peer->pgl_node);
 		create_node_interface(peer->pgl_interface);
 		bdr_node_create(peer->bdr_node);
@@ -513,6 +541,7 @@ bdr_gen_sub_name(BdrNodeInfo *subscriber, BdrNodeInfo *provider)
 	Assert(provider->bdr_node_group != NULL);
 	Assert(subscriber->bdr_node_group != NULL);
 	Assert(provider->bdr_node_group->id == subscriber->bdr_node_group->id);
+	Assert(provider->bdr_node->node_id != subscriber->bdr_node->node_id);
 
 	initStringInfo(&sub_name);
 	/*
@@ -543,6 +572,9 @@ bdr_create_subscription(BdrNodeInfo *local, BdrNodeInfo *remote, int apply_delay
 	PGLSubscriptionWriter	sub_writer;
 	PGLogicalSyncStatus		sync;
 	Interval				apply_delay;
+
+	elog(bdr_debug_level, "creating subscription for %u on %u",
+		 remote->bdr_node->node_id, local->bdr_node->node_id);
 
 	/*
 	 * For now we support only one replication set, with the same name as the
@@ -634,6 +666,8 @@ bdr_create_subscription(BdrNodeInfo *local, BdrNodeInfo *remote, int apply_delay
 	/*
 	 * TODO: create bdr.subscriptions entry for this sub
 	 */
+	elog(bdr_debug_level, "created subscription for %u on %u",
+		 remote->bdr_node->node_id, local->bdr_node->node_id);
 }
 
 /*
@@ -771,9 +805,14 @@ bdr_join_create_slot(BdrNodeInfo *local, BdrNodeInfo *remote)
 	 * retry.
 	 */
 	if (bdr_replication_slot_exists(&slot_name))
+	{
+		elog(LOG, "XXX slot %s already exists", NameStr(slot_name));
 		return;
+	}
 
+	elog(LOG, "XXX slot %s does not exist", NameStr(slot_name));
 	ReplicationSlotCreate(NameStr(slot_name), true, RS_PERSISTENT);
+	elog(LOG, "XXX slot %s created", NameStr(slot_name));
 	ReplicationSlotRelease();
 }
 

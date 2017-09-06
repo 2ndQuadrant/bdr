@@ -21,6 +21,12 @@
 #include "bdr_msgbroker_receive.h"
 #include "bdr_msgbroker.h"
 
+typedef struct node_toc_entry
+{
+	uint32	node_id;
+	int		active_pid;
+} node_toc_entry;
+
 /*
  * Shared-memory queues used to deliver from origin_node_id to the associated
  * segment-handle's node_id are stored in dynamic shared memory, addressed
@@ -38,6 +44,13 @@
  * once assigned, but nodes can come and go. It doesn't give us a way to
  * scan the whole ToC either. (We might be better off not using shm_toc
  * at all, but then we have to do all the alignment, sizing, etc ourselves).
+ *
+ * The node_toc_entry keeps track of which slots are assigned to which bdr
+ * nodes (in node_id), and which backends are currently attached if any (in
+ * active_peer). See peer_detach for why the latter is necessary and shm_mq's
+ * shm_mq_get_sender is insufficient. 0 indicates the slot is ready for a peer
+ * to connect. -1 is an entry needing cleanup by the manager or being
+ * initialized.
  */
 typedef struct MsgbDSMHdr
 {
@@ -47,9 +60,9 @@ typedef struct MsgbDSMHdr
 	 * ToC entries have zero. Allocations and scans must be done with the
 	 * spinlock held.
 	 */
-	slock_t		mutex;
-	int			node_toc_map_size;
-	uint32		node_toc_map[FLEXIBLE_ARRAY_MEMBER];
+	slock_t				mutex;
+	int					node_toc_map_size;
+	node_toc_entry		node_toc_map[FLEXIBLE_ARRAY_MEMBER];
 } MsgbDSMHdr;
 
 /*
@@ -92,12 +105,25 @@ static MsgbDynamicSegmentHandle *msgb_my_seg = NULL;
 /* max DBs, used only in shmem startup until segment ready */
 static int msgb_max_local_nodes = 0;
 
+/*
+ * TODO: merge queue state logic here with that
+ * in bdr_messaging.c
+ */
+typedef enum MsgbQueueState
+{
+	QUEUE_STATE_FREE,
+	QUEUE_STATE_READY_ACTIVE,
+	QUEUE_STATE_WAIT_PEER_DETACH_REINIT,
+	QUEUE_STATE_WAIT_PEER_DETACH_FREE,
+	QUEUE_STATE_NEEDS_REINIT
+} MsgbQueueState;
+
 /* Broker state pertaining to each peer, */
 typedef struct MsgbReceivePeer
 {
+	MsgbQueueState	state;
 	uint32			sender_id;
 	uint32			max_received_msgid;
-	bool			pending_cleanup;
 	MemoryContext	queue_context;
 	shm_mq_handle  *recvqueue;
 	/* Staging area for incomplete incoming messages */
@@ -107,6 +133,11 @@ typedef struct MsgbReceivePeer
 
 /* only valid for the broker not normal backends. */
 static MsgbReceivePeer *recvpeers = NULL;
+
+/*
+ * DSM segment pointer for this broker (if we're the broker)
+ * or the broker we're connected to (if we're a peer).
+ */
 static dsm_segment *broker_dsm_seg = NULL;
 
 /*
@@ -116,6 +147,7 @@ static dsm_segment *broker_dsm_seg = NULL;
 static uint32 connected_peer_id = 0;
 static shm_mq_handle *send_mq;
 static Size msgb_recv_queue_size = 0;
+static int active_node_toc_entry = -1;
 
 static void msgb_connect_shmem(uint32 origin_node);
 
@@ -123,9 +155,13 @@ msgb_received_hook_type msgb_received_hook = NULL;
 
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
 
-static void msgb_mq_for_node(dsm_segment *seg, uint32 nodeid, MsgbDSMHdr **hdr, int *hdr_idx, shm_mq **mq);
+static void msgb_mq_for_node(uint32 nodeid, MsgbDSMHdr **hdr,
+	int *hdr_idx, shm_mq **mq);
 static void msgb_handle_peer_connect(MsgbReceivePeer *peer, const char *msg, Size msg_len);
 static void msgb_report_peer_connect(uint32 origin_id, uint32 last_sent_msgid);
+static void on_peer_detach(dsm_segment *seg, Datum arg);
+static void msgb_try_cleanup_peer_slot(MsgbReceivePeer *peer);
+static void msgb_reinit_queue(MsgbReceivePeer *peer, MsgbDSMHdr *hdr, int node_toc_entry, void *mq_addr);
 
 inline static bool
 InBrokerProcess(void)
@@ -184,16 +220,16 @@ static void
 msgb_connect_shmem(uint32 origin_node)
 {
 	const uint32	local_node = bdr_get_local_nodeid();
-	dsm_segment	   *seg;
 	shm_toc		   *toc;
 	MsgbDSMHdr	   *hdr;
 	int				my_node_toc_entry;
 	shm_mq		   *mq;
 	MemoryContext	old_ctx;
 	int				i;
-	PGPROC*			cur_receiver;
+	int				cur_sender_pid;
 
 	Assert(!InBrokerProcess());
+	Assert(active_node_toc_entry == -1);
 
 	/*
 	 * Find the static shmem control segment for the message broker we want to
@@ -228,14 +264,14 @@ msgb_connect_shmem(uint32 origin_node)
 	 * To do this we must find the ToC entry corresponding to the node
 	 * id and get the shmem_mq.
 	 */
-	seg = dsm_attach(msgb_my_seg->dsm_seg_handle);
-	if (seg == NULL)
+	broker_dsm_seg = dsm_attach(msgb_my_seg->dsm_seg_handle);
+	if (broker_dsm_seg == NULL)
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg_internal("no dynamic shared memory segment found when attaching to shm mq on %u",
 				 				 local_node)));
 
-	toc = shm_toc_attach(BDR_SHMEM_MAGIC, dsm_segment_address(seg));
+	toc = shm_toc_attach(BDR_SHMEM_MAGIC, dsm_segment_address(broker_dsm_seg));
 	if (toc == NULL)
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
@@ -254,7 +290,7 @@ msgb_connect_shmem(uint32 origin_node)
 	SpinLockAcquire(&hdr->mutex);
 	for (i = 0; i < hdr->node_toc_map_size; i++)
 	{
-		if (hdr->node_toc_map[i] == origin_node)
+		if (hdr->node_toc_map[i].node_id == origin_node)
 			my_node_toc_entry = i;
 	}
 	SpinLockRelease(&hdr->mutex);
@@ -271,35 +307,51 @@ msgb_connect_shmem(uint32 origin_node)
 	/*
 	 * We need to associate ourselves with the queue under the mq spinlock
 	 * because shm_mq doesn't offer a test-and-set interface or an option to
-	 * error if the queue is attached. It just Assert()s. So if there's another
-	 * backend already connected for this peer we'd crash the server, and without
-	 * the lock we'd race. Trying to prevent it in our own DSM would be
-	 * unnecessarily complex.
+	 * error if the queue is attached, and it wouldn't maintain the
+	 * active_peer field anyway.
 	 */
 	SpinLockAcquire(&hdr->mutex);
-	cur_receiver = shm_mq_get_sender(mq);
-	if (cur_receiver == NULL)
+	cur_sender_pid = hdr->node_toc_map[my_node_toc_entry].active_pid;
+	if (cur_sender_pid == 0)
+	{
 		shm_mq_set_sender(mq, MyProc);
+		hdr->node_toc_map[my_node_toc_entry].active_pid = MyProc->pid;
+		/*
+		 * As of this moment we've claimed the slot and are responsible for
+		 * releasing it if we error out later. So record that we've claimed
+		 * it, even though we're not attached to shmem yet.
+		 */
+		connected_peer_id = origin_node;
+		active_node_toc_entry = my_node_toc_entry;
+	}
 	SpinLockRelease(&hdr->mutex);
 
-	if (cur_receiver != NULL)
+	if (cur_sender_pid == -1)
 	{
 		/*
-		 * Someone else is attached, or used to be.
-		 *
-		 * TODO: what happens if this is a dead proc? Or queue detached?
-		 * TODO: should we wait for master to notice and clean up queue then retry
-		 * rather than ERRORing here?
+		 * TODO: special case for pid -1, we should sleep a moment and retry
+		 * since the slot will be ready very soon, the manager is just setting
+		 * it up or cleaning and resetting it.
 		 */
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("memory queue for node %u already in use",
-						origin_node)));
+				 errmsg("memory queue for node %u is being cleaned up, try again later",
+				 		origin_node)));
+	}
+
+	if (cur_sender_pid != 0)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("memory queue for node %u already in use by pid %d",
+				 		origin_node, cur_sender_pid)));
 	}
 
 	old_ctx = MemoryContextSwitchTo(TopMemoryContext);
-	send_mq = shm_mq_attach(mq, seg, NULL);
+	send_mq = shm_mq_attach(mq, broker_dsm_seg, NULL);
 	(void) MemoryContextSwitchTo(old_ctx);
+
+	on_dsm_detach(broker_dsm_seg, on_peer_detach, (Datum)0);
 
 	if (shm_mq_wait_for_attach(send_mq) != SHM_MQ_SUCCESS)
 		ereport(FATAL,
@@ -308,13 +360,76 @@ msgb_connect_shmem(uint32 origin_node)
 						bdr_get_local_nodeid())));
 
 	/*
-	 * Stay attached to the DSM segment now we're set up successfully.
+	 * Stay attached to the DSM segment now we're set up successfully. We'll
+	 * auto-detach on shmem exit, just not at the end of the current txn.
 	 */
-	dsm_pin_mapping(seg);
+	dsm_pin_mapping(broker_dsm_seg);
 
-	connected_peer_id = origin_node;
+	elog(bdr_debug_level, "peer %d connected message queue", origin_node);
+}
 
-	elog(DEBUG1, "peer %d connected message queue", origin_node);
+/*
+ * A user backend will detach automaticaly from the DSM segment and
+ * any related shm_mq, since we pass the dsm segment to the at attach
+ * time.
+ *
+ * However, this doesn't give the manager any way to tell the peer is gone. The
+ * mq becomes detached as soon as the manager detaches, so if it detached first
+ * (say, on removal of a peer) it cannot be sure when the peer has also
+ * detached and will no longer access the memory. Testing shm_mq_get_sender
+ * doesn't help as the sender proc info isn't cleared when the sender detaches
+ * (or even when the sender exits; another proc just lands up in that slot).
+ *
+ * So we must ensure that the manager is never the first to detach, which seems
+ * fragile, or have some other method of signalling peer attachment. The
+ * node_toc_map is for allocation, not attachment, and won't do, so
+ * we keep a separate attachment map, and clear it here.
+ *
+ * This could be called during dsm detach after an error pretty
+ * much anywhere, so avoid making assumptions about other state,
+ * and let dsm/shm_mq clean up the queue and dsm seg.
+ */
+static void
+peer_detach(void)
+{
+	if (active_node_toc_entry != -1)
+	{
+		MsgbDSMHdr *hdr;
+		int			hdr_idx;
+
+		msgb_mq_for_node(connected_peer_id, &hdr, &hdr_idx, NULL);
+
+		SpinLockAcquire(&hdr->mutex);
+		/* The entry cannot have been reassigned if we were active on it */
+		Assert(hdr->node_toc_map[hdr_idx].node_id == connected_peer_id);
+		/* If we were attached, we should be the one detaching */
+		Assert(hdr->node_toc_map[hdr_idx].active_pid == MyProcPid);
+		/*
+		 * OK, release the slot for cleanup or removal by handing
+		 * ownership of it over to the manager. The manager will
+		 * notice when it tries to read from the slot and sees
+		 * we've detached.
+		 *
+		 * We can't set it back to 0 (free) since the shm_mq needs to be
+		 * re-created by the manager.
+		 *
+		 * shm_mq will auto-detach from the queue, and that'll signal
+		 * the manager to wake up.
+		 */
+		hdr->node_toc_map[hdr_idx].active_pid = -1;
+		SpinLockRelease(&hdr->mutex);
+
+		elog(bdr_debug_level, "peer %d detached from message queue", connected_peer_id);
+
+		active_node_toc_entry = -1;
+		connected_peer_id = 0;
+	}
+}
+
+static void
+on_peer_detach(dsm_segment *seg, Datum arg)
+{
+	peer_detach();
 }
 
 /*
@@ -345,6 +460,8 @@ msgb_report_peer_connect(uint32 origin_id, uint32 last_sent_msgid)
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("message broker for node %u appears to have exited",
 						bdr_get_local_nodeid())));
+
+	elog(bdr_debug_level, "peer %d initial connect message sent", origin_id);
 }
 
 /*
@@ -358,6 +475,7 @@ msgb_handle_peer_connect(MsgbReceivePeer *peer, const char *msg, Size msg_len)
 	uint32 last_sent_msgid;
 
 	Assert(InBrokerProcess());
+	Assert(peer->state == QUEUE_STATE_READY_ACTIVE);
 
 	if (msg_len != sizeof(uint32))
 	{
@@ -379,13 +497,13 @@ msgb_handle_peer_connect(MsgbReceivePeer *peer, const char *msg, Size msg_len)
 		if (last_sent_msgid == 0)
 		{
 			peer->max_received_msgid = 0;
-			ereport(DEBUG2,
-					(errmsg("peer %u reconnecting to %u with reset message id after restart; was %u now 0",
+			ereport(bdr_debug_level,
+					(errmsg("peer %u reconnected to %u with reset message id after restart; was %u now 0",
 							peer->sender_id, bdr_get_local_nodeid(), peer->max_received_msgid)));
 		}
 		else
-			ereport(DEBUG2,
-					(errmsg("peer %u reconnecting to %u with last msgid %u but local %u is greater; ignoring",
+			ereport(bdr_debug_level,
+					(errmsg("peer %u reconnected to %u with last msgid %u but local %u is greater; ignoring",
 					 		peer->sender_id, bdr_get_local_nodeid(), last_sent_msgid, peer->max_received_msgid)));
 	}
 
@@ -493,6 +611,7 @@ msgb_startup_receive(Size recv_queue_size)
 	 * and the information mapping them to attached nodes.
 	 */
 	recvpeers = MemoryContextAlloc(TopMemoryContext, sizeof(MsgbReceivePeer) * msgb_max_peers);
+	/* sets QUEUE_STATE_FREE */
 	memset(recvpeers, 0, sizeof(MsgbReceivePeer) * msgb_max_peers);
 
 	/*
@@ -550,7 +669,8 @@ msgb_startup_receive(Size recv_queue_size)
 				 errdetail("all %d local broker slots are in use",
 						   msgb_ctx->msgb_max_local_nodes)));
 
-	hdr_size = offsetof(MsgbDSMHdr, node_toc_map) + sizeof(uint32)*msgb_max_peers;
+	hdr_size = offsetof(MsgbDSMHdr, node_toc_map)
+		+ sizeof(node_toc_entry)*msgb_max_peers;
 
 	msgb_recv_queue_size = recv_queue_size;
 
@@ -570,6 +690,7 @@ msgb_startup_receive(Size recv_queue_size)
 	/* Create the shared memory segment and establish a table of contents. */
 	Assert(broker_dsm_seg == NULL);
 	broker_dsm_seg = dsm_create(shm_toc_estimate(&e), 0);
+	memset(dsm_segment_address(broker_dsm_seg), 0, segsize);
 	toc = shm_toc_create(BDR_SHMEM_MAGIC, dsm_segment_address(broker_dsm_seg),
 						 segsize);
 
@@ -578,13 +699,13 @@ msgb_startup_receive(Size recv_queue_size)
 	SpinLockInit(&hdr->mutex);
 	hdr->node_toc_map_size = msgb_max_peers;
 	Assert(hdr_size > sizeof(uint32)*msgb_max_peers);
-	memset(hdr->node_toc_map, 0, sizeof(uint32)*msgb_max_peers);
+	memset(hdr->node_toc_map, 0, sizeof(node_toc_entry)*msgb_max_peers);
 	shm_toc_insert(toc, 0, hdr);
 
 	/*
 	 * Reserve space for one message queue per peer in the ToC.
 	 *
-	 * We don't actuallly initialise the queues until needed; we'll have to
+	 * We don't actually initialise the queues until needed. We'll have to
 	 * re-init them for re-use after they get released, so might as well delay
 	 * initial init too.
 	 */
@@ -623,12 +744,10 @@ msgb_add_receive_peer(uint32 origin_id)
 	int				i;
 	int				existing_id = -1;
 	MsgbReceivePeer *p = NULL;
-	shm_mq		   *mq;
 	shm_toc		   *toc;
 	MsgbDSMHdr	   *hdr;
 	void		   *mq_addr;
 	int				my_node_toc_entry, first_free_toc_entry;
-	MemoryContext	old_ctx;
 
 	Assert(broker_dsm_seg != NULL);
 	Assert(InBrokerProcess());
@@ -657,91 +776,134 @@ msgb_add_receive_peer(uint32 origin_id)
 				 errmsg("not enough free node slots to receive from peer %u",
 				 		origin_id)));
 
-	/* Add this node to the header ToC entry and allocate a MQ for it. */
+	/* Must be a properly reset local state entry */
+	Assert(p->sender_id == 0);
+	Assert(p->state == QUEUE_STATE_FREE);
+	Assert(p->recvsize == 0);
+	Assert(p->recvbuf == NULL);
+
+	/*
+	 * Get shared state header and scan it to find and claim an entry.
+	 *
+	 * While we're at it make sure this node isn't already registered
+	 * in shmem. It shouldn't be, since it wasn't in local state.
+	 */
 	toc = shm_toc_attach(BDR_SHMEM_MAGIC, dsm_segment_address(broker_dsm_seg));
 	if (toc == NULL)
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("bad magic number in dynamic shared memory segment")));
 
-	/*
-	 * Get shared state header and scan it to find and claim an entry.
-	 *
-	 * While we're at it make sure this node isn't already registered.
-	 */
 	hdr = shm_toc_lookup(toc, 0, false);
 	my_node_toc_entry = -1;
 	first_free_toc_entry = -1;
 	SpinLockAcquire(&hdr->mutex);
 	for (i = 0; i < hdr->node_toc_map_size; i++)
 	{
-		if (hdr->node_toc_map[i] == origin_id)
+		if (hdr->node_toc_map[i].node_id == origin_id)
 			my_node_toc_entry = i;
-		else if (first_free_toc_entry == -1 && hdr->node_toc_map[i] == 0)
+		else if (first_free_toc_entry == -1 && hdr->node_toc_map[i].node_id == 0)
 			first_free_toc_entry = i;
 	}
 	if (my_node_toc_entry == -1 && first_free_toc_entry != -1)
-		hdr->node_toc_map[first_free_toc_entry] = origin_id;
+	{
+		/* The entry was free, so it must not be marked active */
+		Assert(hdr->node_toc_map[first_free_toc_entry].active_pid == 0);
+		Assert(hdr->node_toc_map[first_free_toc_entry].node_id == 0);
+		/*
+		 * Assign the slot, but set the special active_pid -1 to indicate that
+		 * the manager claims the slot, it's not ready yet. Otherwise a peer
+		 * could connect while we're still preparing the shm_mq.
+		 */
+		hdr->node_toc_map[first_free_toc_entry].node_id = origin_id;
+		hdr->node_toc_map[first_free_toc_entry].active_pid = -1;
+		p->sender_id = origin_id;
+		p->state = QUEUE_STATE_NEEDS_REINIT;
+	}
 	SpinLockRelease(&hdr->mutex);
 
 	if (my_node_toc_entry != -1)
-		/* shouldn't happen */
+		/* shouldn't happen, should've detected conflict in peer state */
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg_internal("receiving node %u already has sending node %u registered in shmem",
 				 		bdr_get_local_nodeid(), origin_id)));
 
-	/*
-	 * Even though we reserved local state for the peer earlier we could fail
-	 * to get space in the shmem queues array for it if the array was recently
-	 * full and a recently-removed peer is being laggard about exiting so we
-	 * can clean up.
-	 *
-	 * TODO: handle running out of memqueues more gracefully on peer add
-	 */
 	if (first_free_toc_entry == -1)
+		/*
+		 * Since we already reserved local state space for the queue, this
+		 * shouldn't happen.  We only clear the local state once the shared
+		 * state is zeroed.
+		 */
 		ereport(ERROR,
 				(errcode(ERRCODE_INSUFFICIENT_RESOURCES),
 				 errmsg("no free shared memory slots on %u for message queue for node %u while adding peer",
 				 		 bdr_get_local_nodeid(), origin_id)));
 
 	/*
-	 * We already claimed this entry while holding the spinlock,
-	 * if there was one free
+	 * If we got here, we must've successfully claimed this slot.
+	 *
+	 * Safe to test this w/o a lock, since only we can change it.
 	 */
-	my_node_toc_entry = first_free_toc_entry;
+	Assert(hdr->node_toc_map[first_free_toc_entry].active_pid == -1);
+	Assert(hdr->node_toc_map[first_free_toc_entry].node_id == origin_id);
+
+	/*
+	 * Look up the ToC to find out the address to put the MQ in,
+	 * with the offset to allow for the header at position 0.
+	 */
+	mq_addr = shm_toc_lookup(toc, first_free_toc_entry+1, false);
+
+	/*
+	 * We already claimed this entry while holding the spinlock,
+	 * if there was one free.
+	 */
+	msgb_reinit_queue(p, hdr, first_free_toc_entry, mq_addr);
+}
+
+static void
+msgb_reinit_queue(MsgbReceivePeer *peer, MsgbDSMHdr *hdr, int hdr_idx, void *mq_addr)
+{
+	MemoryContext			old_ctx;
+	shm_mq				   *mq;
+
+	/* Must be properly reset queue */
+	Assert(peer->sender_id != 0);
+	Assert(peer->state == QUEUE_STATE_NEEDS_REINIT);
+	Assert(peer->recvqueue == NULL);
+	Assert(peer->recvsize == 0);
+	Assert(peer->recvbuf == NULL);
 
 	/*
 	 * The queue won't be created yet - we just allocated space for it earlier,
 	 * or it's one that's been cleaned up for re-use. So write a queue into
 	 * the space and attach to it.
-	 *
-	 * Remember ToC is 1-indexed due to header entry
 	 */
-	mq_addr = shm_toc_lookup(toc, my_node_toc_entry+1, false);
-	old_ctx = MemoryContextSwitchTo(p->queue_context);
+	old_ctx = MemoryContextSwitchTo(peer->queue_context);
 	mq = shm_mq_create(mq_addr, msgb_recv_queue_size);
 	Assert(mq == mq_addr);
 
-	shm_mq_set_receiver(mq, MyProc);
-
-	/* Finish setting up broker-side state */
-	p->sender_id = origin_id;
-	p->max_received_msgid = 0;
-	p->recvqueue = shm_mq_attach(mq, broker_dsm_seg, NULL);
-	p->recvsize = 0;
 	/*
-	 * Any old buffer was owned by the shm_mq that's gone away
-	 * and it was cleared when that queue's memory context was
-	 * reset. We can't pfree() it and don't need to.
+	 * Finish setting up broker-side state, allocating the handle info in the
+	 * queue context
 	 */
-	p->recvbuf = NULL;
+	shm_mq_set_receiver(mq, MyProc);
+	peer->max_received_msgid = 0;
+	peer->recvqueue = shm_mq_attach(mq, broker_dsm_seg, NULL);
 	(void) MemoryContextSwitchTo(old_ctx);
 
-	/* And allow this peer to connect by mapping the entry in the ToC */
+	/* Tell peers they can connect */
 	SpinLockAcquire(&hdr->mutex);
-	hdr->node_toc_map[my_node_toc_entry] = origin_id;
+	/* shmem state must still be claimed by manager */
+	Assert(hdr->node_toc_map[hdr_idx].active_pid == -1);
+	Assert(hdr->node_toc_map[hdr_idx].node_id == peer->sender_id);
+	/* mark it ready for use */
+	hdr->node_toc_map[hdr_idx].active_pid = 0;
 	SpinLockRelease(&hdr->mutex);
+
+	peer->state = QUEUE_STATE_READY_ACTIVE;
+	elog(bdr_debug_level, "queue for peer %u is ready for new connections",
+		 peer->sender_id);
 }
 
 /*
@@ -775,9 +937,14 @@ msgb_remove_receive_peer(uint32 origin_id)
 				 errmsg("peer node %u is not registered with the broker",
 				 		origin_id)));
 
-	msgb_mq_for_node(broker_dsm_seg, origin_id, &hdr, &my_node_toc_entry, &mq);
+	Assert(p->state != QUEUE_STATE_FREE &&
+		   p->state != QUEUE_STATE_WAIT_PEER_DETACH_FREE);
+
+	p->state = QUEUE_STATE_WAIT_PEER_DETACH_FREE;
+
+	msgb_mq_for_node(origin_id, &hdr, &my_node_toc_entry, &mq);
 	Assert(shm_mq_get_receiver(mq) == MyProc);
-	p->pending_cleanup = true;
+	elog(bdr_debug_level, "peer %u removed, need cleanup of slot", p->sender_id);
 
 	shm_mq_detach(mq);
 
@@ -785,11 +952,13 @@ msgb_remove_receive_peer(uint32 origin_id)
 	 * At this point the broker is detached but the peer may still be attached,
 	 * so trying to overwrite it would be ... bad. We set the pending cleanup
 	 * flag above and we'll re-use the space later, once the peer has gone.
+	 *
+	 * It's also possible that the slot was never attached to and will still have
+	 * active_pid 0.
+	 *
+	 * We might as well check now, though.
 	 */
-
-	/* Clear broker-side state for re-use */
-	p->sender_id = 0;
-	p->max_received_msgid = 0;
+	msgb_try_cleanup_peer_slot(p);
 }
 
 void
@@ -930,17 +1099,22 @@ msgb_deliver_msg(MsgbReceivePeer *peer)
 	 */
 }
 
-/* Look up a node in our shared memory state */
+/*
+ * Look up a node in our shared memory state.
+ *
+ * This doesn't mark the entry as active or hold a lock. The manager can use it
+ * safely, since it's responsible for clearing and reassigning slots, but peers
+ * must re-check ownership if they use this.
+ */
 static void
-msgb_mq_for_node(dsm_segment *seg, uint32 nodeid, MsgbDSMHdr **hdr, int *hdr_idx, shm_mq **mq)
+msgb_mq_for_node(uint32 nodeid, MsgbDSMHdr **hdr,
+	int *hdr_idx, shm_mq **mq)
 {
 	shm_toc	   *toc;
 	int			my_node_toc_entry = -1;
 	int			i;
 
-	Assert(InBrokerProcess());
-
-	toc = shm_toc_attach(BDR_SHMEM_MAGIC, dsm_segment_address(seg));
+	toc = shm_toc_attach(BDR_SHMEM_MAGIC, dsm_segment_address(broker_dsm_seg));
 	if (toc == NULL)
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
@@ -951,7 +1125,7 @@ msgb_mq_for_node(dsm_segment *seg, uint32 nodeid, MsgbDSMHdr **hdr, int *hdr_idx
 	SpinLockAcquire(&(*hdr)->mutex);
 	for (i = 0; i < (*hdr)->node_toc_map_size; i++)
 	{
-		if ((*hdr)->node_toc_map[i] == nodeid)
+		if ((*hdr)->node_toc_map[i].node_id == nodeid)
 			my_node_toc_entry = i;
 	}
 	SpinLockRelease(&(*hdr)->mutex);
@@ -963,7 +1137,8 @@ msgb_mq_for_node(dsm_segment *seg, uint32 nodeid, MsgbDSMHdr **hdr, int *hdr_idx
 				 errmsg_internal("receiving node %u not registered with broker shmem %u",
 				 		bdr_get_local_nodeid(), nodeid)));
 
-	*mq = shm_toc_lookup(toc, my_node_toc_entry+1, false);
+	if (mq)
+		*mq = shm_toc_lookup(toc, my_node_toc_entry+1, false);
 }
 
 /*
@@ -981,25 +1156,90 @@ msgb_try_cleanup_peer_slot(MsgbReceivePeer *peer)
 	MsgbDSMHdr *hdr;
 	int hdr_idx;
 	shm_mq *mq;
+	int active_pid;
 
-	Assert(peer->pending_cleanup == true);
 	Assert(InBrokerProcess());
+	Assert(peer->state == QUEUE_STATE_WAIT_PEER_DETACH_REINIT
+		   || peer->state == QUEUE_STATE_WAIT_PEER_DETACH_FREE);
 
-	msgb_mq_for_node(broker_dsm_seg, peer->sender_id, &hdr, &hdr_idx, &mq);
+	elog(bdr_debug_level, "peer %u slot needs broker detach and %s",
+		 peer->sender_id,
+		 peer->state == QUEUE_STATE_WAIT_PEER_DETACH_REINIT ? "reinit" : "cleanup");
+
+	msgb_mq_for_node(peer->sender_id, &hdr, &hdr_idx, &mq);
+
+	/*
+	 * TODO FIXME: testing get_receiver is useless here, it's not cleared
+	 * on detach. Separate state needed! (This can Assert)
+	 */
 	if (shm_mq_get_receiver(mq) != NULL)
-		shm_mq_detach(mq);
-
-	if (shm_mq_get_sender(mq) == NULL)
 	{
-		/* Free any memory the shm_mq allocated for temporary buffers, etc. */
+		shm_mq_detach(mq);
+		elog(bdr_debug_level, "detached from broker side of queue for %u", peer->sender_id);
+	}
+	
+	/*
+	 * If we detached due to removing a peer on our side, or due to shutdown
+	 * on our side, the slot might be in ready state, so we have to claim it
+	 * to prevent a concurrent peer attach before we overwrite it.
+	 */
+	SpinLockAcquire(&hdr->mutex);
+	active_pid = hdr->node_toc_map[hdr_idx].active_pid;
+	if (active_pid == 0)
+	{
+		hdr->node_toc_map[hdr_idx].active_pid = -1;
+		active_pid = -1;
+	}
+	SpinLockRelease(&hdr->mutex);
+
+	if (active_pid == -1)
+	{
+		/*
+		 * Peer gone.
+		 *
+		 * Free any memory the shm_mq allocated for temporary buffers, etc.
+		 *
+		 * It's safe to do this without a lock held, since active_pid is still
+		 * -1 and only the manager will clear it.
+		 */
 		MemoryContextReset(peer->queue_context);
+		peer->recvqueue = NULL;
+		peer->recvsize = 0;
+		peer->recvbuf = NULL;
 
 		SpinLockAcquire(&hdr->mutex);
-		hdr->node_toc_map[hdr_idx] = 0;
+		Assert(hdr->node_toc_map[hdr_idx].active_pid == -1);
+		if (peer->state == QUEUE_STATE_WAIT_PEER_DETACH_FREE)
+		{	
+			hdr->node_toc_map[hdr_idx].node_id = 0;
+			hdr->node_toc_map[hdr_idx].active_pid = 0;
+		}
+		/* Clobber the MQ eagerly, to make bugs more obvious */
+		memset(mq, 0, msgb_recv_queue_size);
 		SpinLockRelease(&hdr->mutex);
 
-		peer->pending_cleanup = false;
+		if (peer->state == QUEUE_STATE_WAIT_PEER_DETACH_REINIT)
+		{
+			peer->state = QUEUE_STATE_NEEDS_REINIT;
+			/*
+			 * Reinit a new queue in the location of the old queue
+			 */
+			msgb_reinit_queue(peer, hdr, hdr_idx, mq);
+		}
+		else if (peer->state == QUEUE_STATE_WAIT_PEER_DETACH_REINIT)
+		{
+			peer->sender_id = 0;
+			peer->state = QUEUE_STATE_FREE;
+		}
+		else
+			Assert(false);
+
+		elog(bdr_debug_level, "detached from sender side of queue for %u, queue cleaned up", peer->sender_id);
 	}
+	else
+		elog(bdr_debug_level, "not yet detached from sender side of queue for %u; in-use by pid %d",
+			 peer->sender_id, shm_mq_get_sender(mq)->pid); /* unsafe, XXX test code only */
+
 }
 
 /*
@@ -1023,51 +1263,68 @@ msgb_service_connections_receive(void)
 	{
 		MsgbReceivePeer * const p = &recvpeers[i];
 
-		if (recvpeers[i].sender_id != 0)
+		switch (p->state)
 		{
-			shm_mq_result	res;
+			case QUEUE_STATE_FREE:
+				continue;
 
-			/* If a sender_id is set, there must be an associated queue */
-			Assert(p->recvqueue != NULL);
+			case QUEUE_STATE_WAIT_PEER_DETACH_REINIT:
+			case QUEUE_STATE_WAIT_PEER_DETACH_FREE:
+				msgb_try_cleanup_peer_slot(p);
+				break;
 
-			/*
-			 * We must perform a non-blocking read of queue, since we don't know
-			 * if there's anything to read at all on this socket. Our latch got set
-			 * but we don't know by whom.
-			 *
-			 * It's a nonblocking read so we can avoid the in_shm_mq dance with
-			 * the shm_mq_receive wrapper, we can't get stuck in shm_mq_wait_internal.
-			 */
-			res = shm_mq_receive(p->recvqueue, &p->recvsize, &p->recvbuf, true);
-			switch (res)
+			case QUEUE_STATE_NEEDS_REINIT:
+				/* reinit should be immediate, should never get here */
+				Assert(false);
+				break;
+
+			case QUEUE_STATE_READY_ACTIVE:
 			{
-				case SHM_MQ_WOULD_BLOCK:
-					/*
-					 * There's nothing here to read, or we read a partial message
-					 * but not all of it fit in the buffer. Either way we preserve
-					 * state and wait until our latch is set again.
-					 */
-					break;
-				case SHM_MQ_SUCCESS:
-					/*
-					 * Yay, we can deliver the message. We need to read out the
-					 * message-id that's addressed to us and pass the the
-					 * message to the caller.
-					 */
-					msgb_deliver_msg(p);
-					break;
-				case SHM_MQ_DETACHED:
-					/*
-					 * Our peer went away. They'll need a fresh queue to reconnect
-					 * to so we have to reset our side's state.
-					 */
-					p->pending_cleanup = true;
-					break;
+				shm_mq_result	res;
+
+				Assert(p->sender_id != 0);
+				Assert(p->recvqueue != NULL);
+
+				/*
+				 * We must perform a non-blocking read of queue, since we don't know
+				 * if there's anything to read at all on this socket. Our latch got set
+				 * but we don't know by whom.
+				 *
+				 * It's a nonblocking read so we can avoid the in_shm_mq dance with
+				 * the shm_mq_receive wrapper, we can't get stuck in shm_mq_wait_internal.
+				 */
+				res = shm_mq_receive(p->recvqueue, &p->recvsize, &p->recvbuf, true);
+				switch (res)
+				{
+					case SHM_MQ_WOULD_BLOCK:
+						/*
+						 * There's nothing here to read, or we read a partial message
+						 * but not all of it fit in the buffer. Either way we preserve
+						 * state and wait until our latch is set again.
+						 */
+						break;
+					case SHM_MQ_SUCCESS:
+						/*
+						 * Yay, we can deliver the message. We need to read out the
+						 * message-id that's addressed to us and pass the the
+						 * message to the caller.
+						 */
+						msgb_deliver_msg(p);
+						break;
+					case SHM_MQ_DETACHED:
+						/*
+						 * Our peer went away. They'll need a fresh queue to reconnect
+						 * to so we have to reset our side's state.
+						 *
+						 * We'll want to recheck that the peer is really gone, though...
+						 */
+						p->state = QUEUE_STATE_WAIT_PEER_DETACH_REINIT;
+						elog(bdr_debug_level, "broker noticed peer went away for %u", p->sender_id);
+						msgb_try_cleanup_peer_slot(p);
+						break;
+				}
 			}
 		}
-
-		if (p->pending_cleanup)
-			msgb_try_cleanup_peer_slot(p);
 
 		CHECK_FOR_INTERRUPTS();
 	}

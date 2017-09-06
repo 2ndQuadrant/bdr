@@ -268,15 +268,13 @@ msgb_clear_bad_connection(MsgbConnection *conn)
 {
 	ListCell *lc;
 
-	elog(WARNING, "XXX clearing bad conn for %u", conn->destination_id);
-
 	msgb_status_invariant(conn);
 
 	if (conn->pgconn)
 	{
 		ereport(WARNING,
 				(errcode(ERRCODE_CONNECTION_FAILURE),
-				 errmsg("connection to peer %d went down: %s",
+				 errmsg("connection to peer %u went down: %s",
 						conn->destination_id, PQerrorMessage(conn->pgconn))));
 		PQfinish(conn->pgconn);
 		conn->pgconn = NULL;
@@ -367,26 +365,28 @@ msgb_continue_async_connect(MsgbConnection *conn)
 	{
 		case PGRES_POLLING_OK:
 			conn->conn_status = MSGB_SEND_CONN_POLLING_DONE;
-			elog(WARNING, "XXX connected to peer %u, backend pid is %d",
-				 conn->destination_id, PQbackendPID(conn->pgconn)); /* XXX keep this one */
+			elog(bdr_debug_level, "%u connected to peer %u, backend pid is %d",
+				 bdr_get_local_nodeid(), conn->destination_id,
+				 PQbackendPID(conn->pgconn));
 			msgb_finish_connect(conn);
 			break;
 		case PGRES_POLLING_READING:
 		case PGRES_POLLING_WRITING:
 			/* nothing to do but wait until socket readable/writeable again */
-			elog(WARNING, "XXX continuing polling on %u", conn->destination_id);
 			break;
 		case PGRES_POLLING_FAILED:
 			if (PQconnectionNeedsPassword(conn->pgconn))
 				ereport(WARNING,
 						(errcode(ERRCODE_INVALID_PASSWORD),
-						 errmsg("XXX connection to node %u needs password, but none was supplied: %s",
-						 		conn->destination_id, PQerrorMessage(conn->pgconn)))); /* XXX keep this one */
+						 errmsg("%u connection to node %u needs password, but none was supplied: %s",
+						 		bdr_get_local_nodeid(), conn->destination_id,
+								PQerrorMessage(conn->pgconn))));
 			else
 				ereport(WARNING,
 						(errcode(ERRCODE_CONNECTION_FAILURE),
-						 errmsg("XXX connecting to %u failed: %s",
-								conn->destination_id, PQerrorMessage(conn->pgconn)))); /* XXX keep this one */
+						 errmsg("%u connecting to %u failed: %s",
+								bdr_get_local_nodeid(), conn->destination_id,
+								PQerrorMessage(conn->pgconn))));
 			msgb_clear_bad_connection(conn);	
 			break;
 	}
@@ -893,8 +893,6 @@ msgb_service_connections_events(WaitEvent *occurred_events, int nevents)
 
 		msgb_status_invariant(conn);
 
-		elog(WARNING, "XXX wait event with flags %d matched to conn to %u", e->events, conn->destination_id);
-
 		/*
 		 * Ignore the wait event unless the connection is expecting events;
 		 * it's possible we've cleared it, removed it, etc but not re-created
@@ -936,8 +934,6 @@ msgb_service_connections_polling(void)
 	 */
 	if (conns_polling)
 	{
-		elog(WARNING, "XXX conns polling");
-
 		for (i = 0; i < msgb_max_peers; i++)
 		{
 			MsgbConnection * const conn = &conns[i];
@@ -957,7 +953,7 @@ msgb_service_connections_polling(void)
 			 */
 			if (conn->conn_status == MSGB_SEND_CONN_PENDING_START)
 			{
-				elog(WARNING, "XXX starting connect %d for %u", i, conn->destination_id);
+				elog(bdr_debug_level, "starting connect %d for %u", i, conn->destination_id);
 				msgb_start_connect(conn);
 				new_conns_polling = true;
 				/*
@@ -972,7 +968,7 @@ msgb_service_connections_polling(void)
 				{
 					case CONNECTION_OK:
 						conn->conn_status = MSGB_SEND_CONN_POLLING_DONE;
-						elog(WARNING, "XXX finished connect %d for %u", i, conn->destination_id);
+						elog(bdr_debug_level, "finished connect %d for %u", i, conn->destination_id);
 						msgb_finish_connect(conn);
 						break;
 						
@@ -981,7 +977,6 @@ msgb_service_connections_polling(void)
 						 * failed, must ensure wait event cleared and reconnect
 						 * next time around.
 						 */
-						elog(WARNING, "XXX bad connect %d for %u", i, conn->destination_id);
 						msgb_clear_bad_connection(conn);
 						/*
 						 * msgb_clear_bad_connection set conns_polling, but
@@ -996,7 +991,8 @@ msgb_service_connections_polling(void)
 						 * All other states are async connect progress states
 						 * where we must continue to PQconnectPoll(...)
 						 */
-						elog(WARNING, "XXX continuing connect %d for %u state %d", i, conn->destination_id, PQstatus(conn->pgconn));
+						elog(bdr_debug_level, "continuing connect %d for %u state %d",
+							 i, conn->destination_id, PQstatus(conn->pgconn));
 						msgb_continue_async_connect(conn);
 						/*
 						 * The conn could've switched to async events now but

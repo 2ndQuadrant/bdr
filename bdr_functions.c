@@ -211,33 +211,41 @@ bdr_create_node_group_sql(PG_FUNCTION_ARGS)
 	PG_RETURN_OID(nodegroup.id);
 }
 
+/* XXX HACK */
+static bool need_kill_manager = false;
+static bool kill_manager_callback_registered = false;
 static void
 kill_manager_callback(XactEvent event, void *arg)
 {
-	/*
-	 * TODO: get rid of this entirely once join moves into manager
-	 */
-	PGLWorkerHandle handle;
-	PGLogicalWorker *manager;
-
-	LWLockAcquire(PGLogicalCtx->lock, LW_EXCLUSIVE);
-	manager = pglogical_manager_find(MyDatabaseId, &handle);
-	LWLockRelease(PGLogicalCtx->lock);
-
-	if (manager != NULL)
+	if (need_kill_manager)
 	{
-		elog(WARNING, "killed manager for db %u", MyDatabaseId);
-		pglogical_worker_kill(&handle);
-	}
-	else
-		elog(WARNING, "couldn't kill pglogical manager for db %u",
-			 MyDatabaseId);
+		/*
+		 * TODO: get rid of this entirely once join moves into manager
+		 */
+		PGLWorkerHandle handle;
+		PGLogicalWorker *manager;
 
-	LWLockAcquire(PGLogicalCtx->lock, LW_EXCLUSIVE);
-	PGLogicalCtx->subscriptions_changed = true;
-	if (&PGLogicalCtx->supervisor)
-		SetLatch(&PGLogicalCtx->supervisor->procLatch);
-	LWLockRelease(PGLogicalCtx->lock);
+		LWLockAcquire(PGLogicalCtx->lock, LW_EXCLUSIVE);
+		manager = pglogical_manager_find(MyDatabaseId, &handle);
+		LWLockRelease(PGLogicalCtx->lock);
+
+		if (manager != NULL)
+		{
+			elog(WARNING, "killed manager for db %u", MyDatabaseId);
+			pglogical_worker_kill(&handle);
+		}
+		else
+			elog(WARNING, "couldn't kill pglogical manager for db %u",
+				 MyDatabaseId);
+
+		LWLockAcquire(PGLogicalCtx->lock, LW_EXCLUSIVE);
+		PGLogicalCtx->subscriptions_changed = true;
+		if (&PGLogicalCtx->supervisor)
+			SetLatch(&PGLogicalCtx->supervisor->procLatch);
+		LWLockRelease(PGLogicalCtx->lock);
+
+		need_kill_manager = false;
+	}
 }
 
 PG_FUNCTION_INFO_V1(bdr_join_node_group_sql);
@@ -354,7 +362,8 @@ bdr_join_node_group_sql(PG_FUNCTION_ARGS)
 		if (remote->bdr_node_group->id == 0)
 			elog(ERROR, "invalid remote nodegroup id 0");
 
-		elog(NOTICE, "joining nodegroup %s (%u) via remote node %s (node_id %u)",
+		elog(NOTICE, "%u joining nodegroup %s (%u) via remote node %s (node_id %u)",
+			 local->bdr_node->node_id,
 			 remote->bdr_node_group->name, remote->bdr_node_group->id,
 			 remote->pgl_node->name, remote->bdr_node->node_id);
 
@@ -384,7 +393,15 @@ bdr_join_node_group_sql(PG_FUNCTION_ARGS)
 		 * commit time, because we cannot see the nodes until then.
 		 */
 		//bdr_join_start_messaging();
-		RegisterXactCallback(kill_manager_callback, NULL);
+
+
+		/* TODO XXX HACK */
+		need_kill_manager = true;
+		if (!kill_manager_callback_registered)
+		{
+			RegisterXactCallback(kill_manager_callback, NULL);
+			kill_manager_callback_registered = true;
+		}
 
 		/*
 		 * Subscribe to join target
@@ -423,47 +440,8 @@ bdr_join_node_group_sql(PG_FUNCTION_ARGS)
 		 */
 
 		/*
-		 * Tell peers we exist so they can make slots for us
-		 * to use. No need for them to subscribe yet.
+		 * We must now commit, in order to send messages to the new peer.
 		 */
-		bdr_join_send_catchup_ready(local);
-
-		/*
-		 * We're now in catchup mode, waiting to be
-		 * ready to promote. Yay!
-		 *
-		 * TODO: but we ignore that, and node confirmations,
-		 * etc, and go straight to:
-		 */
-
-		/*
-		 * Ask join target to get us a node seq id, since we're planning on
-		 * going live.
-		 */
-		//bdr_join_send_seq_id_alloc_request(local); // TODO
-
-		/*
-		 * TODO: wait for node seq id assignment and all peers to have
-		 * confirmed our prior standby announce message so we know we have
-		 * slots, and ensure we replayed past join target's min catchup lsn,
-		 * then:
-		 *
-		 * TODO: allow specification of pre-created slots, for testing
-		 * purposes
-		 */
-		bdr_join_create_slots(local);
-
-		/*
-		 * Become active by sending consensus message to peers via our join
-		 * target (or failing that, some other live peer). 
-		 */
-		bdr_join_send_active_announce(local);
-
-		/*
-		 * Finish join, switching to direct replay from peers, and
-		 * go read/write.
-		 */
-		bdr_join_go_active(local);
 	}
 	PG_CATCH();
 	{
@@ -473,6 +451,81 @@ bdr_join_node_group_sql(PG_FUNCTION_ARGS)
 	PG_END_TRY();
 
 	bdr_finish_connect_remote(conn);
+
+	PG_RETURN_VOID();
+}
+
+PG_FUNCTION_INFO_V1(bdr_join_node_group_finish_sql);
+
+/*
+ * As a dirty (dirty) hack until we move join into manager, do join
+ * in two phases as two separate SQL funcs.
+ */
+Datum
+bdr_join_node_group_finish_sql(PG_FUNCTION_ARGS)
+{
+	BdrNodeInfo *local;
+
+	/*
+	 * Force cache refresh; we don't invalidate yet, and
+	 * we know it's changed due to nodegroup creation
+	 */
+
+	bdr_refresh_cache_local_nodeinfo();
+	local = bdr_check_local_node(false);
+
+	if (local->bdr_node_group == NULL)
+	{
+		elog(ERROR, "no bdr node group found");
+	}
+
+	/*
+	 * We just killed the manager, so wait for it to come back.
+	 */
+	wait_for_manager_shmem_attach(local->bdr_node->node_id);
+
+	/*
+	 * Tell peers we exist so they can make slots for us
+	 * to use. No need for them to subscribe yet.
+	 */
+	bdr_join_send_catchup_ready(local);
+
+	/*
+	 * We're now in catchup mode, waiting to be
+	 * ready to promote. Yay!
+	 *
+	 * TODO: but we ignore that, and node confirmations,
+	 * etc, and go straight to:
+	 */
+
+	/*
+	 * Ask join target to get us a node seq id, since we're planning on
+	 * going live.
+	 */
+	//bdr_join_send_seq_id_alloc_request(local); // TODO
+
+	/*
+	 * TODO: wait for node seq id assignment and all peers to have
+	 * confirmed our prior standby announce message so we know we have
+	 * slots, and ensure we replayed past join target's min catchup lsn,
+	 * then:
+	 *
+	 * TODO: allow specification of pre-created slots, for testing
+	 * purposes
+	 */
+	bdr_join_create_slots(local);
+
+	/*
+	 * Become active by sending consensus message to peers via our join
+	 * target (or failing that, some other live peer). 
+	 */
+	bdr_join_send_active_announce(local);
+
+	/*
+	 * Finish join, switching to direct replay from peers, and
+	 * go read/write.
+	 */
+	bdr_join_go_active(local);
 
 	PG_RETURN_VOID();
 }
@@ -568,6 +621,8 @@ bdr_internal_submit_join_request(PG_FUNCTION_ARGS)
 
 	bdr_cache_local_nodeinfo();
 	handle = bdr_msgs_enqueue_one(BDR_MSG_NODE_JOIN_REQUEST, &jreq);
+
+	elog(LOG, "XXX join request dispatched to manager");
 
 	snprintf(handle_str, MAX_DIGITS_INT64, UINT64_FORMAT, handle);
 	PG_RETURN_TEXT_P(cstring_to_text(handle_str));

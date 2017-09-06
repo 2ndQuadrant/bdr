@@ -29,7 +29,7 @@ wrapInStringInfo(StringInfo si, char *data, Size length)
 	si->data = data;
 	si->len = length;
 	si->maxlen = -1;
-	si->cursor = -1;
+	si->cursor = 0;
 }
 
 /*
@@ -43,27 +43,19 @@ wrapInStringInfo(StringInfo si, char *data, Size length)
  * Serialize a BDR message proposal for submission to the consensus
  * system or over shmem. This is the BDR specific header that'll
  * be added to consensus messages before the payload.
+ *
+ * No length word is included; it's expected that the container wrapping this
+ * message payload will provide length information.
  */
 void
 msg_serialize_proposal(StringInfo out, BdrMessageType message_type,
 	void* message)
 {
-	int *lengthword;
-	int headercursor;
+	resetStringInfo(out);
+	Assert(out->len == 0);
 
 	pq_sendint(out, message_type, 4);
 	Assert(out->len == SizeOfBdrMsgHeader);
-
-	/*
-	 * We now need a payload length word, but we don't know the payload length
-	 * yet. We could pre-format the message, but instead lets cheat - we'll
-	 * write it now, then come back and overwrite it once we know the real
-	 * value.
-	 */
-	pq_sendint(out, 0, 4);
-	lengthword = (int*)(out->data + out->len - 4);
-	Assert((void*)lengthword == (void*)(out->data + SizeOfBdrMsgHeader));
-	headercursor = out->len;
 
 	switch (message_type)
 	{
@@ -84,8 +76,6 @@ msg_serialize_proposal(StringInfo out, BdrMessageType message_type,
 				 message_type);
 			break;
 	}
-
-	*lengthword = out->len - headercursor;
 }
 
 /*
@@ -109,6 +99,13 @@ msg_deserialize_proposal(ConsensusProposal *in)
 	out->originator_propose_lsn = in->sender_lsn;
 	/* TODO: support majority consensus */
 	out->majority_consensus_ok = false;
+
+	if (in->payload_length < 4)
+	{
+		elog(LOG, "ignored bad bdr message: consensus message from %u missing payload",
+			 out->originator_id);
+		return NULL;
+	}
 
 	wrapInStringInfo(&si, in->payload, in->payload_length);
 	out->message_type = pq_getmsgint(&si, 4);

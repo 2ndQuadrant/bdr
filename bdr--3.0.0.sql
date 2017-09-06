@@ -119,6 +119,12 @@ LANGUAGE c AS 'MODULE_PATHNAME','bdr_join_node_group_sql';
 COMMENT ON FUNCTION bdr.join_node_group(text,text) IS
 'Join an existing BDR node group on peer at ''dsn''';
 
+-- Dirty hack required to finish a join for now,
+-- until we split it up and move into manager
+CREATE FUNCTION bdr.join_node_group_finish()
+RETURNS void CALLED ON NULL INPUT VOLATILE
+LANGUAGE c AS 'MODULE_PATHNAME','bdr_join_node_group_finish_sql';
+
 CREATE FUNCTION bdr.replication_set_add_table(relation regclass, set_name text DEFAULT NULL, synchronize_data boolean DEFAULT false,
 	columns text[] DEFAULT NULL, row_filter text DEFAULT NULL)
 RETURNS void CALLED ON NULL INPUT VOLATILE LANGUAGE c AS 'MODULE_PATHNAME', 'bdr_replication_set_add_table';
