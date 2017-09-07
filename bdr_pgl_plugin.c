@@ -103,12 +103,7 @@ bdr_worker_start(void)
 	CommitTransactionCommand();
 
 	if (!bdr_is_active_db())
-	{
-		elog(LOG, "BDR not active");
 		return;
-	}
-	else
-		elog(LOG, "BDR is active");
 
 	roles = MyPGLogicalWorker->worker_roles;
 

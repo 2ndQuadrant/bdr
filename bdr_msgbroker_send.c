@@ -1043,12 +1043,6 @@ msgb_service_connections_send(WaitEvent *occurred_events, int nevents,
 	if (nevents == 0 && !conns_polling)
 		return;
 
-	/*
-	 * Any requested wait-set re-creation must finish before the next time the
-	 * event loop is serviced.
-	 */
-	Assert(!wait_set_recreate_pending);
-
 	msgb_service_connections_events(occurred_events, nevents);
 	msgb_service_connections_polling();
 

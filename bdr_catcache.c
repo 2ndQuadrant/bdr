@@ -89,6 +89,11 @@ bdr_get_local_node_name(void)
 	}
 }
 
+/*
+ * Get the local node id, and ERROR if none is found.
+ *
+ * Doesn't care if the node is a member of a nodegroup.
+ */
 uint32
 bdr_get_local_nodeid(void)
 {
@@ -104,6 +109,11 @@ bdr_get_local_nodeid(void)
 	}
 }
 
+/*
+ * Get the local node id, or 0 if none is found.
+ *
+ * Doesn't care if the node is a member of a nodegroup.
+ */
 uint32
 bdr_get_local_nodeid_if_exists(void)
 {
@@ -119,4 +129,46 @@ bdr_get_local_nodeid_if_exists(void)
 		return local_bdr_node_info->bdr_node->node_id;
 	else
 		return 0;
+}
+
+/*
+ * Get the local BDR node-group id if the current node is a member of
+ * a nodegroup. Otherwise ERROR, or on missing_ok, return 0.
+ */
+uint32
+bdr_get_local_nodegroup_id(bool missing_ok)
+{
+	Assert(bdr_catcache_initialised());
+
+	if (local_bdr_node_info != NULL)
+	{
+		const BdrNodeGroup * const ng = local_bdr_node_info->bdr_node_group;
+		const BdrNode * const n = local_bdr_node_info->bdr_node;
+
+		if (ng != NULL && n != NULL && n->node_group_id == ng->id)
+			return local_bdr_node_info->bdr_node_group->id;
+	}
+
+	if (!missing_ok)
+	{
+		Assert(false); /* Crash here in CASSERT builds */
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("attempted to use BDR catalog cache when bdr is not active")));
+	}
+
+	return 0;
+}
+
+/*
+ * Test if BDR is active. Catcache must be inited first.
+ *
+ * This tests if we have a local BDR node, and that node is a member
+ * of a nodegroup.
+ */
+bool
+bdr_is_active_db(void)
+{
+	return bdr_get_local_nodeid_if_exists() != 0
+	       && bdr_get_local_nodegroup_id(true) != 0;
 }

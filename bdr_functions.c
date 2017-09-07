@@ -211,43 +211,6 @@ bdr_create_node_group_sql(PG_FUNCTION_ARGS)
 	PG_RETURN_OID(nodegroup.id);
 }
 
-/* XXX HACK */
-static bool need_kill_manager = false;
-static bool kill_manager_callback_registered = false;
-static void
-kill_manager_callback(XactEvent event, void *arg)
-{
-	if (need_kill_manager)
-	{
-		/*
-		 * TODO: get rid of this entirely once join moves into manager
-		 */
-		PGLWorkerHandle handle;
-		PGLogicalWorker *manager;
-
-		LWLockAcquire(PGLogicalCtx->lock, LW_EXCLUSIVE);
-		manager = pglogical_manager_find(MyDatabaseId, &handle);
-		LWLockRelease(PGLogicalCtx->lock);
-
-		if (manager != NULL)
-		{
-			elog(WARNING, "killed manager for db %u", MyDatabaseId);
-			pglogical_worker_kill(&handle);
-		}
-		else
-			elog(WARNING, "couldn't kill pglogical manager for db %u",
-				 MyDatabaseId);
-
-		LWLockAcquire(PGLogicalCtx->lock, LW_EXCLUSIVE);
-		PGLogicalCtx->subscriptions_changed = true;
-		if (&PGLogicalCtx->supervisor)
-			SetLatch(&PGLogicalCtx->supervisor->procLatch);
-		LWLockRelease(PGLogicalCtx->lock);
-
-		need_kill_manager = false;
-	}
-}
-
 PG_FUNCTION_INFO_V1(bdr_join_node_group_sql);
 
 /*
@@ -308,12 +271,6 @@ bdr_join_node_group_sql(PG_FUNCTION_ARGS)
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("local node is already a member of a nodegroup (%s), cannot join",
 				 		local->bdr_node_group->name)));
-
-	/*
-	 * There's a race with manager startup here, if we just created
-	 * the node. Wait for the manager to become available.
-	 */
-	wait_for_manager_shmem_attach(local->bdr_node->node_id);
 
 	/*
 	 * OK, so here what are our minimal requirements?
@@ -388,20 +345,12 @@ bdr_join_node_group_sql(PG_FUNCTION_ARGS)
 		 * can update node statuses, etc. Peers know about us now since we got
 		 * consensus for our name allocation, so they'll be ready to talk to us.
 		 *
-		 * TODO Can't do this until we run in the manager. So for now we'll have
-		 * to kill the manager and let it restart to start doing messaging. At
-		 * commit time, because we cannot see the nodes until then.
+		 * TODO Can't do this until we run in the manager. So for now we'll
+		 * have to set the manager's latch (via subscriptions_changed) and let
+		 * it notice and start up BDR. This can only happen at commit time,
+		 * because the manager cannot see the nodes in the catalogs until then.
 		 */
 		//bdr_join_start_messaging();
-
-
-		/* TODO XXX HACK */
-		need_kill_manager = true;
-		if (!kill_manager_callback_registered)
-		{
-			RegisterXactCallback(kill_manager_callback, NULL);
-			kill_manager_callback_registered = true;
-		}
 
 		/*
 		 * Subscribe to join target
@@ -420,13 +369,14 @@ bdr_join_node_group_sql(PG_FUNCTION_ARGS)
 		 */
 
 		/*
-		 * Create subscriptions to peers, disabled until we go-live.
+		 * Create subscriptions to peers
 		 *
 		 * This also makes the replication origins for the peers,
 		 * so catchup mode can advance them.
 		 *
 		 * TODO: enable subscriptions in fast-forward only mode to
-		 * get rid of excess resource retention on peers.
+		 * get rid of excess resource retention on peers while preventing
+		 * clashing updates and squabbling over origins.
 		 */
 		bdr_join_create_subscriptions(local, remote);
 

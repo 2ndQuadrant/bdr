@@ -13,13 +13,8 @@ extern uint32 bdr_get_local_nodeid_if_exists(void);
 
 extern bool bdr_catcache_initialised(void);
 
-/*
- * Test if BDR is active. Catcache must be inited first.
- */
-static inline bool
-bdr_is_active_db(void)
-{
-	return bdr_get_local_nodeid_if_exists() != 0;
-};
+extern bool bdr_is_active_db(void);
+
+extern uint32 bdr_get_local_nodegroup_id(bool missing_ok);
 
 #endif

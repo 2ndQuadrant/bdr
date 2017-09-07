@@ -388,7 +388,7 @@ bdr_get_local_node_info(bool for_update, bool missing_ok)
 		nodeinfo->pgl_interface = local_pgl_node->node_if;
 
 		if (strcmp(nodeinfo->pgl_node->name, nodeinfo->pgl_interface->name) != 0)
-			ereport(ERROR,
+			ereport(missing_ok ? WARNING: ERROR,
 					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 					 errmsg("bdr requires that the pglogical interface %s have the same name as the pglogical node %s",
 					        nodeinfo->pgl_interface->name, nodeinfo->pgl_node->name)));

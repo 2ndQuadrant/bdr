@@ -106,6 +106,11 @@ FUTURE WORK
   and add a subsystem identifier so we can trace just messaging, for 
   example
 
+- Make startup in the manager smarter and avoid polling the catalogs every pgl
+  manager wait event wakeup. Maybe something like creating the manager's
+  shmem segment directly from the nodegroup create and nodegroup join funcs,
+  then telling it to wake up and notice?
+
 SANITY CHECKS AND DEFENSES NEEDED
 ---
 
