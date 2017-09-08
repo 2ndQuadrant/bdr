@@ -26,6 +26,8 @@
 
 #include "commands/dbcommands.h"
 
+#include "libpq/pqformat.h"
+
 #include "miscadmin.h"
 
 #include "nodes/makefuncs.h"
@@ -40,10 +42,14 @@
 #include "utils/rel.h"
 #include "utils/timestamp.h"
 
+#include "bdr_state.h"
+#include "bdr_msgformats.h"
 #include "bdr_catalogs.h"
 
-#define CATALOG_NODE			"node"
-#define CATALOG_NODE_GROUP		"node_group"
+#define CATALOG_NODE				"node"
+#define CATALOG_NODE_GROUP			"node_group"
+#define CATALOG_STATE				"state_journal"
+#define CATALOG_STATE_COUNTER_IDX	"state_journal_pkey"
 
 typedef struct NodeTuple
 {
@@ -74,6 +80,20 @@ typedef struct NodeGroupTuple
 #define Anum_node_group_id		1
 #define Anum_node_group_name	2
 #define Anum_node_group_default_repset	3
+
+typedef struct StateTuple
+{
+	Oid			counter;
+	Oid			current;
+	int64		global_consensus_no;
+	/* After this point use heap_getattr */
+} StateTuple;
+
+#define Natts_state						4
+#define Anum_state_counter				1
+#define Anum_state_current				2
+#define Anum_state_global_consensus_no	3
+#define Anum_state_extra_data			4
 
 static BdrNodeGroup *
 bdr_nodegroup_fromtuple(HeapTuple tuple)
@@ -651,4 +671,148 @@ interval_from_ms(int ms, Interval *interval)
 
 	if (tm2interval(&tm, micros, interval) != 0)
 		elog(ERROR, "error converting %d ms to interval", ms);
+}
+
+static void
+state_fromtuple(BdrStateEntry *state, HeapTuple tuple, TupleDesc tupDesc,
+	bool fetch_extradata)
+{
+	StateTuple *stup = (StateTuple *) GETSTRUCT(tuple);
+	Datum d;
+	bool isnull = true;
+
+	state->counter = stup->counter;
+	state->current = (BdrNodeState)stup->current;
+	state->global_consensus_no = (uint64)stup->global_consensus_no;
+
+	if (fetch_extradata)
+		d = heap_getattr(tuple, Anum_state_extra_data, tupDesc, &isnull);
+
+	if (isnull)
+		state->extra_data = NULL;
+	else
+	{
+		StringInfoData si;
+		bytea *extradata = DatumGetByteaPP(PG_DETOAST_DATUM_COPY(d));
+		wrapInStringInfo(&si, VARDATA_ANY(extradata), VARSIZE_ANY_EXHDR(extradata));
+		state->extra_data = state_extradata_deserialize(&si, state->current);
+	}
+}
+
+void
+state_prune(int maxentries)
+{
+	/*
+	 * Prune the state table, deleting all but maxentries.
+	 */
+	elog(ERROR, "not implemented");
+}
+
+/*
+ * Push a new state onto the top of the stack.
+ *
+ * Counter must be pre-set to exactly increment the prior
+ * counter by 1. In most cases you should be using
+ * state_transition instead, as it checks the counter
+ * and last state.
+ */
+void
+state_push(BdrStateEntry *state)
+{
+	RangeVar   *rv;
+	Relation	rel;
+	TupleDesc	tupDesc;
+	HeapTuple	tup;
+	Datum		values[Natts_state];
+	bool		nulls[Natts_state];
+	bytea		*extra_data = NULL;
+
+	rv = makeRangeVar(BDR_EXTENSION_NAME, CATALOG_STATE, -1);
+	rel = heap_openrv(rv, ShareRowExclusiveLock);
+	tupDesc = RelationGetDescr(rel);
+
+	if (state->counter == 0)
+		elog(ERROR, "attempt to insert invalid state counter 0");
+
+	/* Form a tuple. */
+	memset(nulls, false, sizeof(nulls));
+	values[Anum_state_counter - 1] = ObjectIdGetDatum(state->counter);
+	values[Anum_state_current - 1] = ObjectIdGetDatum((Oid)state->current);
+	values[Anum_state_global_consensus_no - 1] = Int64GetDatum((int64)state->global_consensus_no);
+
+	if (state->extra_data != NULL)
+	{
+		StringInfoData si;
+		initStringInfo(&si);
+		pq_sendint(&si, 0, VARHDRSZ); /* will overwrite later */
+		state_extradata_serialize(&si, state->current, state->extra_data);
+		extra_data = (bytea*)si.data;
+ 		/* overwrite size; header size included */
+		SET_VARSIZE(extra_data, si.len);
+	}
+	Assert((state->extra_data == NULL) == (extra_data == NULL));
+	nulls[Anum_state_extra_data - 1] = extra_data == NULL;
+	values[Anum_state_extra_data - 1] = PointerGetDatum(extra_data);
+
+	tup = heap_form_tuple(tupDesc, values, nulls);
+
+	/* Insert the tuple to the catalog. */
+	CatalogTupleInsert(rel, tup);
+
+	/* Cleanup. */
+	heap_freetuple(tup);
+	heap_close(rel, NoLock);
+
+	CommandCounterIncrement();
+}
+
+/*
+ * Fetch the current state entry into the passed state struct.
+ *
+ * Optionally lock the state table so that states cannot be added by other
+ * xacts until commit/rollback.
+ */
+void
+state_get_last(BdrStateEntry *state, bool for_update, bool fetch_extradata)
+{
+	RangeVar   *state_rv;
+	RangeVar   *state_idx_rv;
+	Relation	state_rel;
+	Relation	state_idx;
+	SysScanDesc state_scan;
+	HeapTuple	state_tuple;
+	TupleDesc	tupDesc;
+	const int	lockmode = for_update ? ShareRowExclusiveLock
+									  : AccessShareLock;
+	bool		found = false;
+	BdrStateEntry tmp;
+
+	state_rv = makeRangeVar(BDR_EXTENSION_NAME, CATALOG_STATE, -1);
+	state_idx_rv = makeRangeVar(BDR_EXTENSION_NAME,
+								CATALOG_STATE_COUNTER_IDX, -1);
+	state_rel = heap_openrv(state_rv, lockmode);
+	tupDesc = RelationGetDescr(state_rel);
+	state_idx = relation_openrv(state_idx_rv, lockmode);
+	if (state_idx->rd_rel->relkind != RELKIND_INDEX)
+		elog(ERROR, BDR_EXTENSION_NAME"."CATALOG_STATE_COUNTER_IDX" is not an index");
+	state_scan = systable_beginscan_ordered(state_rel, state_idx, NULL,
+										   0, NULL);
+
+	state_tuple = systable_getnext_ordered(state_scan, BackwardScanDirection);
+	if (HeapTupleIsValid(state_tuple))
+	{
+		found = true;
+		state_fromtuple(&tmp, state_tuple, tupDesc, fetch_extradata);
+	}
+
+	systable_endscan_ordered(state_scan);
+	index_close(state_idx, lockmode);
+	/* Keep the lock until commit if we're called for_update */
+	heap_close(state_rel, for_update ? NoLock : lockmode);
+
+	if (!found)
+		/* shouldn't happen, callers should check if bdr is ready */
+		elog(ERROR, "no entries found in BDR state table, BDR not initialized?");
+	
+	*state = tmp;
 }

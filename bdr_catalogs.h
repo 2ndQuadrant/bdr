@@ -72,6 +72,14 @@ extern void bdr_modify_node(BdrNode *node);
 extern void bdr_create_node_defaults(const char *node_name,
 									 const char *local_dsn);
 
+struct BdrStateEntry;
+extern void state_push(struct BdrStateEntry *state);
+
+extern void state_get_last(struct BdrStateEntry *out_state, bool for_update,
+	bool get_extradata);
+
+extern void state_prune(int maxentries);
+
 /* Random helpers related to working with pgl/bdr catalogs */
 extern void interval_from_ms(int ms, Interval *interval);
 

@@ -383,6 +383,18 @@ bdr_join_handle_active_proposal(BdrMessage *msg)
 	 */
 }
 
+static void
+read_nodeinfo_required_attr(PGresult *res, int rownum, int colnum)
+{
+	if (PQgetisnull(res, rownum, colnum))
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+				 errmsg("column %s (number %d) in row %d of result was null",
+				 		PQfname(res, colnum), colnum, rownum)));
+	}
+}
+
 /*
  * Mirror of make_nodeinfo_result
  */
@@ -394,9 +406,9 @@ read_nodeinfo_result(PGresult *res, int rownum)
 
 	info = palloc(sizeof(BdrNodeInfo));
 	info->bdr_node = palloc0(sizeof(BdrNode));
-	info->bdr_node_group = palloc0(sizeof(BdrNodeGroup));
 	info->pgl_node = palloc0(sizeof(PGLogicalNode));
 	info->pgl_interface = palloc0(sizeof(PGlogicalInterface));
+	info->bdr_node_group = NULL;
 
 	/*
 	 * TODO: use SELECT *, and gracefully ignore missing fields
@@ -410,38 +422,56 @@ read_nodeinfo_result(PGresult *res, int rownum)
 
 	val = PQgetvalue(res, rownum, 0);
 	if (sscanf(val, "%u", &info->bdr_node->node_id) != 1)
-		elog(ERROR, "could not parse info node id");
+		elog(ERROR, "could not parse info node id '%s'", val);
 
 	info->pgl_node->id = info->bdr_node->node_id;
 	info->pgl_interface->nodeid = info->bdr_node->node_id;
 
+	read_nodeinfo_required_attr(res, rownum, 1);
 	info->pgl_node->name = pstrdup(PQgetvalue(res, rownum, 1));
 
+	read_nodeinfo_required_attr(res, rownum, 2);
 	val = PQgetvalue(res, rownum, 2);
 	if (sscanf(val, "%u", &info->bdr_node->local_state) != 1)
-		elog(ERROR, "could not parse info node state");
+		elog(ERROR, "could not parse info node state '%s'", val);
 
+	read_nodeinfo_required_attr(res, rownum, 3);
 	val = PQgetvalue(res, rownum, 3);
 	if (sscanf(val, "%d", &info->bdr_node->seq_id) != 1)
-		elog(ERROR, "could not parse info node sequence id");
+		elog(ERROR, "could not parse info node sequence id '%s'", val);
 
 	info->bdr_node->confirmed_our_join = false;
 
-	val = PQgetvalue(res, rownum, 4);
-	if (sscanf(val, "%u", &info->bdr_node_group->id) != 1)
-		elog(ERROR, "could not parse info nodegroup id");
-	info->bdr_node->node_group_id = info->bdr_node_group->id;
+	if (!PQgetisnull(res, rownum, 4))
+	{
+		info->bdr_node_group = palloc0(sizeof(BdrNodeGroup));
 
-	info->bdr_node_group->name = pstrdup(PQgetvalue(res, rownum, 5));
+		val = PQgetvalue(res, rownum, 4);
+		if (sscanf(val, "%u", &info->bdr_node_group->id) != 1)
+			elog(ERROR, "could not parse info nodegroup id '%s'", val);
 
+		read_nodeinfo_required_attr(res, rownum, 5);
+		info->bdr_node_group->name = pstrdup(PQgetvalue(res, rownum, 5));
+		info->bdr_node->node_group_id = info->bdr_node_group->id;
+	}
+	else
+	{
+		info->bdr_node_group = NULL;
+		info->bdr_node->node_group_id = 0;
+	}
+
+	read_nodeinfo_required_attr(res, rownum, 6);
 	val = PQgetvalue(res, rownum, 6);
 	if (sscanf(val, "%u", &info->pgl_interface->id) != 1)
-		elog(ERROR, "could not parse pglogical interface id");
+		elog(ERROR, "could not parse pglogical interface id '%s'", val);
 
+	read_nodeinfo_required_attr(res, rownum, 7);
 	info->pgl_interface->name = pstrdup(PQgetvalue(res, rownum, 7));
 
+	read_nodeinfo_required_attr(res, rownum, 8);
 	info->pgl_interface->dsn = pstrdup(PQgetvalue(res, rownum, 8));
 
+	read_nodeinfo_required_attr(res, rownum, 9);
 	info->bdr_node->dbname = pstrdup(PQgetvalue(res, rownum, 9));
 
 	check_nodeinfo(info);

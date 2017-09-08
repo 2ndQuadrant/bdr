@@ -1,11 +1,10 @@
 NEXT STEPS TO PROGRESS
 ----
 
-- clean tests
-
-- minimal docs
-
-- tag alpha
+- finish the bdr state implementation
+  - move to state file
+  - test
+  - adopt in join process too
 
 - move node join into manager
 
@@ -48,6 +47,10 @@ bdr.bdr_group_create wrapper around bdr.create_node and bdr.create_node_group
 
 HACKS TO PAY DOWN AND TODOs TO FINISH
 ----
+
+- Replace most uses of node-names with node-ids or "name (id)" in messages
+
+- Use names not integer values when printing state enums, etc
 
 - Instead of assuming there's an interface with the same name as the node,
   look up the interfaces being used by the join target node for its bdr

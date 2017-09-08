@@ -23,6 +23,7 @@ OBJS = \
 	bdr_output.o \
 	bdr_pgl_plugin.o \
 	bdr_shmem.o \
+	bdr_state.o \
 	bdr_sync.o \
 	bdr_worker.o
 

@@ -84,10 +84,10 @@ REVOKE ALL ON FUNCTION bdr.decode_message_payload("char", bytea) FROM public;
 
 CREATE TABLE bdr.state_journal
 (
-	state_counter integer NOT NULL PRIMARY KEY,
-	state integer NOT NULL,
-	state_data bytea,
-	global_consensus_no integer
+    state_counter oid NOT NULL PRIMARY KEY,
+    state oid NOT NULL,
+    global_consensus_no bigint,
+    state_extra_data bytea
 ) WITH (user_catalog_table=true);
 
 REVOKE ALL ON bdr.state_journal FROM public;

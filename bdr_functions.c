@@ -37,6 +37,7 @@
 #include "bdr_messaging.h"
 #include "bdr_msgformats.h"
 #include "bdr_shmem.h"
+#include "bdr_state.h"
 
 /*
  * Ensure that the local BDR node exists
@@ -59,6 +60,7 @@ bdr_check_local_node(bool for_update)
 				 errmsg("bdr requires that the pglogical interface %s have the same name as the pglogical node %s",
 				        nodeinfo->pgl_interface->name, nodeinfo->pgl_node->name)));
 
+	bdr_refresh_cache_local_nodeinfo();
 	return nodeinfo;
 }
 
@@ -133,8 +135,16 @@ bdr_create_node_sql(PG_FUNCTION_ARGS)
 	bnode.dbname = get_database_name(MyDatabaseId);
 
 	bdr_node_create(&bnode);
+	bdr_refresh_cache_local_nodeinfo();
 
 	pglogical_subscription_changed(InvalidOid);
+
+	/*
+	 * Create the initial entry in the BDR state journal.
+	 *
+	 * (This is one of the few places it's OK to use state_push directly)
+	 */
+	bdr_state_insert_initial(BDR_NODE_STATE_CREATED);
 
 	PG_RETURN_OID(bnode.node_id);
 }
@@ -152,6 +162,7 @@ bdr_create_node_group_sql(PG_FUNCTION_ARGS)
 	BdrNodeInfo *info;
 	PGLogicalRepSet		repset;
 	char * nodegroup_name;
+	BdrStateEntry cur_state;
 
 	if (PG_ARGISNULL(0))
 		ereport(ERROR,
@@ -184,6 +195,9 @@ bdr_create_node_group_sql(PG_FUNCTION_ARGS)
 		Assert(info->bdr_node_group == NULL);
 	}
 
+	/* Lock state table for update and check state */
+	state_get_expected(&cur_state, true, BDR_NODE_STATE_CREATED);
+
 	/*
 	 * BDR creates an 'internal' replication set with the same name as the BDR
 	 * node group.
@@ -205,6 +219,15 @@ bdr_create_node_group_sql(PG_FUNCTION_ARGS)
 	/* Assign the nodegroup to the local node */
 	info->bdr_node->node_group_id = nodegroup.id;
 	bdr_modify_node(info->bdr_node);
+
+	bdr_refresh_cache_local_nodeinfo();
+
+	/*
+	 * This is the first node in a group so there's none of the usual
+	 * join process to do and we can jump straight to the active
+	 * state.
+	 */
+	state_transition(&cur_state, BDR_NODE_STATE_ACTIVE, NULL);
 
 	pglogical_subscription_changed(InvalidOid);
 
@@ -303,8 +326,11 @@ bdr_join_node_group_sql(PG_FUNCTION_ARGS)
 	{
 		remote = get_remote_node_info(conn);
 
-		if (remote->bdr_node->node_id == 0)
+		if (remote->bdr_node == NULL)
 			elog(ERROR, "no BDR node found on join target");
+
+		if (remote->bdr_node_group == NULL)
+			elog(ERROR, "no BDR node group found on join target, create one before joining");
 
 		Assert(remote->pgl_node->id == remote->bdr_node->node_id);
 
@@ -421,7 +447,6 @@ bdr_join_node_group_finish_sql(PG_FUNCTION_ARGS)
 	 * we know it's changed due to nodegroup creation
 	 */
 
-	bdr_refresh_cache_local_nodeinfo();
 	local = bdr_check_local_node(false);
 
 	if (local->bdr_node_group == NULL)
