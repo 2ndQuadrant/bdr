@@ -227,7 +227,7 @@ bdr_create_node_group_sql(PG_FUNCTION_ARGS)
 	 * join process to do and we can jump straight to the active
 	 * state.
 	 */
-	state_transition(&cur_state, BDR_NODE_STATE_ACTIVE, NULL);
+	state_transition(&cur_state, BDR_NODE_STATE_ACTIVE, 0, NULL);
 
 	pglogical_subscription_changed(InvalidOid);
 
@@ -266,7 +266,7 @@ bdr_join_node_group_sql(PG_FUNCTION_ARGS)
 	BdrNodeInfo *local;
 	BdrNodeInfo *remote;
 	PGconn *conn;
-	XLogRecPtr min_catchup_lsn;
+	BdrStateEntry cur_state;
 
 	if (PG_ARGISNULL(0))
 		ereport(ERROR,
@@ -295,33 +295,16 @@ bdr_join_node_group_sql(PG_FUNCTION_ARGS)
 				 errmsg("local node is already a member of a nodegroup (%s), cannot join",
 				 		local->bdr_node_group->name)));
 
-	/*
-	 * OK, so here what are our minimal requirements?
-	 *
-	 * - Tell remote node we exist
-	 * - Discover remote nodes
-	 * - Make local slots
-	 * - Make remote slots
-	 * - subscribe remote
-	 * - subscribe other remotes
-	 *
-	 * Let the dirty hacks commence!
-	 *
-	 * The *right* way this should work later is:
-	 *
-	 * - Take node state machine lock
-	 * - Propose state transition to 'initially joining'
-	 *    (attach join target dsn as extradata)
-	 * - wake the manager
-	 *
-	 * .. then the manager executes the join, appending states as it goes.
-	 *
-	 * But we're going to do absolutely none of that now. Instead it's time
-	 * for fire and forget submission of a remote join request message, then
-	 * blind local creation of the local side state.
-	 */
-	conn = bdr_join_connect_remote(join_target_dsn, local);
+	state_get_expected(&cur_state, true, BDR_NODE_STATE_CREATED);
 
+	conn = bdr_join_connect_remote(local, join_target_dsn);
+
+	/*
+	 * Here we're going to ask the remote node for some information about its
+	 * self, validate that the join looks reasonable, create the initial
+	 * catalog state, and hand over to the manager by updating the local node
+	 * state journal.
+	 */
 	PG_TRY();
 	{
 		remote = get_remote_node_info(conn);
@@ -345,79 +328,29 @@ bdr_join_node_group_sql(PG_FUNCTION_ARGS)
 		if (remote->bdr_node_group->id == 0)
 			elog(ERROR, "invalid remote nodegroup id 0");
 
-		elog(NOTICE, "%u joining nodegroup %s (%u) via remote node %s (node_id %u)",
-			 local->bdr_node->node_id,
-			 remote->bdr_node_group->name, remote->bdr_node_group->id,
-			 remote->pgl_node->name, remote->bdr_node->node_id);
-
 		/*
-		 * Ask the join target to reserve our name on all peers
-		 * (in the process telling them we're joining).
-		 *
-		 * TODO: the manager should be doing all this asynchronously
+		 * Create a local copy of the remote node's nodegroup
+		 * entry. Also copy the join target node's entry
+		 * to the local node.
 		 */
-		bdr_join_submit_request(conn, node_group_name, local);
-
-		/*
-		 * TODO: wait until join request succeeds
-		 */
-
 		bdr_join_copy_remote_nodegroup(local, remote);
+		bdr_join_copy_remote_node(local, remote);
 
-		bdr_join_copy_remote_nodes(conn, local);
-
-		/*
-		 * TODO: start up messaging system. We need it running early so that we
-		 * can update node statuses, etc. Peers know about us now since we got
-		 * consensus for our name allocation, so they'll be ready to talk to us.
-		 *
-		 * TODO Can't do this until we run in the manager. So for now we'll
-		 * have to set the manager's latch (via subscriptions_changed) and let
-		 * it notice and start up BDR. This can only happen at commit time,
-		 * because the manager cannot see the nodes in the catalogs until then.
-		 */
-		//bdr_join_start_messaging();
+		state_transition(&cur_state, BDR_NODE_STATE_JOIN_START,
+			remote->pgl_node->id, NULL);
 
 		/*
-		 * Subscribe to join target
-		 * TODO: but pause before starting actual data replay from target
-		 */
-		bdr_join_subscribe_join_target(conn, local, remote);
-
-		bdr_join_copy_repset_memberships(conn, local);
-
-		/* TODO: copy initial consensus message position */
-		bdr_join_init_consensus_messages(conn, local);
-
-		/*
-		 * TODO: wait for subscription dump+restore to finish (in
-		 * state machine); can't do that when still in function....
+		 * TODO: more sanity checks here. Connectback to validate our dsn, etc.
+		 * Borrow liberally from pglogical.
 		 */
 
-		/*
-		 * Create subscriptions to peers
-		 *
-		 * This also makes the replication origins for the peers,
-		 * so catchup mode can advance them.
-		 *
-		 * TODO: enable subscriptions in fast-forward only mode to
-		 * get rid of excess resource retention on peers while preventing
-		 * clashing updates and squabbling over origins.
-		 */
-		bdr_join_create_subscriptions(local, remote);
-
-		min_catchup_lsn = bdr_get_remote_insert_lsn(conn);
-		elog(WARNING, "ignoring minimum catchup lsn: %X/%X",
-			 (uint32)(min_catchup_lsn>>32),
-			 (uint32)min_catchup_lsn);
-
-		/*
-		 * TODO: record min catchup lsn in join progress/state
-		 */
-
-		/*
-		 * We must now commit, in order to send messages to the new peer.
-		 */
+		ereport(NOTICE,
+				(errmsg("node join started"),
+				 errdetail("%u joining nodegroup %s (%u) via remote node %s (node_id %u)",
+						   local->bdr_node->node_id,
+						   remote->bdr_node_group->name, remote->bdr_node_group->id,
+						   remote->pgl_node->name, remote->bdr_node->node_id),
+				 errhint("Further join progress will be reported in the PostgreSQL logs. Use bdr.wait_for_join_completion() to wait until the join completes.")));
 	}
 	PG_CATCH();
 	{
@@ -427,80 +360,6 @@ bdr_join_node_group_sql(PG_FUNCTION_ARGS)
 	PG_END_TRY();
 
 	bdr_finish_connect_remote(conn);
-
-	PG_RETURN_VOID();
-}
-
-PG_FUNCTION_INFO_V1(bdr_join_node_group_finish_sql);
-
-/*
- * As a dirty (dirty) hack until we move join into manager, do join
- * in two phases as two separate SQL funcs.
- */
-Datum
-bdr_join_node_group_finish_sql(PG_FUNCTION_ARGS)
-{
-	BdrNodeInfo *local;
-
-	/*
-	 * Force cache refresh; we don't invalidate yet, and
-	 * we know it's changed due to nodegroup creation
-	 */
-
-	local = bdr_check_local_node(false);
-
-	if (local->bdr_node_group == NULL)
-	{
-		elog(ERROR, "no bdr node group found");
-	}
-
-	/*
-	 * We just killed the manager, so wait for it to come back.
-	 */
-	wait_for_manager_shmem_attach(local->bdr_node->node_id);
-
-	/*
-	 * Tell peers we exist so they can make slots for us
-	 * to use. No need for them to subscribe yet.
-	 */
-	bdr_join_send_catchup_ready(local);
-
-	/*
-	 * We're now in catchup mode, waiting to be
-	 * ready to promote. Yay!
-	 *
-	 * TODO: but we ignore that, and node confirmations,
-	 * etc, and go straight to:
-	 */
-
-	/*
-	 * Ask join target to get us a node seq id, since we're planning on
-	 * going live.
-	 */
-	//bdr_join_send_seq_id_alloc_request(local); // TODO
-
-	/*
-	 * TODO: wait for node seq id assignment and all peers to have
-	 * confirmed our prior standby announce message so we know we have
-	 * slots, and ensure we replayed past join target's min catchup lsn,
-	 * then:
-	 *
-	 * TODO: allow specification of pre-created slots, for testing
-	 * purposes
-	 */
-	bdr_join_create_slots(local);
-
-	/*
-	 * Become active by sending consensus message to peers via our join
-	 * target (or failing that, some other live peer). 
-	 */
-	bdr_join_send_active_announce(local);
-
-	/*
-	 * Finish join, switching to direct replay from peers, and
-	 * go read/write.
-	 */
-	bdr_join_go_active(local);
 
 	PG_RETURN_VOID();
 }
@@ -947,4 +806,18 @@ bdr_submit_comment(PG_FUNCTION_ARGS)
 
 	snprintf(&handle_str[0], 33, UINT64_FORMAT, handle);
 	PG_RETURN_TEXT_P(cstring_to_text(handle_str));
+}
+
+PG_FUNCTION_INFO_V1(bdr_consensus_message_outcome);
+
+Datum
+bdr_consensus_message_outcome(PG_FUNCTION_ARGS)
+{
+	const char * handle_str = text_to_cstring(PG_GETARG_TEXT_P(0));
+	uint64 handle;
+
+	if (sscanf(handle_str, UINT64_FORMAT, &handle) != 1)
+		elog(ERROR, "could not parse %s as uint64", handle_str);
+
+	PG_RETURN_INT32(bdr_msg_get_outcome(handle));
 }

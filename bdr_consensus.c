@@ -157,7 +157,7 @@ consensus_find_node_by_id(uint32 node_id, const char * find_reason)
 }
 
 void
-consensus_add_node(uint32 node_id, const char *dsn)
+consensus_add_node(uint32 node_id, const char *dsn, bool update_if_found)
 {
 	ConsensusNode *node = NULL;
 	int first_free = -1;
@@ -182,10 +182,15 @@ consensus_add_node(uint32 node_id, const char *dsn)
 	}
 
 	if (node != NULL)
-		ereport(ERROR,
-				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("node %u already registered in consensus manager",
-				 		node_id)));
+	{
+		if (update_if_found)
+			consensus_alter_node(node_id, dsn);
+		else
+			ereport(ERROR,
+					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+					 errmsg("node %u already registered in consensus manager",
+							node_id)));
+	}
 
 	node = &consensus_nodes[first_free];
 	node->node_id = node_id;

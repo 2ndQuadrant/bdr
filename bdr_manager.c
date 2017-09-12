@@ -26,6 +26,8 @@
 
 #include "utils/memutils.h"
 
+#include "bdr_join.h"
+#include "bdr_state.h"
 #include "bdr_catalogs.h"
 #include "bdr_catcache.h"
 #include "bdr_messaging.h"
@@ -168,4 +170,21 @@ bdr_manager_wait_event(struct WaitEvent *events, int nevents,
 		return;
 
 	bdr_messaging_wait_event(events, nevents, max_next_wait_msecs);
+	bdr_join_wait_event(events, nevents, max_next_wait_msecs);
+
+	bdr_state_dispatch(max_next_wait_msecs);
+}
+
+void
+bdr_wait_event_set_recreated(struct WaitEventSet *new_set)
+{
+	bdr_messaging_wait_event_set_recreated(new_set);
+	bdr_join_wait_event_set_recreated(new_set);
+}
+
+int
+bdr_get_wait_event_space_needed(void)
+{
+	return bdr_join_get_wait_event_space_needed()
+		   + bdr_messaging_get_wait_event_space_needed(); 
 }

@@ -86,14 +86,16 @@ typedef struct StateTuple
 	Oid			counter;
 	Oid			current;
 	int64		global_consensus_no;
+	Oid			join_target_id;
 	/* After this point use heap_getattr */
 } StateTuple;
 
-#define Natts_state						4
+#define Natts_state						5
 #define Anum_state_counter				1
 #define Anum_state_current				2
 #define Anum_state_global_consensus_no	3
-#define Anum_state_extra_data			4
+#define Anum_state_join_target_id		4
+#define Anum_state_extra_data			5
 
 static BdrNodeGroup *
 bdr_nodegroup_fromtuple(HeapTuple tuple)
@@ -684,6 +686,7 @@ state_fromtuple(BdrStateEntry *state, HeapTuple tuple, TupleDesc tupDesc,
 	state->counter = stup->counter;
 	state->current = (BdrNodeState)stup->current;
 	state->global_consensus_no = (uint64)stup->global_consensus_no;
+	state->join_target_id = stup->join_target_id;
 
 	if (fetch_extradata)
 		d = heap_getattr(tuple, Anum_state_extra_data, tupDesc, &isnull);
@@ -739,6 +742,7 @@ state_push(BdrStateEntry *state)
 	values[Anum_state_counter - 1] = ObjectIdGetDatum(state->counter);
 	values[Anum_state_current - 1] = ObjectIdGetDatum((Oid)state->current);
 	values[Anum_state_global_consensus_no - 1] = Int64GetDatum((int64)state->global_consensus_no);
+	values[Anum_state_join_target_id - 1] = ObjectIdGetDatum(state->join_target_id);
 
 	if (state->extra_data != NULL)
 	{

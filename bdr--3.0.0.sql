@@ -86,7 +86,8 @@ CREATE TABLE bdr.state_journal
 (
     state_counter oid NOT NULL PRIMARY KEY,
     state oid NOT NULL,
-    global_consensus_no bigint,
+    global_consensus_no bigint NOT NULL,
+    join_target_id oid NOT NULL,
     state_extra_data bytea
 ) WITH (user_catalog_table=true);
 
@@ -119,12 +120,6 @@ LANGUAGE c AS 'MODULE_PATHNAME','bdr_join_node_group_sql';
 COMMENT ON FUNCTION bdr.join_node_group(text,text) IS
 'Join an existing BDR node group on peer at ''dsn''';
 
--- Dirty hack required to finish a join for now,
--- until we split it up and move into manager
-CREATE FUNCTION bdr.join_node_group_finish()
-RETURNS void CALLED ON NULL INPUT VOLATILE
-LANGUAGE c AS 'MODULE_PATHNAME','bdr_join_node_group_finish_sql';
-
 CREATE FUNCTION bdr.replication_set_add_table(relation regclass, set_name text DEFAULT NULL, synchronize_data boolean DEFAULT false,
 	columns text[] DEFAULT NULL, row_filter text DEFAULT NULL)
 RETURNS void CALLED ON NULL INPUT VOLATILE LANGUAGE c AS 'MODULE_PATHNAME', 'bdr_replication_set_add_table';
@@ -144,6 +139,12 @@ CREATE FUNCTION bdr.msgb_deliver_message(destination_node oid, message_id oid, p
 RETURNS void LANGUAGE c AS 'MODULE_PATHNAME','msgb_deliver_message';
 
 REVOKE ALL ON FUNCTION bdr.msgb_deliver_message(oid,oid,bytea) FROM public;
+
+/*
+ * Consensus messaging status lookup. The argument is actually a uint64.
+ */
+CREATE FUNCTION bdr.consensus_message_outcome(handle text)
+RETURNS integer STRICT LANGUAGE c AS 'MODULE_PATHNAME','bdr_consensus_message_outcome';
 
 /*
  * Functions used to query remote node info. Don't change these without caution,

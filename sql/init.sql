@@ -53,8 +53,6 @@ SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.
 
 SELECT 1
 FROM bdr.join_node_group(:'node1_dsn', 'bdrgroup');
-SELECT pg_sleep(1);
-SELECT 1 FROM bdr.join_node_group_finish(); -- XXX should go away soon
 
 SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info((SELECT node_group_id FROM bdr.node_group));
 

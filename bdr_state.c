@@ -13,6 +13,8 @@
  */
 #include "postgres.h"
 
+#include "access/xact.h"
+
 #include "lib/stringinfo.h"
 
 #include "libpq/pqformat.h"
@@ -21,9 +23,11 @@
 
 #include "utils/memutils.h"
 
-#include "bdr_catcache.h"
-#include "bdr_msgformats.h"
 #include "bdr_catalogs.h"
+#include "bdr_catcache.h"
+#include "bdr_join.h"
+#include "bdr_msgformats.h"
+#include "bdr_state.h"
 #include "bdr_state.h"
 #include "bdr_worker.h"
 
@@ -37,7 +41,24 @@ state_has_extradata(BdrNodeState new_state)
 	{
 		case BDR_NODE_STATE_CREATED:
 		case BDR_NODE_STATE_ACTIVE:
+		case BDR_NODE_STATE_JOIN_START:
+		case BDR_NODE_STATE_JOIN_COPY_REMOTE_NODES:
+		case BDR_NODE_JOIN_SUBSCRIBE_JOIN_TARGET:
+		case BDR_NODE_STATE_WAIT_SUBSCRIBE_COMPLETE:
+		case BDR_NODE_STATE_JOIN_GET_CATCHUP_LSN:
+		case BDR_NODE_STATE_JOIN_COPY_REPSET_MEMBERSHIPS:
+		case BDR_NODE_STATE_JOIN_CREATE_SUBSCRIPTIONS:
+		case BDR_NODE_STATE_SEND_CATCHUP_READY:
+		case BDR_NODE_STATE_STANDBY:
+		case BDR_NODE_STATE_CREATE_SLOTS:
+		case BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE:
+		case BDR_NODE_STATE_REQUEST_GLOBAL_SEQ_ID:
 			return false;
+		case BDR_NODE_STATE_JOIN_WAIT_CONFIRM:
+		case BDR_NODE_STATE_JOIN_WAIT_CATCHUP:
+		case BDR_NODE_STATE_WAIT_GLOBAL_SEQ_ID:
+		case BDR_NODE_STATE_JOIN_FAILED:
+			return true;
 		default:
 			elog(ERROR, "unhandled node state %u", new_state);
 	}
@@ -77,6 +98,28 @@ state_extradata_deserialize(StringInfo in, BdrNodeState state)
 
 	switch (state)
 	{
+		case BDR_NODE_STATE_JOIN_WAIT_CONFIRM:
+		case BDR_NODE_STATE_WAIT_GLOBAL_SEQ_ID:
+		{
+			struct ExtraDataConsensusWait *extra = palloc(sizeof(struct ExtraDataConsensusWait));
+			extra->request_message_handle = pq_getmsgint64(in);
+			return extra;
+		}
+
+		case BDR_NODE_STATE_JOIN_WAIT_CATCHUP:
+		{
+			struct ExtraDataJoinWaitCatchup *extra = palloc(sizeof(struct ExtraDataJoinWaitCatchup));
+			extra->min_catchup_lsn = pq_getmsgint64(in);
+			return extra;
+		}
+
+		case BDR_NODE_STATE_JOIN_FAILED:
+		{
+			struct ExtraDataJoinFailure *extra = palloc(sizeof(struct ExtraDataJoinFailure));
+			extra->reason = pq_getmsgstring(in);
+			return extra;
+		}
+
 		default:
 			/*
 			 * We shouldn't error here, since new states could be added
@@ -109,6 +152,28 @@ state_extradata_serialize(StringInfo out, BdrNodeState new_state,
 
 	switch (new_state)
 	{
+		case BDR_NODE_STATE_JOIN_WAIT_CONFIRM:
+		case BDR_NODE_STATE_WAIT_GLOBAL_SEQ_ID:
+		{
+			struct ExtraDataConsensusWait *extra = extradata;
+			pq_sendint64(out, extra->request_message_handle);
+			break;
+		}
+
+		case BDR_NODE_STATE_JOIN_WAIT_CATCHUP:
+		{
+			struct ExtraDataJoinWaitCatchup *extra = extradata;
+			pq_sendint64(out, extra->min_catchup_lsn);
+			break;
+		}
+
+		case BDR_NODE_STATE_JOIN_FAILED:
+		{
+			struct ExtraDataJoinFailure *extra = extradata;
+			pq_sendstring(out, extra->reason);
+			break;
+		}
+
 		default:
 			elog(ERROR, "unhandled node state %u", new_state);
 	}
@@ -122,32 +187,7 @@ state_extradata_serialize(StringInfo out, BdrNodeState new_state,
 static void
 state_transition_check(BdrStateEntry *state, BdrNodeState new_state)
 {
-	bool ok = false;
-
-	switch (state->current)
-	{
-		case BDR_NODE_STATE_CREATED:
-			switch (new_state)
-			{
-				case BDR_NODE_STATE_ACTIVE:
-					ok = true;
-				default:
-					break;
-			}
-			break;
-		case BDR_NODE_STATE_ACTIVE:
-			/* no allowed states yet */
-			break;
-		default:
-			elog(ERROR, "unhandled current node state %u", new_state);
-	}
-
- 	if (!ok)
-		ereport(ERROR,
-				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("node %u attempted disallowed state transition %u=>%u after #%u",
-				 		bdr_get_local_nodeid(), state->current, new_state,
-						state->counter)));
+	/* Not implemented! */
 }
 
 /*
@@ -167,7 +207,8 @@ state_transition_check(BdrStateEntry *state, BdrNodeState new_state)
  * table when it read it.
  */
 void
-state_transition(BdrStateEntry *state, BdrNodeState new_state, void *extradata)
+state_transition(BdrStateEntry *state, BdrNodeState new_state,
+	uint32 join_target_id, void *extradata)
 {
 	BdrStateEntry cur;
 
@@ -183,6 +224,7 @@ state_transition(BdrStateEntry *state, BdrNodeState new_state, void *extradata)
 	cur.counter = cur.counter + 1;
 	cur.current = new_state;
 	cur.global_consensus_no = 0L; /* TODO, accept arg */
+	cur.join_target_id = join_target_id;
 	cur.extra_data = extradata;
 
 	elog(bdr_debug_level, "node %u state transition #%u, %u => %u",
@@ -259,6 +301,7 @@ bdr_state_insert_initial(BdrNodeState initial)
 	state_initial.counter = 1;
 	state_initial.current = initial;
 	state_initial.global_consensus_no = 0L;
+	state_initial.join_target_id = 0;
 	state_initial.extra_data = NULL;
 
 	/*
@@ -266,4 +309,63 @@ bdr_state_insert_initial(BdrNodeState initial)
 	 * violation.
 	 */
 	state_push(&state_initial);
+}
+
+/*
+ * Dispatch to state-specific handlers to continue whatever
+ * work we're doing.
+ *
+ * TODO: should really be a jump table
+ */
+void
+bdr_state_dispatch(long *max_next_wait_msecs)
+{
+	bool txn_started = false;
+	BdrStateEntry cur;
+
+	if (!IsTransactionState())
+	{
+		txn_started = true;
+		StartTransactionCommand();
+	}
+	state_get_last(&cur, false /* no lock */, false /* no extradata */);
+	if (txn_started)
+		CommitTransactionCommand();
+
+	switch (cur.current)
+	{
+		/*
+		 * Steady states that don't budge without
+		 * external influence.
+		 */
+		case BDR_NODE_STATE_CREATED:
+		case BDR_NODE_STATE_ACTIVE:
+		case BDR_NODE_STATE_JOIN_FAILED:
+			return;
+
+		/*
+		 * Transitional states during the node join process.
+		 */
+		case BDR_NODE_STATE_JOIN_START:
+		case BDR_NODE_STATE_JOIN_WAIT_CONFIRM:
+		case BDR_NODE_STATE_JOIN_COPY_REMOTE_NODES:
+		case BDR_NODE_JOIN_SUBSCRIBE_JOIN_TARGET:
+		case BDR_NODE_STATE_WAIT_SUBSCRIBE_COMPLETE:
+		case BDR_NODE_STATE_JOIN_GET_CATCHUP_LSN:
+		case BDR_NODE_STATE_JOIN_WAIT_CATCHUP:
+		case BDR_NODE_STATE_JOIN_COPY_REPSET_MEMBERSHIPS:
+		case BDR_NODE_STATE_JOIN_CREATE_SUBSCRIPTIONS:
+		case BDR_NODE_STATE_SEND_CATCHUP_READY:
+		case BDR_NODE_STATE_STANDBY:
+		case BDR_NODE_STATE_REQUEST_GLOBAL_SEQ_ID:
+		case BDR_NODE_STATE_WAIT_GLOBAL_SEQ_ID:
+		case BDR_NODE_STATE_CREATE_SLOTS:
+		case BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE:
+			bdr_join_continue(cur.current, max_next_wait_msecs);
+			return;
+
+		case BDR_NODE_STATE_UNUSED:
+			Assert(false);
+			return;
+	}
 }

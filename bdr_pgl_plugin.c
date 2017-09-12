@@ -156,7 +156,7 @@ bdr_register_pgl_plugin(void)
 	 * readable/writeable sockets in our async messaging system.
 	 */
 	plugin.manager_wait_event = bdr_manager_wait_event;
-	plugin.manager_wait_event_set_recreated = bdr_messaging_wait_event_set_recreated;
+	plugin.manager_wait_event_set_recreated = bdr_wait_event_set_recreated;
 	plugin.manager_get_required_wait_event_space = bdr_get_wait_event_space_needed;
 
 	pgl_register_plugin(&plugin);

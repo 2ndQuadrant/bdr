@@ -128,15 +128,9 @@ static bool atexit_registered = false;
 void
 bdr_start_consensus(int bdr_max_nodes)
 {
-	List	   *subs;
-	ListCell   *lc;
-	StringInfoData si;
-
 	Assert(is_bdr_manager());
 
 	my_manager = bdr_shmem_lookup_manager_segment(bdr_get_local_nodeid(), false);
-
-	initStringInfo(&si);
 
 	consensus_proposals_receive_hook = bdr_proposals_receive;
 	consensus_proposals_prepare_hook = bdr_proposals_prepare;
@@ -146,25 +140,37 @@ bdr_start_consensus(int bdr_max_nodes)
 
 	bdr_startup_submit_shm_mq();
 
-	Assert(!IsTransactionState());
-	StartTransactionCommand();
-
 	consensus_begin_startup(bdr_get_local_nodeid(), BDR_SCHEMA_NAME,
 					  BDR_MSGJOURNAL_REL_NAME, bdr_max_nodes);
+
+	bdr_messaging_refresh_nodes();
+}
+
+void
+bdr_messaging_refresh_nodes(void)
+{
+	bool txn_started = false;
+	List	   *subs;
+	ListCell   *lc;
+
+	if (!IsTransactionState())
+	{
+		txn_started = true;
+		StartTransactionCommand();
+	}
 
 	subs = bdr_get_node_subscriptions(bdr_get_local_nodeid());
 
 	foreach (lc, subs)
 	{
 		PGLogicalSubscription *sub = lfirst(lc);
-		bdr_messaging_add_peer(sub->origin->id, sub->origin_if->dsn);
+		bdr_messaging_add_peer(sub->origin->id, sub->origin_if->dsn, true);
 	}
 
 	consensus_finish_startup();
 
-	pfree(si.data);
-
-	CommitTransactionCommand();
+	if (txn_started)
+		CommitTransactionCommand();
 }
 
 static void
@@ -1032,13 +1038,14 @@ bdr_request_recreate_wait_event_set_hook(WaitEventSet *old_set)
 }
 
 int
-bdr_get_wait_event_space_needed(void)
+bdr_messaging_get_wait_event_space_needed(void)
 {
 	return msgb_get_wait_event_space_needed();
 }
 
 void
-bdr_messaging_add_peer(uint32 node_id, const char *dsn)
+bdr_messaging_add_peer(uint32 node_id, const char *dsn,
+	bool update_if_found)
 {
 	StringInfoData si;
 
@@ -1047,7 +1054,7 @@ bdr_messaging_add_peer(uint32 node_id, const char *dsn)
 	appendStringInfoString(&si, dsn);
 	appendStringInfo(&si, " application_name='bdr_msgbroker %u'",
 					 bdr_get_local_nodeid());
-	consensus_add_node(node_id, si.data);
+	consensus_add_node(node_id, si.data, update_if_found);
 	elog(bdr_debug_level, "%u added new bdr node %u to consensus system",
 		 bdr_get_local_nodeid(), node_id);
 	pfree(si.data);

@@ -7,7 +7,8 @@
 
 struct WaitEvent;
 
-extern void consensus_add_node(uint32 nodeid, const char *dsn);
+extern void consensus_add_node(uint32 nodeid, const char *dsn,
+	bool update_if_found);
 
 extern void consensus_alter_node(uint32 nodeid, const char *new_dsn);
 
