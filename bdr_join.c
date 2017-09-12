@@ -195,26 +195,28 @@ bdr_join_connect_remote(BdrNodeInfo *local, const char * remote_node_dsn)
 	Assert(!is_bdr_manager());
 
 	conn = bdr_join_begin_connect_remote(local, remote_node_dsn);
-	ret = PQconnectPoll(join.conn);
 	for (;;)
 	{
+		ret = PQconnectPoll(conn);
 		switch (ret)
 		{
 			case PGRES_POLLING_OK:
-				break;
+				Assert(PQstatus(conn) == CONNECTION_OK);
+				return conn;
 			case PGRES_POLLING_READING:
 			case PGRES_POLLING_WRITING:
 				/* we just polled, sleep and try again */
 				backend_sleep_conn(2500L /* millis */, conn);
+				break;
 			case PGRES_POLLING_FAILED:
 				ereport(ERROR,
 						(errmsg("failed to connect to remote BDR node"),
-						 errdetail("libpq: %s", PQerrorMessage(join.conn))));
+						 errdetail("libpq: %s", PQerrorMessage(conn))));
 
 		}
 	}
 
-	return conn;
+	Assert(false); /* unreachable */
 }
 
 void
@@ -884,7 +886,7 @@ finish_get_remote_node_info(PGconn *conn)
 BdrNodeInfo *
 get_remote_node_info(PGconn *conn)
 {
-	Assert(is_bdr_manager());
+	Assert(!is_bdr_manager());
 
 	if (!start_get_remote_node_info(conn))
 		ereport(ERROR,
@@ -893,7 +895,7 @@ get_remote_node_info(PGconn *conn)
 
 	for (;;)
 	{
-		if (!PQconsumeInput(join.conn))
+		if (!PQconsumeInput(conn))
 		{
 			ereport(ERROR,
 					(errmsg("connection to peer broke while waiting for query response"),
@@ -1689,7 +1691,6 @@ bdr_join_wait_event_set_register(void)
 
 	Assert(join.wait_set != NULL);
 	Assert(join.conn != NULL && PQstatus(join.conn) == CONNECTION_OK);
-	Assert(join.wait_event_pos == -1);
 
 	if (join.query_result_pending)
 		flags = WL_SOCKET_READABLE;
