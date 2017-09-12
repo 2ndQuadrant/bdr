@@ -124,7 +124,6 @@ bdr_manager_check_startup_needed(void)
 		StartTransactionCommand();
 		txn_started = true;
 	}
-	elog(LOG, "XXX BDR event loop checking to see if bdr added");//XXX
 	bdr_refresh_cache_local_nodeinfo();
 	if (bdr_is_active_db())
 	{
@@ -133,7 +132,6 @@ bdr_manager_check_startup_needed(void)
 		 * sort of invalidation mechanism, so we'd better re-read it.
 		 */
 		needs_startup = true;
-		elog(LOG, "XXX found node, refreshed cache");//XXX
 	}
 	if (txn_started)
 		CommitTransactionCommand();
@@ -146,12 +144,9 @@ bdr_manager_check_startup_needed(void)
 	 */
 	if (needs_startup)
 	{
-		elog(LOG, "XXX BDR added, waking manager");//XXX
 		(void) MemoryContextSwitchTo(TopMemoryContext);
 		bdr_manager_worker_start();
 	}
-	else
-		elog(LOG, "XXX seems like there's no BDR yet");//XXX
 
 	(void) MemoryContextSwitchTo(old_ctx);
 }
