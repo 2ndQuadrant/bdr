@@ -123,6 +123,20 @@ bdr_join_begin_connect_remote(BdrNodeInfo *local,
 	return conn;
 }
 
+static void
+bdr_join_reset_connection(void)
+{
+	if (join.conn != NULL)
+		PQfinish(join.conn);
+	join.conn = NULL;
+	join.wait_event_pos = -1;
+	join.query_result_pending = false;
+	/*
+	 * We can't remove our wait event from the set, so...
+	 */
+	pglogical_manager_recreate_wait_event_set();
+}
+
 /*
  * Begin or continue asynchronous connection process for the join target node.
  * Returns true if the conn is ready to use. Call reapeatedly until it
@@ -141,24 +155,33 @@ bdr_join_maintain_conn(BdrNodeInfo *local, uint32 target_id)
 		(void) MemoryContextSwitchTo(old_ctx);
 	}
 
+	if (join.conn != NULL && PQstatus(join.conn) == CONNECTION_BAD)
+	{
+		ereport(ERROR,
+				(errmsg("connection to peer broke"),
+				 errdetail("libpq: %s", PQerrorMessage(join.conn))));
+		bdr_join_reset_connection();
+	}
+
 	if (join.conn == NULL)
 	{
-		join.query_result_pending = false;
+		bdr_join_reset_connection();
 		join.conn = bdr_join_begin_connect_remote(local,
 			join.target->pgl_interface->dsn);
 	}
 
-	if (join.conn != NULL)
+	/*
+	 * Continue async connect
+	 */
+	if (join.conn != NULL
+		&& PQstatus(join.conn != CONNECTION_OK)
+		&& PQstatus(join.conn != CONNECTION_BAD))
 	{
+
 		switch (PQconnectPoll(join.conn))
 		{
 			case PGRES_POLLING_FAILED:
-				join.conn = NULL;
-				join.query_result_pending = false;
-				/*
-				 * We can't remove our wait event from the set, so...
-				 */
-				pglogical_manager_recreate_wait_event_set();
+				bdr_join_reset_connection();
 				ereport(WARNING,
 						(errmsg("failed to connect to remote BDR node %s",
 								join.target->pgl_node->name),
@@ -176,6 +199,7 @@ bdr_join_maintain_conn(BdrNodeInfo *local, uint32 target_id)
 				 * We just polled, so no point doing it again, we'll recheck
 				 * next time we loop.
 				 */
+				Assert(join.wait_event_pos == -1);
 				break;
 		}
 	}
@@ -267,8 +291,7 @@ bdr_join_submit_request(const char * node_group_name)
 		ereport(WARNING,
 				(errmsg("failed to submit join request on join target - couldn't send query"),
 				 errdetail("libpq: %s", PQerrorMessage(join.conn))));
-		PQfinish(join.conn);
-		join.conn = NULL;
+		bdr_join_reset_connection();
 	}
 
 	join.query_result_pending = true;
@@ -288,8 +311,7 @@ check_for_query_result(void)
 		ereport(WARNING,
 				(errmsg("connection to join target broke"),
 				 errdetail("libpq: %s", PQerrorMessage(join.conn))));
-		PQfinish(join.conn);
-		join.conn = NULL;
+		 bdr_join_reset_connection();
 	}
 	return (!PQisBusy(join.conn));
 }
@@ -512,8 +534,7 @@ bdr_join_submit_outcome_request(uint64 handle)
 		ereport(WARNING,
 				(errmsg("failed to submit consensus message outcome request - couldn't send query"),
 				 errdetail("libpq: %s", PQerrorMessage(join.conn))));
-		PQfinish(join.conn);
-		join.conn = NULL;
+		bdr_join_reset_connection();
 	}
 
 	join.query_result_pending = true;
@@ -1002,8 +1023,7 @@ bdr_join_start_copy_remote_nodes(BdrNodeInfo *local)
 		ereport(WARNING,
 				(errmsg("failed to submit request for remote node list - couldn't send query"),
 				 errdetail("libpq: %s", PQerrorMessage(join.conn))));
-		PQfinish(join.conn);
-		join.conn = NULL;
+		bdr_join_reset_connection();
 	}
 
 	join.query_result_pending = true;
@@ -1102,8 +1122,7 @@ bdr_join_continue_get_catchup_lsn(BdrStateEntry *cur_state, BdrNodeInfo *local)
 			ereport(WARNING,
 					(errmsg("failed to submit remote lsn request on target - couldn't send query"),
 					 errdetail("libpq: %s", PQerrorMessage(join.conn))));
-			PQfinish(join.conn);
-			join.conn = NULL;
+			bdr_join_reset_connection();
 		}
 		join.query_result_pending = true;
 	}
@@ -1273,8 +1292,7 @@ bdr_join_continue_subscribe_join_target(BdrStateEntry *cur_state, BdrNodeInfo *l
 			ereport(WARNING,
 					(errmsg("unable to submit remote node info query"),
 					 errdetail("libpq: %s", PQerrorMessage(join.conn))));
-			PQfinish(join.conn);
-			join.conn = NULL;
+			bdr_join_reset_connection();
 		}
 		else
 			join.query_result_pending = true;
@@ -1691,6 +1709,7 @@ bdr_join_wait_event_set_register(void)
 
 	Assert(join.wait_set != NULL);
 	Assert(join.conn != NULL && PQstatus(join.conn) == CONNECTION_OK);
+	Assert(join.wait_event_pos == -1);
 
 	if (join.query_result_pending)
 		flags = WL_SOCKET_READABLE;
@@ -1713,8 +1732,12 @@ bdr_join_wait_event_set_register(void)
 void
 bdr_join_wait_event_set_recreated(struct WaitEventSet *new_set)
 {
+	if (join.wait_set == new_set)
+		return;
 	join.wait_set = new_set;
-	if (join.conn != NULL && PQstatus(join.conn) == CONNECTION_OK)
+	if (join.conn != NULL
+		&& PQstatus(join.conn) == CONNECTION_OK
+		&& join.wait_event_pos != -1)
 	{
 		join.wait_event_pos = -1;
 		bdr_join_wait_event_set_register();
@@ -1811,4 +1834,12 @@ bdr_join_continue(BdrNodeState cur_state,
 		}
 	}
 	CommitTransactionCommand();
+
+	/*
+	 * HACK HACK HACK
+	 * TODO
+	 *
+	 * Should only be set for the few areas where we must poll.
+	 */
+	*max_next_wait_msecs = 250;
 }
