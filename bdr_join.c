@@ -174,8 +174,8 @@ bdr_join_maintain_conn(BdrNodeInfo *local, uint32 target_id)
 	 * Continue async connect
 	 */
 	if (join.conn != NULL
-		&& PQstatus(join.conn != CONNECTION_OK)
-		&& PQstatus(join.conn != CONNECTION_BAD))
+		&& PQstatus(join.conn) != CONNECTION_OK
+		&& PQstatus(join.conn) != CONNECTION_BAD)
 	{
 
 		switch (PQconnectPoll(join.conn))
@@ -392,12 +392,15 @@ static void
 bdr_join_continue_join_start(BdrStateEntry *cur_state, BdrNodeInfo *local)
 {
 	uint64 handle = 0;
+	ExtraDataJoinStart *extra;
+
 	Assert(cur_state->current == BDR_NODE_STATE_JOIN_START);
+	extra = cur_state->extra_data;
 
 	if (!join.query_result_pending)
 	{
 		/* send join request query to server */
-		bdr_join_submit_request(join.target->pgl_interface->dsn);
+		bdr_join_submit_request(extra->group_name);
 		join.query_result_pending = true;
 	}
 
@@ -435,7 +438,7 @@ bdr_join_handle_join_proposal(BdrMessage *msg)
 	BdrStateEntry cur_state;
 
 	Assert(is_bdr_manager());
-	state_get_expected(&cur_state, true, BDR_NODE_STATE_ACTIVE);
+	state_get_expected(&cur_state, true, true, BDR_NODE_STATE_ACTIVE);
 
 	elog(LOG, "XXX processing join request for %u", req->joining_node_id);
 
@@ -671,7 +674,7 @@ bdr_join_handle_catchup_proposal(BdrMessage *msg)
 	BdrStateEntry		cur_state;
 
 	Assert(is_bdr_manager());
-	state_get_expected(&cur_state, true, BDR_NODE_STATE_ACTIVE);
+	state_get_expected(&cur_state, true, true, BDR_NODE_STATE_ACTIVE);
 
 	/*
 	 * Catchup ready announcements are empty, with no payload,
@@ -706,7 +709,7 @@ bdr_join_handle_active_proposal(BdrMessage *msg)
 	BdrStateEntry		cur_state;
 
 	Assert(is_bdr_manager());
-	state_get_expected(&cur_state, true, BDR_NODE_STATE_ACTIVE);
+	state_get_expected(&cur_state, true, true, BDR_NODE_STATE_ACTIVE);
 
 	/*
 	 * Catchup ready announcements are empty, with no payload,
@@ -1761,7 +1764,7 @@ bdr_join_continue(BdrNodeState cur_state,
 
 	StartTransactionCommand();
 	/* Lock the state and decode extradata */
-	state_get_expected(&locked_state, true, cur_state);
+	state_get_expected(&locked_state, true, true, cur_state);
 
 	if (bdr_join_maintain_conn(local, locked_state.join_target_id))
 	{

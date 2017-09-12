@@ -41,7 +41,6 @@ state_has_extradata(BdrNodeState new_state)
 	{
 		case BDR_NODE_STATE_CREATED:
 		case BDR_NODE_STATE_ACTIVE:
-		case BDR_NODE_STATE_JOIN_START:
 		case BDR_NODE_STATE_JOIN_COPY_REMOTE_NODES:
 		case BDR_NODE_JOIN_SUBSCRIBE_JOIN_TARGET:
 		case BDR_NODE_STATE_WAIT_SUBSCRIBE_COMPLETE:
@@ -54,6 +53,7 @@ state_has_extradata(BdrNodeState new_state)
 		case BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE:
 		case BDR_NODE_STATE_REQUEST_GLOBAL_SEQ_ID:
 			return false;
+		case BDR_NODE_STATE_JOIN_START:
 		case BDR_NODE_STATE_JOIN_WAIT_CONFIRM:
 		case BDR_NODE_STATE_JOIN_WAIT_CATCHUP:
 		case BDR_NODE_STATE_WAIT_GLOBAL_SEQ_ID:
@@ -98,6 +98,13 @@ state_extradata_deserialize(StringInfo in, BdrNodeState state)
 
 	switch (state)
 	{
+		case BDR_NODE_STATE_JOIN_START:
+		{
+			struct ExtraDataJoinStart *extra = palloc(sizeof(struct ExtraDataJoinStart));
+			extra->group_name = pq_getmsgstring(in);
+			return extra;
+		}
+
 		case BDR_NODE_STATE_JOIN_WAIT_CONFIRM:
 		case BDR_NODE_STATE_WAIT_GLOBAL_SEQ_ID:
 		{
@@ -152,6 +159,13 @@ state_extradata_serialize(StringInfo out, BdrNodeState new_state,
 
 	switch (new_state)
 	{
+		case BDR_NODE_STATE_JOIN_START:
+		{
+			struct ExtraDataJoinStart *extra = extradata;
+			pq_sendstring(out, extra->group_name);
+			break;
+		}
+
 		case BDR_NODE_STATE_JOIN_WAIT_CONFIRM:
 		case BDR_NODE_STATE_WAIT_GLOBAL_SEQ_ID:
 		{
@@ -212,6 +226,8 @@ state_transition(BdrStateEntry *state, BdrNodeState new_state,
 {
 	BdrStateEntry cur;
 
+	Assert(state_has_extradata(new_state) != (extradata == NULL));
+
 	state_get_last(&cur, true /* for_update */, false /* no extradata */);
 	Assert(cur.counter != 0);
 
@@ -246,11 +262,11 @@ state_transition(BdrStateEntry *state, BdrNodeState new_state,
  */
 void
 state_get_expected_many(BdrStateEntry *state, bool for_update,
-	int nexpected, BdrNodeState *expected)
+	bool with_extradata, int nexpected, BdrNodeState *expected)
 {
 	int i;
 	BdrStateEntry cur;
-	state_get_last(&cur, for_update, false /* don't decode extradata */);
+	state_get_last(&cur, for_update, with_extradata);
 	for (i = 0; i < nexpected; i++)
 	{
 		if (cur.current == expected[i])
@@ -273,10 +289,10 @@ state_get_expected_many(BdrStateEntry *state, bool for_update,
  */
 void
 state_get_expected(BdrStateEntry *state, bool for_update,
-	BdrNodeState expected)
+	bool with_extradata, BdrNodeState expected)
 {
 	BdrStateEntry cur;
-	state_get_last(&cur, for_update, false /* no extradata */);
+	state_get_last(&cur, for_update, with_extradata);
 	if (cur.current == expected)
 	{
 		*state = cur;

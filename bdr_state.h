@@ -147,10 +147,10 @@ extern void state_extradata_serialize(StringInfo out, BdrNodeState new_state,
 extern void* state_extradata_deserialize(StringInfo in, BdrNodeState state);
 
 extern void state_get_expected(BdrStateEntry *state, bool for_update,
-	BdrNodeState expected);
+	bool want_extradata, BdrNodeState expected);
 
-extern void state_get_expected_many(BdrStateEntry *state, bool for_update, int nexpected,
-	BdrNodeState *expected);
+extern void state_get_expected_many(BdrStateEntry *state, bool for_update,
+	bool want_extradata, int nexpected, BdrNodeState *expected);
 
 extern void bdr_state_insert_initial(BdrNodeState initial);
 

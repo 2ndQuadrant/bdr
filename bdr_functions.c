@@ -196,7 +196,7 @@ bdr_create_node_group_sql(PG_FUNCTION_ARGS)
 	}
 
 	/* Lock state table for update and check state */
-	state_get_expected(&cur_state, true, BDR_NODE_STATE_CREATED);
+	state_get_expected(&cur_state, true, false, BDR_NODE_STATE_CREATED);
 
 	/*
 	 * BDR creates an 'internal' replication set with the same name as the BDR
@@ -267,6 +267,7 @@ bdr_join_node_group_sql(PG_FUNCTION_ARGS)
 	BdrNodeInfo *remote;
 	PGconn *conn;
 	BdrStateEntry cur_state;
+	ExtraDataJoinStart extra;
 
 	if (PG_ARGISNULL(0))
 		ereport(ERROR,
@@ -295,7 +296,7 @@ bdr_join_node_group_sql(PG_FUNCTION_ARGS)
 				 errmsg("local node is already a member of a nodegroup (%s), cannot join",
 				 		local->bdr_node_group->name)));
 
-	state_get_expected(&cur_state, true, BDR_NODE_STATE_CREATED);
+	state_get_expected(&cur_state, true, false, BDR_NODE_STATE_CREATED);
 
 	conn = bdr_join_connect_remote(local, join_target_dsn);
 
@@ -318,6 +319,7 @@ bdr_join_node_group_sql(PG_FUNCTION_ARGS)
 		Assert(remote->pgl_node->id == remote->bdr_node->node_id);
 
 		if (remote->bdr_node_group->name != NULL
+		    && node_group_name != NULL
 			&& strcmp(remote->bdr_node_group->name, node_group_name) != 0)
 		{
 			elog(ERROR, "remote node is member of nodegroup %s but we asked to join nodegroup %s",
@@ -336,8 +338,9 @@ bdr_join_node_group_sql(PG_FUNCTION_ARGS)
 		bdr_join_copy_remote_nodegroup(local, remote);
 		bdr_join_copy_remote_node(local, remote);
 
+		extra.group_name = node_group_name;
 		state_transition(&cur_state, BDR_NODE_STATE_JOIN_START,
-			remote->pgl_node->id, NULL);
+			remote->pgl_node->id, &extra);
 
 		/*
 		 * TODO: more sanity checks here. Connectback to validate our dsn, etc.

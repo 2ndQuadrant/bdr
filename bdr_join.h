@@ -14,6 +14,14 @@ struct WaitEvent;
 struct WaitEventSet;
 
 /*
+ * Extra data for BDR_NODE_STATE_JOIN_START
+ */
+typedef struct ExtraDataJoinStart
+{
+	const char * group_name;
+} ExtraDataJoinStart;
+
+/*
  * State journal extradata for BDR_NODE_STATE_JOIN_WAIT_CONFIRM
  * and BDR_NODE_STATE_WAIT_GLOBAL_SEQ_ID
  */

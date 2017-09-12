@@ -113,7 +113,7 @@ LANGUAGE c AS 'MODULE_PATHNAME','bdr_create_node_group_sql';
 COMMENT ON FUNCTION bdr.create_node_group(text) IS
 'Create a new local BDR node group and make the local node the first member';
 
-CREATE FUNCTION bdr.join_node_group(join_target_dsn text, node_group_name text)
+CREATE FUNCTION bdr.join_node_group(join_target_dsn text, node_group_name text DEFAULT NULL)
 RETURNS void CALLED ON NULL INPUT VOLATILE
 LANGUAGE c AS 'MODULE_PATHNAME','bdr_join_node_group_sql';
 
