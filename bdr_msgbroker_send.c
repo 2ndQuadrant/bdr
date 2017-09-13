@@ -1,5 +1,8 @@
 #include "postgres.h"
 
+#include <sys/time.h>
+#include <math.h>
+
 #include "catalog/pg_type.h"
 
 #include "fmgr.h"
@@ -56,8 +59,12 @@ typedef struct MsgbConnection
 	int msgb_msgid_counter;			/* next message ID to allocate */
 	MemoryContext queue_context;	/* memory context for MsgbMessageBuffer */
 	List *send_queue;				/* List of MsgbMessageBuffer */
-	/* TODO: need backoff timer */
+	time_t next_retry_ts;			/* Don't reconnect until this time */
+	int num_retries;				/* number of retries since last good connection */
 } MsgbConnection;
+
+#define MSGB_DEFAULT_RECONNECT_DELAY_S 2
+#define MSGB_MAX_RECONNECT_DELAY_S 600
 
 static inline bool
 ConnIsEventDriven(MsgbConnection *conn)
@@ -169,6 +176,8 @@ msgb_status_invariant(MsgbConnection *conn)
 			Assert(conn->destination_id != 0);
 			Assert(conn->dsn != NULL);
 			Assert(conn->pgconn != NULL);
+			if (conn->conn_status == MSGB_SEND_CONN_READY)
+				Assert(conn->num_retries == 0);
 			/*
 			 * We must have a defined wait-event index unless we're in the
 			 * middle of rebuilding the wait-event set, in which case we may
@@ -260,13 +269,12 @@ msgb_startup_send(void)
  *
  * We preserve the queue and counter, we're not throwing away messages here,
  * just trying to re-establish a connection.
- *
- * TODO: should update a random backoff timer here
  */
 static void
 msgb_clear_bad_connection(MsgbConnection *conn)
 {
-	ListCell *lc;
+	ListCell   *lc;
+	struct timeval tv_now;
 
 	msgb_status_invariant(conn);
 
@@ -302,6 +310,12 @@ msgb_clear_bad_connection(MsgbConnection *conn)
 	/* Reconnect please */
 	conn->conn_status = MSGB_SEND_CONN_PENDING_START;
 
+	/*. .. after a delay */
+	gettimeofday(&tv_now, NULL);
+	conn->next_retry_ts = tv_now.tv_sec
+		+ Min(MSGB_DEFAULT_RECONNECT_DELAY_S * (time_t)pow(2,conn->num_retries),
+			  MSGB_MAX_RECONNECT_DELAY_S);
+
 	/* remember to reconnect */
 	conns_polling = true;
 
@@ -316,9 +330,18 @@ static void
 msgb_start_connect(MsgbConnection *conn)
 {
 	int status;
+	struct timeval tv_now;
 
 	Assert(conn->conn_status == MSGB_SEND_CONN_PENDING_START);
 	msgb_status_invariant(conn);
+
+	gettimeofday(&tv_now, NULL);
+	if (tv_now.tv_sec < conn->next_retry_ts)
+	{
+		elog(DEBUG3, "broker not reconnecting to peer %u yet due to backoff delay",
+			conn->destination_id);
+		return;
+	}
 
 	conn->pgconn = PQconnectStart(conn->dsn);
 	if (conn->pgconn == NULL)
@@ -651,6 +674,8 @@ msgb_process_result(MsgbConnection *conn)
 			 * now ready for normal message delivery.
 			 */
 			conn->conn_status = MSGB_SEND_CONN_READY;
+			/* Successful connection, reset backoff counter */
+			conn->num_retries = 0;
 			elog(bdr_debug_level, "connection to %u is now ready",
 				 conn->destination_id);
 		}
