@@ -59,9 +59,15 @@ state_has_extradata(BdrNodeState new_state)
 		case BDR_NODE_STATE_WAIT_GLOBAL_SEQ_ID:
 		case BDR_NODE_STATE_JOIN_FAILED:
 			return true;
-		default:
-			elog(ERROR, "unhandled node state %u", new_state);
+		case BDR_NODE_STATE_JOIN_CAN_START_CONSENSUS:
+		case BDR_NODE_STATE_JOIN_RANGE_END:
+		case BDR_NODE_STATE_UNUSED:
+			Assert(false);
+			elog(ERROR, "reserved node state %u somehow got used", new_state);
 	}
+	/* This is deliberately not a default: so we get warnings */
+	Assert(false);
+	elog(ERROR, "unhandled node state %u", new_state);
 }
 
 /*
@@ -380,8 +386,10 @@ bdr_state_dispatch(long *max_next_wait_msecs)
 			bdr_join_continue(cur.current, max_next_wait_msecs);
 			return;
 
+		case BDR_NODE_STATE_JOIN_CAN_START_CONSENSUS:
+		case BDR_NODE_STATE_JOIN_RANGE_END:
 		case BDR_NODE_STATE_UNUSED:
 			Assert(false);
-			return;
+			elog(ERROR, "reserved node state %u somehow got used", cur.current);
 	}
 }

@@ -791,6 +791,8 @@ state_get_last(BdrStateEntry *state, bool for_update, bool fetch_extradata)
 	bool		found = false;
 	BdrStateEntry tmp;
 
+	Assert(IsTransactionState());
+
 	state_rv = makeRangeVar(BDR_EXTENSION_NAME, CATALOG_STATE, -1);
 	state_idx_rv = makeRangeVar(BDR_EXTENSION_NAME,
 								CATALOG_STATE_COUNTER_IDX, -1);

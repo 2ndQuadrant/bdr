@@ -44,6 +44,7 @@
 #include "bdr_msgbroker_send.h"
 #include "bdr_msgformats.h"
 #include "bdr_shmem.h"
+#include "bdr_state.h"
 #include "bdr_worker.h"
 
 typedef enum SubmitMQMessageType
@@ -126,9 +127,22 @@ static bool atexit_registered = false;
  */
 
 void
-bdr_start_consensus(int bdr_max_nodes)
+bdr_start_consensus(int bdr_max_nodes, BdrNodeState cur_state)
 {
 	Assert(is_bdr_manager());
+
+	/*
+	 * Node isn't ready for consensus manager startup yet. If it's during join,
+	 * the join process will make it start later on.
+	 */
+	if (cur_state < BDR_NODE_STATE_JOIN_CAN_START_CONSENSUS)
+		return;
+
+	/*
+	 * If we were already started earlier, take no action.
+	 */
+	if (my_manager != NULL)
+		return;
 
 	my_manager = bdr_shmem_lookup_manager_segment(bdr_get_local_nodeid(), false);
 
@@ -1023,6 +1037,10 @@ void
 bdr_messaging_wait_event(struct WaitEvent *events, int nevents,
 						 long *max_next_wait_ms)
 {
+	/* Bail out if the consensus system isn't loaded yet */
+	if (my_manager == NULL)
+		return;
+
 	/*
 	 * This is a good chance for us to check if we've had any new messages
 	 * submitted to us for processing.
@@ -1041,6 +1059,10 @@ void
 bdr_messaging_wait_event_set_recreated(struct WaitEventSet *new_set)
 {
 	if (!bdr_is_active_db())
+		return;
+
+	/* Bail out if the consensus system isn't loaded yet */
+	if (my_manager == NULL)
 		return;
 
 	msgb_wait_event_set_recreated(new_set);

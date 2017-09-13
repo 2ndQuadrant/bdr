@@ -181,11 +181,11 @@ bdr_join_maintain_conn(BdrNodeInfo *local, uint32 target_id)
 		switch (PQconnectPoll(join.conn))
 		{
 			case PGRES_POLLING_FAILED:
-				bdr_join_reset_connection();
 				ereport(WARNING,
 						(errmsg("failed to connect to remote BDR node %s",
 								join.target->pgl_node->name),
 						 errdetail("libpq: %s", PQerrorMessage(join.conn))));
+				bdr_join_reset_connection();
 				/* TODO: rate limit reconnections */
 				break;
 
@@ -300,11 +300,17 @@ bdr_join_submit_request(const char * node_group_name)
 /*
  * Return true if there's a result ready to read on the current
  * join.conn
+ *
+ * It's legal to call this when we're not actually expecting a result, e.g.
+ * due to the connection being reset. It's assumed that you'll be in a loop
+ * with bdr_join_maintain_conn where you'll notice by testing
+ * join.query_result_pending and re-issue the query on the new connection.
  */
 static bool
 check_for_query_result(void)
 {
-	Assert(join.query_result_pending);
+	if (!join.query_result_pending)
+		return false;
 
 	if (!PQconsumeInput(join.conn))
 	{
@@ -351,10 +357,11 @@ bdr_join_submit_get_result(void)
 
 		if (PQresultStatus(res) != PGRES_TUPLES_OK)
 		{
+			const char *msg = pstrdup(PQresultErrorMessage(res));
 			PQclear(res);
 			ereport(ERROR,
 					(errmsg("failed to submit join request on join target"),
-					 errdetail("libpq: %s", PQerrorMessage(join.conn))));
+					 errdetail("libpq: %s", msg)));
 		}
 
 		val = PQgetvalue(res, 0, 0);
@@ -567,10 +574,11 @@ bdr_join_submit_outcome_get_result(void)
 
 		if (PQresultStatus(res) != PGRES_TUPLES_OK)
 		{
+			const char *msg = pstrdup(PQresultErrorMessage(res));
 			PQclear(res);
 			ereport(ERROR,
 					(errmsg("failed to submit join request outcome query on join target"),
-					 errdetail("libpq: %s", PQerrorMessage(join.conn))));
+					 errdetail("libpq: %s", msg)));
 		}
 
 		val = PQgetvalue(res, 0, 0);
@@ -646,6 +654,7 @@ bdr_join_continue_wait_confirm(BdrStateEntry *cur_state, BdrNodeInfo *local)
 					cur_state->join_target_id, &new_extra);
 				ereport(WARNING,
 						(errmsg("BDR node join has failed - could not achieve consensus on join")));
+
 				break;
 			}
 			case CONSENSUS_MESSAGE_IN_PROGRESS:
@@ -893,9 +902,10 @@ finish_get_remote_node_info(PGconn *conn)
 
 	if (PQresultStatus(res) != PGRES_TUPLES_OK)
 	{
+		const char *msg = pstrdup(PQresultErrorMessage(res));
 		PQclear(res);
 		ereport(ERROR,
-				(errmsg("failed to get remote node info: %s", PQerrorMessage(conn))));
+				(errmsg("failed to get remote node info: %s", msg)));
 	}
 
 	if (PQntuples(res) == 0)
@@ -1056,9 +1066,10 @@ bdr_join_finish_copy_remote_nodes(BdrNodeInfo *local)
 
 	if (PQresultStatus(res) != PGRES_TUPLES_OK)
 	{
+		const char *msg = pstrdup(PQerrorMessage(join.conn));
 		PQclear(res);
 		ereport(ERROR,
-				(errmsg("failed to get remote node list: %s", PQerrorMessage(join.conn))));
+				(errmsg("failed to get remote node list: %s", msg)));
 	}
 
 	if (PQntuples(res) == 0)
@@ -1140,14 +1151,15 @@ bdr_join_continue_get_catchup_lsn(BdrStateEntry *cur_state, BdrNodeInfo *local)
 
 	if (!join.query_result_pending)
 	{
-		if (!PQsendQuery(join.conn, "SELECT pg_current_wal_insert_lsn()"))
+		if (PQsendQuery(join.conn, "SELECT * FROM pg_current_wal_insert_lsn()"))
+			join.query_result_pending = true;
+		else
 		{
 			ereport(WARNING,
 					(errmsg("failed to submit remote lsn request on target - couldn't send query"),
 					 errdetail("libpq: %s", PQerrorMessage(join.conn))));
 			bdr_join_reset_connection();
 		}
-		join.query_result_pending = true;
 	}
 
 	/* wait for server to reply with progress handle for join */
@@ -1158,6 +1170,14 @@ bdr_join_continue_get_catchup_lsn(BdrStateEntry *cur_state, BdrNodeInfo *local)
 		const char *val;
 
 		res = PQgetResult(join.conn);
+
+		if (PQresultStatus(res) != PGRES_TUPLES_OK)
+		{
+			const char *msg = pstrdup(PQresultErrorMessage(res));
+			ereport(ERROR,
+					(errmsg("failed to query join target for pg_current_wal_insert_lsn()"),
+					 errdetail("libpq: %s: %s", PQresStatus(PQresultStatus(res)), msg)));
+		}
 
 		val = PQgetvalue(res, 0, 0);
 		extra.min_catchup_lsn =
@@ -1319,19 +1339,20 @@ bdr_join_continue_subscribe_join_target(BdrStateEntry *cur_state, BdrNodeInfo *l
 	if (!join.query_result_pending)
 	{
 		if (start_get_remote_node_info(join.conn))
+			join.query_result_pending = true;
+		else
 		{
 			ereport(WARNING,
 					(errmsg("unable to submit remote node info query"),
 					 errdetail("libpq: %s", PQerrorMessage(join.conn))));
 			bdr_join_reset_connection();
 		}
-		else
-			join.query_result_pending = true;
 	}
 
 	if (check_for_query_result())
 	{
 		BdrNodeInfo *remote = finish_get_remote_node_info(join.conn);
+		join.query_result_pending = false;
 		bdr_create_subscription(local, remote, 0, true);
 
 		state_transition(cur_state, BDR_NODE_STATE_WAIT_SUBSCRIBE_COMPLETE,
@@ -1348,10 +1369,13 @@ bdr_join_continue_wait_subscribe_complete(BdrStateEntry *cur_state, BdrNodeInfo 
 
 	Assert(cur_state->current == BDR_NODE_STATE_WAIT_SUBSCRIBE_COMPLETE);
 
-	subs = bdr_get_node_subscriptions(cur_state->join_target_id);
-	/* Only one BDR sub should exist right now */
-	Assert(list_length(subs) == 1);
+	subs = bdr_get_node_subscriptions(bdr_get_local_nodeid());
 
+	/*
+	 * Only one BDR sub should exist. We created it earlier, we're just waiting
+	 * for it to sync now.
+	 */
+	Assert(list_length(subs) == 1);
 	sub = linitial(subs);
 	Assert(sub->target->id == bdr_get_local_nodeid());
 	Assert(sub->origin->id == cur_state->join_target_id);
@@ -1380,10 +1404,12 @@ bdr_join_continue_wait_catchup(BdrStateEntry *cur_state, BdrNodeInfo *local)
 	Assert(cur_state->current == BDR_NODE_STATE_JOIN_WAIT_CATCHUP);
 	extra = cur_state->extra_data;
 
-	subs = bdr_get_node_subscriptions(cur_state->join_target_id);
+	subs = bdr_get_node_subscriptions(bdr_get_local_nodeid());
 	/* Only one BDR sub should exist right now */
 	Assert(list_length(subs) == 1);
 	sub = linitial(subs);
+	Assert(sub->target->id == bdr_get_local_nodeid());
+	Assert(sub->origin->id == cur_state->join_target_id);
 
 	origin_id = replorigin_by_name(sub->slot_name, false);
 

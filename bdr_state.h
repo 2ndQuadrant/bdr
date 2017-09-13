@@ -12,9 +12,9 @@ typedef enum BdrNodeState
 	BDR_NODE_STATE_CREATED = 1,
 
 	/*
-	 * Nodegroup is fully active as a participating member
+	 * Join failure, oops.
 	 */
-	BDR_NODE_STATE_ACTIVE,
+	BDR_NODE_STATE_JOIN_FAILED = 2,
 
 	/*
 	 * Join phases are discrete states, so we can follow join progress in
@@ -38,6 +38,14 @@ typedef enum BdrNodeState
 	 * nodes entries.
 	 */
 	BDR_NODE_STATE_JOIN_COPY_REMOTE_NODES,
+
+	/*
+	 * This state is never actually entered. It's a marker for when the
+	 * consensus system should be started during join. Anything
+	 * prior to it has the consensus system suppressed, anything after it
+	 * has it enabled.
+	 */
+	BDR_NODE_STATE_JOIN_CAN_START_CONSENSUS,
 	
 	/*
 	 * Create the subscription to the join target node, so we dump its
@@ -117,9 +125,15 @@ typedef enum BdrNodeState
 	BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE,
 
 	/*
-	 * Join failure, oops.
+	 * This is a placeholder for the end of the range of join states.
+	 * We never enter this state.
 	 */
-	BDR_NODE_STATE_JOIN_FAILED = 300
+	BDR_NODE_STATE_JOIN_RANGE_END = 299,
+
+	/*
+	 * Nodegroup is fully active as a participating member
+	 */
+	BDR_NODE_STATE_ACTIVE = 500
 
 } BdrNodeState;
 

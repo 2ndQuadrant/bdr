@@ -679,8 +679,8 @@ enum ConsensusProposalStatus {
 enum ConsensusProposalStatus
 consensus_proposals_status(uint64 handle)
 {
-	elog(WARNING, "not implemented");
-	return CONSENSUS_MESSAGE_FAILED;
+	elog(WARNING, "consensus message status checks not implemented, assuming success");
+	return CONSENSUS_MESSAGE_ACCEPTED;
 }
 
 /*

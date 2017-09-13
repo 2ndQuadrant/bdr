@@ -85,7 +85,8 @@ typedef struct BdrMessage
 
 #define BdrMessageSize(msg) (offsetof(BdrMessage, payload) + msg->payload_length)
 
-extern void bdr_start_consensus(int max_nodes);
+enum BdrNodeState;
+extern void bdr_start_consensus(int max_nodes, enum BdrNodeState cur_state);
 extern void bdr_shutdown_consensus(void);
 
 /*

@@ -15,6 +15,8 @@
 
 #include "access/xact.h"
 
+#include "commands/dbcommands.h"
+
 #include "miscadmin.h"
 
 #include "replication/slot.h"
@@ -49,6 +51,8 @@ static bool atexit_registered = false;
  */
 static bool bdr_is_active_in_manager = false;
 
+static void report_failure_reason(void);
+
 /*
  * This hook runs when pglogical's manager worker starts. It brings up the BDR
  * subsystems needed to do inter-node state management.
@@ -60,12 +64,20 @@ static bool bdr_is_active_in_manager = false;
 void
 bdr_manager_worker_start(void)
 {
+	BdrStateEntry cur_state;
+
 	bdr_max_nodes = Min(max_worker_processes, max_replication_slots);
 	if (!bdr_is_active_db())
 	{
 		elog(bdr_debug_level, "BDR not configured on db %u", MyDatabaseId);
 		return;
 	}
+
+	StartTransactionCommand();
+	state_get_last(&cur_state, false, false);
+	CommitTransactionCommand();
+	if (cur_state.current == BDR_NODE_STATE_JOIN_FAILED)
+		report_failure_reason();
 
 	elog(bdr_debug_level, "configuring BDR manager on %s (%u) for up to %d nodes (unless other resource limits hit)",
 		 bdr_get_local_node_name(), bdr_get_local_nodeid(), bdr_max_nodes);
@@ -80,7 +92,7 @@ bdr_manager_worker_start(void)
 
 	my_manager = bdr_shmem_allocate_manager_segment(bdr_get_local_nodeid());
 
-	bdr_start_consensus(bdr_max_nodes);
+	bdr_start_consensus(bdr_max_nodes, cur_state.current);
 }
 
 static void
@@ -182,4 +194,23 @@ bdr_get_wait_event_space_needed(void)
 {
 	return bdr_join_get_wait_event_space_needed()
 		   + bdr_messaging_get_wait_event_space_needed(); 
+}
+
+static void
+report_failure_reason(void)
+{
+	BdrStateEntry cur_state;
+	const char * dbname;
+	ExtraDataJoinFailure *extra;
+
+	state_get_last(&cur_state, false, true);
+	extra = cur_state.extra_data;
+	if (!IsTransactionState())
+		StartTransactionCommand();
+	dbname = get_database_name(MyDatabaseId);
+	ereport(ERROR,
+			(errmsg("BDR node join previously failed, cannot start BDR"),
+			 errdetail("join failed with: %s", extra->reason),
+			 errhint("Drop the database '%s', re-create it, and try joining again",
+				dbname)));
 }
