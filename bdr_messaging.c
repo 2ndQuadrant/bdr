@@ -447,6 +447,7 @@ static void
 bdr_attach_manager_queue(void)
 {
 	shm_mq *recvq, *sendq;
+	MemoryContext old_ctx;
 
 	Assert(!is_bdr_manager());
 
@@ -481,6 +482,7 @@ bdr_attach_manager_queue(void)
 		atexit_registered = true;
 	}
 
+
 	/*
 	 * We must attach to both queues under a lock that prevents
 	 * them being concurrently clobbered by the manager. Once
@@ -490,11 +492,13 @@ bdr_attach_manager_queue(void)
 	 * we can't copy them into shmem because they're an opaque struct.
 	 */
 	LWLockAcquire(bdr_ctx->lock, LW_EXCLUSIVE);
+	old_ctx = MemoryContextSwitchTo(submit_mq.mq_context);
 	shm_mq_set_receiver(recvq, MyProc);
 	shm_mq_set_sender(sendq, MyProc);
 	submit_mq.sendq_handle = shm_mq_attach(sendq, NULL, NULL);
 	submit_mq.recvq_handle = shm_mq_attach(recvq, NULL, NULL);
 	my_manager->peer_attached = true;
+	(void) MemoryContextSwitchTo(old_ctx);
 	LWLockRelease(bdr_ctx->lock);
 
 	submit_mq.recvbuf = NULL;
