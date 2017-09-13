@@ -364,10 +364,12 @@ bdr_join_submit_get_result(void)
 		PQclear(res);
 
 		/*
-		 * TODO: We're supposed to keep reading until we get NULL. We know
-		 * there should only be one result set, though, so we're just going to
-		 * wing it for now.
+		 * We know there's only one result set, so this really shouldn't
+		 * block for long. It's a bit naughty to check it here without
+		 * testing if we'll block first, but it really should be safe...
 		 */
+		res = PQgetResult(join.conn);
+		Assert(res == NULL);
 
 		join.query_result_pending = false;
 	}
@@ -578,10 +580,12 @@ bdr_join_submit_outcome_get_result(void)
 		PQclear(res);
 
 		/*
-		 * TODO: We're supposed to keep reading until we get NULL. We know
-		 * there should only be one result set, though, so we're just going to
-		 * wing it for now.
+		 * We know there's only one result set, so this really shouldn't
+		 * block for long. It's a bit naughty to check it here without
+		 * testing if we'll block first, but it really should be safe...
 		 */
+		res = PQgetResult(join.conn);
+		Assert(res == NULL);
 
 		join.query_result_pending = false;
 	}
@@ -901,6 +905,14 @@ finish_get_remote_node_info(PGconn *conn)
 
 	PQclear(res);
 
+	/*
+	 * We know there's only one result set, so this really shouldn't
+	 * block for long. It's a bit naughty to check it here without
+	 * testing if we'll block first, but it really should be safe...
+	 */
+	res = PQgetResult(join.conn);
+	Assert(res == NULL);
+
 	return remote;
 }
 
@@ -1076,6 +1088,14 @@ bdr_join_finish_copy_remote_nodes(BdrNodeInfo *local)
 			bdr_node_create(peer->bdr_node);
 	}
 
+	/*
+	 * We know there's only one result set, so this really shouldn't
+	 * block for long. It's a bit naughty to check it here without
+	 * testing if we'll block first, but it really should be safe...
+	 */
+	res = PQgetResult(join.conn);
+	Assert(res == NULL);
+
 	join.query_result_pending = false;
 }
 
@@ -1146,6 +1166,14 @@ bdr_join_continue_get_catchup_lsn(BdrStateEntry *cur_state, BdrNodeInfo *local)
 		PQclear(res);
 		state_transition(cur_state, BDR_NODE_STATE_JOIN_WAIT_CATCHUP,
 			cur_state->join_target_id, &extra);
+
+		/*
+		 * We know there's only one result set, so this really shouldn't
+		 * block for long. It's a bit naughty to check it here without
+		 * testing if we'll block first, but it really should be safe...
+		 */
+		res = PQgetResult(join.conn);
+		Assert(res == NULL);
 	}
 }
 
