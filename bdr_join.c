@@ -1180,6 +1180,8 @@ bdr_join_continue_get_catchup_lsn(BdrStateEntry *cur_state, BdrNodeInfo *local)
 		}
 
 		val = PQgetvalue(res, 0, 0);
+		elog(bdr_debug_level, "BDR join of %u waiting for replay past origin lsn %s",
+			 bdr_get_local_nodeid(), val);
 		extra.min_catchup_lsn =
 			DatumGetLSN(DirectFunctionCall1(pg_lsn_in, CStringGetDatum(val)));
 
@@ -1412,6 +1414,7 @@ bdr_join_continue_wait_catchup(BdrStateEntry *cur_state, BdrNodeInfo *local)
 	Assert(sub->origin->id == cur_state->join_target_id);
 
 	origin_id = replorigin_by_name(sub->slot_name, false);
+	Assert(origin_id != InvalidRepOriginId);
 
 	/*
 	 * We need to continue replay until our subscription to the join
@@ -1421,9 +1424,16 @@ bdr_join_continue_wait_catchup(BdrStateEntry *cur_state, BdrNodeInfo *local)
 	cur_progress = replorigin_get_progress(origin_id, false);
 	if ( cur_progress > extra->min_catchup_lsn )
 	{
+		elog(LOG, "%u replayed past minimum recovery lsn %X/%X",
+			 (uint32)(extra->min_catchup_lsn>>32), (uint32)extra->min_catchup_lsn);
 		state_transition(cur_state, BDR_NODE_STATE_JOIN_COPY_REPSET_MEMBERSHIPS,
 			cur_state->join_target_id, NULL);
 	}
+	else
+		elog(bdr_debug_level, "%u waiting for origin '%s' to replay past %X/%X; currently %X/%X",
+			 bdr_get_local_nodeid(), sub->slot_name,
+			 (uint32)(extra->min_catchup_lsn>>32), (uint32)extra->min_catchup_lsn,
+			 (uint32)(cur_progress>>32), (uint32)cur_progress);
 }
 
 static void

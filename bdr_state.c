@@ -70,6 +70,59 @@ state_has_extradata(BdrNodeState new_state)
 	elog(ERROR, "unhandled node state %u", new_state);
 }
 
+/* Sometimes I hate C */
+const char *
+bdr_node_state_name(BdrNodeState state)
+{
+	switch (state)
+	{
+		case BDR_NODE_STATE_CREATED:
+			return CppAsString2(BDR_NODE_STATE_CREATED);
+		case BDR_NODE_STATE_ACTIVE:
+			return CppAsString2(BDR_NODE_STATE_ACTIVE);
+		case BDR_NODE_STATE_JOIN_COPY_REMOTE_NODES:
+			return CppAsString2(BDR_NODE_STATE_JOIN_COPY_REMOTE_NODES);
+		case BDR_NODE_JOIN_SUBSCRIBE_JOIN_TARGET:
+			return CppAsString2(BDR_NODE_JOIN_SUBSCRIBE_JOIN_TARGET);
+		case BDR_NODE_STATE_WAIT_SUBSCRIBE_COMPLETE:
+			return CppAsString2(BDR_NODE_STATE_WAIT_SUBSCRIBE_COMPLETE);
+		case BDR_NODE_STATE_JOIN_GET_CATCHUP_LSN:
+			return CppAsString2(BDR_NODE_STATE_JOIN_GET_CATCHUP_LSN);
+		case BDR_NODE_STATE_JOIN_COPY_REPSET_MEMBERSHIPS:
+			return CppAsString2(BDR_NODE_STATE_JOIN_COPY_REPSET_MEMBERSHIPS);
+		case BDR_NODE_STATE_JOIN_CREATE_SUBSCRIPTIONS:
+			return CppAsString2(BDR_NODE_STATE_JOIN_CREATE_SUBSCRIPTIONS);
+		case BDR_NODE_STATE_SEND_CATCHUP_READY:
+			return CppAsString2(BDR_NODE_STATE_SEND_CATCHUP_READY);
+		case BDR_NODE_STATE_STANDBY:
+			return CppAsString2(BDR_NODE_STATE_STANDBY);
+		case BDR_NODE_STATE_CREATE_SLOTS:
+			return CppAsString2(BDR_NODE_STATE_CREATE_SLOTS);
+		case BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE:
+			return CppAsString2(BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE);
+		case BDR_NODE_STATE_REQUEST_GLOBAL_SEQ_ID:
+			return CppAsString2(BDR_NODE_STATE_REQUEST_GLOBAL_SEQ_ID);
+		case BDR_NODE_STATE_JOIN_START:
+			return CppAsString2(BDR_NODE_STATE_JOIN_START);
+		case BDR_NODE_STATE_JOIN_WAIT_CONFIRM:
+			return CppAsString2(BDR_NODE_STATE_JOIN_WAIT_CONFIRM);
+		case BDR_NODE_STATE_JOIN_WAIT_CATCHUP:
+			return CppAsString2(BDR_NODE_STATE_JOIN_WAIT_CATCHUP);
+		case BDR_NODE_STATE_WAIT_GLOBAL_SEQ_ID:
+			return CppAsString2(BDR_NODE_STATE_WAIT_GLOBAL_SEQ_ID);
+		case BDR_NODE_STATE_JOIN_FAILED:
+			return CppAsString2(BDR_NODE_STATE_JOIN_FAILED);
+		case BDR_NODE_STATE_JOIN_CAN_START_CONSENSUS:
+			return CppAsString2(BDR_NODE_STATE_JOIN_CAN_START_CONSENSUS);
+		case BDR_NODE_STATE_JOIN_RANGE_END:
+			return CppAsString2(BDR_NODE_STATE_JOIN_RANGE_END);
+		case BDR_NODE_STATE_UNUSED:
+			return CppAsString2(BDR_NODE_STATE_UNUSED);
+	}
+	Assert(false);
+	elog(ERROR, "unhandled node state %u", state);
+}
+
 /*
  * Deserialize state extra data, of a state-specific type identified
  * by 'state' and return a palloc'd struct with the deserialized
@@ -249,8 +302,10 @@ state_transition(BdrStateEntry *state, BdrNodeState new_state,
 	cur.join_target_id = join_target_id;
 	cur.extra_data = extradata;
 
-	elog(bdr_debug_level, "node %u state transition #%u, %u => %u",
-		 bdr_get_local_nodeid(), cur.counter, state->current, cur.current);
+	elog(bdr_debug_level, "node %u state transition #%u, %s => %s",
+		 bdr_get_local_nodeid(), cur.counter,
+		 bdr_node_state_name(state->current),
+		 bdr_node_state_name(cur.current));
 
 	state_push(&cur);
 

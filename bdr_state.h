@@ -152,6 +152,8 @@ typedef struct BdrStateEntry
 	void		   *extra_data;
 } BdrStateEntry;
 
+extern const char * bdr_node_state_name(BdrNodeState state);
+
 extern void state_transition(BdrStateEntry *state, BdrNodeState new_state,
 	uint32 join_target_id, void *extradata);
 
