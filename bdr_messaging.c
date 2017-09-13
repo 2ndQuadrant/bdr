@@ -874,13 +874,24 @@ bdr_msgs_finish_enqueue(void)
 ConsensusProposalStatus
 bdr_msg_get_outcome(uint64 msg_handle)
 {
-	/*
-	 * TODO: For now only works in manager worker, see comments
-	 * in bdr_consensus.c prelude for how to change that.
-	 */
-	Assert(is_bdr_manager());
-
-	return consensus_proposals_status(msg_handle);
+	if (is_bdr_manager())
+	{
+		return consensus_proposals_status(msg_handle);
+	}
+	else
+	{
+		SubmitMQMessage *msg;
+		/*
+		 * TODO: We don't release the queue until proc exit, so we'll hold
+		 * up any other peers who want to talk to the manager. Not fixing properly
+		 * because the improved messaging that's coming will have a pool.
+		 */
+		bdr_attach_manager_queue();
+		msg = bdr_submit_manager_queue(MSG_QUERY_STATUS, 0, NULL);
+		Assert(msg->msg_type == MSG_QUERY_STATUS_RESULT);
+		Assert(msg->payload_length == sizeof(uint32));
+		return (ConsensusProposalStatus)(*((int32*)msg->payload));
+	}
 }
 
 static bool

@@ -795,8 +795,7 @@ bdr_submit_comment(PG_FUNCTION_ARGS)
 	uint64 handle;
 	char handle_str[33];
 
-	if (!bdr_is_active_db())
-		elog(ERROR, "BDR is not active in this database");
+	(void) bdr_check_local_node(false);
 
 	handle = bdr_msgs_enqueue_one(BDR_MSG_COMMENT, (void*)dummy_payload);
 	if (handle == 0)
@@ -818,6 +817,8 @@ bdr_consensus_message_outcome(PG_FUNCTION_ARGS)
 {
 	const char * handle_str = text_to_cstring(PG_GETARG_TEXT_P(0));
 	uint64 handle;
+
+	(void) bdr_check_local_node(false);
 
 	if (sscanf(handle_str, UINT64_FORMAT, &handle) != 1)
 		elog(ERROR, "could not parse %s as uint64", handle_str);

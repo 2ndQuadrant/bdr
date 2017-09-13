@@ -313,7 +313,7 @@ check_for_query_result(void)
 				 errdetail("libpq: %s", PQerrorMessage(join.conn))));
 		 bdr_join_reset_connection();
 	}
-	return (!PQisBusy(join.conn));
+	return (PQstatus(join.conn) == CONNECTION_OK && !PQisBusy(join.conn));
 }
 
 /*
