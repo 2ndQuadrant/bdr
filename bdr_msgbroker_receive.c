@@ -423,7 +423,7 @@ peer_detach(void)
 		hdr->node_toc_map[hdr_idx].active_pid = -1;
 		SpinLockRelease(&hdr->mutex);
 
-		elog(bdr_debug_level, "peer %d detached from message queue", connected_peer_id);
+		elog(bdr_debug_level, "peer %u detached from message queue", connected_peer_id);
 
 		active_node_toc_entry = -1;
 		connected_peer_id = 0;
