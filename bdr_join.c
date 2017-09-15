@@ -457,6 +457,7 @@ bdr_join_handle_join_proposal(BdrMessage *msg)
 	BdrStateEntry cur_state;
 
 	Assert(is_bdr_manager());
+	Assert(msg->message_type == BDR_MSG_NODE_JOIN_REQUEST);
 	state_get_expected(&cur_state, true, true, BDR_NODE_STATE_ACTIVE);
 
 	local_nodegroup = bdr_get_nodegroup_by_name(req->nodegroup_name, false);
@@ -538,8 +539,9 @@ bdr_join_handle_join_proposal(BdrMessage *msg)
 }
 
 /*
- * Respond to a BDR_NODE_STATE_ACTIVE_SLOT_CREATE_PENDING request by
- * creating a slot for the peer and returning to BDR_NODE_STATE_ACTIVE.
+ * Respond to a BDR_MSG_NODE_JOIN_REQUEST request's
+ * BDR_NODE_STATE_ACTIVE_SLOT_CREATE_PENDING state by creating a slot for the
+ * peer and returning to BDR_NODE_STATE_ACTIVE.
  */
 void
 bdr_join_create_peer_slot(void)
@@ -557,6 +559,15 @@ bdr_join_create_peer_slot(void)
 	bdr_join_create_slot(local, remote);
 
 	state_transition(&cur_state, BDR_NODE_STATE_ACTIVE, 0, NULL);
+
+	/*
+	 * TODO: should set local state for peer node entry.
+	 */
+
+	/*
+	 * TODO: write a catchup-confirmation message
+	 * here, so the peer can tally join confirmations
+	 */
 	CommitTransactionCommand();
 }
 
@@ -744,20 +755,17 @@ bdr_join_handle_catchup_proposal(BdrMessage *msg)
 
 	if (local->bdr_node->node_id != msg->originator_id)
 	{
+		/*
+		 * Just like in bdr_node_join_handle_proposal, we can't create the slot
+		 * here if we might have done writes or if we expect to do 2PC. We have
+		 * to transition to a temporary local state to queue the slot creation
+		 * for after we accept this, instead.
+		 */
 		BdrStateEntry cur_state;
-		BdrNodeInfo *remote = bdr_get_node_info(msg->originator_id, false);
-		state_get_expected(&cur_state, false, false,
+		state_get_expected(&cur_state, true, false,
 			BDR_NODE_STATE_ACTIVE);
-		bdr_join_create_slot(local, remote);
-
-		/*
-		 * TODO: should set local state to catchup for peer node entry
-		 */
-
-		/*
-		 * TODO: write a catchup-confirmation message
-		 * here, so the peer can tally join confirmations
-		 */
+		state_transition(&cur_state, BDR_NODE_STATE_ACTIVE_SLOT_CREATE_PENDING,
+			msg->originator_id, NULL);
 	}
 	else
 	{
