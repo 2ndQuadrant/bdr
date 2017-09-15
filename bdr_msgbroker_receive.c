@@ -250,10 +250,14 @@ msgb_connect_shmem(uint32 origin_node)
 	 		/*
 			 * TODO: sleep and retry here instead of ERRORing? We know BDR is active for this
 			 * node so the message broker should come up soon.
+			 *
+			 * TODO: send nodegroup IDs so we can check nodegroup match?
 			 */
 			ereport(ERROR,
 					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-					 errmsg("no receiver found for node id %u", local_node)));
+					 errmsg("no msgbroker receiver found on node id %u while establishing connection from %u",
+						 	local_node, origin_node),
+					 errdetail("BDR is not fully up yet or this node isn't part of the same node group")));
 		}
 	}
 

@@ -163,15 +163,14 @@ consensus_add_node(uint32 node_id, const char *dsn, bool update_if_found)
 	int first_free = -1;
 	int i;
 
+	Assert(consensus_max_nodes > 0);
+
 	if (node_id == bdr_get_local_nodeid())
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("cannot add own node to consensus manager")));
 	}
-
-	if (consensus_state >= CONSENSUS_STARTING)
-		msgb_add_peer(node_id, dsn);
 
 	for (i = 0; i < consensus_max_nodes; i++)
 	{
@@ -191,9 +190,20 @@ consensus_add_node(uint32 node_id, const char *dsn, bool update_if_found)
 					 errmsg("node %u already registered in consensus manager",
 							node_id)));
 	}
+	else
+	{
+		if (first_free == -1)
+			ereport(ERROR,
+					(errcode(ERRCODE_INSUFFICIENT_RESOURCES),
+					 errmsg("adding node %u exceeds max nodes limit %d on %u",
+							node_id, consensus_max_nodes, bdr_get_local_nodeid())));
 
-	node = &consensus_nodes[first_free];
-	node->node_id = node_id;
+		if (consensus_state >= CONSENSUS_STARTING)
+			msgb_add_peer(node_id, dsn);
+
+		node = &consensus_nodes[first_free];
+		node->node_id = node_id;
+	}
 
 	/* TODO: handle any in progress proposal */
 }

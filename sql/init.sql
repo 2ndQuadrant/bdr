@@ -64,6 +64,13 @@ SELECT slot_name FROM pg_create_logical_replication_slot(pglogical.pglogical_gen
 
 \c :node1_dsn
 
+-- A dummy transaction will help make sure we make prompt progress.
+SELECT txid_current();
+
+-- Forcing a checkpoint will force out replication origins and make us
+-- advance more promptly too.
+CHECKPOINT;
+
 DO LANGUAGE plpgsql $$
 BEGIN
   WHILE NOT EXISTS (SELECT 1 FROM pglogical.show_subscription_status() WHERE status = 'replicating')

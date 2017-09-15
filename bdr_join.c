@@ -50,6 +50,7 @@
 #include "bdr_catcache.h"
 #include "bdr_functions.h"
 #include "bdr_join.h"
+#include "bdr_manager.h"
 #include "bdr_messaging.h"
 #include "bdr_msgformats.h"
 #include "bdr_state.h"
@@ -153,6 +154,19 @@ bdr_join_maintain_conn(BdrNodeInfo *local, uint32 target_id)
 		old_ctx = MemoryContextSwitchTo(join.mctx);
 		join.target = bdr_get_node_info(target_id, false);
 		(void) MemoryContextSwitchTo(old_ctx);
+	}
+
+	if (PQstatus(join.conn) == CONNECTION_OK)
+	{
+		/*
+		 * We consume input here because we want to clear any notices, etc,
+		 * that might be on the connection, notice when it breaks etc, even if
+		 * we're in a join phase that doesn't use the connection right now.
+		 * 
+		 * This lets us update the wait-event state appropriately too.
+		 */
+		if (!PQconsumeInput(join.conn))
+			bdr_join_reset_connection();
 	}
 
 	if (join.conn != NULL && PQstatus(join.conn) == CONNECTION_BAD)
@@ -302,9 +316,10 @@ bdr_join_submit_request(const char * node_group_name)
  * join.conn
  *
  * It's legal to call this when we're not actually expecting a result, e.g.
- * due to the connection being reset. It's assumed that you'll be in a loop
- * with bdr_join_maintain_conn where you'll notice by testing
- * join.query_result_pending and re-issue the query on the new connection.
+ * due to the connection being reset.
+ *
+ * This must be called in conjunction with bdr_join_maintain_conn to
+ * consume input, establish/continue/fix connections, etc.
  */
 static bool
 check_for_query_result(void)
@@ -312,25 +327,20 @@ check_for_query_result(void)
 	if (!join.query_result_pending)
 		return false;
 
-	if (!PQconsumeInput(join.conn))
-	{
-		ereport(WARNING,
-				(errmsg("connection to join target broke"),
-				 errdetail("libpq: %s", PQerrorMessage(join.conn))));
-		 bdr_join_reset_connection();
-	}
 	return (PQstatus(join.conn) == CONNECTION_OK && !PQisBusy(join.conn));
 }
 
 /*
- * Sleep safely in the backend. Basically pg_sleep.
+ * Sleep safely in the backend. Basically pg_sleep + wait for socket read.
  */
 static void
 backend_sleep_conn(int millis, PGconn *conn)
 {
 	int latchret = WaitLatchOrSocket(&MyProc->procLatch,
-		WL_TIMEOUT|WL_LATCH_SET|WL_SOCKET_READABLE|WL_SOCKET_WRITEABLE|WL_POSTMASTER_DEATH,
+		WL_TIMEOUT|WL_LATCH_SET|WL_POSTMASTER_DEATH|WL_SOCKET_READABLE,
 		PQsocket(conn), millis, PG_WAIT_EXTENSION);
+
+	ResetLatch(&MyProc->procLatch);
 
 	if (latchret & WL_POSTMASTER_DEATH)
 		proc_exit(0);
@@ -1113,7 +1123,6 @@ bdr_join_finish_copy_remote_nodes(BdrNodeInfo *local)
 static void
 bdr_join_continue_copy_remote_nodes(BdrStateEntry *cur_state, BdrNodeInfo *local)
 {
-	bool nodes_changed = false;
 	Assert(cur_state->current == BDR_NODE_STATE_JOIN_COPY_REMOTE_NODES);
 
 	if (!join.query_result_pending)
@@ -1130,18 +1139,7 @@ bdr_join_continue_copy_remote_nodes(BdrStateEntry *cur_state, BdrNodeInfo *local
 
 		state_transition(cur_state, BDR_NODE_JOIN_SUBSCRIBE_JOIN_TARGET,
 			cur_state->join_target_id, NULL);
-
-		nodes_changed = true;
 	}
-
-	/*
-	 * Now that we've copied the nodes we can connect to them all.
-	 *
-	 * (They should all know about us by now. If they don't, we'll
-	 * keep trying until they let us connect.)
-	 */
-	if (nodes_changed)
-		bdr_messaging_refresh_nodes();
 }
 
 static void
@@ -1357,6 +1355,13 @@ bdr_join_continue_subscribe_join_target(BdrStateEntry *cur_state, BdrNodeInfo *l
 		join.query_result_pending = false;
 		bdr_create_subscription(local, remote, 0, true);
 
+		/*
+		 * Now that we've created a subscription to the target we can start
+		 * talking to it.
+		 */
+		bdr_start_consensus(bdr_max_nodes, cur_state->current);
+		bdr_messaging_refresh_nodes();
+
 		state_transition(cur_state, BDR_NODE_STATE_WAIT_SUBSCRIBE_COMPLETE,
 			cur_state->join_target_id, NULL);
 	}
@@ -1425,6 +1430,7 @@ bdr_join_continue_wait_catchup(BdrStateEntry *cur_state, BdrNodeInfo *local)
 	if ( cur_progress > extra->min_catchup_lsn )
 	{
 		elog(LOG, "%u replayed past minimum recovery lsn %X/%X",
+			 bdr_get_local_nodeid(),
 			 (uint32)(extra->min_catchup_lsn>>32), (uint32)extra->min_catchup_lsn);
 		state_transition(cur_state, BDR_NODE_STATE_JOIN_COPY_REPSET_MEMBERSHIPS,
 			cur_state->join_target_id, NULL);
@@ -1470,6 +1476,8 @@ bdr_join_continue_create_subscriptions(BdrStateEntry *cur_state, BdrNodeInfo *lo
 		bdr_create_subscription(local, remote, 0, false);
 	}
 
+	bdr_messaging_refresh_nodes();
+
 	state_transition(cur_state, BDR_NODE_STATE_SEND_CATCHUP_READY,
 		cur_state->join_target_id, NULL);
 }
@@ -1477,12 +1485,16 @@ bdr_join_continue_create_subscriptions(BdrStateEntry *cur_state, BdrNodeInfo *lo
 static void
 bdr_join_continue_send_catchup_ready(BdrStateEntry *cur_state, BdrNodeInfo *local)
 {
+	uint64 handle;
+
 	Assert(cur_state->current == BDR_NODE_STATE_SEND_CATCHUP_READY);
 
 	/*
 	 * TODO: we probably have to wait for peers here
 	 */
-	(void) bdr_msgs_enqueue_one(BDR_MSG_NODE_CATCHUP_READY, NULL);
+	handle = bdr_msgs_enqueue_one(BDR_MSG_NODE_CATCHUP_READY, NULL);
+	if (handle == 0)
+		elog(ERROR, "failed to submit BDR_MSG_NODE_CATCHUP_READY consensus message");
 
 	elog(WARNING, "waiting for all nodes to confirm catchup ready not yet implemented");
 
@@ -1578,10 +1590,14 @@ bdr_join_continue_create_slots(BdrStateEntry *cur_state, BdrNodeInfo *local)
 static void
 bdr_join_continue_send_active_announce(BdrStateEntry *cur_state, BdrNodeInfo *local)
 {
+	uint64 handle;
+
 	Assert(cur_state->current == BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE);
 
 	/* TODO: wait for consensus in an extra state phase here */
-	(void) bdr_msgs_enqueue_one(BDR_MSG_NODE_ACTIVE, NULL);
+	handle = bdr_msgs_enqueue_one(BDR_MSG_NODE_ACTIVE, NULL);
+	if (handle == 0)
+		elog(ERROR, "failed to submit BDR_MSG_NODE_ACTIVE consensus message");
 	elog(WARNING, "not waiting for consensus on active announce, not implemented");
 
 	/* Enter fully joined steady state */
@@ -1772,18 +1788,17 @@ bdr_join_wait_event(struct WaitEvent *events, int nevents,
 static void
 bdr_join_wait_event_set_register(void)
 {
-	int flags;
-
 	Assert(join.wait_set != NULL);
 	Assert(join.conn != NULL && PQstatus(join.conn) == CONNECTION_OK);
 	Assert(join.wait_event_pos == -1);
 
-	if (join.query_result_pending)
-		flags = WL_SOCKET_READABLE;
-	else
-		flags = WL_SOCKET_WRITEABLE;
-
-	join.wait_event_pos = AddWaitEventToSet(join.wait_set, flags,
+	/*
+	 * We only need WL_SOCKET_READABLE here. We'll always consume from a socket
+	 * if something's readable, and we're not bothering to do non-blocking
+	 * sends since we won't ever exceed our send buffer size.
+	 */
+	join.wait_event_pos = AddWaitEventToSet(join.wait_set,
+											WL_SOCKET_READABLE,
 											PQsocket(join.conn),
 											NULL, &join);
 
@@ -1908,5 +1923,5 @@ bdr_join_continue(BdrNodeState cur_state,
 	 *
 	 * Should only be set for the few areas where we must poll.
 	 */
-	*max_next_wait_msecs = 250;
+	*max_next_wait_msecs = 1000;
 }

@@ -978,7 +978,6 @@ msgb_service_connections_polling(void)
 			 */
 			if (conn->conn_status == MSGB_SEND_CONN_PENDING_START)
 			{
-				elog(bdr_debug_level, "starting connect %d for %u", i, conn->destination_id);
 				msgb_start_connect(conn);
 				new_conns_polling = true;
 				/*

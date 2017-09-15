@@ -178,8 +178,14 @@ bdr_messaging_refresh_nodes(void)
 	foreach (lc, subs)
 	{
 		PGLogicalSubscription *sub = lfirst(lc);
+		elog(LOG, "XXX adding/refreshing %u", sub->origin->id);
 		bdr_messaging_add_peer(sub->origin->id, sub->origin_if->dsn, true);
 	}
+
+	/*
+	 * TODO: remove nodes no longer involved
+	 * TODO: check node status and only add nodes we want to hear from
+	 */
 
 	consensus_finish_startup();
 
@@ -1085,6 +1091,8 @@ bdr_messaging_add_peer(uint32 node_id, const char *dsn,
 	bool update_if_found)
 {
 	StringInfoData si;
+
+	Assert(node_id != bdr_get_local_nodeid());
 
 	Assert(is_bdr_manager());
 	initStringInfo(&si);
