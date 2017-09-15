@@ -128,7 +128,6 @@ msgb_status_invariant(MsgbConnection *conn)
 			Assert(conn->dsn != NULL);
 			Assert(conn->pgconn == NULL);
 			Assert(conn->wait_set_index == -1);
-			Assert(conn->wait_flags == 0);
 			Assert(conn->queue_context != NULL);
 			/* Items can be queued now */
 			Assert(conn->msgb_msgid_counter >= 1);
@@ -191,12 +190,21 @@ msgb_status_invariant(MsgbConnection *conn)
 			 * Even if there's no wait-event set, this is what we'll register
 			 * for when we do create the wait-event set entry and it must be
 			 * correct otherwise we'll fall over when we exit polling.
+			 *
+			 * If the send queue is empty we must be waiting for readable data.
+			 * If it's non-empty we must be either have a queue item in-flight
+			 * or be waiting for it to become sendable. It's OK if we're also
+			 * waiting for the other condition in either state too.
 			 */
-			Assert(conn->wait_flags > 0);
+			Assert(conn->wait_flags & WL_SOCKET_READABLE);
+			if (conn->send_queue != NIL && conn->conn_status == MSGB_SEND_CONN_READY)
+				Assert(((MsgbMessageBuffer*)linitial(conn->send_queue))->send_status == MSGB_MSGSTATUS_SENDING
+					   || conn->wait_flags & WL_SOCKET_WRITEABLE);
+
 			Assert(conn->queue_context != NULL);
 			/* Items can be queued now */
 			Assert(conn->msgb_msgid_counter >= 1);
-			Assert(list_length(conn->send_queue) >= 0);
+
 			/*
 			 * Items in the list can never be delivered since we pop them
 			 * immediately.
@@ -697,6 +705,16 @@ msgb_process_result(MsgbConnection *conn)
 
 		/* PQgetResult didn't return NULL, might be more results */
 		more_pending = true;
+
+		/*
+		 * Is there another to deliver? If so, try to as soon as the socket
+		 * is writeable. Otherwise we can just consume notices etc until
+		 * someone gives us something else to deliver.
+		 */
+		if (conn->send_queue == NIL)
+			msgb_conn_set_wait_flags(conn, WL_SOCKET_READABLE);
+		else
+			msgb_conn_set_wait_flags(conn, WL_SOCKET_READABLE|WL_SOCKET_WRITEABLE);
 	}
 
 	msgb_status_invariant(conn);
@@ -831,7 +849,6 @@ msgb_send_pending(MsgbConnection *conn)
 {
 	int wait_flags;
 
-	Assert(ConnIsEventDriven(conn));
 	msgb_status_invariant(conn);
 
 	if (conn->send_queue == NIL)
@@ -897,6 +914,7 @@ msgb_service_connections_events(WaitEvent *occurred_events, int nevents)
 		WaitEvent const	   *e = &occurred_events[i];
 		MsgbConnection	   *conn = NULL;
 		int					i;
+		int					new_wait_flags = 0;
 
 		/* Find the connection for this wait event */
 		for (i = 0; i < msgb_max_peers; i++)
@@ -921,23 +939,10 @@ msgb_service_connections_events(WaitEvent *occurred_events, int nevents)
 
 		msgb_status_invariant(conn);
 
-		/*
-		 * Ignore the wait event unless the connection is expecting events;
-		 * it's possible we've cleared it, removed it, etc but not re-created
-		 * the wait event set, in which case we'll be polling or ignoring it.
-		 */
-		if (ConnIsEventDriven(conn))
-		{
-			int new_wait_flags = 0;
+		new_wait_flags |= msgb_recv_pending(conn);
+		new_wait_flags |= msgb_send_pending(conn);
 
-			if (e->events & WL_SOCKET_READABLE)
-				new_wait_flags |= msgb_recv_pending(conn);
-
-			if (e->events & WL_SOCKET_WRITEABLE)
-				new_wait_flags |= msgb_send_pending(conn);
-
-			msgb_conn_set_wait_flags(conn, new_wait_flags);
-		}
+		msgb_conn_set_wait_flags(conn, new_wait_flags);
 
 		CHECK_FOR_INTERRUPTS();
 
@@ -1132,10 +1137,9 @@ msgb_queue_message(uint32 destination, const char * payload, Size payload_size)
 	msgb_status_invariant(conn);
 
 	/* Make sure we service the connection properly */
-	if (ConnIsEventDriven(conn))
-		msgb_conn_set_wait_flags(conn, msgb_send_pending(conn));
-	else
-		conns_polling = true;
+	msgb_conn_set_wait_flags(conn, conn->wait_flags|WL_SOCKET_WRITEABLE);
+	Assert(ConnIsEventDriven(conn) || conns_polling);
+	elog(LOG, "XXX set wait flags to %d after enqueue", conn->wait_flags);
 
 	return msg->msgid;
 }
