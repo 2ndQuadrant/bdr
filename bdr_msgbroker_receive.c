@@ -201,7 +201,7 @@ msgb_connect(PG_FUNCTION_ARGS)
 	if (destination_node != bdr_get_local_nodeid())
 		ereport(ERROR,
 				(errcode(ERRCODE_DATA_EXCEPTION),
-				 errmsg("peer %d expected to connect to our node with id %d but we are node %d",
+				 errmsg("peer %u expected to connect to our node with id %d but we are node %d",
 				 		origin_node, destination_node, bdr_get_local_nodeid())));
 
 	Assert(msgb_ctx != NULL);
@@ -369,7 +369,7 @@ msgb_connect_shmem(uint32 origin_node)
 	 */
 	dsm_pin_mapping(broker_dsm_seg);
 
-	elog(bdr_debug_level, "peer %d connected message queue", origin_node);
+	elog(bdr_debug_level, "peer %u connected message queue", origin_node);
 }
 
 /*
@@ -465,7 +465,7 @@ msgb_report_peer_connect(uint32 origin_id, uint32 last_sent_msgid)
 				 errmsg("message broker for node %u appears to have exited",
 						bdr_get_local_nodeid())));
 
-	elog(bdr_debug_level, "peer %d initial connect message sent", origin_id);
+	elog(bdr_debug_level, "peer %u initial connect message sent", origin_id);
 }
 
 /*

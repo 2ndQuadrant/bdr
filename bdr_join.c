@@ -459,8 +459,6 @@ bdr_join_handle_join_proposal(BdrMessage *msg)
 	Assert(is_bdr_manager());
 	state_get_expected(&cur_state, true, true, BDR_NODE_STATE_ACTIVE);
 
-	elog(LOG, "XXX processing join request for %u", req->joining_node_id);
-
 	local_nodegroup = bdr_get_nodegroup_by_name(req->nodegroup_name, false);
 	if (req->nodegroup_id != 0 && local_nodegroup->id != req->nodegroup_id)
 		elog(ERROR, "expected nodegroup %s to have id %u but local nodegroup id is %u",
@@ -479,8 +477,6 @@ bdr_join_handle_join_proposal(BdrMessage *msg)
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("node %u received its own join request", req->joining_node_id)));
 	}
-
-	elog(LOG, "XXX forming node tuples for join request");
 
 	pnode.id = req->joining_node_id;
 	pnode.name = (char*)req->joining_node_name;
@@ -507,11 +503,8 @@ bdr_join_handle_join_proposal(BdrMessage *msg)
 	/* Ignoring join_target_node_name and join_target_node_id for now */
 
 	/* TODO: do upserts here in case pgl node or even bdr node exists already */
-	elog(LOG, "XXX creating node for join request");
 	create_node(&pnode);
-	elog(LOG, "XXX creating node interface for join request");
 	create_node_interface(&pnodeif);
-	elog(LOG, "XXX creating bdr node for join request");
 	bdr_node_create(&bnode);
 
 	/*
@@ -523,9 +516,7 @@ bdr_join_handle_join_proposal(BdrMessage *msg)
 	 * TODO: move addition of the peer node from prepare
 	 * phase to accept phase callback
 	 */
-	elog(LOG, "XXX adding messaging peer for node join request");
 	bdr_messaging_add_peer(bnode.node_id, pnodeif.dsn, false);
-	elog(LOG, "XXX added messaging peer for node join request");
 }
 
 /*
@@ -1725,12 +1716,7 @@ bdr_join_create_slot(BdrNodeInfo *local, BdrNodeInfo *remote)
 	 * retry.
 	 */
 	if (bdr_replication_slot_exists(&slot_name))
-	{
-		elog(LOG, "XXX slot %s already exists", NameStr(slot_name));
 		return;
-	}
-
-	elog(LOG, "XXX slot %s does not exist, creating", NameStr(slot_name));
 
 	/*
 	 * See: pg_create_logical_replication_slot for all this stuff; rest is mostly
@@ -1765,8 +1751,6 @@ bdr_join_create_slot(BdrNodeInfo *local, BdrNodeInfo *remote)
 	/* ok, slot is now fully created, mark it as persistent if needed */
 	ReplicationSlotPersist();
 	ReplicationSlotRelease();
-
-	elog(LOG, "XXX slot %s created", NameStr(slot_name));
 }
 
 static void

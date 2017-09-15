@@ -983,8 +983,10 @@ bdr_proposals_prepare(List *messages)
 {
 	ListCell *lc;
 
-	elog(bdr_debug_level, "%u handling CONSENSUS PREPARE for %d message transaction",
-		 bdr_get_local_nodeid(), list_length(messages));
+	elog(bdr_debug_level, "%u (%s) handling CONSENSUS PREPARE for %d message transaction",
+		 bdr_get_local_nodeid(),
+		 bdr_messaging_active_nodeid() == bdr_get_local_nodeid() ? "self" : "peer",
+		 list_length(messages));
 
 	foreach (lc, messages)
 	{
