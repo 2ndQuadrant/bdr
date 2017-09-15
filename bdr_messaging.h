@@ -89,6 +89,8 @@ enum BdrNodeState;
 extern void bdr_start_consensus(int max_nodes, enum BdrNodeState cur_state);
 extern void bdr_shutdown_consensus(void);
 
+extern const char * bdr_message_type_to_string(BdrMessageType msgtype);
+
 /*
  * This API wraps bdr_consensus.c and adds IPC to allow submissions
  * from other backends.
@@ -125,5 +127,7 @@ extern void bdr_messaging_refresh_nodes(void);
 extern void bdr_messaging_add_peer(uint32 node_id, const char *dsn,
 	bool update_if_found);
 extern void bdr_messaging_remove_peer(uint32 node_id);
+
+extern uint32 bdr_messaging_active_nodeid(void);
 
 #endif

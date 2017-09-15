@@ -680,7 +680,12 @@ bdr_join_continue_wait_confirm(BdrStateEntry *cur_state, BdrNodeInfo *local)
 }
 
 /*
- * A peer node says it wants to go into catchup mode.
+ * A peer node says it wants to go into catchup mode and sent us a
+ * BDR_MSG_NODE_CATCHUP_READY.
+ * 
+ * That peer might be us; we handle our own catchup mode request here too, in
+ * response to a BDR_NODE_STATE_SEND_CATCHUP_READY state. In that case we'll
+ * transition to BDR_NODE_STATE_STANDBY on commit.
  *
  * (This won't really require consensus, but it's simplest to treat it as if it does)
  *
@@ -694,10 +699,9 @@ void
 bdr_join_handle_catchup_proposal(BdrMessage *msg)
 {
 	BdrNodeInfo		   *local, *remote;
-	BdrStateEntry		cur_state;
 
 	Assert(is_bdr_manager());
-	state_get_expected(&cur_state, true, true, BDR_NODE_STATE_ACTIVE);
+	Assert(msg->message_type == BDR_MSG_NODE_CATCHUP_READY);
 
 	/*
 	 * Catchup ready announcements are empty, with no payload,
@@ -709,6 +713,9 @@ bdr_join_handle_catchup_proposal(BdrMessage *msg)
 
 	if (local->bdr_node->node_id != remote->bdr_node->node_id)
 	{
+		BdrStateEntry cur_state;
+		state_get_expected(&cur_state, false, false,
+			BDR_NODE_STATE_ACTIVE);
 		bdr_join_create_slot(local, remote);
 
 		/*
@@ -720,10 +727,27 @@ bdr_join_handle_catchup_proposal(BdrMessage *msg)
 		 * here, so the peer can tally join confirmations
 		 */
 	}
+	else
+	{
+		/*
+		 * We're processing a locally originated message. On consensus we need
+		 * to transition to a new state to continue the join.
+		 */
+		BdrStateEntry cur_state;
+		state_get_expected(&cur_state, true, false,
+			BDR_NODE_STATE_SEND_CATCHUP_READY);
+		state_transition(&cur_state, BDR_NODE_STATE_STANDBY,
+			cur_state.join_target_id, NULL);
+	}
 }
 
 /*
- * A node in catchup mode announces that it wants to join as a full peer.
+ * A node in catchup mode announces that it wants to join as a full peer
+ * and sent us a BDR_MSG_NODE_ACTIVE message.
+ *
+ * That peer could be us, in which case we'll be in
+ * BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE state and will transition to 
+ * BDR_NODE_STATE_ACTIVE.
  */
 void
 bdr_join_handle_active_proposal(BdrMessage *msg)
@@ -732,7 +756,7 @@ bdr_join_handle_active_proposal(BdrMessage *msg)
 	BdrStateEntry		cur_state;
 
 	Assert(is_bdr_manager());
-	state_get_expected(&cur_state, true, true, BDR_NODE_STATE_ACTIVE);
+	Assert(msg->message_type == BDR_MSG_NODE_ACTIVE);
 
 	/*
 	 * Catchup ready announcements are empty, with no payload,
@@ -744,17 +768,13 @@ bdr_join_handle_active_proposal(BdrMessage *msg)
 
 	if (local->bdr_node->node_id != remote->bdr_node->node_id)
 	{
+		state_get_expected(&cur_state, true, true, BDR_NODE_STATE_ACTIVE);
+
 		/*
 		 * We can now create a subscription to the node, to be started
 		 * once we commit.
 		 */
 		bdr_create_subscription(local, remote, 0, false);
-
-		/*
-		 * TODO: since we currently don't do 2PC messaging, force
-		 * it to start immediately.
-		 */
-		
 	}
 	else
 	{
@@ -763,6 +783,10 @@ bdr_join_handle_active_proposal(BdrMessage *msg)
 		 */
 		List	   *nodes;
 		ListCell   *lc;
+
+		state_get_expected(&cur_state, true, true,
+			BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE);
+
 		nodes = bdr_get_nodes_info(local->bdr_node_group->id);
 
 		/*
@@ -784,6 +808,10 @@ bdr_join_handle_active_proposal(BdrMessage *msg)
 				alter_subscription(sub);
 			}
 		}
+
+		/* Enter fully joined steady state */
+		state_transition(&cur_state, BDR_NODE_STATE_ACTIVE,
+			cur_state.join_target_id, NULL);
 	}
 
 	/*
@@ -1489,15 +1517,18 @@ bdr_join_continue_send_catchup_ready(BdrStateEntry *cur_state, BdrNodeInfo *loca
 
 	Assert(cur_state->current == BDR_NODE_STATE_SEND_CATCHUP_READY);
 	Assert(IsTransactionState());
+	CommitTransactionCommand();
 
+	/*
+	 * Local processing of this message via bdr_join_handle_catchup_proposal
+	 * will transition us to BDR_NODE_STATE_STANDBY, which is how we exit
+	 * this state.
+	 */
 	handle = bdr_msgs_enqueue_one(BDR_MSG_NODE_CATCHUP_READY, NULL);
 	if (handle == 0)
 		elog(ERROR, "failed to submit BDR_MSG_NODE_CATCHUP_READY consensus message");
 
 	elog(WARNING, "waiting for all nodes to confirm catchup ready not yet implemented");
-
-	state_transition(cur_state, BDR_NODE_STATE_STANDBY,
-		cur_state->join_target_id, NULL);
 }
 
 static void
@@ -1591,16 +1622,20 @@ bdr_join_continue_send_active_announce(BdrStateEntry *cur_state, BdrNodeInfo *lo
 	uint64 handle;
 
 	Assert(cur_state->current == BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE);
+	Assert(IsTransactionState());
+	CommitTransactionCommand();
 
-	/* TODO: wait for consensus in an extra state phase here */
+	/*
+	 * This consensus message will tell our peers we're going
+	 * active. When our own handler for it is invoked, it'll also
+	 * transition us to BDR_NODE_STATE_ACTIVE.
+	 */
 	handle = bdr_msgs_enqueue_one(BDR_MSG_NODE_ACTIVE, NULL);
 	if (handle == 0)
 		elog(ERROR, "failed to submit BDR_MSG_NODE_ACTIVE consensus message");
-	elog(WARNING, "not waiting for consensus on active announce, not implemented");
 
-	/* Enter fully joined steady state */
-	state_transition(cur_state, BDR_NODE_STATE_ACTIVE,
-		cur_state->join_target_id, NULL);
+	/* TODO: wait for consensus in an extra state phase here */
+	elog(WARNING, "not waiting for consensus on active announce, not implemented");
 }
 
 /*
@@ -1913,7 +1948,17 @@ bdr_join_continue(BdrNodeState cur_state,
 				elog(ERROR, "unhandled case");
 		}
 	}
-	CommitTransactionCommand();
+
+	if (IsTransactionState())
+	{
+		/*
+		 * One of the above may have committed the transaction we started at
+		 * the beginning of this call in order to submit a consensus message
+		 * instead. If that's the case we'd better not try to commit it.
+		 */
+		if (bdr_messaging_active_nodeid() == 0)
+			CommitTransactionCommand();
+	}
 
 	/*
 	 * HACK HACK HACK

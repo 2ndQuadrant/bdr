@@ -936,31 +936,41 @@ bdr_proposals_receive(ConsensusProposal *msg)
 	switch (bmsg->message_type)
 	{
 		case BDR_MSG_COMMENT:
-			elog(bdr_debug_level, "%u BDR comment msg from %u: \"%s\"",
-				 bdr_get_local_nodeid(), msg->sender_nodeid, (char*)bmsg->message);
+			elog(bdr_debug_level, "%u %s proposal from %u: \"%s\"",
+				 bdr_get_local_nodeid(),
+				 bdr_message_type_to_string(bmsg->message_type),
+				 msg->sender_nodeid,
+				 (char*)bmsg->message);
 			break;
 		case BDR_MSG_NODE_JOIN_REQUEST:
 		{
 			StringInfoData logmsg;
 			initStringInfo(&logmsg);
 			msg_stringify_join_request(&logmsg, bmsg->message);
-			elog(bdr_debug_level, "%u BDR join request message from %u: %s",
-				 bdr_get_local_nodeid(), msg->sender_nodeid, logmsg.data);
+			elog(bdr_debug_level, "%u %s proposal from %u: %s",
+				 bdr_get_local_nodeid(),
+				 bdr_message_type_to_string(bmsg->message_type),
+				 msg->sender_nodeid, logmsg.data);
 			pfree(logmsg.data);
 			break;
 		}
 		case BDR_MSG_NODE_CATCHUP_READY:
-			elog(bdr_debug_level, "%u BDR catchup ready from %u",
-				 bdr_get_local_nodeid(), msg->sender_nodeid);
+			elog(bdr_debug_level, "%u %s proposal from %u",
+				 bdr_get_local_nodeid(),
+				 bdr_message_type_to_string(bmsg->message_type),
+				 msg->sender_nodeid);
 			break;
 		case BDR_MSG_NODE_ACTIVE:
-			elog(bdr_debug_level, "%u BDR node active from %u",
-				 bdr_get_local_nodeid(), msg->sender_nodeid);
+			elog(bdr_debug_level, "%u %s proposal from %u",
+				 bdr_get_local_nodeid(),
+				 bdr_message_type_to_string(bmsg->message_type),
+				 msg->sender_nodeid);
 			break;
 		default:
 			elog(bdr_debug_level,
-				 "%u unrecognised BDR message type %d ignored",
-				 bdr_get_local_nodeid(), bmsg->message_type);
+				 "%u unhandled BDR proposal type '%s' ignored",
+				 bdr_get_local_nodeid(),
+				 bdr_message_type_to_string(bmsg->message_type));
 			return false;
 	}
 
@@ -973,7 +983,7 @@ bdr_proposals_prepare(List *messages)
 {
 	ListCell *lc;
 
-	elog(bdr_debug_level, "%u handling PREPARE for %d message transaction",
+	elog(bdr_debug_level, "%u handling CONSENSUS PREPARE for %d message transaction",
 		 bdr_get_local_nodeid(), list_length(messages));
 
 	foreach (lc, messages)
@@ -983,8 +993,10 @@ bdr_proposals_prepare(List *messages)
 
 		bmsg = msg_deserialize_proposal(msg);
 
-		elog(bdr_debug_level, "%u dispatching prepare of proposal %u from %u",
-			 bdr_get_local_nodeid(), bmsg->message_type, bmsg->originator_id);
+		elog(bdr_debug_level, "%u dispatching prepare of proposal %s from %u",
+			 bdr_get_local_nodeid(),
+			 bdr_message_type_to_string(bmsg->message_type),
+			 bmsg->originator_id);
 
 		/*
 		 * TODO: should dispatch message processing via the local node state
@@ -1025,7 +1037,7 @@ bdr_proposals_prepare(List *messages)
 static void
 bdr_proposals_commit(List *messages)
 {
-	elog(LOG, "XXX COMMIT"); /* TODO */
+	elog(LOG, "XXX CONSENSUS COMMIT"); /* TODO */
 
     /* TODO: here's where we allow state changes to take effect */
 }
@@ -1034,7 +1046,7 @@ bdr_proposals_commit(List *messages)
 static void
 bdr_proposals_rollback(void)
 {
-	elog(LOG, "XXX ROLLBACK"); /* TODO */
+	elog(LOG, "XXX CONSENSUS ROLLBACK"); /* TODO */
 
     /* TODO: here's where we wind back any temporary state changes */
 }
@@ -1111,4 +1123,44 @@ bdr_messaging_remove_peer(uint32 node_id)
 	Assert(is_bdr_manager());
 	elog(LOG, "removing new bdr node %u", node_id);
 	consensus_remove_node(node_id);
+}
+
+uint32
+bdr_messaging_active_nodeid(void)
+{
+	return consensus_active_nodeid();
+}
+
+const char *
+bdr_message_type_to_string(BdrMessageType msgtype)
+{
+	StringInfoData si;
+
+	switch (msgtype)
+	{
+		case BDR_MSG_NOOP:
+			return CppAsString2(BDR_MSG_NOOP);
+		case BDR_MSG_COMMENT:
+			return CppAsString2(BDR_MSG_COMMENT);
+		case BDR_MSG_NODE_JOIN_REQUEST:
+			return CppAsString2(BDR_MSG_NODE_JOIN_REQUEST);
+		case BDR_MSG_NODE_ID_SEQ_ALLOCATE:
+			return CppAsString2(BDR_MSG_NODE_ID_SEQ_ALLOCATE);
+		case BDR_MSG_NODE_CATCHUP_READY:
+			return CppAsString2(BDR_MSG_NODE_CATCHUP_READY);
+		case BDR_MSG_NODE_ACTIVE:
+			return CppAsString2(BDR_MSG_NODE_ACTIVE);
+		case BDR_MSG_DDL_LOCK_REQUEST:
+			return CppAsString2(BDR_MSG_DDL_LOCK_REQUEST);
+		case BDR_MSG_DDL_LOCK_GRANT:
+			return CppAsString2(BDR_MSG_DDL_LOCK_GRANT);
+		case BDR_MSG_DDL_LOCK_REJECT:
+			return CppAsString2(BDR_MSG_DDL_LOCK_REJECT);
+		case BDR_MSG_DDL_LOCK_RELEASE:
+			return CppAsString2(BDR_MSG_DDL_LOCK_RELEASE);
+	}
+
+	initStringInfo(&si);
+	appendStringInfo(&si, "(unrecognised BDR message type %d)", msgtype);
+	return si.data;
 }

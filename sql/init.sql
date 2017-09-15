@@ -31,6 +31,16 @@ SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.
 SELECT 1
 FROM bdr.create_node_group('bdrgroup');
 
+-- Wait for the creating node to go fully active
+DO LANGUAGE plpgsql $$
+BEGIN
+  WHILE NOT EXISTS (SELECT 1 FROM bdr.state_journal WHERE state = 500)
+  LOOP
+    PERFORM pg_sleep(0.5);
+  END LOOP;
+END;
+$$;
+
 SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info(NULL);
 SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info((SELECT node_group_id FROM bdr.node_group));
 
@@ -71,6 +81,22 @@ SELECT txid_current();
 -- advance more promptly too.
 CHECKPOINT;
 
+\c :node2_dsn
+
+-- Wait for the joining node to go fully active
+DO LANGUAGE plpgsql $$
+BEGIN
+  WHILE NOT EXISTS (SELECT 1 FROM bdr.state_journal WHERE state = 500)
+  LOOP
+    PERFORM pg_sleep(0.5);
+  END LOOP;
+END;
+$$;
+
+\c :node1_dsn
+
+-- Wait for the join target to start replaying from the joining node
+-- at the end of BDR setup.
 DO LANGUAGE plpgsql $$
 BEGIN
   WHILE NOT EXISTS (SELECT 1 FROM pglogical.show_subscription_status() WHERE status = 'replicating')
