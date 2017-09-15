@@ -1205,7 +1205,7 @@ bdr_join_continue_copy_remote_nodes(BdrStateEntry *cur_state, BdrNodeInfo *local
 	{
 		bdr_join_finish_copy_remote_nodes(local);
 
-		state_transition(cur_state, BDR_NODE_JOIN_SUBSCRIBE_JOIN_TARGET,
+		state_transition(cur_state, BDR_NODE_STATE_JOIN_SUBSCRIBE_JOIN_TARGET,
 			cur_state->join_target_id, NULL);
 	}
 }
@@ -1402,7 +1402,7 @@ bdr_create_subscription(BdrNodeInfo *local, BdrNodeInfo *remote, int apply_delay
 static void
 bdr_join_continue_subscribe_join_target(BdrStateEntry *cur_state, BdrNodeInfo *local)
 {
-	Assert(cur_state->current == BDR_NODE_JOIN_SUBSCRIBE_JOIN_TARGET);
+	Assert(cur_state->current == BDR_NODE_STATE_JOIN_SUBSCRIBE_JOIN_TARGET);
 
 	if (!join.query_result_pending)
 	{
@@ -1430,7 +1430,7 @@ bdr_join_continue_subscribe_join_target(BdrStateEntry *cur_state, BdrNodeInfo *l
 		bdr_start_consensus(bdr_max_nodes, cur_state->current);
 		bdr_messaging_refresh_nodes();
 
-		state_transition(cur_state, BDR_NODE_STATE_WAIT_SUBSCRIBE_COMPLETE,
+		state_transition(cur_state, BDR_NODE_STATE_JOIN_WAIT_SUBSCRIBE_COMPLETE,
 			cur_state->join_target_id, NULL);
 	}
 }
@@ -1442,7 +1442,7 @@ bdr_join_continue_wait_subscribe_complete(BdrStateEntry *cur_state, BdrNodeInfo 
 	PGLogicalSubscription  *sub;
 	PGLogicalSyncStatus	   *sync;
 
-	Assert(cur_state->current == BDR_NODE_STATE_WAIT_SUBSCRIBE_COMPLETE);
+	Assert(cur_state->current == BDR_NODE_STATE_JOIN_WAIT_SUBSCRIBE_COMPLETE);
 
 	subs = bdr_get_node_subscriptions(bdr_get_local_nodeid());
 
@@ -1927,11 +1927,11 @@ bdr_join_continue(BdrNodeState cur_state,
 				bdr_join_continue_copy_remote_nodes(&locked_state, local);
 				break;
 
-			case BDR_NODE_JOIN_SUBSCRIBE_JOIN_TARGET:
+			case BDR_NODE_STATE_JOIN_SUBSCRIBE_JOIN_TARGET:
 				bdr_join_continue_subscribe_join_target(&locked_state, local);
 				break;
 
-			case BDR_NODE_STATE_WAIT_SUBSCRIBE_COMPLETE:
+			case BDR_NODE_STATE_JOIN_WAIT_SUBSCRIBE_COMPLETE:
 				bdr_join_continue_wait_subscribe_complete(&locked_state, local);
 				break;
 

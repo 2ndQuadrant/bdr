@@ -51,12 +51,12 @@ typedef enum BdrNodeState
 	 * Create the subscription to the join target node, so we dump its
 	 * db.
 	 */
-	BDR_NODE_JOIN_SUBSCRIBE_JOIN_TARGET,
+	BDR_NODE_STATE_JOIN_SUBSCRIBE_JOIN_TARGET,
 
 	/*
 	 * Wait until the dump of the remote subscription finishes
 	 */
-	BDR_NODE_STATE_WAIT_SUBSCRIBE_COMPLETE,
+	BDR_NODE_STATE_JOIN_WAIT_SUBSCRIBE_COMPLETE,
 
 	/*
 	 * Look up join target to find the minimum point we must replay past
