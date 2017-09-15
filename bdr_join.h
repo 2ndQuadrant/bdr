@@ -70,6 +70,8 @@ extern void bdr_join_copy_remote_node(BdrNodeInfo *local,
 extern void bdr_join_continue(enum BdrNodeState cur_state,
 	long *max_next_wait_msecs);
 
+extern void bdr_join_create_peer_slot(void);
+
 /*
  * Integration into wait events in manager
  */

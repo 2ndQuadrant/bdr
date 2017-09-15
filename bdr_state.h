@@ -130,10 +130,24 @@ typedef enum BdrNodeState
 	 */
 	BDR_NODE_STATE_JOIN_RANGE_END = 299,
 
+
 	/*
 	 * Nodegroup is fully active as a participating member
+	 *
+	 * This state and 
 	 */
-	BDR_NODE_STATE_ACTIVE = 500
+	BDR_NODE_STATE_ACTIVE = 500,
+
+	/*
+	 * Active node needs to create a slot for joining node
+	 */
+	BDR_NODE_STATE_ACTIVE_SLOT_CREATE_PENDING,
+
+	/*
+	 * Placeholder for the end of the range of IDs used for active
+	 * nodes.
+	 */
+	BDR_NODE_ACTIVE_RANGE_END = 599
 
 } BdrNodeState;
 

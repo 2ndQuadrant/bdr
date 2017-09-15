@@ -52,6 +52,7 @@ state_has_extradata(BdrNodeState new_state)
 		case BDR_NODE_STATE_CREATE_SLOTS:
 		case BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE:
 		case BDR_NODE_STATE_REQUEST_GLOBAL_SEQ_ID:
+		case BDR_NODE_STATE_ACTIVE_SLOT_CREATE_PENDING:
 			return false;
 		case BDR_NODE_STATE_JOIN_START:
 		case BDR_NODE_STATE_JOIN_WAIT_CONFIRM:
@@ -62,6 +63,7 @@ state_has_extradata(BdrNodeState new_state)
 		case BDR_NODE_STATE_JOIN_CAN_START_CONSENSUS:
 		case BDR_NODE_STATE_JOIN_RANGE_END:
 		case BDR_NODE_STATE_UNUSED:
+		case BDR_NODE_ACTIVE_RANGE_END:
 			Assert(false);
 			elog(ERROR, "reserved node state %u somehow got used", new_state);
 	}
@@ -118,6 +120,10 @@ bdr_node_state_name(BdrNodeState state)
 			return CppAsString2(BDR_NODE_STATE_JOIN_RANGE_END);
 		case BDR_NODE_STATE_UNUSED:
 			return CppAsString2(BDR_NODE_STATE_UNUSED);
+		case BDR_NODE_STATE_ACTIVE_SLOT_CREATE_PENDING:
+			return CppAsString2(BDR_NODE_STATE_ACTIVE_SLOT_CREATE_PENDING);
+		case BDR_NODE_ACTIVE_RANGE_END:
+			return CppAsString2(BDR_NODE_ACTIVE_RANGE_END);
 	}
 	Assert(false);
 	elog(ERROR, "unhandled node state %u", state);
@@ -441,8 +447,19 @@ bdr_state_dispatch(long *max_next_wait_msecs)
 			bdr_join_continue(cur.current, max_next_wait_msecs);
 			return;
 
+		/*
+		 * Temporary states for active nodes
+		 */
+		case BDR_NODE_STATE_ACTIVE_SLOT_CREATE_PENDING:
+			bdr_join_create_peer_slot();
+			break;
+
+		/*
+		 * States that should never appear
+		 */
 		case BDR_NODE_STATE_JOIN_CAN_START_CONSENSUS:
 		case BDR_NODE_STATE_JOIN_RANGE_END:
+		case BDR_NODE_ACTIVE_RANGE_END:
 		case BDR_NODE_STATE_UNUSED:
 			Assert(false);
 			elog(ERROR, "reserved node state %u somehow got used", cur.current);

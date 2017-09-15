@@ -500,7 +500,6 @@ bdr_join_handle_join_proposal(BdrMessage *msg)
 	 * node ourselves.
 	 */
 	bnode.confirmed_our_join = false;
-	/* Ignoring join_target_node_name and join_target_node_id for now */
 
 	/* TODO: do upserts here in case pgl node or even bdr node exists already */
 	create_node(&pnode);
@@ -508,15 +507,57 @@ bdr_join_handle_join_proposal(BdrMessage *msg)
 	bdr_node_create(&bnode);
 
 	/*
-	 * We don't subscribe to the node yet, that only happens once it goes
-	 * active.
-	 */
-
-	/*
 	 * TODO: move addition of the peer node from prepare
 	 * phase to accept phase callback
 	 */
 	bdr_messaging_add_peer(bnode.node_id, pnodeif.dsn, false);
+
+	/*
+	 * If this node is the join target, the joining peer will need a
+	 * replication slot to use for catchup mode subscription. Create one now.
+	 *
+	 * Otherwise we'll delay slot creation until the peer is entering catchup
+	 * standby mode so there's less cleanup to do in case of failure, less resource
+	 * retention to worry about, etc.
+	 *
+	 * Unfortunately we cannot create a logical replication slot in an xact
+	 * that's done writes, let alone a prepared xact. And we must do this reliably,
+	 * so we don't want to wait for the after-commit callback. To solve that,
+	 * transition the node's local state and action the slot creation once
+	 * we've committed. This'll call bdr_join_create_peer_slot() to do the
+	 * creation.
+	 */
+	if (req->join_target_node_id == bdr_get_local_nodeid())
+		state_transition(&cur_state, BDR_NODE_STATE_ACTIVE_SLOT_CREATE_PENDING,
+			req->joining_node_id, NULL);
+
+	/*
+	 * We don't subscribe to the node yet, that only happens once it goes
+	 * active.
+	 */
+}
+
+/*
+ * Respond to a BDR_NODE_STATE_ACTIVE_SLOT_CREATE_PENDING request by
+ * creating a slot for the peer and returning to BDR_NODE_STATE_ACTIVE.
+ */
+void
+bdr_join_create_peer_slot(void)
+{
+	BdrStateEntry cur_state;
+	BdrNodeInfo *local, *remote;
+
+	Assert(!IsTransactionState());
+	StartTransactionCommand();
+	state_get_expected(&cur_state, true, true,
+		BDR_NODE_STATE_ACTIVE_SLOT_CREATE_PENDING);
+
+	local = bdr_get_cached_local_node_info();
+	remote = bdr_get_node_info(cur_state.join_target_id, false);
+	bdr_join_create_slot(local, remote);
+
+	state_transition(&cur_state, BDR_NODE_STATE_ACTIVE, 0, NULL);
+	CommitTransactionCommand();
 }
 
 /*
@@ -689,7 +730,7 @@ bdr_join_continue_wait_confirm(BdrStateEntry *cur_state, BdrNodeInfo *local)
 void
 bdr_join_handle_catchup_proposal(BdrMessage *msg)
 {
-	BdrNodeInfo		   *local, *remote;
+	BdrNodeInfo		   *local;
 
 	Assert(is_bdr_manager());
 	Assert(msg->message_type == BDR_MSG_NODE_CATCHUP_READY);
@@ -700,11 +741,11 @@ bdr_join_handle_catchup_proposal(BdrMessage *msg)
 	 */
 
 	local = bdr_get_local_node_info(false, false);
-	remote = bdr_get_node_info(msg->originator_id, false);
 
-	if (local->bdr_node->node_id != remote->bdr_node->node_id)
+	if (local->bdr_node->node_id != msg->originator_id)
 	{
 		BdrStateEntry cur_state;
+		BdrNodeInfo *remote = bdr_get_node_info(msg->originator_id, false);
 		state_get_expected(&cur_state, false, false,
 			BDR_NODE_STATE_ACTIVE);
 		bdr_join_create_slot(local, remote);

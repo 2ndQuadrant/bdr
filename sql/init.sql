@@ -1,7 +1,7 @@
 SELECT * FROM bdr_regress_variables()
 \gset
 
-\set VERBOSITY verbose
+\set VERBOSITY terse
 
 \c :node1_dsn
 CREATE EXTENSION bdr CASCADE;
@@ -44,11 +44,6 @@ $$;
 SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info(NULL);
 SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info((SELECT node_group_id FROM bdr.node_group));
 
--- We must create a slot before creating the subscription to work
--- around the deadlock in 2ndQuadrant/pglogical_internal#152
--- TODO: BDR should do this automatically
-SELECT slot_name FROM pg_create_logical_replication_slot(pglogical.pglogical_gen_slot_name(:node2_db, 'node1', 'bdrgroup_node1'), 'pglogical');
-
 \c :node2_dsn
 
 SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info(NULL);
@@ -65,17 +60,10 @@ SELECT 1 FROM bdr.join_node_group(:'node1_dsn');
 
 SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info((SELECT node_group_id FROM bdr.node_group));
 
-SELECT subscription_name, status, provider_node, slot_name, replication_sets
-FROM pglogical.show_subscription_status();
-
--- See above...
--- TODO: BDR should do this automatically
-SELECT slot_name FROM pg_create_logical_replication_slot(pglogical.pglogical_gen_slot_name(:node1_db, 'node2', 'bdrgroup_node2'), 'pglogical');
-
 \c :node1_dsn
 
 -- A dummy transaction will help make sure we make prompt progress.
-SELECT txid_current();
+SELECT 1 FROM txid_current();
 
 -- Forcing a checkpoint will force out replication origins and make us
 -- advance more promptly too.
@@ -140,3 +128,8 @@ SELECT
 FROM pg_stat_activity
 WHERE application_name LIKE 'pglogical%'
 ORDER BY appname;
+
+\c :node2_dsn
+
+SELECT subscription_name, status, provider_node, slot_name, replication_sets
+FROM pglogical.show_subscription_status();
