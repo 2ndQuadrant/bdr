@@ -687,6 +687,9 @@ msgb_process_result(MsgbConnection *conn)
 			buf = linitial(conn->send_queue);
 			Assert(buf->send_status = MSGB_MSGSTATUS_SENDING);
 			conn->send_queue = list_delete_first(conn->send_queue);
+			elog(bdr_debug_level, "%u delivered msgbroker message #%u for %u (%d pending)",
+				bdr_get_local_nodeid(), buf->msgid, conn->destination_id,
+				list_length(conn->send_queue));
 			pfree(buf);
 		}
 
@@ -1123,7 +1126,16 @@ msgb_queue_message(uint32 destination, const char * payload, Size payload_size)
 
 	(void) MemoryContextSwitchTo(old_mctx);
 
+	elog(bdr_debug_level, "%u enqueued msgbroker message #%u for %u",
+		bdr_get_local_nodeid(), msg->msgid, destination);
+
 	msgb_status_invariant(conn);
+
+	/* Make sure we service the connection properly */
+	if (ConnIsEventDriven(conn))
+		msgb_conn_set_wait_flags(conn, msgb_send_pending(conn));
+	else
+		conns_polling = true;
 
 	return msg->msgid;
 }
