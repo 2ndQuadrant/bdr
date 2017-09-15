@@ -259,6 +259,73 @@ state_extradata_serialize(StringInfo out, BdrNodeState new_state,
 }
 
 /*
+ * For debugging/tracing purposes, convert a state's extradata to human
+ * readable form. Returns a palloc'd string in the current memory context.
+ *
+ * Keep in mind that this could possibly have to deal with unrecognised
+ * states after a downgrade, etc.
+ */
+char*
+state_stringify_extradata(BdrStateEntry *state)
+{
+	StringInfoData si;
+
+	if (state->extra_data == NULL)
+		return NULL;
+
+	initStringInfo(&si);
+
+	switch (state->current)
+	{
+		case BDR_NODE_STATE_JOIN_START:
+		{
+			struct ExtraDataJoinStart *extra = state->extra_data;
+			appendStringInfoString(&si, "node group name: ");
+			if (extra->group_name != NULL)
+				appendStringInfoString(&si, extra->group_name);
+			else
+				appendStringInfoString(&si, "(NULL)");
+			break;
+		}
+
+		case BDR_NODE_STATE_JOIN_WAIT_CONFIRM:
+		case BDR_NODE_STATE_WAIT_GLOBAL_SEQ_ID:
+		{
+			struct ExtraDataConsensusWait *extra = state->extra_data;
+			appendStringInfo(&si, "global consensus message handle: "UINT64_FORMAT,
+				extra->request_message_handle);
+			break;
+		}
+
+		case BDR_NODE_STATE_JOIN_WAIT_CATCHUP:
+		{
+			struct ExtraDataJoinWaitCatchup *extra = state->extra_data;
+			appendStringInfo(&si, "minimum catchup lsn: %X/%08X",
+				(uint32)(extra->min_catchup_lsn>>32),
+				(uint32)extra->min_catchup_lsn);
+			break;
+		}
+
+		case BDR_NODE_STATE_JOIN_FAILED:
+		{
+			struct ExtraDataJoinFailure *extra = state->extra_data;
+			appendStringInfoString(&si, "reason: ");
+			if (extra->reason != NULL)
+				appendStringInfoString(&si, extra->reason);
+			else
+				appendStringInfoString(&si, "(NULL)");
+			break;
+		}
+
+		default:
+			appendStringInfo(&si, "unhandled state %d",
+				state->current);
+			break;
+	}
+	return si.data;
+}
+
+/*
  * Validty check for state transitions
  *
  * TODO: make into a state jump table, this will get messy otherwise

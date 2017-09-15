@@ -41,6 +41,7 @@
 #include "utils/memutils.h"
 #include "utils/rel.h"
 #include "utils/timestamp.h"
+#include "utils/typcache.h"
 
 #include "bdr_state.h"
 #include "bdr_msgformats.h"
@@ -821,4 +822,39 @@ state_get_last(BdrStateEntry *state, bool for_update, bool fetch_extradata)
 		elog(ERROR, "no entries found in BDR state table, BDR not initialized?");
 	
 	*state = tmp;
+}
+
+/*
+ * Decode a tuple from bdr.state_journal into 'state'
+ *
+ * Exposed separately so we can use it when debugging. This just wraps
+ * state_fromtuple with tuple metadata lookup. It's probably going to be pretty
+ * slow looking up this metadata every time, but we can deal with that if we
+ * ever need to care.
+ */
+void
+state_decode_tuple(BdrStateEntry *state, HeapTupleHeader tupheader)
+{
+	TupleDesc	tupdesc;
+	Oid			tupType;
+	int32		tupTypmod;
+	HeapTupleData	tuple;
+	
+	tupType = HeapTupleHeaderGetTypeId(tupheader);
+	tupTypmod = HeapTupleHeaderGetTypMod(tupheader);
+	tupdesc = lookup_rowtype_tupdesc(tupType, tupTypmod);
+
+	/*
+	 * Build a temporary HeapTuple control structure.
+	 *
+	 * There must be a better way? Borrowed from record_in
+	 */
+	tuple.t_len = HeapTupleHeaderGetDatumLength(tupheader);
+	ItemPointerSetInvalid(&(tuple.t_self));
+	tuple.t_tableOid = InvalidOid;
+	tuple.t_data = tupheader;
+
+	state_fromtuple(state, &tuple, tupdesc, true);
+
+	ReleaseTupleDesc(tupdesc);
 }

@@ -1497,14 +1497,14 @@ bdr_join_continue_wait_catchup(BdrStateEntry *cur_state, BdrNodeInfo *local)
 	cur_progress = replorigin_get_progress(origin_id, false);
 	if ( cur_progress > extra->min_catchup_lsn )
 	{
-		elog(LOG, "%u replayed past minimum recovery lsn %X/%X",
+		elog(LOG, "%u replayed past minimum recovery lsn %X/%08X",
 			 bdr_get_local_nodeid(),
 			 (uint32)(extra->min_catchup_lsn>>32), (uint32)extra->min_catchup_lsn);
 		state_transition(cur_state, BDR_NODE_STATE_JOIN_COPY_REPSET_MEMBERSHIPS,
 			cur_state->join_target_id, NULL);
 	}
 	else
-		elog(bdr_debug_level, "%u waiting for origin '%s' to replay past %X/%X; currently %X/%X",
+		elog(bdr_debug_level, "%u waiting for origin '%s' to replay past %X/%08X; currently %X/%08X",
 			 bdr_get_local_nodeid(), sub->slot_name,
 			 (uint32)(extra->min_catchup_lsn>>32), (uint32)extra->min_catchup_lsn,
 			 (uint32)(cur_progress>>32), (uint32)cur_progress);

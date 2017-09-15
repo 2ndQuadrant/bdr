@@ -182,7 +182,7 @@ CALLED ON NULL INPUT VOLATILE
 LANGUAGE c AS 'MODULE_PATHNAME','bdr_internal_submit_join_request';
 
 /*
- * Helper views
+ * Helper views and functions
  */
 CREATE VIEW bdr.node_group_replication_sets AS
 SELECT g.node_group_name, l.node_name, s.set_name
@@ -195,3 +195,20 @@ ORDER BY set_name;
 
 COMMENT ON VIEW bdr.node_group_replication_sets IS
 'BDR replication sets for local node groups';
+
+CREATE FUNCTION bdr.decode_state_entry(entry bdr.state_journal)
+RETURNS TABLE (state_name text, extra_data text)
+STRICT VOLATILE
+LANGUAGE c AS 'MODULE_PATHNAME','bdr_decode_state';
+
+CREATE VIEW bdr.state_journal_details AS
+SELECT 
+  j.state_counter,
+  j.state,
+  d.state_name,
+  j.join_target_id,
+  n.node_name AS join_target_name,
+  d.extra_data
+FROM bdr.state_journal j
+  CROSS JOIN LATERAL bdr.decode_state_entry(j) d
+  LEFT JOIN pglogical.node n ON (n.node_id = j.join_target_id);

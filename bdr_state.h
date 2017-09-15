@@ -176,6 +176,8 @@ extern void state_extradata_serialize(StringInfo out, BdrNodeState new_state,
 
 extern void* state_extradata_deserialize(StringInfo in, BdrNodeState state);
 
+extern char* state_stringify_extradata(BdrStateEntry *state);
+
 extern void state_get_expected(BdrStateEntry *state, bool for_update,
 	bool want_extradata, BdrNodeState expected);
 

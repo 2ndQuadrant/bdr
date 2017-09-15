@@ -774,12 +774,40 @@ bdr_decode_message_payload(PG_FUNCTION_ARGS)
 
 PG_FUNCTION_INFO_V1(bdr_decode_state);
 
+/*
+ * Given a composite bdr.state_journal tuple, decode it into human
+ * readable form.
+ */
 Datum
 bdr_decode_state(PG_FUNCTION_ARGS)
 {
-	ereport(ERROR,
-			(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-			 errmsg("unimplemented")));
+	HeapTupleHeader 	t = PG_GETARG_HEAPTUPLEHEADER(0);
+	BdrStateEntry		state;
+	TupleDesc			tupdesc;
+	HeapTuple			htup;
+	Datum				values[2];
+	bool				nulls[2] = {false, false};
+
+	if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("function returning record called in context "
+					 "that cannot accept type record")));
+
+	tupdesc = BlessTupleDesc(tupdesc);
+
+	state_decode_tuple(&state, t);
+
+	values[0] = CStringGetTextDatum(bdr_node_state_name(state.current));
+
+	if (state.extra_data == NULL)
+		nulls[1] = true;
+	else
+		values[1] = CStringGetTextDatum(state_stringify_extradata(&state));
+
+	htup = heap_form_tuple(tupdesc, values, nulls);
+
+	PG_RETURN_DATUM(HeapTupleGetDatum(htup));
 }
 
 PG_FUNCTION_INFO_V1(bdr_submit_comment);

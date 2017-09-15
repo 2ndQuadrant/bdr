@@ -6,6 +6,8 @@
 
 #define BDR_MSGJOURNAL_REL_NAME "global_message_journal"
 
+#include "access/htup.h"
+
 #include "nodes/pg_list.h"
 
 #include "datatype/timestamp.h"
@@ -79,6 +81,8 @@ extern void state_get_last(struct BdrStateEntry *out_state, bool for_update,
 	bool get_extradata);
 
 extern void state_prune(int maxentries);
+
+extern void state_decode_tuple(struct BdrStateEntry *state, HeapTupleHeader tup);
 
 /* Random helpers related to working with pgl/bdr catalogs */
 extern void interval_from_ms(int ms, Interval *interval);
