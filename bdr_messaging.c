@@ -114,7 +114,6 @@ static void bdr_request_recreate_wait_event_set_hook(WaitEventSet *old_set);
 static void bdr_messaging_atexit(int code, Datum argument);
 static void bdr_startup_submit_shm_mq(void);
 static void bdr_reinit_submit_shm_mq(void);
-static void bdr_detach_manager_queue(void);
 static uint64 bdr_msgs_enqueue_internal(void * payload, Size payload_length);
 
 static BdrManagerShmem *my_manager;
@@ -454,7 +453,7 @@ bdr_received_submit_shm_mq(void)
  * bdr_service_submit_shmem_mq for the protocol.
  *
  * The non-manager side is handled with
- * bdr_attach_manager_queue, bdr_submit_manager_queue, bdr_detach_manager_queue.
+ * bdr_attach_manager_queue, bdr_submit_manager_queue, bdr_messaging_detach
  *
  * Note that any backend calling this must have a signal handler that sets
  * ProcDiePending and InterruptPending on SIGTERM; see 
@@ -468,6 +467,7 @@ bdr_attach_manager_queue(void)
 {
 	shm_mq *recvq, *sendq;
 	MemoryContext old_ctx;
+	PGPROC *sendproc, *recvproc;
 
 	Assert(!is_bdr_manager());
 
@@ -512,6 +512,18 @@ bdr_attach_manager_queue(void)
 	 * we can't copy them into shmem because they're an opaque struct.
 	 */
 	LWLockAcquire(bdr_ctx->lock, LW_EXCLUSIVE);
+	sendproc = shm_mq_get_sender(sendq);
+	recvproc = shm_mq_get_receiver(recvq);
+	if (sendproc != NULL || recvproc != NULL)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_INSUFFICIENT_RESOURCES),
+				 errmsg("manager is currently busy and cannot receive messages, try again later"),
+				 errdetail("send queue in use by pid %d, recv queue in use by pid %d (or new proc pid in the same PROC slot)",
+				 		   sendproc == NULL ? 0 : sendproc->pid,
+						   recvproc == NULL ? 0 : recvproc->pid)));
+	}
+
 	old_ctx = MemoryContextSwitchTo(submit_mq.mq_context);
 	shm_mq_set_receiver(recvq, MyProc);
 	shm_mq_set_sender(sendq, MyProc);
@@ -563,7 +575,7 @@ bdr_submit_manager_queue(SubmitMQMessageType msgtype, Size payload_size,
 		case SHM_MQ_SUCCESS:
 			break;
 		case SHM_MQ_DETACHED:
-			bdr_detach_manager_queue();
+			bdr_messaging_detach();
 			/* TODO: better error */
 			elog(ERROR, "manager detached during message submit");
 		case SHM_MQ_WOULD_BLOCK:
@@ -580,7 +592,7 @@ bdr_submit_manager_queue(SubmitMQMessageType msgtype, Size payload_size,
 		case SHM_MQ_SUCCESS:
 			break;
 		case SHM_MQ_DETACHED:
-			bdr_detach_manager_queue();
+			bdr_messaging_detach();
 			/* TODO: better error */
 			elog(ERROR, "manager detached during message reply receive");
 		case SHM_MQ_WOULD_BLOCK:
@@ -594,8 +606,8 @@ bdr_submit_manager_queue(SubmitMQMessageType msgtype, Size payload_size,
 	return reply_msg;
 }
 
-static void
-bdr_detach_manager_queue(void)
+void
+bdr_messaging_detach(void)
 {
 	Assert(!is_bdr_manager());
 
@@ -790,7 +802,7 @@ bdr_messaging_atexit(int code, Datum argument)
 	if (is_bdr_manager())
 		bdr_shutdown_consensus();
 	else
-		bdr_detach_manager_queue();
+		bdr_messaging_detach();
 }
 
 bool

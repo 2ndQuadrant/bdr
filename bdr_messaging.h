@@ -99,6 +99,8 @@ extern bool bdr_msgs_begin_enqueue(void);
 extern uint64 bdr_msgs_enqueue(BdrMessageType message_type, void* message);
 extern uint64 bdr_msgs_finish_enqueue(void);
 
+extern void bdr_messaging_detach(void);
+
 static inline uint64
 bdr_msgs_enqueue_one(BdrMessageType message_type, void *message)
 {

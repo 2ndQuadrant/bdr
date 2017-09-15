@@ -461,7 +461,7 @@ bdr_internal_submit_join_request(PG_FUNCTION_ARGS)
 	bdr_cache_local_nodeinfo();
 	handle = bdr_msgs_enqueue_one(BDR_MSG_NODE_JOIN_REQUEST, &jreq);
 
-	elog(LOG, "XXX join request dispatched to manager");
+	bdr_messaging_detach();
 
 	snprintf(handle_str, MAX_DIGITS_INT64, UINT64_FORMAT, handle);
 	PG_RETURN_TEXT_P(cstring_to_text(handle_str));
@@ -805,6 +805,8 @@ bdr_submit_comment(PG_FUNCTION_ARGS)
 		elog(WARNING, "manager couldn't enqueue message, try again later");
 	else
 		elog(INFO, "manager enqueued message with handle "UINT64_FORMAT, handle);
+
+	bdr_messaging_detach();
 
 	snprintf(&handle_str[0], 33, UINT64_FORMAT, handle);
 	PG_RETURN_TEXT_P(cstring_to_text(handle_str));
