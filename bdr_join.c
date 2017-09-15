@@ -1488,10 +1488,8 @@ bdr_join_continue_send_catchup_ready(BdrStateEntry *cur_state, BdrNodeInfo *loca
 	uint64 handle;
 
 	Assert(cur_state->current == BDR_NODE_STATE_SEND_CATCHUP_READY);
+	Assert(IsTransactionState());
 
-	/*
-	 * TODO: we probably have to wait for peers here
-	 */
 	handle = bdr_msgs_enqueue_one(BDR_MSG_NODE_CATCHUP_READY, NULL);
 	if (handle == 0)
 		elog(ERROR, "failed to submit BDR_MSG_NODE_CATCHUP_READY consensus message");

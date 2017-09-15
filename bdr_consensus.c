@@ -132,10 +132,13 @@ static void consensus_received_new_proposal(ConsensusProposal *proposal);
 static void consensus_prepare_transaction(void);
 static void consensus_commit_prepared(void);
 static void consensus_rollback_prepared(void);
+static void consensus_xact_callback(XactEvent event, void *arg);
 
 static uint32 consensus_started_txn = 0;
+static bool consensus_finishing_txn = false;
 static List *cur_txn_proposals = NIL;
 static MemoryContext cur_txn_context = NULL;
+static bool xact_callback_registered = false;
 
 static ConsensusNode *
 consensus_find_node_by_id(uint32 node_id, const char * find_reason)
@@ -249,6 +252,7 @@ consensus_insert_proposal(ConsensusProposal *proposal)
 static void
 consensus_received_msgb_message(uint32 origin, const char *payload, Size payload_size)
 {
+	Assert(!consensus_finishing_txn);
     /*
      * TODO: Check if this is a new proposal, an ack/nack, a prepare request,
      * a commit or rollback, etc. Act accordingly.
@@ -315,7 +319,7 @@ consensus_received_new_proposal(ConsensusProposal *proposal)
      * ConsensusProposal. We need a ConsensusMessage that wraps ConsensusProposal
      * with a message type field (ack/nack etc).
      */
-	Assert(IsTransactionState() && consensus_started_txn);
+	Assert(IsTransactionState() && consensus_started_txn && !consensus_finishing_txn);
 
 	if (consensus_proposals_receive_hook != NULL)
 		(*consensus_proposals_receive_hook)(proposal);
@@ -352,8 +356,11 @@ consensus_commit_prepared(void)
 	 * when we detect that a locally submitted consensus request has been acked by all peers.
 	 * (Or later a quorum once we do raft/paxos).
 	 */
+	Assert(consensus_started_txn != 0);
+	consensus_finishing_txn = true;
 	CommitTransactionCommand();
-	consensus_started_txn = 0;
+	Assert(consensus_started_txn == 0);
+	Assert(!consensus_finishing_txn);
 
     /*
      * After commit we must pass the proposals again to the commit hook; if
@@ -426,8 +433,15 @@ consensus_begin_startup(uint32 my_nodeid,
 								"consensus transaction",
 								ALLOCSET_DEFAULT_SIZES);
 
+	if (!xact_callback_registered)
+	{
+		RegisterXactCallback(consensus_xact_callback, (Datum)0);
+		xact_callback_registered = true;
+	}
+
 	consensus_max_nodes = max_nodes;
 	consensus_started_txn = 0;
+	consensus_finishing_txn = false;
 }
 
 /*
@@ -519,6 +533,75 @@ consensus_serialize_proposal(StringInfo si, ConsensusProposal *msg)
 	 * the message type (ack/nack etc) and optional payload
 	 */
 	appendBinaryStringInfo(si, (const char*)msg, offsetof(ConsensusProposal, payload) + msg->payload_length);
+}
+
+/*
+ * If there's a consensus transaction active, return the initiating
+ * node-id, otherwise 0.
+ *
+ * The app must never commit a consensus transaction except via the consensus
+ * manager, so you can test to see if it's safe to commit here, or if you must
+ * hand control back to your caller to complete the txn.
+ */
+uint32
+consensus_active_nodeid(void)
+{
+	if (consensus_started_txn != 0)
+	{
+		Assert(IsTransactionState());
+		return consensus_started_txn;
+	}
+	else
+		return 0;
+}
+
+/*
+ * Detect state violations where a consensus transaction is commited from
+ * outside the consensus manager.
+ *
+ * Similar checks are likely needed for PREPARE later.
+ */
+static void
+consensus_xact_callback(XactEvent event, void *arg)
+{
+	switch (event)
+	{
+		case XACT_EVENT_COMMIT:
+			/*
+			 * If this txn was started by the consensus manager, make sure it's
+			 * being committed by the consensus manager too, and clear the
+			 * consensus_started_txn field.
+			 */
+			if (consensus_started_txn != 0)
+			{
+				if (!consensus_finishing_txn)
+					ereport(ERROR,
+							(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+							 errmsg("attempted to commit consensus transaction from outside consensus manager")));
+				consensus_started_txn = 0;
+				consensus_finishing_txn = false;
+			}
+			break;
+		case XACT_EVENT_ABORT:
+			/*
+			 * It's OK to rollback a consensus txn from anywhere, since failures can arise
+			 * at any point. We could be in elog(ERROR) handling here too, so take care.
+			 *
+			 * Right now all we'll do is clear our state. Once we support true consensus
+			 * we'll need to arrange for a nack to be sent here too.
+			 */
+			if (consensus_started_txn != 0)
+			{
+				elog(bdr_debug_level, "consensus tranaction from originating node %u aborted", consensus_started_txn);
+				consensus_started_txn = 0;
+				consensus_finishing_txn = false;
+				MemoryContextReset(cur_txn_context);
+				cur_txn_proposals = NIL;
+			}
+			break;
+		default:
+			break;
+	}
 }
 
 /*

@@ -52,6 +52,8 @@ extern void consensus_proposals_max_id(uint32 *max_applied, int32 *max_applyable
 
 extern struct ConsensusProposal* consensus_get_proposal(uint32 proposal_id);
 
+extern uint32 consensus_active_nodeid(void);
+
 /*
  * This hook is called when a proposal is received from the message broker or
  * is localy submitted, before it is inserted.
