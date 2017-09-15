@@ -851,7 +851,7 @@ bdr_join_handle_active_proposal(BdrMessage *msg)
 
 		/* Enter fully joined steady state */
 		state_transition(&cur_state, BDR_NODE_STATE_ACTIVE,
-			cur_state.join_target_id, NULL);
+			0, NULL);
 	}
 
 	/*

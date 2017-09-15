@@ -233,6 +233,6 @@ FROM bdr.state_journal_details;
             12 |   200 | BDR_NODE_STATE_STANDBY                      |     1148549230 | node1            | 
             13 |   203 | BDR_NODE_STATE_CREATE_SLOTS                 |     1148549230 | node1            | 
             14 |   204 | BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE         |     1148549230 | node1            | 
-            15 |   500 | BDR_NODE_STATE_ACTIVE                       |     1148549230 | node1            | 
+            15 |   500 | BDR_NODE_STATE_ACTIVE                       |              0 |                  | 
 (15 rows)
 
