@@ -231,7 +231,7 @@ bdr_reinit_submit_shm_mq(void)
 	LWLockAcquire(bdr_ctx->lock, LW_EXCLUSIVE);
 
 	Assert(my_manager != NULL);
-	Assert(!my_manager->peer_attached);
+	Assert(my_manager->peer_attached_pid == 0);
 	sendq = shm_mq_create((void*)my_manager->shm_send_mq, SHM_MQ_SIZE);
 	recvq = shm_mq_create((void*)my_manager->shm_recv_mq, SHM_MQ_SIZE);
 	Assert((void*)sendq == (void*)my_manager->shm_send_mq);
@@ -299,7 +299,7 @@ submit_mq_detach(void)
 	if (is_bdr_manager())
 		my_manager->manager_attached = false;
 	else
-		my_manager->peer_attached = false;
+		my_manager->peer_attached_pid = 0;
 
 	LWLockRelease(bdr_ctx->lock);
 }
@@ -335,7 +335,7 @@ bdr_detach_submit_shm_mq(void)
 	submit_mq.state = MQ_WAIT_PEER_DETACH;
 
 	LWLockAcquire(bdr_ctx->lock, LW_EXCLUSIVE);
-	if (!my_manager->peer_attached)
+	if (my_manager->peer_attached_pid == 0)
 	{
 		Assert(!my_manager->manager_attached);
 		/* Peer is gone */
@@ -514,22 +514,28 @@ bdr_attach_manager_queue(void)
 	LWLockAcquire(bdr_ctx->lock, LW_EXCLUSIVE);
 	sendproc = shm_mq_get_sender(sendq);
 	recvproc = shm_mq_get_receiver(recvq);
-	if (sendproc != NULL || recvproc != NULL)
+	/*
+	 * If a peer is attached, or if one was previously attached to a queue
+	 * that isn't yet cleaned up, we can't attempt delivery yet.
+	 */
+	if (my_manager->peer_attached_pid != 0 || sendproc != NULL || recvproc != NULL)
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_INSUFFICIENT_RESOURCES),
-				 errmsg("manager is currently busy and cannot receive messages, try again later"),
-				 errdetail("send queue in use by pid %d, recv queue in use by pid %d (or new proc pid in the same PROC slot)",
+				 errmsg("manager is currently busy servicing another process and cannot receive messages, try again later"),
+				 errdetail("queue marked busy by pid %d (send queue in use by pid %d, recv queue in use by pid %d or new proc pid in the same PROC slot)",
+				 		   my_manager->peer_attached_pid,
 				 		   sendproc == NULL ? 0 : sendproc->pid,
 						   recvproc == NULL ? 0 : recvproc->pid)));
 	}
 
+	Assert(my_manager->peer_attached_pid == 0);
 	old_ctx = MemoryContextSwitchTo(submit_mq.mq_context);
 	shm_mq_set_receiver(recvq, MyProc);
 	shm_mq_set_sender(sendq, MyProc);
 	submit_mq.sendq_handle = shm_mq_attach(sendq, NULL, NULL);
 	submit_mq.recvq_handle = shm_mq_attach(recvq, NULL, NULL);
-	my_manager->peer_attached = true;
+	my_manager->peer_attached_pid = MyProcPid;
 	(void) MemoryContextSwitchTo(old_ctx);
 	LWLockRelease(bdr_ctx->lock);
 
@@ -616,6 +622,8 @@ bdr_messaging_detach(void)
 	 * or wait for the manager to detach. It just closes down.
 	 */
 	submit_mq_detach();
+
+	elog(bdr_debug_level, "detached from manager message queue");
 }
 
 /*

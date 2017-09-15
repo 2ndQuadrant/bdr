@@ -819,11 +819,15 @@ bdr_consensus_message_outcome(PG_FUNCTION_ARGS)
 {
 	const char * handle_str = text_to_cstring(PG_GETARG_TEXT_P(0));
 	uint64 handle;
+	ConsensusProposalStatus outcome;
 
 	(void) bdr_check_local_node(false);
 
 	if (sscanf(handle_str, UINT64_FORMAT, &handle) != 1)
 		elog(ERROR, "could not parse %s as uint64", handle_str);
 
-	PG_RETURN_INT32(bdr_msg_get_outcome(handle));
+	outcome = bdr_msg_get_outcome(handle);
+	bdr_messaging_detach();
+
+	PG_RETURN_INT32((int32)outcome);
 }

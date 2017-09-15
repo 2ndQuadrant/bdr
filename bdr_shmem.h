@@ -39,11 +39,11 @@ typedef struct BdrManagerShmem
 	 * after attached. This guards against them being overwritten (after
 	 * another peer detaches). The manager must set manager_attached
 	 * before attaching to the queues themselves, and a peer must set
-	 * peer_attached. (see discussion in bdr_msgbroker_receiver for
+	 * peer_attached_pid. (see discussion in bdr_msgbroker_receiver for
 	 * why we need this extra interlock).
 	 */
 	bool		manager_attached;
-	bool		peer_attached;
+	int			peer_attached_pid;
 	char		shm_recv_mq[SHM_MQ_SIZE];
 	char		shm_send_mq[SHM_MQ_SIZE];
 } BdrManagerShmem;
