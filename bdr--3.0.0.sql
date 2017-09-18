@@ -217,3 +217,6 @@ SELECT
 FROM bdr.state_journal j
   CROSS JOIN LATERAL bdr.decode_state_entry(j) d
   LEFT JOIN pglogical.node n ON (n.node_id = j.peer_id);
+
+COMMENT ON VIEW bdr.state_journal_details IS
+'Human readable decoding of bdr.state_journal';
