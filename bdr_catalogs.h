@@ -46,6 +46,24 @@ typedef struct BdrNodeInfo
 	PGlogicalInterface *pgl_interface;
 } BdrNodeInfo;
 
+typedef enum BdrSubscriptionMode
+{
+	BDR_SUBSCRIPTION_MODE_NONE  = 0,
+	BDR_SUBSCRIPTION_MODE_NORMAL = 'n',
+	BDR_SUBSCRIPTION_MODE_CATCHUP = 'c',
+	BDR_SUBSCRIPTION_MODE_FASTFORWARD = 'f'
+} BdrSubscriptionMode;
+
+
+typedef struct BdrSubscription
+{
+	Oid					pglogical_subscription_id;
+	Oid					nodegroup_id;
+	Oid					origin_node_id;
+	Oid					target_node_id;
+	BdrSubscriptionMode	mode;
+} BdrSubscription;
+
 extern BdrNodeGroup * bdr_get_nodegroup(Oid nodegroup_id, bool missing_ok);
 
 extern BdrNodeGroup * bdr_get_nodegroup_by_name(const char *name,
@@ -83,6 +101,15 @@ extern void state_get_last(struct BdrStateEntry *out_state, bool for_update,
 extern void state_prune(int maxentries);
 
 extern void state_decode_tuple(struct BdrStateEntry *state, HeapTupleHeader tup);
+
+extern void bdr_create_bdr_subscription(BdrSubscription *sub);
+
+extern void bdr_alter_bdr_subscription(BdrSubscription *sub);
+
+extern List * bdr_get_node_subscriptions(uint32 target_node_id);
+
+extern BdrSubscription * bdr_get_node_subscription(uint32 target_node_id,
+	uint32 origin_node_id, uint32 nodegroup_id, bool missing_ok);
 
 /* Random helpers related to working with pgl/bdr catalogs */
 extern void interval_from_ms(int ms, Interval *interval);

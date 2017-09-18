@@ -92,7 +92,8 @@ struct BdrJoinProgress
 struct BdrJoinProgress join = { NULL, NULL, false, NULL, -1, NULL};
 
 static void bdr_join_create_slot(BdrNodeInfo *local, BdrNodeInfo *remote);
-static void bdr_create_subscription(BdrNodeInfo *local, BdrNodeInfo *remote, int apply_delay_ms, bool for_join);
+static void bdr_create_subscription(BdrNodeInfo *local, BdrNodeInfo *remote,
+	int apply_delay_ms, bool for_join, char initial_mode);
 static void bdr_join_wait_event_set_register(void);
 static void backend_sleep_conn(int millis, PGconn *conn);
 
@@ -811,42 +812,48 @@ bdr_join_handle_active_proposal(BdrMessage *msg)
 		state_get_expected(&cur_state, true, true, BDR_NODE_STATE_ACTIVE);
 
 		/*
-		 * We can now create a subscription to the node, to be started
+		 * We can now create a subscription to the joining node, to be started
 		 * once we commit.
 		 */
-		bdr_create_subscription(local, remote, 0, false);
+		bdr_create_subscription(local, remote, 0, false, BDR_SUBSCRIPTION_MODE_NORMAL);
 	}
 	else
 	{
 		/*
 		 * We're the joining node, so enable our subs to all peers.
 		 */
-		List	   *nodes;
+		List	   *subs;
 		ListCell   *lc;
 
 		state_get_expected(&cur_state, true, true,
 			BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE);
 
-		nodes = bdr_get_nodes_info(local->bdr_node_group->id);
-
 		/*
-		 * TODO: later we'll instead be switching these from catchup-only mode
-		 * to actually replaying directly, after first switching the join
-		 * subscription from catchup to normal replay.
+		 * Switch the catchup mode subscription we used for join to normal
+		 * replay.
 		 */
-		foreach (lc, nodes)
+		subs = bdr_get_node_subscriptions(local->pgl_node->id);
+		foreach (lc, subs)
 		{
-			BdrNodeInfo	   *remote = lfirst(lc);
-			List		   *subs;
-			ListCell	   *lcsub;
-
-			subs = bdr_get_node_subscriptions(remote->bdr_node->node_id);
-			foreach (lcsub, subs)
+			BdrSubscription *sub = lfirst(lc);
+			PGLogicalSubscription *psub = get_subscription(sub->pglogical_subscription_id);
+			Assert(sub->target_node_id == local->pgl_node->id);
+			if (sub->origin_node_id == remote->pgl_node->id)
 			{
-				PGLogicalSubscription *sub = lfirst(lcsub);
-				sub->enabled = true;
-				alter_subscription(sub);
+				Assert(sub->mode == BDR_SUBSCRIPTION_MODE_CATCHUP);
+				sub->mode = BDR_SUBSCRIPTION_MODE_NORMAL;
 			}
+			else
+			{
+				Assert(sub->mode == BDR_SUBSCRIPTION_MODE_CATCHUP);
+				sub->mode = BDR_SUBSCRIPTION_MODE_NORMAL;
+			}
+			bdr_alter_bdr_subscription(sub);
+			psub->enabled = true;
+			/*
+			 * This will kill the subscription's workers and restart them
+			 */
+			alter_subscription(psub);
 		}
 
 		/* Enter fully joined steady state */
@@ -1293,13 +1300,18 @@ bdr_gen_sub_name(BdrNodeInfo *subscriber, BdrNodeInfo *provider)
 /*
  * Create a subscription, optionally initially disabled, from 'local' to 'remote, possibly
  * dumping data too.
+ *
+ * Creates the bdr.subscription entry and the underlying
+ * pglogical.subscription, writer, etc.
  */
 static void
-bdr_create_subscription(BdrNodeInfo *local, BdrNodeInfo *remote, int apply_delay_ms, bool for_join)
+bdr_create_subscription(BdrNodeInfo *local, BdrNodeInfo *remote, int apply_delay_ms, bool for_join, char initial_mode)
 {
 	List				   *replication_sets = NIL;
 	NameData				slot_name;
 	char				   *sub_name;
+	BdrSubscription		   *bsub_existing;
+	BdrSubscription			bsub_new;
 	PGLogicalSubscription	sub;
 	PGLSubscriptionWriter	sub_writer;
 	PGLogicalSyncStatus		sync;
@@ -1308,6 +1320,17 @@ bdr_create_subscription(BdrNodeInfo *local, BdrNodeInfo *remote, int apply_delay
 	elog(bdr_debug_level, "creating subscription for %u on %u",
 		 remote->bdr_node->node_id, local->bdr_node->node_id);
 
+	bsub_existing = bdr_get_node_subscription(local->pgl_node->id,
+		remote->pgl_node->id, local->bdr_node_group->id, true);
+
+	if (bsub_existing != NULL)
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("bdr subscription from %u to %u for nodegroup %u already exists with id %u",
+				 		local->pgl_node->id, remote->pgl_node->id,
+						local->bdr_node_group->id,
+						bsub_existing->pglogical_subscription_id)));
+
 	/*
 	 * For now we support only one replication set, with the same name as the
 	 * BDR group. (DDL should be done through it too).
@@ -1315,7 +1338,8 @@ bdr_create_subscription(BdrNodeInfo *local, BdrNodeInfo *remote, int apply_delay
 	replication_sets = lappend(replication_sets, pstrdup(local->bdr_node_group->name));
 
 	/*
-	 * Make sure there's no existing BDR subscription to this node.
+	 * Make sure there's no existing subscription to this node with the same
+	 * BDR replication set.
 	 */
 	check_overlapping_replication_sets(replication_sets, 
 		remote->pgl_node->id, remote->pgl_node->name);
@@ -1340,6 +1364,7 @@ bdr_create_subscription(BdrNodeInfo *local, BdrNodeInfo *remote, int apply_delay
 	sub.origin_if = remote->pgl_interface;
 	sub.target_if = local->pgl_interface;
 	sub.replication_sets = replication_sets;
+
 	/*
 	 * BDR handles forwarding separately in the output plugin hooks
 	 * so it can forward by nodegroup, not origin list.
@@ -1360,6 +1385,16 @@ bdr_create_subscription(BdrNodeInfo *local, BdrNodeInfo *remote, int apply_delay
 	sub.isinternal = true;
 
 	create_subscription(&sub);
+
+	/*
+	 * Record that this is a BDR-owned subscription
+	 */
+	bsub_new.pglogical_subscription_id = sub.id;
+	bsub_new.nodegroup_id = local->bdr_node_group->id;
+	bsub_new.origin_node_id = remote->pgl_node->id;
+	bsub_new.target_node_id = local->pgl_node->id;
+	bsub_new.mode = initial_mode;
+	bdr_create_bdr_subscription(&bsub_new);
 
 	/*
 	 * Create the writer for the subscription.
@@ -1421,7 +1456,7 @@ bdr_join_continue_subscribe_join_target(BdrStateEntry *cur_state, BdrNodeInfo *l
 	{
 		BdrNodeInfo *remote = finish_get_remote_node_info(join.conn);
 		join.query_result_pending = false;
-		bdr_create_subscription(local, remote, 0, true);
+		bdr_create_subscription(local, remote, 0, true, BDR_SUBSCRIPTION_MODE_CATCHUP);
 
 		/*
 		 * Now that we've created a subscription to the target we can start
@@ -1438,20 +1473,21 @@ bdr_join_continue_subscribe_join_target(BdrStateEntry *cur_state, BdrNodeInfo *l
 static void
 bdr_join_continue_wait_subscribe_complete(BdrStateEntry *cur_state, BdrNodeInfo *local)
 {
-	List				   *subs;
 	PGLogicalSubscription  *sub;
 	PGLogicalSyncStatus	   *sync;
+	BdrSubscription		   *bsub;
 
 	Assert(cur_state->current == BDR_NODE_STATE_JOIN_WAIT_SUBSCRIBE_COMPLETE);
 
-	subs = bdr_get_node_subscriptions(bdr_get_local_nodeid());
+	bsub = bdr_get_node_subscription(bdr_get_local_nodeid(), cur_state->peer_id,
+		bdr_get_local_nodegroup_id(false), true);
+
 
 	/*
 	 * Only one BDR sub should exist. We created it earlier, we're just waiting
 	 * for it to sync now.
 	 */
-	Assert(list_length(subs) == 1);
-	sub = linitial(subs);
+	sub = get_subscription(bsub->pglogical_subscription_id);
 	Assert(sub->target->id == bdr_get_local_nodeid());
 	Assert(sub->origin->id == cur_state->peer_id);
 
@@ -1473,16 +1509,15 @@ bdr_join_continue_wait_catchup(BdrStateEntry *cur_state, BdrNodeInfo *local)
 	XLogRecPtr cur_progress;
 	ExtraDataJoinWaitCatchup *extra;
 	RepOriginId origin_id;
-	List *subs;
+	BdrSubscription *bsub;
 	PGLogicalSubscription *sub;
 
 	Assert(cur_state->current == BDR_NODE_STATE_JOIN_WAIT_CATCHUP);
 	extra = cur_state->extra_data;
 
-	subs = bdr_get_node_subscriptions(bdr_get_local_nodeid());
-	/* Only one BDR sub should exist right now */
-	Assert(list_length(subs) == 1);
-	sub = linitial(subs);
+	bsub = bdr_get_node_subscription(local->pgl_node->id,
+		cur_state->peer_id, local->bdr_node_group->id, false);
+	sub = get_subscription(bsub->pglogical_subscription_id);
 	Assert(sub->target->id == bdr_get_local_nodeid());
 	Assert(sub->origin->id == cur_state->peer_id);
 
@@ -1541,7 +1576,7 @@ bdr_join_continue_create_subscriptions(BdrStateEntry *cur_state, BdrNodeInfo *lo
 		if (remote->bdr_node->node_id == local->bdr_node->node_id)
 			continue;
 
-		bdr_create_subscription(local, remote, 0, false);
+		bdr_create_subscription(local, remote, 0, false, BDR_SUBSCRIPTION_MODE_FASTFORWARD);
 	}
 
 	bdr_messaging_refresh_nodes();

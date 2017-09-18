@@ -28,15 +28,27 @@ CREATE TABLE bdr.node
 
 REVOKE ALL ON bdr.node FROM public;
 
--- This just records which subscriptions are ours. Since we use
--- pglogical node IDs and the subscription references those, we
--- need not record anything else.
-CREATE TABLE bdr.node_subscriptions
+-- This records which subscriptions are owned by the local BDR node
+-- (target_node_id) and the mode they are in.
+--
+-- Since we use pglogical node IDs and the subscription references those,
+-- strictly we need not record anything else. The subscription's replication
+-- sets tell us which nodegroup it's part of.
+--
+-- That makes filtering and lookups a real pain, though, so we store the source
+-- and destination node and nodegroup id here.
+--
+CREATE TABLE bdr.subscription
 (
-	pglogical_subscription_id oid PRIMARY KEY
+	pgl_subscription_id oid PRIMARY KEY,
+	nodegroup_id oid NOT NULL,
+	origin_node_id oid NOT NULL,
+	target_node_id oid NOT NULL,
+	UNIQUE(nodegroup_id, origin_node_id, target_node_id),
+	subscription_mode "char" NOT NULL CHECK (subscription_mode IN ('n', 'c', 'f'))
 );
 
-REVOKE ALL ON bdr.node_subscriptions FROM public;
+REVOKE ALL ON bdr.subscription FROM public;
 
 CREATE TABLE bdr.node_peer_progress
 (

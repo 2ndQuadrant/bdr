@@ -51,6 +51,7 @@
 #define CATALOG_NODE_GROUP			"node_group"
 #define CATALOG_STATE				"state_journal"
 #define CATALOG_STATE_COUNTER_IDX	"state_journal_pkey"
+#define CATALOG_SUBSCRIPTION		"subscription"
 
 typedef struct NodeTuple
 {
@@ -99,6 +100,22 @@ typedef struct StateTuple
 #define Anum_state_global_consensus_no	4
 #define Anum_state_peer_id		5
 #define Anum_state_extra_data			6
+
+typedef struct SubscriptionTuple
+{
+	Oid			pglogical_subscription_id;
+	Oid			nodegroup_id;
+	Oid			origin_node_id;
+	Oid			target_node_id;
+	char		mode;
+} SubscriptionTuple;
+
+#define Natts_subscription					5
+#define Anum_subscription_pglogical_subscription_id 1
+#define Anum_subscription_nodegroup_id		2
+#define Anum_subscription_origin_node_id	3
+#define Anum_subscription_target_node_id	4
+#define Anum_subscription_mode				5
 
 static BdrNodeGroup *
 bdr_nodegroup_fromtuple(HeapTuple tuple)
@@ -620,41 +637,206 @@ bdr_get_nodes_info(Oid in_group_id)
 	return res;
 }
 
+void
+bdr_create_bdr_subscription(BdrSubscription *sub)
+{
+	RangeVar   *rv;
+	Relation	rel;
+	TupleDesc	tupDesc;
+	HeapTuple	tup;
+	Datum		values[Natts_subscription];
+	bool		nulls[Natts_subscription];
+
+	rv = makeRangeVar(BDR_EXTENSION_NAME, CATALOG_SUBSCRIPTION, -1);
+	rel = heap_openrv(rv, RowExclusiveLock);
+	tupDesc = RelationGetDescr(rel);
+
+	/* Form a tuple. */
+	memset(nulls, false, sizeof(nulls));
+	values[Anum_subscription_pglogical_subscription_id - 1]
+		= ObjectIdGetDatum(sub->pglogical_subscription_id);
+	values[Anum_subscription_nodegroup_id - 1]
+		= ObjectIdGetDatum(sub->nodegroup_id);
+	values[Anum_subscription_origin_node_id - 1]
+		= ObjectIdGetDatum(sub->origin_node_id);
+	values[Anum_subscription_target_node_id - 1]
+		= ObjectIdGetDatum(sub->target_node_id);
+	values[Anum_subscription_mode - 1]
+		= CharGetDatum((char)sub->mode);
+
+	tup = heap_form_tuple(tupDesc, values, nulls);
+
+	/* Insert the tuple to the catalog. */
+	CatalogTupleInsert(rel, tup);
+
+	/* Cleanup. */
+	heap_freetuple(tup);
+	heap_close(rel, NoLock);
+
+	CommandCounterIncrement();
+}
+
+static BdrSubscription*
+subscription_fromtuple(HeapTuple tuple)
+{
+	SubscriptionTuple *stup = (SubscriptionTuple *) GETSTRUCT(tuple);
+	BdrSubscription *sub = palloc(sizeof(BdrSubscription));
+
+	sub->pglogical_subscription_id = stup->pglogical_subscription_id;
+	sub->nodegroup_id = stup->nodegroup_id;
+	sub->origin_node_id = stup->origin_node_id;
+	sub->target_node_id = stup->target_node_id;
+	sub->mode = (BdrSubscriptionMode)stup->mode;
+
+	return sub;
+}
+
+void
+bdr_alter_bdr_subscription(BdrSubscription *sub)
+{
+	RangeVar   *rv;
+	Relation	rel;
+	TupleDesc	tupDesc;
+	HeapTuple	oldtup,
+				newtup;
+	Datum		values[Natts_subscription];
+	bool		nulls[Natts_subscription];
+	bool		replaces[Natts_subscription];
+	ScanKeyData key[1];
+	SysScanDesc	scan;
+	BdrSubscription *oldsub;
+
+	rv = makeRangeVar(BDR_EXTENSION_NAME, CATALOG_SUBSCRIPTION, -1);
+	rel = heap_openrv(rv, RowExclusiveLock);
+	tupDesc = RelationGetDescr(rel);
+
+	ScanKeyInit(&key[0],
+				Anum_subscription_pglogical_subscription_id,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(sub->pglogical_subscription_id));
+
+	scan = systable_beginscan(rel, 0, true, NULL, 1, key);
+	oldtup = systable_getnext(scan);
+
+	if (!HeapTupleIsValid(oldtup))
+		elog(ERROR, "bdr.subscription %u not found",
+			sub->pglogical_subscription_id);
+
+	oldsub = subscription_fromtuple(oldtup);
+	Assert(oldsub->pglogical_subscription_id == sub->pglogical_subscription_id);
+	Assert(oldsub->nodegroup_id == sub->nodegroup_id);
+	Assert(oldsub->origin_node_id == sub->origin_node_id);
+	Assert(oldsub->target_node_id == sub->target_node_id);
+
+	/* Form a tuple. */
+	memset(nulls, false, sizeof(nulls));
+	memset(replaces, true, sizeof(replaces));
+
+	replaces[Anum_subscription_pglogical_subscription_id - 1] = false;
+	replaces[Anum_subscription_nodegroup_id - 1] = false;
+	replaces[Anum_subscription_origin_node_id - 1] = false;
+	replaces[Anum_subscription_target_node_id - 1] = false;
+
+	values[Anum_subscription_mode - 1] = CharGetDatum((char)sub->mode);
+	replaces[Anum_subscription_mode - 1] = true;
+
+	newtup = heap_modify_tuple(oldtup, tupDesc, values, nulls, replaces);
+
+	/* Update the tuple in catalog. */
+	CatalogTupleUpdate(rel, &oldtup->t_self, newtup);
+
+	/* Cleanup. */
+	heap_freetuple(newtup);
+	systable_endscan(scan);
+	heap_close(rel, NoLock);
+
+	CommandCounterIncrement();
+}
+
+BdrSubscription*
+bdr_get_node_subscription(uint32 target_node_id, uint32 origin_node_id,
+	uint32 nodegroup_id, bool missing_ok)
+{
+	RangeVar	   *rv;
+	Relation		rel;
+	HeapTuple		tuple;
+	SysScanDesc		scan;
+	ScanKeyData		key[3];
+	BdrSubscription*ret = NULL;
+
+	Assert(CurrentMemoryContext != TopMemoryContext);
+
+	rv = makeRangeVar(BDR_EXTENSION_NAME, CATALOG_SUBSCRIPTION, -1);
+	rel = heap_openrv(rv, RowExclusiveLock);
+
+	ScanKeyInit(&key[0],
+				Anum_subscription_nodegroup_id,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(nodegroup_id));
+	ScanKeyInit(&key[1],
+				Anum_subscription_origin_node_id,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(origin_node_id));
+	ScanKeyInit(&key[2],
+				Anum_subscription_target_node_id,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(target_node_id));
+
+	scan = systable_beginscan(rel, 0, true, NULL, 3, key);
+	tuple = systable_getnext(scan);
+	
+	if (!HeapTupleIsValid(tuple) && !missing_ok)
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("subscription for %u->%u in nodegroup %u not found",
+				 		target_node_id, origin_node_id, nodegroup_id)));
+
+	if (HeapTupleIsValid(tuple))
+		ret = subscription_fromtuple(tuple);
+
+	systable_endscan(scan);
+	heap_close(rel, RowExclusiveLock);
+
+	return ret;
+}
+
 /*
  * Filter the pglogical subscriptions for a node to report only the
- * BDR subscriptions.
+ * BDR subscriptions. Returns a List of BdrSubscription.
  */
 List *
-bdr_get_node_subscriptions(uint32 node_id)
+bdr_get_node_subscriptions(uint32 target_node_id)
 {
-	/*
-	 * TODO: filter the subscription list to exclude non-bdr subscriptions.
-	 *
-	 * We'll need another table like bdr.subscriptions to track this if more
-	 * than one plugin is active, but for now we just assume any isinternal
-	 * subscription is ours.
-	 */
-	List *subs = get_node_subscriptions(node_id, false);
-	ListCell *lc;
-	ListCell *prev = NULL;
+	RangeVar	   *rv;
+	Relation		rel;
+	HeapTuple		tuple;
+	List		   *ret = NIL;
+	SysScanDesc		scan;
+	ScanKeyData		key[1];
 
 	/* Not leak-proof */
 	Assert(CurrentMemoryContext != TopMemoryContext);
 
-	foreach (lc, subs)
+	rv = makeRangeVar(BDR_EXTENSION_NAME, CATALOG_SUBSCRIPTION, -1);
+	rel = heap_openrv(rv, RowExclusiveLock);
+
+	ScanKeyInit(&key[0],
+				Anum_subscription_target_node_id,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(target_node_id));
+
+	scan = systable_beginscan(rel, 0, true, NULL, 1, key);
+
+	while (HeapTupleIsValid(tuple = systable_getnext(scan)))
 	{
-		PGLogicalSubscription *sub = lfirst(lc);
-
-		if (!sub->isinternal)
-		{
-			/* We leak the subscription, but we're not in TopMemoryContext */
-			list_delete_cell(subs, lc, prev);
-		}
-
-		prev = lc;
+		BdrSubscription *bsub = subscription_fromtuple(tuple);
+		ret = lappend(ret, bsub);
 	}
 
-	return subs;
+	systable_endscan(scan);
+	heap_close(rel, RowExclusiveLock);
+
+	return ret;
 }
 
 void

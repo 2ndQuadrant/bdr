@@ -176,7 +176,8 @@ bdr_messaging_refresh_nodes(void)
 
 	foreach (lc, subs)
 	{
-		PGLogicalSubscription *sub = lfirst(lc);
+		BdrSubscription *bsub = lfirst(lc);
+		PGLogicalSubscription *sub = get_subscription(bsub->pglogical_subscription_id);
 		elog(LOG, "XXX adding/refreshing %u", sub->origin->id);
 		bdr_messaging_add_peer(sub->origin->id, sub->origin_if->dsn, true);
 	}
