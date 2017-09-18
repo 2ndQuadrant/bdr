@@ -354,7 +354,7 @@ state_transition_check(BdrStateEntry *state, BdrNodeState new_state)
  */
 void
 state_transition(BdrStateEntry *state, BdrNodeState new_state,
-	uint32 join_target_id, void *extradata)
+	uint32 peer_id, void *extradata)
 {
 	BdrStateEntry cur;
 
@@ -372,7 +372,7 @@ state_transition(BdrStateEntry *state, BdrNodeState new_state,
 	cur.counter = cur.counter + 1;
 	cur.current = new_state;
 	cur.global_consensus_no = 0L; /* TODO, accept arg */
-	cur.join_target_id = join_target_id;
+	cur.peer_id = peer_id;
 	cur.extra_data = extradata;
 
 	elog(bdr_debug_level, "node %u state transition #%u, %s => %s",
@@ -451,8 +451,9 @@ bdr_state_insert_initial(BdrNodeState initial)
 	state_initial.counter = 1;
 	state_initial.current = initial;
 	state_initial.global_consensus_no = 0L;
-	state_initial.join_target_id = 0;
+	state_initial.peer_id = 0;
 	state_initial.extra_data = NULL;
+	/* state->entered_time will be set by state_push */
 
 	/*
 	 * No need to look for states here, we'll ERROR with a pkey

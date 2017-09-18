@@ -434,7 +434,7 @@ bdr_join_continue_join_start(BdrStateEntry *cur_state, BdrNodeInfo *local)
 			ExtraDataConsensusWait new_extra;
 			new_extra.request_message_handle = handle;
 			state_transition(cur_state, BDR_NODE_STATE_JOIN_WAIT_CONFIRM,
-				cur_state->join_target_id, &new_extra);
+				cur_state->peer_id, &new_extra);
 		}
 	}
 }
@@ -555,7 +555,7 @@ bdr_join_create_peer_slot(void)
 		BDR_NODE_STATE_ACTIVE_SLOT_CREATE_PENDING);
 
 	local = bdr_get_cached_local_node_info();
-	remote = bdr_get_node_info(cur_state.join_target_id, false);
+	remote = bdr_get_node_info(cur_state.peer_id, false);
 	bdr_join_create_slot(local, remote);
 
 	state_transition(&cur_state, BDR_NODE_STATE_ACTIVE, 0, NULL);
@@ -690,7 +690,7 @@ bdr_join_continue_wait_confirm(BdrStateEntry *cur_state, BdrNodeInfo *local)
 			{
 				/* join request submitted successfully */
 				state_transition(cur_state, BDR_NODE_STATE_JOIN_COPY_REMOTE_NODES,
-					cur_state->join_target_id, NULL);
+					cur_state->peer_id, NULL);
 				break;
 			}
 			case CONSENSUS_MESSAGE_FAILED:
@@ -704,7 +704,7 @@ bdr_join_continue_wait_confirm(BdrStateEntry *cur_state, BdrNodeInfo *local)
 				ExtraDataJoinFailure new_extra;
 				new_extra.reason = "join target could not achieve consensus on join request";
 				state_transition(cur_state, BDR_NODE_STATE_JOIN_FAILED,
-					cur_state->join_target_id, &new_extra);
+					cur_state->peer_id, &new_extra);
 				ereport(WARNING,
 						(errmsg("BDR node join has failed - could not achieve consensus on join")));
 
@@ -777,7 +777,7 @@ bdr_join_handle_catchup_proposal(BdrMessage *msg)
 		state_get_expected(&cur_state, true, false,
 			BDR_NODE_STATE_SEND_CATCHUP_READY);
 		state_transition(&cur_state, BDR_NODE_STATE_STANDBY,
-			cur_state.join_target_id, NULL);
+			cur_state.peer_id, NULL);
 	}
 }
 
@@ -1206,7 +1206,7 @@ bdr_join_continue_copy_remote_nodes(BdrStateEntry *cur_state, BdrNodeInfo *local
 		bdr_join_finish_copy_remote_nodes(local);
 
 		state_transition(cur_state, BDR_NODE_STATE_JOIN_SUBSCRIBE_JOIN_TARGET,
-			cur_state->join_target_id, NULL);
+			cur_state->peer_id, NULL);
 	}
 }
 
@@ -1253,7 +1253,7 @@ bdr_join_continue_get_catchup_lsn(BdrStateEntry *cur_state, BdrNodeInfo *local)
 
 		PQclear(res);
 		state_transition(cur_state, BDR_NODE_STATE_JOIN_WAIT_CATCHUP,
-			cur_state->join_target_id, &extra);
+			cur_state->peer_id, &extra);
 
 		/*
 		 * We know there's only one result set, so this really shouldn't
@@ -1431,7 +1431,7 @@ bdr_join_continue_subscribe_join_target(BdrStateEntry *cur_state, BdrNodeInfo *l
 		bdr_messaging_refresh_nodes();
 
 		state_transition(cur_state, BDR_NODE_STATE_JOIN_WAIT_SUBSCRIBE_COMPLETE,
-			cur_state->join_target_id, NULL);
+			cur_state->peer_id, NULL);
 	}
 }
 
@@ -1453,7 +1453,7 @@ bdr_join_continue_wait_subscribe_complete(BdrStateEntry *cur_state, BdrNodeInfo 
 	Assert(list_length(subs) == 1);
 	sub = linitial(subs);
 	Assert(sub->target->id == bdr_get_local_nodeid());
-	Assert(sub->origin->id == cur_state->join_target_id);
+	Assert(sub->origin->id == cur_state->peer_id);
 
 	/*
 	 * Is the subscription synced up yet?
@@ -1462,7 +1462,7 @@ bdr_join_continue_wait_subscribe_complete(BdrStateEntry *cur_state, BdrNodeInfo 
 	if (sync && sync->status == SYNC_STATUS_READY)
 	{	
 		state_transition(cur_state, BDR_NODE_STATE_JOIN_GET_CATCHUP_LSN,
-			cur_state->join_target_id, NULL);
+			cur_state->peer_id, NULL);
 	}
 
 }
@@ -1484,7 +1484,7 @@ bdr_join_continue_wait_catchup(BdrStateEntry *cur_state, BdrNodeInfo *local)
 	Assert(list_length(subs) == 1);
 	sub = linitial(subs);
 	Assert(sub->target->id == bdr_get_local_nodeid());
-	Assert(sub->origin->id == cur_state->join_target_id);
+	Assert(sub->origin->id == cur_state->peer_id);
 
 	origin_id = replorigin_by_name(sub->slot_name, false);
 	Assert(origin_id != InvalidRepOriginId);
@@ -1501,7 +1501,7 @@ bdr_join_continue_wait_catchup(BdrStateEntry *cur_state, BdrNodeInfo *local)
 			 bdr_get_local_nodeid(),
 			 (uint32)(extra->min_catchup_lsn>>32), (uint32)extra->min_catchup_lsn);
 		state_transition(cur_state, BDR_NODE_STATE_JOIN_COPY_REPSET_MEMBERSHIPS,
-			cur_state->join_target_id, NULL);
+			cur_state->peer_id, NULL);
 	}
 	else
 		elog(bdr_debug_level, "%u waiting for origin '%s' to replay past %X/%08X; currently %X/%08X",
@@ -1518,7 +1518,7 @@ bdr_join_continue_copy_repset_memberships(BdrStateEntry *cur_state, BdrNodeInfo 
 	elog(WARNING, "replication set memberships copy not implemented");
 
 	state_transition(cur_state, BDR_NODE_STATE_JOIN_CREATE_SUBSCRIPTIONS,
-		cur_state->join_target_id, NULL);
+		cur_state->peer_id, NULL);
 }
 
 static void
@@ -1547,7 +1547,7 @@ bdr_join_continue_create_subscriptions(BdrStateEntry *cur_state, BdrNodeInfo *lo
 	bdr_messaging_refresh_nodes();
 
 	state_transition(cur_state, BDR_NODE_STATE_SEND_CATCHUP_READY,
-		cur_state->join_target_id, NULL);
+		cur_state->peer_id, NULL);
 }
 
 static void
@@ -1585,7 +1585,7 @@ bdr_join_continue_standby(BdrStateEntry *cur_state, BdrNodeInfo *local)
 	elog(LOG, "skipping standby and going straight to active");
 
 	state_transition(cur_state, BDR_NODE_STATE_CREATE_SLOTS,
-		cur_state->join_target_id, NULL);
+		cur_state->peer_id, NULL);
 }
 
 static void
@@ -1606,7 +1606,7 @@ bdr_join_continue_request_global_seq_id(BdrStateEntry *cur_state, BdrNodeInfo *l
 
 	extra.request_message_handle = handle;
 	state_transition(cur_state, BDR_NODE_STATE_WAIT_GLOBAL_SEQ_ID,
-		cur_state->join_target_id, &extra);
+		cur_state->peer_id, &extra);
 }
 
 static void
@@ -1620,7 +1620,7 @@ bdr_join_continue_wait_global_seq_id(BdrStateEntry *cur_state, BdrNodeInfo *loca
 	elog(WARNING, "waiting for global sequence ID assignment not implemented");
 
 	state_transition(cur_state, BDR_NODE_STATE_CREATE_SLOTS,
-		cur_state->join_target_id, NULL);
+		cur_state->peer_id, NULL);
 }
 
 /*
@@ -1653,7 +1653,7 @@ bdr_join_continue_create_slots(BdrStateEntry *cur_state, BdrNodeInfo *local)
 	}
 
 	state_transition(cur_state, BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE,
-		cur_state->join_target_id, NULL);
+		cur_state->peer_id, NULL);
 }
 
 static void
@@ -1911,7 +1911,7 @@ bdr_join_continue(BdrNodeState cur_state,
 	/* Lock the state and decode extradata */
 	state_get_expected(&locked_state, true, true, cur_state);
 
-	if (bdr_join_maintain_conn(local, locked_state.join_target_id))
+	if (bdr_join_maintain_conn(local, locked_state.peer_id))
 	{
 		switch (locked_state.current)
 		{

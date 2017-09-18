@@ -86,8 +86,9 @@ CREATE TABLE bdr.state_journal
 (
     state_counter oid NOT NULL PRIMARY KEY,
     state oid NOT NULL,
+    entered_time timestamptz NOT NULL,
     global_consensus_no bigint NOT NULL,
-    join_target_id oid NOT NULL,
+    peer_id oid NOT NULL,
     state_extra_data bytea
 ) WITH (user_catalog_table=true);
 
@@ -206,9 +207,10 @@ SELECT
   j.state_counter,
   j.state,
   d.state_name,
-  j.join_target_id,
-  n.node_name AS join_target_name,
+  j.entered_time,
+  j.peer_id,
+  n.node_name AS peer_name,
   d.extra_data
 FROM bdr.state_journal j
   CROSS JOIN LATERAL bdr.decode_state_entry(j) d
-  LEFT JOIN pglogical.node n ON (n.node_id = j.join_target_id);
+  LEFT JOIN pglogical.node n ON (n.node_id = j.peer_id);

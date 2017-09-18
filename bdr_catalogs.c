@@ -86,17 +86,19 @@ typedef struct StateTuple
 {
 	Oid			counter;
 	Oid			current;
+	TimestampTz entered_time;
 	int64		global_consensus_no;
-	Oid			join_target_id;
+	Oid			peer_id;
 	/* After this point use heap_getattr */
 } StateTuple;
 
-#define Natts_state						5
+#define Natts_state						6
 #define Anum_state_counter				1
 #define Anum_state_current				2
-#define Anum_state_global_consensus_no	3
-#define Anum_state_join_target_id		4
-#define Anum_state_extra_data			5
+#define Anum_state_entered_time			3
+#define Anum_state_global_consensus_no	4
+#define Anum_state_peer_id		5
+#define Anum_state_extra_data			6
 
 static BdrNodeGroup *
 bdr_nodegroup_fromtuple(HeapTuple tuple)
@@ -686,8 +688,9 @@ state_fromtuple(BdrStateEntry *state, HeapTuple tuple, TupleDesc tupDesc,
 
 	state->counter = stup->counter;
 	state->current = (BdrNodeState)stup->current;
+	state->entered_time = stup->entered_time;
 	state->global_consensus_no = (uint64)stup->global_consensus_no;
-	state->join_target_id = stup->join_target_id;
+	state->peer_id = stup->peer_id;
 
 	if (fetch_extradata)
 		d = heap_getattr(tuple, Anum_state_extra_data, tupDesc, &isnull);
@@ -723,13 +726,13 @@ state_prune(int maxentries)
 void
 state_push(BdrStateEntry *state)
 {
-	RangeVar   *rv;
-	Relation	rel;
-	TupleDesc	tupDesc;
-	HeapTuple	tup;
-	Datum		values[Natts_state];
-	bool		nulls[Natts_state];
-	bytea		*extra_data = NULL;
+	RangeVar	   *rv;
+	Relation		rel;
+	TupleDesc		tupDesc;
+	HeapTuple		tup;
+	Datum			values[Natts_state];
+	bool			nulls[Natts_state];
+	bytea		   *extra_data = NULL;
 
 	rv = makeRangeVar(BDR_EXTENSION_NAME, CATALOG_STATE, -1);
 	rel = heap_openrv(rv, ShareRowExclusiveLock);
@@ -738,12 +741,15 @@ state_push(BdrStateEntry *state)
 	if (state->counter == 0)
 		elog(ERROR, "attempt to insert invalid state counter 0");
 
+	state->entered_time = GetCurrentTimestamp();
+
 	/* Form a tuple. */
 	memset(nulls, false, sizeof(nulls));
 	values[Anum_state_counter - 1] = ObjectIdGetDatum(state->counter);
 	values[Anum_state_current - 1] = ObjectIdGetDatum((Oid)state->current);
+	values[Anum_state_entered_time - 1] = TimestampTzGetDatum(state->entered_time);
 	values[Anum_state_global_consensus_no - 1] = Int64GetDatum((int64)state->global_consensus_no);
-	values[Anum_state_join_target_id - 1] = ObjectIdGetDatum(state->join_target_id);
+	values[Anum_state_peer_id - 1] = ObjectIdGetDatum(state->peer_id);
 
 	if (state->extra_data != NULL)
 	{

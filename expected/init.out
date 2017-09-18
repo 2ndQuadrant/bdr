@@ -195,44 +195,44 @@ FROM pglogical.show_subscription_status();
 
 \c :node1_dsn
 SELECT
-    state_counter, state, state_name, join_target_id, join_target_name,
+    state_counter, state, state_name, peer_id, peer_name,
     regexp_replace(
 	regexp_replace(extra_data, '[[:xdigit:]]{1,8}/[[:xdigit:]]{8}', 'X/XXXXXXXX'),
 	 '[[:digit:]]', 'n', 'g') AS extra_data_masked
 FROM bdr.state_journal_details;
- state_counter | state |                state_name                 | join_target_id | join_target_name | extra_data_masked 
----------------+-------+-------------------------------------------+----------------+------------------+-------------------
-             1 |     1 | BDR_NODE_STATE_CREATED                    |              0 |                  | 
-             2 |   500 | BDR_NODE_STATE_ACTIVE                     |              0 |                  | 
-             3 |   501 | BDR_NODE_STATE_ACTIVE_SLOT_CREATE_PENDING |     3367056606 | node2            | 
-             4 |   500 | BDR_NODE_STATE_ACTIVE                     |              0 |                  | 
-             5 |   501 | BDR_NODE_STATE_ACTIVE_SLOT_CREATE_PENDING |     3367056606 | node2            | 
-             6 |   500 | BDR_NODE_STATE_ACTIVE                     |              0 |                  | 
+ state_counter | state |                state_name                 |  peer_id   | peer_name | extra_data_masked 
+---------------+-------+-------------------------------------------+------------+-----------+-------------------
+             1 |     1 | BDR_NODE_STATE_CREATED                    |          0 |           | 
+             2 |   500 | BDR_NODE_STATE_ACTIVE                     |          0 |           | 
+             3 |   501 | BDR_NODE_STATE_ACTIVE_SLOT_CREATE_PENDING | 3367056606 | node2     | 
+             4 |   500 | BDR_NODE_STATE_ACTIVE                     |          0 |           | 
+             5 |   501 | BDR_NODE_STATE_ACTIVE_SLOT_CREATE_PENDING | 3367056606 | node2     | 
+             6 |   500 | BDR_NODE_STATE_ACTIVE                     |          0 |           | 
 (6 rows)
 
 \c :node2_dsn
 SELECT
-    state_counter, state, state_name, join_target_id, join_target_name,
+    state_counter, state, state_name, peer_id, peer_name,
     regexp_replace(
 	regexp_replace(extra_data, '[[:xdigit:]]{1,8}/[[:xdigit:]]{8}', 'X/XXXXXXXX'),
 	 '[[:digit:]]', 'n', 'g') AS extra_data_masked
 FROM bdr.state_journal_details;
- state_counter | state |                 state_name                  | join_target_id | join_target_name |         extra_data_masked          
----------------+-------+---------------------------------------------+----------------+------------------+------------------------------------
-             1 |     1 | BDR_NODE_STATE_CREATED                      |              0 |                  | 
-             2 |   100 | BDR_NODE_STATE_JOIN_START                   |     1148549230 | node1            | node group name: bdrgroup
-             3 |   101 | BDR_NODE_STATE_JOIN_WAIT_CONFIRM            |     1148549230 | node1            | global consensus message handle: n
-             4 |   102 | BDR_NODE_STATE_JOIN_COPY_REMOTE_NODES       |     1148549230 | node1            | 
-             5 |   104 | BDR_NODE_STATE_JOIN_SUBSCRIBE_JOIN_TARGET   |     1148549230 | node1            | 
-             6 |   105 | BDR_NODE_STATE_JOIN_WAIT_SUBSCRIBE_COMPLETE |     1148549230 | node1            | 
-             7 |   106 | BDR_NODE_STATE_JOIN_GET_CATCHUP_LSN         |     1148549230 | node1            | 
-             8 |   107 | BDR_NODE_STATE_JOIN_WAIT_CATCHUP            |     1148549230 | node1            | minimum catchup lsn: X/XXXXXXXX
-             9 |   108 | BDR_NODE_STATE_JOIN_COPY_REPSET_MEMBERSHIPS |     1148549230 | node1            | 
-            10 |   109 | BDR_NODE_STATE_JOIN_CREATE_SUBSCRIPTIONS    |     1148549230 | node1            | 
-            11 |   110 | BDR_NODE_STATE_SEND_CATCHUP_READY           |     1148549230 | node1            | 
-            12 |   200 | BDR_NODE_STATE_STANDBY                      |     1148549230 | node1            | 
-            13 |   203 | BDR_NODE_STATE_CREATE_SLOTS                 |     1148549230 | node1            | 
-            14 |   204 | BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE         |     1148549230 | node1            | 
-            15 |   500 | BDR_NODE_STATE_ACTIVE                       |              0 |                  | 
+ state_counter | state |                 state_name                  |  peer_id   | peer_name |         extra_data_masked          
+---------------+-------+---------------------------------------------+------------+-----------+------------------------------------
+             1 |     1 | BDR_NODE_STATE_CREATED                      |          0 |           | 
+             2 |   100 | BDR_NODE_STATE_JOIN_START                   | 1148549230 | node1     | node group name: bdrgroup
+             3 |   101 | BDR_NODE_STATE_JOIN_WAIT_CONFIRM            | 1148549230 | node1     | global consensus message handle: n
+             4 |   102 | BDR_NODE_STATE_JOIN_COPY_REMOTE_NODES       | 1148549230 | node1     | 
+             5 |   104 | BDR_NODE_STATE_JOIN_SUBSCRIBE_JOIN_TARGET   | 1148549230 | node1     | 
+             6 |   105 | BDR_NODE_STATE_JOIN_WAIT_SUBSCRIBE_COMPLETE | 1148549230 | node1     | 
+             7 |   106 | BDR_NODE_STATE_JOIN_GET_CATCHUP_LSN         | 1148549230 | node1     | 
+             8 |   107 | BDR_NODE_STATE_JOIN_WAIT_CATCHUP            | 1148549230 | node1     | minimum catchup lsn: X/XXXXXXXX
+             9 |   108 | BDR_NODE_STATE_JOIN_COPY_REPSET_MEMBERSHIPS | 1148549230 | node1     | 
+            10 |   109 | BDR_NODE_STATE_JOIN_CREATE_SUBSCRIPTIONS    | 1148549230 | node1     | 
+            11 |   110 | BDR_NODE_STATE_SEND_CATCHUP_READY           | 1148549230 | node1     | 
+            12 |   200 | BDR_NODE_STATE_STANDBY                      | 1148549230 | node1     | 
+            13 |   203 | BDR_NODE_STATE_CREATE_SLOTS                 | 1148549230 | node1     | 
+            14 |   204 | BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE         | 1148549230 | node1     | 
+            15 |   500 | BDR_NODE_STATE_ACTIVE                       |          0 |           | 
 (15 rows)
 

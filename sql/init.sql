@@ -137,7 +137,7 @@ FROM pglogical.show_subscription_status();
 \c :node1_dsn
 
 SELECT
-    state_counter, state, state_name, join_target_id, join_target_name,
+    state_counter, state, state_name, peer_id, peer_name,
     regexp_replace(
 	regexp_replace(extra_data, '[[:xdigit:]]{1,8}/[[:xdigit:]]{8}', 'X/XXXXXXXX'),
 	 '[[:digit:]]', 'n', 'g') AS extra_data_masked
@@ -146,7 +146,7 @@ FROM bdr.state_journal_details;
 \c :node2_dsn
 
 SELECT
-    state_counter, state, state_name, join_target_id, join_target_name,
+    state_counter, state, state_name, peer_id, peer_name,
     regexp_replace(
 	regexp_replace(extra_data, '[[:xdigit:]]{1,8}/[[:xdigit:]]{8}', 'X/XXXXXXXX'),
 	 '[[:digit:]]', 'n', 'g') AS extra_data_masked

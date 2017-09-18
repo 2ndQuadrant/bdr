@@ -158,10 +158,11 @@ typedef struct BdrStateEntry
 {
 	uint32			counter;
 	BdrNodeState	current;
+	TimestampTz		entered_time;
 	/* if this state is associated with a global consensus operation */
 	uint64			global_consensus_no;
 	/* If this is state is associated with a join operation, the join target id */
-	uint32			join_target_id;
+	uint32			peer_id;
 	/* A separate palloc'd struct of BdrNodeState-specific type, or NULL */
 	void		   *extra_data;
 } BdrStateEntry;
@@ -169,7 +170,7 @@ typedef struct BdrStateEntry
 extern const char * bdr_node_state_name(BdrNodeState state);
 
 extern void state_transition(BdrStateEntry *state, BdrNodeState new_state,
-	uint32 join_target_id, void *extradata);
+	uint32 peer_id, void *extradata);
 
 extern void state_extradata_serialize(StringInfo out, BdrNodeState new_state,
 	void *extradata);
