@@ -21,9 +21,10 @@
 #include "bdr_catcache.h"
 #include "bdr_worker.h"
 
-bool bdr_required_this_conn = false;
 int peer_bdr_version_num = -1;
 char peer_bdr_version_str[BDR_VERSION_STR_SIZE];
+uint32 peer_bdr_node_group_id = 0;
+uint32 peer_bdr_node_id = 0;
 
 /*
  * GUC storage for bdr.debug_level
