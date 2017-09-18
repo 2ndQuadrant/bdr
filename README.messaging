@@ -157,3 +157,11 @@ batch of messages at once.
   requiring manager to only detach after worker gone, or similar.
 * extend it so it allows submission of multiple multiple messages in a single batch so we don't have to pass through the event loop each time;
 * expand the pool with a set of extra queues used first-come first-served by normal user backends and other bdr bgworkers - for ddl lock requests, ipc with manager, etc etc.
+
+Node states
+---
+
+The bdr.state_journal integrates with messaging. When we get a consensus
+message that we cannot act on completely in the prepare callback, we'll
+transition to a new local state. Then run the local state handlers until we get
+back to the active state. See bdr_state.c.

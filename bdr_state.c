@@ -10,6 +10,32 @@
  *
  * A persistent state machine for BDR node management operations.
  *-------------------------------------------------------------------------
+ *
+ * This state machine is invoked by the manager during event processing,
+ * startup, etc. It looks up the bdr.state_journal table to find the most
+ * recent state recorded, and based on that invokes a callback for whatever BDR
+ * subsystem is interested in making changes to node state. A state transition
+ * occurs when a state callback succeeds and sets the next state by inserting
+ * a new bdr.state_journal row.
+ *
+ * It's mainly used for node part and join, where we need to perform complex
+ * multi-step operations in a reliable, crash-safe, recoverable way.
+ *
+ * The current state can move out of one of the steady states like
+ * BDR_NODE_STATE_CREATED, BDR_NODE_STATE_ACTIVE, etc in response to SQL
+ * function calls that directly change the node state. 
+ *
+ * Global consensus messages can also change the state once the consensus
+ * system is up; we just do a state transition in a gobal consensus prepare
+ * handler. This lets global consensus messages respond to requests that
+ * cannot be completed within the scope of one commit (so long as they
+ * can do enough to promise to succeed within the first prepare).
+ *
+ * Arbitrary extra data may be added to any given state, so the handler callback
+ * for it has the information it needs.
+ *
+ * The bdr.state_journal may be inspected with the bdr.state_journal_details
+ * view to get human readable state names, decoded extradata fields, etc.
  */
 #include "postgres.h"
 
