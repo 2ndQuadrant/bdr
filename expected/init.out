@@ -44,7 +44,7 @@ FROM bdr.create_node_group('bdrgroup');
 -- Wait for the creating node to go fully active
 DO LANGUAGE plpgsql $$
 BEGIN
-  WHILE NOT EXISTS (SELECT 1 FROM bdr.state_journal WHERE state = 500)
+  WHILE NOT EXISTS (SELECT 1 FROM bdr.state_journal_details WHERE state_name = 'BDR_NODE_STATE_ACTIVE')
   LOOP
     PERFORM pg_sleep(0.5);
   END LOOP;
@@ -114,7 +114,7 @@ CHECKPOINT;
 -- Wait for the joining node to go fully active
 DO LANGUAGE plpgsql $$
 BEGIN
-  WHILE NOT EXISTS (SELECT 1 FROM bdr.state_journal WHERE state = 500)
+  WHILE NOT EXISTS (SELECT 1 FROM bdr.state_journal_details WHERE state_name = 'BDR_NODE_STATE_ACTIVE')
   LOOP
     PERFORM pg_sleep(0.5);
   END LOOP;
@@ -203,11 +203,11 @@ FROM bdr.state_journal_details;
  state_counter | state |                state_name                 |  peer_id   | peer_name | extra_data_masked 
 ---------------+-------+-------------------------------------------+------------+-----------+-------------------
              1 |     1 | BDR_NODE_STATE_CREATED                    |          0 |           | 
-             2 |   500 | BDR_NODE_STATE_ACTIVE                     |          0 |           | 
-             3 |   501 | BDR_NODE_STATE_ACTIVE_SLOT_CREATE_PENDING | 3367056606 | node2     | 
-             4 |   500 | BDR_NODE_STATE_ACTIVE                     |          0 |           | 
-             5 |   501 | BDR_NODE_STATE_ACTIVE_SLOT_CREATE_PENDING | 3367056606 | node2     | 
-             6 |   500 | BDR_NODE_STATE_ACTIVE                     |          0 |           | 
+             2 |  5000 | BDR_NODE_STATE_ACTIVE                     |          0 |           | 
+             3 |  5010 | BDR_NODE_STATE_ACTIVE_SLOT_CREATE_PENDING | 3367056606 | node2     | 
+             4 |  5000 | BDR_NODE_STATE_ACTIVE                     |          0 |           | 
+             5 |  5010 | BDR_NODE_STATE_ACTIVE_SLOT_CREATE_PENDING | 3367056606 | node2     | 
+             6 |  5000 | BDR_NODE_STATE_ACTIVE                     |          0 |           | 
 (6 rows)
 
 \c :node2_dsn
@@ -220,19 +220,19 @@ FROM bdr.state_journal_details;
  state_counter | state |                 state_name                  |  peer_id   | peer_name |         extra_data_masked          
 ---------------+-------+---------------------------------------------+------------+-----------+------------------------------------
              1 |     1 | BDR_NODE_STATE_CREATED                      |          0 |           | 
-             2 |   100 | BDR_NODE_STATE_JOIN_START                   | 1148549230 | node1     | node group name: bdrgroup
-             3 |   101 | BDR_NODE_STATE_JOIN_WAIT_CONFIRM            | 1148549230 | node1     | global consensus message handle: n
-             4 |   102 | BDR_NODE_STATE_JOIN_COPY_REMOTE_NODES       | 1148549230 | node1     | 
-             5 |   104 | BDR_NODE_STATE_JOIN_SUBSCRIBE_JOIN_TARGET   | 1148549230 | node1     | 
-             6 |   105 | BDR_NODE_STATE_JOIN_WAIT_SUBSCRIBE_COMPLETE | 1148549230 | node1     | 
-             7 |   106 | BDR_NODE_STATE_JOIN_GET_CATCHUP_LSN         | 1148549230 | node1     | 
-             8 |   107 | BDR_NODE_STATE_JOIN_WAIT_CATCHUP            | 1148549230 | node1     | minimum catchup lsn: X/XXXXXXXX
-             9 |   108 | BDR_NODE_STATE_JOIN_COPY_REPSET_MEMBERSHIPS | 1148549230 | node1     | 
-            10 |   109 | BDR_NODE_STATE_JOIN_CREATE_SUBSCRIPTIONS    | 1148549230 | node1     | 
-            11 |   110 | BDR_NODE_STATE_SEND_CATCHUP_READY           | 1148549230 | node1     | 
-            12 |   200 | BDR_NODE_STATE_STANDBY                      | 1148549230 | node1     | 
-            13 |   203 | BDR_NODE_STATE_CREATE_SLOTS                 | 1148549230 | node1     | 
-            14 |   204 | BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE         | 1148549230 | node1     | 
-            15 |   500 | BDR_NODE_STATE_ACTIVE                       |          0 |           | 
+             2 |  1000 | BDR_NODE_STATE_JOIN_START                   | 1148549230 | node1     | node group name: bdrgroup
+             3 |  1010 | BDR_NODE_STATE_JOIN_WAIT_CONFIRM            | 1148549230 | node1     | global consensus message handle: n
+             4 |  1020 | BDR_NODE_STATE_JOIN_COPY_REMOTE_NODES       | 1148549230 | node1     | 
+             5 |  1040 | BDR_NODE_STATE_JOIN_SUBSCRIBE_JOIN_TARGET   | 1148549230 | node1     | 
+             6 |  1050 | BDR_NODE_STATE_JOIN_WAIT_SUBSCRIBE_COMPLETE | 1148549230 | node1     | 
+             7 |  1060 | BDR_NODE_STATE_JOIN_GET_CATCHUP_LSN         | 1148549230 | node1     | 
+             8 |  1070 | BDR_NODE_STATE_JOIN_WAIT_CATCHUP            | 1148549230 | node1     | minimum catchup lsn: X/XXXXXXXX
+             9 |  1080 | BDR_NODE_STATE_JOIN_COPY_REPSET_MEMBERSHIPS | 1148549230 | node1     | 
+            10 |  1090 | BDR_NODE_STATE_JOIN_CREATE_SUBSCRIPTIONS    | 1148549230 | node1     | 
+            11 |  1100 | BDR_NODE_STATE_SEND_CATCHUP_READY           | 1148549230 | node1     | 
+            12 |  2000 | BDR_NODE_STATE_STANDBY                      | 1148549230 | node1     | 
+            13 |  2030 | BDR_NODE_STATE_CREATE_SLOTS                 | 1148549230 | node1     | 
+            14 |  2040 | BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE         | 1148549230 | node1     | 
+            15 |  5000 | BDR_NODE_STATE_ACTIVE                       |          0 |           | 
 (15 rows)
 

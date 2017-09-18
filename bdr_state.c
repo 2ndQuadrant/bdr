@@ -417,33 +417,6 @@ state_transition(BdrStateEntry *state, BdrNodeState new_state,
 }
 
 /*
- * Look up the current state and set 'state' to it if it's one of the listed
- * expected states. ERROR if it doesn't match any of the expected states.
- */
-void
-state_get_expected_many(BdrStateEntry *state, bool for_update,
-	bool with_extradata, int nexpected, BdrNodeState *expected)
-{
-	int i;
-	BdrStateEntry cur;
-	state_get_last(&cur, for_update, with_extradata);
-	for (i = 0; i < nexpected; i++)
-	{
-		if (cur.current == expected[i])
-		{
-			*state = cur;
-			return;
-		}
-	}
-
-	/* TODO: list expected/allowed states here */
-	ereport(ERROR,
-			(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-			 errmsg("local BDR node %u in unexpected state %u",
-					bdr_get_local_nodeid(), cur.current)));
-}
-
-/*
  * Look up the current state and set 'state' to it if it's the listed expected
  * state. ERROR if it doesn't match expected.
  */

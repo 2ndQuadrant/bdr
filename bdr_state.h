@@ -1,6 +1,12 @@
 #ifndef BDR_STATE_H
 #define BDR_STATE_H
 
+/*
+ * This enumeration corresponds to the on-disk states in bdr.state_journal.
+ * 
+ * Values must not be changed once assigned and used in a public release,
+ * so the enum is defined sparse.
+ */
 typedef enum BdrNodeState
 {
 	/* Never appears, reserved */
@@ -24,20 +30,20 @@ typedef enum BdrNodeState
 	 * and nodegroup definition is copied from a peer and we're ready
 	 * to submit the join request.
 	 */
-	BDR_NODE_STATE_JOIN_START = 100,
+	BDR_NODE_STATE_JOIN_START = 1000,
 
 	/*
 	 * Join request submitted to remote node. We're waiting for it to approve
 	 * the request so we know for sure that we got our node id and name
 	 * reserved by the node group.
 	 */
-	BDR_NODE_STATE_JOIN_WAIT_CONFIRM,
+	BDR_NODE_STATE_JOIN_WAIT_CONFIRM = 1010,
 
 	/*
 	 * The remote node has OK'd our join request, and we need to copy its
 	 * nodes entries.
 	 */
-	BDR_NODE_STATE_JOIN_COPY_REMOTE_NODES,
+	BDR_NODE_STATE_JOIN_COPY_REMOTE_NODES = 1020,
 
 	/*
 	 * This state is never actually entered. It's a marker for when the
@@ -45,61 +51,61 @@ typedef enum BdrNodeState
 	 * prior to it has the consensus system suppressed, anything after it
 	 * has it enabled.
 	 */
-	BDR_NODE_STATE_JOIN_CAN_START_CONSENSUS,
+	BDR_NODE_STATE_JOIN_CAN_START_CONSENSUS = 1030,
 	
 	/*
 	 * Create the subscription to the join target node, so we dump its
 	 * db.
 	 */
-	BDR_NODE_STATE_JOIN_SUBSCRIBE_JOIN_TARGET,
+	BDR_NODE_STATE_JOIN_SUBSCRIBE_JOIN_TARGET = 1040,
 
 	/*
 	 * Wait until the dump of the remote subscription finishes
 	 */
-	BDR_NODE_STATE_JOIN_WAIT_SUBSCRIBE_COMPLETE,
+	BDR_NODE_STATE_JOIN_WAIT_SUBSCRIBE_COMPLETE = 1050,
 
 	/*
 	 * Look up join target to find the minimum point we must replay past
 	 * before we can promote.
 	 */
-	BDR_NODE_STATE_JOIN_GET_CATCHUP_LSN,
+	BDR_NODE_STATE_JOIN_GET_CATCHUP_LSN = 1060,
 
 	/*
 	 * Our join request to the join target was successful, and we're in catchup
 	 * mode streaming from the join target, waiting to pass the minimum
 	 * replay lsn.
 	 */
-	BDR_NODE_STATE_JOIN_WAIT_CATCHUP,
+	BDR_NODE_STATE_JOIN_WAIT_CATCHUP = 1070,
 
 	/*
 	 * Copy replication set memberships from upstream tables to the
 	 * downstream node.
 	 */
-	BDR_NODE_STATE_JOIN_COPY_REPSET_MEMBERSHIPS,
+	BDR_NODE_STATE_JOIN_COPY_REPSET_MEMBERSHIPS = 1080,
 
 	/*
 	 * Create subscriptions to remaining peers. We do this
 	 * in catchup phase because they'll be set to fast-forward
 	 * only mode.
 	 */
-	BDR_NODE_STATE_JOIN_CREATE_SUBSCRIPTIONS,
+	BDR_NODE_STATE_JOIN_CREATE_SUBSCRIPTIONS = 1090,
 
 	/*
 	 * Tell all our peers that we've finished minimum catchup
 	 * and can be promoted.
 	 */
-	BDR_NODE_STATE_SEND_CATCHUP_READY,
+	BDR_NODE_STATE_SEND_CATCHUP_READY = 1100,
 
 	/*
 	 * Steady state: standby, waiting for promotion
 	 */
-	BDR_NODE_STATE_STANDBY = 200,
+	BDR_NODE_STATE_STANDBY = 2000,
 
 	/*
 	 * We've been promoted and are going full-active. Get a node-id for
 	 * global sequences.
 	 */
-	BDR_NODE_STATE_REQUEST_GLOBAL_SEQ_ID,
+	BDR_NODE_STATE_REQUEST_GLOBAL_SEQ_ID = 2010,
 
 	/*
 	 * We've requested a global sequence ID and obtained a request handle.
@@ -108,46 +114,48 @@ typedef enum BdrNodeState
 	 * We can go back to BDR_NODE_STATE_REQUEST_GLOBAL_SEQ_ID on nack
 	 * to try again or continue to BDR_NODE_STATE_CREATE_SLOTS.
 	 */
-	BDR_NODE_STATE_WAIT_GLOBAL_SEQ_ID,
+	BDR_NODE_STATE_WAIT_GLOBAL_SEQ_ID = 2020,
 
 	/*
 	 * We've been promoted and are going active.
 	 *
 	 * Create slots for peers to replay from us.
 	 */
-	BDR_NODE_STATE_CREATE_SLOTS,
+	BDR_NODE_STATE_CREATE_SLOTS = 2030,
 
 	/*
 	 * Announce that we've gone active (and set our node read/write)
 	 *
 	 * => BDR_NODE_STATE_ACTIVE
 	 */
-	BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE,
+	BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE = 2040,
 
 	/*
 	 * This is a placeholder for the end of the range of join states.
 	 * We never enter this state.
 	 */
-	BDR_NODE_STATE_JOIN_RANGE_END = 299,
+	BDR_NODE_STATE_JOIN_RANGE_END = 2999,
 
 
 	/*
 	 * Nodegroup is fully active as a participating member
 	 *
-	 * This state and 
+	 * This state is a steady state, it won't transition out
+	 * without an external influence from global messages,
+	 * SQL functions, etc.
 	 */
-	BDR_NODE_STATE_ACTIVE = 500,
+	BDR_NODE_STATE_ACTIVE = 5000,
 
 	/*
 	 * Active node needs to create a slot for joining node
 	 */
-	BDR_NODE_STATE_ACTIVE_SLOT_CREATE_PENDING,
+	BDR_NODE_STATE_ACTIVE_SLOT_CREATE_PENDING = 5010,
 
 	/*
 	 * Placeholder for the end of the range of IDs used for active
 	 * nodes.
 	 */
-	BDR_NODE_ACTIVE_RANGE_END = 599
+	BDR_NODE_ACTIVE_RANGE_END = 5999
 
 } BdrNodeState;
 
@@ -181,9 +189,6 @@ extern char* state_stringify_extradata(BdrStateEntry *state);
 
 extern void state_get_expected(BdrStateEntry *state, bool for_update,
 	bool want_extradata, BdrNodeState expected);
-
-extern void state_get_expected_many(BdrStateEntry *state, bool for_update,
-	bool want_extradata, int nexpected, BdrNodeState *expected);
 
 extern void bdr_state_insert_initial(BdrNodeState initial);
 

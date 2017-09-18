@@ -34,7 +34,7 @@ FROM bdr.create_node_group('bdrgroup');
 -- Wait for the creating node to go fully active
 DO LANGUAGE plpgsql $$
 BEGIN
-  WHILE NOT EXISTS (SELECT 1 FROM bdr.state_journal WHERE state = 500)
+  WHILE NOT EXISTS (SELECT 1 FROM bdr.state_journal_details WHERE state_name = 'BDR_NODE_STATE_ACTIVE')
   LOOP
     PERFORM pg_sleep(0.5);
   END LOOP;
@@ -74,7 +74,7 @@ CHECKPOINT;
 -- Wait for the joining node to go fully active
 DO LANGUAGE plpgsql $$
 BEGIN
-  WHILE NOT EXISTS (SELECT 1 FROM bdr.state_journal WHERE state = 500)
+  WHILE NOT EXISTS (SELECT 1 FROM bdr.state_journal_details WHERE state_name = 'BDR_NODE_STATE_ACTIVE')
   LOOP
     PERFORM pg_sleep(0.5);
   END LOOP;
