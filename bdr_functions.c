@@ -29,6 +29,7 @@
 #include "pglogical_node.h"
 #include "pglogical_repset.h"
 #include "pglogical_worker.h"
+#include "pglogical_functions.h"
 
 #include "bdr_catalogs.h"
 #include "bdr_catcache.h"
@@ -858,4 +859,55 @@ bdr_consensus_message_outcome(PG_FUNCTION_ARGS)
 	bdr_messaging_detach();
 
 	PG_RETURN_INT32((int32)outcome);
+}
+
+PG_FUNCTION_INFO_V1(bdr_replicate_ddl_command);
+
+/*
+ * This function wraps pglogical.replicate_ddl_command with a convenience
+ * lookup to preset the default replication set to the active BDR group's
+ * default replication set.
+ */
+Datum
+bdr_replicate_ddl_command(PG_FUNCTION_ARGS)
+{
+	const char *query;
+	BdrNodeInfo *local = bdr_check_local_node(false);
+	List	   *replication_sets;
+	bool		ret;
+
+	if (PG_ARGISNULL(0))
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("cannot replicate null DDL string")));
+
+	query = text_to_cstring(PG_GETARG_TEXT_PP(0));
+	
+	if (PG_ARGISNULL(1))
+		replication_sets = NIL;
+	else
+	{
+		ArrayType  *rep_set_names = PG_GETARG_ARRAYTYPE_P(1);
+		replication_sets = textarray_to_list(rep_set_names);
+	}
+
+	if (local->bdr_node_group == NULL)
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("current bdr node is not part of a node group"),
+				 errhint("Create or join a node group first.")));
+
+	/*
+	 * BDR uses the node-group's replication set by default, unlike pglogical's
+	 * default repset 'sql_ddl' for replicated ddl commands.
+	 */
+	if (replication_sets == NIL)
+	{
+		PGLogicalRepSet *repset =
+			get_replication_set(local->bdr_node_group->default_repset);
+		replication_sets = list_make1(repset->name);
+	}
+
+	ret = pglogical_replicate_ddl_command_base(query, replication_sets);
+	PG_RETURN_BOOL(ret);
 }

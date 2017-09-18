@@ -3,11 +3,11 @@ SELECT * FROM bdr_regress_variables()
 
 \c :node1_dsn
 
-SELECT pglogical.replicate_ddl_command($DDL$
+SELECT bdr.replicate_ddl_command($DDL$
 CREATE TABLE public.demo(
     id integer primary key
 );
-$DDL$, ARRAY['bdrgroup']);
+$DDL$);
 
 -- TODO: This should happen automatically with BDR, adding tables to
 -- the default repset on creation.

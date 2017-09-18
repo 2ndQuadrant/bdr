@@ -128,6 +128,9 @@ RETURNS void CALLED ON NULL INPUT VOLATILE LANGUAGE c AS 'MODULE_PATHNAME', 'bdr
 CREATE FUNCTION bdr.replication_set_remove_table(relation regclass, set_name text DEFAULT NULL)
 RETURNS void CALLED ON NULL INPUT VOLATILE LANGUAGE c AS 'MODULE_PATHNAME', 'bdr_replication_set_remove_table';
 
+CREATE FUNCTION bdr.replicate_ddl_command(ddl_cmd text, replication_sets text[] DEFAULT NULL)
+RETURNS bool CALLED ON NULL INPUT VOLATILE LANGUAGE c AS 'MODULE_PATHNAME', 'bdr_replicate_ddl_command';
+
 /*
  * Interface for BDR message broker
  */
