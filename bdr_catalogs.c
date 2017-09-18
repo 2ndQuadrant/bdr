@@ -754,6 +754,44 @@ bdr_alter_bdr_subscription(BdrSubscription *sub)
 }
 
 BdrSubscription*
+bdr_get_subscription(uint32 pglogical_subscription_id, bool missing_ok)
+{
+	RangeVar	   *rv;
+	Relation		rel;
+	HeapTuple		tuple;
+	SysScanDesc		scan;
+	ScanKeyData		key[1];
+	BdrSubscription*ret = NULL;
+
+	Assert(CurrentMemoryContext != TopMemoryContext);
+
+	rv = makeRangeVar(BDR_EXTENSION_NAME, CATALOG_SUBSCRIPTION, -1);
+	rel = heap_openrv(rv, RowExclusiveLock);
+
+	ScanKeyInit(&key[0],
+				Anum_subscription_pglogical_subscription_id,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(pglogical_subscription_id));
+
+	scan = systable_beginscan(rel, 0, true, NULL, 1, key);
+	tuple = systable_getnext(scan);
+	
+	if (!HeapTupleIsValid(tuple) && !missing_ok)
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("BDR subscription %u not found",
+				 		pglogical_subscription_id)));
+
+	if (HeapTupleIsValid(tuple))
+		ret = subscription_fromtuple(tuple);
+
+	systable_endscan(scan);
+	heap_close(rel, RowExclusiveLock);
+
+	return ret;
+}
+
+BdrSubscription*
 bdr_get_node_subscription(uint32 target_node_id, uint32 origin_node_id,
 	uint32 nodegroup_id, bool missing_ok)
 {

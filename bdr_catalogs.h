@@ -108,6 +108,9 @@ extern void bdr_alter_bdr_subscription(BdrSubscription *sub);
 
 extern List * bdr_get_node_subscriptions(uint32 target_node_id);
 
+extern BdrSubscription* bdr_get_subscription(uint32 pglogical_subscription_id,
+	bool missing_ok);
+
 extern BdrSubscription * bdr_get_node_subscription(uint32 target_node_id,
 	uint32 origin_node_id, uint32 nodegroup_id, bool missing_ok);
 
