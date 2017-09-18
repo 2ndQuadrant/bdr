@@ -1,6 +1,10 @@
 #ifndef BDR_STATE_H
 #define BDR_STATE_H
 
+#include "datatype/timestamp.h"
+
+#include "lib/stringinfo.h"
+
 /*
  * This enumeration corresponds to the on-disk states in bdr.state_journal.
  * 
