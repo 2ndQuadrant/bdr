@@ -134,6 +134,7 @@ bdr_create_node_sql(PG_FUNCTION_ARGS)
 	bnode.confirmed_our_join = false;
 	bnode.node_group_id = InvalidOid;
 	bnode.dbname = get_database_name(MyDatabaseId);
+	bnode.local_state = 0; /* TODO */
 
 	bdr_node_create(&bnode);
 	bdr_refresh_cache_local_nodeinfo();
