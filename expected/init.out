@@ -164,10 +164,10 @@ ORDER BY application_name;
 
 SELECT slot_name, plugin, slot_type, database, temporary, active
 FROM pg_replication_slots ORDER BY slot_name;
-              slot_name              |  plugin   | slot_type |  database  | temporary | active 
--------------------------------------+-----------+-----------+------------+-----------+--------
- pgl_postgres_node1_bdrgroup_node1   | pglogical | logical   | regression | f         | t
- pgl_regression_node2_bdrgroup_node2 | pglogical | logical   | postgres   | f         | t
+              slot_name              |      plugin      | slot_type |  database  | temporary | active 
+-------------------------------------+------------------+-----------+------------+-----------+--------
+ pgl_postgres_node1_bdrgroup_node1   | pglogical_output | logical   | regression | f         | t
+ pgl_regression_node2_bdrgroup_node2 | pglogical_output | logical   | postgres   | f         | t
 (2 rows)
 
 SELECT

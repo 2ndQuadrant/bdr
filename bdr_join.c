@@ -1739,8 +1739,7 @@ bdr_join_create_slot(BdrNodeInfo *local, BdrNodeInfo *remote)
 	 * is fine to use, since it must be at or behind the position a new
 	 * slot would get created at.
 	 */
-	pgl_acquire_or_create_slot(NameStr(slot_name));
-	ReplicationSlotRelease();
+	pgl_acquire_or_create_slot(NameStr(slot_name), false);
 }
 
 static void
