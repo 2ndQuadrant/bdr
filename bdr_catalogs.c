@@ -753,6 +753,9 @@ bdr_alter_bdr_subscription(BdrSubscription *sub)
 	CommandCounterIncrement();
 }
 
+/*
+ * Get a single subscription by ID.
+ */
 BdrSubscription*
 bdr_get_subscription(uint32 pglogical_subscription_id, bool missing_ok)
 {
@@ -762,8 +765,6 @@ bdr_get_subscription(uint32 pglogical_subscription_id, bool missing_ok)
 	SysScanDesc		scan;
 	ScanKeyData		key[1];
 	BdrSubscription*ret = NULL;
-
-	Assert(CurrentMemoryContext != TopMemoryContext);
 
 	rv = makeRangeVar(BDR_EXTENSION_NAME, CATALOG_SUBSCRIPTION, -1);
 	rel = heap_openrv(rv, RowExclusiveLock);
@@ -802,6 +803,7 @@ bdr_get_node_subscription(uint32 target_node_id, uint32 origin_node_id,
 	ScanKeyData		key[3];
 	BdrSubscription*ret = NULL;
 
+	/* Not leak-proof */
 	Assert(CurrentMemoryContext != TopMemoryContext);
 
 	rv = makeRangeVar(BDR_EXTENSION_NAME, CATALOG_SUBSCRIPTION, -1);
