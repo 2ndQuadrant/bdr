@@ -73,7 +73,7 @@ static void
 bdrorigincache_invalidation_cb(Datum arg, int cacheid, uint32 origin_id)
  {
 	struct BdrOriginCacheEntry *hentry;
-	RepOriginId origin = (RepOriginId)origin;
+	RepOriginId origin = (RepOriginId)origin_id;
 
 	Assert (BdrOriginCache != NULL);
 	Assert (cacheid == REPLORIGIDENT);
@@ -306,13 +306,30 @@ bdr_origin_filter_hook(struct LogicalDecodingContext *ctx, RepOriginId origin_id
 		return PGL_standard_decode_origin_filter(ctx, origin_id);
 }
 
+static char *
+sub_mode_name(BdrSubscriptionMode mode)
+{
+	switch (mode)
+	{
+		case BDR_SUBSCRIPTION_MODE_NORMAL:
+			return "normal";
+		case BDR_SUBSCRIPTION_MODE_FASTFORWARD:
+			return "fast forward";
+		case BDR_SUBSCRIPTION_MODE_NONE:
+			return "(none)";
+		case BDR_SUBSCRIPTION_MODE_CATCHUP:
+			return "catchup";
+	}
+	Assert(false);
+	elog(ERROR, "unreachable");
+}
+
 void
 bdr_output_start(struct LogicalDecodingContext * ctx, struct OutputPluginOptions *opt)
 {
 	bool txn_started = false;
 	MemoryContext old_ctx;
 
-	sub_mode = BDR_SUBSCRIPTION_MODE_NONE;
 	decoding_ctx = ctx->context;
 	Assert(decoding_ctx != NULL);
 
@@ -320,8 +337,9 @@ bdr_output_start(struct LogicalDecodingContext * ctx, struct OutputPluginOptions
 		return;
 
 	elog(bdr_debug_level,
-		"received connection from bdr node %u nodegroup %u, bdr version %s (%06d)",
+		"received connection from bdr node %u nodegroup %u, %s mode, bdr version %s (%06d)",
 		peer_bdr_node_id, peer_bdr_node_group_id,
+		sub_mode_name(sub_mode),
 		peer_bdr_version_str, peer_bdr_version_num);
 
 	if (!IsTransactionState())

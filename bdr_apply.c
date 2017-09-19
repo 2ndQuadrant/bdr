@@ -78,5 +78,4 @@ bdr_start_replication_params(StringInfo s)
 	 * output plugin so it filters in transtions for the whole nodegroup.
 	 */
 	appendStringInfo(s, ", bdr_subscription_mode '%c'", (char)bdr_sub->mode);
-
 }
