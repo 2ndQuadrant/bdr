@@ -16,6 +16,7 @@
 #include "access/xact.h"
 
 #include "utils/int8.h"
+#include "utils/memutils.h"
 
 #include "pglogical_worker.h"
 
@@ -34,13 +35,17 @@ static BdrSubscription *bdr_sub = NULL;
 void
 bdr_receiver_writer_start(void)
 {
+	MemoryContext old_ctx;
+
 	if (!bdr_is_active_db())
 		return;
 
 	Assert(!IsTransactionState());
 	StartTransactionCommand();
 	bdr_cache_local_nodeinfo();
+	old_ctx = MemoryContextSwitchTo(TopMemoryContext);
 	bdr_sub = bdr_get_subscription(MyPGLogicalWorker->subid, true);
+	(void) MemoryContextSwitchTo(old_ctx);
 	CommitTransactionCommand();
 }
 
@@ -60,6 +65,8 @@ bdr_start_replication_params(StringInfo s)
 	if (bdr_sub == NULL)
 		return;
 
+	Assert(bdr_sub->pglogical_subscription_id == MyPGLogicalWorker->subid);
+
 	appendStringInfo(s, ", bdr_version_num '%06d'", BDR_VERSION_NUM);
 	appendStringInfo(s, ", bdr_version_str '%s'", BDR_VERSION);
 	appendStringInfo(s, ", bdr_node_id '%u'", local->bdr_node->node_id);
@@ -70,5 +77,6 @@ bdr_start_replication_params(StringInfo s)
 	 * If we're replaying in catchup mode from this peer, we need to tell the
 	 * output plugin so it filters in transtions for the whole nodegroup.
 	 */
-	appendStringInfo(s, ", bdr_subscription_mode '%c'", bdr_sub->mode);
+	appendStringInfo(s, ", bdr_subscription_mode '%c'", (char)bdr_sub->mode);
+
 }
