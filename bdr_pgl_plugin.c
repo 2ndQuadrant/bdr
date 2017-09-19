@@ -149,6 +149,7 @@ bdr_register_pgl_plugin(void)
 	 */
 	plugin.worker_start = bdr_worker_start;
 	plugin.output_start = bdr_output_start;
+	plugin.output_shutdown = bdr_output_shutdown;
 	plugin.start_replication_params = bdr_start_replication_params;
 	plugin.process_output_param = bdr_process_output_params;
 	/*
