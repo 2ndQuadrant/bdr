@@ -871,10 +871,9 @@ msgb_send_pending(MsgbConnection *conn)
 		else
 			ereport(ERROR, (errmsg_internal("unexpected send status %d", buf->send_status)));
 	}
-	else
+	else if (conn->conn_status == MSGB_SEND_CONN_CONNECTING_REMOTE_SHMEM)
 	{
 		/* Still doing our initial setup query, so don't look at the queue yet. */
-		Assert(conn->conn_status == MSGB_SEND_CONN_CONNECTING_REMOTE_SHMEM);
 		wait_flags = msgb_flush_conn(conn);
 	}
 
