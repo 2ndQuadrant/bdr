@@ -1713,69 +1713,11 @@ bdr_join_continue_send_active_announce(BdrStateEntry *cur_state, BdrNodeInfo *lo
 	elog(WARNING, "not waiting for consensus on active announce, not implemented");
 }
 
-/*
- *
- * Pg's replication slots code lacks any interface to check if a slot exists.
- * You can acquire it, but either it'll block if in use, or with nowait mode,
- * it'll ERROR. So there's no nice way to ask "does this slot exist?". And
- * there's no way to create one if it doesn't exist.
- *
- * So we must do the test ourselves. This is racey with a concurrent slot
- * creation, but ... "don't do that". If someone does create a conflicting
- * slot we'll error out when we try to create, and re-check when we run again.
- *
- * Returns true if the slot exists and is a pglogical slot. false if no such
- * slot exists. ERROR's if the slot exists but isn't a pglogical slot.
- */
-static bool
-bdr_replication_slot_exists(Name slot_name)
-{
-	ReplicationSlot    *found = NULL;
-	int					i;
-
-	LWLockAcquire(ReplicationSlotAllocationLock, LW_SHARED);
-	for (i = 0; i < max_replication_slots; i++)
-	{
-		ReplicationSlot *s = &ReplicationSlotCtl->replication_slots[i];
-
-		if (s->in_use && strcmp(NameStr(*slot_name), NameStr(s->data.name)) == 0)
-		{
-			found = s;
-			break;
-		}
-	}
-
-	if (found && found->data.database != MyDatabaseId)
-		ereport(ERROR,
-				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("slot %s exists but is not a logical slot for the current database",
-					 NameStr(*slot_name)),
-				 errdetail("Expected slot for %u, found slot for %u",
-				 	 MyDatabaseId, found->data.database)));
-
-	if (found && found->data.persistency != RS_PERSISTENT)
-		ereport(ERROR,
-				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("slot %s exists but is not a persistent slot",
-					 NameStr(*slot_name))));
-
-	if (found && strcmp(NameStr(found->data.plugin), "pglogical") != 0)
-		ereport(ERROR,
-				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("slot %s exists but uses plugin '%s' not expected 'pglogical'",
-					 NameStr(*slot_name), NameStr(found->data.plugin))));
-
-	LWLockRelease(ReplicationSlotAllocationLock);
-
-	return found != NULL;
-}
-
 static void
 bdr_join_create_slot(BdrNodeInfo *local, BdrNodeInfo *remote)
 {
 	char		*sub_name;
 	NameData	slot_name;
-	LogicalDecodingContext *ctx = NULL;
 
 	/*
 	 * Subscription names here are from the PoV of the remote
@@ -1788,52 +1730,16 @@ bdr_join_create_slot(BdrNodeInfo *local, BdrNodeInfo *remote)
 
 	/*
 	 * Slot creation is NOT transactional. If we're being asked to create a
-	 * slot for peers we could've failed after some slots were created, so
-	 * we can't assume a clean slate here.
+	 * slot for peers we could've failed after some slots were created, so we
+	 * can't assume a clean slate here. However, because we create slots as
+	 * emphemeral then persist them on success, we know we'll have either no
+	 * slot or a good slot.
 	 *
 	 * An already-existing pglogical slot for this db with the right name
 	 * is fine to use, since it must be at or behind the position a new
 	 * slot would get created at.
-	 *
-	 * We don't hold a lock over these two, so someone could create the
-	 * slot after we check it, but then we'll just ERROR in creation and
-	 * retry.
 	 */
-	if (bdr_replication_slot_exists(&slot_name))
-		return;
-
-	/*
-	 * See: pg_create_logical_replication_slot for all this stuff; rest is mostly
-	 * verbatim from there.
-	 */
-	CheckLogicalDecodingRequirements();
-
-	/*
-	 * Acquire a logical decoding slot, this will check for conflicting names.
-	 * Initially create persistent slot as ephemeral - that allows us to
-	 * nicely handle errors during initialization because it'll get dropped if
-	 * this transaction fails. We'll make it persistent at the end. Temporary
-	 * slots can be created as temporary from beginning as they get dropped on
-	 * error as well.
-	 */
-	ReplicationSlotCreate(NameStr(slot_name), true, RS_TEMPORARY);
-
-	/*
-	 * Create logical decoding context, to build the initial snapshot.
-	 */
-	ctx = CreateInitDecodingContext("pglogical", NIL,
-									false,	/* do not build snapshot */
-									logical_read_local_xlog_page, NULL, NULL,
-									NULL);
-
-	/* build initial snapshot, might take a while */
-	DecodingContextFindStartpoint(ctx);
-
-	/* don't need the decoding context anymore */
-	FreeDecodingContext(ctx);
-
-	/* ok, slot is now fully created, mark it as persistent if needed */
-	ReplicationSlotPersist();
+	pgl_acquire_or_create_slot(NameStr(slot_name));
 	ReplicationSlotRelease();
 }
 
