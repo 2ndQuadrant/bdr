@@ -128,3 +128,11 @@ BDR3 is BDR rebuilt on top of pglogical.
 
 * Same global sequences as BDR2. Legacy BDR1 global sequences will
   not be supported.
+
+## Running tests
+
+Something like
+
+    VERBOSE_WAITS=1 TRACE_SQL=1 PATH=$HOME/pg/10/bin:$PATH make prove_installcheck PROVE_TESTS=t/010_simple.pl PROVE_FLAGS="--verbose"
+
+does nicely.
