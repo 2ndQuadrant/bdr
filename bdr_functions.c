@@ -295,7 +295,8 @@ bdr_join_node_group_sql(PG_FUNCTION_ARGS)
 	if (local->bdr_node_group != NULL)
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("local node is already a member of a nodegroup (%s), cannot join",
+				 errmsg("local node (%s) is already a member of a nodegroup (%s), cannot join",
+				 		local->pgl_node->name,
 				 		local->bdr_node_group->name)));
 
 	state_get_expected(&cur_state, true, false, BDR_NODE_STATE_CREATED);
