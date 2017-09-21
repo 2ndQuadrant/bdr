@@ -181,9 +181,10 @@ msgb_status_invariant(MsgbConnection *conn)
 			 * We must have a defined wait-event index unless we're in the
 			 * middle of rebuilding the wait-event set, in which case we may
 			 * have deferred a wait-event slot allocation for a newly
-			 * event-driven connection.
+			 * event-driven connection. Or if we're still polling, we might not
+			 * have got around to setting one up yet.
 			 */
-			if (!wait_set_recreate_pending)
+			if (!wait_set_recreate_pending && !conns_polling)
 				Assert(conn->wait_set_index >= 0);
 			/*
 			 * An active connection must be waiting on receive and/or send.
@@ -682,6 +683,7 @@ msgb_process_result(MsgbConnection *conn)
 			 * now ready for normal message delivery.
 			 */
 			conn->conn_status = MSGB_SEND_CONN_READY;
+			Assert(conns_polling || conn->wait_set_index != -1);
 			/* Successful connection, reset backoff counter */
 			conn->num_retries = 0;
 			elog(bdr_debug_level, "connection to %u is now ready",
