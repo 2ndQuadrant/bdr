@@ -1386,8 +1386,6 @@ msgb_wait_event_set_recreated(WaitEventSet *new_wait_set)
 
 	wait_set = new_wait_set;
 
-	wait_set_recreate_pending = false;
-
 	for (i = 0; i < msgb_max_peers; i++)
 	{
 		MsgbConnection *conn = &conns[i];
@@ -1400,6 +1398,8 @@ msgb_wait_event_set_recreated(WaitEventSet *new_wait_set)
 
 		msgb_status_invariant(conn);
 	}
+
+	wait_set_recreate_pending = false;
 }
 
 static void
