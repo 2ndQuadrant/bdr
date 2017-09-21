@@ -316,6 +316,13 @@ msgb_connect_shmem(uint32 origin_node)
 	 */
 	SpinLockAcquire(&hdr->mutex);
 	cur_sender_pid = hdr->node_toc_map[my_node_toc_entry].active_pid;
+	/*
+	 * In case this entry got remapped to another node, treat it as being
+	 * cleaned up, bail out, and retry later.
+	 */
+	if (hdr->node_toc_map[my_node_toc_entry].node_id != origin_node)
+		cur_sender_pid = -1;
+
 	if (cur_sender_pid == 0)
 	{
 		shm_mq_set_sender(mq, MyProc);
@@ -327,6 +334,7 @@ msgb_connect_shmem(uint32 origin_node)
 		 */
 		connected_peer_id = origin_node;
 		active_node_toc_entry = my_node_toc_entry;
+		Assert(hdr->node_toc_map[active_node_toc_entry].node_id == connected_peer_id);
 	}
 	SpinLockRelease(&hdr->mutex);
 
@@ -401,10 +409,13 @@ peer_detach(void)
 		MsgbDSMHdr *hdr;
 		int			hdr_idx;
 
+		Assert(connected_peer_id != 0);
+
 		msgb_mq_for_node(connected_peer_id, &hdr, &hdr_idx, NULL);
 
 		SpinLockAcquire(&hdr->mutex);
-		/* The entry cannot have been reassigned if we were active on it */
+		/*
+		 * The entry cannot have been reassigned if we were active on it */
 		Assert(hdr->node_toc_map[hdr_idx].node_id == connected_peer_id);
 		/* If we were attached, we should be the one detaching */
 		Assert(hdr->node_toc_map[hdr_idx].active_pid == MyProcPid);

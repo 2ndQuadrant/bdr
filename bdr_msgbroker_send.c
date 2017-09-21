@@ -285,8 +285,6 @@ msgb_clear_bad_connection(MsgbConnection *conn)
 	ListCell   *lc;
 	struct timeval tv_now;
 
-	msgb_status_invariant(conn);
-
 	if (conn->pgconn)
 	{
 		ereport(WARNING,
@@ -889,9 +887,14 @@ msgb_conn_set_wait_flags(MsgbConnection *conn, int flags)
 {
 	conn->wait_flags = flags;
 
-	if (!wait_set_recreate_pending && ConnIsEventDriven(conn))
-		ModifyWaitEvent(wait_set, conn->wait_set_index,
-			flags, NULL);
+	if (wait_set != NULL && ConnIsEventDriven(conn))
+	{
+		if (conn->wait_set_index == -1)
+			msgb_register_wait_event(conn);
+		else
+			ModifyWaitEvent(wait_set, conn->wait_set_index,
+				flags, NULL);
+	}
 }
 
 /*

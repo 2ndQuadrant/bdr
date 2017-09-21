@@ -1287,14 +1287,66 @@ bdr_gen_sub_name(BdrNodeInfo *subscriber, BdrNodeInfo *provider)
 	 * Annoyingly, sub names must be unique across all providers on a
 	 * subscriber so we have to qualify the sub name by the provider name.
 	 *
-	 * This is redundant with the provider name in the slot created on the peer
-	 * end, since it also has the subscriber name in it, but not much to be
-	 * done about it.
+	 * If we used subscription names as part of the slot name in the slot
+	 * created on the peer it'd be even worse. But we don't, because then
+	 * we'd also have to add the subscriber name to ensure we got unique
+	 * slot names, and that'd just get horrid.
 	 */
 	appendStringInfo(&sub_name, "%s_%s",
 		provider->bdr_node_group->name,
 		provider->pgl_node->name);
 	return sub_name.data;
+}
+
+/*
+ * Generate a slot / replication origin name for BDR.
+ *
+ * We don't use pglogical's name generation because it's extremely redundant
+ * when used for a mesh. See comments on bdr_gen_sub_name.
+ *
+ * Instead we use the format:
+ *
+ *     bdr_subscriberdbname_nodegroupname_originname_targetname
+ *
+ * with the same abbreviation as used by pgl. origin = provider, target =
+ * subscriber.
+ *
+ * The short names are unfortunate, but ... oh well.
+ *
+ * Each of these name components is needed.
+ *
+ * We need the subscriber dbname to prevent slot name collisions if someone is
+ * silly enough to create multiple parallel BDR setups, with the same nodegroup
+ * name + node names. Arguably avoidable with "don't be stupid", but we all
+ * know how well that works in practical terms. The dbname is more aggressively
+ * abbreviated since it's deemed less important.
+ *
+ * We need the nodegroup name in case we support multiple nodegroups in future.
+ * A pair of nodes could be joined to >1 nodegroup, effecively creating
+ * multiple subscriptions like pgl has.
+ *
+ * We need the subscriber name to prevent replication slot name conflicts
+ * on the provider.
+ *
+ * We need the provider name to prevent replication origin name conflicts
+ * on the subscriber, because pgl uses the same name for slots + origins.
+ */
+static void
+bdr_gen_slot_name(Name slot_name, const char *dbname,
+			  const char *nodegroup, const char *provider_node,
+			  const char *subscriber_node)
+{
+	memset(NameStr(*slot_name), 0, NAMEDATALEN);
+	/* 63-char limit, so 56 chars of variable data */
+	snprintf(NameStr(*slot_name), NAMEDATALEN,
+			 "bdr_%s_%s_%s_%s",
+			 shorten_hash(dbname, 11),
+			 shorten_hash(nodegroup, 13),
+			 shorten_hash(provider_node, 16),
+			 shorten_hash(subscriber_node, 16));
+	NameStr(*slot_name)[NAMEDATALEN-1] = '\0';
+
+	sanitize_slot_name(slot_name);
 }
 
 /*
@@ -1375,8 +1427,14 @@ bdr_create_subscription(BdrNodeInfo *local, BdrNodeInfo *remote, int apply_delay
 	 * of some kind.
 	 */
 	sub.enabled = true;
-	gen_slot_name(&slot_name, get_database_name(MyDatabaseId),
-				  remote->pgl_node->name, sub_name);
+	/* PGL comment is:
+	 * The current format is:
+	 * pgl_<subscriber database name>_<provider node name>_<subscription name>
+	 */
+	bdr_gen_slot_name(&slot_name, get_database_name(MyDatabaseId),
+				  local->bdr_node_group->name,
+				  remote->pgl_node->name,
+				  local->pgl_node->name);
 	sub.slot_name = pstrdup(NameStr(slot_name));
 
 	interval_from_ms(apply_delay_ms, &apply_delay);
@@ -1725,8 +1783,11 @@ bdr_join_create_slot(BdrNodeInfo *local, BdrNodeInfo *remote)
 	 */
 	sub_name = bdr_gen_sub_name(remote, local);
 
-	gen_slot_name(&slot_name, remote->bdr_node->dbname,
-				  local->pgl_node->name, sub_name);
+	bdr_gen_slot_name(&slot_name,
+				  remote->bdr_node->dbname,
+				  local->bdr_node_group->name,
+				  local->pgl_node->name,
+				  remote->pgl_node->name);
 
 	/*
 	 * Slot creation is NOT transactional. If we're being asked to create a
