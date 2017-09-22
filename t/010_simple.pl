@@ -125,13 +125,14 @@ foreach my $node (0, 1) {
 }
 
 $dbs[0]->wait_for_catchup_all;
+$dbs[1]->wait_for_catchup_all;
 
 is($dbs[0]->safe_psql(q[SELECT id, blah FROM tbl_included ORDER BY id]),
    "0|from_node0\n1|from_node1",
-   'data replicated, node0');
+   'data replicated 2-way, node0');
 is($dbs[1]->safe_psql(q[SELECT id, blah FROM tbl_included ORDER BY id]),
    "0|from_node0\n1|from_node1",
-   'data replicated, node1');
+   'data replicated 2-way, node1');
 
 #
 # Third node
@@ -155,15 +156,17 @@ TODO: {
 
 # Initial data is as expected
 is($dbs[2]->safe_psql(q[SELECT id, blah FROM tbl_included ORDER BY id]),
-   '0|from_node0\n1|from_node1',
-   'data replicated, node1');
+   "0|from_node0\n1|from_node1",
+   'data copied on join, node2');
 
 # Do a trivial no-conflict MM insert
 $dbs[0]->safe_psql(qq[INSERT INTO tbl_included (id, blah) VALUES (10, 'from_node0');]);
-$dbs[1]->safe_psql(qq[INSERT INTO tbl_included (id, blah) VALUES (11, 'from_node2');]);
+$dbs[1]->safe_psql(qq[INSERT INTO tbl_included (id, blah) VALUES (11, 'from_node1');]);
 $dbs[2]->safe_psql(qq[INSERT INTO tbl_included (id, blah) VALUES (12, 'from_node2');]);
 
 # and check it.
+$dbs[0]->wait_for_catchup_all;
+$dbs[1]->wait_for_catchup_all;
 $dbs[2]->wait_for_catchup_all;
 
 my $expected = q[0|from_node0
@@ -173,7 +176,7 @@ my $expected = q[0|from_node0
 12|from_node2];
 
 foreach my $i (0, 1, 2) {
-    is($dbs[$i]->safe_psql(q[SELECT id, blah FROM tbl_included ORDER BY id]), $expected, "data replicated, node$i");
+    is($dbs[$i]->safe_psql(q[SELECT id, blah FROM tbl_included ORDER BY id]), $expected, "data replicated 3-way, node$i");
 }
 
 done_testing();
