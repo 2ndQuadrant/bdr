@@ -845,7 +845,7 @@ bdr_join_handle_active_proposal(BdrMessage *msg)
 			}
 			else
 			{
-				Assert(sub->mode == BDR_SUBSCRIPTION_MODE_CATCHUP);
+				Assert(sub->mode == BDR_SUBSCRIPTION_MODE_FASTFORWARD);
 				sub->mode = BDR_SUBSCRIPTION_MODE_NORMAL;
 			}
 			bdr_alter_bdr_subscription(sub);
