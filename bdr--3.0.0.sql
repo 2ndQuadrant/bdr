@@ -248,6 +248,7 @@ SELECT
        sub_forward_origins, 
        sub_apply_delay, 
        subscription_mode AS bdr_subscription_mode,
+       ss.status         AS subscription_status,
        ng.node_group_id, 
        sub_id, 
        onode.node_id     AS origin_id, 
@@ -264,7 +265,8 @@ INNER JOIN bdr.node btnode
 INNER JOIN bdr.node bonode 
         ON ( bonode.pglogical_node_id = onode.node_id ) 
 INNER JOIN bdr.node_group ng 
-        ON ( btnode.node_group_id = ng.node_group_id ); 
+        ON ( btnode.node_group_id = ng.node_group_id )
+CROSS JOIN LATERAL pglogical.show_subscription_status(sub_name) ss;
 
 COMMENT ON VIEW bdr.subscription_summary IS
 'breakdown of subscriptions for the local node';

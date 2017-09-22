@@ -19,7 +19,7 @@ node_group_name | bdrgroup
 node_name       | node1
 set_name        | bdrgroup
 
-SELECT node_group_name, sub_name, origin_name, target_name, sub_enabled, sub_slot_name, sub_replication_sets, sub_forward_origins, sub_apply_delay, bdr_subscription_mode FROM bdr.subscription_summary;
+SELECT node_group_name, sub_name, origin_name, target_name, sub_enabled, sub_slot_name, sub_replication_sets, sub_forward_origins, sub_apply_delay, subscription_status, bdr_subscription_mode FROM bdr.subscription_summary;
 -[ RECORD 1 ]---------+------------------------------------
 node_group_name       | bdrgroup
 sub_name              | bdrgroup_node2
@@ -30,6 +30,7 @@ sub_slot_name         | bdr_regression_bdrgroup_node2_node1
 sub_replication_sets  | {bdrgroup}
 sub_forward_origins   | 
 sub_apply_delay       | @ 0
+subscription_status   | replicating
 bdr_subscription_mode | n
 
 SELECT target_dbname, node_group_name, origin_name, target_name, bdr_slot_name, slot_name, plugin, slot_type, database, temporary, active, usename, application_name, state FROM bdr.node_slots;
@@ -66,7 +67,7 @@ node_group_name | bdrgroup
 node_name       | node2
 set_name        | bdrgroup
 
-SELECT node_group_name, sub_name, origin_name, target_name, sub_enabled, sub_slot_name, sub_replication_sets, sub_forward_origins, sub_apply_delay, bdr_subscription_mode FROM bdr.subscription_summary;
+SELECT node_group_name, sub_name, origin_name, target_name, sub_enabled, sub_slot_name, sub_replication_sets, sub_forward_origins, sub_apply_delay, subscription_status, bdr_subscription_mode FROM bdr.subscription_summary;
 -[ RECORD 1 ]---------+----------------------------------
 node_group_name       | bdrgroup
 sub_name              | bdrgroup_node1
@@ -77,6 +78,7 @@ sub_slot_name         | bdr_postgres_bdrgroup_node1_node2
 sub_replication_sets  | {bdrgroup}
 sub_forward_origins   | 
 sub_apply_delay       | @ 0
+subscription_status   | replicating
 bdr_subscription_mode | n
 
 SELECT target_dbname, node_group_name, origin_name, target_name, bdr_slot_name, slot_name, plugin, slot_type, database, temporary, active, usename, application_name, state FROM bdr.node_slots;
