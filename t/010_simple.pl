@@ -159,6 +159,21 @@ is($dbs[2]->safe_psql(q[SELECT id, blah FROM tbl_included ORDER BY id]),
    "0|from_node0\n1|from_node1",
    'data copied on join, node2');
 
+# All expected subscriptions exist
+my $query = q[SELECT sub_name,origin_name,target_name FROM bdr.subscription_summary ORDER BY 1,2,3];
+is($dbs[0]->safe_psql($query),
+    q[mygroup_node1|node1|node0
+mygroup_node2|node2|node0],
+    'expected subscriptions found on node0');
+is($dbs[1]->safe_psql($query),
+    q[mygroup_node0|node0|node1
+mygroup_node2|node2|node1],
+    'expected subscriptions found on node1');
+is($dbs[2]->safe_psql($query),
+    q[mygroup_node0|node0|node2
+mygroup_node1|node1|node2],
+    'expected subscriptions found on node2');
+
 # Do a trivial no-conflict MM insert
 $dbs[0]->safe_psql(qq[INSERT INTO tbl_included (id, blah) VALUES (10, 'from_node0');]);
 $dbs[1]->safe_psql(qq[INSERT INTO tbl_included (id, blah) VALUES (11, 'from_node1');]);
