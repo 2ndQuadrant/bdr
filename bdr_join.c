@@ -837,14 +837,19 @@ bdr_join_handle_active_proposal(BdrMessage *msg)
 		{
 			BdrSubscription *sub = lfirst(lc);
 			PGLogicalSubscription *psub = get_subscription(sub->pglogical_subscription_id);
+			/* Subscription must point to us */
 			Assert(sub->target_node_id == local->pgl_node->id);
-			if (sub->origin_node_id == remote->pgl_node->id)
+			/* Can't have a subscription to ourselves */
+			Assert(sub->origin_node_id != local->pgl_node->id);
+			if (sub->origin_node_id == cur_state.peer_id)
 			{
+				/* It's our join target subscription */
 				Assert(sub->mode == BDR_SUBSCRIPTION_MODE_CATCHUP);
 				sub->mode = BDR_SUBSCRIPTION_MODE_NORMAL;
 			}
 			else
 			{
+				/* It's a subscription to another peer */
 				Assert(sub->mode == BDR_SUBSCRIPTION_MODE_FASTFORWARD);
 				sub->mode = BDR_SUBSCRIPTION_MODE_NORMAL;
 			}
