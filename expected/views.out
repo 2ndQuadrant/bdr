@@ -9,7 +9,7 @@ node_name               | node1
 node_group_name         | bdrgroup
 repset_name             | bdrgroup
 interface_name          | node1
-cur_state_journal_state | BDR_NODE_STATE_ACTIVE
+cur_state_journal_state | ACTIVE
 node_local_dbname       | regression
 set_repl_ops            | INSERT,UPDATE,DELETE,TRUNCATE
 
@@ -57,7 +57,7 @@ node_name               | node2
 node_group_name         | bdrgroup
 repset_name             | bdrgroup
 interface_name          | node2
-cur_state_journal_state | BDR_NODE_STATE_ACTIVE
+cur_state_journal_state | ACTIVE
 node_local_dbname       | postgres
 set_repl_ops            | INSERT,UPDATE,DELETE,TRUNCATE
 

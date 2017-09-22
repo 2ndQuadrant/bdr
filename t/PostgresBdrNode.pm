@@ -44,8 +44,10 @@ sub init
 	my ($self, %kwargs) = @_;
 	PostgresPGLNode::init($self, %kwargs);
 	# Override earlier entry made by pglogical
+	# and add some other BDR-specific settings
 	$self->append_conf('postgresql.conf', qq[
 shared_preload_libraries = 'pglogical,bdr'
+bdr.debug_level = 'log'
 ]);
 }
 

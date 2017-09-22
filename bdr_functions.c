@@ -790,6 +790,8 @@ bdr_decode_state(PG_FUNCTION_ARGS)
 	HeapTuple			htup;
 	Datum				values[2];
 	bool				nulls[2] = {false, false};
+	const char		   *state_name;
+	static const char  *state_name_prefix = "BDR_NODE_STATE_";
 
 	if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
 		ereport(ERROR,
@@ -801,7 +803,11 @@ bdr_decode_state(PG_FUNCTION_ARGS)
 
 	state_decode_tuple(&state, t);
 
-	values[0] = CStringGetTextDatum(bdr_node_state_name(state.current));
+	state_name = bdr_node_state_name(state.current);
+	if (strncmp(state_name, state_name_prefix, strlen(state_name_prefix)) == 0)
+		state_name = &state_name[strlen(state_name_prefix)];
+
+	values[0] = CStringGetTextDatum(state_name);
 
 	if (state.extra_data == NULL)
 		nulls[1] = true;
