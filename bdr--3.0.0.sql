@@ -143,6 +143,9 @@ RETURNS void CALLED ON NULL INPUT VOLATILE LANGUAGE c AS 'MODULE_PATHNAME', 'bdr
 CREATE FUNCTION bdr.replicate_ddl_command(ddl_cmd text, replication_sets text[] DEFAULT NULL)
 RETURNS bool CALLED ON NULL INPUT VOLATILE LANGUAGE c AS 'MODULE_PATHNAME', 'bdr_replicate_ddl_command';
 
+CREATE FUNCTION bdr.gen_slot_name(dbname text, nodegroup_name text, origin_node_name text, target_node_name text)
+RETURNS text STRICT STABLE LANGUAGE c AS 'MODULE_PATHNAME','bdr_gen_slot_name_sql';
+
 /*
  * Interface for BDR message broker
  */
@@ -232,3 +235,73 @@ FROM bdr.state_journal j
 
 COMMENT ON VIEW bdr.state_journal_details IS
 'Human readable decoding of bdr.state_journal';
+
+CREATE VIEW bdr.subscription_summary AS
+SELECT 
+       ng.node_group_name, 
+       sub_name, 
+       onode.node_name   AS origin_name, 
+       tnode.node_name   AS target_name, 
+       sub_enabled, 
+       sub_slot_name, 
+       sub_replication_sets, 
+       sub_forward_origins, 
+       sub_apply_delay, 
+       subscription_mode AS bdr_subscription_mode,
+       ng.node_group_id, 
+       sub_id, 
+       onode.node_id     AS origin_id, 
+       tnode.node_id     AS target_id
+FROM   bdr.subscription bs 
+INNER JOIN pglogical.subscription ps 
+        ON ( bs.pgl_subscription_id = ps.sub_id ) 
+INNER JOIN pglogical.node onode 
+        ON ( onode.node_id = ps.sub_origin ) 
+INNER JOIN pglogical.node tnode 
+        ON ( tnode.node_id = ps.sub_target ) 
+INNER JOIN bdr.node btnode 
+        ON ( btnode.pglogical_node_id = tnode.node_id ) 
+INNER JOIN bdr.node bonode 
+        ON ( bonode.pglogical_node_id = onode.node_id ) 
+INNER JOIN bdr.node_group ng 
+        ON ( btnode.node_group_id = ng.node_group_id ); 
+
+COMMENT ON VIEW bdr.subscription_summary IS
+'breakdown of subscriptions for the local node';
+
+CREATE VIEW bdr.local_node_summary AS
+SELECT
+     n.node_name, 
+     ng.node_group_name, 
+     rs.set_name AS repset_name, 
+     ni.if_name AS interface_name, 
+     if_dsn AS interface_connstr, 
+     ( 
+              SELECT   state_name 
+              FROM     bdr.state_journal_details 
+              ORDER BY state_counter DESC limit 1
+     ) AS cur_state_journal_state,
+     seq_id AS node_seq_id, 
+     dbname AS node_local_dbname, 
+     array_to_string(ARRAY[
+         CASE WHEN rs.replicate_insert THEN 'INSERT' END,
+         CASE WHEN rs.replicate_update THEN 'UPDATE' END,
+         CASE WHEN rs.replicate_delete THEN 'DELETE' END,
+         CASE WHEN rs.replicate_truncate THEN 'TRUNCATE' END
+     ], ',') AS set_repl_ops
+FROM       pglogical.local_node l 
+INNER JOIN pglogical.node n
+        ON (l.node_id = n.node_id) 
+INNER JOIN bdr.node bn
+        ON (l.node_id = bn.pglogical_node_id) 
+INNER JOIN pglogical.node_interface ni
+        ON (l.node_local_interface = ni.if_id) 
+INNER JOIN bdr.node_group ng
+        ON (bn.node_group_id = ng.node_group_id) 
+INNER JOIN pglogical.replication_set rs
+        ON (ng.node_group_default_repset = rs.set_id);
+
+COMMENT ON VIEW bdr.local_node_summary IS
+'Summary view of the local BDR node';
+
+

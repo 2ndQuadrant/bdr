@@ -72,6 +72,10 @@ extern void bdr_join_continue(enum BdrNodeState cur_state,
 
 extern void bdr_join_create_peer_slot(void);
 
+extern void bdr_gen_slot_name(Name slot_name, const char *dbname,
+	const char *nodegroup, const char *provider_node,
+	const char *subscriber_node);
+
 /*
  * Integration into wait events in manager
  */

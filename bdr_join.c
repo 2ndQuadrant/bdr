@@ -1336,7 +1336,7 @@ bdr_gen_sub_name(BdrNodeInfo *subscriber, BdrNodeInfo *provider)
  * We need the provider name to prevent replication origin name conflicts
  * on the subscriber, because pgl uses the same name for slots + origins.
  */
-static void
+void
 bdr_gen_slot_name(Name slot_name, const char *dbname,
 			  const char *nodegroup, const char *provider_node,
 			  const char *subscriber_node)

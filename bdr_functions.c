@@ -913,3 +913,19 @@ bdr_replicate_ddl_command(PG_FUNCTION_ARGS)
 	ret = pglogical_replicate_ddl_command_base(query, replication_sets);
 	PG_RETURN_BOOL(ret);
 }
+
+PG_FUNCTION_INFO_V1(bdr_gen_slot_name_sql);
+
+Datum
+bdr_gen_slot_name_sql(PG_FUNCTION_ARGS)
+{
+	char * dbname = text_to_cstring(PG_GETARG_TEXT_P(0));
+	char * nodegroup_name = text_to_cstring(PG_GETARG_TEXT_P(1));
+	char * origin_node_name = text_to_cstring(PG_GETARG_TEXT_P(2));
+	char * target_node_name = text_to_cstring(PG_GETARG_TEXT_P(3));
+	NameData slot_name;
+
+	bdr_gen_slot_name(&slot_name, dbname, nodegroup_name, origin_node_name, target_node_name);
+
+	PG_RETURN_TEXT_P(cstring_to_text(NameStr(slot_name)));
+}
