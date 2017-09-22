@@ -160,18 +160,18 @@ is($dbs[2]->safe_psql(q[SELECT id, blah FROM tbl_included ORDER BY id]),
    'data copied on join, node2');
 
 # All expected subscriptions exist
-my $query = q[SELECT sub_name,origin_name,target_name FROM bdr.subscription_summary ORDER BY 1,2,3];
+my $query = q[SELECT sub_name,origin_name,target_name,subscription_status,bdr_subscription_mode FROM bdr.subscription_summary ORDER BY 1,2,3];
 is($dbs[0]->safe_psql($query),
-    q[mygroup_node1|node1|node0
-mygroup_node2|node2|node0],
+    q[mygroup_node1|node1|node0|replicating|n
+mygroup_node2|node2|node0|replicating|n],
     'expected subscriptions found on node0');
 is($dbs[1]->safe_psql($query),
-    q[mygroup_node0|node0|node1
-mygroup_node2|node2|node1],
+    q[mygroup_node0|node0|node1|replicating|n
+mygroup_node2|node2|node1|replicating|n],
     'expected subscriptions found on node1');
 is($dbs[2]->safe_psql($query),
-    q[mygroup_node0|node0|node2
-mygroup_node1|node1|node2],
+    q[mygroup_node0|node0|node2|replicating|n
+mygroup_node1|node1|node2|replicating|n],
     'expected subscriptions found on node2');
 
 # Do a trivial no-conflict MM insert
