@@ -159,12 +159,12 @@ is($dbs[2]->safe_psql(q[SELECT id, blah FROM tbl_included ORDER BY id]),
    'data replicated, node1');
 
 # Do a trivial no-conflict MM insert
-$dbs[0]->safe_psql(qq[INSERT INTO tbl_included (other, blah) VALUES (10, 'from_node0');]);
-$dbs[1]->safe_psql(qq[INSERT INTO tbl_included (other, blah) VALUES (11, 'from_node2');]);
-$dbs[2]->safe_psql(qq[INSERT INTO tbl_included (other, blah) VALUES (12, 'from_node2');]);
+$dbs[0]->safe_psql(qq[INSERT INTO tbl_included (id, blah) VALUES (10, 'from_node0');]);
+$dbs[1]->safe_psql(qq[INSERT INTO tbl_included (id, blah) VALUES (11, 'from_node2');]);
+$dbs[2]->safe_psql(qq[INSERT INTO tbl_included (id, blah) VALUES (12, 'from_node2');]);
 
 # and check it.
-$dbs[2]->bdr_wait_for_catchup_all;
+$dbs[2]->wait_for_catchup_all;
 
 my $expected = q[0|from_node0
 1|from_node1
