@@ -271,24 +271,28 @@ COMMENT ON VIEW bdr.subscription_summary IS
 
 CREATE VIEW bdr.local_node_summary AS
 SELECT
-     n.node_name, 
-     ng.node_group_name, 
-     rs.set_name AS repset_name, 
-     ni.if_name AS interface_name, 
-     if_dsn AS interface_connstr, 
-     ( 
-              SELECT   state_name 
-              FROM     bdr.state_journal_details 
-              ORDER BY state_counter DESC limit 1
-     ) AS cur_state_journal_state,
-     seq_id AS node_seq_id, 
-     dbname AS node_local_dbname, 
-     array_to_string(ARRAY[
-         CASE WHEN rs.replicate_insert THEN 'INSERT' END,
-         CASE WHEN rs.replicate_update THEN 'UPDATE' END,
-         CASE WHEN rs.replicate_delete THEN 'DELETE' END,
-         CASE WHEN rs.replicate_truncate THEN 'TRUNCATE' END
-     ], ',') AS set_repl_ops
+    n.node_name, 
+    ng.node_group_name, 
+    rs.set_name AS repset_name, 
+    ni.if_name AS interface_name, 
+    if_dsn AS interface_connstr, 
+    ( 
+             SELECT   state_name 
+             FROM     bdr.state_journal_details 
+             ORDER BY state_counter DESC limit 1
+    ) AS cur_state_journal_state,
+    seq_id AS node_seq_id, 
+    dbname AS node_local_dbname, 
+    array_to_string(ARRAY[
+        CASE WHEN rs.replicate_insert THEN 'INSERT' END,
+        CASE WHEN rs.replicate_update THEN 'UPDATE' END,
+        CASE WHEN rs.replicate_delete THEN 'DELETE' END,
+        CASE WHEN rs.replicate_truncate THEN 'TRUNCATE' END
+    ], ',') AS set_repl_ops,
+    n.node_id,
+    ng.node_group_id,
+    rs.set_id,
+    ni.if_id
 FROM       pglogical.local_node l 
 INNER JOIN pglogical.node n
         ON (l.node_id = n.node_id) 
@@ -304,4 +308,35 @@ INNER JOIN pglogical.replication_set rs
 COMMENT ON VIEW bdr.local_node_summary IS
 'Summary view of the local BDR node';
 
+CREATE VIEW bdr.node_slots AS
+SELECT rbn.dbname AS target_dbname,
+       ng.node_group_name,
+       ln.node_name AS origin_name,
+       rn.node_name AS target_name,
+       bdr_slots.slot_name AS bdr_slot_name,
+       rs.*
+FROM pglogical.local_node l
+INNER JOIN pglogical.node ln
+        ON (l.node_id = ln.node_id)
+INNER JOIN bdr.node lbn
+        ON (lbn.pglogical_node_id = ln.node_id)
+INNER JOIN bdr.node rbn
+        ON (rbn.pglogical_node_id <> lbn.pglogical_node_id)
+INNER JOIN pglogical.node rn
+        ON (rbn.pglogical_node_id = rn.node_id)
+INNER JOIN bdr.node_group ng
+        ON (ng.node_group_id = rbn.node_group_id
+            AND ng.node_group_id = lbn.node_group_id)
+/* slot name from provider PoV:  remote (subscriber) dbname, ngname, remote (subscriber) name, local (provider) name */
+CROSS JOIN LATERAL bdr.gen_slot_name(rbn.dbname, ng.node_group_name, ln.node_name, rn.node_name) bdr_slots(slot_name)
+FULL OUTER JOIN
+  (SELECT *
+   FROM pg_catalog.pg_replication_slots
+   LEFT JOIN pg_catalog.pg_stat_replication
+          ON (pg_replication_slots.active_pid = pg_stat_replication.pid)
+   WHERE slot_name LIKE 'bdr_%'
+     AND database = current_database()
+  ) rs ON (rs.slot_name = bdr_slots.slot_name);
 
+COMMENT ON VIEW bdr.node_slots
+IS 'Summary view mapping local BDR nodes to replication slot state and replication progress';

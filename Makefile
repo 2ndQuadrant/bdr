@@ -27,7 +27,7 @@ OBJS = \
 	bdr_sync.o \
 	bdr_worker.o
 
-REGRESS = preseed init simple wait part
+REGRESS = preseed init simple views wait part
 
 EXTRA_CLEAN += 
 

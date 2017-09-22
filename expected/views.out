@@ -1,0 +1,98 @@
+SELECT * FROM bdr_regress_variables()
+\gset
+\x
+\set VERBOSITY terse
+\c :node1_dsn
+SELECT node_name, node_group_name, repset_name, interface_name, cur_state_journal_state, node_local_dbname, set_repl_ops FROM bdr.local_node_summary;
+-[ RECORD 1 ]-----------+------------------------------
+node_name               | node1
+node_group_name         | bdrgroup
+repset_name             | bdrgroup
+interface_name          | node1
+cur_state_journal_state | BDR_NODE_STATE_ACTIVE
+node_local_dbname       | regression
+set_repl_ops            | INSERT,UPDATE,DELETE,TRUNCATE
+
+SELECT node_group_name, node_name, set_name FROM bdr.node_group_replication_sets;
+-[ RECORD 1 ]---+---------
+node_group_name | bdrgroup
+node_name       | node1
+set_name        | bdrgroup
+
+SELECT node_group_name, sub_name, origin_name, target_name, sub_enabled, sub_slot_name, sub_replication_sets, sub_forward_origins, sub_apply_delay, bdr_subscription_mode FROM bdr.subscription_summary;
+-[ RECORD 1 ]---------+------------------------------------
+node_group_name       | bdrgroup
+sub_name              | bdrgroup_node2
+origin_name           | node2
+target_name           | node1
+sub_enabled           | t
+sub_slot_name         | bdr_regression_bdrgroup_node2_node1
+sub_replication_sets  | {bdrgroup}
+sub_forward_origins   | 
+sub_apply_delay       | @ 0
+bdr_subscription_mode | n
+
+SELECT target_dbname, node_group_name, origin_name, target_name, bdr_slot_name, slot_name, plugin, slot_type, database, temporary, active, usename, application_name, state FROM bdr.node_slots;
+-[ RECORD 1 ]----+----------------------------------
+target_dbname    | postgres
+node_group_name  | bdrgroup
+origin_name      | node1
+target_name      | node2
+bdr_slot_name    | bdr_postgres_bdrgroup_node1_node2
+slot_name        | bdr_postgres_bdrgroup_node1_node2
+plugin           | pglogical_output
+slot_type        | logical
+database         | regression
+temporary        | f
+active           | t
+usename          | super
+application_name | bdrgroup_node1
+state            | streaming
+
+\c :node2_dsn
+SELECT node_name, node_group_name, repset_name, interface_name, cur_state_journal_state, node_local_dbname, set_repl_ops FROM bdr.local_node_summary;
+-[ RECORD 1 ]-----------+------------------------------
+node_name               | node2
+node_group_name         | bdrgroup
+repset_name             | bdrgroup
+interface_name          | node2
+cur_state_journal_state | BDR_NODE_STATE_ACTIVE
+node_local_dbname       | postgres
+set_repl_ops            | INSERT,UPDATE,DELETE,TRUNCATE
+
+SELECT node_group_name, node_name, set_name FROM bdr.node_group_replication_sets;
+-[ RECORD 1 ]---+---------
+node_group_name | bdrgroup
+node_name       | node2
+set_name        | bdrgroup
+
+SELECT node_group_name, sub_name, origin_name, target_name, sub_enabled, sub_slot_name, sub_replication_sets, sub_forward_origins, sub_apply_delay, bdr_subscription_mode FROM bdr.subscription_summary;
+-[ RECORD 1 ]---------+----------------------------------
+node_group_name       | bdrgroup
+sub_name              | bdrgroup_node1
+origin_name           | node1
+target_name           | node2
+sub_enabled           | t
+sub_slot_name         | bdr_postgres_bdrgroup_node1_node2
+sub_replication_sets  | {bdrgroup}
+sub_forward_origins   | 
+sub_apply_delay       | @ 0
+bdr_subscription_mode | n
+
+SELECT target_dbname, node_group_name, origin_name, target_name, bdr_slot_name, slot_name, plugin, slot_type, database, temporary, active, usename, application_name, state FROM bdr.node_slots;
+-[ RECORD 1 ]----+------------------------------------
+target_dbname    | regression
+node_group_name  | bdrgroup
+origin_name      | node2
+target_name      | node1
+bdr_slot_name    | bdr_regression_bdrgroup_node2_node1
+slot_name        | bdr_regression_bdrgroup_node2_node1
+plugin           | pglogical_output
+slot_type        | logical
+database         | postgres
+temporary        | f
+active           | t
+usename          | super
+application_name | bdrgroup_node2
+state            | streaming
+

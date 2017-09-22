@@ -136,3 +136,11 @@ Something like
     VERBOSE_WAITS=1 TRACE_SQL=1 PATH=$HOME/pg/10/bin:$PATH make prove_installcheck PROVE_TESTS=t/010_simple.pl PROVE_FLAGS="--verbose"
 
 does nicely.
+
+## Debugging tips
+
+### See what node you're attached to in gdb
+
+If the BDR nodecache is up, you can:
+
+    p *local_bdr_node_info-pgl_node
