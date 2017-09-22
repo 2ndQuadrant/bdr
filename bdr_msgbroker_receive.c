@@ -414,8 +414,7 @@ peer_detach(void)
 		msgb_mq_for_node(connected_peer_id, &hdr, &hdr_idx, NULL);
 
 		SpinLockAcquire(&hdr->mutex);
-		/*
-		 * The entry cannot have been reassigned if we were active on it */
+		/* The entry cannot have been reassigned if we were active on it */
 		Assert(hdr->node_toc_map[hdr_idx].node_id == connected_peer_id);
 		/* If we were attached, we should be the one detaching */
 		Assert(hdr->node_toc_map[hdr_idx].active_pid == MyProcPid);
@@ -1141,7 +1140,10 @@ msgb_mq_for_node(uint32 nodeid, MsgbDSMHdr **hdr,
 	for (i = 0; i < (*hdr)->node_toc_map_size; i++)
 	{
 		if ((*hdr)->node_toc_map[i].node_id == nodeid)
+		{
 			my_node_toc_entry = i;
+			break;
+		}
 	}
 	SpinLockRelease(&(*hdr)->mutex);
 
@@ -1154,6 +1156,9 @@ msgb_mq_for_node(uint32 nodeid, MsgbDSMHdr **hdr,
 
 	if (mq)
 		*mq = shm_toc_lookup(toc, my_node_toc_entry+1, false);
+
+	if (hdr_idx)
+		*hdr_idx = my_node_toc_entry;
 }
 
 /*
