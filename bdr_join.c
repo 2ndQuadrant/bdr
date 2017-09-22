@@ -1774,14 +1774,7 @@ bdr_join_continue_send_active_announce(BdrStateEntry *cur_state, BdrNodeInfo *lo
 static void
 bdr_join_create_slot(BdrNodeInfo *local, BdrNodeInfo *remote)
 {
-	char		*sub_name;
 	NameData	slot_name;
-
-	/*
-	 * Subscription names here are from the PoV of the remote
-	 * node, since this creation is happening on the provider.
-	 */
-	sub_name = bdr_gen_sub_name(remote, local);
 
 	bdr_gen_slot_name(&slot_name,
 				  remote->bdr_node->dbname,
