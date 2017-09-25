@@ -33,10 +33,9 @@
 
 #include "bdr_catalogs.h"
 #include "bdr_catcache.h"
+#include "bdr_consensus.h"
 #include "bdr_functions.h"
 #include "bdr_join.h"
-#include "bdr_messaging.h"
-#include "bdr_msgformats.h"
 #include "bdr_shmem.h"
 #include "bdr_state.h"
 
@@ -88,7 +87,7 @@ bdr_create_node_sql(PG_FUNCTION_ARGS)
 
 	if (!PG_ARGISNULL(1))
 		local_dsn = text_to_cstring(PG_GETARG_TEXT_P(1));
-	
+
 	/* Look up underlying pglogical node (if any) */
 	pgllocal = get_local_node(false, true);
 
@@ -454,17 +453,15 @@ bdr_internal_submit_join_request(PG_FUNCTION_ARGS)
 				 		local->pgl_node->name, local->bdr_node_group->name,
 						jreq.joining_node_name, jreq.nodegroup_name)));
 	/*
-	 * Submit a consensus proposal to the local manager node, asking
-	 * that the new node be allowed to join the node group.
+	 * Submit a consensus proposal asking that the new node be allowed to
+	 * join the node group.
 	 */
 	jreq.nodegroup_id = local->bdr_node_group->id;
 	jreq.join_target_node_name = local->pgl_node->name;
 	jreq.join_target_node_id = local->pgl_node->id;
 
 	bdr_cache_local_nodeinfo();
-	handle = bdr_msgs_enqueue_one(BDR_MSG_NODE_JOIN_REQUEST, &jreq);
-
-	bdr_messaging_detach();
+	handle = bdr_consensus_enqueue_proposal(BDR_MSG_NODE_JOIN_REQUEST, &jreq);
 
 	snprintf(handle_str, MAX_DIGITS_INT64, UINT64_FORMAT, handle);
 	PG_RETURN_TEXT_P(cstring_to_text(handle_str));
@@ -834,7 +831,8 @@ bdr_submit_comment(PG_FUNCTION_ARGS)
 
 	(void) bdr_check_local_node(false);
 
-	handle = bdr_msgs_enqueue_one(BDR_MSG_COMMENT, (void*)dummy_payload);
+	handle = bdr_consensus_enqueue_proposal(BDR_MSG_COMMENT,
+											(void *) dummy_payload);
 	if (handle == 0)
 		/*
 		 * TODO: block
@@ -842,8 +840,6 @@ bdr_submit_comment(PG_FUNCTION_ARGS)
 		elog(WARNING, "manager couldn't enqueue message, try again later");
 	else
 		elog(INFO, "manager enqueued message with handle "UINT64_FORMAT, handle);
-
-	bdr_messaging_detach();
 
 	snprintf(&handle_str[0], 33, UINT64_FORMAT, handle);
 	PG_RETURN_TEXT_P(cstring_to_text(handle_str));
@@ -856,17 +852,16 @@ bdr_consensus_message_outcome(PG_FUNCTION_ARGS)
 {
 	const char * handle_str = text_to_cstring(PG_GETARG_TEXT_P(0));
 	uint64 handle;
-	ConsensusProposalStatus outcome;
+	MNConsensusStatus status;
 
 	(void) bdr_check_local_node(false);
 
 	if (sscanf(handle_str, UINT64_FORMAT, &handle) != 1)
 		elog(ERROR, "could not parse %s as uint64", handle_str);
 
-	outcome = bdr_msg_get_outcome(handle);
-	bdr_messaging_detach();
+	status = mn_consensus_status(handle);
 
-	PG_RETURN_INT32((int32)outcome);
+	PG_RETURN_INT32((int32) status);
 }
 
 PG_FUNCTION_INFO_V1(bdr_replicate_ddl_command);

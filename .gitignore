@@ -3,3 +3,5 @@ bdr.so
 bdr_version.h
 regression_output/
 tmp_check/
+*~
+*.o

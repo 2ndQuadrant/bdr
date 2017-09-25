@@ -48,11 +48,10 @@
 #include "pglogical_plugins.h"
 
 #include "bdr_catcache.h"
+#include "bdr_consensus.h"
 #include "bdr_functions.h"
 #include "bdr_join.h"
 #include "bdr_manager.h"
-#include "bdr_messaging.h"
-#include "bdr_msgformats.h"
 #include "bdr_state.h"
 #include "bdr_worker.h"
 
@@ -163,7 +162,7 @@ bdr_join_maintain_conn(BdrNodeInfo *local, uint32 target_id)
 		 * We consume input here because we want to clear any notices, etc,
 		 * that might be on the connection, notice when it breaks etc, even if
 		 * we're in a join phase that doesn't use the connection right now.
-		 * 
+		 *
 		 * This lets us update the wait-event state appropriately too.
 		 */
 		if (!PQconsumeInput(join.conn))
@@ -208,7 +207,7 @@ bdr_join_maintain_conn(BdrNodeInfo *local, uint32 target_id)
 				Assert(PQstatus(join.conn) == CONNECTION_OK);
 				bdr_join_wait_event_set_register();
 				break;
-				
+
 			default:
 				/*
 				 * We just polled, so no point doing it again, we'll recheck
@@ -512,7 +511,7 @@ bdr_join_handle_join_proposal(BdrMessage *msg)
 	 * TODO: move addition of the peer node from prepare
 	 * phase to accept phase callback
 	 */
-	bdr_messaging_add_peer(bnode.node_id, pnodeif.dsn, false);
+	mn_consensus_add_node(bnode.node_id, pnodeif.dsn, false);
 
 	/*
 	 * If this node is the join target, the joining peer will need a
@@ -613,11 +612,11 @@ bdr_join_submit_outcome_request(uint64 handle)
  *
  * Returns 0 until result successfully read.
  */
-static ConsensusProposalStatus
+static MNConsensusStatus
 bdr_join_submit_outcome_get_result(void)
 {
-	ConsensusProposalStatus outcome;
-	Assert(sizeof(ConsensusProposalStatus) == sizeof(int));
+	MNConsensusStatus outcome;
+	Assert(sizeof(MNConsensusStatus) == sizeof(int));
 
 	Assert(join.query_result_pending);
 
@@ -669,7 +668,7 @@ static void
 bdr_join_continue_wait_confirm(BdrStateEntry *cur_state, BdrNodeInfo *local)
 {
 	ExtraDataConsensusWait *extra;
-	ConsensusProposalStatus outcome;
+	MNConsensusStatus outcome;
 	Assert(cur_state->current == BDR_NODE_STATE_JOIN_WAIT_CONFIRM);
 	extra = cur_state->extra_data;
 
@@ -687,14 +686,14 @@ bdr_join_continue_wait_confirm(BdrStateEntry *cur_state, BdrNodeInfo *local)
 
 		switch (outcome)
 		{
-			case CONSENSUS_MESSAGE_ACCEPTED:
+			case MNCONSENSUS_ACCEPTED:
 			{
 				/* join request submitted successfully */
 				state_transition(cur_state, BDR_NODE_STATE_JOIN_COPY_REMOTE_NODES,
 					cur_state->peer_id, NULL);
 				break;
 			}
-			case CONSENSUS_MESSAGE_FAILED:
+			case MNCONSENSUS_FAILED:
 			{
 				/*
 				 * TODO: we should be able to transition back to
@@ -711,7 +710,7 @@ bdr_join_continue_wait_confirm(BdrStateEntry *cur_state, BdrNodeInfo *local)
 
 				break;
 			}
-			case CONSENSUS_MESSAGE_IN_PROGRESS:
+			case MNCONSENSUS_IN_PROGRESS:
 			{
 				/*
 				 * Peer hasn't got everyone to agree yet, so we'll just re-enter
@@ -726,7 +725,7 @@ bdr_join_continue_wait_confirm(BdrStateEntry *cur_state, BdrNodeInfo *local)
 /*
  * A peer node says it wants to go into catchup mode and sent us a
  * BDR_MSG_NODE_CATCHUP_READY.
- * 
+ *
  * That peer might be us; we handle our own catchup mode request here too, in
  * response to a BDR_NODE_STATE_SEND_CATCHUP_READY state. In that case we'll
  * transition to BDR_NODE_STATE_STANDBY on commit.
@@ -787,7 +786,7 @@ bdr_join_handle_catchup_proposal(BdrMessage *msg)
  * and sent us a BDR_MSG_NODE_ACTIVE message.
  *
  * That peer could be us, in which case we'll be in
- * BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE state and will transition to 
+ * BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE state and will transition to
  * BDR_NODE_STATE_ACTIVE.
  */
 void
@@ -971,7 +970,7 @@ read_nodeinfo_result(PGresult *res, int rownum)
 	return info;
 }
 
-#define NODEINFO_FIELD_NAMES 
+#define NODEINFO_FIELD_NAMES
 
 /*
  * Send query to probe a remote node to get BdrNodeInfo for the node.
@@ -1038,7 +1037,7 @@ get_remote_node_info(PGconn *conn)
 					 errdetail("libpq: %s", PQerrorMessage(conn))));
 			PQfinish(conn);
 		}
-		
+
 		if (!PQisBusy(conn))
 			return finish_get_remote_node_info(conn);
 
@@ -1177,7 +1176,7 @@ bdr_join_finish_copy_remote_nodes(BdrNodeInfo *local)
 
 		if (peer->bdr_node->node_id == local->bdr_node->node_id)
 			continue;
-		
+
 		local_copy = bdr_get_node_info(peer->pgl_node->id, true);
 
 		/* TODO: do a proper upsert here, not just create-if-exists */
@@ -1350,8 +1349,6 @@ bdr_gen_slot_name(Name slot_name, const char *dbname,
 			 shorten_hash(provider_node, 16),
 			 shorten_hash(subscriber_node, 16));
 	NameStr(*slot_name)[NAMEDATALEN-1] = '\0';
-
-	sanitize_slot_name(slot_name);
 }
 
 /*
@@ -1398,7 +1395,7 @@ bdr_create_subscription(BdrNodeInfo *local, BdrNodeInfo *remote, int apply_delay
 	 * Make sure there's no existing subscription to this node with the same
 	 * BDR replication set.
 	 */
-	check_overlapping_replication_sets(replication_sets, 
+	check_overlapping_replication_sets(replication_sets,
 		remote->pgl_node->id, remote->pgl_node->name);
 
 	sub_name = bdr_gen_sub_name(local, remote);
@@ -1525,8 +1522,8 @@ bdr_join_continue_subscribe_join_target(BdrStateEntry *cur_state, BdrNodeInfo *l
 		 * Now that we've created a subscription to the target we can start
 		 * talking to it.
 		 */
-		bdr_start_consensus(bdr_max_nodes, cur_state->current);
-		bdr_messaging_refresh_nodes();
+		bdr_start_consensus(cur_state->current);
+		bdr_consensus_refresh_nodes();
 
 		state_transition(cur_state, BDR_NODE_STATE_JOIN_WAIT_SUBSCRIBE_COMPLETE,
 			cur_state->peer_id, NULL);
@@ -1559,7 +1556,7 @@ bdr_join_continue_wait_subscribe_complete(BdrStateEntry *cur_state, BdrNodeInfo 
 	 */
 	sync = get_subscription_sync_status(sub->id, true);
 	if (sync && sync->status == SYNC_STATUS_READY)
-	{	
+	{
 		state_transition(cur_state, BDR_NODE_STATE_JOIN_GET_CATCHUP_LSN,
 			cur_state->peer_id, NULL);
 	}
@@ -1628,7 +1625,7 @@ bdr_join_continue_create_subscriptions(BdrStateEntry *cur_state, BdrNodeInfo *lo
 	Assert(cur_state->current == BDR_NODE_STATE_JOIN_CREATE_SUBSCRIPTIONS);
 
 	nodes = bdr_get_nodes_info(local->bdr_node_group->id);
-	
+
 	foreach (lc, nodes)
 	{
 		BdrNodeInfo *remote = lfirst(lc);
@@ -1642,7 +1639,7 @@ bdr_join_continue_create_subscriptions(BdrStateEntry *cur_state, BdrNodeInfo *lo
 		bdr_create_subscription(local, remote, 0, false, BDR_SUBSCRIPTION_MODE_FASTFORWARD);
 	}
 
-	bdr_messaging_refresh_nodes();
+	bdr_consensus_refresh_nodes();
 
 	state_transition(cur_state, BDR_NODE_STATE_SEND_CATCHUP_READY,
 		cur_state->peer_id, NULL);
@@ -1662,7 +1659,7 @@ bdr_join_continue_send_catchup_ready(BdrStateEntry *cur_state, BdrNodeInfo *loca
 	 * will transition us to BDR_NODE_STATE_STANDBY, which is how we exit
 	 * this state.
 	 */
-	handle = bdr_msgs_enqueue_one(BDR_MSG_NODE_CATCHUP_READY, NULL);
+	handle = bdr_consensus_enqueue_proposal(BDR_MSG_NODE_CATCHUP_READY, NULL);
 	if (handle == 0)
 		elog(ERROR, "failed to submit BDR_MSG_NODE_CATCHUP_READY consensus message");
 
@@ -1768,7 +1765,7 @@ bdr_join_continue_send_active_announce(BdrStateEntry *cur_state, BdrNodeInfo *lo
 	 * active. When our own handler for it is invoked, it'll also
 	 * transition us to BDR_NODE_STATE_ACTIVE.
 	 */
-	handle = bdr_msgs_enqueue_one(BDR_MSG_NODE_ACTIVE, NULL);
+	handle = bdr_consensus_enqueue_proposal(BDR_MSG_NODE_ACTIVE, NULL);
 	if (handle == 0)
 		elog(ERROR, "failed to submit BDR_MSG_NODE_ACTIVE consensus message");
 
@@ -1873,7 +1870,7 @@ bdr_join_wait_event_set_register(void)
 /*
  * Re-register any libpq connection with the wait event set.
  *
- * Assume the socket wants to be woken for everything; next 
+ * Assume the socket wants to be woken for everything; next
  * time we get woken we'll update the setting.
  */
 void
@@ -1988,7 +1985,7 @@ bdr_join_continue(BdrNodeState cur_state,
 		 * the beginning of this call in order to submit a consensus message
 		 * instead. If that's the case we'd better not try to commit it.
 		 */
-		if (bdr_messaging_active_nodeid() == 0)
+		if (mn_consensus_active_nodeid() == 0)
 			CommitTransactionCommand();
 	}
 

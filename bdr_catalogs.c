@@ -44,8 +44,8 @@
 #include "utils/typcache.h"
 
 #include "bdr_state.h"
-#include "bdr_msgformats.h"
 #include "bdr_catalogs.h"
+#include "bdr_consensus.h"
 
 #define CATALOG_NODE				"node"
 #define CATALOG_NODE_GROUP			"node_group"

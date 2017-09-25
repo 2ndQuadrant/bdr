@@ -8,6 +8,12 @@ PGFILEDESC = "bdr - async multimaster logical replication"
 DATA = bdr--3.0.0.sql
 
 OBJS = \
+	mn_consensus.o \
+	mn_consensus_impl.o \
+	mn_msgbroker.o \
+	mn_msgbroker_receive.o \
+	mn_msgbroker_send.o \
+	shm_mq_pool.o \
 	bdr_apply.o \
 	bdr_catalogs.o \
 	bdr_catcache.o \
@@ -15,11 +21,6 @@ OBJS = \
 	bdr_functions.o \
 	bdr_join.o \
 	bdr_manager.o \
-	bdr_messaging.o \
-	bdr_msgbroker.o \
-	bdr_msgbroker_receive.o \
-	bdr_msgbroker_send.o \
-	bdr_msgformats.o\
 	bdr_output.o \
 	bdr_pgl_plugin.o \
 	bdr_shmem.o \
@@ -28,8 +29,6 @@ OBJS = \
 	bdr_worker.o
 
 REGRESS = preseed init simple views wait part
-
-EXTRA_CLEAN += 
 
 # For regression checks
 # http://www.postgresql.org/message-id/CAB7nPqTsR5o3g-fBi6jbsVdhfPiLFWQ_0cGU5=94Rv_8W3qvFA@mail.gmail.com

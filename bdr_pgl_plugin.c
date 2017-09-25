@@ -53,6 +53,9 @@
 #include "pglogical_output_config.h"
 #include "pglogical_output_plugin.h"
 
+#include "mn_msgbroker.h"
+#include "shm_mq_pool.h"
+
 #include "bdr_version.h"
 #include "bdr_catcache.h"
 #include "bdr_consensus.h"
@@ -60,9 +63,7 @@
 #include "bdr_sync.h"
 #include "bdr_apply.h"
 #include "bdr_output.h"
-#include "bdr_msgbroker.h"
 #include "bdr_shmem.h"
-#include "bdr_messaging.h"
 #include "bdr_manager.h"
 
 PG_MODULE_MAGIC;
@@ -202,7 +203,7 @@ _PG_init(void)
 
 	bdr_define_gucs();
 
-	msgb_shmem_init(BDR_MAX_DATABASES);
+	shm_mq_pooler_shmem_init();
     bdr_shmem_init(BDR_MAX_DATABASES);
 
 	bdr_register_pgl_plugin();

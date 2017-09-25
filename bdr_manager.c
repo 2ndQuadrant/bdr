@@ -32,7 +32,7 @@
 #include "bdr_state.h"
 #include "bdr_catalogs.h"
 #include "bdr_catcache.h"
-#include "bdr_messaging.h"
+#include "bdr_consensus.h"
 #include "bdr_manager.h"
 #include "bdr_shmem.h"
 #include "bdr_worker.h"
@@ -66,6 +66,7 @@ bdr_manager_worker_start(void)
 {
 	BdrStateEntry cur_state;
 
+	/* We need at least one worker process and one replixation set per node. */
 	bdr_max_nodes = Min(max_worker_processes, max_replication_slots);
 	if (!bdr_is_active_db())
 	{
@@ -92,7 +93,8 @@ bdr_manager_worker_start(void)
 
 	my_manager = bdr_shmem_allocate_manager_segment(bdr_get_local_nodeid());
 
-	bdr_start_consensus(bdr_max_nodes, cur_state.current);
+	bdr_start_consensus(cur_state.current);
+	bdr_consensus_refresh_nodes();
 }
 
 static void
@@ -176,7 +178,7 @@ bdr_manager_wait_event(struct WaitEvent *events, int nevents,
 	if (!bdr_is_active_db())
 		return;
 
-	bdr_messaging_wait_event(events, nevents, max_next_wait_msecs);
+	mn_consensus_wakeup(events, nevents, max_next_wait_msecs);
 	bdr_join_wait_event(events, nevents, max_next_wait_msecs);
 
 	bdr_state_dispatch(max_next_wait_msecs);
@@ -185,7 +187,7 @@ bdr_manager_wait_event(struct WaitEvent *events, int nevents,
 void
 bdr_wait_event_set_recreated(struct WaitEventSet *new_set)
 {
-	bdr_messaging_wait_event_set_recreated(new_set);
+	bdr_consensus_wait_event_set_recreated(new_set);
 	bdr_join_wait_event_set_recreated(new_set);
 }
 
@@ -193,7 +195,7 @@ int
 bdr_get_wait_event_space_needed(void)
 {
 	return bdr_join_get_wait_event_space_needed()
-		   + bdr_messaging_get_wait_event_space_needed(); 
+		   + bdr_consensus_get_wait_event_space_needed();
 }
 
 static void

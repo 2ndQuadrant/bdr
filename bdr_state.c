@@ -52,7 +52,6 @@
 #include "bdr_catalogs.h"
 #include "bdr_catcache.h"
 #include "bdr_join.h"
-#include "bdr_msgformats.h"
 #include "bdr_state.h"
 #include "bdr_state.h"
 #include "bdr_worker.h"
