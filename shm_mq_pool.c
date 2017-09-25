@@ -20,13 +20,18 @@
 
 #include "miscadmin.h"
 
+#include "access/twophase.h"
+
 #include "lib/stringinfo.h"
 
 #include "nodes/pg_list.h"
 
+#include "pgstat.h"
+
 #include "storage/ipc.h"
 #include "storage/latch.h"
 #include "storage/shm_mq.h"
+#include "storage/spin.h"
 
 #include "utils/builtins.h"
 #include "utils/dsa.h"
@@ -57,6 +62,10 @@ struct MQPoolConn
 
 struct MQPool
 {
+	/* Write lock. */
+	slock_t			mutex;
+
+	/* Name of the pool. */
 	NameData		name;
 
 	/* This is pointer to shmem. */
@@ -69,6 +78,8 @@ struct MQPool
 	shm_mq_pool_connect_cb connect_cb;
 	shm_mq_pool_disconnect_cb disconnect_cb;
 	shm_mq_pool_message_cb message_cb;
+
+	slist_head      waiters;
 
 	/* Number of connections in the pool. */
 	uint32			max_connections;
@@ -83,10 +94,19 @@ typedef struct MQPooler
 	dsa_pointer		pools[FLEXIBLE_ARRAY_MEMBER];
 } MQPooler;
 
+typedef struct MQPoolWaiter {
+	PGPROC		   *proc;
+	slist_node		node;
+} MQPoolWaiter;
+
 struct MQPoolerContext
 {
+	/* Write lock. */
+	slock_t			mutex;
 	dsa_handle		dsa;
 	dsa_pointer		pooler;
+
+	MQPoolWaiter   *waiters;
 };
 
 MQPoolerContext			   *MQPoolerCtx = NULL;
@@ -103,15 +123,24 @@ shm_mq_pooler_shm_startup(void)
 {
 	bool        found;
 
+	/* See InitProcGlobal() */
+	uint32		TotalProcs = MaxBackends + NUM_AUXILIARY_PROCS + max_prepared_xacts;
+
 	if (prev_shmem_startup_hook != NULL)
 		prev_shmem_startup_hook();
 
 	/* Init signaling context for supervisor proccess. */
-	MQPoolerCtx = ShmemInitStruct("shm_mq_pooler", sizeof(MQPoolerContext),
+	MQPoolerCtx = ShmemInitStruct("shm_mq_pooler", sizeof(MQPoolerContext) +
+								  sizeof(MQPoolWaiter) * TotalProcs,
 								  &found);
 
 	if (!found)
-		memset(MQPoolerCtx, 0, sizeof(MQPoolerContext));
+	{
+		memset(MQPoolerCtx, 0,
+			   sizeof(MQPoolerContext) + sizeof(MQPoolWaiter) * TotalProcs);
+		SpinLockInit(&MQPoolerCtx->mutex);
+		MQPoolerCtx->waiters = (MQPoolWaiter *) (MQPoolerCtx + sizeof(MQPoolerContext));
+	}
 }
 
 /*
@@ -183,6 +212,8 @@ shm_mq_pooler_new_pool(const char *name, int max_connections, Size recv_queue_si
 	if (MQPoolerCtx == NULL)
 		elog(ERROR, "shm_mq_pooler not initialized");
 
+	SpinLockAcquire(&MQPoolerCtx->mutex);
+
 	/* Init the pooler if needed. */
 	if (!DsaPointerIsValid(MQPoolerCtx->pooler))
 		shm_mq_pooler_init();
@@ -202,6 +233,7 @@ shm_mq_pooler_new_pool(const char *name, int max_connections, Size recv_queue_si
 	mqpool->disconnect_cb = disconnect_cb;
 	mqpool->message_cb = message_cb;
 	mqpool->max_connections = max_connections;
+	SpinLockInit(&mqpool->mutex);
 
 	for (i = 0; i < mqpool->max_connections; i++)
 	{
@@ -221,6 +253,8 @@ shm_mq_pooler_new_pool(const char *name, int max_connections, Size recv_queue_si
 
 	dsa_free(MQPoolerDsaArea, MQPoolerCtx->pooler);
 	MQPoolerCtx->pooler = dp;
+
+	SpinLockRelease(&MQPoolerCtx->mutex);
 
 	MemoryContextSwitchTo(oldctx);
 	CurrentResourceOwner = oldresowner;
@@ -310,7 +344,6 @@ shm_mq_pooler_work(void)
 		if (mqpool->owner != MyProc)
 			continue;
 
-
 		for (ci = 0; ci < mqpool->max_connections; ci++)
 		{
 			MQPoolConn	   *mqconn = dsa_get_address(MQPoolerDsaArea,
@@ -319,9 +352,9 @@ shm_mq_pooler_work(void)
 
 			CHECK_FOR_INTERRUPTS();
 
+			pg_read_barrier();
 			if (!mqconn->used)
 				continue;
-
 
 			/*
 			 * Attach to connection if not attached already (this is a new
@@ -340,6 +373,7 @@ shm_mq_pooler_work(void)
 
 			if (result == SHM_MQ_DETACHED)
 			{
+				/* Cleanup the connection info and set it unused. */
 				if (mqpool->disconnect_cb)
 					mqpool->disconnect_cb(mqconn);
 				shm_mq_detach(dsa_get_address(MQPoolerDsaArea, mqconn->clientq));
@@ -356,8 +390,26 @@ shm_mq_pooler_work(void)
 				mqconn->client_sendqh = NULL;
 				mqconn->clientq = 0;
 				mqconn->serverq = 0;
+				SpinLockAcquire(&mqpool->mutex);
 				mqconn->client = NULL;
 				mqconn->used = false;
+				SpinLockRelease(&mqpool->mutex);
+
+				/* Signal all waiters for connection slot. */
+				while (!slist_is_empty(&mqpool->waiters))
+				{
+					slist_node	   *node;
+					MQPoolWaiter   *waiter;
+					PGPROC		   *proc;
+
+					SpinLockAcquire(&mqpool->mutex);
+					node = slist_pop_head_node(&mqpool->waiters);
+					SpinLockRelease(&mqpool->mutex);
+					waiter = slist_container(MQPoolWaiter, node, node);
+					proc = waiter->proc;
+
+					SetLatch(&proc->procLatch);
+				}
 			}
 
 			if (result != SHM_MQ_SUCCESS)
@@ -373,14 +425,14 @@ shm_mq_pooler_work(void)
  *
  * Called by backed (normal or bgworker) which wants to communicate with the
  * proccess serving the given pool.
- *
- * TODO: locking
  */
 MQPoolConn *
-shm_mq_pool_get_connection(MQPool *mqpool)
+shm_mq_pool_get_connection(MQPool *mqpool, bool nowait)
 {
-	int			i;
+	int				i;
+    MQPoolWaiter   *waiter = NULL;
 
+retry:
 	for (i = 0; i < mqpool->max_connections; i++)
 	{
 		dsa_pointer		dp = mqpool->connections[i];
@@ -389,14 +441,20 @@ shm_mq_pool_get_connection(MQPool *mqpool)
 		void		   *queueaddr;
 		MemoryContext oldctx;
 
+		SpinLockAcquire(&mqpool->mutex);
+
 		/* Check if the connection is free. */
 		if (mqconn->used)
+		{
+			SpinLockRelease(&mqpool->mutex);
 			continue;
-
-		oldctx = MemoryContextSwitchTo(TopMemoryContext);
+		}
 
 		mqconn->used = true;
 		mqconn->client = MyProc;
+		SpinLockRelease(&mqpool->mutex);
+
+		oldctx = MemoryContextSwitchTo(TopMemoryContext);
 
 		/* Create queues. */
 		mqconn->clientq = dsa_allocate(MQPoolerDsaArea, mqpool->recv_queue_size);
@@ -415,6 +473,36 @@ shm_mq_pool_get_connection(MQPool *mqpool)
 		MemoryContextSwitchTo(oldctx);
 
 		return mqconn;
+	}
+
+	/* Wait if requested. */
+	if (!nowait)
+	{
+		int rc;
+
+		CHECK_FOR_INTERRUPTS();
+
+		/* If this is the first time we tried, add us to the waiter list. */
+		if (waiter == NULL)
+		{
+			waiter = &MQPoolerCtx->waiters[MyProc->pgprocno];
+			waiter->proc = MyProc;
+			SpinLockAcquire(&mqpool->mutex);
+			slist_push_head(&mqpool->waiters, &waiter->node);
+			SpinLockRelease(&mqpool->mutex);
+		}
+
+		/* Retry after maximum of 1s. */
+        rc = WaitLatch(&MyProc->procLatch,
+					   WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH, 1000L,
+					   PG_WAIT_EXTENSION);
+		ResetLatch(&MyProc->procLatch);
+
+		/* emergency bailout if postmaster has died */
+		if (rc & WL_POSTMASTER_DEATH)
+			proc_exit(1);
+
+		goto retry;
 	}
 
 	return NULL;

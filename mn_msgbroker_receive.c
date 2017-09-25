@@ -88,7 +88,7 @@ msgb_connect(PG_FUNCTION_ARGS)
 	mqpool = shm_mq_pool_get_pool("mn_msg_broker");
 	if (!mqpool)
 		ereport(ERROR, (errmsg("could not get mn_msg_broker pool")));
-	MyMQConn = shm_mq_pool_get_connection(mqpool);
+	MyMQConn = shm_mq_pool_get_connection(mqpool, false);
 	if (!MyMQConn)
 		ereport(ERROR, (errmsg("could not get mn_msg_broker connection")));
 

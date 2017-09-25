@@ -257,7 +257,7 @@ mn_consensus_begin_enqueue(void)
 	mqpool = shm_mq_pool_get_pool("mn_consensus");
 	if (!mqpool)
 		ereport(ERROR, (errmsg("could not get mn_consensus pool")));
-	MyMQConn = shm_mq_pool_get_connection(mqpool);
+	MyMQConn = shm_mq_pool_get_connection(mqpool, false);
 	if (!MyMQConn)
 		ereport(ERROR, (errmsg("could not get mn_consensus connection")));
 
@@ -344,7 +344,7 @@ mn_consensus_status(uint64 msg_handle)
 	mqpool = shm_mq_pool_get_pool("mn_consensus");
 	if (!mqpool)
 		ereport(ERROR, (errmsg("could not get mn_consensus pool")));
-	MyMQConn = shm_mq_pool_get_connection(mqpool);
+	MyMQConn = shm_mq_pool_get_connection(mqpool, false);
 	if (!MyMQConn)
 		ereport(ERROR, (errmsg("could not get mn_consensus connection")));
 

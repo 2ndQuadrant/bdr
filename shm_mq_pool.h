@@ -28,7 +28,7 @@ extern MQPool *shm_mq_pooler_new_pool(const char *name, int max_connections, Siz
 extern void shm_mq_pooler_work(void);
 
 /* Pooling cient interfaces. */
-extern MQPoolConn *shm_mq_pool_get_connection(MQPool *mqpool);
+extern MQPoolConn *shm_mq_pool_get_connection(MQPool *mqpool, bool nowait);
 extern void shm_mq_pool_disconnect(MQPoolConn *mqconn);
 extern MQPool *shm_mq_pool_get_pool(const char *name);
 extern bool shm_mq_pool_write(MQPoolConn *mqconn, StringInfo msg);
