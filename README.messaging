@@ -7,7 +7,7 @@ backends and SQL function calls acting as a delivery transport.
 
 It's structured into a few modular components.
 
-bdr_msgbroker
+mn_msgbroker
 ---
 
 The message broker provides unreliable, non-persistent messaging between BDR
@@ -30,7 +30,7 @@ extension.
 [Implementation complete]
 
 
-bdr_consensus
+mn_consensus
 ---
 
 The consensus manager builds on the message broker, adding network two phase
@@ -59,15 +59,15 @@ be able to be put into its own extension for re-use elsewhere.
 [Implementation WIP: no consensus, crash safety, 2PC]
 
 
-bdr_messaging
+bdr_consensus
 ---
 
-The BDR messaging layer contains the BDR knowledge. It sets up the message
-broker and consensus manager's knowledge of peer nodes from the BDR catalogs,
-reports added/removed nodes, etc. It also integrates them into pglogical's
+The BDR consensus layer contains the BDR knowledge. It sets up the consensus
+subsustem's knowledge of peer nodes from the BDR catalogs, reports
+added/removed nodes, etc. It also integrates them into pglogical's
 wait-event loop so their own event loops can be serviced.
 
-In addition to wrapping the consensus manager, the BDR messaging layer adds
+In addition to wrapping the consensus manager, the BDR consensus layer adds
 knowledge of BDR-specific message types to be carried by the consensus manager.
 It has a dispatcher for invoking appropriate BDR subsystems in response to
 accepted consensus proposals.
@@ -75,15 +75,9 @@ accepted consensus proposals.
 Since the message broker only has limited IPC to receive messages from remote
 peers, and the consensus manager runs wholly within the manager worker, we also
 need a way for other BDR backends to submit BDR messages and learn of the
-outcomes. The BDR messaging layer provides this with shmem memory queues 
+outcomes. The BDR messaging layer provides this with shmem memory queues
 that other BDR backends (bgworker or hook in user backend) can attach to and
 use to communicate with the manager worker.
-
-(TODO: this probably makes more sense to have in the consensus layer,
-really, and for the BDR messaging layer to wrap it in each proc. So should
-move the submit queue stuff from bdr_shmem.[ch] and bdr_messaging.[ch]
-into bdr_consensus.[ch])
-
 
 bdr_manager
 ---
@@ -144,17 +138,6 @@ for use when needed).
 Future work
 ---
 
-In the near future we need to refactor this a bit, so both shm_mq facilities
-are merged together and shared. The merged facility should have two-way
-communication, a defined protocol between the peers, and the ability to send a
-batch of messages at once.
-
-* extract bdr_msgbuf_receive.c's shmem worker pool;
-* make it into coupled pairs of in and out queues like bdr_messaging.c uses, so we can reply;
-* adopt the same protocol and state tracking as used for bdr_messaging.c in the new queue;
-* fix it so that it does not rely on shm_mq_get_receiver or shm_mq_get_sender returning
-  null after detach; requires in-band signalling of intent to detach, ordering restrictions
-  requiring manager to only detach after worker gone, or similar.
 * extend it so it allows submission of multiple multiple messages in a single batch so we don't have to pass through the event loop each time;
 * expand the pool with a set of extra queues used first-come first-served by normal user backends and other bdr bgworkers - for ddl lock requests, ipc with manager, etc etc.
 

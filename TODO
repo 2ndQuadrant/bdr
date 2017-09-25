@@ -17,27 +17,9 @@ NEXT STEPS TO PROGRESS
 
 - replicate replication set memberships on change
 
-- do MQ refactor
-
 - write persistence for consensus messages
 - write db read-out for consensus messages
 - write proper consensus 2pc
-
-MQ REFACTOR
-----
-
-Needed pretty urgently now
-
-- 2-way comms
-- pool of slots
-- assign slots for peer message submit and for local ipc from same pool
-- detach protocol is that manager always detaches last; if it wants a peer
-  to go away it sends a shm_mq message to it instead of detaching, and
-  if it fails to detach, sends a signal. So we never have doubt as to whether
-  the peer is still attached.
-  
-more in README.messaging
-
 
 
 COMPAT STUFF
