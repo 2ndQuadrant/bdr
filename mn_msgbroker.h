@@ -31,8 +31,9 @@ typedef void (*msgb_receive_cb)(uint32 origin, const char *payload, Size payload
 extern void msgb_wakeup(struct WaitEvent *occurred_events, int nevents,
 						long *max_next_wait_ms);
 
-extern void msgb_startup(uint32 local_node_id, mn_request_waitevents_fn request_waitevents,
-						 msgb_receive_cb receive_cb, Size recv_queue_size);
+extern void msgb_startup(char *channel, uint32 local_node_id,
+			 mn_request_waitevents_fn request_waitevents,
+			 msgb_receive_cb receive_cb, Size recv_queue_size);
 extern void msgb_shutdown(void);
 
 extern void msgb_add_peer(uint32 peer_id, const char *dsn);

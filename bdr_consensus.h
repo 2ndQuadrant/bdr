@@ -62,8 +62,8 @@ typedef enum BdrMessageType
  */
 typedef struct BdrMessage
 {
-    /* Globally unique, ordered sequence value for this proposal/agreement */
-    int				global_consensus_no;
+    /* Globally unique, sequence value for this proposal/agreement */
+	uint64			global_consensus_no;
 
     /* Node ID that proposed this BDR message */
     uint32			originator_id;
@@ -122,7 +122,7 @@ extern void wrapInStringInfo(StringInfo si, char *data, Size length);
 
 extern void msg_serialize_proposal(StringInfo out, BdrMessageType message_type, void* message);
 
-extern struct BdrMessage* msg_deserialize_proposal(MNConsensusProposalRequest *in);
+extern struct BdrMessage* msg_deserialize_proposal(MNConsensusMessage *in);
 
 extern uint64 bdr_consensus_enqueue_proposal(BdrMessageType message_type, void *message);
 

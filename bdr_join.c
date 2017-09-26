@@ -517,7 +517,7 @@ bdr_join_handle_join_proposal(BdrMessage *msg)
 	 * TODO: move addition of the peer node from prepare
 	 * phase to accept phase callback
 	 */
-	mn_consensus_add_or_update_node(bnode.node_id, pnodeif.dsn, false);
+//	mn_consensus_add_or_update_node(bnode.node_id, pnodeif.dsn, false);
 
 	/*
 	 * Ideally we'd create the peer's replication slot here, transactionally,

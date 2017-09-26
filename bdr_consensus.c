@@ -35,7 +35,7 @@
 static mn_waitevents_fill_cb		waitevents_fill_cb = NULL;
 static int							waitevents_requested = 0;
 
-static bool bdr_proposal_receive(MNConsensusProposalRequest *request);
+static bool bdr_proposal_receive(MNConsensusMessage *msg);
 static bool bdr_proposals_prepare(List *requests);
 static void bdr_proposals_commit(List *requests);
 static void bdr_proposals_rollback(void);
@@ -224,13 +224,13 @@ bdr_consensus_enqueue_proposal(BdrMessageType message_type, void *message)
 }
 
 static bool
-bdr_proposal_receive(MNConsensusProposalRequest *request)
+bdr_proposal_receive(MNConsensusMessage *cmsg)
 {
 	BdrMessage *bmsg;
 	const MNMessageFuncs *funcs;
 	const char *msgdetail;
 
-	bmsg = msg_deserialize_proposal(request);
+	bmsg = msg_deserialize_proposal(cmsg);
 
 	if (!bmsg)
 	{
@@ -273,10 +273,10 @@ bdr_proposals_prepare(List *requests)
 
 	foreach (lc, requests)
 	{
-		MNConsensusProposalRequest	   *request = lfirst(lc);
+		MNConsensusMessage *cmsg = lfirst(lc);
 		BdrMessage		   *bmsg;
 
-		bmsg = msg_deserialize_proposal(request);
+		bmsg = msg_deserialize_proposal(cmsg);
 
 		elog(bdr_debug_level, "%u dispatching prepare of proposal %s from %u",
 			 bdr_get_local_nodeid(),
@@ -305,8 +305,6 @@ bdr_proposals_prepare(List *requests)
 					 bmsg->message_type);
 		}
 	}
-
-    /* TODO: here's where we apply in-transaction state changes like insert nodes */
 
     /* TODO: can nack messages here too */
     return true;
@@ -399,7 +397,7 @@ msg_serialize_proposal(StringInfo out, BdrMessageType message_type,
  * Thus this isn't an exact mirror of msg_serialize_proposal.
  */
 BdrMessage*
-msg_deserialize_proposal(MNConsensusProposalRequest *in)
+msg_deserialize_proposal(MNConsensusMessage *in)
 {
 	BdrMessage *out;
 	StringInfoData si;
@@ -407,7 +405,7 @@ msg_deserialize_proposal(MNConsensusProposalRequest *in)
 
 	out = palloc(sizeof(BdrMessage));
 
-	out->global_consensus_no = in->global_proposal_id;
+	out->global_consensus_no = in->global_id;
 	out->originator_id = in->sender_nodeid;
 	out->originator_propose_time = in->sender_timestamp;
 	out->originator_propose_lsn = in->sender_lsn;
@@ -440,7 +438,7 @@ msg_deserialize_proposal(MNConsensusProposalRequest *in)
 		error_context_stack = &myerrcontext;
 
 		out->message = funcs->deserialize(&si);
-		
+
 		error_context_stack = myerrcontext.previous;
 	}
 

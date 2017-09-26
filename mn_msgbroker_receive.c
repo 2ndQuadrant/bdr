@@ -14,6 +14,7 @@
 #include "storage/shm_toc.h"
 #include "storage/spin.h"
 
+#include "utils/builtins.h"
 #include "utils/elog.h"
 #include "utils/memutils.h"
 
@@ -61,9 +62,10 @@ PG_FUNCTION_INFO_V1(msgb_connect);
 Datum
 msgb_connect(PG_FUNCTION_ARGS)
 {
-	uint32			origin_node = PG_GETARG_UINT32(0);
-	uint32			destination_node = PG_GETARG_UINT32(1);
-	uint64			last_sent_msgid = PG_GETARG_INT64(2);
+	char		   *channel = text_to_cstring(PG_GETARG_TEXT_P(0));
+	uint32			origin_node = PG_GETARG_UINT32(1);
+	uint32			destination_node = PG_GETARG_UINT32(2);
+	uint64			last_sent_msgid = PG_GETARG_INT64(3);
 	MQPool		   *mqpool;
 	StringInfoData	msg;
 	const uint64    message_id = 0;
@@ -85,12 +87,14 @@ msgb_connect(PG_FUNCTION_ARGS)
 
 	Assert(MQPoolerCtx != NULL);
 
-	mqpool = shm_mq_pool_get_pool("mn_msg_broker");
+	mqpool = shm_mq_pool_get_pool(channel);
 	if (!mqpool)
-		ereport(ERROR, (errmsg("could not get mn_msg_broker pool")));
+		ereport(ERROR, (errmsg("could not get pool for channel \"%s\"",
+							   channel)));
 	MyMQConn = shm_mq_pool_get_connection(mqpool, false);
 	if (!MyMQConn)
-		ereport(ERROR, (errmsg("could not get mn_msg_broker connection")));
+		ereport(ERROR, (errmsg("could not get connection for channel \"%s\"",
+							   channel)));
 
 	connected_peer_id = origin_node;
 
@@ -181,16 +185,21 @@ msgb_deliver_message(PG_FUNCTION_ARGS)
  * user backend, which is one per max_connections.
  */
 void
-msgb_startup_receive(uint32 local_node_id, Size recv_queue_size,
+msgb_startup_receive(char *channel, uint32 local_node_id, Size recv_queue_size,
 					 msgb_receive_cb receive_cb)
 {
 	Assert(receive_cb);
+
+	if (MyNodeId != 0)
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg_internal("only one msgbroker receiver can be active per process")));
 
 	msgb_received_callback = receive_cb;
 	MyNodeId = local_node_id;
 
 	/* Create the pool. */
-	MyMQPool = shm_mq_pooler_new_pool("mn_msg_broker", 100, recv_queue_size,
+	MyMQPool = shm_mq_pooler_new_pool(channel, 100, recv_queue_size,
 									  NULL, NULL, msgb_receiver_message_cb);
 }
 
@@ -337,7 +346,7 @@ msgb_receiver_message_cb(MQPoolConn *mqconn, void *data, Size len)
 					(errmsg_internal("peer %u sending to %u appears to have skipped from msgid "UINT64_FORMAT" to "UINT64_FORMAT,
 									 peer->sender_id, MyNodeId, peer->max_received_msgid, msgid)));
 
-		msgb_received_callback(msgid, buf, bufsize);
+		msgb_received_callback(sender_id, buf, bufsize);
 
 		peer->max_received_msgid = msgid;
 	}

@@ -90,7 +90,7 @@ REVOKE ALL ON bdr.node_part_progress FROM public;
 
 CREATE TABLE bdr.distributed_message_journal
 (
-	global_consensus_no integer NOT NULL PRIMARY KEY,
+	global_consensus_no bigint NOT NULL PRIMARY KEY,
 	originator_id oid NOT NULL,
 	originator_state_no integer NOT NULL,
 	UNIQUE(originator_id, originator_state_no),
@@ -113,8 +113,8 @@ CREATE TABLE bdr.state_journal
     state oid NOT NULL,
     goal_state oid NOT NULL,
     entered_time timestamptz NOT NULL,
-    global_consensus_no bigint NOT NULL,
     peer_id oid NOT NULL,
+    global_consensus_no bigint NOT NULL,
     state_extra_data bytea
 ) WITH (user_catalog_table=true);
 
@@ -182,10 +182,10 @@ COMMENT ON FUNCTION bdr.request_replay_progress_update() IS
 /*
  * Interface for BDR message broker
  */
-CREATE FUNCTION bdr.msgb_connect(origin_node oid, destination_node oid, last_sent_msgid bigint)
+CREATE FUNCTION bdr.msgb_connect(channel text, origin_node oid, destination_node oid, last_sent_msgid bigint)
 RETURNS void LANGUAGE c AS 'MODULE_PATHNAME','msgb_connect';
 
-REVOKE ALL ON FUNCTION bdr.msgb_connect(oid,oid,bigint) FROM public;
+REVOKE ALL ON FUNCTION bdr.msgb_connect(text,oid,oid,bigint) FROM public;
 
 CREATE FUNCTION bdr.msgb_deliver_message(destination_node oid, message_id bigint, payload bytea)
 RETURNS void LANGUAGE c AS 'MODULE_PATHNAME','msgb_deliver_message';

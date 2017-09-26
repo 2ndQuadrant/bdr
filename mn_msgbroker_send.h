@@ -3,7 +3,7 @@
 
 #include "mn_msgbroker.h"
 
-extern void msgb_startup_send(uint32 local_node_id,
+extern void msgb_startup_send(char *channel, uint32 local_node_id,
 				  mn_request_waitevents_fn request_waitevents_fn);
 extern void msgb_shutdown_send(void);
 

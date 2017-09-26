@@ -5,6 +5,8 @@
 
 #include "lib/stringinfo.h"
 
+#include "mn_consensus.h"
+
 /*
  * This enumeration corresponds to the on-disk states in bdr.state_journal.
  * 
@@ -200,7 +202,7 @@ extern const char * bdr_node_state_name(BdrNodeState state);
 extern const char * bdr_node_state_name_abbrev(BdrNodeState state);
 
 extern void state_transition_goal(BdrStateEntry *state, BdrNodeState new_state,
-	BdrNodeState new_goal, int64 consensus_no, uint32 peer_id,
+	BdrNodeState new_goal, uint64 consensus_no, uint32 peer_id,
 	void *extradata);
 
 extern void state_transition(BdrStateEntry *state, BdrNodeState new_state,

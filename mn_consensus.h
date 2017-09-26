@@ -8,20 +8,36 @@
 
 #include "mn_msgbroker.h"
 
+typedef enum MNConsensusMessageKind
+{
+	MNCONSENSUS_MSG_KIND_PROPOSAL,
+	MNCONSENSUS_MSG_KIND_PROPOSAL_OK,
+	MNCONSENSUS_MSG_KIND_PROPOSAL_FAIL,
+	MNCONSENSUS_MSG_KIND_PREPARE,
+	MNCONSENSUS_MSG_KIND_PREPARE_OK,
+	MNCONSENSUS_MSG_KIND_PREPARE_FAIL,
+	MNCONSENSUS_MSG_KIND_COMMIT,
+	MNCONSENSUS_MSG_KIND_COMMIT_OK,
+	MNCONSENSUS_MSG_KIND_COMMIT_FAIL,	/* COMMIT can only FAIL if we get unknown
+										 * global_proposal_id. */
+	MNCONSENSUS_MSG_KIND_ROLLBACK
+} MNConsensusMessageKind;
+
 typedef struct MNConsensusProposal
 {
 	Size		payload_length;
 	char	   *payload;
 } MNConsensusProposal;
 
-typedef struct MNConsensusProposalRequest {
+typedef struct MNConsensusMessage {
 	uint32		sender_nodeid;
 	uint64		sender_local_msgnum;
 	XLogRecPtr	sender_lsn;
 	TimestampTz	sender_timestamp;
-	uint64		global_proposal_id;
-	MNConsensusProposal	*proposal;
-} MNConsensusProposalRequest;
+	uint64		global_id;				/* Id of the proposal group (same for all proposals between begin enqueue and finish enqueue). */
+	MNConsensusMessageKind msg_kind;
+	MNConsensusProposal	*proposal;		/* Only set for MNCONSENSUS_MSG_KIND_PROPOSAL */
+} MNConsensusMessage;
 
 typedef enum MNConsensusStatus {
 	MNCONSENSUS_IN_PROGRESS,
@@ -44,7 +60,7 @@ typedef enum MNConsensusStatus {
  * This hook is mainly for debugging/tracing. It should not have any state
  * side effects outside the transaction.
  */
-typedef bool (*consensus_proposal_receive_cb)(struct MNConsensusProposalRequest *request);
+typedef bool (*consensus_proposal_receive_cb)(struct MNConsensusMessage *proposal);
 
 /*
  * This hook is called after a set of proposals, already inserted into the
@@ -75,7 +91,7 @@ typedef bool (*consensus_proposal_receive_cb)(struct MNConsensusProposalRequest 
  * consensus_proposals_rollback_hook will be called after
  * consensus_proposal_prepare_hook and before any other prepare hook.
  */
-typedef bool (*consensus_proposals_prepare_cb)(List *requests);
+typedef bool (*consensus_proposals_prepare_cb)(List *msgs);
 
 /*
  * This hook is called once consensus_proposal_prepare_hook has returned
@@ -96,7 +112,7 @@ typedef bool (*consensus_proposals_prepare_cb)(List *requests);
  * previously prepared xact before a crash. Either way they must be treated
  * the same.
  */
-typedef void (*consensus_proposals_commit_cb)(List *requests);
+typedef void (*consensus_proposals_commit_cb)(List *msgs);
 
 /*
  * This hook is called instead of consensus_proposal_commit_hook if a peer node
@@ -162,9 +178,9 @@ extern MNConsensusStatus mn_consensus_status(uint64 msg_handle);
 extern void mn_serialize_consensus_proposal(MNConsensusProposal *proposal,
 								StringInfo s);
 extern MNConsensusProposal *mn_deserialize_consensus_proposal(const char *data, Size len);
-extern void mn_serialize_consensus_proposal_req(MNConsensusProposalRequest *req,
+extern void mn_serialize_consensus_proposal_msg(MNConsensusMessage *req,
 									StringInfo s);
-extern MNConsensusProposalRequest *mn_deserialize_consensus_proposal_req(const char *data, Size len);
+extern MNConsensusMessage *mn_deserialize_consensus_proposal_msg(const char *data, Size len);
 
 extern uint32 mn_consensus_active_nodeid(void);
 

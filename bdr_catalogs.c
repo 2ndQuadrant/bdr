@@ -89,8 +89,8 @@ typedef struct StateTuple
 	Oid			current;
 	Oid			goal;
 	TimestampTz entered_time;
-	int64		global_consensus_no;
 	Oid			peer_id;
+	uint64		global_consensus_no;
 	/* After this point use heap_getattr */
 } StateTuple;
 
@@ -99,8 +99,8 @@ typedef struct StateTuple
 #define Anum_state_current				2
 #define Anum_state_goal					3
 #define Anum_state_entered_time			4
-#define Anum_state_global_consensus_no	5
-#define Anum_state_peer_id		6
+#define Anum_state_peer_id				5
+#define Anum_state_global_consensus_no	6
 #define Anum_state_extra_data			7
 
 typedef struct SubscriptionTuple
@@ -783,7 +783,7 @@ bdr_get_subscription(uint32 pglogical_subscription_id, bool missing_ok)
 
 	scan = systable_beginscan(rel, 0, true, NULL, 1, key);
 	tuple = systable_getnext(scan);
-	
+
 	if (!HeapTupleIsValid(tuple) && !missing_ok)
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
@@ -831,7 +831,7 @@ bdr_get_node_subscription(uint32 target_node_id, uint32 origin_node_id,
 
 	scan = systable_beginscan(rel, 0, true, NULL, 3, key);
 	tuple = systable_getnext(scan);
-	
+
 	if (!HeapTupleIsValid(tuple) && !missing_ok)
 	{
 		Assert(false);
@@ -916,17 +916,19 @@ state_fromtuple(BdrStateEntry *state, HeapTuple tuple, TupleDesc tupDesc,
 {
 	StateTuple *stup = (StateTuple *) GETSTRUCT(tuple);
 	Datum d;
-	bool isnull = true;
+	bool isnull;
 
 	state->counter = stup->counter;
 	state->current = (BdrNodeState)stup->current;
 	state->goal = (BdrNodeState)stup->goal;
 	state->entered_time = stup->entered_time;
-	state->global_consensus_no = (uint64)stup->global_consensus_no;
 	state->peer_id = stup->peer_id;
+	state->global_consensus_no = stup->global_consensus_no;
 
 	if (fetch_extradata)
 		d = heap_getattr(tuple, Anum_state_extra_data, tupDesc, &isnull);
+	else
+		isnull = true;
 
 	if (isnull)
 		state->extra_data = NULL;
@@ -982,8 +984,8 @@ state_push(BdrStateEntry *state)
 	values[Anum_state_current - 1] = ObjectIdGetDatum((Oid)state->current);
 	values[Anum_state_goal - 1] = ObjectIdGetDatum((Oid)state->goal);
 	values[Anum_state_entered_time - 1] = TimestampTzGetDatum(state->entered_time);
-	values[Anum_state_global_consensus_no - 1] = Int64GetDatum((int64)state->global_consensus_no);
 	values[Anum_state_peer_id - 1] = ObjectIdGetDatum(state->peer_id);
+	values[Anum_state_global_consensus_no - 1] = UInt64GetDatum(state->global_consensus_no);
 
 	if (state->extra_data != NULL)
 	{
@@ -1060,7 +1062,7 @@ state_get_last(BdrStateEntry *state, bool for_update, bool fetch_extradata)
 	if (!found)
 		/* shouldn't happen, callers should check if bdr is ready */
 		elog(ERROR, "no entries found in BDR state table, BDR not initialized?");
-	
+
 	*state = tmp;
 }
 
@@ -1079,7 +1081,7 @@ state_decode_tuple(BdrStateEntry *state, HeapTupleHeader tupheader)
 	Oid			tupType;
 	int32		tupTypmod;
 	HeapTupleData	tuple;
-	
+
 	tupType = HeapTupleHeaderGetTypeId(tupheader);
 	tupTypmod = HeapTupleHeaderGetTypMod(tupheader);
 	tupdesc = lookup_rowtype_tupdesc(tupType, tupTypmod);

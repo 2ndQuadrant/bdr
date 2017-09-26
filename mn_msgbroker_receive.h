@@ -3,7 +3,8 @@
 
 #include "mn_msgbroker.h"
 
-extern void msgb_startup_receive(uint32 local_node_id, Size recv_queue_size,
+extern void msgb_startup_receive(char *channel, uint32 local_node_id,
+								 Size recv_queue_size,
 								 msgb_receive_cb receive_cb);
 extern void msgb_shutdown_receive(void);
 

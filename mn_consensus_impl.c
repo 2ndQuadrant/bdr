@@ -67,6 +67,9 @@
  */
 #include "postgres.h"
 
+#include <sys/time.h>
+
+#include "access/twophase.h"
 #include "access/xact.h"
 #include "access/xlog.h"
 
@@ -77,6 +80,7 @@
 #include "storage/latch.h"
 #include "storage/ipc.h"
 
+#include "utils/fmgrprotos.h"
 #include "utils/memutils.h"
 
 #include "mn_msgbroker.h"
@@ -118,23 +122,36 @@ static mn_request_waitevents_fn			request_waitevents;
 static ConsensusNode   *consensus_nodes = NULL;
 static uint32			nconsensus_nodes = 0;
 
-static void consensus_insert_proposal(MNConsensusProposalRequest *proposal);
-static void consensus_received_new_proposal(MNConsensusProposalRequest *proposal);
-static void consensus_prepare_transaction(void);
+static void consensus_insert_proposal(MNConsensusProposal *proposal);
+static void consensus_received_new_proposal(MNConsensusMessage *msg);
+static bool consensus_prepare_transaction(void);
 static void consensus_commit_prepared(void);
 static void consensus_rollback_prepared(void);
 static void consensus_xact_callback(XactEvent event, void *arg);
+
+static void consensus_received_prepare_response(uint32 origin, bool result);
+
+static void consensus_abort(void);
+
+static MNConsensusMessage *consensus_make_message(MNConsensusMessageKind kind,
+												  uint64 global_id);
+static void consensus_send_message(MNConsensusMessage *msg, uint32 node_id);
+static void consensus_broadcast_message(MNConsensusMessage *msg);
 
 static uint32 consensus_started_txn = 0;
 static bool consensus_finishing_txn = false;
 static List *cur_txn_proposals = NIL;
 static MemoryContext cur_txn_context = NULL;
 static bool xact_callback_registered = false;
+static uint64 current_global_id = 0;
 
 static uint32	MyNodeId = 0;
 
+/* TODO: Move to SHM to support multiple consensus workers. */
+static pg_atomic_uint64	localMsgNumberSequece;
+
 static ConsensusNode *
-consensus_find_node_by_id(uint32 node_id, const char * find_reason)
+consensus_find_node_by_id(uint32 node_id)
 {
 	int i;
 	ConsensusNode *node = NULL;
@@ -148,8 +165,7 @@ consensus_find_node_by_id(uint32 node_id, const char * find_reason)
 	else
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("node %u not found while %s consensus manager",
-				 		node_id, find_reason)));
+				 errmsg("node %u not found", node_id)));
 }
 
 void
@@ -230,7 +246,7 @@ consensus_remove_node(uint32 node_id)
 	if (consensus_state >= CONSENSUS_STARTING)
 		msgb_remove_peer(node_id);
 
-	node = consensus_find_node_by_id(node_id, "removing from");
+	node = consensus_find_node_by_id(node_id);
 	node->node_id = 0;
 
 	/* TODO: decrease the memory used by consensus_nodes at some threshold*/
@@ -243,7 +259,7 @@ consensus_remove_node(uint32 node_id)
  * bdr_proposals_commit_hook again during crash recovery.
  */
 static void
-consensus_insert_proposal(MNConsensusProposalRequest *proposal)
+consensus_insert_proposal(MNConsensusProposal *proposal)
 {
 	/* TODO */
 }
@@ -256,29 +272,37 @@ consensus_insert_proposal(MNConsensusProposalRequest *proposal)
 static void
 consensus_received_msgb_message(uint32 origin, const char *payload, Size payload_size)
 {
+	MNConsensusMessage	   *msg;
+
 	Assert(!consensus_finishing_txn);
 
-    /*
-     * TODO: Check if this is a new proposal, an ack/nack, a prepare request,
-     * a commit or rollback, etc. Act accordingly.
-     */
-	if (!IsTransactionState())
+	msg = mn_deserialize_consensus_proposal_msg(payload, payload_size);
+
+	/*
+	 * This might be first proposal, start transaction if needed.  We need to
+	 * do this here and not in the switch because we want to do protocol/state
+	 * checks that depends on this before we start processing the message.
+	 */
+	if (msg->msg_kind == MNCONSENSUS_MSG_KIND_PROPOSAL && !IsTransactionState())
 	{
 		StartTransactionCommand();
+		BeginTransactionBlock();
+		CommitTransactionCommand();
 		consensus_started_txn = origin;
 	}
-	else if (consensus_started_txn == 0)
+
+	if (unlikely(consensus_started_txn == 0))
 	{
 		/* cannot be called within a txn someone else started; internal error */
 		elog(ERROR, "attempt to start consensus receive within exiting txn");
 	}
-	else if (consensus_started_txn != origin)
+	else if (unlikely(consensus_started_txn != origin))
 	{
 		/*
 		 * The consensus system is processing a request from another node right
 		 * now. We don't yet support any blocking/queuing here. Our node has
 		 * already accepted the proposal, we can't ERROR on delivery. So we
-		 * must dispatch our own NACK as a reply.
+		 * must dispatch our own NACK as a response.
 		 */
 
 		/*
@@ -289,80 +313,133 @@ consensus_received_msgb_message(uint32 origin, const char *payload, Size payload
 		return;
 	}
 
-	/* TODO: handle 2pc prepare and commit requests from peer too */
-	/* by invoking consensus_prepare_transaction, consensus_commit_prepared, consensus_rollback_prepared */
 
-	consensus_received_new_proposal(mn_deserialize_consensus_proposal_req(payload, payload_size));
+	switch (msg->msg_kind)
+	{
+		case MNCONSENSUS_MSG_KIND_PROPOSAL:
+			consensus_received_new_proposal(msg);
+			break;
+		case MNCONSENSUS_MSG_KIND_PROPOSAL_OK:
+			/* We don't care atm. */
+			break;
+		case MNCONSENSUS_MSG_KIND_PROPOSAL_FAIL:
+			/* TODO support majority. */
+			consensus_abort();
+			break;
+		case MNCONSENSUS_MSG_KIND_PREPARE:
+			{
+				bool				result;
+				MNConsensusMessage *msg;
 
-	/*
-     * TODO: For now we're ignoring all the consensus protocol stuff and pretty
-     * much bypassing this layer, sending the nearly raw proposals we sent on
-     * the wire to receivers. No synchronisation, confirmation all nodes
-     * received, unpacking, etc. No proposal type header yet. Consequently the
-     * receive side here is similarly basic.
-	 *
-	 * What we'll do here in the real version is insert each proposal and
-	 * call a proposal received hook to ack/nack it, then reply with an ack/nack.
-	 *
-	 * When we get a commit we'll call the commit callback for all the proposals
-	 * together.
-	 *
-	 * But for now we just treat each proposal as committed as soon as it
-	 * arrives.
-	 */
-	consensus_prepare_transaction();
+				/* Try to prepare locally */
+				result = consensus_prepare_transaction();
+
+				/* Send answer. */
+				msg = consensus_make_message(result ? MNCONSENSUS_MSG_KIND_PREPARE_OK :
+											 MNCONSENSUS_MSG_KIND_PREPARE_FAIL,
+											 current_global_id);
+				consensus_send_message(msg, origin);
+			}
+			break;
+		case MNCONSENSUS_MSG_KIND_PREPARE_OK:
+			consensus_received_prepare_response(origin, true);
+			break;
+		case MNCONSENSUS_MSG_KIND_PREPARE_FAIL:
+			consensus_received_prepare_response(origin, false);
+			break;
+		case MNCONSENSUS_MSG_KIND_COMMIT:
+			{
+				MNConsensusMessage *msg;
+
+				/* Commit locally. */
+				consensus_commit_prepared();
+
+				/* Send answer. */
+				msg = consensus_make_message(MNCONSENSUS_MSG_KIND_COMMIT_OK,
+											 current_global_id);
+				consensus_send_message(msg, origin);
+			}
+			break;
+		case MNCONSENSUS_MSG_KIND_COMMIT_OK:
+			/* We don't care atm. */
+			break;
+		case MNCONSENSUS_MSG_KIND_COMMIT_FAIL:
+			elog(ERROR, "consensus received commit failure from node %u",
+				 origin);
+			consensus_abort();
+			break;
+		case MNCONSENSUS_MSG_KIND_ROLLBACK:
+			consensus_rollback_prepared();
+			break;
+	}
 }
 
 static void
-consensus_received_new_proposal(MNConsensusProposalRequest *proposal)
+consensus_received_new_proposal(MNConsensusMessage *message)
 {
 	MemoryContext old_ctx;
 
-    /*
-     * FIXME: a ConsensusProposal is the proposal for, and outcome of, a
-     * negotiation. Not every message passed to this function will be a
-     * ConsensusProposal. We need a ConsensusMessage that wraps ConsensusProposal
-     * with a message type field (ack/nack etc).
-     */
 	Assert(IsTransactionState() && consensus_started_txn && !consensus_finishing_txn);
 
 	if (proposal_receive_callback != NULL)
-		(*proposal_receive_callback)(proposal);
+		(*proposal_receive_callback)(message);
 
-	consensus_insert_proposal(proposal);
+	consensus_insert_proposal(message->proposal);
 
 	old_ctx = MemoryContextSwitchTo(cur_txn_context);
-	cur_txn_proposals = lappend(cur_txn_proposals, proposal);
+	cur_txn_proposals = lappend(cur_txn_proposals, message);
 	(void) MemoryContextSwitchTo(old_ctx);
 }
 
 static void
+generate_gxid(char *gxid, int gxid_len)
+{
+	snprintf(gxid, gxid_len, "bdrc%08X%08X",
+			 (uint32) (current_global_id >> 32), (uint32) current_global_id);
+}
+
+static bool
 consensus_prepare_transaction(void)
 {
-	(*proposals_prepare_callback)(cur_txn_proposals);
+	if ((*proposals_prepare_callback)(cur_txn_proposals))
+	{
+		char	gxid[64];
 
-	/* TODO: 2PC here. Prepare the xact, exchange proposals with peers, and come back when they have confirmed prepare too so we can commit: */
+		generate_gxid( gxid, sizeof(gxid)-1);
 
-	/*
-	 * TODO: this commit should happen in response to 2PC consensus, not
-	 * immediately here. If all peers agreed we should commit then send
-	 * a commit to peers, and not before.
-	 */
-	consensus_commit_prepared();
+		consensus_finishing_txn = true;
+		StartTransactionCommand();
+		if (!PrepareTransactionBlock(gxid))
+		{
+			CommitTransactionCommand();
+			elog(LOG, "failed to prepare transaction %s", gxid);
+			return false;
+		}
+
+		CommitTransactionCommand();
+
+		return true;
+	}
+	else
+		return false;
 }
 
 static void
 consensus_commit_prepared(void)
 {
 	/*
-	 * TODO: do real 2PC here
-	 *
 	 * This func should be called in response to a remote initiated commit-prepared proposal, or
 	 * when we detect that a locally submitted consensus request has been acked by all peers.
 	 * (Or later a quorum once we do raft/paxos).
 	 */
+	char	gxid[64];
+
+	generate_gxid(gxid, sizeof(gxid)-1);
+
 	Assert(consensus_started_txn != 0);
 	consensus_finishing_txn = true;
+	StartTransactionCommand();
+	FinishPreparedTransaction(gxid, true);
 	CommitTransactionCommand();
 	Assert(consensus_started_txn == 0);
 	Assert(!consensus_finishing_txn);
@@ -392,6 +469,37 @@ consensus_rollback_prepared(void)
 	MemoryContextReset(cur_txn_context);
 }
 
+static void
+consensus_received_prepare_response(uint32 origin, bool result)
+{
+	MNConsensusMessage *msg;
+
+	/* TODO: Implement voting consensus. */
+	if (true)
+	{
+		/* Commit locally */
+		consensus_commit_prepared();
+
+		/* Tell everybody else to commit as well. */
+		msg = consensus_make_message(MNCONSENSUS_MSG_KIND_COMMIT,
+									 current_global_id);
+		consensus_broadcast_message(msg);
+	}
+}
+
+static void
+consensus_abort(void)
+{
+	MNConsensusMessage	   *msg;
+
+	consensus_rollback_prepared();
+
+	msg = consensus_make_message(MNCONSENSUS_MSG_KIND_ROLLBACK,
+								 current_global_id);
+
+	consensus_broadcast_message(msg);
+}
+
 /*
  * Start bringing up the consensus system: init the proposal
  * broker, etc.
@@ -408,6 +516,8 @@ consensus_startup(uint32 local_node_id, const char *journal_schema,
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("consensus system already running")));
+
+	pg_atomic_init_u64(&localMsgNumberSequece, 1);
 
 	proposal_receive_callback = cbs->proposal_receive;
 	proposals_prepare_callback = cbs->proposals_prepare;
@@ -431,7 +541,8 @@ consensus_startup(uint32 local_node_id, const char *journal_schema,
 										 sizeof(ConsensusNode) * nconsensus_nodes);
 	memset(consensus_nodes, 0, sizeof(ConsensusNode) * nconsensus_nodes);
 
-	msgb_startup(MyNodeId, request_waitevents,
+	/* TODO: don't hardcode channel. */
+	msgb_startup("mn_consensus_impl", MyNodeId, request_waitevents,
 				 consensus_received_msgb_message, CONSENSUS_MSG_QUEUE_SIZE);
 
 	/*
@@ -534,7 +645,10 @@ consensus_begin_enqueue(void)
 
 	Assert(consensus_started_txn == 0);
 	StartTransactionCommand();
+	BeginTransactionBlock();
+	CommitTransactionCommand();
 	consensus_started_txn = MyNodeId;
+	current_global_id++;
 
 	return true;
 }
@@ -554,9 +668,7 @@ consensus_begin_enqueue(void)
 uint64
 consensus_enqueue_proposal(MNConsensusProposal *proposal)
 {
-	int				nodeidx;
-	StringInfoData	si;
-	MNConsensusProposalRequest *req;
+	MNConsensusMessage	   *msg;
 
 	Assert(IsTransactionState() && consensus_started_txn == MyNodeId);
 
@@ -565,53 +677,17 @@ consensus_enqueue_proposal(MNConsensusProposal *proposal)
 	 * by a peer and if so, reject this submit.
 	 */
 
-	/*
-	 * TODO: right now, all we do is commit locally then fire and forget to the
-	 * broker and trust that all nodes will receive it. No attempt to handle
-	 * failures is made.  No attempt to achieve consensus is made. Obviously
-	 * that's broken, it's just enough of a skeleton to let us start testing
-	 * things out.
-	 *
-	 * We have to do distributed 2PC on this batch of proposals, getting all
-	 * nodes' confirmation that they could all be applied before committing.
-	 * (Then later we'll upgrade to Raft or Paxos distributed majority
-	 * consensus).
-	 */
-
-	req = MemoryContextAlloc(cur_txn_context, sizeof(MNConsensusProposalRequest));
-	req->sender_nodeid = MyNodeId;
-	req->sender_local_msgnum = 0; /* TODO (or caller supplied?) */
-	req->sender_lsn = GetXLogWriteRecPtr();
-	req->sender_timestamp = GetCurrentTimestamp();
-	req->global_proposal_id = 0; /* TODO */
-	req->proposal = proposal;
-
-	/* payload and length set by caller */
-	initStringInfo(&si);
-	mn_serialize_consensus_proposal_req(req, &si);
+	msg = consensus_make_message(MNCONSENSUS_MSG_KIND_PROPOSAL,
+								 current_global_id);
+	msg->proposal = proposal;
 
 	/* A sending node receives its own proposal immediately. */
-	consensus_received_new_proposal(req);
+	consensus_received_new_proposal(msg);
 
-	for (nodeidx = 0; nodeidx < nconsensus_nodes; nodeidx++)
-	{
-		ConsensusNode * const node = &consensus_nodes[nodeidx];
-		if (node->node_id == 0)
-			continue;
+	/* Send to all other nodes. */
+	consensus_broadcast_message(msg);
 
-		/*
-		 * TODO: We could possibly have a smarter api here where message
-		 * data is shared across all recipients when a message id
-		 * dispatched to a list of recipients. But that'd be hard to manage
-		 * memory and failure for. THis wastes memory temporarily, but
-		 * it's simpler.
-		 */
-		msgb_queue_message(node->node_id, si.data, si.len);
-	}
-	resetStringInfo(&si);
-
-	/* TODO: return msg number */
-	return 1;
+	return current_global_id;
 }
 
 /*
@@ -626,22 +702,23 @@ consensus_enqueue_proposal(MNConsensusProposal *proposal)
 uint64
 consensus_finish_enqueue(void)
 {
+	MNConsensusMessage	   *msg;
+
 	Assert(IsTransactionState() && consensus_started_txn == MyNodeId);
 
 	/*
 	 * All local proposals have been passed through the local receive hook and
 	 * have been submitted to the broker for sending to peers. Prepare the
 	 * transaction locally.
-	 *
-	 * This should do the full 2PC dance and commit only once all peers have
-	 * acked.
-	 *
-	 * TODO: send out prepare to peers too
 	 */
-	consensus_prepare_transaction();
+	consensus_received_prepare_response(MyNodeId,
+										consensus_prepare_transaction());
 
-	/* TODO: return last msg number */
-	return 1;
+	msg = consensus_make_message(MNCONSENSUS_MSG_KIND_PREPARE,
+								 current_global_id);
+	consensus_broadcast_message(msg);
+
+	return current_global_id;
 }
 
 /*
@@ -653,65 +730,6 @@ consensus_proposals_status(uint64 handle)
 {
 	elog(WARNING, "consensus message status checks not implemented, assuming success");
 	return MNCONSENSUS_ACCEPTED;
-}
-
-/*
- * Tell the consensus system that proposals up to id 'n' are applied and fully
- * acted on.
- *
- * The consensus sytem is also free to truncate them off the bottom of the
- * journal.
- *
- * It is an ERROR to try to confirm past the max applyable proposal per
- * consensus_proposals_max_id.
- */
-void
-consensus_proposals_applied(uint64 applied_upto)
-{
-    /* TODO: Needs shmem to coordinate apply progress */
-	elog(WARNING, "not implemented");
-}
-
-/*
- * Find out how far ahead it's safe to request proposals with
- * consensus_get_proposal and apply them. Also reports the consensus
- * manager's view of the last proposal applied by the system.
- *
- * During startup, call this to find out where to start applying proposals. Then
- * fetch each proposal with consensus_get_proposal, act on it and call
- * consensus_proposals_applied to advance the confirmation counter. When
- * max_applyable is reached, call consensus_proposals_max_id again.
- */
-void
-consensus_proposals_max_id(uint64 *max_applied, uint64 *max_applyable)
-{
-    /* TODO: Needs shmem to coordinate apply progress */
-	elog(WARNING, "not implemented");
-}
-
-/*
- * Given a globally proposal id (not a proposal handle), look up the proposal
- * and return it.
- *
- * If the proposal-id is 0, return the next proposal after what was
- * reported as applied to consensus_proposals_applied(...).
- *
- * It is an ERROR to request a proposal greater than the max-applyable
- * proposal, even if later proposals may be committed. (This won't happen
- * yet, but might once Raft/Paxos is added).
- *
- * It is an ERROR to request an uncommitted proposal, including PREPAREd
- * but not committed proposals.
- *
- * It is an ERROR to request an already-applied proposal.
- */
-extern MNConsensusProposalRequest*
-consensus_get_proposal_request(uint64 proposal_id)
-{
-    /* TODO: Needs shmem to coordinate apply progress */
-    /* TODO: read proposal directly from table */
-	elog(WARNING, "not implemented");
-	return NULL;
 }
 
 /*
@@ -781,4 +799,77 @@ consensus_xact_callback(XactEvent event, void *arg)
 		default:
 			break;
 	}
+}
+
+/*
+ * Create message skelton for specific message kind.
+ */
+static MNConsensusMessage *
+consensus_make_message(MNConsensusMessageKind kind, uint64 global_id)
+{
+	MNConsensusMessage *msg = palloc0(sizeof(MNConsensusMessage));
+	pg_atomic_uint64   *mew_msgnum = &localMsgNumberSequece;
+
+	msg->sender_nodeid = MyNodeId;
+	msg->sender_local_msgnum = pg_atomic_fetch_add_u64(mew_msgnum, 1);
+	msg->sender_lsn = GetXLogWriteRecPtr();
+	msg->sender_timestamp = GetCurrentTimestamp();
+	msg->global_id = global_id;
+	msg->msg_kind = kind;
+
+	return msg;
+}
+
+/*
+ * Send message to all known nodes.
+ */
+static void
+consensus_broadcast_message(MNConsensusMessage *msg)
+{
+	int				nodeidx;
+	StringInfoData	si;
+	int cnt = 0;
+	for (nodeidx = 0; nodeidx < nconsensus_nodes; nodeidx++)
+	{
+		ConsensusNode * const node = &consensus_nodes[nodeidx];
+		if (node->node_id != 0)
+			cnt ++;
+	}
+
+	/* payload and length set by caller */
+	initStringInfo(&si);
+	mn_serialize_consensus_proposal_msg(msg, &si);
+
+	for (nodeidx = 0; nodeidx < nconsensus_nodes; nodeidx++)
+	{
+		ConsensusNode * const node = &consensus_nodes[nodeidx];
+		if (node->node_id == 0)
+			continue;
+
+		msgb_queue_message(node->node_id, si.data, si.len);
+	}
+
+	pfree(si.data);
+	resetStringInfo(&si);
+}
+
+/*
+ * Send message to all known nodes.
+ */
+static void
+consensus_send_message(MNConsensusMessage *msg, uint32 node_id)
+{
+	ConsensusNode  *node;
+	StringInfoData	si;
+
+	node = consensus_find_node_by_id(node_id);
+
+	/* payload and length set by caller */
+	initStringInfo(&si);
+	mn_serialize_consensus_proposal_msg(msg, &si);
+
+	msgb_queue_message(node->node_id, si.data, si.len);
+
+	pfree(si.data);
+	resetStringInfo(&si);
 }

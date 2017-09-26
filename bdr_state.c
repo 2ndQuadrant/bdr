@@ -162,7 +162,7 @@ bdr_node_state_name(BdrNodeState state)
 			return CppAsString2(BDR_NODE_ACTIVE_RANGE_END);
 	}
 	Assert(false);
-	
+
 	/* Not meant to happen, but we should handle it for downgrades etc */
 	initStringInfo(&si);
 	appendStringInfo(&si, "<unrecognised node state %d>", state);
@@ -184,7 +184,7 @@ bdr_node_state_name_abbrev(BdrNodeState state)
 	const char * state_name = bdr_node_state_name(state);
 	if (strncmp(state_name, state_name_prefix, strlen(state_name_prefix)) == 0)
 		state_name = &state_name[strlen(state_name_prefix)];
-	
+
 	return state_name;
 }
 
@@ -413,7 +413,7 @@ state_transition_check(BdrStateEntry *state, BdrNodeState new_state)
  */
 void
 state_transition_goal(BdrStateEntry *state, BdrNodeState new_state,
-	BdrNodeState new_goal, int64 consensus_no,
+	BdrNodeState new_goal, uint64 consensus_id,
 	uint32 peer_id, void *extradata)
 {
 	BdrStateEntry cur;
@@ -432,8 +432,8 @@ state_transition_goal(BdrStateEntry *state, BdrNodeState new_state,
 	cur.counter = cur.counter + 1;
 	cur.current = new_state;
 	cur.goal = new_goal;
-	cur.global_consensus_no = consensus_no;
 	cur.peer_id = peer_id;
+	cur.global_consensus_no = consensus_id;
 	cur.extra_data = extradata;
 
 	Assert(state->current != cur.current);
@@ -501,8 +501,8 @@ bdr_state_insert_initial(BdrNodeState initial)
 	state_initial.counter = 1;
 	state_initial.current = initial;
 	state_initial.goal = initial;
-	state_initial.global_consensus_no = 0L;
 	state_initial.peer_id = 0;
+	state_initial.global_consensus_no = 0;
 	state_initial.extra_data = NULL;
 	/* state->entered_time will be set by state_push */
 

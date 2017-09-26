@@ -89,6 +89,7 @@ static uint32		   nconns = 0;
 static MemoryContext msgbuf_context = NULL;
 
 static uint32	MyNodeId = 0;
+static char	   *MyChannel = NULL;
 
 /*
  * Are any connections pending and not yet registered in the wait-list
@@ -254,7 +255,7 @@ msgb_status_invariant(MsgbConnection *conn)
  * maintained by future add/remove destination operations.
  */
 void
-msgb_startup_send(uint32 local_node_id,
+msgb_startup_send(char *channel, uint32 local_node_id,
 				  mn_request_waitevents_fn request_waitevents_fn)
 {
 	int i;
@@ -265,8 +266,9 @@ msgb_startup_send(uint32 local_node_id,
 	if (msgbuf_context != NULL)
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg_internal("msgbroker already running")));
+				 errmsg_internal("only one msgbroker sender can be active per process")));
 
+	MyChannel = channel;
 	MyNodeId = local_node_id;
 	nconns = INITIAL_MAX_CONNS;
 
@@ -458,9 +460,10 @@ static void
 msgb_peer_connect(MsgbConnection *conn)
 {
 	int ret;
-	const int nParams = 3;
-	Oid paramTypes[3] = { OIDOID, OIDOID, INT8OID };
-	const char * paramValues[3];
+	int	curParam = 0;
+	const int nParams = 4;
+	Oid paramTypes[4] = { TEXTOID, OIDOID, OIDOID, INT8OID };
+	const char * paramValues[4];
 	char destination_id[30];
 	char origin_id[30];
 	char last_message_id[30];
@@ -468,18 +471,19 @@ msgb_peer_connect(MsgbConnection *conn)
 	Assert(conn->conn_status == MSGB_SEND_CONN_POLLING_DONE);
 	msgb_status_invariant(conn);
 
+	paramValues[curParam++] = MyChannel;
 	snprintf(origin_id, 30, "%u", MyNodeId);
-	paramValues[0] = origin_id;
+	paramValues[curParam++] = origin_id;
 	snprintf(destination_id, 30, "%u", conn->destination_id);
-	paramValues[1] = destination_id;
+	paramValues[curParam++] = destination_id;
 	/*
 	 * The msgid counter is the *next* message-id and we want to send the id of
 	 * the last message sent, or 0 if none sent by this broker instance yet.
 	 */
 	snprintf(last_message_id, 30, UINT64_FORMAT, conn->msgb_msgid_counter - 1);
-	paramValues[2] = last_message_id;
+	paramValues[curParam++] = last_message_id;
 
-	ret = PQsendQueryParams(conn->pgconn, "SELECT * FROM "MSGB_SCHEMA".msgb_connect($1, $2, $3)", nParams,
+	ret = PQsendQueryParams(conn->pgconn, "SELECT * FROM "MSGB_SCHEMA".msgb_connect($1, $2, $3, $4)", nParams,
 							paramTypes, paramValues, NULL, NULL, 0);
 
 	if (ret)
