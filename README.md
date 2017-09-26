@@ -152,7 +152,7 @@ does nicely.
 Linux omits shmem from cores by default, which is nice when `shared_buffers` is
 4GB but not so nice for debugging. Override with:
 
-    echo '39' > /proc/self/coredump_filter
+    echo '0x3f' > /proc/self/coredump_filter
 
 in the shell you'll be running your tests from. Get rid of those 
 
