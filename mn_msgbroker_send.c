@@ -440,7 +440,7 @@ msgb_peer_connect(MsgbConnection *conn)
 {
 	int ret;
 	const int nParams = 3;
-	Oid paramTypes[3] = { OIDOID, OIDOID, OIDOID };
+	Oid paramTypes[3] = { OIDOID, OIDOID, INT8OID };
 	const char * paramValues[3];
 	char destination_id[30];
 	char origin_id[30];
@@ -787,7 +787,7 @@ msgb_send_next(MsgbConnection *conn)
 {
 	MsgbMessageBuffer *buf;
 	const int nParams = 3;
-	Oid paramTypes[3] = { OIDOID, OIDOID, BYTEAOID };
+	Oid paramTypes[3] = { OIDOID, INT8OID, BYTEAOID };
 	const char * paramValues[3];
 	char destination_id[30];
 	char msgid_str[30];
