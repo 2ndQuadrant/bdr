@@ -19,6 +19,8 @@
 
 #include "access/xact.h"
 
+#include "utils/builtins.h"
+
 #include "pglogical_plugins.h"
 
 #include "mn_consensus.h"
@@ -397,10 +399,46 @@ msg_deserialize_proposal(MNConsensusProposalRequest *in)
 	return out;
 }
 
+struct bdr_msg_errcontext {
+	BdrMessageType	msgtype;
+	StringInfo		msgdata;
+};
+
+static void
+deserialize_msg_errcontext_callback(void *arg)
+{
+	struct bdr_msg_errcontext *ctx = arg;	
+	char * hexmsg = palloc(ctx->msgdata->len * 2 + 1);
+
+	hex_encode(ctx->msgdata->data, ctx->msgdata->len, hexmsg);
+	hexmsg[ctx->msgdata->len * 2 + 1] = '\0';
+
+	/*
+	 * This errcontext is only used when we're deserializing messages, so it's
+	 * OK for it to be pretty verbose.
+	 */
+	errcontext("while deserialising bdr %s consensus message of length %d at cursor %d with data %s",
+			   bdr_message_type_to_string(ctx->msgtype),
+			   ctx->msgdata->len, ctx->msgdata->cursor,
+			   hexmsg);
+
+	pfree(hexmsg);
+}
+
 void
 msg_serialize_join_request(StringInfo join_request,
 	BdrMsgJoinRequest *request)
 {
+	ErrorContextCallback myerrcontext;
+	struct bdr_msg_errcontext ctxinfo;
+
+	ctxinfo.msgtype = BDR_MSG_NODE_JOIN_REQUEST;
+	ctxinfo.msgdata = join_request;
+	myerrcontext.callback = deserialize_msg_errcontext_callback;
+	myerrcontext.arg = &ctxinfo;
+	myerrcontext.previous = error_context_stack;
+	error_context_stack = &myerrcontext;
+
 	pq_sendstring(join_request, request->nodegroup_name);
 	pq_sendint(join_request, request->nodegroup_id, 4);
 	pq_sendstring(join_request, request->joining_node_name);
@@ -412,6 +450,8 @@ msg_serialize_join_request(StringInfo join_request,
 	pq_sendstring(join_request, request->joining_node_dbname);
 	pq_sendstring(join_request, request->join_target_node_name);
 	pq_sendint(join_request, request->join_target_node_id, 4);
+
+	error_context_stack = myerrcontext.previous;
 }
 
 void

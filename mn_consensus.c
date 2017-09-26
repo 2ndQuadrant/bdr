@@ -390,6 +390,30 @@ mn_consensus_remove_node(uint32 nodeid)
 	consensus_remove_node(nodeid);
 }
 
+struct mn_msg_errcontext {
+	const char	   *msgtype;
+	StringInfo		msgdata;
+};
+
+static void
+deserialize_mn_msg_errcontext_callback(void *arg)
+{
+	struct mn_msg_errcontext *ctx = arg;	
+	char * hexmsg = palloc(ctx->msgdata->len * 2 + 1);
+
+	hex_encode(ctx->msgdata->data, ctx->msgdata->len, hexmsg);
+	hexmsg[ctx->msgdata->len * 2] = '\0';
+
+	/*
+	 * This errcontext is only used when we're deserializing messages, so it's
+	 * OK for it to be pretty verbose.
+	 */
+	errcontext("while deserialising %s message of length %d at cursor %d with data %s",
+			   ctx->msgtype, ctx->msgdata->len, ctx->msgdata->cursor, hexmsg);
+
+	pfree(hexmsg);
+}
+
 void
 mn_serialize_consensus_proposal(MNConsensusProposal *proposal,
 								StringInfo s)
@@ -403,15 +427,27 @@ mn_deserialize_consensus_proposal(const char *data, Size len)
 {
 	StringInfoData		s;
 	MNConsensusProposal *proposal = palloc0(sizeof(MNConsensusProposal));
+	ErrorContextCallback myerrcontext;
+	struct mn_msg_errcontext ctxinfo;
 
 	/*
 	 * We are not going to change the data but the StringInfo contains char,
 	 * not const char...
 	 */
 	wrapInStringInfo(&s, (char *) data, len);
+
+	ctxinfo.msgtype = "consensus proposal";
+	ctxinfo.msgdata = &s;
+	myerrcontext.callback = deserialize_mn_msg_errcontext_callback;
+	myerrcontext.arg = &ctxinfo;
+	myerrcontext.previous = error_context_stack;
+	error_context_stack = &myerrcontext;
+
 	proposal->payload_length = pq_getmsgint64(&s);
 	proposal->payload = palloc(proposal->payload_length);
 	pq_copymsgbytes(&s, proposal->payload, proposal->payload_length);
+
+	error_context_stack = myerrcontext.previous;
 
 	return proposal;
 }
@@ -420,7 +456,6 @@ void
 mn_serialize_consensus_proposal_req(MNConsensusProposalRequest *req,
 									StringInfo s)
 {
-
 	pq_sendint(s, req->sender_nodeid, 4);
 	pq_sendint64(s, req->sender_local_msgnum);
 	pq_sendint64(s, req->sender_lsn);
@@ -434,12 +469,22 @@ mn_deserialize_consensus_proposal_req(const char *data, Size len)
 {
 	StringInfoData		s;
 	MNConsensusProposalRequest *req = palloc0(sizeof(MNConsensusProposalRequest));
+	ErrorContextCallback myerrcontext;
+	struct mn_msg_errcontext ctxinfo;
 
 	/*
 	 * We are not going to change the data but the StringInfo contains char,
 	 * not const char...
 	 */
 	wrapInStringInfo(&s, (char *) data, len);
+
+	ctxinfo.msgtype = "consensus proposal request";
+	ctxinfo.msgdata = &s;
+	myerrcontext.callback = deserialize_mn_msg_errcontext_callback;
+	myerrcontext.arg = &ctxinfo;
+	myerrcontext.previous = error_context_stack;
+	error_context_stack = &myerrcontext;
+
 	memset(req, 0, sizeof(MNConsensusProposalRequest));
 	req->sender_nodeid = pq_getmsgint(&s, 4);
 	req->sender_local_msgnum = pq_getmsgint64(&s);
@@ -448,6 +493,8 @@ mn_deserialize_consensus_proposal_req(const char *data, Size len)
 	req->global_proposal_id = pq_getmsgint64(&s);
 	req->proposal = mn_deserialize_consensus_proposal(&s.data[s.cursor],
 													  len - s.cursor);
+
+	error_context_stack = myerrcontext.previous;
 
 	return req;
 }
