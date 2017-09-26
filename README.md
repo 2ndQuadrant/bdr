@@ -7,6 +7,14 @@ issues to produce a more comprehensive and maintaintable BDR.
 
 See the document "Building BDR on pglogical" in gdrive (search for it)
 
+# Installation
+
+First install pglogical 3.0.
+
+Then
+
+    PATH=/path/to/pg/bin:$PATH make -s install
+
 # Usage
 
 See sql/init.sql and sql/simple.sql
@@ -138,6 +146,30 @@ Something like
 does nicely.
 
 ## Debugging tips
+
+### Including shmem in cores
+
+Linux omits shmem from cores by default, which is nice when `shared_buffers` is
+4GB but not so nice for debugging. Override with:
+
+    echo '39' > /proc/self/coredump_filter
+
+in the shell you'll be running your tests from. Get rid of those 
+
+    Cannot access memory at address 0x7f3fb9ee2000
+
+errors.
+
+### Writing cores somewhere useful
+
+It's a pain finding cores in `tmp_check/` or whatever. Assumign your distro
+doesn't hijack cores to some auto bug reporter or something worse instead.
+Put them somewhere sensible, e.g.:
+
+    mdkir -p $HOME/core
+    sudo sysctl -w kernel.core_pattern="$HOME/core/core.%e.%p"
+
+See `man 5 core`.
 
 ### See what node you're attached to in gdb
 
