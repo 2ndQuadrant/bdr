@@ -66,7 +66,7 @@ msgb_connect(PG_FUNCTION_ARGS)
 	uint64			last_sent_msgid = PG_GETARG_INT64(2);
 	MQPool		   *mqpool;
 	StringInfoData	msg;
-	const uint32    message_id = 0;
+	const uint64    message_id = 0;
 
 	if (origin_node == 0 || destination_node == 0)
 		ereport(ERROR,
@@ -97,7 +97,7 @@ msgb_connect(PG_FUNCTION_ARGS)
 	/* Send the connection message to broker. */
 	initStringInfo(&msg);
 	appendBinaryStringInfo(&msg, (char *) &connected_peer_id, sizeof(uint32));
-	appendBinaryStringInfo(&msg, (char *) &message_id, sizeof(uint32));
+	appendBinaryStringInfo(&msg, (char *) &message_id, sizeof(uint64));
 	appendBinaryStringInfo(&msg, (char *) &last_sent_msgid, sizeof(uint64));
 	if (!shm_mq_pool_write(MyMQConn, &msg))
 		ereport(ERROR,
@@ -121,7 +121,7 @@ Datum
 msgb_deliver_message(PG_FUNCTION_ARGS)
 {
 	uint32			destination_id = PG_GETARG_UINT32(0);
-	uint32			message_id = PG_GETARG_UINT32(1);
+	uint64			message_id = PG_GETARG_INT64(1);
 	bytea		   *payload = PG_GETARG_BYTEA_PP(2);
 	StringInfoData	msg;
 
@@ -151,7 +151,7 @@ msgb_deliver_message(PG_FUNCTION_ARGS)
 	 */
 	initStringInfo(&msg);
 	appendBinaryStringInfo(&msg, (char *) &connected_peer_id, sizeof(uint32));
-	appendBinaryStringInfo(&msg, (char *) &message_id, sizeof(uint32));
+	appendBinaryStringInfo(&msg, (char *) &message_id, sizeof(uint64));
 	appendBinaryStringInfo(&msg, VARDATA_ANY(payload), VARSIZE_ANY(payload));
 
 	if (!shm_mq_pool_write(MyMQConn, &msg))
@@ -313,7 +313,7 @@ msgb_receiver_message_cb(MQPoolConn *mqconn, void *data, Size len)
 	bufsize -= sizeof(uint32);
 	memcpy(&msgid, buf, sizeof(uint64));
 	buf += sizeof(uint64);
-	bufsize -= sizeof(uint32);
+	bufsize -= sizeof(uint64);
 
 	peer = msgb_get_peer(sender_id);
 

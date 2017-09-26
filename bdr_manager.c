@@ -64,7 +64,8 @@ static void report_failure_reason(void);
 void
 bdr_manager_worker_start(void)
 {
-	BdrStateEntry cur_state;
+	BdrStateEntry	cur_state;
+	char		   *dbname;
 
 	/* We need at least one worker process and one replixation set per node. */
 	bdr_max_nodes = Min(max_worker_processes, max_replication_slots);
@@ -76,12 +77,13 @@ bdr_manager_worker_start(void)
 
 	StartTransactionCommand();
 	state_get_last(&cur_state, false, false);
+	dbname = get_database_name(MyDatabaseId);
 	CommitTransactionCommand();
 	if (cur_state.current == BDR_NODE_STATE_JOIN_FAILED)
 		report_failure_reason();
 
-	elog(bdr_debug_level, "configuring BDR manager on %s (%u) for up to %d nodes (unless other resource limits hit)",
-		 bdr_get_local_node_name(), bdr_get_local_nodeid(), bdr_max_nodes);
+	elog(bdr_debug_level, "configuring BDR manager on node %s (%u) in db %s for up to %d nodes (unless other resource limits hit)",
+		 bdr_get_local_node_name(), bdr_get_local_nodeid(), dbname, bdr_max_nodes);
 
 	bdr_is_active_in_manager = true;
 

@@ -149,15 +149,15 @@ RETURNS text STRICT STABLE LANGUAGE c AS 'MODULE_PATHNAME','bdr_gen_slot_name_sq
 /*
  * Interface for BDR message broker
  */
-CREATE FUNCTION bdr.msgb_connect(origin_node oid, destination_node oid, last_sent_msgid oid)
+CREATE FUNCTION bdr.msgb_connect(origin_node oid, destination_node oid, last_sent_msgid bigint)
 RETURNS void LANGUAGE c AS 'MODULE_PATHNAME','msgb_connect';
 
-REVOKE ALL ON FUNCTION bdr.msgb_connect(oid,oid,oid) FROM public;
+REVOKE ALL ON FUNCTION bdr.msgb_connect(oid,oid,bigint) FROM public;
 
-CREATE FUNCTION bdr.msgb_deliver_message(destination_node oid, message_id oid, payload bytea)
+CREATE FUNCTION bdr.msgb_deliver_message(destination_node oid, message_id bigint, payload bytea)
 RETURNS void LANGUAGE c AS 'MODULE_PATHNAME','msgb_deliver_message';
 
-REVOKE ALL ON FUNCTION bdr.msgb_deliver_message(oid,oid,bytea) FROM public;
+REVOKE ALL ON FUNCTION bdr.msgb_deliver_message(oid,bigint,bytea) FROM public;
 
 /*
  * Consensus messaging status lookup. The argument is actually a uint64.
