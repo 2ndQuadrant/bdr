@@ -95,7 +95,6 @@ bdr_consensus_refresh_nodes(void)
 	{
 		BdrSubscription *bsub = lfirst(lc);
 		PGLogicalSubscription *sub = get_subscription(bsub->pglogical_subscription_id);
-		elog(LOG, "XXX adding/refreshing %u", sub->origin->id);
 		mn_consensus_add_node(sub->origin->id, sub->origin_if->dsn, true);
 	}
 

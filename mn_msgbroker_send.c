@@ -1142,7 +1142,6 @@ msgb_queue_message(uint32 destination, const char * payload, Size payload_size)
 	/* Make sure we service the connection properly */
 	msgb_conn_set_wait_flags(conn, conn->wait_flags|WL_SOCKET_WRITEABLE);
 	Assert(ConnIsEventDriven(conn) || conns_polling);
-	elog(LOG, "XXX set wait flags to %d after enqueue", conn->wait_flags);
 
 	msgb_status_invariant(conn);
 
