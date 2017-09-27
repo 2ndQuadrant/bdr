@@ -171,7 +171,7 @@ sub bdr_wait_for_state {
 # TODO: should be functions in BDR its self for this
 sub bdr_wait_for_join {
 	my $self = shift;
-	$self->bdr_wait_for_state('BDR_NODE_STATE_ACTIVE');
+	$self->bdr_wait_for_state('ACTIVE');
 }
 
 sub bdr_replication_set_add_table {
