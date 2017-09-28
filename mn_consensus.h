@@ -135,8 +135,8 @@ extern void mn_consensus_shutdown(void);
 extern void mn_consensus_wakeup(struct WaitEvent *events, int nevents,
 								long *max_next_wait_ms);
 
-extern void mn_consensus_add_node(uint32 nodeid, const char *dsn,
-								  bool update_if_exists);
+extern void mn_consensus_add_or_update_node(uint32 nodeid, const char *dsn,
+											bool update_if_exists);
 extern void mn_consensus_remove_node(uint32 nodeid);
 
 /* Consensus client API */

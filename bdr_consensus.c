@@ -77,11 +77,18 @@ bdr_start_consensus(BdrNodeState cur_state)
 }
 
 void
-bdr_consensus_refresh_nodes(void)
+bdr_consensus_refresh_nodes(BdrNodeState cur_state)
 {
 	bool txn_started = false;
 	List	   *nodes;
 	ListCell   *lc;
+
+	/*
+	 * Node isn't ready for consensus manager yet. If it's during join, the
+	 * join process will start and refresh later on.
+	 */
+	if (cur_state < BDR_NODE_STATE_JOIN_CAN_START_CONSENSUS)
+		return;
 
 	if (!IsTransactionState())
 	{
@@ -94,6 +101,9 @@ bdr_consensus_refresh_nodes(void)
 	foreach (lc, nodes)
 	{
 		BdrNodeInfo *node = lfirst(lc);
+
+		if (node->pgl_node->id == bdr_get_local_nodeid())
+			continue;
 
 		mn_consensus_add_or_update_node(node->pgl_node->id, node->pgl_interface->dsn,
 			true);

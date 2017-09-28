@@ -9,7 +9,8 @@
 
 struct WaitEvent;
 
-extern void consensus_add_node(uint32 nodeid, const char *dsn, bool update_if_exists);
+extern void consensus_add_or_update_node(uint32 nodeid, const char *dsn,
+				  bool update_if_exists);
 extern void consensus_remove_node(uint32 nodeid);
 
 extern void consensus_startup(uint32 local_node_id, const char *journal_schema,

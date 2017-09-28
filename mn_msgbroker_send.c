@@ -1458,7 +1458,8 @@ static void
 msgb_request_waitevents(void)
 {
 	request_waitevents_pending = true;
-	request_waitevents(nconns, msgb_wait_event_set_fill);
+	if (request_waitevents != NULL)
+		request_waitevents(nconns, msgb_wait_event_set_fill);
 }
 
 int

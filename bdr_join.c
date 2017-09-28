@@ -511,7 +511,7 @@ bdr_join_handle_join_proposal(BdrMessage *msg)
 	 * TODO: move addition of the peer node from prepare
 	 * phase to accept phase callback
 	 */
-	mn_consensus_add_node(bnode.node_id, pnodeif.dsn, false);
+	mn_consensus_add_or_update_node(bnode.node_id, pnodeif.dsn, false);
 
 	/*
 	 * If this node is the join target, the joining peer will need a
@@ -762,8 +762,12 @@ bdr_join_handle_catchup_proposal(BdrMessage *msg)
 		 * for after we accept this, instead.
 		 */
 		BdrStateEntry cur_state;
+
 		state_get_expected(&cur_state, true, false,
 			BDR_NODE_STATE_ACTIVE);
+
+		bdr_consensus_refresh_nodes(cur_state.current);
+
 		state_transition(&cur_state, BDR_NODE_STATE_ACTIVE_SLOT_CREATE_PENDING,
 			msg->originator_id, NULL);
 	}
@@ -774,8 +778,12 @@ bdr_join_handle_catchup_proposal(BdrMessage *msg)
 		 * to transition to a new state to continue the join.
 		 */
 		BdrStateEntry cur_state;
+
 		state_get_expected(&cur_state, true, false,
 			BDR_NODE_STATE_SEND_CATCHUP_READY);
+
+		bdr_consensus_refresh_nodes(cur_state.current);
+
 		state_transition(&cur_state, BDR_NODE_STATE_STANDBY,
 			cur_state.peer_id, NULL);
 	}
@@ -879,8 +887,6 @@ bdr_join_handle_active_proposal(BdrMessage *msg)
 
 			bdr_create_subscription(local, remote, 0, false, BDR_SUBSCRIPTION_MODE_NORMAL);
 		}
-
-		bdr_consensus_refresh_nodes();
 
 		/* Enter fully joined steady state */
 		state_transition(&cur_state, BDR_NODE_STATE_ACTIVE,
@@ -1545,7 +1551,7 @@ bdr_join_continue_subscribe_join_target(BdrStateEntry *cur_state, BdrNodeInfo *l
 		 * talking to it.
 		 */
 		bdr_start_consensus(cur_state->current);
-		bdr_consensus_refresh_nodes();
+		bdr_consensus_refresh_nodes(cur_state->current);
 
 		state_transition(cur_state, BDR_NODE_STATE_JOIN_WAIT_SUBSCRIBE_COMPLETE,
 			cur_state->peer_id, NULL);
@@ -1753,11 +1759,8 @@ bdr_join_continue_send_active_announce(BdrStateEntry *cur_state, BdrNodeInfo *lo
 	Assert(IsTransactionState());
 	CommitTransactionCommand();
 
-	/*
-	 * This consensus message will tell our peers we're going
-	 * active. When our own handler for it is invoked, it'll also
-	 * transition us to BDR_NODE_STATE_ACTIVE.
-	 */
+	bdr_consensus_refresh_nodes(cur_state->current);
+
 	handle = bdr_consensus_enqueue_proposal(BDR_MSG_NODE_ACTIVE, NULL);
 	if (handle == 0)
 		elog(ERROR, "failed to submit BDR_MSG_NODE_ACTIVE consensus message");

@@ -128,7 +128,7 @@ extern uint64 bdr_consensus_enqueue_proposal(BdrMessageType message_type, void *
 extern void bdr_start_consensus(BdrNodeState cur_state);
 extern void bdr_shutdown_consensus(void);
 
-void bdr_consensus_refresh_nodes(void);
+void bdr_consensus_refresh_nodes(BdrNodeState cur_state);
 
 extern void bdr_consensus_wait_event_set_recreated(WaitEventSet *new_set);
 extern int bdr_consensus_get_wait_event_space_needed(void);

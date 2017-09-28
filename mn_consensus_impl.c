@@ -153,7 +153,7 @@ consensus_find_node_by_id(uint32 node_id, const char * find_reason)
 }
 
 void
-consensus_add_node(uint32 node_id, const char *dsn, bool update_if_exists)
+consensus_add_or_update_node(uint32 node_id, const char *dsn, bool update_if_exists)
 {
 	ConsensusNode *existing_node = NULL;
 	ConsensusNode *free_node = NULL;
@@ -165,6 +165,15 @@ consensus_add_node(uint32 node_id, const char *dsn, bool update_if_exists)
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("cannot add own node to consensus manager")));
 	}
+
+	if (consensus_state == CONSENSUS_OFFLINE)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("cannot add a node before consensus system started")));
+	}
+
+	Assert(nconsensus_nodes != 0);
 
 	for (i = 0; i < nconsensus_nodes; i++)
 	{

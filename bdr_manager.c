@@ -96,7 +96,7 @@ bdr_manager_worker_start(void)
 	my_manager = bdr_shmem_allocate_manager_segment(bdr_get_local_nodeid());
 
 	bdr_start_consensus(cur_state.current);
-	bdr_consensus_refresh_nodes();
+	bdr_consensus_refresh_nodes(cur_state.current);
 }
 
 static void

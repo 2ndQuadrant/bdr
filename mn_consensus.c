@@ -27,6 +27,7 @@
 #include "storage/shm_toc.h"
 #include "storage/spin.h"
 
+#include "utils/builtins.h"
 #include "utils/elog.h"
 #include "utils/memutils.h"
 
@@ -379,9 +380,9 @@ mn_consensus_wakeup(struct WaitEvent *events, int nevents,
 }
 
 void
-mn_consensus_add_node(uint32 nodeid, const char *dsn, bool update_if_exists)
+mn_consensus_add_or_update_node(uint32 nodeid, const char *dsn, bool update_if_exists)
 {
-	consensus_add_node(nodeid, dsn, update_if_exists);
+	consensus_add_or_update_node(nodeid, dsn, update_if_exists);
 }
 
 void
