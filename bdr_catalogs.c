@@ -508,10 +508,6 @@ bdr_node_create(BdrNode *node)
 	heap_close(rel, NoLock);
 
 	CommandCounterIncrement();
-
-	/*
-	 * TODO: this should call hooks to notify BDR/pglogical
-	 */
 }
 
 /*
