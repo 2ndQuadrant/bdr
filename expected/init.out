@@ -76,9 +76,23 @@ NOTICE:  creating new pglogical node
         1
 (1 row)
 
+-- TODO: https://redmine.2ndquadrant.com/issues/1057
+SELECT pg_sleep(0.5);
+ pg_sleep 
+----------
+ 
+(1 row)
+
 SELECT 1
 FROM bdr.join_node_group(:'node1_dsn', 'nosuch-nodegroup');
 ERROR:  remote node is member of nodegroup bdrgroup but we asked to join nodegroup nosuch-nodegroup
+-- TODO: https://redmine.2ndquadrant.com/issues/1057
+SELECT pg_sleep(0.5);
+ pg_sleep 
+----------
+ 
+(1 row)
+
 SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info((SELECT node_group_id FROM bdr.node_group));
  node_name | node_local_state | nodegroup_name | pgl_interface_name 
 -----------+------------------+----------------+--------------------

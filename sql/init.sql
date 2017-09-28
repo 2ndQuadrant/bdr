@@ -51,8 +51,14 @@ SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.
 SELECT 1
 FROM bdr.create_node(node_name := 'node2', local_dsn := :'node2_dsn' || ' user=super');
 
+-- TODO: https://redmine.2ndquadrant.com/issues/1057
+SELECT pg_sleep(0.5);
+
 SELECT 1
 FROM bdr.join_node_group(:'node1_dsn', 'nosuch-nodegroup');
+
+-- TODO: https://redmine.2ndquadrant.com/issues/1057
+SELECT pg_sleep(0.5);
 
 SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info((SELECT node_group_id FROM bdr.node_group));
 
