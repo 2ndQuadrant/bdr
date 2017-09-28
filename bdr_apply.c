@@ -57,7 +57,6 @@ bdr_receiver_writer_start(void)
 void
 bdr_start_replication_params(StringInfo s)
 {
-	BdrStateEntry cur;
 	BdrNodeInfo *local;
 
 	local = bdr_get_cached_local_node_info();
