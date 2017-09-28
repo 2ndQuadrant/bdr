@@ -80,7 +80,7 @@ void
 bdr_consensus_refresh_nodes(void)
 {
 	bool txn_started = false;
-	List	   *subs;
+	List	   *nodes;
 	ListCell   *lc;
 
 	if (!IsTransactionState())
@@ -89,13 +89,14 @@ bdr_consensus_refresh_nodes(void)
 		StartTransactionCommand();
 	}
 
-	subs = bdr_get_node_subscriptions(bdr_get_local_nodeid());
+	nodes = bdr_get_nodes_info(bdr_get_local_nodegroup_id(false));
 
-	foreach (lc, subs)
+	foreach (lc, nodes)
 	{
-		BdrSubscription *bsub = lfirst(lc);
-		PGLogicalSubscription *sub = get_subscription(bsub->pglogical_subscription_id);
-		mn_consensus_add_node(sub->origin->id, sub->origin_if->dsn, true);
+		BdrNodeInfo *node = lfirst(lc);
+
+		mn_consensus_add_or_update_node(node->pgl_node->id, node->pgl_interface->dsn,
+			true);
 	}
 
 	/*
@@ -125,6 +126,10 @@ bdr_consensus_enqueue_proposal(BdrMessageType message_type, void *message)
 
 	initStringInfo(&s);
 	msg_serialize_proposal(&s, message_type, message);
+
+	elog(bdr_debug_level, "%u enqueuing consensus proposal %s of size %d",
+		 bdr_get_local_nodeid(), bdr_message_type_to_string(message_type),
+		 s.len);
 
 	proposal.payload = s.data;
 	proposal.payload_length = s.len;

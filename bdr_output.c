@@ -286,16 +286,6 @@ bdr_origin_filter_hook(struct LogicalDecodingContext *ctx, RepOriginId origin_id
 			 */
 			break;
 
-		case BDR_SUBSCRIPTION_MODE_FASTFORWARD:
-			/*
-			 * Filter out everything.
-			 *
-			 * See RM#839
-			 *
-			 * We possibly don't need this since pgl has the skip_all option.
-			 */
-			return true;
-
 		case BDR_SUBSCRIPTION_MODE_NONE:
 			break;
 	}
@@ -313,8 +303,6 @@ sub_mode_name(BdrSubscriptionMode mode)
 	{
 		case BDR_SUBSCRIPTION_MODE_NORMAL:
 			return "normal";
-		case BDR_SUBSCRIPTION_MODE_FASTFORWARD:
-			return "fast forward";
 		case BDR_SUBSCRIPTION_MODE_NONE:
 			return "(none)";
 		case BDR_SUBSCRIPTION_MODE_CATCHUP:

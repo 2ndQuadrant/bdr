@@ -242,11 +242,12 @@ FROM bdr.state_journal_details;
              7 |  1060 | JOIN_GET_CATCHUP_LSN         | 1148549230 | node1     | 
              8 |  1070 | JOIN_WAIT_CATCHUP            | 1148549230 | node1     | minimum catchup lsn: X/XXXXXXXX
              9 |  1080 | JOIN_COPY_REPSET_MEMBERSHIPS | 1148549230 | node1     | 
-            10 |  1090 | JOIN_CREATE_SUBSCRIPTIONS    | 1148549230 | node1     | 
-            11 |  1100 | SEND_CATCHUP_READY           | 1148549230 | node1     | 
-            12 |  2000 | STANDBY                      | 1148549230 | node1     | 
-            13 |  2030 | CREATE_SLOTS                 | 1148549230 | node1     | 
-            14 |  2040 | SEND_ACTIVE_ANNOUNCE         | 1148549230 | node1     | 
-            15 |  5000 | ACTIVE                       |          0 |           | 
-(15 rows)
+            10 |  1100 | SEND_CATCHUP_READY           | 1148549230 | node1     | 
+            11 |  2000 | STANDBY                      | 1148549230 | node1     | 
+            12 |  2010 | REQUEST_GLOBAL_SEQ_ID        | 1148549230 | node1     | 
+            13 |  2020 | WAIT_GLOBAL_SEQ_ID           | 1148549230 | node1     | global consensus message handle: n
+            14 |  2030 | CREATE_SLOTS                 | 1148549230 | node1     | 
+            15 |  2040 | SEND_ACTIVE_ANNOUNCE         | 1148549230 | node1     | 
+            16 |  5000 | ACTIVE                       |          0 |           | 
+(16 rows)
 

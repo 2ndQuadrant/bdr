@@ -81,6 +81,16 @@ TODO: {
 $dbs[1]->bdr_join_node_group($nodegroup, $dbs[0]);
 $dbs[1]->bdr_wait_for_join;
 
+my $query = q[SELECT sub_name,origin_name,target_name,subscription_status,bdr_subscription_mode FROM bdr.subscription_summary ORDER BY 1,2,3];
+$dbs[0]->poll_query_until(q[SELECT count(*) = 1 FROM bdr.subscription_summary;]);
+is($dbs[0]->safe_psql($query),
+    q[mygroup_node1|node1|node0|replicating|n],
+    'expected subscriptions found on node0 (2-node)');
+$dbs[1]->poll_query_until(q[SELECT count(*) = 1 FROM bdr.subscription_summary;]);
+is($dbs[1]->safe_psql($query),
+    q[mygroup_node0|node0|node1|replicating|n],
+    'expected subscriptions found on node1 (2-node)');
+
 TODO: {
     local $TODO = "RM#863 replication set membership changes should be replicated to peers";
     ok($dbs[1]->replication_set_has_table($ngname, 'seed_table'),
@@ -161,28 +171,34 @@ is($dbs[2]->safe_psql(q[SELECT id, blah FROM tbl_included ORDER BY id]),
 
 # All expected subscriptions exist
 my $query = q[SELECT sub_name,origin_name,target_name,subscription_status,bdr_subscription_mode FROM bdr.subscription_summary ORDER BY 1,2,3];
+$dbs[0]->poll_query_until(q[SELECT count(*) = 2 FROM bdr.subscription_summary;]);
 is($dbs[0]->safe_psql($query),
     q[mygroup_node1|node1|node0|replicating|n
 mygroup_node2|node2|node0|replicating|n],
-    'expected subscriptions found on node0');
+    'expected subscriptions found on node0 (3-node)');
+$dbs[1]->poll_query_until(q[SELECT count(*) = 2 FROM bdr.subscription_summary;]);
 is($dbs[1]->safe_psql($query),
     q[mygroup_node0|node0|node1|replicating|n
 mygroup_node2|node2|node1|replicating|n],
-    'expected subscriptions found on node1');
+    'expected subscriptions found on node1 (3-node)');
+$dbs[2]->poll_query_until(q[SELECT count(*) = 2 FROM bdr.subscription_summary;]);
 is($dbs[2]->safe_psql($query),
     q[mygroup_node0|node0|node2|replicating|n
 mygroup_node1|node1|node2|replicating|n],
-    'expected subscriptions found on node2');
+    'expected subscriptions found on node2 (3-node)');
 
 # Do a trivial no-conflict MM insert
-$dbs[0]->safe_psql(qq[INSERT INTO tbl_included (id, blah) VALUES (10, 'from_node0');]);
-$dbs[1]->safe_psql(qq[INSERT INTO tbl_included (id, blah) VALUES (11, 'from_node1');]);
-$dbs[2]->safe_psql(qq[INSERT INTO tbl_included (id, blah) VALUES (12, 'from_node2');]);
+foreach my $i (0..2)
+{
+    my $xid = $dbs[$i]->safe_psql(qq[INSERT INTO tbl_included (id, blah) VALUES ($i+10, 'from_node$i') RETURNING txid_current();]);
+    diag "insert into node $i has xid $xid";
+}
 
 # and check it.
-$dbs[0]->wait_for_catchup_all;
-$dbs[1]->wait_for_catchup_all;
-$dbs[2]->wait_for_catchup_all;
+foreach my $i (0..2)
+{
+    $dbs[$i]->wait_for_catchup_all;
+}
 
 my $expected = q[0|from_node0
 1|from_node1
@@ -190,7 +206,7 @@ my $expected = q[0|from_node0
 11|from_node1
 12|from_node2];
 
-foreach my $i (0, 1, 2) {
+foreach my $i (0..2) {
     is($dbs[$i]->safe_psql(q[SELECT id, blah FROM tbl_included ORDER BY id]), $expected, "data replicated 3-way, node$i");
 }
 

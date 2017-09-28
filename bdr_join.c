@@ -822,6 +822,7 @@ bdr_join_handle_active_proposal(BdrMessage *msg)
 		 * We're the joining node, so enable our subs to all peers.
 		 */
 		List	   *subs;
+		List	   *nodes;
 		ListCell   *lc;
 
 		state_get_expected(&cur_state, true, true,
@@ -832,6 +833,8 @@ bdr_join_handle_active_proposal(BdrMessage *msg)
 		 * replay.
 		 */
 		subs = bdr_get_node_subscriptions(local->pgl_node->id);
+		/* There should only be one subscription */
+		Assert(list_length(subs) == 1);
 		foreach (lc, subs)
 		{
 			BdrSubscription *sub = lfirst(lc);
@@ -840,18 +843,10 @@ bdr_join_handle_active_proposal(BdrMessage *msg)
 			Assert(sub->target_node_id == local->pgl_node->id);
 			/* Can't have a subscription to ourselves */
 			Assert(sub->origin_node_id != local->pgl_node->id);
-			if (sub->origin_node_id == cur_state.peer_id)
-			{
-				/* It's our join target subscription */
-				Assert(sub->mode == BDR_SUBSCRIPTION_MODE_CATCHUP);
-				sub->mode = BDR_SUBSCRIPTION_MODE_NORMAL;
-			}
-			else
-			{
-				/* It's a subscription to another peer */
-				Assert(sub->mode == BDR_SUBSCRIPTION_MODE_FASTFORWARD);
-				sub->mode = BDR_SUBSCRIPTION_MODE_NORMAL;
-			}
+			/* Only subscription allowed before we go active is the catchup sub */
+			Assert(sub->origin_node_id == cur_state.peer_id);
+			Assert(sub->mode == BDR_SUBSCRIPTION_MODE_CATCHUP);
+			sub->mode = BDR_SUBSCRIPTION_MODE_NORMAL;
 			bdr_alter_bdr_subscription(sub);
 			psub->enabled = true;
 			/*
@@ -859,6 +854,33 @@ bdr_join_handle_active_proposal(BdrMessage *msg)
 			 */
 			alter_subscription(psub);
 		}
+
+		/*
+		 * Create subscriptions to all our other peers.
+		 *
+		 * TODO: ensure the catchup worker is actually dead before committing
+		 * these. We don't want to have one worker in catchup while the others are
+		 * doing normal replay.
+		 */
+
+		nodes = bdr_get_nodes_info(local->bdr_node_group->id);
+
+		foreach (lc, nodes)
+		{
+			BdrNodeInfo *remote = lfirst(lc);
+
+			/* Don't try to create the join target sub, it already exists */
+			if (remote->bdr_node->node_id == cur_state.peer_id)
+				continue;
+
+			/* ... and of course don't subscribe to ourselves */
+			if (remote->bdr_node->node_id == local->bdr_node->node_id)
+				continue;
+
+			bdr_create_subscription(local, remote, 0, false, BDR_SUBSCRIPTION_MODE_NORMAL);
+		}
+
+		bdr_consensus_refresh_nodes();
 
 		/* Enter fully joined steady state */
 		state_transition(&cur_state, BDR_NODE_STATE_ACTIVE,
@@ -1612,35 +1634,6 @@ bdr_join_continue_copy_repset_memberships(BdrStateEntry *cur_state, BdrNodeInfo 
 
 	elog(WARNING, "replication set memberships copy not implemented");
 
-	state_transition(cur_state, BDR_NODE_STATE_JOIN_CREATE_SUBSCRIPTIONS,
-		cur_state->peer_id, NULL);
-}
-
-static void
-bdr_join_continue_create_subscriptions(BdrStateEntry *cur_state, BdrNodeInfo *local)
-{
-	List	   *nodes;
-	ListCell   *lc;
-
-	Assert(cur_state->current == BDR_NODE_STATE_JOIN_CREATE_SUBSCRIPTIONS);
-
-	nodes = bdr_get_nodes_info(local->bdr_node_group->id);
-
-	foreach (lc, nodes)
-	{
-		BdrNodeInfo *remote = lfirst(lc);
-
-		if (remote->bdr_node->node_id == join.target->bdr_node->node_id)
-			continue;
-
-		if (remote->bdr_node->node_id == local->bdr_node->node_id)
-			continue;
-
-		bdr_create_subscription(local, remote, 0, false, BDR_SUBSCRIPTION_MODE_FASTFORWARD);
-	}
-
-	bdr_consensus_refresh_nodes();
-
 	state_transition(cur_state, BDR_NODE_STATE_SEND_CATCHUP_READY,
 		cur_state->peer_id, NULL);
 }
@@ -1679,7 +1672,7 @@ bdr_join_continue_standby(BdrStateEntry *cur_state, BdrNodeInfo *local)
 
 	elog(LOG, "skipping standby and going straight to active");
 
-	state_transition(cur_state, BDR_NODE_STATE_CREATE_SLOTS,
+	state_transition(cur_state, BDR_NODE_STATE_REQUEST_GLOBAL_SEQ_ID,
 		cur_state->peer_id, NULL);
 }
 
@@ -1941,10 +1934,6 @@ bdr_join_continue(BdrNodeState cur_state,
 
 			case BDR_NODE_STATE_JOIN_COPY_REPSET_MEMBERSHIPS:
 				bdr_join_continue_copy_repset_memberships(&locked_state, local);
-				break;
-
-			case BDR_NODE_STATE_JOIN_CREATE_SUBSCRIPTIONS:
-				bdr_join_continue_create_subscriptions(&locked_state, local);
 				break;
 
 			case BDR_NODE_STATE_SEND_CATCHUP_READY:

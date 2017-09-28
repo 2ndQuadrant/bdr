@@ -88,13 +88,6 @@ typedef enum BdrNodeState
 	BDR_NODE_STATE_JOIN_COPY_REPSET_MEMBERSHIPS = 1080,
 
 	/*
-	 * Create subscriptions to remaining peers. We do this
-	 * in catchup phase because they'll be set to fast-forward
-	 * only mode.
-	 */
-	BDR_NODE_STATE_JOIN_CREATE_SUBSCRIPTIONS = 1090,
-
-	/*
 	 * Tell all our peers that we've finished minimum catchup
 	 * and can be promoted.
 	 */
