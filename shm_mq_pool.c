@@ -376,13 +376,9 @@ shm_mq_pooler_work(void)
 				/* Cleanup the connection info and set it unused. */
 				if (mqpool->disconnect_cb)
 					mqpool->disconnect_cb(mqconn);
-				shm_mq_detach(dsa_get_address(MQPoolerDsaArea, mqconn->clientq));
-				shm_mq_detach(dsa_get_address(MQPoolerDsaArea, mqconn->serverq));
-				if (mqconn->server_recvqh)
-					pfree(mqconn->server_recvqh);
+				shm_mq_detach(mqconn->server_recvqh);
 				mqconn->server_recvqh = NULL;
-				if (mqconn->server_sendqh)
-					pfree(mqconn->server_sendqh);
+				shm_mq_detach(mqconn->server_sendqh);
 				mqconn->server_sendqh = NULL;
 				dsa_free(MQPoolerDsaArea, mqconn->clientq);
 				dsa_free(MQPoolerDsaArea, mqconn->serverq);
@@ -566,15 +562,11 @@ shm_mq_pool_disconnect(MQPoolConn *mqconn)
 	seg = dsm_find_mapping(dsa_get_handle(MQPoolerDsaArea));
 	cancel_on_dsm_detach(seg, shm_mq_pool_on_detach, PointerGetDatum(mqconn));
 
-	shm_mq_detach(dsa_get_address(MQPoolerDsaArea, mqconn->clientq));
-	shm_mq_detach(dsa_get_address(MQPoolerDsaArea, mqconn->serverq));
-	mqconn->client = NULL;
-	if (mqconn->client_recvqh)
-		pfree(mqconn->client_recvqh);
+	shm_mq_detach(mqconn->client_recvqh);
 	mqconn->client_recvqh = NULL;
-	if (mqconn->client_sendqh)
-		pfree(mqconn->client_sendqh);
+	shm_mq_detach(mqconn->client_sendqh);
 	mqconn->client_sendqh = NULL;
+	mqconn->client = NULL;
 }
 
 /*
