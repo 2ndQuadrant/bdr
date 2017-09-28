@@ -170,7 +170,7 @@ is($dbs[2]->safe_psql(q[SELECT id, blah FROM tbl_included ORDER BY id]),
    'data copied on join, node2');
 
 # All expected subscriptions exist
-my $query = q[SELECT sub_name,origin_name,target_name,subscription_status,bdr_subscription_mode FROM bdr.subscription_summary ORDER BY 1,2,3];
+$query = q[SELECT sub_name,origin_name,target_name,subscription_status,bdr_subscription_mode FROM bdr.subscription_summary ORDER BY 1,2,3];
 $dbs[0]->poll_query_until(q[SELECT count(*) = 2 FROM bdr.subscription_summary;]);
 is($dbs[0]->safe_psql($query),
     q[mygroup_node1|node1|node0|replicating|n
