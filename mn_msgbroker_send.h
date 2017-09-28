@@ -40,5 +40,6 @@ extern void msgb_wakeup_send(WaitEvent *occurred_events, int nevents, long *max_
 
 extern void msgb_add_send_peer(uint32 destination_id, const char *dsn);
 extern void msgb_remove_send_peer(uint32 destination_id);
+extern void msgb_update_send_peer(uint32 peer_id, const char *dsn);
 
 #endif

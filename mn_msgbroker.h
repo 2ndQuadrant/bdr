@@ -37,6 +37,7 @@ extern void msgb_shutdown(void);
 
 extern void msgb_add_peer(uint32 peer_id, const char *dsn);
 extern void msgb_remove_peer(uint32 peer_id);
+extern void msgb_update_peer(uint32 peer_id, const char *dsn);
 
 /* TODO */
 #define MSGB_SCHEMA "bdr"

@@ -87,6 +87,12 @@ msgb_remove_peer(uint32 peer_id)
 	elog(DEBUG1, "BDR msgbroker: peer %u removed", peer_id);
 }
 
+void
+msgb_update_peer(uint32 peer_id, const char *dsn)
+{
+	msgb_update_send_peer(peer_id, dsn);
+}
+
 /*
  * Disconnect from all peers, discard pending messages, and shut
  * down. Has no effect if not started.

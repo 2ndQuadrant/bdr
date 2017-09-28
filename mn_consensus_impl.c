@@ -181,8 +181,7 @@ consensus_add_node(uint32 node_id, const char *dsn, bool update_if_exists)
 	{
 		if (update_if_exists)
 		{
-			msgb_remove_peer(node_id);
-			msgb_add_peer(node_id, dsn);
+			msgb_update_peer(node_id, dsn);
 			return;
 		}
 		else

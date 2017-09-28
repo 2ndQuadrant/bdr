@@ -20,6 +20,11 @@
 #include "utils/elog.h"
 #include "utils/memutils.h"
 
+/*
+ * Only used for bdr_debug_level; mn should try to be independent of BDR.
+ */
+#include "bdr_worker.h"
+
 #include "mn_msgbroker_send.h"
 #include "mn_msgbroker.h"
 
@@ -29,13 +34,14 @@
  */
 typedef enum MsgbConnStatus
 {
-	MSGB_SEND_CONN_UNUSED,
-	MSGB_SEND_CONN_PENDING_START,
-	MSGB_SEND_CONN_POLLING,
-	MSGB_SEND_CONN_POLLING_DONE,
+	MSGB_SEND_CONN_UNUSED,					/* nothing here */
+	MSGB_SEND_CONN_REGISTERED,				/* peer registered but we don't have anything to send yet */
+	MSGB_SEND_CONN_PENDING_START,			/* connection ready to start (or restart) */
+	MSGB_SEND_CONN_POLLING,					/* connection is in async startup using polling */
+	MSGB_SEND_CONN_POLLING_DONE,			/* libpq connection is established, no shmem conn to peer yet */
 	/* Conn becomes event-driven now */
-	MSGB_SEND_CONN_CONNECTING_REMOTE_SHMEM,
-	MSGB_SEND_CONN_READY
+	MSGB_SEND_CONN_CONNECTING_REMOTE_SHMEM,	/* making msgb_connect call to peer */
+	MSGB_SEND_CONN_READY					/* libpq connected, shm_mq connected, all is well */
 } MsgbConnStatus;
 
 typedef struct MsgbMessageBuffer
@@ -121,6 +127,19 @@ msgb_status_invariant(MsgbConnection *conn)
 			Assert(conn->wait_set_index == -1);
 			Assert(conn->wait_flags == 0);
 			Assert(conn->queue_context == NULL);
+			Assert(conn->msgb_msgid_counter == 1);
+			Assert(conn->send_queue == NIL);
+			break;
+		case MSGB_SEND_CONN_REGISTERED:
+			/*
+			 * This connection is offline, un-queued and empty so far,
+			 * but has a peer and dsn set so we can start it when we
+			 * get a message submitted for it.
+			 */
+			Assert(conn->destination_id != 0);
+			Assert(conn->dsn != NULL);
+			Assert(conn->pgconn == NULL);
+			Assert(conn->wait_set_index == -1);
 			Assert(conn->msgb_msgid_counter == 1);
 			Assert(conn->send_queue == NIL);
 			break;
@@ -398,7 +417,7 @@ msgb_continue_async_connect(MsgbConnection *conn)
 	{
 		case PGRES_POLLING_OK:
 			conn->conn_status = MSGB_SEND_CONN_POLLING_DONE;
-			elog(DEBUG1, "%u connected to peer %u, backend pid is %d",
+			elog(bdr_debug_level, "%u connected to peer %u, backend pid is %d",
 				 MyNodeId, conn->destination_id,
 				 PQbackendPID(conn->pgconn));
 			msgb_finish_connect(conn);
@@ -687,7 +706,7 @@ msgb_process_result(MsgbConnection *conn)
 			Assert(conns_polling || conn->wait_set_index != -1);
 			/* Successful connection, reset backoff counter */
 			conn->num_retries = 0;
-			elog(DEBUG2, "connection to %u is now ready",
+			elog(bdr_debug_level, "outbound msgb connection to %u is now ready",
 				 conn->destination_id);
 		}
 		else
@@ -698,7 +717,7 @@ msgb_process_result(MsgbConnection *conn)
 			buf = linitial(conn->send_queue);
 			Assert(buf->send_status = MSGB_MSGSTATUS_SENDING);
 			conn->send_queue = list_delete_first(conn->send_queue);
-			elog(DEBUG2, "%u delivered msgbroker message #%u for %u (%d pending)",
+			elog(bdr_debug_level, "%u delivered msgbroker message #%u for %u (%d pending)",
 				MyNodeId, buf->msgid, conn->destination_id,
 				list_length(conn->send_queue));
 			pfree(buf);
@@ -1006,7 +1025,7 @@ msgb_service_connections_polling(void)
 				{
 					case CONNECTION_OK:
 						conn->conn_status = MSGB_SEND_CONN_POLLING_DONE;
-						elog(DEBUG1, "finished connect %d for %u", i, conn->destination_id);
+						elog(bdr_debug_level, "finished connect %d for %u", i, conn->destination_id);
 						msgb_finish_connect(conn);
 						break;
 
@@ -1029,7 +1048,7 @@ msgb_service_connections_polling(void)
 						 * All other states are async connect progress states
 						 * where we must continue to PQconnectPoll(...)
 						 */
-						elog(DEBUG1, "continuing connect %d for %u state %d",
+						elog(bdr_debug_level, "continuing connect %d for %u state %d",
 							 i, conn->destination_id, PQstatus(conn->pgconn));
 						msgb_continue_async_connect(conn);
 						/*
@@ -1132,12 +1151,20 @@ msgb_queue_message(uint32 destination, const char * payload, Size payload_size)
 	msg->send_status = MSGB_MSGSTATUS_QUEUED;
 	memcpy(&msg->payload[0], payload, payload_size);
 
+	elog(bdr_debug_level, "%u enqueued msgbroker message #%u for %u (%d ahead in queue)",
+		MyNodeId, msg->msgid, destination, list_length(conn->send_queue));
+
 	conn->send_queue = lappend(conn->send_queue, msg);
 
 	(void) MemoryContextSwitchTo(old_mctx);
 
-	elog(DEBUG2, "%u enqueued msgbroker message #%u for %u",
-		MyNodeId, msg->msgid, destination);
+	/* If we haven't used this connection yet, wake it up */
+	if (conn->conn_status == MSGB_SEND_CONN_REGISTERED)
+	{
+		conn->conn_status = MSGB_SEND_CONN_PENDING_START;
+		conns_polling = true;
+		SetLatch(&MyProc->procLatch);
+	}
 
 	/* Make sure we service the connection properly */
 	msgb_conn_set_wait_flags(conn, conn->wait_flags|WL_SOCKET_WRITEABLE);
@@ -1199,6 +1226,9 @@ msgb_remove_destination_by_index(int index, bool request_waitevents)
 
 	msgb_status_invariant(conn);
 
+	elog(bdr_debug_level, "removing message destination %u",
+		 conn->destination_id);
+
 	conn->destination_id = 0;
 
 	if (conn->pgconn != NULL)
@@ -1238,7 +1268,7 @@ msgb_remove_destination_by_index(int index, bool request_waitevents)
 
 	if (conn->send_queue != NIL)
 	{
-		ereport(DEBUG2,
+		ereport(bdr_debug_level,
 				(errmsg_internal("peer removed with %d pending messages",
 				 list_length(conn->send_queue))));
 
@@ -1326,7 +1356,14 @@ msgb_add_send_peer(uint32 destination_id, const char *dsn)
 
 	msgb_status_invariant(conn);
 
-	conn->conn_status = MSGB_SEND_CONN_PENDING_START;
+	/*
+	 * We register connections immediately but we won't actually start them
+	 * until we get asked to send a message on them. This lets us gracefully
+	 * handle cases where the peer may still be starting, may not know about us
+	 * yet, etc. It'll be started for real when we get the first messge
+	 * enqueued on it.
+	 */
+	conn->conn_status = MSGB_SEND_CONN_REGISTERED;
 	conn->pgconn = NULL;
 	conn->destination_id = destination_id;
 	conn->dsn = MemoryContextStrdup(msgbuf_context, dsn);
@@ -1338,12 +1375,22 @@ msgb_add_send_peer(uint32 destination_id, const char *dsn)
 										   "msgbroker send queue",
 										   ALLOCSET_DEFAULT_SIZES);
 
-	conns_polling = true;
-
-	/* Skip any pending sleep, so we start work on connecting immediately */
-	SetLatch(&MyProc->procLatch);
-
 	msgb_status_invariant(conn);
+}
+
+void
+msgb_update_send_peer(uint32 peer_id, const char *dsn)
+{
+	int idx = msgb_idx_for_destination(peer_id, "update");
+	if (idx >= 0)
+	{
+		MsgbConnection *conn = &conns[idx];
+		if (strcmp(dsn, conn->dsn) != 0)
+		{
+			conn->dsn = MemoryContextStrdup(conn->queue_context, dsn);
+			msgb_clear_bad_connection(conn);
+		}
+	}
 }
 
 static int
