@@ -101,6 +101,8 @@ state_has_extradata(BdrNodeState new_state)
 const char *
 bdr_node_state_name(BdrNodeState state)
 {
+	StringInfoData si;
+
 	switch (state)
 	{
 		case BDR_NODE_STATE_CREATED:
@@ -151,7 +153,30 @@ bdr_node_state_name(BdrNodeState state)
 			return CppAsString2(BDR_NODE_ACTIVE_RANGE_END);
 	}
 	Assert(false);
-	elog(ERROR, "unhandled node state %u", state);
+	
+	/* Not meant to happen, but we should handle it for downgrades etc */
+	initStringInfo(&si);
+	appendStringInfo(&si, "<unrecognised node state %d>", state);
+	return si.data;
+}
+
+/*
+ * Return an abbreviated state name for user display etc. Much less useful
+ * for grep'ing logs, but much nicer to see in views etc.
+ *
+ * Returns a pointer into string constant data unless the state is
+ * unrecognised, in which case it's a palloc'd string in the current memory
+ * context. That shouldn't happen anyway.
+ */
+const char *
+bdr_node_state_name_abbrev(BdrNodeState state)
+{
+	static const char  *state_name_prefix = "BDR_NODE_STATE_";
+	const char * state_name = bdr_node_state_name(state);
+	if (strncmp(state_name, state_name_prefix, strlen(state_name_prefix)) == 0)
+		state_name = &state_name[strlen(state_name_prefix)];
+	
+	return state_name;
 }
 
 /*

@@ -40,6 +40,7 @@
 #include "bdr_join.h"
 #include "bdr_shmem.h"
 #include "bdr_state.h"
+#include "bdr_worker.h"
 
 /*
  * Ensure that the local BDR node exists
@@ -818,7 +819,6 @@ bdr_decode_state(PG_FUNCTION_ARGS)
 	Datum				values[3];
 	bool				nulls[3] = {false, false, false};
 	const char		   *state_name, *goal_state_name;
-	static const char  *state_name_prefix = "BDR_NODE_STATE_";
 
 	if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
 		ereport(ERROR,
@@ -830,16 +830,10 @@ bdr_decode_state(PG_FUNCTION_ARGS)
 
 	state_decode_tuple(&state, t);
 
-	state_name = bdr_node_state_name(state.current);
-	if (strncmp(state_name, state_name_prefix, strlen(state_name_prefix)) == 0)
-		state_name = &state_name[strlen(state_name_prefix)];
-
+	state_name = bdr_node_state_name_abbrev(state.current);
 	values[0] = CStringGetTextDatum(state_name);
 
-	goal_state_name = bdr_node_state_name(state.goal);
-	if (strncmp(goal_state_name, state_name_prefix, strlen(state_name_prefix)) == 0)
-		goal_state_name = &goal_state_name[strlen(state_name_prefix)];
-
+	goal_state_name = bdr_node_state_name_abbrev(state.goal);
 	values[1] = CStringGetTextDatum(goal_state_name);
 
 	if (state.extra_data == NULL)
@@ -974,9 +968,10 @@ bdr_wait_for_join_completion(PG_FUNCTION_ARGS)
 {
 	static const int max_sleep_ms = 5000;
 	int sleep_ms = 100;
-	static const char  *state_name_prefix = "BDR_NODE_STATE_";
 	const char *state_name;
 	BdrStateEntry cur_state;
+
+	bool verbose = PG_GETARG_BOOL(0);
 
 	(void) bdr_check_local_node(false);
 
@@ -1003,15 +998,20 @@ bdr_wait_for_join_completion(PG_FUNCTION_ARGS)
 			ereport(ERROR,
 					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 					 errmsg("node join failed"),
-					 errhint("See bdr.state_journal_details view and the PostgreSQL logs for details.")));
+					 errhint("See bdr.state_journal_details view and the PostgreSQL logs for details. Note that you cannot retry without DROPing and re-CREATEing the joining database.")));
+
+		if (sleep_ms > 1000)
+		{
+			ereport(verbose? NOTICE : bdr_debug_level,
+					(errmsg("Node state is %s", bdr_node_state_name_abbrev(cur_state.current))));
+		}
 
 		/* Increase backoff */
 		sleep_ms = Min(sleep_ms * 1.5, max_sleep_ms);
+
 	}
 
-	state_name = bdr_node_state_name(cur_state.current);
-	if (strncmp(state_name, state_name_prefix, strlen(state_name_prefix)) == 0)
-		state_name = &state_name[strlen(state_name_prefix)];
+	state_name = bdr_node_state_name_abbrev(cur_state.current);
 
 	PG_RETURN_TEXT_P(cstring_to_text(state_name));
 }

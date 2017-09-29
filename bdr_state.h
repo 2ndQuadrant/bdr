@@ -180,6 +180,8 @@ typedef struct BdrStateEntry
 
 extern const char * bdr_node_state_name(BdrNodeState state);
 
+extern const char * bdr_node_state_name_abbrev(BdrNodeState state);
+
 extern void state_transition_goal(BdrStateEntry *state, BdrNodeState new_state,
 	BdrNodeState new_goal, int64 consensus_no, uint32 peer_id,
 	void *extradata);
