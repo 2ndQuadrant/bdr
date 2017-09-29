@@ -24,35 +24,19 @@ See sql/init.sql and sql/simple.sql
     
      node2: SELECT bdr.create_node('node2', 'node2_connstr')
      node2: SELECT bdr.join_node_group('node1_connstr', 'bdrgroup');
-     -- this is a temporary hack:
-     node2: SELECT bdr.join_node_group_finish();
     
-     node1: SELECT pglogical.replicate_ddl_command($$SQL$$, ARRAY['bdrgroup'])
-     node1: SELECT bdr.replication_set_add_table('thetable')
+     node1: SELECT bdr.replicate_ddl_command($$SQL$$);
+     node1: SELECT bdr.replication_set_add_table('thetable');
      node2: ... wait for catchup ...
-     node2: SELECT bdr.replication_set_add_table('thetable')
+     node2: SELECT bdr.replication_set_add_table('thetable');
     
      ... do ddl ...
 
 # Prominent bugs
 
-The answer to most "how do I" questions beyond this is still "you don't".
-This is early days work.
-
-The init tests fail (diff mismatches), the others shouldn't.
-
-Only really tested in a single-cluster setup so far. Expect bugs.
-
 There's a known deadlock when creating slots. You must pre-create
 the slots if using in a single-cluster setup. See `sql/init.sql` and
 `2ndQuadrant/pglogical_internal#152`. Same issue exists in pglogical.
-
-Sometimes have to SIGUSR1 the pglogical supervisor to make it
-notice the need to relaunch a manager. Occasionally have to kill
-manager and supervisor instead. Issues will go away with pending
-join process changes.
-
-    pkill -USR1 -f supervisor
 
 # VPATH BUILDS
 
