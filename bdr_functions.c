@@ -22,6 +22,8 @@
 
 #include "miscadmin.h"
 
+#include "pgstat.h"
+
 #include "storage/lwlock.h"
 
 #include "utils/builtins.h"
@@ -963,4 +965,53 @@ bdr_gen_slot_name_sql(PG_FUNCTION_ARGS)
 	bdr_gen_slot_name(&slot_name, dbname, nodegroup_name, origin_node_name, target_node_name);
 
 	PG_RETURN_TEXT_P(cstring_to_text(NameStr(slot_name)));
+}
+
+PG_FUNCTION_INFO_V1(bdr_wait_for_join_completion);
+
+Datum
+bdr_wait_for_join_completion(PG_FUNCTION_ARGS)
+{
+	static const int max_sleep_ms = 5000;
+	int sleep_ms = 100;
+	static const char  *state_name_prefix = "BDR_NODE_STATE_";
+	const char *state_name;
+	BdrStateEntry cur_state;
+
+	(void) bdr_check_local_node(false);
+
+	while (1)
+	{
+		int latchret = WaitLatch(&MyProc->procLatch,
+			WL_TIMEOUT|WL_LATCH_SET|WL_POSTMASTER_DEATH,
+			1000, PG_WAIT_EXTENSION);
+
+		ResetLatch(&MyProc->procLatch);
+
+		if (latchret & WL_POSTMASTER_DEATH)
+			proc_exit(0);
+
+		CHECK_FOR_INTERRUPTS();
+
+		state_get_last(&cur_state, false, false);
+
+		if (cur_state.current == cur_state.goal
+			&& cur_state.current != BDR_NODE_STATE_CREATED)
+			break;
+
+		if (cur_state.current == BDR_NODE_STATE_JOIN_FAILED)
+			ereport(ERROR,
+					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+					 errmsg("node join failed"),
+					 errhint("See bdr.state_journal_details view and the PostgreSQL logs for details.")));
+
+		/* Increase backoff */
+		sleep_ms = Min(sleep_ms * 1.5, max_sleep_ms);
+	}
+
+	state_name = bdr_node_state_name(cur_state.current);
+	if (strncmp(state_name, state_name_prefix, strlen(state_name_prefix)) == 0)
+		state_name = &state_name[strlen(state_name_prefix)];
+
+	PG_RETURN_TEXT_P(cstring_to_text(state_name));
 }

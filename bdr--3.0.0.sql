@@ -140,6 +140,13 @@ LANGUAGE c AS 'MODULE_PATHNAME','bdr_promote_node_sql';
 COMMENT ON FUNCTION bdr.promote_node() IS
 'Promote a node from standby state into an active node member';
 
+CREATE FUNCTION bdr.wait_for_join_completion()
+RETURNS text VOLATILE
+LANGUAGE c AS 'MODULE_PATHNAME','bdr_wait_for_join_completion';
+
+COMMENT ON FUNCTION bdr.wait_for_join_completion() IS
+'Wait for node to reach a goal steady state and return that state';
+
 CREATE FUNCTION bdr.replication_set_add_table(relation regclass, set_name text DEFAULT NULL, synchronize_data boolean DEFAULT false,
 	columns text[] DEFAULT NULL, row_filter text DEFAULT NULL)
 RETURNS void CALLED ON NULL INPUT VOLATILE LANGUAGE c AS 'MODULE_PATHNAME', 'bdr_replication_set_add_table';

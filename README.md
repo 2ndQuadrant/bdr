@@ -24,6 +24,7 @@ See sql/init.sql and sql/simple.sql
     
      node2: SELECT bdr.create_node('node2', 'node2_connstr')
      node2: SELECT bdr.join_node_group('node1_connstr', 'bdrgroup');
+     node2: SELECT bdr.wait_for_join_completion();
     
      node1: SELECT bdr.replicate_ddl_command($$SQL$$);
      node1: SELECT bdr.replication_set_add_table('thetable');

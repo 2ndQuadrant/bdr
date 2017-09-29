@@ -78,14 +78,7 @@ CHECKPOINT;
 \c :node2_dsn
 
 -- Wait for the joining node to reach standby state
-DO LANGUAGE plpgsql $$
-BEGIN
-  WHILE NOT EXISTS (SELECT 1 FROM bdr.state_journal_details WHERE state_name = 'STANDBY')
-  LOOP
-    PERFORM pg_sleep(0.5);
-  END LOOP;
-END;
-$$;
+SELECT bdr.wait_for_join_completion();
 
 SELECT goal_state_name FROM bdr.state_journal_details ORDER BY state_counter DESC LIMIT 1;
 
@@ -98,14 +91,7 @@ SELECT bdr.promote_node();
 SELECT goal_state_name FROM bdr.state_journal_details ORDER BY state_counter DESC LIMIT 1;
 
 -- Wait for the joining node to go fully active
-DO LANGUAGE plpgsql $$
-BEGIN
-  WHILE NOT EXISTS (SELECT 1 FROM bdr.state_journal_details WHERE state_name = 'ACTIVE')
-  LOOP
-    PERFORM pg_sleep(0.5);
-  END LOOP;
-END;
-$$;
+SELECT bdr.wait_for_join_completion();
 
 \c :node1_dsn
 
