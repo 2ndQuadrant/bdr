@@ -98,6 +98,7 @@ CREATE TABLE bdr.state_journal
 (
     state_counter oid NOT NULL PRIMARY KEY,
     state oid NOT NULL,
+    goal_state oid NOT NULL,
     entered_time timestamptz NOT NULL,
     global_consensus_no bigint NOT NULL,
     peer_id oid NOT NULL,
@@ -105,9 +106,6 @@ CREATE TABLE bdr.state_journal
 ) WITH (user_catalog_table=true);
 
 REVOKE ALL ON bdr.state_journal FROM public;
-
-CREATE FUNCTION bdr.decode_state(state integer, state_data bytea)
-RETURNS text LANGUAGE c AS 'MODULE_PATHNAME','bdr_decode_state';
 
 /*
  * BDR node manipulation
@@ -126,12 +124,21 @@ LANGUAGE c AS 'MODULE_PATHNAME','bdr_create_node_group_sql';
 COMMENT ON FUNCTION bdr.create_node_group(text) IS
 'Create a new local BDR node group and make the local node the first member';
 
-CREATE FUNCTION bdr.join_node_group(join_target_dsn text, node_group_name text DEFAULT NULL)
+CREATE FUNCTION bdr.join_node_group(join_target_dsn text,
+	node_group_name text DEFAULT NULL,
+	pause_in_standby bool DEFAULT 'f')
 RETURNS void CALLED ON NULL INPUT VOLATILE
 LANGUAGE c AS 'MODULE_PATHNAME','bdr_join_node_group_sql';
 
-COMMENT ON FUNCTION bdr.join_node_group(text,text) IS
+COMMENT ON FUNCTION bdr.join_node_group(text,text,boolean) IS
 'Join an existing BDR node group on peer at ''dsn''';
+
+CREATE FUNCTION bdr.promote_node()
+RETURNS void VOLATILE
+LANGUAGE c AS 'MODULE_PATHNAME','bdr_promote_node_sql';
+
+COMMENT ON FUNCTION bdr.promote_node() IS
+'Promote a node from standby state into an active node member';
 
 CREATE FUNCTION bdr.replication_set_add_table(relation regclass, set_name text DEFAULT NULL, synchronize_data boolean DEFAULT false,
 	columns text[] DEFAULT NULL, row_filter text DEFAULT NULL)
@@ -216,7 +223,7 @@ COMMENT ON VIEW bdr.node_group_replication_sets IS
 'BDR replication sets for local node groups';
 
 CREATE FUNCTION bdr.decode_state_entry(entry bdr.state_journal)
-RETURNS TABLE (state_name text, extra_data text)
+RETURNS TABLE (state_name text, goal_state_name text, extra_data text)
 STRICT VOLATILE
 LANGUAGE c AS 'MODULE_PATHNAME','bdr_decode_state';
 
@@ -224,11 +231,14 @@ CREATE VIEW bdr.state_journal_details AS
 SELECT 
   j.state_counter,
   j.state,
+  j.goal_state,
   d.state_name,
+  d.goal_state_name,
   j.entered_time,
   j.peer_id,
   n.node_name AS peer_name,
-  d.extra_data
+  d.extra_data,
+  j.global_consensus_no
 FROM bdr.state_journal j
   CROSS JOIN LATERAL bdr.decode_state_entry(j) d
   LEFT JOIN pglogical.node n ON (n.node_id = j.peer_id);
@@ -278,11 +288,7 @@ SELECT
     rs.set_name AS repset_name, 
     ni.if_name AS interface_name, 
     if_dsn AS interface_connstr, 
-    ( 
-             SELECT   state_name 
-             FROM     bdr.state_journal_details 
-             ORDER BY state_counter DESC limit 1
-    ) AS cur_state_journal_state,
+    sj.state_name AS cur_state_journal_state,
     seq_id AS node_seq_id, 
     dbname AS node_local_dbname, 
     array_to_string(ARRAY[
@@ -305,7 +311,13 @@ INNER JOIN pglogical.node_interface ni
 INNER JOIN bdr.node_group ng
         ON (bn.node_group_id = ng.node_group_id) 
 INNER JOIN pglogical.replication_set rs
-        ON (ng.node_group_default_repset = rs.set_id);
+        ON (ng.node_group_default_repset = rs.set_id)
+CROSS JOIN ( 
+    SELECT   state_name, goal_state_name
+    FROM     bdr.state_journal_details 
+    ORDER BY state_counter DESC
+	LIMIT 1
+    ) AS sj;
 
 COMMENT ON VIEW bdr.local_node_summary IS
 'Summary view of the local BDR node';

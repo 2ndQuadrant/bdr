@@ -28,7 +28,7 @@ OBJS = \
 	bdr_sync.o \
 	bdr_worker.o
 
-REGRESS = preseed init simple views wait part
+REGRESS = preseed init simple views part
 
 # For regression checks
 # http://www.postgresql.org/message-id/CAB7nPqTsR5o3g-fBi6jbsVdhfPiLFWQ_0cGU5=94Rv_8W3qvFA@mail.gmail.com

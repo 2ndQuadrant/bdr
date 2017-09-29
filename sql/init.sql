@@ -62,7 +62,7 @@ SELECT pg_sleep(0.5);
 
 SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info((SELECT node_group_id FROM bdr.node_group));
 
-SELECT 1 FROM bdr.join_node_group(:'node1_dsn');
+SELECT 1 FROM bdr.join_node_group(:'node1_dsn', pause_in_standby := true);
 
 SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info((SELECT node_group_id FROM bdr.node_group));
 
@@ -76,6 +76,26 @@ SELECT 1 FROM txid_current();
 CHECKPOINT;
 
 \c :node2_dsn
+
+-- Wait for the joining node to reach standby state
+DO LANGUAGE plpgsql $$
+BEGIN
+  WHILE NOT EXISTS (SELECT 1 FROM bdr.state_journal_details WHERE state_name = 'STANDBY')
+  LOOP
+    PERFORM pg_sleep(0.5);
+  END LOOP;
+END;
+$$;
+
+SELECT goal_state_name FROM bdr.state_journal_details ORDER BY state_counter DESC LIMIT 1;
+
+-- TODO: replicate some minimal test data here
+-- TODO: Make standby read-only RM#859
+
+-- Promote to active
+SELECT bdr.promote_node();
+
+SELECT goal_state_name FROM bdr.state_journal_details ORDER BY state_counter DESC LIMIT 1;
 
 -- Wait for the joining node to go fully active
 DO LANGUAGE plpgsql $$

@@ -94,9 +94,14 @@ typedef enum BdrNodeState
 	BDR_NODE_STATE_SEND_CATCHUP_READY = 1100,
 
 	/*
-	 * Steady state: standby, waiting for promotion
+	 * Potential steady state: standby, waiting for promotion
 	 */
 	BDR_NODE_STATE_STANDBY = 2000,
+
+	/*
+	 * Promoted and starting to go active
+	 */
+	BDR_NODE_STATE_PROMOTING = 2005,
 
 	/*
 	 * We've been promoted and are going full-active. Get a node-id for
@@ -163,6 +168,7 @@ typedef struct BdrStateEntry
 {
 	uint32			counter;
 	BdrNodeState	current;
+	BdrNodeState	goal;
 	TimestampTz		entered_time;
 	/* if this state is associated with a global consensus operation */
 	uint64			global_consensus_no;
@@ -174,8 +180,12 @@ typedef struct BdrStateEntry
 
 extern const char * bdr_node_state_name(BdrNodeState state);
 
+extern void state_transition_goal(BdrStateEntry *state, BdrNodeState new_state,
+	BdrNodeState new_goal, int64 consensus_no, uint32 peer_id,
+	void *extradata);
+
 extern void state_transition(BdrStateEntry *state, BdrNodeState new_state,
-	uint32 peer_id, void *extradata);
+	void *extradata);
 
 extern void state_extradata_serialize(StringInfo out, BdrNodeState new_state,
 	void *extradata);

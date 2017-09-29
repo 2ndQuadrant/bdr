@@ -21,14 +21,28 @@ typedef struct BdrNodeGroup
 	uint32		default_repset;
 } BdrNodeGroup;
 
+/*
+ * This is different to BdrNodeState, as it's a simplified and coarser view of
+ * the state that only shows what a peer node knows about us. We don't update
+ * it for all the fine grained local state transitions in bdr_state.
+ */
+typedef enum BdrPeerState
+{
+	BDR_PEER_STATE_CREATED,
+	BDR_PEER_STATE_JOINING,
+	BDR_PEER_STATE_STANDBY,
+	BDR_PEER_STATE_ACTIVE
+	/* TODO: part states */
+} BdrPeerState;
+
 typedef struct BdrNode
 {
-    uint32		node_id;
-    uint32		node_group_id;
-    uint32		local_state; /* TODO */
-    int32		seq_id;
-    bool		confirmed_our_join;
-	const char *dbname;
+    uint32			node_id;
+    uint32			node_group_id;
+    BdrPeerState	local_state;	/* last reported state of peer */
+    int32			seq_id;
+    bool			confirmed_our_join;
+	const char	   *dbname;
 } BdrNode;
 
 /*

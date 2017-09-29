@@ -31,7 +31,7 @@ NOTICE:  creating new pglogical node
 SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info(NULL);
  node_name | node_local_state | nodegroup_name | pgl_interface_name 
 -----------+------------------+----------------+--------------------
- node1     |                0 |                | node1
+ node1     |                1 |                | node1
 (1 row)
 
 SELECT 1
@@ -53,13 +53,13 @@ $$;
 SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info(NULL);
  node_name | node_local_state | nodegroup_name | pgl_interface_name 
 -----------+------------------+----------------+--------------------
- node1     |                0 | bdrgroup       | node1
+ node1     |                1 | bdrgroup       | node1
 (1 row)
 
 SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info((SELECT node_group_id FROM bdr.node_group));
  node_name | node_local_state | nodegroup_name | pgl_interface_name 
 -----------+------------------+----------------+--------------------
- node1     |                0 | bdrgroup       | node1
+ node1     |                1 | bdrgroup       | node1
 (1 row)
 
 \c :node2_dsn
@@ -96,10 +96,10 @@ SELECT pg_sleep(0.5);
 SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info((SELECT node_group_id FROM bdr.node_group));
  node_name | node_local_state | nodegroup_name | pgl_interface_name 
 -----------+------------------+----------------+--------------------
- node2     |                0 |                | node2
+ node2     |                1 |                | node2
 (1 row)
 
-SELECT 1 FROM bdr.join_node_group(:'node1_dsn');
+SELECT 1 FROM bdr.join_node_group(:'node1_dsn', pause_in_standby := true);
 NOTICE:  node join started
  ?column? 
 ----------
@@ -109,8 +109,8 @@ NOTICE:  node join started
 SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info((SELECT node_group_id FROM bdr.node_group));
  node_name | node_local_state | nodegroup_name | pgl_interface_name 
 -----------+------------------+----------------+--------------------
- node2     |                0 | bdrgroup       | node2
- node1     |                0 | bdrgroup       | node1
+ node2     |                1 | bdrgroup       | node2
+ node1     |                1 | bdrgroup       | node1
 (2 rows)
 
 \c :node1_dsn
@@ -125,6 +125,37 @@ SELECT 1 FROM txid_current();
 -- advance more promptly too.
 CHECKPOINT;
 \c :node2_dsn
+-- Wait for the joining node to reach standby state
+DO LANGUAGE plpgsql $$
+BEGIN
+  WHILE NOT EXISTS (SELECT 1 FROM bdr.state_journal_details WHERE state_name = 'STANDBY')
+  LOOP
+    PERFORM pg_sleep(0.5);
+  END LOOP;
+END;
+$$;
+SELECT goal_state_name FROM bdr.state_journal_details ORDER BY state_counter DESC LIMIT 1;
+ goal_state_name 
+-----------------
+ STANDBY
+(1 row)
+
+-- TODO: replicate some minimal test data here
+-- TODO: Make standby read-only RM#859
+-- Promote to active
+SELECT bdr.promote_node();
+NOTICE:  node promotion started in the background
+ promote_node 
+--------------
+ 
+(1 row)
+
+SELECT goal_state_name FROM bdr.state_journal_details ORDER BY state_counter DESC LIMIT 1;
+ goal_state_name 
+-----------------
+ ACTIVE
+(1 row)
+
 -- Wait for the joining node to go fully active
 DO LANGUAGE plpgsql $$
 BEGIN
@@ -244,10 +275,11 @@ FROM bdr.state_journal_details;
              9 |  1080 | JOIN_COPY_REPSET_MEMBERSHIPS | 1148549230 | node1     | 
             10 |  1100 | SEND_CATCHUP_READY           | 1148549230 | node1     | 
             11 |  2000 | STANDBY                      | 1148549230 | node1     | 
-            12 |  2010 | REQUEST_GLOBAL_SEQ_ID        | 1148549230 | node1     | 
-            13 |  2020 | WAIT_GLOBAL_SEQ_ID           | 1148549230 | node1     | global consensus message handle: n
-            14 |  2030 | CREATE_SLOTS                 | 1148549230 | node1     | 
-            15 |  2040 | SEND_ACTIVE_ANNOUNCE         | 1148549230 | node1     | 
-            16 |  5000 | ACTIVE                       |          0 |           | 
-(16 rows)
+            12 |  2005 | PROMOTING                    | 1148549230 | node1     | 
+            13 |  2010 | REQUEST_GLOBAL_SEQ_ID        | 1148549230 | node1     | 
+            14 |  2020 | WAIT_GLOBAL_SEQ_ID           | 1148549230 | node1     | global consensus message handle: n
+            15 |  2030 | CREATE_SLOTS                 | 1148549230 | node1     | 
+            16 |  2040 | SEND_ACTIVE_ANNOUNCE         | 1148549230 | node1     | 
+            17 |  5000 | ACTIVE                       |          0 |           | 
+(17 rows)
 

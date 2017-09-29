@@ -133,7 +133,7 @@ bdr_create_node_sql(PG_FUNCTION_ARGS)
 	bnode.confirmed_our_join = false;
 	bnode.node_group_id = InvalidOid;
 	bnode.dbname = get_database_name(MyDatabaseId);
-	bnode.local_state = 0; /* TODO */
+	bnode.local_state = BDR_NODE_STATE_CREATED;
 
 	bdr_node_create(&bnode);
 	bdr_refresh_cache_local_nodeinfo();
@@ -228,7 +228,8 @@ bdr_create_node_group_sql(PG_FUNCTION_ARGS)
 	 * join process to do and we can jump straight to the active
 	 * state.
 	 */
-	state_transition(&cur_state, BDR_NODE_STATE_ACTIVE, 0, NULL);
+	state_transition_goal(&cur_state, BDR_NODE_STATE_ACTIVE,
+		BDR_NODE_STATE_ACTIVE, 0, 0, NULL);
 
 	pglogical_subscription_changed(InvalidOid);
 
@@ -269,6 +270,7 @@ bdr_join_node_group_sql(PG_FUNCTION_ARGS)
 	PGconn *conn;
 	BdrStateEntry cur_state;
 	ExtraDataJoinStart extra;
+	BdrNodeState goal_state = BDR_NODE_STATE_ACTIVE;
 
 	if (PG_ARGISNULL(0))
 		ereport(ERROR,
@@ -279,6 +281,13 @@ bdr_join_node_group_sql(PG_FUNCTION_ARGS)
 
 	if (!PG_ARGISNULL(1))
 		node_group_name = text_to_cstring(PG_GETARG_TEXT_P(1));
+
+	if (!PG_ARGISNULL(2))
+	{
+		bool pause_in_standby = PG_GETARG_BOOL(2);
+		if (pause_in_standby)
+			goal_state = BDR_NODE_STATE_STANDBY;
+	}
 
 	/*
 	 * TODO FIXME should take for-update lock here
@@ -341,8 +350,8 @@ bdr_join_node_group_sql(PG_FUNCTION_ARGS)
 		bdr_join_copy_remote_node(local, remote);
 
 		extra.group_name = node_group_name;
-		state_transition(&cur_state, BDR_NODE_STATE_JOIN_START,
-			remote->pgl_node->id, &extra);
+		state_transition_goal(&cur_state, BDR_NODE_STATE_JOIN_START,
+			goal_state, 0, remote->pgl_node->id, &extra);
 
 		/*
 		 * TODO: more sanity checks here. Connectback to validate our dsn, etc.
@@ -365,6 +374,25 @@ bdr_join_node_group_sql(PG_FUNCTION_ARGS)
 	PG_END_TRY();
 
 	bdr_finish_connect_remote(conn);
+
+	PG_RETURN_VOID();
+}
+
+PG_FUNCTION_INFO_V1(bdr_promote_node_sql);
+
+Datum
+bdr_promote_node_sql(PG_FUNCTION_ARGS)
+{
+	BdrStateEntry cur_state;
+
+	(void) bdr_check_local_node(true);
+
+	state_get_expected(&cur_state, true, false, BDR_NODE_STATE_STANDBY);
+
+	state_transition_goal(&cur_state, BDR_NODE_STATE_PROMOTING,
+		BDR_NODE_STATE_ACTIVE, 0, cur_state.peer_id, NULL);
+
+	ereport(NOTICE, (errmsg("node promotion started in the background")));
 
 	PG_RETURN_VOID();
 }
@@ -785,9 +813,9 @@ bdr_decode_state(PG_FUNCTION_ARGS)
 	BdrStateEntry		state;
 	TupleDesc			tupdesc;
 	HeapTuple			htup;
-	Datum				values[2];
-	bool				nulls[2] = {false, false};
-	const char		   *state_name;
+	Datum				values[3];
+	bool				nulls[3] = {false, false, false};
+	const char		   *state_name, *goal_state_name;
 	static const char  *state_name_prefix = "BDR_NODE_STATE_";
 
 	if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
@@ -806,10 +834,16 @@ bdr_decode_state(PG_FUNCTION_ARGS)
 
 	values[0] = CStringGetTextDatum(state_name);
 
+	goal_state_name = bdr_node_state_name(state.goal);
+	if (strncmp(goal_state_name, state_name_prefix, strlen(state_name_prefix)) == 0)
+		goal_state_name = &goal_state_name[strlen(state_name_prefix)];
+
+	values[1] = CStringGetTextDatum(goal_state_name);
+
 	if (state.extra_data == NULL)
-		nulls[1] = true;
+		nulls[2] = true;
 	else
-		values[1] = CStringGetTextDatum(state_stringify_extradata(&state));
+		values[2] = CStringGetTextDatum(state_stringify_extradata(&state));
 
 	htup = heap_form_tuple(tupdesc, values, nulls);
 

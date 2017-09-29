@@ -73,6 +73,7 @@ state_has_extradata(BdrNodeState new_state)
 		case BDR_NODE_STATE_JOIN_COPY_REPSET_MEMBERSHIPS:
 		case BDR_NODE_STATE_SEND_CATCHUP_READY:
 		case BDR_NODE_STATE_STANDBY:
+		case BDR_NODE_STATE_PROMOTING:
 		case BDR_NODE_STATE_CREATE_SLOTS:
 		case BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE:
 		case BDR_NODE_STATE_REQUEST_GLOBAL_SEQ_ID:
@@ -120,6 +121,8 @@ bdr_node_state_name(BdrNodeState state)
 			return CppAsString2(BDR_NODE_STATE_SEND_CATCHUP_READY);
 		case BDR_NODE_STATE_STANDBY:
 			return CppAsString2(BDR_NODE_STATE_STANDBY);
+		case BDR_NODE_STATE_PROMOTING:
+			return CppAsString2(BDR_NODE_STATE_PROMOTING);
 		case BDR_NODE_STATE_CREATE_SLOTS:
 			return CppAsString2(BDR_NODE_STATE_CREATE_SLOTS);
 		case BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE:
@@ -375,7 +378,8 @@ state_transition_check(BdrStateEntry *state, BdrNodeState new_state)
  * table when it read it.
  */
 void
-state_transition(BdrStateEntry *state, BdrNodeState new_state,
+state_transition_goal(BdrStateEntry *state, BdrNodeState new_state,
+	BdrNodeState new_goal, int64 consensus_no,
 	uint32 peer_id, void *extradata)
 {
 	BdrStateEntry cur;
@@ -393,7 +397,8 @@ state_transition(BdrStateEntry *state, BdrNodeState new_state,
 
 	cur.counter = cur.counter + 1;
 	cur.current = new_state;
-	cur.global_consensus_no = 0L; /* TODO, accept arg */
+	cur.goal = new_goal;
+	cur.global_consensus_no = consensus_no;
 	cur.peer_id = peer_id;
 	cur.extra_data = extradata;
 
@@ -410,6 +415,18 @@ state_transition(BdrStateEntry *state, BdrNodeState new_state,
 	 * our caller is doing in this state change.
 	 */
 	*state = cur;
+}
+
+/*
+ * Simplified state transition function for when we're not changing the goal
+ * state, peer ID or consensus number.
+ */
+void
+state_transition(BdrStateEntry *state, BdrNodeState new_state,
+	void *extradata)
+{
+	state_transition_goal(state, new_state, state->goal,
+		state->global_consensus_no, state->peer_id, extradata);
 }
 
 /*
@@ -445,6 +462,7 @@ bdr_state_insert_initial(BdrNodeState initial)
 
 	state_initial.counter = 1;
 	state_initial.current = initial;
+	state_initial.goal = initial;
 	state_initial.global_consensus_no = 0L;
 	state_initial.peer_id = 0;
 	state_initial.extra_data = NULL;
@@ -501,13 +519,18 @@ bdr_state_dispatch(long *max_next_wait_msecs)
 		case BDR_NODE_STATE_JOIN_WAIT_CATCHUP:
 		case BDR_NODE_STATE_JOIN_COPY_REPSET_MEMBERSHIPS:
 		case BDR_NODE_STATE_SEND_CATCHUP_READY:
-		case BDR_NODE_STATE_STANDBY:
+		case BDR_NODE_STATE_PROMOTING:
 		case BDR_NODE_STATE_REQUEST_GLOBAL_SEQ_ID:
 		case BDR_NODE_STATE_WAIT_GLOBAL_SEQ_ID:
 		case BDR_NODE_STATE_CREATE_SLOTS:
 		case BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE:
 			bdr_join_continue(cur.current, max_next_wait_msecs);
 			return;
+
+		case BDR_NODE_STATE_STANDBY:
+			if (cur.goal != BDR_NODE_STATE_STANDBY)
+				bdr_join_continue(cur.current, max_next_wait_msecs);
+			break;
 
 		/*
 		 * Temporary states for active nodes
