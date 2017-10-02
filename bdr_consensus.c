@@ -51,6 +51,78 @@ static MNConsensusCallbacks consensus_callbacks = {
 	bdr_consensus_request_waitevents
 };
 
+typedef void (*msg_serialize_fn)(StringInfo outmsgdata, void *msg);
+typedef void* (*msg_deserialize_fn)(StringInfo msgdata);
+typedef void (*msg_stringify_fn)(StringInfo out, void *msg);
+
+typedef struct MNMessageFuncs {
+	BdrMessageType		msgtype;
+	msg_serialize_fn	serialize;
+	msg_deserialize_fn	deserialize;
+	msg_stringify_fn	stringify;
+} MNMessageFuncs;
+
+static void msg_serialize_join_request(StringInfo join_request, void *request);
+static void* msg_deserialize_join_request(StringInfo join_request);
+static void msg_stringify_join_request(StringInfo out, void *request);
+
+static void msg_serialize_slot_created(StringInfo slot_created_request, void *created);
+static void* msg_deserialize_slot_created( StringInfo slot_created_request);
+static void msg_stringify_slot_created(StringInfo out, void *created);
+
+static void msg_serialize_comment(StringInfo comment_request, void* comment);
+static void* msg_deserialize_comment( StringInfo comment_request);
+static void msg_stringify_comment(StringInfo out, void* comment);
+
+static const MNMessageFuncs message_funcs[] = {
+	{BDR_MSG_COMMENT,			msg_serialize_comment,		msg_deserialize_comment,	  msg_stringify_comment},
+	{BDR_MSG_NODE_JOIN_REQUEST, msg_serialize_join_request, msg_deserialize_join_request, msg_stringify_join_request},
+	{BDR_MSG_NODE_SLOT_CREATED, msg_serialize_slot_created, msg_deserialize_slot_created, msg_stringify_slot_created},
+	/* must be last: */
+	{BDR_MSG_NOOP, NULL, NULL, NULL}
+};
+
+static const MNMessageFuncs*
+message_funcs_lookup(BdrMessageType msgtype)
+{
+	const MNMessageFuncs *ret = &message_funcs[0];
+	while (ret->msgtype != BDR_MSG_NOOP && ret->msgtype != msgtype)
+		ret++;
+
+	if (ret->msgtype == BDR_MSG_NOOP)
+		/* no entry */
+		return NULL;
+
+	return ret;
+}
+
+struct bdr_msg_errcontext {
+	/* When deserializing a message: */
+	BdrMessageType	msgtype;
+	StringInfo		msgdata;
+};
+
+static void
+deserialize_msg_errcontext_callback(void *arg)
+{
+	struct bdr_msg_errcontext *ctx = arg;	
+	char * hexmsg = palloc(ctx->msgdata->len * 2 + 1);
+
+	hex_encode(ctx->msgdata->data, ctx->msgdata->len, hexmsg);
+	hexmsg[ctx->msgdata->len * 2 + 1] = '\0';
+
+	/*
+	 * This errcontext is only used when we're deserializing messages, so it's
+	 * OK for it to be pretty verbose.
+	 */
+	errcontext("while deserialising bdr %s consensus message of length %d at cursor %d with data %s",
+			   bdr_message_type_to_string(ctx->msgtype),
+			   ctx->msgdata->len, ctx->msgdata->cursor,
+			   hexmsg);
+
+	pfree(hexmsg);
+}
+
 void
 bdr_start_consensus(BdrNodeState cur_state)
 {
@@ -155,6 +227,8 @@ static bool
 bdr_proposal_receive(MNConsensusProposalRequest *request)
 {
 	BdrMessage *bmsg;
+	const MNMessageFuncs *funcs;
+	const char *msgdetail;
 
 	bmsg = msg_deserialize_proposal(request);
 
@@ -166,46 +240,22 @@ bdr_proposal_receive(MNConsensusProposalRequest *request)
 		return false;
 	}
 
-	switch (bmsg->message_type)
+	funcs = message_funcs_lookup(bmsg->message_type);
+	if (funcs != NULL && bmsg->message != NULL)
 	{
-		case BDR_MSG_COMMENT:
-			elog(bdr_debug_level, "%u %s proposal from %u: %s",
-				 bdr_get_local_nodeid(),
-				 bdr_message_type_to_string(bmsg->message_type),
-				 request->sender_nodeid,
-				 (char*)bmsg->message);
-			break;
-		case BDR_MSG_NODE_JOIN_REQUEST:
-			{
-				StringInfoData logmsg;
-				initStringInfo(&logmsg);
-				msg_stringify_join_request(&logmsg, bmsg->message);
-				elog(bdr_debug_level, "%u %s proposal from %u: %s",
-					 bdr_get_local_nodeid(),
-					 bdr_message_type_to_string(bmsg->message_type),
-					 request->sender_nodeid, logmsg.data);
-				pfree(logmsg.data);
-				break;
-			}
-		case BDR_MSG_NODE_CATCHUP_READY:
-			elog(bdr_debug_level, "%u %s proposal from %u",
-				 bdr_get_local_nodeid(),
-				 bdr_message_type_to_string(bmsg->message_type),
-				 request->sender_nodeid);
-			break;
-		case BDR_MSG_NODE_ACTIVE:
-			elog(bdr_debug_level, "%u %s proposal from %u",
-				 bdr_get_local_nodeid(),
-				 bdr_message_type_to_string(bmsg->message_type),
-				 request->sender_nodeid);
-			break;
-		default:
-			elog(bdr_debug_level,
-				 "%u unhandled BDR proposal type '%s' ignored",
-				 bdr_get_local_nodeid(),
-				 bdr_message_type_to_string(bmsg->message_type));
-			return false;
+		StringInfoData msgbody;
+		initStringInfo(&msgbody);
+		funcs->stringify(&msgbody, bmsg->message);
+		msgdetail = msgbody.data;
 	}
+	else
+		msgdetail = "(no payload)";
+
+	elog(bdr_debug_level, "%u %s proposal from %u: %s",
+		 bdr_get_local_nodeid(),
+		 bdr_message_type_to_string(bmsg->message_type),
+		 request->sender_nodeid,
+		 msgdetail);
 
 	/* TODO: can nack messages here to abort consensus txn early */
 	return true;
@@ -327,31 +377,18 @@ void
 msg_serialize_proposal(StringInfo out, BdrMessageType message_type,
 					   void *message)
 {
+	const MNMessageFuncs *funcs;
+
 	resetStringInfo(out);
 	Assert(out->len == 0);
 
 	pq_sendint(out, message_type, 4);
 	Assert(out->len == SizeOfBdrMsgHeader);
 
-	switch (message_type)
-	{
-		case BDR_MSG_COMMENT:
-			pq_sendstring(out, message);
-			break;
-		case BDR_MSG_NODE_JOIN_REQUEST:
-			msg_serialize_join_request(out, message);
-			break;
-		case BDR_MSG_NODE_CATCHUP_READY:
-		case BDR_MSG_NODE_ACTIVE:
-			/* Empty messages */
-			Assert(message == NULL);
-			break;
-		default:
-			Assert(false);
-			elog(ERROR, "serialization for message %d not implemented",
-				 message_type);
-			break;
-	}
+	funcs = message_funcs_lookup(message_type);
+	Assert( (message == NULL) == (funcs == NULL) );
+	if (message != NULL)
+		funcs->serialize(out, message);
 }
 
 /*
@@ -366,6 +403,7 @@ msg_deserialize_proposal(MNConsensusProposalRequest *in)
 {
 	BdrMessage *out;
 	StringInfoData si;
+	const MNMessageFuncs *funcs;
 
 	out = palloc(sizeof(BdrMessage));
 
@@ -375,6 +413,7 @@ msg_deserialize_proposal(MNConsensusProposalRequest *in)
 	out->originator_propose_lsn = in->sender_lsn;
 	/* TODO: support majority consensus */
 	out->majority_consensus_ok = false;
+	out->message = NULL;
 
 	if (in->proposal->payload_length < 4)
 	{
@@ -386,73 +425,32 @@ msg_deserialize_proposal(MNConsensusProposalRequest *in)
 	wrapInStringInfo(&si, in->proposal->payload, in->proposal->payload_length);
 	out->message_type = pq_getmsgint(&si, 4);
 
-	switch (out->message_type)
+	funcs = message_funcs_lookup(out->message_type);
+
+	if (funcs != NULL)
 	{
-		case BDR_MSG_COMMENT:
-			out->message = (char*)pq_getmsgstring(&si);
-			break;
-		case BDR_MSG_NODE_JOIN_REQUEST:
-			out->message = palloc(sizeof(BdrMsgJoinRequest));
-			msg_deserialize_join_request(&si, out->message);
-			break;
-		case BDR_MSG_NODE_CATCHUP_READY:
-		case BDR_MSG_NODE_ACTIVE:
-			/*
-			 * Empty messages, at least as far as we know, but later
-			 * verisons might add fields so we won't assert anything.
-			 */
-			out->message = NULL;
-			break;
-		default:
-			elog(bdr_debug_level, "ignored payload of unsupported bdr message type %u from node %u",
-				 out->message_type, in->sender_nodeid);
-			out->message = NULL;
-			break;
+		ErrorContextCallback myerrcontext;
+		struct bdr_msg_errcontext ctxinfo;
+
+		ctxinfo.msgtype = out->message_type;
+		ctxinfo.msgdata = &si;
+		myerrcontext.callback = deserialize_msg_errcontext_callback;
+		myerrcontext.arg = &ctxinfo;
+		myerrcontext.previous = error_context_stack;
+		error_context_stack = &myerrcontext;
+
+		out->message = funcs->deserialize(&si);
+		
+		error_context_stack = myerrcontext.previous;
 	}
 
 	return out;
 }
 
-struct bdr_msg_errcontext {
-	BdrMessageType	msgtype;
-	StringInfo		msgdata;
-};
-
-static void
-deserialize_msg_errcontext_callback(void *arg)
-{
-	struct bdr_msg_errcontext *ctx = arg;	
-	char * hexmsg = palloc(ctx->msgdata->len * 2 + 1);
-
-	hex_encode(ctx->msgdata->data, ctx->msgdata->len, hexmsg);
-	hexmsg[ctx->msgdata->len * 2 + 1] = '\0';
-
-	/*
-	 * This errcontext is only used when we're deserializing messages, so it's
-	 * OK for it to be pretty verbose.
-	 */
-	errcontext("while deserialising bdr %s consensus message of length %d at cursor %d with data %s",
-			   bdr_message_type_to_string(ctx->msgtype),
-			   ctx->msgdata->len, ctx->msgdata->cursor,
-			   hexmsg);
-
-	pfree(hexmsg);
-}
-
 void
-msg_serialize_join_request(StringInfo join_request,
-	BdrMsgJoinRequest *request)
+msg_serialize_join_request(StringInfo join_request, void *jr)
 {
-	ErrorContextCallback myerrcontext;
-	struct bdr_msg_errcontext ctxinfo;
-
-	ctxinfo.msgtype = BDR_MSG_NODE_JOIN_REQUEST;
-	ctxinfo.msgdata = join_request;
-	myerrcontext.callback = deserialize_msg_errcontext_callback;
-	myerrcontext.arg = &ctxinfo;
-	myerrcontext.previous = error_context_stack;
-	error_context_stack = &myerrcontext;
-
+	BdrMsgJoinRequest *request = jr;
 	pq_sendstring(join_request, request->nodegroup_name);
 	pq_sendint(join_request, request->nodegroup_id, 4);
 	pq_sendstring(join_request, request->joining_node_name);
@@ -464,14 +462,12 @@ msg_serialize_join_request(StringInfo join_request,
 	pq_sendstring(join_request, request->joining_node_dbname);
 	pq_sendstring(join_request, request->join_target_node_name);
 	pq_sendint(join_request, request->join_target_node_id, 4);
-
-	error_context_stack = myerrcontext.previous;
 }
 
-void
-msg_deserialize_join_request(StringInfo join_request,
-	BdrMsgJoinRequest *request)
+void*
+msg_deserialize_join_request(StringInfo join_request)
 {
+	BdrMsgJoinRequest *request = palloc(sizeof(BdrMsgJoinRequest));
 	request->nodegroup_name = pq_getmsgstring(join_request);
 	request->nodegroup_id = pq_getmsgint(join_request, 4);
 	request->joining_node_name = pq_getmsgstring(join_request);
@@ -483,11 +479,13 @@ msg_deserialize_join_request(StringInfo join_request,
 	request->joining_node_dbname = pq_getmsgstring(join_request);
 	request->join_target_node_name = pq_getmsgstring(join_request);
 	request->join_target_node_id = pq_getmsgint(join_request, 4);
+	return request;
 }
 
 void
-msg_stringify_join_request(StringInfo out, BdrMsgJoinRequest *request)
+msg_stringify_join_request(StringInfo out, void *jr)
 {
+	BdrMsgJoinRequest *request = jr;
 	appendStringInfo(out,
 		"nodegroup: name %s, id: %u; ",
 		request->nodegroup_name, request->nodegroup_id);
@@ -502,6 +500,59 @@ msg_stringify_join_request(StringInfo out, BdrMsgJoinRequest *request)
 	appendStringInfo(out,
 		"join target: name %s, id %u",
 		request->join_target_node_name, request->join_target_node_id);
+}
+
+static void
+msg_serialize_slot_created(StringInfo created_request, void *cr)
+{
+	BdrMsgSlotCreated *created = cr;
+	pq_sendint(created_request, created->for_peer_id, 4);
+	pq_sendstring(created_request, created->slot_name);
+	pq_sendint64(created_request, created->start_lsn);
+}
+
+static void*
+msg_deserialize_slot_created(
+	StringInfo created_request)
+{
+	BdrMsgSlotCreated *created = palloc(sizeof(BdrMsgSlotCreated));
+	created->for_peer_id = pq_getmsgint(created_request, 4);
+	created->slot_name = pq_getmsgstring(created_request);
+	created->start_lsn = pq_getmsgint64(created_request);
+	return created;
+}
+
+static void
+msg_stringify_slot_created(StringInfo out, void *cr)
+{
+	BdrMsgSlotCreated *created = cr;
+	appendStringInfo(out,
+		"slot created: for peer %u, slot name %s, start lsn %X/%X",
+		created->for_peer_id, created->slot_name,
+		(uint32)(created->start_lsn>>32),
+		(uint32)(created->start_lsn));
+}
+
+static void
+msg_serialize_comment(StringInfo comment_request,
+	void* comment)
+{
+	pq_sendstring(comment_request, (const char*)comment);
+}
+
+static void*
+msg_deserialize_comment(
+	StringInfo comment_request)
+{
+	return (void*)pq_getmsgstring(comment_request);
+}
+
+static void
+msg_stringify_comment(StringInfo out,
+	void* comment)
+{
+	appendStringInfoString(out, "comment: ");
+	appendStringInfoString(out, (const char*)comment);
 }
 
 const char *
@@ -523,6 +574,8 @@ bdr_message_type_to_string(BdrMessageType msgtype)
 			return CppAsString2(BDR_MSG_NODE_CATCHUP_READY);
 		case BDR_MSG_NODE_ACTIVE:
 			return CppAsString2(BDR_MSG_NODE_ACTIVE);
+		case BDR_MSG_NODE_SLOT_CREATED:
+			return CppAsString2(BDR_MSG_NODE_SLOT_CREATED);
 		case BDR_MSG_DDL_LOCK_REQUEST:
 			return CppAsString2(BDR_MSG_DDL_LOCK_REQUEST);
 		case BDR_MSG_DDL_LOCK_GRANT:

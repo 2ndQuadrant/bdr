@@ -28,6 +28,7 @@ typedef enum BdrMessageType
 	BDR_MSG_NODE_JOIN_REQUEST = 100,
 	BDR_MSG_NODE_ID_SEQ_ALLOCATE,
 	BDR_MSG_NODE_CATCHUP_READY,
+	BDR_MSG_NODE_SLOT_CREATED,
 	BDR_MSG_NODE_ACTIVE,
 
 	/* Global DDL locking */
@@ -110,12 +111,12 @@ typedef struct BdrMsgJoinRequest
 	Oid			join_target_node_id;
 } BdrMsgJoinRequest;
 
-extern void msg_serialize_join_request(StringInfo join_request,
-	BdrMsgJoinRequest *request);
-extern void msg_deserialize_join_request(StringInfo join_request,
-	BdrMsgJoinRequest *request);
-extern void msg_stringify_join_request(StringInfo out,
-	BdrMsgJoinRequest *request);
+typedef struct BdrMsgSlotCreated
+{
+	Oid			for_peer_id;	/* Peer expected to use the slot */
+	const char *slot_name;		/* duh */
+	XLogRecPtr	start_lsn;		/* Initial confirmed_flush_lsn */
+} BdrMsgSlotCreated;
 
 extern void wrapInStringInfo(StringInfo si, char *data, Size length);
 
