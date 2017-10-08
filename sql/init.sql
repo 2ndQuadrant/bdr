@@ -21,12 +21,12 @@ SELECT E'\'' || current_database() || E'\'' AS node2_db
 CREATE FUNCTION bdr_submit_comment(message text)
 RETURNS text LANGUAGE c STRICT AS 'bdr','bdr_submit_comment';
 
-SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info(NULL);
+SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info(NULL) ORDER BY 1;
 
 SELECT 1
 FROM bdr.create_node(node_name := 'node1', local_dsn := :'node1_dsn' || ' user=super');
 
-SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info(NULL);
+SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info(NULL) ORDER BY 1;
 
 SELECT 1
 FROM bdr.create_node_group('bdrgroup');
@@ -41,12 +41,12 @@ BEGIN
 END;
 $$;
 
-SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info(NULL);
-SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info((SELECT node_group_id FROM bdr.node_group));
+SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info(NULL) ORDER BY 1;
+SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info((SELECT node_group_id FROM bdr.node_group)) ORDER BY 1;
 
 \c :node2_dsn
 
-SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info(NULL);
+SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info(NULL) ORDER BY 1;
 
 SELECT 1
 FROM bdr.create_node(node_name := 'node2', local_dsn := :'node2_dsn' || ' user=super');
@@ -60,11 +60,11 @@ FROM bdr.join_node_group(:'node1_dsn', 'nosuch-nodegroup');
 -- TODO: https://redmine.2ndquadrant.com/issues/1057
 SELECT pg_sleep(0.5);
 
-SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info((SELECT node_group_id FROM bdr.node_group));
+SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info((SELECT node_group_id FROM bdr.node_group)) ORDER BY 1;
 
 SELECT 1 FROM bdr.join_node_group(:'node1_dsn', pause_in_standby := true);
 
-SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info((SELECT node_group_id FROM bdr.node_group));
+SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info((SELECT node_group_id FROM bdr.node_group)) ORDER BY 1;
 
 \c :node1_dsn
 
@@ -82,6 +82,12 @@ SELECT bdr.wait_for_join_completion();
 
 SELECT goal_state_name FROM bdr.state_journal_details ORDER BY state_counter DESC LIMIT 1;
 
+-- Wait for the joining node to reach standby
+SELECT bdr.wait_for_join_completion();
+
+SELECT slot_name, plugin, slot_type, database, temporary
+FROM pg_replication_slots ORDER BY slot_name;
+
 -- TODO: replicate some minimal test data here
 -- TODO: Make standby read-only RM#859
 
@@ -92,6 +98,9 @@ SELECT goal_state_name FROM bdr.state_journal_details ORDER BY state_counter DES
 
 -- Wait for the joining node to go fully active
 SELECT bdr.wait_for_join_completion();
+
+SELECT slot_name, plugin, slot_type, database, temporary
+FROM pg_replication_slots ORDER BY slot_name;
 
 \c :node1_dsn
 
@@ -131,7 +140,7 @@ SELECT application_name, sync_state
 FROM pg_stat_replication
 ORDER BY application_name;
 
-SELECT slot_name, plugin, slot_type, database, temporary, active
+SELECT slot_name, plugin, slot_type, database, temporary
 FROM pg_replication_slots ORDER BY slot_name;
 
 SELECT
@@ -155,6 +164,10 @@ SELECT
 	 '[[:digit:]]', 'n', 'g') AS extra_data_masked
 FROM bdr.state_journal_details;
 
+SELECT pn.node_name, jcp.min_slot_lsn IS NOT NULL, jcp.passed_min_slot_lsn
+FROM bdr.join_catchup_minimum jcp JOIN pglogical.node pn ON jcp.node_id = pn.node_id
+ORDER BY pn.node_name;
+
 \c :node2_dsn
 
 SELECT
@@ -163,3 +176,7 @@ SELECT
 	regexp_replace(extra_data, '[[:xdigit:]]{1,8}/[[:xdigit:]]{8}', 'X/XXXXXXXX'),
 	 '[[:digit:]]', 'n', 'g') AS extra_data_masked
 FROM bdr.state_journal_details;
+
+SELECT pn.node_name, jcp.min_slot_lsn IS NOT NULL, jcp.passed_min_slot_lsn
+FROM bdr.join_catchup_minimum jcp JOIN pglogical.node pn ON jcp.node_id = pn.node_id
+ORDER BY pn.node_name;

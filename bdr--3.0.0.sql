@@ -22,11 +22,24 @@ CREATE TABLE bdr.node
 	node_group_id oid NOT NULL REFERENCES bdr.node_group(node_group_id),
 	local_state oid NOT NULL,
 	seq_id integer NOT NULL,
-	confirmed_our_join bool NOT NULL,
 	dbname name NOT NULL
 ) WITH (user_catalog_table=true);
 
 REVOKE ALL ON bdr.node FROM public;
+
+-- During a join we need to record the minimum lsn at which it's safe
+-- to switch over from catchup from our join target to direct replay from
+-- a peer.
+CREATE TABLE bdr.join_catchup_minimum (
+	node_id oid NOT NULL
+			PRIMARY KEY
+			REFERENCES bdr.node(pglogical_node_id)
+			ON UPDATE CASCADE
+			ON DELETE CASCADE,
+	slot_name name NOT NULL,
+	min_slot_lsn pg_lsn NOT NULL,
+	passed_min_slot_lsn boolean NOT NULL
+);
 
 -- This records which subscriptions are owned by the local BDR node
 -- (target_node_id) and the mode they are in.
@@ -234,6 +247,9 @@ RETURNS TABLE (state_name text, goal_state_name text, extra_data text)
 STRICT VOLATILE
 LANGUAGE c AS 'MODULE_PATHNAME','bdr_decode_state';
 
+CREATE FUNCTION bdr.peer_state_name(oid)
+RETURNS text STRICT LANGUAGE c AS 'MODULE_PATHNAME','bdr_peer_state_name_sql';
+
 CREATE VIEW bdr.state_journal_details AS
 SELECT 
   j.state_counter,
@@ -288,16 +304,16 @@ CROSS JOIN LATERAL pglogical.show_subscription_status(sub_name) ss;
 COMMENT ON VIEW bdr.subscription_summary IS
 'breakdown of subscriptions for the local node';
 
-CREATE VIEW bdr.local_node_summary AS
+CREATE VIEW bdr.node_summary AS
 SELECT
     n.node_name, 
     ng.node_group_name, 
-    rs.set_name AS repset_name, 
     ni.if_name AS interface_name, 
     if_dsn AS interface_connstr, 
-    sj.state_name AS cur_state_journal_state,
+    ps.peer_state_name,
     seq_id AS node_seq_id, 
     dbname AS node_local_dbname, 
+    rs.set_name AS default_repset_name, 
     array_to_string(ARRAY[
         CASE WHEN rs.replicate_insert THEN 'INSERT' END,
         CASE WHEN rs.replicate_update THEN 'UPDATE' END,
@@ -306,25 +322,48 @@ SELECT
     ], ',') AS set_repl_ops,
     n.node_id,
     ng.node_group_id,
-    rs.set_id,
+    ng.node_group_default_repset AS default_repset_id,
     ni.if_id
-FROM       pglogical.local_node l 
-INNER JOIN pglogical.node n
-        ON (l.node_id = n.node_id) 
+FROM pglogical.node n
 INNER JOIN bdr.node bn
-        ON (l.node_id = bn.pglogical_node_id) 
+        ON (n.node_id = bn.pglogical_node_id) 
 INNER JOIN pglogical.node_interface ni
-        ON (l.node_local_interface = ni.if_id) 
+        ON (ni.if_nodeid = n.node_id)
 INNER JOIN bdr.node_group ng
         ON (bn.node_group_id = ng.node_group_id) 
 INNER JOIN pglogical.replication_set rs
         ON (ng.node_group_default_repset = rs.set_id)
+CROSS JOIN LATERAL bdr.peer_state_name(bn.local_state) ps(peer_state_name);
+
+COMMENT ON VIEW bdr.node_summary IS
+'Overview of a node''s interfaces, replication sets, etc. May emit multiple rows for nodes with multiple interfaces.';
+
+CREATE VIEW bdr.local_node_summary AS
+SELECT
+    ns.node_name, 
+    ns.node_group_name, 
+    ns.interface_name,
+    ns.interface_connstr, 
+    sj.state_name AS cur_state_journal_state,
+    sj.goal_state_name AS goal_state_journal_state,
+    ns.peer_state_name,
+    ns.node_seq_id, 
+    ns.node_local_dbname, 
+    ns.default_repset_name, 
+    ns.set_repl_ops,
+    ns.node_id,
+    ns.node_group_id,
+    ns.default_repset_id,
+    ns.if_id
+FROM       pglogical.local_node l 
+INNER JOIN bdr.node_summary ns ON (l.node_id = ns.node_id)
 CROSS JOIN ( 
     SELECT   state_name, goal_state_name
     FROM     bdr.state_journal_details 
     ORDER BY state_counter DESC
 	LIMIT 1
-    ) AS sj;
+    ) AS sj
+WHERE (l.node_local_interface = ns.if_id);
 
 COMMENT ON VIEW bdr.local_node_summary IS
 'Summary view of the local BDR node';
@@ -332,8 +371,11 @@ COMMENT ON VIEW bdr.local_node_summary IS
 CREATE VIEW bdr.node_slots AS
 SELECT rbn.dbname AS target_dbname,
        ng.node_group_name,
+	   ng.node_group_id,
        ln.node_name AS origin_name,
        rn.node_name AS target_name,
+	   ln.node_id AS origin_id,
+	   rn.node_id AS target_id,
        bdr_slots.slot_name AS bdr_slot_name,
        rs.*
 FROM pglogical.local_node l

@@ -24,6 +24,7 @@ use BdrDb;
 
 my $dbname = 'bdrtest';
 my $ts;
+my $query;
 
 my @nodes = ();
 foreach my $nodename ('node0', 'node1', 'node2') {
@@ -78,10 +79,31 @@ TODO: {
 }
 
 # Join node1, so we have functioning BDR
-$dbs[1]->bdr_join_node_group($nodegroup, $dbs[0]);
+$dbs[1]->bdr_join_node_group($nodegroup, $dbs[0], pause_in_standby => 1);
 $dbs[1]->bdr_wait_for_join;
 
-my $query = q[SELECT sub_name,origin_name,target_name,subscription_status,bdr_subscription_mode FROM bdr.subscription_summary ORDER BY 1,2,3];
+$query = q[
+    SELECT node_name, peer_state_name FROM bdr.node_summary ORDER BY node_name
+];
+for my $i (0..1)
+{
+    is($dbs[$i]->safe_psql($query), q[node0|BDR_PEER_STATE_ACTIVE
+node1|BDR_PEER_STATE_STANDBY],
+    "node$i local states correct for 2-node standby")
+        or diag $dbs[$i]->safe_psql("SELECT * FROM bdr.node_summary");
+}
+
+$dbs[1]->bdr_promote();
+$dbs[1]->bdr_wait_for_join;
+for my $i (0..1)
+{
+    is($dbs[$i]->safe_psql($query), q[node0|BDR_PEER_STATE_ACTIVE
+node1|BDR_PEER_STATE_ACTIVE],
+    "node$i local states correct for 2-node active")
+        or diag $dbs[$i]->safe_psql("SELECT * FROM bdr.node_summary");
+}
+
+$query = q[SELECT sub_name,origin_name,target_name,subscription_status,bdr_subscription_mode FROM bdr.subscription_summary ORDER BY 1,2,3];
 $dbs[0]->poll_query_until(q[SELECT count(*) = 1 FROM bdr.subscription_summary;]);
 is($dbs[0]->safe_psql($query),
     q[mygroup_node1|node1|node0|replicating|n],
@@ -149,11 +171,40 @@ is($dbs[1]->safe_psql(q[SELECT id, blah FROM tbl_included ORDER BY id]),
 #
 # It's time to bring a third node online for our multimaster conflict testing.
 # We'll clone from the 2nd node just for variety.
-#
-# TODO: start the third node in logical standby (catchup) and test catchup mode.
 
-$dbs[2]->bdr_join_node_group($nodegroup, $dbs[0]);
+$dbs[2]->bdr_join_node_group($nodegroup, $dbs[0], pause_in_standby => 1);
 $dbs[2]->bdr_wait_for_join;
+
+$query = q[
+    SELECT node_name, peer_state_name FROM bdr.node_summary ORDER BY node_name
+];
+
+foreach my $i (0..2)
+{
+    is($dbs[$i]->safe_psql($query),
+        qq[node0|BDR_PEER_STATE_ACTIVE
+node1|BDR_PEER_STATE_ACTIVE
+node2|BDR_PEER_STATE_STANDBY],
+        "node$i local_state local statuses ok for node2 standby")
+            or diag $dbs[$i]->safe_psql("SELECT * FROM bdr.node_summary");
+}
+
+$dbs[2]->bdr_promote();
+$dbs[2]->bdr_wait_for_join;
+
+$query = q[
+    SELECT node_name, peer_state_name FROM bdr.node_summary ORDER BY node_name
+];
+
+foreach my $i (0..2)
+{
+    is($dbs[$i]->safe_psql($query),
+        qq[node0|BDR_PEER_STATE_ACTIVE
+node1|BDR_PEER_STATE_ACTIVE
+node2|BDR_PEER_STATE_ACTIVE],
+        "node$i local_state is ACTIVE for all nodes")
+            or diag $dbs[$i]->safe_psql("SELECT * FROM bdr.node_summary");
+}
 
 TODO: {
     local $TODO = "RM#863 replicate replication set additions";
@@ -175,30 +226,43 @@ $dbs[0]->poll_query_until(q[SELECT count(*) = 2 FROM bdr.subscription_summary;])
 is($dbs[0]->safe_psql($query),
     q[mygroup_node1|node1|node0|replicating|n
 mygroup_node2|node2|node0|replicating|n],
-    'expected subscriptions found on node0 (3-node)');
-$dbs[1]->poll_query_until(q[SELECT count(*) = 2 FROM bdr.subscription_summary;]);
+    'expected subscriptions found on node0');
 is($dbs[1]->safe_psql($query),
     q[mygroup_node0|node0|node1|replicating|n
 mygroup_node2|node2|node1|replicating|n],
-    'expected subscriptions found on node1 (3-node)');
-$dbs[2]->poll_query_until(q[SELECT count(*) = 2 FROM bdr.subscription_summary;]);
+    'expected subscriptions found on node1');
 is($dbs[2]->safe_psql($query),
     q[mygroup_node0|node0|node2|replicating|n
 mygroup_node1|node1|node2|replicating|n],
-    'expected subscriptions found on node2 (3-node)');
+    'expected subscriptions found on node2');
+
+# node2 should have a catchup tracking row for node1, but none of the
+# others should have any entries since 2-node join doesn't need one,
+# and neither do active nodes when a new node is joining.
+$query = q[
+    SELECT
+        jcp.min_slot_lsn IS NOT NULL,
+        jcp.passed_min_slot_lsn,
+        rs.remote_lsn >= jcp.min_slot_lsn
+    FROM bdr.join_catchup_minimum jcp
+    LEFT OUTER JOIN bdr.node_slots ns ON ns.origin_id = jcp.node_id
+    LEFT OUTER JOIN pg_catalog.pg_replication_origin_status rs
+        ON rs.external_id = ns.bdr_slot_name
+    ORDER BY jcp.node_id;
+    ];
+is($dbs[0]->safe_psql($query), '', 'no join catchup minimum records on node0');
+is($dbs[1]->safe_psql($query), '', 'no join catchup minimum records on node1');
+is($dbs[2]->safe_psql($query), 't|t|t', 'join catchup minimum record on node2');
 
 # Do a trivial no-conflict MM insert
-foreach my $i (0..2)
-{
-    my $xid = $dbs[$i]->safe_psql(qq[INSERT INTO tbl_included (id, blah) VALUES ($i+10, 'from_node$i') RETURNING txid_current();]);
-    diag "insert into node $i has xid $xid";
-}
+$dbs[0]->safe_psql(qq[INSERT INTO tbl_included (id, blah) VALUES (10, 'from_node0');]);
+$dbs[1]->safe_psql(qq[INSERT INTO tbl_included (id, blah) VALUES (11, 'from_node1');]);
+$dbs[2]->safe_psql(qq[INSERT INTO tbl_included (id, blah) VALUES (12, 'from_node2');]);
 
 # and check it.
-foreach my $i (0..2)
-{
-    $dbs[$i]->wait_for_catchup_all;
-}
+$dbs[0]->wait_for_catchup_all;
+$dbs[1]->wait_for_catchup_all;
+$dbs[2]->wait_for_catchup_all;
 
 my $expected = q[0|from_node0
 1|from_node1
@@ -206,7 +270,7 @@ my $expected = q[0|from_node0
 11|from_node1
 12|from_node2];
 
-foreach my $i (0..2) {
+foreach my $i (0, 1, 2) {
     is($dbs[$i]->safe_psql(q[SELECT id, blah FROM tbl_included ORDER BY id]), $expected, "data replicated 3-way, node$i");
 }
 

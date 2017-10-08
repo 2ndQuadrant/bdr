@@ -50,6 +50,11 @@ typedef enum BdrNodeState
 	BDR_NODE_STATE_JOIN_COPY_REMOTE_NODES = 1020,
 
 	/*
+	 * Create replication slot on the join target
+	 */
+	BDR_NODE_STATE_JOIN_CREATE_TARGET_SLOT = 1025,
+
+	/*
 	 * This state is never actually entered. It's a marker for when the
 	 * consensus system should be started during join. Anything
 	 * prior to it has the consensus system suppressed, anything after it
@@ -67,6 +72,13 @@ typedef enum BdrNodeState
 	 * Wait until the dump of the remote subscription finishes
 	 */
 	BDR_NODE_STATE_JOIN_WAIT_SUBSCRIBE_COMPLETE = 1050,
+
+	/*
+	 * Create subscriptions to remaining peers. We do this
+	 * in catchup phase because they'll be set to fast-forward
+	 * only mode.
+	 */
+	BDR_NODE_STATE_JOIN_CREATE_SUBSCRIPTIONS = 1055,
 
 	/*
 	 * Look up join target to find the minimum point we must replay past
@@ -88,10 +100,20 @@ typedef enum BdrNodeState
 	BDR_NODE_STATE_JOIN_COPY_REPSET_MEMBERSHIPS = 1080,
 
 	/*
+	 * Create replication slots on peer nodes
+	 */
+	BDR_NODE_STATE_JOIN_CREATE_PEER_SLOTS = 1090,
+
+	/*
+	 * Wait for local repay to pass safe start point on all peer slots
+	 */
+	BDR_NODE_STATE_JOIN_WAIT_STANDBY_REPLAY = 1100,
+
+	/*
 	 * Tell all our peers that we've finished minimum catchup
 	 * and can be promoted.
 	 */
-	BDR_NODE_STATE_SEND_CATCHUP_READY = 1100,
+	BDR_NODE_STATE_SEND_STANDBY_READY = 1110,
 
 	/*
 	 * Potential steady state: standby, waiting for promotion
@@ -114,7 +136,7 @@ typedef enum BdrNodeState
 	 * Now we're waiting for the ID to be assigned.
 	 *
 	 * We can go back to BDR_NODE_STATE_REQUEST_GLOBAL_SEQ_ID on nack
-	 * to try again or continue to BDR_NODE_STATE_CREATE_SLOTS.
+	 * to try again or continue to BDR_NODE_STATE_CREATE_LOCAL_SLOTS.
 	 */
 	BDR_NODE_STATE_WAIT_GLOBAL_SEQ_ID = 2020,
 
@@ -123,7 +145,7 @@ typedef enum BdrNodeState
 	 *
 	 * Create slots for peers to replay from us.
 	 */
-	BDR_NODE_STATE_CREATE_SLOTS = 2030,
+	BDR_NODE_STATE_CREATE_LOCAL_SLOTS = 2030,
 
 	/*
 	 * Announce that we've gone active (and set our node read/write)
@@ -147,11 +169,6 @@ typedef enum BdrNodeState
 	 * SQL functions, etc.
 	 */
 	BDR_NODE_STATE_ACTIVE = 5000,
-
-	/*
-	 * Active node needs to create a slot for joining node
-	 */
-	BDR_NODE_STATE_ACTIVE_SLOT_CREATE_PENDING = 5010,
 
 	/*
 	 * Placeholder for the end of the range of IDs used for active

@@ -28,6 +28,7 @@ typedef struct BdrNodeGroup
  */
 typedef enum BdrPeerState
 {
+	BDR_PEER_STATE_UNUSED,
 	BDR_PEER_STATE_CREATED,
 	BDR_PEER_STATE_JOINING,
 	BDR_PEER_STATE_STANDBY,
@@ -76,6 +77,13 @@ typedef struct BdrSubscription
 	Oid					target_node_id;
 	BdrSubscriptionMode	mode;
 } BdrSubscription;
+
+typedef struct JoinCatchupMinimum
+{
+	Oid			node_id;
+	XLogRecPtr	slot_min_lsn;
+	bool		passed_slot_min_lsn;
+} JoinCatchupMinimum;
 
 extern BdrNodeGroup * bdr_get_nodegroup(Oid nodegroup_id, bool missing_ok);
 
@@ -130,6 +138,13 @@ extern BdrSubscription * bdr_get_node_subscription(uint32 target_node_id,
 /* Random helpers related to working with pgl/bdr catalogs */
 extern void interval_from_ms(int ms, Interval *interval);
 
+extern const char *bdr_peer_state_name(BdrPeerState state);
+
 extern void check_nodeinfo(BdrNodeInfo* nodeinfo);
+
+extern bool bdr_get_join_catchup_minimum(Oid nodeid,
+	JoinCatchupMinimum *jcmout, bool missing_ok);
+
+extern void bdr_upsert_join_catchup_minimum(JoinCatchupMinimum *jcm);
 
 #endif

@@ -294,8 +294,8 @@ bdr_proposals_prepare(List *requests)
 			case BDR_MSG_NODE_JOIN_REQUEST:
 				bdr_join_handle_join_proposal(bmsg);
 				break;
-			case BDR_MSG_NODE_CATCHUP_READY:
-				bdr_join_handle_catchup_proposal(bmsg);
+			case BDR_MSG_NODE_STANDBY_READY:
+				bdr_join_handle_standby_proposal(bmsg);
 				break;
 			case BDR_MSG_NODE_ACTIVE:
 				bdr_join_handle_active_proposal(bmsg);
@@ -570,8 +570,8 @@ bdr_message_type_to_string(BdrMessageType msgtype)
 			return CppAsString2(BDR_MSG_NODE_JOIN_REQUEST);
 		case BDR_MSG_NODE_ID_SEQ_ALLOCATE:
 			return CppAsString2(BDR_MSG_NODE_ID_SEQ_ALLOCATE);
-		case BDR_MSG_NODE_CATCHUP_READY:
-			return CppAsString2(BDR_MSG_NODE_CATCHUP_READY);
+		case BDR_MSG_NODE_STANDBY_READY:
+			return CppAsString2(BDR_MSG_NODE_STANDBY_READY);
 		case BDR_MSG_NODE_ACTIVE:
 			return CppAsString2(BDR_MSG_NODE_ACTIVE);
 		case BDR_MSG_NODE_SLOT_CREATED:

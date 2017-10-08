@@ -70,14 +70,17 @@ state_has_extradata(BdrNodeState new_state)
 		case BDR_NODE_STATE_JOIN_SUBSCRIBE_JOIN_TARGET:
 		case BDR_NODE_STATE_JOIN_WAIT_SUBSCRIBE_COMPLETE:
 		case BDR_NODE_STATE_JOIN_GET_CATCHUP_LSN:
+		case BDR_NODE_STATE_JOIN_CREATE_TARGET_SLOT:
 		case BDR_NODE_STATE_JOIN_COPY_REPSET_MEMBERSHIPS:
-		case BDR_NODE_STATE_SEND_CATCHUP_READY:
+		case BDR_NODE_STATE_JOIN_CREATE_PEER_SLOTS:
+		case BDR_NODE_STATE_JOIN_WAIT_STANDBY_REPLAY:
+		case BDR_NODE_STATE_SEND_STANDBY_READY:
+		case BDR_NODE_STATE_JOIN_CREATE_SUBSCRIPTIONS:
 		case BDR_NODE_STATE_STANDBY:
 		case BDR_NODE_STATE_PROMOTING:
-		case BDR_NODE_STATE_CREATE_SLOTS:
+		case BDR_NODE_STATE_CREATE_LOCAL_SLOTS:
 		case BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE:
 		case BDR_NODE_STATE_REQUEST_GLOBAL_SEQ_ID:
-		case BDR_NODE_STATE_ACTIVE_SLOT_CREATE_PENDING:
 			return false;
 		case BDR_NODE_STATE_JOIN_START:
 		case BDR_NODE_STATE_JOIN_WAIT_CONFIRM:
@@ -117,16 +120,24 @@ bdr_node_state_name(BdrNodeState state)
 			return CppAsString2(BDR_NODE_STATE_JOIN_WAIT_SUBSCRIBE_COMPLETE);
 		case BDR_NODE_STATE_JOIN_GET_CATCHUP_LSN:
 			return CppAsString2(BDR_NODE_STATE_JOIN_GET_CATCHUP_LSN);
+		case BDR_NODE_STATE_JOIN_CREATE_TARGET_SLOT:
+			return CppAsString2(BDR_NODE_STATE_JOIN_CREATE_TARGET_SLOT);
 		case BDR_NODE_STATE_JOIN_COPY_REPSET_MEMBERSHIPS:
 			return CppAsString2(BDR_NODE_STATE_JOIN_COPY_REPSET_MEMBERSHIPS);
-		case BDR_NODE_STATE_SEND_CATCHUP_READY:
-			return CppAsString2(BDR_NODE_STATE_SEND_CATCHUP_READY);
+		case BDR_NODE_STATE_JOIN_CREATE_PEER_SLOTS:
+			return CppAsString2(BDR_NODE_STATE_JOIN_CREATE_PEER_SLOTS);
+		case BDR_NODE_STATE_JOIN_WAIT_STANDBY_REPLAY:
+			return CppAsString2(BDR_NODE_STATE_JOIN_WAIT_STANDBY_REPLAY);
+		case BDR_NODE_STATE_SEND_STANDBY_READY:
+			return CppAsString2(BDR_NODE_STATE_SEND_STANDBY_READY);
+		case BDR_NODE_STATE_JOIN_CREATE_SUBSCRIPTIONS:
+			return CppAsString2(BDR_NODE_STATE_JOIN_CREATE_SUBSCRIPTIONS);
 		case BDR_NODE_STATE_STANDBY:
 			return CppAsString2(BDR_NODE_STATE_STANDBY);
 		case BDR_NODE_STATE_PROMOTING:
 			return CppAsString2(BDR_NODE_STATE_PROMOTING);
-		case BDR_NODE_STATE_CREATE_SLOTS:
-			return CppAsString2(BDR_NODE_STATE_CREATE_SLOTS);
+		case BDR_NODE_STATE_CREATE_LOCAL_SLOTS:
+			return CppAsString2(BDR_NODE_STATE_CREATE_LOCAL_SLOTS);
 		case BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE:
 			return CppAsString2(BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE);
 		case BDR_NODE_STATE_REQUEST_GLOBAL_SEQ_ID:
@@ -147,8 +158,6 @@ bdr_node_state_name(BdrNodeState state)
 			return CppAsString2(BDR_NODE_STATE_JOIN_RANGE_END);
 		case BDR_NODE_STATE_UNUSED:
 			return CppAsString2(BDR_NODE_STATE_UNUSED);
-		case BDR_NODE_STATE_ACTIVE_SLOT_CREATE_PENDING:
-			return CppAsString2(BDR_NODE_STATE_ACTIVE_SLOT_CREATE_PENDING);
 		case BDR_NODE_ACTIVE_RANGE_END:
 			return CppAsString2(BDR_NODE_ACTIVE_RANGE_END);
 	}
@@ -427,6 +436,8 @@ state_transition_goal(BdrStateEntry *state, BdrNodeState new_state,
 	cur.peer_id = peer_id;
 	cur.extra_data = extradata;
 
+	Assert(state->current != cur.current);
+
 	elog(bdr_debug_level, "node %u state transition #%u, %s => %s",
 		 bdr_get_local_nodeid(), cur.counter,
 		 bdr_node_state_name(state->current),
@@ -472,8 +483,10 @@ state_get_expected(BdrStateEntry *state, bool for_update,
 
 	ereport(ERROR,
 			(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-			 errmsg("local BDR node %u in unexpected state %u; wanted %u",
-					bdr_get_local_nodeid(), cur.current, expected)));
+			 errmsg("local BDR node %u in unexpected state %s; wanted %s",
+					bdr_get_local_nodeid(),
+					bdr_node_state_name(cur.current),
+					bdr_node_state_name(expected))));
 }
 
 /*
@@ -542,12 +555,16 @@ bdr_state_dispatch(long *max_next_wait_msecs)
 		case BDR_NODE_STATE_JOIN_WAIT_SUBSCRIBE_COMPLETE:
 		case BDR_NODE_STATE_JOIN_GET_CATCHUP_LSN:
 		case BDR_NODE_STATE_JOIN_WAIT_CATCHUP:
+		case BDR_NODE_STATE_JOIN_CREATE_TARGET_SLOT:
 		case BDR_NODE_STATE_JOIN_COPY_REPSET_MEMBERSHIPS:
-		case BDR_NODE_STATE_SEND_CATCHUP_READY:
+		case BDR_NODE_STATE_JOIN_CREATE_PEER_SLOTS:
+		case BDR_NODE_STATE_JOIN_WAIT_STANDBY_REPLAY:
+		case BDR_NODE_STATE_SEND_STANDBY_READY:
 		case BDR_NODE_STATE_PROMOTING:
+		case BDR_NODE_STATE_JOIN_CREATE_SUBSCRIPTIONS:
 		case BDR_NODE_STATE_REQUEST_GLOBAL_SEQ_ID:
 		case BDR_NODE_STATE_WAIT_GLOBAL_SEQ_ID:
-		case BDR_NODE_STATE_CREATE_SLOTS:
+		case BDR_NODE_STATE_CREATE_LOCAL_SLOTS:
 		case BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE:
 			bdr_join_continue(cur.current, max_next_wait_msecs);
 			return;
@@ -555,13 +572,6 @@ bdr_state_dispatch(long *max_next_wait_msecs)
 		case BDR_NODE_STATE_STANDBY:
 			if (cur.goal != BDR_NODE_STATE_STANDBY)
 				bdr_join_continue(cur.current, max_next_wait_msecs);
-			break;
-
-		/*
-		 * Temporary states for active nodes
-		 */
-		case BDR_NODE_STATE_ACTIVE_SLOT_CREATE_PENDING:
-			bdr_join_create_peer_slot();
 			break;
 
 		/*

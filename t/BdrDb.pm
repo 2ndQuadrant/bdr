@@ -112,7 +112,7 @@ sub bdr_create_node_group {
 }
 
 sub bdr_join_node_group {
-	my ($self, $joingroup, $joinvia) = @_;
+	my ($self, $joingroup, $joinvia, %kwargs) = @_;
 
 	die 'joingroup is not a BdrDbGroup'
 		unless $joingroup->isa('BdrDbGroup');
@@ -129,15 +129,26 @@ sub bdr_join_node_group {
 			unless defined($joinvia);
 	}
 
+	my $pause_standby = '';
+	if ($kwargs{pause_in_standby}) {
+		$pause_standby = ", pause_in_standby := 't'";
+	}
+
 	my $query = "SELECT * FROM bdr.join_node_group("
 		. "join_target_dsn := " . quote_literal($joinvia->connstr)
 		. ", node_group_name := " . quote_literal($joingroup->name)
+		. $pause_standby
 		. ");";
 
 	print("Joining with query:\n$query\n") if $trace_sql;
 
 	# This launches an asynchronous join
 	$self->safe_psql($query);
+}
+
+sub bdr_promote {
+	my $self = shift;
+	$self->safe_psql('SELECT bdr.promote_node()');
 }
 
 # Query bdr_state_journal_details for the latest state tuple. (Will fail
@@ -168,10 +179,9 @@ sub bdr_wait_for_state {
 	}
 }
 
-# TODO: should be functions in BDR its self for this
 sub bdr_wait_for_join {
 	my $self = shift;
-	$self->bdr_wait_for_state('ACTIVE');
+	$self->safe_psql("SELECT bdr.wait_for_join_completion(verbose_progress := true)");
 }
 
 sub bdr_replication_set_add_table {

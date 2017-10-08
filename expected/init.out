@@ -15,7 +15,7 @@ SELECT E'\'' || current_database() || E'\'' AS node2_db
 -- Only used in tests
 CREATE FUNCTION bdr_submit_comment(message text)
 RETURNS text LANGUAGE c STRICT AS 'bdr','bdr_submit_comment';
-SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info(NULL);
+SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info(NULL) ORDER BY 1;
  node_name | node_local_state | nodegroup_name | pgl_interface_name 
 -----------+------------------+----------------+--------------------
 (0 rows)
@@ -28,7 +28,7 @@ NOTICE:  creating new pglogical node
         1
 (1 row)
 
-SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info(NULL);
+SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info(NULL) ORDER BY 1;
  node_name | node_local_state | nodegroup_name | pgl_interface_name 
 -----------+------------------+----------------+--------------------
  node1     |                1 |                | node1
@@ -50,20 +50,20 @@ BEGIN
   END LOOP;
 END;
 $$;
-SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info(NULL);
+SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info(NULL) ORDER BY 1;
  node_name | node_local_state | nodegroup_name | pgl_interface_name 
 -----------+------------------+----------------+--------------------
- node1     |                1 | bdrgroup       | node1
+ node1     |                4 | bdrgroup       | node1
 (1 row)
 
-SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info((SELECT node_group_id FROM bdr.node_group));
+SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info((SELECT node_group_id FROM bdr.node_group)) ORDER BY 1;
  node_name | node_local_state | nodegroup_name | pgl_interface_name 
 -----------+------------------+----------------+--------------------
- node1     |                1 | bdrgroup       | node1
+ node1     |                4 | bdrgroup       | node1
 (1 row)
 
 \c :node2_dsn
-SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info(NULL);
+SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info(NULL) ORDER BY 1;
  node_name | node_local_state | nodegroup_name | pgl_interface_name 
 -----------+------------------+----------------+--------------------
 (0 rows)
@@ -93,7 +93,7 @@ SELECT pg_sleep(0.5);
  
 (1 row)
 
-SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info((SELECT node_group_id FROM bdr.node_group));
+SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info((SELECT node_group_id FROM bdr.node_group)) ORDER BY 1;
  node_name | node_local_state | nodegroup_name | pgl_interface_name 
 -----------+------------------+----------------+--------------------
  node2     |                1 |                | node2
@@ -106,11 +106,11 @@ NOTICE:  node join started
         1
 (1 row)
 
-SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info((SELECT node_group_id FROM bdr.node_group));
+SELECT node_name, node_local_state, nodegroup_name, pgl_interface_name FROM bdr.node_group_member_info((SELECT node_group_id FROM bdr.node_group)) ORDER BY 1;
  node_name | node_local_state | nodegroup_name | pgl_interface_name 
 -----------+------------------+----------------+--------------------
- node2     |                1 | bdrgroup       | node2
- node1     |                1 | bdrgroup       | node1
+ node1     |                4 | bdrgroup       | node1
+ node2     |                2 | bdrgroup       | node2
 (2 rows)
 
 \c :node1_dsn
@@ -138,6 +138,20 @@ SELECT goal_state_name FROM bdr.state_journal_details ORDER BY state_counter DES
  STANDBY
 (1 row)
 
+-- Wait for the joining node to reach standby
+SELECT bdr.wait_for_join_completion();
+ wait_for_join_completion 
+--------------------------
+ STANDBY
+(1 row)
+
+SELECT slot_name, plugin, slot_type, database, temporary
+FROM pg_replication_slots ORDER BY slot_name;
+             slot_name             |      plugin      | slot_type |  database  | temporary 
+-----------------------------------+------------------+-----------+------------+-----------
+ bdr_postgres_bdrgroup_node1_node2 | pglogical_output | logical   | regression | f
+(1 row)
+
 -- TODO: replicate some minimal test data here
 -- TODO: Make standby read-only RM#859
 -- Promote to active
@@ -160,6 +174,14 @@ SELECT bdr.wait_for_join_completion();
 --------------------------
  ACTIVE
 (1 row)
+
+SELECT slot_name, plugin, slot_type, database, temporary
+FROM pg_replication_slots ORDER BY slot_name;
+              slot_name              |      plugin      | slot_type |  database  | temporary 
+-------------------------------------+------------------+-----------+------------+-----------
+ bdr_postgres_bdrgroup_node1_node2   | pglogical_output | logical   | regression | f
+ bdr_regression_bdrgroup_node2_node1 | pglogical_output | logical   | postgres   | f
+(2 rows)
 
 \c :node1_dsn
 -- Wait for the join target to start replaying from the joining node
@@ -203,12 +225,12 @@ ORDER BY application_name;
  bdrgroup_node2   | async
 (2 rows)
 
-SELECT slot_name, plugin, slot_type, database, temporary, active
+SELECT slot_name, plugin, slot_type, database, temporary
 FROM pg_replication_slots ORDER BY slot_name;
-              slot_name              |      plugin      | slot_type |  database  | temporary | active 
--------------------------------------+------------------+-----------+------------+-----------+--------
- bdr_postgres_bdrgroup_node1_node2   | pglogical_output | logical   | regression | f         | t
- bdr_regression_bdrgroup_node2_node1 | pglogical_output | logical   | postgres   | f         | t
+              slot_name              |      plugin      | slot_type |  database  | temporary 
+-------------------------------------+------------------+-----------+------------+-----------
+ bdr_postgres_bdrgroup_node1_node2   | pglogical_output | logical   | regression | f
+ bdr_regression_bdrgroup_node2_node1 | pglogical_output | logical   | postgres   | f
 (2 rows)
 
 SELECT
@@ -241,15 +263,18 @@ SELECT
 	regexp_replace(extra_data, '[[:xdigit:]]{1,8}/[[:xdigit:]]{8}', 'X/XXXXXXXX'),
 	 '[[:digit:]]', 'n', 'g') AS extra_data_masked
 FROM bdr.state_journal_details;
- state_counter | state |         state_name         |  peer_id   | peer_name | extra_data_masked 
----------------+-------+----------------------------+------------+-----------+-------------------
-             1 |     1 | CREATED                    |          0 |           | 
-             2 |  5000 | ACTIVE                     |          0 |           | 
-             3 |  5010 | ACTIVE_SLOT_CREATE_PENDING | 3367056606 | node2     | 
-             4 |  5000 | ACTIVE                     |          0 |           | 
-             5 |  5010 | ACTIVE_SLOT_CREATE_PENDING | 3367056606 | node2     | 
-             6 |  5000 | ACTIVE                     |          0 |           | 
-(6 rows)
+ state_counter | state | state_name | peer_id | peer_name | extra_data_masked 
+---------------+-------+------------+---------+-----------+-------------------
+             1 |     1 | CREATED    |       0 |           | 
+             2 |  5000 | ACTIVE     |       0 |           | 
+(2 rows)
+
+SELECT pn.node_name, jcp.min_slot_lsn IS NOT NULL, jcp.passed_min_slot_lsn
+FROM bdr.join_catchup_minimum jcp JOIN pglogical.node pn ON jcp.node_id = pn.node_id
+ORDER BY pn.node_name;
+ node_name | ?column? | passed_min_slot_lsn 
+-----------+----------+---------------------
+(0 rows)
 
 \c :node2_dsn
 SELECT
@@ -264,18 +289,29 @@ FROM bdr.state_journal_details;
              2 |  1000 | JOIN_START                   | 1148549230 | node1     | node group name: bdrgroup
              3 |  1010 | JOIN_WAIT_CONFIRM            | 1148549230 | node1     | global consensus message handle: n
              4 |  1020 | JOIN_COPY_REMOTE_NODES       | 1148549230 | node1     | 
-             5 |  1040 | JOIN_SUBSCRIBE_JOIN_TARGET   | 1148549230 | node1     | 
-             6 |  1050 | JOIN_WAIT_SUBSCRIBE_COMPLETE | 1148549230 | node1     | 
-             7 |  1060 | JOIN_GET_CATCHUP_LSN         | 1148549230 | node1     | 
-             8 |  1070 | JOIN_WAIT_CATCHUP            | 1148549230 | node1     | minimum catchup lsn: X/XXXXXXXX
-             9 |  1080 | JOIN_COPY_REPSET_MEMBERSHIPS | 1148549230 | node1     | 
-            10 |  1100 | SEND_CATCHUP_READY           | 1148549230 | node1     | 
-            11 |  2000 | STANDBY                      | 1148549230 | node1     | 
-            12 |  2005 | PROMOTING                    | 1148549230 | node1     | 
-            13 |  2010 | REQUEST_GLOBAL_SEQ_ID        | 1148549230 | node1     | 
-            14 |  2020 | WAIT_GLOBAL_SEQ_ID           | 1148549230 | node1     | global consensus message handle: n
-            15 |  2030 | CREATE_SLOTS                 | 1148549230 | node1     | 
-            16 |  2040 | SEND_ACTIVE_ANNOUNCE         | 1148549230 | node1     | 
-            17 |  5000 | ACTIVE                       |          0 |           | 
-(17 rows)
+             5 |  1025 | JOIN_CREATE_TARGET_SLOT      | 1148549230 | node1     | 
+             6 |  1040 | JOIN_SUBSCRIBE_JOIN_TARGET   | 1148549230 | node1     | 
+             7 |  1050 | JOIN_WAIT_SUBSCRIBE_COMPLETE | 1148549230 | node1     | 
+             8 |  1080 | JOIN_COPY_REPSET_MEMBERSHIPS | 1148549230 | node1     | 
+             9 |  1055 | JOIN_CREATE_SUBSCRIPTIONS    | 1148549230 | node1     | 
+            10 |  1060 | JOIN_GET_CATCHUP_LSN         | 1148549230 | node1     | 
+            11 |  1070 | JOIN_WAIT_CATCHUP            | 1148549230 | node1     | minimum catchup lsn: X/XXXXXXXX
+            12 |  1090 | JOIN_CREATE_PEER_SLOTS       | 1148549230 | node1     | 
+            13 |  1100 | JOIN_WAIT_STANDBY_REPLAY     | 1148549230 | node1     | 
+            14 |  1110 | SEND_STANDBY_READY           | 1148549230 | node1     | 
+            15 |  2000 | STANDBY                      | 1148549230 | node1     | 
+            16 |  2005 | PROMOTING                    | 1148549230 | node1     | 
+            17 |  2010 | REQUEST_GLOBAL_SEQ_ID        | 1148549230 | node1     | 
+            18 |  2020 | WAIT_GLOBAL_SEQ_ID           | 1148549230 | node1     | global consensus message handle: n
+            19 |  2030 | CREATE_LOCAL_SLOTS           | 1148549230 | node1     | 
+            20 |  2040 | SEND_ACTIVE_ANNOUNCE         | 1148549230 | node1     | 
+            21 |  5000 | ACTIVE                       |          0 |           | 
+(21 rows)
+
+SELECT pn.node_name, jcp.min_slot_lsn IS NOT NULL, jcp.passed_min_slot_lsn
+FROM bdr.join_catchup_minimum jcp JOIN pglogical.node pn ON jcp.node_id = pn.node_id
+ORDER BY pn.node_name;
+ node_name | ?column? | passed_min_slot_lsn 
+-----------+----------+---------------------
+(0 rows)
 

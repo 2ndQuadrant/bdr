@@ -39,6 +39,7 @@
 #include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
+#include "utils/pg_lsn.h"
 #include "utils/rel.h"
 #include "utils/timestamp.h"
 #include "utils/typcache.h"
@@ -47,11 +48,12 @@
 #include "bdr_catalogs.h"
 #include "bdr_consensus.h"
 
-#define CATALOG_NODE				"node"
-#define CATALOG_NODE_GROUP			"node_group"
-#define CATALOG_STATE				"state_journal"
-#define CATALOG_STATE_COUNTER_IDX	"state_journal_pkey"
-#define CATALOG_SUBSCRIPTION		"subscription"
+#define CATALOG_NODE					"node"
+#define CATALOG_NODE_GROUP				"node_group"
+#define CATALOG_STATE					"state_journal"
+#define CATALOG_STATE_COUNTER_IDX		"state_journal_pkey"
+#define CATALOG_SUBSCRIPTION			"subscription"
+#define CATALOG_JOIN_CATCHUP_MINIMUM	"join_catchup_minimum"
 
 typedef struct NodeTuple
 {
@@ -59,7 +61,6 @@ typedef struct NodeTuple
 	Oid			node_group_id;
 	int32		local_state;
 	int32		seq_id;
-	bool		confirmed_our_join;
 	NameData	dbname;
 } NodeTuple;
 
@@ -68,8 +69,7 @@ typedef struct NodeTuple
 #define Anum_node_node_group_id			2
 #define Anum_node_local_state			3
 #define Anum_node_seq_id				4
-#define Anum_node_confirmed_our_join	5
-#define Anum_node_dbname				6
+#define Anum_node_dbname				5
 
 typedef struct NodeGroupTuple
 {
@@ -118,6 +118,20 @@ typedef struct SubscriptionTuple
 #define Anum_subscription_origin_node_id	3
 #define Anum_subscription_target_node_id	4
 #define Anum_subscription_mode				5
+
+typedef struct JoinCatchupMinimumTuple
+{
+	Oid			node_id;
+	NameData	slot_name;
+	XLogRecPtr	slot_min_lsn;
+	bool		passed_slot_min_lsn;
+} JoinCatchupMinimumTuple;
+
+#define Natts_join_catchup_minimum						4
+#define Anum_join_catchup_minimum_node_id				1
+#define Anum_join_catchup_minimum_slot_name				2
+#define Anum_join_catchup_minimum_slot_min_lsn			3
+#define Anum_join_catchup_minimum_passed_slot_min_lsn	4
 
 static BdrNodeGroup *
 bdr_nodegroup_fromtuple(HeapTuple tuple)
@@ -273,7 +287,6 @@ bdr_node_fromtuple(HeapTuple tuple)
 	node->node_group_id = nodetup->node_group_id;
 	node->local_state = nodetup->local_state;
 	node->seq_id = nodetup->seq_id;
-	node->confirmed_our_join = nodetup->confirmed_our_join;
 	node->dbname = pstrdup(NameStr(nodetup->dbname));
 
 	/*
@@ -497,9 +510,7 @@ bdr_node_create(BdrNode *node)
 	values[Anum_node_node_group_id - 1] = ObjectIdGetDatum(node->node_group_id);
 	values[Anum_node_local_state - 1] = ObjectIdGetDatum(node->local_state);
 	values[Anum_node_seq_id - 1] = Int32GetDatum(node->seq_id);
-	values[Anum_node_confirmed_our_join - 1] = BoolGetDatum(node->confirmed_our_join);
 	values[Anum_node_dbname - 1] = CStringGetDatum(node->dbname);
-
 	tup = heap_form_tuple(tupDesc, values, nulls);
 
 	/* Insert the tuple to the catalog. */
@@ -554,10 +565,8 @@ bdr_modify_node(BdrNode *node)
 	values[Anum_node_node_group_id - 1] = ObjectIdGetDatum(node->node_group_id);
 	values[Anum_node_local_state - 1] = ObjectIdGetDatum(node->local_state);
 	values[Anum_node_seq_id - 1] = Int32GetDatum(node->seq_id);
-	values[Anum_node_confirmed_our_join - 1] = BoolGetDatum(node->confirmed_our_join);
 	/* dbname can change if db is renamed, though currently we won't notice */
 	values[Anum_node_dbname - 1] = CStringGetDatum(node->dbname);
-
 	newtup = heap_modify_tuple(oldtup, tupDesc, values, nulls, replaces);
 
 	/* Update the tuple in catalog. */
@@ -824,10 +833,13 @@ bdr_get_node_subscription(uint32 target_node_id, uint32 origin_node_id,
 	tuple = systable_getnext(scan);
 	
 	if (!HeapTupleIsValid(tuple) && !missing_ok)
+	{
+		Assert(false);
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("subscription for %u->%u in nodegroup %u not found",
 				 		target_node_id, origin_node_id, nodegroup_id)));
+	}
 
 	if (HeapTupleIsValid(tuple))
 		ret = subscription_fromtuple(tuple);
@@ -1085,4 +1097,140 @@ state_decode_tuple(BdrStateEntry *state, HeapTupleHeader tupheader)
 	state_fromtuple(state, &tuple, tupdesc, true);
 
 	ReleaseTupleDesc(tupdesc);
+}
+
+const char *
+bdr_peer_state_name(BdrPeerState state)
+{
+	switch (state)
+	{
+		case BDR_PEER_STATE_UNUSED:
+			return CppAsString2(BDR_PEER_STATE_UNUSED);
+		case BDR_PEER_STATE_CREATED:
+			return CppAsString2(BDR_PEER_STATE_CREATED);
+		case BDR_PEER_STATE_JOINING:
+			return CppAsString2(BDR_PEER_STATE_JOINING);
+		case BDR_PEER_STATE_STANDBY:
+			return CppAsString2(BDR_PEER_STATE_STANDBY);
+		case BDR_PEER_STATE_ACTIVE:
+			return CppAsString2(BDR_PEER_STATE_ACTIVE);
+	}
+	Assert(false);
+	elog(ERROR, "unhandled case BdrPeerState %u", state);
+}
+
+static void
+bdr_join_catchup_make_tuple(JoinCatchupMinimum *jcm, Datum* values,
+	bool *nulls)
+{
+	memset(nulls, false, Natts_join_catchup_minimum);
+	values[Anum_join_catchup_minimum_node_id - 1]
+		= ObjectIdGetDatum(jcm->node_id);
+	values[Anum_join_catchup_minimum_slot_min_lsn - 1]
+		= LSNGetDatum(jcm->slot_min_lsn);
+	values[Anum_join_catchup_minimum_passed_slot_min_lsn - 1]
+		= BoolGetDatum(jcm->passed_slot_min_lsn);
+}
+
+static void
+bdr_join_catchup_minimum_fromtuple(HeapTuple tuple,
+	JoinCatchupMinimum *jcm)
+{
+	JoinCatchupMinimumTuple *mintup
+		= (JoinCatchupMinimumTuple *) GETSTRUCT(tuple);
+	jcm->node_id = mintup->node_id;
+	jcm->slot_min_lsn = mintup->slot_min_lsn;
+	jcm->passed_slot_min_lsn = mintup->passed_slot_min_lsn;
+}
+
+bool
+bdr_get_join_catchup_minimum(Oid nodeid, JoinCatchupMinimum * jcmout,
+	bool missing_ok)
+{
+	RangeVar	   *rv;
+	Relation		rel;
+	SysScanDesc		scan;
+	HeapTuple		tuple;
+	ScanKeyData		key[1];
+
+	/* and the BDR node info */
+	rv = makeRangeVar(BDR_EXTENSION_NAME, CATALOG_JOIN_CATCHUP_MINIMUM, -1);
+	rel = heap_openrv(rv, RowExclusiveLock);
+
+	/* Search for node record. */
+	ScanKeyInit(&key[0],
+				Anum_join_catchup_minimum_node_id,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(nodeid));
+
+	scan = systable_beginscan(rel, 0, true, NULL, 1, key);
+	tuple = systable_getnext(scan);
+
+	/* Defaults if not found */
+	jcmout->node_id = nodeid;
+	jcmout->slot_min_lsn = InvalidXLogRecPtr;
+	jcmout->passed_slot_min_lsn = false;
+
+	if (!HeapTupleIsValid(tuple) && !missing_ok)
+		elog(ERROR, "join catchup minimum entry for node %u not found",
+			 nodeid);
+
+	if (HeapTupleIsValid(tuple))
+		bdr_join_catchup_minimum_fromtuple(tuple, jcmout);
+
+	systable_endscan(scan);
+	heap_close(rel, RowExclusiveLock);
+
+	return HeapTupleIsValid(tuple);
+}
+
+void
+bdr_upsert_join_catchup_minimum(JoinCatchupMinimum *jcm)
+{
+	RangeVar   *rv;
+	Relation	rel;
+	TupleDesc	tupDesc;
+	HeapTuple	oldtup,
+				newtup;
+	Datum		values[Natts_join_catchup_minimum];
+	bool		nulls[Natts_join_catchup_minimum];
+	ScanKeyData		key[1];
+	SysScanDesc		scan;
+
+	rv = makeRangeVar(BDR_EXTENSION_NAME, CATALOG_JOIN_CATCHUP_MINIMUM, -1);
+	rel = heap_openrv(rv, ShareRowExclusiveLock); /* strong for upsert */
+	tupDesc = RelationGetDescr(rel);
+
+	ScanKeyInit(&key[0],
+				Anum_join_catchup_minimum_node_id,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(jcm->node_id));
+
+	scan = systable_beginscan(rel, 0, true, NULL, 1, key);
+	oldtup = systable_getnext(scan);
+
+	if (!HeapTupleIsValid(oldtup))
+	{
+		/* INSERT */
+		bdr_join_catchup_make_tuple(jcm, values, nulls);
+		newtup = heap_form_tuple(tupDesc, values, nulls);
+		CatalogTupleInsert(rel, newtup);
+	}
+	else
+	{
+		/* UPDATE */
+		bool replaces[Natts_join_catchup_minimum];
+		memset(replaces, true, sizeof(replaces));
+		bdr_join_catchup_make_tuple(jcm, values, nulls);
+		newtup = heap_modify_tuple(oldtup, tupDesc, values, nulls, replaces);
+
+		/* Update the tuple in catalog. */
+		CatalogTupleUpdate(rel, &oldtup->t_self, newtup);
+	}
+
+	/* Cleanup. */
+	heap_freetuple(newtup);
+	heap_close(rel, NoLock);
+
+	CommandCounterIncrement();
 }

@@ -136,7 +136,7 @@ bdr_create_node_sql(PG_FUNCTION_ARGS)
 	bnode.confirmed_our_join = false;
 	bnode.node_group_id = InvalidOid;
 	bnode.dbname = get_database_name(MyDatabaseId);
-	bnode.local_state = BDR_NODE_STATE_CREATED;
+	bnode.local_state = BDR_PEER_STATE_CREATED;
 
 	bdr_node_create(&bnode);
 	bdr_refresh_cache_local_nodeinfo();
@@ -234,6 +234,13 @@ bdr_create_node_group_sql(PG_FUNCTION_ARGS)
 	state_transition_goal(&cur_state, BDR_NODE_STATE_ACTIVE,
 		BDR_NODE_STATE_ACTIVE, 0, 0, NULL);
 
+	/*
+	 * We need to update our bdr.node entry too, so that when we
+	 * report it to peers they know we're active.
+	 */
+	info->bdr_node->local_state = BDR_PEER_STATE_ACTIVE;
+	bdr_modify_node(info->bdr_node);
+
 	pglogical_subscription_changed(InvalidOid);
 
 	PG_RETURN_OID(nodegroup.id);
@@ -246,22 +253,11 @@ PG_FUNCTION_INFO_V1(bdr_join_node_group_sql);
  * and establish replication with all existing peers of the nodegroup.
  *
  * This is the guts of BDR's node join. It's too complex to be documented
- * entirely here. The final result is to:
+ * entirely here; see bdr_join.c.
  *
- * - Create bdr.nodes entry for this node on peer nodes, in catchup status
- *   (Reserves the node's name as unique across the nodegroup)
- * - Discover all other nodes and create local bdr.node entries for them
- * - Create slots on all other nodes for this node
- * - 
- * 
- * Later, we'll split out these later steps into a separate promote function
- * and optionally run promotion immediately or delayed:
- *
- * - Create slots for peer nodes on this node
- * - Allocate a global sequence ID to the node
- * - Start replicating from this node to remote nodes
- * - Create bdr.node entries for this node on remotes
- * - Make node read/write
+ * This function does some validation of the peer node then sets up
+ * local state to prepare to join it. Then we hand over to the manager
+ * worker and bdr_state.c to drive the join via bdr_join.c.
  */
 Datum
 bdr_join_node_group_sql(PG_FUNCTION_ARGS)
@@ -292,14 +288,7 @@ bdr_join_node_group_sql(PG_FUNCTION_ARGS)
 			goal_state = BDR_NODE_STATE_STANDBY;
 	}
 
-	/*
-	 * TODO FIXME should take for-update lock here
-	 *
-	 * We should probably lock our local node for update, but if we do that at
-	 * the moment we'll deadlock with the manager's attempts to manage apply
-	 * workers.
-	 */
-	local = bdr_check_local_node(false);
+	local = bdr_check_local_node(true);
 
 	bdr_cache_local_nodeinfo();
 
@@ -356,6 +345,14 @@ bdr_join_node_group_sql(PG_FUNCTION_ARGS)
 		state_transition_goal(&cur_state, BDR_NODE_STATE_JOIN_START,
 			goal_state, 0, remote->pgl_node->id, &extra);
 
+		Assert(local->bdr_node->local_state == BDR_PEER_STATE_CREATED);
+		elog(bdr_debug_level, "%s updating local_state from %s to %s",
+			 local->pgl_node->name,
+			 bdr_peer_state_name(local->bdr_node->local_state),
+			 bdr_peer_state_name(BDR_PEER_STATE_JOINING));
+		local->bdr_node->local_state = BDR_PEER_STATE_JOINING;
+		bdr_modify_node(local->bdr_node);
+
 		/*
 		 * TODO: more sanity checks here. Connectback to validate our dsn, etc.
 		 * Borrow liberally from pglogical.
@@ -387,6 +384,7 @@ Datum
 bdr_promote_node_sql(PG_FUNCTION_ARGS)
 {
 	BdrStateEntry cur_state;
+	PGLogicalWorker *manager;
 
 	(void) bdr_check_local_node(true);
 
@@ -394,6 +392,16 @@ bdr_promote_node_sql(PG_FUNCTION_ARGS)
 
 	state_transition_goal(&cur_state, BDR_NODE_STATE_PROMOTING,
 		BDR_NODE_STATE_ACTIVE, 0, cur_state.peer_id, NULL);
+
+	LWLockAcquire(PGLogicalCtx->lock, LW_SHARED);
+	manager = pglogical_manager_find(MyDatabaseId, NULL);
+	if (manager && manager->proc)
+	{
+		/* Signal the manager worker */
+		SetLatch(&manager->proc->procLatch);
+		kill(manager->proc->pid, SIGUSR1);
+	}
+	LWLockRelease(PGLogicalCtx->lock);
 
 	ereport(NOTICE, (errmsg("node promotion started in the background")));
 
@@ -844,6 +852,19 @@ bdr_decode_state(PG_FUNCTION_ARGS)
 	htup = heap_form_tuple(tupdesc, values, nulls);
 
 	PG_RETURN_DATUM(HeapTupleGetDatum(htup));
+}
+
+PG_FUNCTION_INFO_V1(bdr_peer_state_name_sql);
+
+Datum
+bdr_peer_state_name_sql(PG_FUNCTION_ARGS)
+{
+	Oid stateno = PG_GETARG_OID(0);
+	const char *state_name;
+
+	state_name = bdr_peer_state_name(stateno);
+
+	PG_RETURN_TEXT_P(cstring_to_text(state_name));
 }
 
 PG_FUNCTION_INFO_V1(bdr_submit_comment);

@@ -46,6 +46,7 @@
 #include "pglogical_sync.h"
 #include "pglogical_worker.h"
 #include "pglogical_plugins.h"
+#include "pglogical_rpc.h"
 
 #include "bdr_catcache.h"
 #include "bdr_consensus.h"
@@ -54,6 +55,9 @@
 #include "bdr_manager.h"
 #include "bdr_state.h"
 #include "bdr_worker.h"
+	
+/* We cannot use ERRCODE_DUPLICATE_OBJECT because it's bit-packed */
+#define SQLSTATE_DUPLICATE_OBJECT "42710"
 
 /*
  * Local non-persistent state for join. Persistent state is in the state
@@ -90,9 +94,10 @@ struct BdrJoinProgress
 
 struct BdrJoinProgress join = { NULL, NULL, false, NULL, -1, NULL};
 
-static void bdr_join_create_slot(BdrNodeInfo *local, BdrNodeInfo *remote);
+static void bdr_create_local_slot(BdrNodeInfo *local, BdrNodeInfo *remote);
 static void bdr_create_subscription(BdrNodeInfo *local, BdrNodeInfo *remote,
-	int apply_delay_ms, bool for_join, char initial_mode);
+	int apply_delay_ms, bool for_join, char initial_mode,
+	bool initially_enabled);
 static void bdr_join_wait_event_set_register(void);
 static void backend_sleep_conn(int millis, PGconn *conn);
 
@@ -230,8 +235,6 @@ bdr_join_connect_remote(BdrNodeInfo *local, const char * remote_node_dsn)
 	PGconn *conn;
 	int ret;
 
-	Assert(!is_bdr_manager());
-
 	conn = bdr_join_begin_connect_remote(local, remote_node_dsn);
 	for (;;)
 	{
@@ -287,6 +290,7 @@ bdr_join_submit_request(const char * node_group_name)
 	snprintf(my_node_id, MAX_DIGITS_INT32, "%u",
 		local->bdr_node->node_id);
 	paramValues[2] = my_node_id;
+	Assert(local->bdr_node->local_state == BDR_PEER_STATE_JOINING);
 	snprintf(my_node_initial_state, MAX_DIGITS_INT32, "%d",
 		local->bdr_node->local_state);
 	paramValues[3] = my_node_initial_state;
@@ -458,6 +462,8 @@ bdr_join_handle_join_proposal(BdrMessage *msg)
 
 	Assert(is_bdr_manager());
 	Assert(msg->message_type == BDR_MSG_NODE_JOIN_REQUEST);
+
+	/* FIXME RM#1118: This is bogus, any node active in messaging could get this */
 	state_get_expected(&cur_state, true, true, BDR_NODE_STATE_ACTIVE);
 
 	local_nodegroup = bdr_get_nodegroup_by_name(req->nodegroup_name, false);
@@ -484,23 +490,19 @@ bdr_join_handle_join_proposal(BdrMessage *msg)
 
 	bnode.node_id = req->joining_node_id;
 	bnode.node_group_id = local_nodegroup->id;
-	/*
-	 * TODO: should set local state to joining
-	 */
 	bnode.local_state = req->joining_node_state;
 	bnode.seq_id = 0;
 	bnode.dbname = req->joining_node_dbname;
+
+	if (req->joining_node_state != BDR_PEER_STATE_JOINING)
+		elog(WARNING, "joining node reported unexpected initial state %s, expected %s",
+			 bdr_peer_state_name(req->joining_node_state),
+			 bdr_peer_state_name(BDR_PEER_STATE_JOINING));
 
 	pnodeif.id = req->joining_node_if_id;
 	pnodeif.name = req->joining_node_if_name;
 	pnodeif.nodeid = pnode.id;
 	pnodeif.dsn = req->joining_node_if_dsn;
-
-	/*
-	 * TODO: should treat node as join-confirmed if we're an active
-	 * node ourselves.
-	 */
-	bnode.confirmed_our_join = false;
 
 	/* TODO: do upserts here in case pgl node or even bdr node exists already */
 	create_node(&pnode);
@@ -514,64 +516,21 @@ bdr_join_handle_join_proposal(BdrMessage *msg)
 	mn_consensus_add_or_update_node(bnode.node_id, pnodeif.dsn, false);
 
 	/*
-	 * If this node is the join target, the joining peer will need a
-	 * replication slot to use for catchup mode subscription. Create one now.
+	 * Ideally we'd create the peer's replication slot here, transactionally,
+	 * so that it'd be bound by our concensus negotation. It wouldn't be left dangling
+	 * if the join failed, couldn't be left un-created by accident, etc.
 	 *
-	 * Otherwise we'll delay slot creation until the peer is entering catchup
-	 * standby mode so there's less cleanup to do in case of failure, less resource
-	 * retention to worry about, etc.
+	 * But we can't, because of the issues outlined in bdr_create_local_slot().
 	 *
-	 * Unfortunately we cannot create a logical replication slot in an xact
-	 * that's done writes, let alone a prepared xact. And we must do this reliably,
-	 * so we don't want to wait for the after-commit callback. To solve that,
-	 * transition the node's local state and action the slot creation once
-	 * we've committed. This'll call bdr_join_create_peer_slot() to do the
-	 * creation.
+	 * So we let the peer connect over walsender protocol and make the slot.
+	 * We can't even wait for that to succeed before we ack, because decoding
+	 * won't finish the slot creation until our xact commits.
 	 */
-	if (req->join_target_node_id == bdr_get_local_nodeid())
-	{
-		state_transition_goal(&cur_state, BDR_NODE_STATE_ACTIVE_SLOT_CREATE_PENDING,
-			cur_state.goal, msg->global_consensus_no, req->joining_node_id, NULL);
-	}
 
 	/*
 	 * We don't subscribe to the node yet, that only happens once it goes
 	 * active.
 	 */
-}
-
-/*
- * Respond to a BDR_MSG_NODE_JOIN_REQUEST request's
- * BDR_NODE_STATE_ACTIVE_SLOT_CREATE_PENDING state by creating a slot for the
- * peer and returning to BDR_NODE_STATE_ACTIVE.
- */
-void
-bdr_join_create_peer_slot(void)
-{
-	BdrStateEntry cur_state;
-	BdrNodeInfo *local, *remote;
-
-	Assert(!IsTransactionState());
-	StartTransactionCommand();
-	state_get_expected(&cur_state, true, true,
-		BDR_NODE_STATE_ACTIVE_SLOT_CREATE_PENDING);
-
-	local = bdr_get_cached_local_node_info();
-	remote = bdr_get_node_info(cur_state.peer_id, false);
-	bdr_join_create_slot(local, remote);
-
-	state_transition_goal(&cur_state, BDR_NODE_STATE_ACTIVE,
-		cur_state.goal, 0, 0, NULL);
-
-	/*
-	 * TODO: should set local state for peer node entry.
-	 */
-
-	/*
-	 * TODO: write a catchup-confirmation message
-	 * here, so the peer can tally join confirmations
-	 */
-	CommitTransactionCommand();
 }
 
 /*
@@ -727,61 +686,57 @@ bdr_join_continue_wait_confirm(BdrStateEntry *cur_state, BdrNodeInfo *local)
 
 /*
  * A peer node says it wants to go into catchup mode and sent us a
- * BDR_MSG_NODE_CATCHUP_READY.
+ * BDR_MSG_NODE_STANDBY_READY.
  *
- * That peer might be us; we handle our own catchup mode request here too, in
- * response to a BDR_NODE_STATE_SEND_CATCHUP_READY state. In that case we'll
+ * That peer might be us; we handle our own standby mode request here too, in
+ * response to a BDR_NODE_STATE_SEND_STANDBY_READY state. In that case we'll
  * transition to BDR_NODE_STATE_STANDBY on commit.
- *
- * (This won't really require consensus, but it's simplest to treat it as if it does)
- *
- * At this point we need to create slots for the peer to use. The peer won't
- * be replaying data from them yet, but it should connect and advance them
- * so we don't retain excess resources. (TODO)
- *
- * TODO: should create an ephemeral slot here, and make it permanent on commit?
  */
 void
-bdr_join_handle_catchup_proposal(BdrMessage *msg)
+bdr_join_handle_standby_proposal(BdrMessage *msg)
 {
 	BdrNodeInfo		   *local;
 
 	Assert(is_bdr_manager());
-	Assert(msg->message_type == BDR_MSG_NODE_CATCHUP_READY);
+	Assert(msg->message_type == BDR_MSG_NODE_STANDBY_READY);
 
 	/*
 	 * Catchup ready announcements are empty, with no payload,
 	 * but we might want to add one later, so we don't check.
 	 */
-
 	local = bdr_get_local_node_info(false, false);
 
 	if (local->bdr_node->node_id != msg->originator_id)
 	{
-		/*
-		 * Just like in bdr_node_join_handle_proposal, we can't create the slot
-		 * here if we might have done writes or if we expect to do 2PC. We have
-		 * to transition to a temporary local state to queue the slot creation
-		 * for after we accept this, instead.
-		 */
-		BdrStateEntry cur_state;
+		BdrStateEntry	cur_state;
+		BdrNode		   *peer;
 
+		/* FIXME RM#1118: this is bogus, any joining or standby node could get this */
 		state_get_expected(&cur_state, true, false,
 			BDR_NODE_STATE_ACTIVE);
 
-		bdr_consensus_refresh_nodes(cur_state.current);
+		peer = bdr_get_node(msg->originator_id, false);
+		if (peer->local_state != BDR_PEER_STATE_JOINING)
+			elog(WARNING, "unexpected peer node state on %u: %s during catchup proposal, expected %s",
+				 peer->node_id,
+				 bdr_peer_state_name(peer->local_state),
+				 bdr_peer_state_name(BDR_PEER_STATE_JOINING));
+		else
+			elog(bdr_debug_level, "updating peer %u status from %s to %s",
+				 peer->node_id,
+				 bdr_peer_state_name(peer->local_state),
+				 bdr_peer_state_name(BDR_PEER_STATE_STANDBY));
 
-		/*
-		 * It's OK if we're the join target, we'll notice we already have
-		 * a slot and not create one here.
-		 */
-		state_transition_goal(&cur_state,
-			BDR_NODE_STATE_ACTIVE_SLOT_CREATE_PENDING,
-			cur_state.goal, 0, msg->originator_id,
-			NULL);
+		peer->local_state = BDR_PEER_STATE_STANDBY;
+			 
+		bdr_modify_node(peer);
+
+		bdr_consensus_refresh_nodes(cur_state.current);
 	}
 	else
 	{
+		BdrPeerState old_local_state;
+
 		/*
 		 * We're processing a locally originated message. On consensus we need
 		 * to transition to a new state to continue the join.
@@ -789,9 +744,23 @@ bdr_join_handle_catchup_proposal(BdrMessage *msg)
 		BdrStateEntry cur_state;
 
 		state_get_expected(&cur_state, true, false,
-			BDR_NODE_STATE_SEND_CATCHUP_READY);
+			BDR_NODE_STATE_SEND_STANDBY_READY);
 
 		bdr_consensus_refresh_nodes(cur_state.current);
+
+		/*
+		 * We've reached local standby mode and peers will update their idea of
+		 * our state accordingly. So we should make sure our local entry
+		 * matches, even though we don't really use it for much.
+		 */
+		local = bdr_get_local_node_info(true, false);
+		old_local_state = local->bdr_node->local_state;
+		local->bdr_node->local_state = BDR_PEER_STATE_STANDBY;
+		elog(bdr_debug_level, "%s updated local state from %s to %s",
+			local->pgl_node->name, bdr_peer_state_name(old_local_state),
+			bdr_peer_state_name(local->bdr_node->local_state));
+
+		bdr_modify_node(local->bdr_node);
 
 		state_transition(&cur_state, BDR_NODE_STATE_STANDBY,
 			NULL);
@@ -825,21 +794,49 @@ bdr_join_handle_active_proposal(BdrMessage *msg)
 
 	if (local->bdr_node->node_id != remote->bdr_node->node_id)
 	{
+		/*
+		 * Another node is going from standby to active.
+		 *
+		 * FIXME RM#1118: this is wrong, we could be in any valid state, and it's totally
+		 * normal for standbys to handle this...
+		 */
 		state_get_expected(&cur_state, true, true, BDR_NODE_STATE_ACTIVE);
+
+		/*
+		 * If we're currently in an state where we've created slots for active
+		 * peers and we're yet to be confirmed as a standby by the group, the
+		 * remote peer won't have created a slot for us. But we didn't create
+		 * one on it when we prepared for standby mode, because it was only
+		 * another standby then.
+		 *
+		 * We're not a standby yet so we can allow it to promote without
+		 * breaking any promises. We just have to go back to the slot creation
+		 * phase and make a slot for it, then repeat the catchup phase.
+		 */
+		if (cur_state.current > BDR_NODE_STATE_JOIN_CREATE_PEER_SLOTS
+			&& cur_state.current < BDR_NODE_STATE_STANDBY)
+		{
+			/* Restart entering standby at the slot creation phase */
+			elog(bdr_debug_level,
+				 "peer %s went active, going back to CREATE_PEER_SLOTS state",
+				 remote->pgl_node->name);
+			state_transition(&cur_state, BDR_NODE_STATE_JOIN_CREATE_PEER_SLOTS, NULL);
+		}
+
 
 		/*
 		 * We can now create a subscription to the joining node, to be started
 		 * once we commit.
 		 */
-		bdr_create_subscription(local, remote, 0, false, BDR_SUBSCRIPTION_MODE_NORMAL);
+		bdr_create_subscription(local, remote, 0, false,
+			BDR_SUBSCRIPTION_MODE_NORMAL, true);
 	}
 	else
 	{
 		/*
-		 * We're the joining node, so enable our subs to all peers.
+		 * We're the joining/promoting node, so enable our subs to all peers.
 		 */
 		List	   *subs;
-		List	   *nodes;
 		ListCell   *lc;
 
 		state_get_expected(&cur_state, true, true,
@@ -850,8 +847,6 @@ bdr_join_handle_active_proposal(BdrMessage *msg)
 		 * replay.
 		 */
 		subs = bdr_get_node_subscriptions(local->pgl_node->id);
-		/* There should only be one subscription */
-		Assert(list_length(subs) == 1);
 		foreach (lc, subs)
 		{
 			BdrSubscription *sub = lfirst(lc);
@@ -860,10 +855,19 @@ bdr_join_handle_active_proposal(BdrMessage *msg)
 			Assert(sub->target_node_id == local->pgl_node->id);
 			/* Can't have a subscription to ourselves */
 			Assert(sub->origin_node_id != local->pgl_node->id);
-			/* Only subscription allowed before we go active is the catchup sub */
-			Assert(sub->origin_node_id == cur_state.peer_id);
-			Assert(sub->mode == BDR_SUBSCRIPTION_MODE_CATCHUP);
-			sub->mode = BDR_SUBSCRIPTION_MODE_NORMAL;
+			if (sub->origin_node_id == cur_state.peer_id)
+			{
+				/* It's our join target subscription */
+				Assert(sub->mode == BDR_SUBSCRIPTION_MODE_CATCHUP);
+				sub->mode = BDR_SUBSCRIPTION_MODE_NORMAL;
+			}
+			else
+			{
+				/* It's a subscription to another peer */
+				Assert(sub->mode == BDR_SUBSCRIPTION_MODE_NORMAL);
+				Assert(psub->enabled == false);
+				sub->mode = BDR_SUBSCRIPTION_MODE_NORMAL;
+			}
 			bdr_alter_bdr_subscription(sub);
 			psub->enabled = true;
 			/*
@@ -872,45 +876,25 @@ bdr_join_handle_active_proposal(BdrMessage *msg)
 			alter_subscription(psub);
 		}
 
-		/*
-		 * Create subscriptions to all our other peers.
-		 *
-		 * TODO: ensure the catchup worker is actually dead before committing
-		 * these. We don't want to have one worker in catchup while the others are
-		 * doing normal replay.
-		 */
-
-		nodes = bdr_get_nodes_info(local->bdr_node_group->id);
-
-		foreach (lc, nodes)
-		{
-			BdrNodeInfo *remote = lfirst(lc);
-
-			/* Don't try to create the join target sub, it already exists */
-			if (remote->bdr_node->node_id == cur_state.peer_id)
-				continue;
-
-			/* ... and of course don't subscribe to ourselves */
-			if (remote->bdr_node->node_id == local->bdr_node->node_id)
-				continue;
-
-			bdr_create_subscription(local, remote, 0, false, BDR_SUBSCRIPTION_MODE_NORMAL);
-		}
-
 		/* Enter fully joined steady state */
 		Assert(cur_state.goal == BDR_NODE_STATE_ACTIVE);
 		state_transition_goal(&cur_state, BDR_NODE_STATE_ACTIVE,
 			cur_state.goal, 0, 0, NULL);
 	}
 
-	/*
-	 * TODO: should set local state to active/ready
-	 */
+	if (remote->bdr_node->local_state != BDR_PEER_STATE_STANDBY)
+		elog(WARNING, "node %s requesting promotion but was not in expected state %s (was: %s)",
+			 remote->pgl_node->name,
+			 bdr_peer_state_name(BDR_PEER_STATE_STANDBY),
+			 bdr_peer_state_name(remote->bdr_node->local_state));
+	else
+		elog(bdr_debug_level, "node %s state changing from %s to %s",
+			 remote->pgl_node->name,
+			 bdr_peer_state_name(remote->bdr_node->local_state),
+			 bdr_peer_state_name(BDR_PEER_STATE_ACTIVE));
 
-	/*
-	 * TODO: should signal the manager to start the subscription
-	 * once we commit
-	 */
+	remote->bdr_node->local_state = BDR_PEER_STATE_ACTIVE;
+	bdr_modify_node(remote->bdr_node);
 }
 
 static void
@@ -969,8 +953,6 @@ read_nodeinfo_result(PGresult *res, int rownum)
 	val = PQgetvalue(res, rownum, 3);
 	if (sscanf(val, "%d", &info->bdr_node->seq_id) != 1)
 		elog(ERROR, "could not parse info node sequence id '%s'", val);
-
-	info->bdr_node->confirmed_our_join = false;
 
 	if (!PQgetisnull(res, rownum, 4))
 	{
@@ -1254,7 +1236,7 @@ bdr_join_continue_copy_remote_nodes(BdrStateEntry *cur_state, BdrNodeInfo *local
 	{
 		bdr_join_finish_copy_remote_nodes(local);
 
-		state_transition(cur_state, BDR_NODE_STATE_JOIN_SUBSCRIBE_JOIN_TARGET,
+		state_transition(cur_state, BDR_NODE_STATE_JOIN_CREATE_TARGET_SLOT,
 			NULL);
 	}
 }
@@ -1397,7 +1379,9 @@ bdr_gen_slot_name(Name slot_name, const char *dbname,
  * pglogical.subscription, writer, etc.
  */
 static void
-bdr_create_subscription(BdrNodeInfo *local, BdrNodeInfo *remote, int apply_delay_ms, bool for_join, char initial_mode)
+bdr_create_subscription(BdrNodeInfo *local, BdrNodeInfo *remote,
+	int apply_delay_ms, bool for_join, char initial_mode,
+	bool initially_enabled)
 {
 	List				   *replication_sets = NIL;
 	NameData				slot_name;
@@ -1466,15 +1450,11 @@ bdr_create_subscription(BdrNodeInfo *local, BdrNodeInfo *remote, int apply_delay
 	 * TODO: in future we should enable subs in catchup-only mode
 	 * of some kind.
 	 */
-	sub.enabled = true;
-	/* PGL comment is:
-	 * The current format is:
-	 * pgl_<subscriber database name>_<provider node name>_<subscription name>
-	 */
+	sub.enabled = initially_enabled;
 	bdr_gen_slot_name(&slot_name, get_database_name(MyDatabaseId),
 				  local->bdr_node_group->name,
-				  remote->pgl_node->name,
-				  local->pgl_node->name);
+				  remote->pgl_node->name /* provider */,
+				  local->pgl_node->name /* subscriber */);
 	sub.slot_name = pstrdup(NameStr(slot_name));
 
 	interval_from_ms(apply_delay_ms, &apply_delay);
@@ -1525,11 +1505,8 @@ bdr_create_subscription(BdrNodeInfo *local, BdrNodeInfo *remote, int apply_delay
 
 	pglogical_subscription_changed(sub.id);
 
-	/*
-	 * TODO: create bdr.subscriptions entry for this sub
-	 */
-	elog(bdr_debug_level, "created subscription for %u on %u",
-		 remote->bdr_node->node_id, local->bdr_node->node_id);
+	elog(bdr_debug_level, "created subscription for provider %s on local subscriber %s with slot name %s",
+		 remote->pgl_node->name, local->pgl_node->name, NameStr(slot_name));
 }
 
 static void
@@ -1554,7 +1531,8 @@ bdr_join_continue_subscribe_join_target(BdrStateEntry *cur_state, BdrNodeInfo *l
 	{
 		BdrNodeInfo *remote = finish_get_remote_node_info(join.conn);
 		join.query_result_pending = false;
-		bdr_create_subscription(local, remote, 0, true, BDR_SUBSCRIPTION_MODE_CATCHUP);
+		bdr_create_subscription(local, remote, 0, true,
+			BDR_SUBSCRIPTION_MODE_CATCHUP, true);
 
 		/*
 		 * Now that we've created a subscription to the target we can start
@@ -1595,7 +1573,7 @@ bdr_join_continue_wait_subscribe_complete(BdrStateEntry *cur_state, BdrNodeInfo 
 	sync = get_subscription_sync_status(sub->id, true);
 	if (sync && sync->status == SYNC_STATUS_READY)
 	{
-		state_transition(cur_state, BDR_NODE_STATE_JOIN_GET_CATCHUP_LSN,
+		state_transition(cur_state, BDR_NODE_STATE_JOIN_COPY_REPSET_MEMBERSHIPS,
 			NULL);
 	}
 
@@ -1607,33 +1585,28 @@ bdr_join_continue_wait_catchup(BdrStateEntry *cur_state, BdrNodeInfo *local)
 	XLogRecPtr cur_progress;
 	ExtraDataJoinWaitCatchup *extra;
 	RepOriginId origin_id;
-	BdrSubscription *bsub;
-	PGLogicalSubscription *sub;
+	BdrSubscription 	   *bsub;
+	PGLogicalSubscription  *sub;
 
 	Assert(cur_state->current == BDR_NODE_STATE_JOIN_WAIT_CATCHUP);
 	extra = cur_state->extra_data;
 
-	bsub = bdr_get_node_subscription(local->pgl_node->id,
-		cur_state->peer_id, local->bdr_node_group->id, false);
-	sub = get_subscription(bsub->pglogical_subscription_id);
-	Assert(sub->target->id == bdr_get_local_nodeid());
-	Assert(sub->origin->id == cur_state->peer_id);
-
-	origin_id = replorigin_by_name(sub->slot_name, false);
-	Assert(origin_id != InvalidRepOriginId);
-
 	/*
 	 * We need to continue replay until our subscription to the join
 	 * target overtakes the upstream's insert lsn from a point after
-	 * we took the initial dump snapshot.
+	 * we took the initial dump snapshot and copied nodes entries, etc.
 	 */
+	bsub = bdr_get_node_subscription(local->pgl_node->id,
+		cur_state->peer_id, local->bdr_node_group->id, false);
+	sub = get_subscription(bsub->pglogical_subscription_id);
+	origin_id = replorigin_by_name(sub->slot_name, false);
 	cur_progress = replorigin_get_progress(origin_id, false);
 	if ( cur_progress > extra->min_catchup_lsn )
 	{
 		elog(LOG, "%u replayed past minimum recovery lsn %X/%08X",
 			 bdr_get_local_nodeid(),
 			 (uint32)(extra->min_catchup_lsn>>32), (uint32)extra->min_catchup_lsn);
-		state_transition(cur_state, BDR_NODE_STATE_JOIN_COPY_REPSET_MEMBERSHIPS,
+		state_transition(cur_state, BDR_NODE_STATE_JOIN_CREATE_PEER_SLOTS,
 			NULL);
 	}
 	else
@@ -1650,16 +1623,46 @@ bdr_join_continue_copy_repset_memberships(BdrStateEntry *cur_state, BdrNodeInfo 
 
 	elog(WARNING, "replication set memberships copy not implemented");
 
-	state_transition(cur_state, BDR_NODE_STATE_SEND_CATCHUP_READY,
+	state_transition(cur_state, BDR_NODE_STATE_JOIN_CREATE_SUBSCRIPTIONS,
 		NULL);
 }
 
 static void
-bdr_join_continue_send_catchup_ready(BdrStateEntry *cur_state, BdrNodeInfo *local)
+bdr_join_continue_create_subscriptions(BdrStateEntry *cur_state, BdrNodeInfo *local)
+{
+	List	   *nodes;
+	ListCell   *lc;
+
+	Assert(cur_state->current == BDR_NODE_STATE_JOIN_CREATE_SUBSCRIPTIONS);
+
+	nodes = bdr_get_nodes_info(local->bdr_node_group->id);
+
+	foreach (lc, nodes)
+	{
+		BdrNodeInfo *remote = lfirst(lc);
+
+		if (remote->bdr_node->node_id == join.target->bdr_node->node_id)
+			continue;
+
+		if (remote->bdr_node->node_id == local->bdr_node->node_id)
+			continue;
+
+		bdr_create_subscription(local, remote, 0, false,
+			BDR_SUBSCRIPTION_MODE_NORMAL, false);
+	}
+
+	bdr_consensus_refresh_nodes(cur_state->current);
+
+	state_transition(cur_state, BDR_NODE_STATE_JOIN_GET_CATCHUP_LSN,
+		NULL);
+}
+
+static void
+bdr_join_continue_send_standby_ready(BdrStateEntry *cur_state, BdrNodeInfo *local)
 {
 	uint64 handle;
 
-	Assert(cur_state->current == BDR_NODE_STATE_SEND_CATCHUP_READY);
+	Assert(cur_state->current == BDR_NODE_STATE_SEND_STANDBY_READY);
 	Assert(IsTransactionState());
 	CommitTransactionCommand();
 
@@ -1668,9 +1671,9 @@ bdr_join_continue_send_catchup_ready(BdrStateEntry *cur_state, BdrNodeInfo *loca
 	 * will transition us to BDR_NODE_STATE_STANDBY, which is how we exit
 	 * this state.
 	 */
-	handle = bdr_consensus_enqueue_proposal(BDR_MSG_NODE_CATCHUP_READY, NULL);
+	handle = bdr_consensus_enqueue_proposal(BDR_MSG_NODE_STANDBY_READY, NULL);
 	if (handle == 0)
-		elog(ERROR, "failed to submit BDR_MSG_NODE_CATCHUP_READY consensus message");
+		elog(ERROR, "failed to submit BDR_MSG_NODE_STANDBY_READY consensus message");
 
 	elog(WARNING, "waiting for all nodes to confirm catchup ready not yet implemented");
 }
@@ -1743,25 +1746,382 @@ bdr_join_continue_wait_global_seq_id(BdrStateEntry *cur_state, BdrNodeInfo *loca
 
 	elog(WARNING, "waiting for global sequence ID assignment not implemented");
 
-	state_transition(cur_state, BDR_NODE_STATE_CREATE_SLOTS, NULL);
+	state_transition(cur_state, BDR_NODE_STATE_CREATE_LOCAL_SLOTS, NULL);
+}
+
+static void
+bdr_create_remote_slot(BdrNodeInfo *local, BdrNodeInfo *remote)
+{
+	PGconn	   *conn;
+	PGresult   *res;
+	XLogRecPtr	confirmed_flush_lsn;
+	NameData	slot_name;
+	const char *values[2];
+	bool		already_exists = false;
+	const char *lsnstr;
+	uint32		hi, lo;
+	bool		found;
+	JoinCatchupMinimum jcm;
+
+	found = bdr_get_join_catchup_minimum(remote->pgl_node->id, &jcm, true);
+
+	if (found && jcm.slot_min_lsn != InvalidXLogRecPtr)
+	{
+		elog(bdr_debug_level, "skipping creation of slot on peer \"%s\": previous creation recorded with lsn %X/%X",
+			 remote->pgl_node->name, (uint32)(jcm.slot_min_lsn>>32),
+			 (uint32)jcm.slot_min_lsn);
+		return;
+	}
+
+	conn = bdr_join_connect_remote(local, remote->pgl_interface->dsn);
+
+	/*
+	 * The local subscription isn't created yet, so we won't look at it 
+	 * for the slot name.
+	 */
+	bdr_gen_slot_name(&slot_name,
+				  local->bdr_node->dbname,
+				  local->bdr_node_group->name,
+				  remote->pgl_node->name /* provider from remote PoV */,
+				  local->pgl_node->name /* subscriber from remote PoV */);
+
+	elog(bdr_debug_level, "%s creating remote replication slot \"%s\" on peer \"%s\"",
+		 local->pgl_node->name, NameStr(slot_name), remote->pgl_node->name);
+
+	values[0] = NameStr(slot_name);
+	values[1] = "pglogical_output";
+
+	/*
+	 * TODO: This makes a synchronous libpq call, which is a bit naughty. We
+	 * should do it asynchronously.
+	 */
+	res = PQexecParams(conn, "SELECT lsn FROM pg_create_logical_replication_slot($1, $2)",
+					   2, NULL, values, NULL, NULL, 0);
+
+	if (PQresultStatus(res) != PGRES_TUPLES_OK)
+	{
+		const char *sqlstate = PQresultErrorField(res, PG_DIAG_SQLSTATE);
+		if (strcmp(sqlstate, SQLSTATE_DUPLICATE_OBJECT) == 0)
+		{
+			elog(bdr_debug_level, "found existing slot \"%s\" on peer \"%s: %s",
+				 NameStr(slot_name), remote->pgl_node->name, PQerrorMessage(conn));
+			PQclear(res);
+			already_exists = true;
+		}
+		else
+		{
+			const char *msg = pstrdup(PQerrorMessage(conn));
+			PQclear(res);
+			PQfinish(conn);
+			elog(ERROR, "failed create replication slot %s on peer %s: %s",
+				 NameStr(slot_name), remote->pgl_node->name, msg);
+		}
+	}
+	else
+	{
+		if (PQgetisnull(res, 0, 0))
+			elog(ERROR, "LSN unexpectedly null on slot creation");
+		lsnstr = PQgetvalue(res, 0, 0);
+		elog(bdr_debug_level, "created replication slot \"%s\" on peer \"%s\" with lsn %s",
+			 NameStr(slot_name), remote->pgl_node->name, lsnstr);
+	}
+
+	Assert(lsnstr != NULL || already_exists);
+
+	if (already_exists)
+	{
+		/*
+		 * This can happen if we ERROR or crash after creating the slot and
+		 * before local COMMIT. 
+		 */
+		res = PQexecParams(conn, "SELECT confirmed_flush_lsn FROM pg_catalog.pg_replication_slots WHERE slot_name = $1 AND plugin = $2",
+						   2, NULL, values, NULL, NULL, 0);
+
+		if (PQresultStatus(res) != PGRES_TUPLES_OK)
+		{
+			const char *msg = pstrdup(PQerrorMessage(conn));
+			PQclear(res);
+			PQfinish(conn);
+			elog(ERROR, "failed to fetch confirmed_flush_lsn for slot %s on peer %s: %s",
+				 NameStr(slot_name), remote->pgl_node->name, msg);
+		}
+
+		if (PQntuples(res) != 1)
+		{
+			int ntuples = PQntuples(res);
+			PQclear(res);
+			PQfinish(conn);
+			elog(ERROR, "failed to fetch confirmed_flush_lsn for slot %s on peer %s: expected 1 tuple, found %d",
+				 NameStr(slot_name), remote->pgl_node->name, ntuples);
+		}
+
+		if (PQgetisnull(res, 0, 0))
+		{
+			PQclear(res);
+			PQfinish(conn);
+			elog(ERROR, "failed to fetch confirmed_flush_lsn for slot %s on peer %s: result is null",
+				 NameStr(slot_name), remote->pgl_node->name);
+		}
+
+		lsnstr = PQgetvalue(res, 0, 0);
+	}
+
+	Assert(lsnstr != NULL);
+
+	if (sscanf(lsnstr, "%X/%X", &hi, &lo) != 2)
+	{
+		PQfinish(conn);
+		elog(ERROR, "failed to parse %s as LSN", lsnstr);
+	}
+
+	PQclear(res);
+
+	confirmed_flush_lsn = (((XLogRecPtr)hi) << 32) | lo;
+
+	elog(bdr_debug_level, "created/found replication slot \"%s\" on peer \"%s\" at lsn %X/%X",
+		 NameStr(slot_name), remote->pgl_node->name,
+		 (uint32)(confirmed_flush_lsn>>32), (uint32)confirmed_flush_lsn);
+
+	/*
+	 * Record the position we must pass in catchup mode before we can exit
+	 * catchup and switch to direct replay from this slot.
+	 *
+	 * The join-target is inherently caught-up to, so we don't bother keeping
+	 * track of it.
+	 */
+	if (remote->pgl_node->id != join.target->pgl_node->id)
+	{
+		jcm.node_id = remote->pgl_node->id;
+		jcm.slot_min_lsn = confirmed_flush_lsn;
+		jcm.passed_slot_min_lsn = false;
+		bdr_upsert_join_catchup_minimum(&jcm);
+	}
+
+	PQfinish(conn);
 }
 
 /*
- * Unlike for pglogical, BDR creates replication slots for its peers directly.
- * The peers don't have to ask for slot creation via a walsender command or SQL
- * function call. This is done so that nodes can create slots for a peer as
- * part of a consensus message exchange during setup.
- *
- * So these are inbound slots, which other peers will use to talk to us.
- * We expect the peer to in turn create the slots we need to talk to it.
+ * Create a replication slot for our use on the join target node, via
+ * walsender protocol and libpq. See bdr_create_local_slot() for why
+ * we don't do it as part of the join request consensus message.
  */
 static void
-bdr_join_continue_create_slots(BdrStateEntry *cur_state, BdrNodeInfo *local)
+bdr_join_continue_create_target_slot(BdrStateEntry *cur_state, BdrNodeInfo *local)
+{
+	Assert(cur_state->current == BDR_NODE_STATE_JOIN_CREATE_TARGET_SLOT);
+
+	/* TODO: it's a bit naughty to create a slot synchronously here */
+	elog(bdr_debug_level, "%s remotely creating slot on join target %s",
+		 local->pgl_node->name, join.target->pgl_node->name);
+		 
+	bdr_create_remote_slot(local, join.target);
+
+	state_transition(cur_state, BDR_NODE_STATE_JOIN_SUBSCRIBE_JOIN_TARGET, NULL);
+}
+
+/*
+ * Create replication slots on all remaining active peer nodes, using
+ * walsender protocol and libpq. See bdr_create_local_slot() for why
+ * we don't do it as part of the join request consensus message.
+ *
+ * We need these slots created on all active nodes before we enter
+ * standby mode, so we know we can switch out of catchup mode and
+ * have everything we need to remain a consistent member of the
+ * cluster.
+ */
+static void
+bdr_join_continue_create_peer_slots(BdrStateEntry *cur_state, BdrNodeInfo *local)
+{
+	List		   *nodes;
+	ListCell	   *lc;
+
+	Assert(cur_state->current == BDR_NODE_STATE_JOIN_CREATE_PEER_SLOTS);
+
+	nodes = bdr_get_nodes_info(local->bdr_node_group->id);
+
+	foreach (lc, nodes)
+	{
+		BdrNodeInfo *remote = lfirst(lc);
+
+		if (remote->bdr_node->node_id == local->bdr_node->node_id)
+			/* We don't need a loopback slot on our own node */
+			continue;
+
+		if (remote->bdr_node->node_id == cur_state->peer_id)
+			/* We created the join target slot earlier */
+			continue;
+
+		/*
+		 * We must create slots on all active peers before we can safely enter
+		 * standby mode. Otherwise if we were promoted we'd be unable to replay
+		 * from the peer. Making a slot at promotion time isn't good enough
+		 * since there could be a gap between what we last replayed in catchup
+		 * and the minimum we can replay from a new slot... and we might tbe
+		 * being promoted because the join target node (our catchup upstream)
+		 * crashed.
+		 *
+		 * We don't have to make slots on other standbys. They'll make slots
+		 * for all standbys and active nodes when they promote. If going active
+		 * races with another node concurrently going into standby, we handle
+		 * that with consensus message ordering.
+		 *
+		 * TODO: this can ERROR, and we don't want to discard knowledge of each
+		 * slot we create if the next one ERROR's. But we'd also like to keep our
+		 * state entry lock. We can use a subproc, or just loop reacquiring the
+		 * state lock. If we commit and loop we need to use a different memory
+		 * context for the nodes list so we don't clobber it.
+		 */
+		if (remote->bdr_node->local_state == BDR_PEER_STATE_ACTIVE)
+		{
+			/*
+			 * TODO: it's a bit naughty doing a synchronous libpq call here.
+			 * We should really do it asynchronously so we don't hold up
+			 * the event loop.
+			 */
+			elog(bdr_debug_level, "%s remotely creating slot on peer %s in state %s before going active",
+				 local->pgl_node->name, remote->pgl_node->name,
+				 bdr_peer_state_name(remote->bdr_node->local_state));
+			bdr_create_remote_slot(local, remote);
+		}
+		else
+		{
+			elog(bdr_debug_level, "%s not remotely creating slot on peer %s before going active: peer is %s",
+				 local->pgl_node->name, remote->pgl_node->name,
+				 bdr_peer_state_name(remote->bdr_node->local_state));
+		}
+	}
+
+	state_transition(cur_state, BDR_NODE_STATE_JOIN_WAIT_STANDBY_REPLAY, NULL);
+}
+
+/*
+ * Wait for catchup replay to pass the minmimum startpoint for all replication
+ * slots on all peers, i.e. their creation-time confirmed_flush_lsn.
+ *
+ * If we don't wait for this before we announce that we're a standby, we're
+ * making false promises. If we were promoted we could have a gap between the
+ * current position on the peer that we've replayed 2nd-hand via our join
+ * target, and the minimum start position on the slot that peer has for us.
+ * We'd have no way to replay that data unless we returned to catchup
+ * mode.
+ *
+ * So wait until all local origins pass the creation LSNs of slots on all
+ * peers.
+ */
+static void
+bdr_join_continue_wait_standby_replay(BdrStateEntry *cur_state, BdrNodeInfo *local)
+{
+	ListCell   *lc;
+	List	   *nodes;
+
+	bool catchup_complete = true;
+	Assert(cur_state->current == BDR_NODE_STATE_JOIN_WAIT_STANDBY_REPLAY);
+
+	nodes = bdr_get_nodes_info(local->bdr_node_group->id);
+
+	foreach (lc, nodes)
+	{
+		BdrNodeInfo			   *remote = lfirst(lc);
+		XLogRecPtr				local_origin_lsn;
+		RepOriginId				origin_id;
+		BdrSubscription 	   *bsub;
+		PGLogicalSubscription  *sub;
+		JoinCatchupMinimum		jcm;
+
+		if (remote->bdr_node->node_id == local->bdr_node->node_id)
+			/* We know we're caught up with ourselves */
+			continue;
+
+		if (remote->bdr_node->node_id == cur_state->peer_id)
+			/* This is the catchup peer, we're inherently up to date */
+			continue;
+
+		if (bdr_get_join_catchup_minimum(remote->bdr_node->node_id,
+			&jcm, true) && jcm.passed_slot_min_lsn)
+			/* No catchup required for this peer or already caught up */
+			continue;
+
+		bsub = bdr_get_node_subscription(local->pgl_node->id,
+			remote->pgl_node->id, local->bdr_node_group->id, false);
+		sub = get_subscription(bsub->pglogical_subscription_id);
+		Assert(sub->target->id == bdr_get_local_nodeid());
+				
+		if (jcm.slot_min_lsn == InvalidXLogRecPtr)
+		{
+			/*
+			 * Because of possible crashes etc, it's possible we could've created slots on
+			 * a peer during BDR_NODE_STATE_JOIN_CREATE_PEER_SLOTS but not recorded the minimum
+			 * LSN at which the slot becomes valid. We must look up such entries
+			 * in the peer's pg_replication_slots and update our local state, so we know
+			 * when local replay has passed that point and it's safe to enter standby
+			 * or promote to active.
+			 *
+			 * To deal with this we just bail back to slot creation.
+			 */
+			state_transition(cur_state, BDR_NODE_STATE_JOIN_CREATE_PEER_SLOTS,
+							 NULL);
+			return;
+		}
+
+		origin_id = replorigin_by_name(sub->slot_name, false);
+		Assert(origin_id != InvalidRepOriginId);
+
+		local_origin_lsn = replorigin_get_progress(origin_id, false);
+
+		if (local_origin_lsn == InvalidXLogRecPtr
+			|| local_origin_lsn < jcm.slot_min_lsn)
+			catchup_complete = false;
+
+		elog(bdr_debug_level,
+			 "%s past %X/%X for peer %s; currently at %X/%X",
+			 catchup_complete ? "caught up" : "still waiting to catch up",
+			 (uint32)(jcm.slot_min_lsn >> 32),
+			 (uint32)jcm.slot_min_lsn,
+			 remote->pgl_node->name,
+			 (uint32)(local_origin_lsn >> 32),
+			 (uint32)local_origin_lsn);
+
+		if (!catchup_complete)
+			break;
+
+		/* Don't keep re-checking the catchup lsn now we've passed it */
+		jcm.passed_slot_min_lsn = true;
+		bdr_upsert_join_catchup_minimum(&jcm);
+	}
+
+	/* Ready to tell the world we're a standby */
+	if (catchup_complete)
+		state_transition(cur_state, BDR_NODE_STATE_SEND_STANDBY_READY, NULL);
+}
+
+/*
+ * Before we can call ourselves active and (once supported) enable writes on this
+ * node, we must ensure all active peers have replication slots on this node.
+ *
+ * The peer doesn't need to know about the slot, we just have to have a
+ * startpoint for replication with a valid restart_lsn, catalog_xmin and
+ * confirmed_flush_lsn locked in.
+ *
+ * There aren't the same issues that apply to slot creation in response to
+ * global consensus messages here, since we're just in a local state handler
+ * that won't have an existing write xact.  We can create slots on the peers'
+ * behalf, on our end. This means we don't have to do any dancing about with
+ * asking the peers to create slots on us when we announce our intended
+ * promotion, then wait for them to create them before actually promoting.
+ *
+ * (See detailed comment in bdr_create_local_slot for details of issues around
+ * slots and transactions)
+ */
+static void
+bdr_join_continue_create_local_slots(BdrStateEntry *cur_state, BdrNodeInfo *local)
 {
 	List	   *nodes;
 	ListCell   *lc;
 
-	Assert(cur_state->current == BDR_NODE_STATE_CREATE_SLOTS);
+	Assert(cur_state->current == BDR_NODE_STATE_CREATE_LOCAL_SLOTS);
+
+	/* Cannot have a write xid due to logical decoding limits */
+	Assert(GetCurrentTransactionIdIfAny() == InvalidTransactionId);
 
 	nodes = bdr_get_nodes_info(local->bdr_node_group->id);
 
@@ -1772,7 +2132,35 @@ bdr_join_continue_create_slots(BdrStateEntry *cur_state, BdrNodeInfo *local)
 		if (remote->bdr_node->node_id == local->bdr_node->node_id)
 			continue;
 
-		bdr_join_create_slot(local, remote);
+		/*
+		 * We must create a slot for any standby or active peer before we start
+		 * doing writes, so they can safely replay from us.
+		 *
+		 * Peers not yet in standby will create their own slots on existing
+		 * active nodes when they enter standby.
+		 *
+		 * There's a race between slot creation on the standby and another node
+		 * going active. If some peer has finished creating slots on active
+		 * nodes but hasn't yet announced its self as a standby, when we
+		 * announce ourselves as active, that peer won't have a slot for us
+		 * yet. But we can handle that by having the "active announce" message
+		 * handler detect a node in that state and bump it back to the
+		 * slot-create state.
+		 */
+		if (remote->bdr_node->local_state == BDR_PEER_STATE_STANDBY
+		    || remote->bdr_node->local_state == BDR_PEER_STATE_ACTIVE)
+		{
+			elog(bdr_debug_level, "%s creating local slot for peer %s in state %s",
+				 local->pgl_node->name, remote->pgl_node->name,
+				 bdr_peer_state_name(remote->bdr_node->local_state));
+			bdr_create_local_slot(local, remote);
+		}
+		else
+		{
+			elog(bdr_debug_level, "%s not creating local slot for peer %s: peer state %s",
+				 local->pgl_node->name, remote->pgl_node->name,
+				 bdr_peer_state_name(remote->bdr_node->local_state));
+		}
 	}
 
 	state_transition(cur_state, BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE, NULL);
@@ -1797,28 +2185,61 @@ bdr_join_continue_send_active_announce(BdrStateEntry *cur_state, BdrNodeInfo *lo
 	elog(WARNING, "not waiting for consensus on active announce, not implemented");
 }
 
+/*
+ * Create a logical replication slot on the local PostgreSQL instance, for
+ * 'remote' to use to connect to node 'local' and stream changes from
+ * 'local'.
+ *
+ * It's as if 'remote' connected to us and did a CREATE_REPLICATION_SLOT LOGICAL ...
+ *
+ * If the slot already exists, no action is taken. That's because slot
+ * creation is NOT transactional. If we're being asked to create a slot for
+ * peers we could've failed after some slots were already created, so we can't
+ * assume a clean slate. However, because we create slots as emphemeral then
+ * persist them on success, we know we'll have either no slot or a good slot,
+ * we won't have a broken and unusable slot.
+ *
+ * An already-existing pglogical slot for this db with the right name
+ * is fine to use, since it must be at or behind the position a new
+ * slot would get created at.
+ *
+ * Note that there are some significant limitations that affect slot creation,
+ * meaning you can't use this in all contexts:
+ *
+ * - Replication slots cannot be created in a transaction that has done writes.
+ *   Like, say a consensus message prepare handler.
+ *
+ * - Replication slots cannot finish creation while a concurrent write xact
+ *   that was started before slot creation is still running.  Like, say, in
+ *   another backend while a consensus message handler waits for the slot
+ *   creation to finish.
+ *
+ * - Replication slot creation isn't transactional. If we ROLLBACK, a persistent
+ *   slot isn't removed.
+ *
+ * - Similarly, ephemeral slots cannot be reliably made into persistent slots on
+ *   commit if we're doing 2PC. If we crash after PREPARE TRANSACTION but before
+ *   COMMIT PREPARED, then in recovery the ephemeral slot will be gone but the
+ *   prepared xact will still be present.
+ *
+ * So you can't use this from all contexts - and workarounds like using a
+ * bgworker to run the slot creation won't help.
+ *
+ * (See: RM#1105 and RM#837)
+ */
 static void
-bdr_join_create_slot(BdrNodeInfo *local, BdrNodeInfo *remote)
+bdr_create_local_slot(BdrNodeInfo *local, BdrNodeInfo *remote)
 {
 	NameData	slot_name;
 
 	bdr_gen_slot_name(&slot_name,
 				  remote->bdr_node->dbname,
 				  local->bdr_node_group->name,
-				  local->pgl_node->name,
-				  remote->pgl_node->name);
+				  local->pgl_node->name /* provider */,
+				  remote->pgl_node->name /* subscriber */);
 
-	/*
-	 * Slot creation is NOT transactional. If we're being asked to create a
-	 * slot for peers we could've failed after some slots were created, so we
-	 * can't assume a clean slate here. However, because we create slots as
-	 * emphemeral then persist them on success, we know we'll have either no
-	 * slot or a good slot.
-	 *
-	 * An already-existing pglogical slot for this db with the right name
-	 * is fine to use, since it must be at or behind the position a new
-	 * slot would get created at.
-	 */
+	elog(bdr_debug_level, "creating local slot \"%s\" for peer %s",
+		 NameStr(slot_name), remote->pgl_node->name);
 	pgl_acquire_or_create_slot(NameStr(slot_name), false);
 }
 
@@ -1912,6 +2333,28 @@ bdr_join_wait_event_set_recreated(struct WaitEventSet *new_set)
 	}
 }
 
+struct bdr_join_errcontext {
+	BdrNodeState cur_state;
+	BdrStateEntry *state_entry;
+};
+
+static void
+join_errcontext_callback(void *arg)
+{
+	struct bdr_join_errcontext *ctx = arg;	
+
+	if (ctx->state_entry != NULL)
+		errcontext("while executing join state handler for %s (%s) for goal %s",
+				   bdr_node_state_name(ctx->state_entry->current),
+				   ctx->state_entry->extra_data == NULL
+					? "" : state_stringify_extradata(ctx->state_entry),
+				   bdr_node_state_name(ctx->state_entry->goal)
+				   );
+	else
+		errcontext("while early in state join handler for %s",
+				   bdr_node_state_name(ctx->cur_state));
+}
+
 /*
  * The manager state machine calls into here to continue a BDR
  * node join. From here we dispatch to one or more non-blocking
@@ -1921,8 +2364,17 @@ void
 bdr_join_continue(BdrNodeState cur_state,
 	long *max_next_wait_msecs)
 {
+	ErrorContextCallback myerrcontext;
+	struct bdr_join_errcontext ctxinfo;
 	BdrStateEntry locked_state;
 	BdrNodeInfo *local;
+
+	ctxinfo.cur_state = cur_state;
+	ctxinfo.state_entry = NULL;
+	myerrcontext.callback = join_errcontext_callback;
+	myerrcontext.arg = &ctxinfo;
+	myerrcontext.previous = error_context_stack;
+	error_context_stack = &myerrcontext;
 
 	maintain_join_context();
  	local = bdr_get_cached_local_node_info();
@@ -1930,6 +2382,7 @@ bdr_join_continue(BdrNodeState cur_state,
 	StartTransactionCommand();
 	/* Lock the state and decode extradata */
 	state_get_expected(&locked_state, true, true, cur_state);
+	ctxinfo.state_entry = &locked_state;
 
 	if (bdr_join_maintain_conn(local, locked_state.peer_id))
 	{
@@ -1947,12 +2400,24 @@ bdr_join_continue(BdrNodeState cur_state,
 				bdr_join_continue_copy_remote_nodes(&locked_state, local);
 				break;
 
+			case BDR_NODE_STATE_JOIN_CREATE_TARGET_SLOT:
+				bdr_join_continue_create_target_slot(&locked_state, local);
+				break;
+
 			case BDR_NODE_STATE_JOIN_SUBSCRIBE_JOIN_TARGET:
 				bdr_join_continue_subscribe_join_target(&locked_state, local);
 				break;
 
 			case BDR_NODE_STATE_JOIN_WAIT_SUBSCRIBE_COMPLETE:
 				bdr_join_continue_wait_subscribe_complete(&locked_state, local);
+				break;
+
+			case BDR_NODE_STATE_JOIN_COPY_REPSET_MEMBERSHIPS:
+				bdr_join_continue_copy_repset_memberships(&locked_state, local);
+				break;
+
+			case BDR_NODE_STATE_JOIN_CREATE_SUBSCRIPTIONS:
+				bdr_join_continue_create_subscriptions(&locked_state, local);
 				break;
 
 			case BDR_NODE_STATE_JOIN_GET_CATCHUP_LSN:
@@ -1963,12 +2428,18 @@ bdr_join_continue(BdrNodeState cur_state,
 				bdr_join_continue_wait_catchup(&locked_state, local);
 				break;
 
-			case BDR_NODE_STATE_JOIN_COPY_REPSET_MEMBERSHIPS:
-				bdr_join_continue_copy_repset_memberships(&locked_state, local);
+			case BDR_NODE_STATE_JOIN_CREATE_PEER_SLOTS:
+				/* create remote slots for outbound conns to active peers */
+				bdr_join_continue_create_peer_slots(&locked_state, local);
 				break;
 
-			case BDR_NODE_STATE_SEND_CATCHUP_READY:
-				bdr_join_continue_send_catchup_ready(&locked_state, local);
+			case BDR_NODE_STATE_JOIN_WAIT_STANDBY_REPLAY:
+				/* wait for catchup to replay past all active peer slot start points */
+				bdr_join_continue_wait_standby_replay(&locked_state, local);
+				break;
+
+			case BDR_NODE_STATE_SEND_STANDBY_READY:
+				bdr_join_continue_send_standby_ready(&locked_state, local);
 				break;
 
 			case BDR_NODE_STATE_STANDBY:
@@ -1987,8 +2458,9 @@ bdr_join_continue(BdrNodeState cur_state,
 				bdr_join_continue_wait_global_seq_id(&locked_state, local);
 				break;
 
-			case BDR_NODE_STATE_CREATE_SLOTS:
-				bdr_join_continue_create_slots(&locked_state, local);
+			case BDR_NODE_STATE_CREATE_LOCAL_SLOTS:
+				/* local slots for inbound conns from all standbys and active peers */
+				bdr_join_continue_create_local_slots(&locked_state, local);
 				break;
 
 			case BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE:
@@ -2020,4 +2492,6 @@ bdr_join_continue(BdrNodeState cur_state,
 	 * Should only be set for the few areas where we must poll.
 	 */
 	*max_next_wait_msecs = 1000;
+
+	error_context_stack = myerrcontext.previous;
 }

@@ -3,11 +3,11 @@ SELECT * FROM bdr_regress_variables()
 \x
 \set VERBOSITY terse
 \c :node1_dsn
-SELECT node_name, node_group_name, repset_name, interface_name, cur_state_journal_state, node_local_dbname, set_repl_ops FROM bdr.local_node_summary;
+SELECT node_name, node_group_name, default_repset_name, interface_name, cur_state_journal_state, node_local_dbname, set_repl_ops FROM bdr.local_node_summary;
 -[ RECORD 1 ]-----------+------------------------------
 node_name               | node1
 node_group_name         | bdrgroup
-repset_name             | bdrgroup
+default_repset_name     | bdrgroup
 interface_name          | node1
 cur_state_journal_state | ACTIVE
 node_local_dbname       | regression
@@ -51,11 +51,11 @@ application_name | bdrgroup_node1
 state            | streaming
 
 \c :node2_dsn
-SELECT node_name, node_group_name, repset_name, interface_name, cur_state_journal_state, node_local_dbname, set_repl_ops FROM bdr.local_node_summary;
+SELECT node_name, node_group_name, default_repset_name, interface_name, cur_state_journal_state, node_local_dbname, set_repl_ops FROM bdr.local_node_summary;
 -[ RECORD 1 ]-----------+------------------------------
 node_name               | node2
 node_group_name         | bdrgroup
-repset_name             | bdrgroup
+default_repset_name     | bdrgroup
 interface_name          | node2
 cur_state_journal_state | ACTIVE
 node_local_dbname       | postgres
