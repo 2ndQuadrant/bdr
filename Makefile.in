@@ -48,7 +48,8 @@ DATA = \
 	extsql/bdr--0.10.0.11--1.0.0.0.sql \
 	extsql/bdr--1.0.0.0--1.0.1.0.sql \
 	extsql/bdr--1.0.1.0--1.0.2.0.sql \
-	extsql/bdr--1.0.2.0--1.0.3.0.sql
+	extsql/bdr--1.0.2.0--1.0.3.0.sql \
+	extsql/bdr--1.0.3.0--1.0.3.1.sql
 
 DATA_built = \
 	extsql/bdr--0.8.0.1.sql \
@@ -82,7 +83,8 @@ DATA_built = \
 	extsql/bdr--1.0.0.0.sql \
 	extsql/bdr--1.0.1.0.sql \
 	extsql/bdr--1.0.2.0.sql \
-	extsql/bdr--1.0.3.0.sql
+	extsql/bdr--1.0.3.0.sql \
+	extsql/bdr--1.0.3.1.sql
 
 DOCS = bdr.conf.sample README.bdr
 SCRIPTS = scripts/bdr_initial_load bdr_init_copy bdr_dump
@@ -107,6 +109,7 @@ OBJS = \
 	bdr_label.o \
 	bdr_locks.o \
 	bdr_nodecache.o \
+	bdr_monitoring.o \
 	bdr_output.o \
 	bdr_pgutils.o \
 	bdr_relcache.o \
@@ -284,6 +287,9 @@ extsql/bdr--1.0.3.0.sql: extsql/bdr--1.0.2.0.sql extsql/bdr--1.0.2.0--1.0.3.0.sq
 	mkdir -p extsql
 	cat $^ > $@
 
+extsql/bdr--1.0.3.1.sql: extsql/bdr--1.0.3.0.sql extsql/bdr--1.0.3.0--1.0.3.1.sql
+	mkdir -p extsql
+	cat $^ > $@
 
 pg_dump_dir:
 	mkdir -p pg_dump

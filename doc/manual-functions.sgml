@@ -287,6 +287,29 @@
        </entry>
       </row>
 
+      <row id="function-bdr-wait-slot-confirm-lsn" xreflabel="bdr.wait_slot_confirm_lsn">
+       <entry>
+        <indexterm>
+         <primary>bdr.wait_slot_confirm_lsn</primary>
+        </indexterm>
+        <literal><function>bdr.wait_slot_confirm_lsn(<replaceable>slotname name</replaceable>, <replaceable>upto pg_lsn</replaceable>)</function></literal>
+       </entry>
+       <entry>void</entry>
+       <entry>
+        <para>
+         Wait until <replaceable>slotname</replaceable> (or all slots, if
+         <literal>NULL</literal>) has passed specified
+         <replaceable>upto</replaceable> lsn (or the local server's current
+         xlog insert lsn, if <literal>NULL</literal>).
+        </para>
+        <para>
+         This function is mosty typically used as <literal>SELECT
+         bdr.wait_slot_confirm_lsn(NULL, NULL)</literal> to wait for all peers
+         to catch up to the last committed state of the local node.
+        </para>
+       </entry>
+      </row>
+
       <row>
        <entry>
         <indexterm>
@@ -296,16 +319,11 @@
        </entry>
        <entry>void</entry>
        <entry>
-        Wait until the replication connection with process id <replaceable>pid</replaceable>
-        (or all connections if <replaceable>pid</replaceable> is <literal>0</literal>)
-        in <literal>pg_stat_replication</literal> has replayed WAL up to at least
-        <replaceable>lsn</replaceable>. Typically used with
-        <function>pg_current_xlog_insert_location()</function> as the target LSN.
-        Note that currently disconnected peers will <emphasis>not</emphasis> be waited for; this
-        function cannot be used to verify that all peers are caught up, only all currently
-        connected peers.
-        (This function was added to PostgreSQL 9.4 by the BDR patches and is not part
-         of the BDR extension as such.)
+        <para>
+         Present in Postgres-BDR 9.4 only. Deprecated. Use <link
+         linkend="function-bdr-wait-slot-confirm-lsn"><function>bdr.wait_slot_confirm_lsn</function></link>
+         instead.
+        </para>
        </entry>
       </row>
 
