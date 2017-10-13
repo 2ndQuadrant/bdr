@@ -241,8 +241,27 @@ void
 bdr_locks_addwaiter(PGPROC *proc)
 {
 	BDRLockWaiter  *waiter = &bdr_locks_ctl->waiters[proc->pgprocno];
+	slist_iter iter;
 
 	waiter->proc = proc;
+
+	/*
+	 * The waiter list shouldn't be huge, and compared to the expense of a DDL
+	 * lock it's cheap to check if we're already registered. After all, we're
+	 * just adding ourselves to a wait-notification list. slist has no guard
+	 * against adding a cycle, and we'd infinite-loop in bdr_locks_on_unlock
+	 * otherwise. See #130.
+	 */
+	slist_foreach(iter, &bdr_my_locks_database->waiters)
+	{
+		if (iter.cur == &waiter->node)
+		{
+			elog(WARNING, LOCKTRACE "backend %d already registered as waiter for DDL lock release",
+				 MyProcPid);
+			Assert(false); /* crash in debug builds */
+			return;
+		}
+	}
 	slist_push_head(&bdr_my_locks_database->waiters, &waiter->node);
 
 	elog(ddl_lock_log_level(DDL_LOCK_TRACE_DEBUG), LOCKTRACE "backend started waiting on DDL lock");
@@ -258,6 +277,22 @@ bdr_locks_on_unlock(void)
 		PGPROC	   *proc;
 
 		node = slist_pop_head_node(&bdr_my_locks_database->waiters);
+
+		/*
+		 * Detect a self-referencing node and bail out by tossing the rest of
+		 * the list. This shouldn't be necessary, it's an emergency bailout
+		 * to stop us going into an infinite loop while holding a LWLock.
+		 *
+		 * We have to PANIC here so we force shmem and lwlock state to be
+		 * re-inited. We could possibly just clobber the list and exit, leaving
+		 * waiters dangling. But since this should be guarded against by
+		 * bdr_locks_addwaiter, it shouldn't happen anyway.
+		 * (See: #130)
+		 */
+		if (slist_has_next(&bdr_my_locks_database->waiters, node)
+			&& slist_next_node(&bdr_my_locks_database->waiters, node) == node)
+			elog(PANIC, "cycle detected in DDL lock waiter linked list");
+
 		waiter = slist_container(BDRLockWaiter, node, node);
 		proc = waiter->proc;
 
@@ -699,6 +734,12 @@ bdr_acquire_ddl_lock(BDRLockType lock_type)
 						 holder_sysid, holder_tli, holder_datid)));
 	}
 
+	/*
+	 * There should be nobody waiting to be notified if the DDL lock isn't
+	 * held, and now we hold bdr_locks_ctl->lock and know the lock is free.
+	 */
+	Assert(slist_is_empty(&bdr_my_locks_database->waiters));
+
 	/* send message about ddl lock */
 	initStringInfo(&s);
 	bdr_prepare_message(&s, BDR_MESSAGE_ACQUIRE_LOCK);
@@ -708,9 +749,10 @@ bdr_acquire_ddl_lock(BDRLockType lock_type)
 	START_CRIT_SECTION();
 
 	/*
-	 * NB: We need to setup the state as if we'd have already acquired the
-	 * lock - otherwise concurrent transactions could acquire the lock; and we
-	 * wouldn't send a release message when we fail to fully acquire the lock.
+	 * NB: We need to setup the shmem state as if we'd have already acquired
+	 * the lock before we release the LWLock on bdr_locks_ctl->lock. Otherwise
+	 * concurrent transactions could acquire the lock, and we wouldn't send a
+	 * release message when we fail to fully acquire the lock.
 	 */
 	if (!this_xact_acquired_lock)
 	{
