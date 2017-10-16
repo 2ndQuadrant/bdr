@@ -409,7 +409,7 @@
         generated_value bigint primary key
       );
 
-      CREATE SEQUENCE some_seq INCREMENT 1000 OWNED BY some_table.generated_value;
+      CREATE SEQUENCE some_seq INCREMENT 1000 OWNED BY some_table.generated_value USING local;
 
       ALTER TABLE some_table ALTER COLUMN generated_value SET DEFAULT nextval('some_seq');
     </programlisting>
@@ -427,11 +427,6 @@
     You should be sure to allow a large enough <literal>INCREMENT</literal> to
     leave room for all the nodes you may ever want to add since changing it in
     future is difficult and disruptive.
-   </para>
-   <para>
-    On BDR-Postgres 9.4, create the sequence with <literal>USING local</literal>
-    to make sure there's no conflict with any <literal>default_sequenceam</literal>
-    setting.
    </para>
 
    <para>
