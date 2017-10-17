@@ -11,8 +11,7 @@
 #define BDR_INTERNAL_H
 
 #include <signal.h>
-
-#include "lib/ilist.h"
+#include "access/xlogdefs.h"
 
 #define EMPTY_REPLICATION_NAME ""
 
@@ -61,19 +60,11 @@ typedef struct BdrConnectionConfig
 	char *replication_sets;
 } BdrConnectionConfig;
 
-typedef struct BdrFlushPosition
-{
-	dlist_node node;
-	XLogRecPtr local_end;
-	XLogRecPtr remote_end;
-} BdrFlushPosition;
-
 extern volatile sig_atomic_t got_SIGTERM;
 extern volatile sig_atomic_t got_SIGHUP;
 
 extern void bdr_error_nodeids_must_differ(uint64 sysid, TimeLineID timeline,
 										  Oid dboid);
-extern List* bdr_read_connection_configs(void);
 extern BdrConnectionConfig* bdr_get_connection_config(uint64 sysid,
 													  TimeLineID timeline,
 													  Oid dboid,

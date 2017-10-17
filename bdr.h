@@ -17,6 +17,8 @@
 #include "storage/latch.h"
 #include "storage/lock.h"
 
+#include "lib/ilist.h"
+
 #include "libpq-fe.h"
 
 #include "bdr_config.h"
@@ -554,6 +556,7 @@ extern BDRNodeInfo * bdr_nodes_get_local_info(uint64 sysid, TimeLineID tli,
 										  Oid dboid);
 extern void bdr_bdr_node_free(BDRNodeInfo *node);
 extern void bdr_nodes_set_local_status(char status);
+extern List* bdr_read_connection_configs(void);
 
 extern Oid GetSysCacheOidError(int cacheId, Datum key1, Datum key2, Datum key3,
 							   Datum key4);

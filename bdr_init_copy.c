@@ -16,15 +16,29 @@
 #include <locale.h>
 #include <signal.h>
 #include <time.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "libpq-fe.h"
-#include "libpq-int.h"
+/* Note the order is important for debian here. */
+#if !defined(pg_attribute_printf)
 
+/* GCC and XLC support format attributes */
+#if defined(__GNUC__) || defined(__IBMC__)
+#define pg_attribute_format_arg(a) __attribute__((format_arg(a)))
+#define pg_attribute_printf(f,a) __attribute__((format(PG_PRINTF_ATTRIBUTE, f, a)))
+#else
+#define pg_attribute_format_arg(a)
+#define pg_attribute_printf(f,a)
+#endif
+
+#endif
+
+#include "libpq-fe.h"
 #include "postgres_fe.h"
+#include "pqexpbuffer.h"
 
 #include "getopt_long.h"
 
@@ -32,11 +46,9 @@
 
 #include "miscadmin.h"
 
-#include "access/timeline.h"
 #include "access/xlog_internal.h"
 #include "catalog/pg_control.h"
 
-#include "bdr_config.h"
 #include "bdr_internal.h"
 
 #define LLOGCDIR "pg_logical/checkpoints"
