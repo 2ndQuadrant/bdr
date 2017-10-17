@@ -220,7 +220,6 @@ process_remote_begin(StringInfo s)
 {
 	XLogRecPtr		origlsn;
 	TimestampTz		committime;
-	TimestampTz		current;
 	TransactionId	remote_xid;
 	char			statbuf[100];
 	int				apply_delay = bdr_apply_config->apply_delay;
@@ -337,21 +336,75 @@ process_remote_begin(StringInfo s)
 	/* don't want the overhead otherwise */
 	if (apply_delay > 0)
 	{
-		current = GetCurrentIntegerTimestamp();
-
-		/* ensure no weirdness due to clock drift */
-		if (current > replication_origin_timestamp)
+		/* loop in case we're woken early in a sleep by an interrupt */
+		while (true)
 		{
 			long		sec;
 			int			usec;
+			int			ret;
+			long		delay_ms;
+			TimestampTz		current;
 
-			current = TimestampTzPlusMilliseconds(current,
-												  -apply_delay);
+			current = GetCurrentIntegerTimestamp();
 
-			TimestampDifference(current, replication_origin_timestamp,
-								&sec, &usec);
-			/* FIXME: deal with overflow? */
-			pg_usleep(usec + (sec * USECS_PER_SEC));
+			/*
+			 * Some amount of clock drift/skew is normal, so
+			 * we must handle remote commits that are in the future
+			 * according to our local clock.
+			 */
+			if (current < replorigin_session_origin_timestamp)
+			{
+				TimestampDifference(replorigin_session_origin_timestamp, current,
+									&sec, &usec);
+				
+				/* ignore small skews */
+				if (sec > 1)
+					ereport(WARNING,
+							(errmsg("clock skew detected: node "BDR_NODEID_FORMAT_WITHNAME" clock is ahead of local clock by at least %ld.%03d seconds",
+									BDR_NODEID_FORMAT_WITHNAME_ARGS(origin), sec,
+									usec / 1000)));
+
+				/*
+				 * Now clamp the delay to max apply delay. If we're woken
+				 * mid-sleep this could mean we repeat the warning and wait
+				 * longer than apply_delay but ... don't have your clocks
+				 * ahead, then!
+				 */
+				delay_ms = apply_delay;
+			}
+			else
+			{
+				current = TimestampTzPlusMilliseconds(current,
+													  -apply_delay);
+
+				TimestampDifference(current, replorigin_session_origin_timestamp,
+									&sec, &usec);
+
+				/*
+				 * WaitLatch doesn't support > INT_MAX ms, including any us component,
+				 * and we have to guard against overflow anyway.
+				 */
+				if (sec >= (INT_MAX/1000 - 1000))
+				{
+					elog(WARNING, "ignoring absurd remote commit timestamp and/or apply_delay");
+					delay_ms = 0;
+				}
+				else
+					delay_ms = sec * 1000 + usec / 1000L;
+
+				/* TimestampDifference returns 0 if start >= end, so: */
+				if (delay_ms == 0)
+					break;
+			}
+
+			ret = WaitLatch(&MyProc->procLatch,
+							WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
+							delay_ms);
+
+			if (ret & WL_POSTMASTER_DEATH)
+				proc_exit(1);
+
+			ResetLatch(&MyProc->procLatch);
 
 			CHECK_FOR_INTERRUPTS();
 		}
