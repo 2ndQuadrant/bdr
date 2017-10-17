@@ -43,17 +43,20 @@
 
 struct MQPoolConn
 {
-	/* Is this connection used. */
-	bool			used;
+	/* Pointer back to owning pool. */
+	dsa_pointer		mqpool;
 
-	/* Connected backend. */
+	/* Connected client backend. */
 	PGPROC		   *client;
 
 	/* DSA pointers to queues. */
 	dsa_pointer		clientq;
 	dsa_pointer		serverq;
 
-	/* Process local queue attached handles. */
+	/*
+	 * Process local queue attached handles.
+	 * TODO: move to process local memory.
+	 */
 	shm_mq_handle  *client_recvqh;
 	shm_mq_handle  *client_sendqh;
 	shm_mq_handle  *server_recvqh;
@@ -83,6 +86,9 @@ struct MQPool
 
 	/* Number of connections in the pool. */
 	uint32			max_connections;
+
+	/* Allocated connections. */
+	uint32			alloc_connections;
 
 	/* Connections in the pool. */
 	dsa_pointer		connections[FLEXIBLE_ARRAY_MEMBER];
@@ -114,6 +120,8 @@ MQPoolerContext			   *MQPoolerCtx = NULL;
 static dsa_area			   *MQPoolerDsaArea = NULL;
 
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
+
+static dsa_pointer dsa_reallocate(dsa_area *dsa, dsa_pointer olddp, Size oldsz, Size newsz);
 
 /*
  * Init shmem needed our context.
@@ -187,8 +195,42 @@ shm_mq_pooler_init(void)
 	MQPoolerCtx->pooler = dp;
 }
 
+static bool
+shm_mq_pool_conn_used(MQPoolConn *mqconn)
+{
+	shm_mq	   *mq;
+
+	if (mqconn->clientq)
+	{
+		mq = dsa_get_address(MQPoolerDsaArea, mqconn->clientq);
+		if (shm_mq_get_receiver(mq) || shm_mq_get_sender(mq))
+			return true;
+	}
+
+	if (mqconn->serverq)
+	{
+		mq = dsa_get_address(MQPoolerDsaArea, mqconn->serverq);
+		if (shm_mq_get_receiver(mq) || shm_mq_get_sender(mq))
+			return true;
+	}
+
+	return false;
+}
+
+static void
+shm_mq_pool_on_server_detach(dsm_segment *seg, Datum arg)
+{
+	MQPool	   *mqpool = (MQPool *) DatumGetPointer(arg);
+
+	SpinLockAcquire(&mqpool->mutex);
+	mqpool->owner = NULL;
+	SpinLockRelease(&mqpool->mutex);
+}
+
 /*
  * Register new pool
+ *
+ * TODO: improve locking
  */
 MQPool *
 shm_mq_pooler_new_pool(const char *name, int max_connections, Size recv_queue_size,
@@ -198,10 +240,9 @@ shm_mq_pooler_new_pool(const char *name, int max_connections, Size recv_queue_si
 {
 	dsa_pointer			dp;
 	dsa_pointer			mqpoolp;
-	MQPool			   *mqpool;
+	MQPool			   *mqpool = NULL;
 	int					i;
-	MQPooler		   *oldpooler;
-	MQPooler		   *newpooler;
+	MQPooler		   *pooler;
 	ResourceOwner		oldresowner = CurrentResourceOwner;
 	MemoryContext		oldctx = MemoryContextSwitchTo(TopMemoryContext);
 
@@ -222,8 +263,87 @@ shm_mq_pooler_new_pool(const char *name, int max_connections, Size recv_queue_si
 	if (MQPoolerDsaArea == NULL)
 		MQPoolerDsaArea = dsa_attach(MQPoolerCtx->dsa);
 
-	mqpoolp = dsa_allocate0(MQPoolerDsaArea, sizeof(MQPool) + sizeof(dsa_pointer) * max_connections);
-	mqpool = dsa_get_address(MQPoolerDsaArea, mqpoolp);
+	/* Check for name conflict. */
+	pooler = dsa_get_address(MQPoolerDsaArea, MQPoolerCtx->pooler);
+
+	for (i = 0; i < pooler->npools; i++)
+	{
+		mqpool = dsa_get_address(MQPoolerDsaArea, pooler->pools[i]);
+
+		/* Potentially unused pool, check if we can reuse it already. */
+		SpinLockAcquire(&mqpool->mutex);
+		if (!mqpool->owner && mqpool->alloc_connections >= max_connections)
+		{
+			int		ci;
+
+			/*
+			 * We only care about connections up to max_connections even
+			 * if the pool might have more allocated.
+			 */
+			for (ci = 0; ci < max_connections; ci++)
+			{
+				MQPoolConn   *mqconn = dsa_get_address(MQPoolerDsaArea,
+													   mqpool->connections[ci]);
+				if (shm_mq_pool_conn_used(mqconn))
+					break;
+			}
+
+			/*
+			 * Found unused pool, re-use it.
+			 * NB: we don't release the mutex lock here on purpose.
+			 */
+			if (ci == max_connections)
+			{
+				mqpoolp = pooler->pools[i];
+				break;
+			}
+		}
+		/* Report used pool with same name. */
+		else if (namestrcmp(&mqpool->name, name) == 0)
+		{
+			SpinLockRelease(&mqpool->mutex);
+			elog(ERROR, "pool \"%s\" already exists", name);
+		}
+
+		SpinLockRelease(&mqpool->mutex);
+		mqpool = NULL;
+	}
+
+	if (!mqpool)
+	{
+		mqpoolp = dsa_allocate0(MQPoolerDsaArea,
+								sizeof(MQPool) + sizeof(dsa_pointer) * max_connections);
+		mqpool = dsa_get_address(MQPoolerDsaArea, mqpoolp);
+		SpinLockInit(&mqpool->mutex);
+
+		mqpool->alloc_connections = max_connections;
+
+		for (i = 0; i < mqpool->alloc_connections; i++)
+		{
+			MQPoolConn	   *mqconn;
+
+			dp = dsa_allocate0(MQPoolerDsaArea, sizeof(MQPoolConn));
+			mqconn = dsa_get_address(MQPoolerDsaArea, dp);
+			mqconn->mqpool = mqpoolp;
+
+			mqpool->connections[i] = dp;
+		}
+
+		MQPoolerCtx->pooler =
+			dsa_reallocate(MQPoolerDsaArea, MQPoolerCtx->pooler,
+						   sizeof(MQPooler) + pooler->npools * sizeof(dsa_pointer),
+						   sizeof(MQPooler) + (pooler->npools + 1) * sizeof(dsa_pointer));
+		pooler = dsa_get_address(MQPoolerDsaArea, MQPoolerCtx->pooler);
+
+		SpinLockAcquire(&mqpool->mutex);
+
+		pooler->pools[pooler->npools] = mqpoolp;
+		pooler->npools++;
+
+	}
+
+	on_dsm_detach(dsm_find_mapping(dsa_get_handle(MQPoolerDsaArea)),
+				  shm_mq_pool_on_server_detach, PointerGetDatum(mqpool));
 
 	Assert(strlen(name) <= NAMEDATALEN);
 	memcpy(NameStr(mqpool->name), name, NAMEDATALEN);
@@ -233,26 +353,8 @@ shm_mq_pooler_new_pool(const char *name, int max_connections, Size recv_queue_si
 	mqpool->disconnect_cb = disconnect_cb;
 	mqpool->message_cb = message_cb;
 	mqpool->max_connections = max_connections;
-	SpinLockInit(&mqpool->mutex);
 
-	for (i = 0; i < mqpool->max_connections; i++)
-	{
-		dp = dsa_allocate0(MQPoolerDsaArea, sizeof(MQPoolConn));
-		mqpool->connections[i] = dp;
-	}
-
-	/* DSA does not provide realloc, so do the reallocation ourselves. */
-	oldpooler = dsa_get_address(MQPoolerDsaArea, MQPoolerCtx->pooler);
-	dp = dsa_allocate0(MQPoolerDsaArea,
-					   sizeof(MQPooler) + (oldpooler->npools + 1) * sizeof(dsa_pointer));
-
-	newpooler = dsa_get_address(MQPoolerDsaArea, dp);
-	memcpy(newpooler, oldpooler, sizeof(MQPooler) + oldpooler->npools * sizeof(dsa_pointer));
-	newpooler->pools[newpooler->npools] = mqpoolp;
-	newpooler->npools++;
-
-	dsa_free(MQPoolerDsaArea, MQPoolerCtx->pooler);
-	MQPoolerCtx->pooler = dp;
+	SpinLockRelease(&mqpool->mutex);
 
 	SpinLockRelease(&MQPoolerCtx->mutex);
 
@@ -263,7 +365,7 @@ shm_mq_pooler_new_pool(const char *name, int max_connections, Size recv_queue_si
 }
 
 static void
-shm_mq_pool_on_detach(dsm_segment *seg, Datum arg)
+shm_mq_pool_on_client_detach(dsm_segment *seg, Datum arg)
 {
 	MQPoolConn	   *mqconn = (MQPoolConn *) DatumGetPointer(arg);
 
@@ -299,7 +401,7 @@ shm_mq_pool_attach_connection(MQPool *mqpool, MQPoolConn *mqconn)
 			seg = dsm_attach(dsa_get_handle(MQPoolerDsaArea));
 
 		/* Make sure we run cleanup on detach. */
-		on_dsm_detach(seg, shm_mq_pool_on_detach, PointerGetDatum(mqconn));
+		on_dsm_detach(seg, shm_mq_pool_on_client_detach, PointerGetDatum(mqconn));
 
 		shm_mq_set_receiver(clientq, MyProc);
 		mqconn->client_recvqh = shm_mq_attach(clientq, NULL, NULL);
@@ -352,8 +454,7 @@ shm_mq_pooler_work(void)
 
 			CHECK_FOR_INTERRUPTS();
 
-			pg_read_barrier();
-			if (!mqconn->used)
+			if (!shm_mq_pool_conn_used(mqconn))
 				continue;
 
 			/*
@@ -371,11 +472,14 @@ shm_mq_pooler_work(void)
 			/* Attempt to read a message. */
 			result = shm_mq_receive(mqconn->server_recvqh, &nbytes, &data, true);
 
+			/* Client has disconnected. */
 			if (result == SHM_MQ_DETACHED)
 			{
-				/* Cleanup the connection info and set it unused. */
 				if (mqpool->disconnect_cb)
 					mqpool->disconnect_cb(mqconn);
+
+				/* Cleanup the connection info. */
+				SpinLockAcquire(&mqpool->mutex);
 				shm_mq_detach(mqconn->server_recvqh);
 				mqconn->server_recvqh = NULL;
 				shm_mq_detach(mqconn->server_sendqh);
@@ -386,9 +490,6 @@ shm_mq_pooler_work(void)
 				mqconn->client_sendqh = NULL;
 				mqconn->clientq = 0;
 				mqconn->serverq = 0;
-				SpinLockAcquire(&mqpool->mutex);
-				mqconn->client = NULL;
-				mqconn->used = false;
 				SpinLockRelease(&mqpool->mutex);
 
 				/* Signal all waiters for connection slot. */
@@ -440,15 +541,13 @@ retry:
 		SpinLockAcquire(&mqpool->mutex);
 
 		/* Check if the connection is free. */
-		if (mqconn->used)
+		if (shm_mq_pool_conn_used(mqconn))
 		{
 			SpinLockRelease(&mqpool->mutex);
 			continue;
 		}
 
-		mqconn->used = true;
 		mqconn->client = MyProc;
-		SpinLockRelease(&mqpool->mutex);
 
 		oldctx = MemoryContextSwitchTo(TopMemoryContext);
 
@@ -465,6 +564,8 @@ retry:
 
 		/* Attach proccess to the connection. */
 		shm_mq_pool_attach_connection(mqpool, mqconn);
+
+		SpinLockRelease(&mqpool->mutex);
 
 		MemoryContextSwitchTo(oldctx);
 
@@ -545,7 +646,7 @@ shm_mq_pool_get_pool(const char *name)
 	for (i = 0; i < pooler->npools; i++)
 	{
 		mqpool = dsa_get_address(MQPoolerDsaArea, pooler->pools[i]);
-		if (namestrcmp(&mqpool->name, name) == 0)
+		if (mqpool->owner && namestrcmp(&mqpool->name, name) == 0)
 			break;
 		else
 			mqpool = NULL;
@@ -558,15 +659,20 @@ void
 shm_mq_pool_disconnect(MQPoolConn *mqconn)
 {
 	dsm_segment	   *seg;
+	MQPool		   *mqpool;
 
 	seg = dsm_find_mapping(dsa_get_handle(MQPoolerDsaArea));
-	cancel_on_dsm_detach(seg, shm_mq_pool_on_detach, PointerGetDatum(mqconn));
+	cancel_on_dsm_detach(seg, shm_mq_pool_on_client_detach, PointerGetDatum(mqconn));
 
+	mqpool = dsa_get_address(MQPoolerDsaArea, mqconn->mqpool);
+
+	SpinLockAcquire(&mqpool->mutex);
 	shm_mq_detach(mqconn->client_recvqh);
 	mqconn->client_recvqh = NULL;
 	shm_mq_detach(mqconn->client_sendqh);
 	mqconn->client_sendqh = NULL;
 	mqconn->client = NULL;
+	SpinLockRelease(&mqpool->mutex);
 }
 
 /*
@@ -620,4 +726,28 @@ shm_mq_pool_receive(MQPoolConn *mqconn, StringInfo output, bool nowait)
 	}
 
 	return false; /* unreachable */
+}
+
+/*
+ * The DSA in PostgreSQL does not support realloc so we implement our own.
+ */
+static dsa_pointer
+dsa_reallocate(dsa_area *dsa, dsa_pointer olddp, Size oldsz, Size newsz)
+{
+	dsa_pointer		dp;
+	char		   *oldptr;
+	char		   *newptr;
+
+	oldptr = dsa_get_address(MQPoolerDsaArea, olddp);
+
+	dp = dsa_allocate(dsa, newsz);
+	newptr = dsa_get_address(MQPoolerDsaArea, dp);
+
+	memcpy(newptr, oldptr, oldsz);
+	if (newsz > oldsz)
+		memset(newptr + oldsz, 0, newsz - oldsz);
+
+	dsa_free(MQPoolerDsaArea, olddp);
+
+	return dp;
 }
