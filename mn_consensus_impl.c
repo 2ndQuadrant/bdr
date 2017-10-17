@@ -394,8 +394,8 @@ consensus_received_new_proposal(MNConsensusMessage *message)
 static void
 generate_gxid(char *gxid, int gxid_len)
 {
-	snprintf(gxid, gxid_len, "bdrc%08X%08X",
-			 (uint32) (current_global_id >> 32), (uint32) current_global_id);
+	snprintf(gxid, gxid_len, "bdrc%016" INT64_MODIFIER "x",
+			 current_global_id);
 }
 
 static bool

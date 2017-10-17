@@ -100,8 +100,11 @@ void
 mn_consensus_start(uint32 local_node_id, const char *journal_schema,
 				   const char *journal_relation, MNConsensusCallbacks *cbs)
 {
+	char	pool_name[128];
+
 	am_server = true;
-	MyMQPool = shm_mq_pooler_new_pool("mn_consensus", 100, recv_queue_size,
+	snprintf(pool_name, sizeof(pool_name), "%s%d", "mn_consensus", MyDatabaseId);
+	MyMQPool = shm_mq_pooler_new_pool(pool_name, 100, recv_queue_size,
 									  NULL, NULL, mn_consensus_request_cb);
 
 	consensus_startup(local_node_id, journal_schema, journal_relation,cbs);
@@ -307,11 +310,13 @@ mn_consensus_begin_enqueue(void)
 	MQPool				   *mqpool;
 	MNConsensusRequest		req;
 	MNConsensusResponse	   *res;
+	char	pool_name[128];
 
 	if (am_server)
 		return consensus_begin_enqueue();
 
-	mqpool = shm_mq_pool_get_pool("mn_consensus");
+	snprintf(pool_name, sizeof(pool_name), "%s%d", "mn_consensus", MyDatabaseId);
+	mqpool = shm_mq_pool_get_pool(pool_name);
 	if (!mqpool)
 		ereport(ERROR, (errmsg("could not get mn_consensus pool")));
 	MyMQConn = shm_mq_pool_get_connection(mqpool, false);
@@ -397,7 +402,10 @@ mn_consensus_status(uint64 msg_handle)
 
 	if (!MyMQConn)
 	{
-		mqpool = shm_mq_pool_get_pool("mn_consensus");
+		char	pool_name[128];
+
+		snprintf(pool_name, sizeof(pool_name), "%s%d", "mn_consensus", MyDatabaseId);
+		mqpool = shm_mq_pool_get_pool(pool_name);
 		if (!mqpool)
 			ereport(ERROR, (errmsg("could not get mn_consensus pool")));
 		MyMQConn = shm_mq_pool_get_connection(mqpool, false);
