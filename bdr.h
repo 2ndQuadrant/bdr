@@ -61,6 +61,13 @@ struct EState; /* from nodes/execnodes.h */
 struct ScanKeyData; /* from access/skey.h for ScanKey */
 enum LockTupleMode; /* from access/heapam.h */
 
+typedef struct BdrFlushPosition
+{
+	dlist_node node;
+	XLogRecPtr local_end;
+	XLogRecPtr remote_end;
+} BdrFlushPosition;
+
 /*
  * Flags to indicate which fields are present in a begin record sent by the
  * output plugin.

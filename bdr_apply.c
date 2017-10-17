@@ -352,17 +352,17 @@ process_remote_begin(StringInfo s)
 			 * we must handle remote commits that are in the future
 			 * according to our local clock.
 			 */
-			if (current < replorigin_session_origin_timestamp)
+			if (current < replication_origin_timestamp)
 			{
-				TimestampDifference(replorigin_session_origin_timestamp, current,
+				TimestampDifference(replication_origin_timestamp, current,
 									&sec, &usec);
 				
 				/* ignore small skews */
 				if (sec > 1)
 					ereport(WARNING,
-							(errmsg("clock skew detected: node "BDR_NODEID_FORMAT_WITHNAME" clock is ahead of local clock by at least %ld.%03d seconds",
-									BDR_NODEID_FORMAT_WITHNAME_ARGS(origin), sec,
-									usec / 1000)));
+							(errmsg("clock skew detected: node "BDR_LOCALID_FORMAT" clock is ahead of local clock by at least %ld.%03d seconds",
+									origin_sysid, origin_timeline, origin_dboid,
+									EMPTY_REPLICATION_NAME, sec, usec / 1000)));
 
 				/*
 				 * Now clamp the delay to max apply delay. If we're woken
@@ -377,7 +377,7 @@ process_remote_begin(StringInfo s)
 				current = TimestampTzPlusMilliseconds(current,
 													  -apply_delay);
 
-				TimestampDifference(current, replorigin_session_origin_timestamp,
+				TimestampDifference(current, replication_origin_timestamp,
 									&sec, &usec);
 
 				/*
