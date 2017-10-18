@@ -442,6 +442,8 @@ bdr_bgworker_init(uint32 worker_arg, BdrWorkerType worker_type)
 
 	Assert(IsBackgroundWorker);
 
+	MyProcPort = (Port *) calloc(1, sizeof(Port));
+
 	worker_generation = (uint16)(worker_arg >> 16);
 	worker_idx = (uint16)(worker_arg & 0x0000FFFF);
 
@@ -481,6 +483,8 @@ bdr_bgworker_init(uint32 worker_arg, BdrWorkerType worker_type)
 
 	/* Connect to our database */
 	BackgroundWorkerInitializeConnection(dbname, NULL);
+
+	MyProcPort->database_name = MemoryContextStrdup(TopMemoryContext, dbname);
 
 	LWLockAcquire(BdrWorkerCtl->lock, LW_EXCLUSIVE);
 	bdr_worker_slot->worker_pid = MyProcPid;
