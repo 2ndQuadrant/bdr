@@ -129,26 +129,32 @@ static void consensus_commit_prepared(void);
 static void consensus_rollback_prepared(void);
 static void consensus_xact_callback(XactEvent event, void *arg);
 
-static void consensus_received_prepare_response(uint32 origin, bool result);
+static void consensus_received_prepare_response(MNConsensusMessage *msg, bool result);
+static void consensus_abort(MNConsensusMessage *msg);
 
-static void consensus_abort(void);
+static void consensus_received_global_id_response(uint32 nodeid, bool result,
+									  uint64 global_id);
 
 static MNConsensusMessage *consensus_make_message(MNConsensusMessageKind kind,
+												  uint64 session_id,
 												  uint64 global_id);
 static void consensus_send_message(MNConsensusMessage *msg, uint32 node_id);
 static void consensus_broadcast_message(MNConsensusMessage *msg);
 
+/*
+ * TODO support multiple parallel votings by creating has of active
+ * votings with key `current_session_id`.
+ */
 static uint32 consensus_started_txn = 0;
 static bool consensus_finishing_txn = false;
 static List *cur_txn_proposals = NIL;
 static MemoryContext cur_txn_context = NULL;
 static bool xact_callback_registered = false;
+static uint64 current_session_id = 0;
 static uint64 current_global_id = 0;
+static bool in_global_id_voting = false;
 
 static uint32	MyNodeId = 0;
-
-/* TODO: Move to SHM to support multiple consensus workers. */
-static pg_atomic_uint64	localMsgNumberSequece;
 
 static ConsensusNode *
 consensus_find_node_by_id(uint32 node_id)
@@ -316,6 +322,28 @@ consensus_received_msgb_message(uint32 origin, const char *payload, Size payload
 
 	switch (msg->msg_kind)
 	{
+		case MNCONSENSUS_MSG_KIND_RESERVE_ID:
+			{
+				MNConsensusMessage *res;
+				if (msg->global_id > current_global_id)
+					res = consensus_make_message(MNCONSENSUS_MSG_KIND_RESERVE_ID_ACCEPT,
+												 msg->sender_session_id,
+												 msg->global_id);
+				else
+					res = consensus_make_message(MNCONSENSUS_MSG_KIND_RESERVE_ID_ADJUST,
+												 msg->sender_session_id,
+												 ++current_global_id);
+				consensus_send_message(res, origin);
+			break;
+			}
+		case MNCONSENSUS_MSG_KIND_RESERVE_ID_ACCEPT:
+			consensus_received_global_id_response(origin, true,
+												  msg->global_id);
+			break;
+		case MNCONSENSUS_MSG_KIND_RESERVE_ID_ADJUST:
+			consensus_received_global_id_response(origin, false,
+												  msg->global_id);
+			break;
 		case MNCONSENSUS_MSG_KIND_PROPOSAL:
 			consensus_received_new_proposal(msg);
 			break;
@@ -324,40 +352,42 @@ consensus_received_msgb_message(uint32 origin, const char *payload, Size payload
 			break;
 		case MNCONSENSUS_MSG_KIND_PROPOSAL_FAIL:
 			/* TODO support majority. */
-			consensus_abort();
+			consensus_abort(msg);
 			break;
 		case MNCONSENSUS_MSG_KIND_PREPARE:
 			{
 				bool				result;
-				MNConsensusMessage *msg;
+				MNConsensusMessage *res;
 
 				/* Try to prepare locally */
 				result = consensus_prepare_transaction();
 
 				/* Send answer. */
-				msg = consensus_make_message(result ? MNCONSENSUS_MSG_KIND_PREPARE_OK :
+				res = consensus_make_message(result ? MNCONSENSUS_MSG_KIND_PREPARE_OK :
 											 MNCONSENSUS_MSG_KIND_PREPARE_FAIL,
-											 current_global_id);
-				consensus_send_message(msg, origin);
+											 msg->sender_session_id,
+											 msg->global_id);
+				consensus_send_message(res, origin);
 			}
 			break;
 		case MNCONSENSUS_MSG_KIND_PREPARE_OK:
-			consensus_received_prepare_response(origin, true);
+			consensus_received_prepare_response(msg, true);
 			break;
 		case MNCONSENSUS_MSG_KIND_PREPARE_FAIL:
-			consensus_received_prepare_response(origin, false);
+			consensus_received_prepare_response(msg, false);
 			break;
 		case MNCONSENSUS_MSG_KIND_COMMIT:
 			{
-				MNConsensusMessage *msg;
+				MNConsensusMessage *res;
 
 				/* Commit locally. */
 				consensus_commit_prepared();
 
 				/* Send answer. */
-				msg = consensus_make_message(MNCONSENSUS_MSG_KIND_COMMIT_OK,
-											 current_global_id);
-				consensus_send_message(msg, origin);
+				res = consensus_make_message(MNCONSENSUS_MSG_KIND_COMMIT_OK,
+											 msg->sender_session_id,
+											 msg->global_id);
+				consensus_send_message(res, origin);
 			}
 			break;
 		case MNCONSENSUS_MSG_KIND_COMMIT_OK:
@@ -366,7 +396,7 @@ consensus_received_msgb_message(uint32 origin, const char *payload, Size payload
 		case MNCONSENSUS_MSG_KIND_COMMIT_FAIL:
 			elog(ERROR, "consensus received commit failure from node %u",
 				 origin);
-			consensus_abort();
+			consensus_abort(msg);
 			break;
 		case MNCONSENSUS_MSG_KIND_ROLLBACK:
 			consensus_rollback_prepared();
@@ -394,8 +424,8 @@ consensus_received_new_proposal(MNConsensusMessage *message)
 static void
 generate_gxid(char *gxid, int gxid_len)
 {
-	snprintf(gxid, gxid_len, "bdrc%016" INT64_MODIFIER "x",
-			 current_global_id);
+	snprintf(gxid, gxid_len, "bdrc:%" INT64_MODIFIER "x:%08x",
+			 current_global_id, MyNodeId);
 }
 
 static bool
@@ -460,7 +490,15 @@ consensus_commit_prepared(void)
 static void
 consensus_rollback_prepared(void)
 {
-	AbortCurrentTransaction();
+	char	gxid[64];
+
+	generate_gxid(gxid, sizeof(gxid)-1);
+
+	consensus_finishing_txn = true;
+	StartTransactionCommand();
+	FinishPreparedTransaction(gxid, true);
+	CommitTransactionCommand();
+
 	consensus_started_txn = 0;
 
 	(*proposals_rollback_callback)();
@@ -470,9 +508,9 @@ consensus_rollback_prepared(void)
 }
 
 static void
-consensus_received_prepare_response(uint32 origin, bool result)
+consensus_received_prepare_response(MNConsensusMessage *msg, bool result)
 {
-	MNConsensusMessage *msg;
+	MNConsensusMessage *res;
 
 	/* TODO: Implement voting consensus. */
 	if (true)
@@ -481,23 +519,26 @@ consensus_received_prepare_response(uint32 origin, bool result)
 		consensus_commit_prepared();
 
 		/* Tell everybody else to commit as well. */
-		msg = consensus_make_message(MNCONSENSUS_MSG_KIND_COMMIT,
-									 current_global_id);
-		consensus_broadcast_message(msg);
+		res = consensus_make_message(MNCONSENSUS_MSG_KIND_COMMIT,
+									 msg->sender_session_id,
+									 msg->global_id);
+		consensus_broadcast_message(res);
 	}
 }
 
 static void
-consensus_abort(void)
+consensus_abort(MNConsensusMessage *msg)
 {
-	MNConsensusMessage	   *msg;
+	MNConsensusMessage *res;
+
 
 	consensus_rollback_prepared();
 
-	msg = consensus_make_message(MNCONSENSUS_MSG_KIND_ROLLBACK,
-								 current_global_id);
+	res = consensus_make_message(MNCONSENSUS_MSG_KIND_ROLLBACK,
+								 msg->sender_session_id,
+								 msg->global_id);
 
-	consensus_broadcast_message(msg);
+	consensus_broadcast_message(res);
 }
 
 /*
@@ -517,7 +558,9 @@ consensus_startup(uint32 local_node_id, const char *journal_schema,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("consensus system already running")));
 
-	pg_atomic_init_u64(&localMsgNumberSequece, 1);
+	current_session_id = 1;
+	/* TODO: remember the last value? */
+	current_global_id = 1;
 
 	proposal_receive_callback = cbs->proposal_receive;
 	proposals_prepare_callback = cbs->proposals_prepare;
@@ -607,6 +650,64 @@ consensus_shutdown(void)
 	consensus_started_txn = 0;
 }
 
+static void
+consensus_received_global_id_response(uint32 nodeid, bool result,
+									  uint64 global_id)
+{
+	if (!result)
+	{
+		MNConsensusMessage *msg;
+
+		if (global_id > current_global_id)
+		{
+			current_global_id = global_id;
+
+			msg = consensus_make_message(MNCONSENSUS_MSG_KIND_RESERVE_ID,
+										 current_session_id,
+										 current_global_id);
+			consensus_broadcast_message(msg);
+		}
+
+		return;
+	}
+
+	/* TODO: Implement voting consensus. */
+	if (global_id == current_global_id)
+		in_global_id_voting = false;
+}
+
+static void
+consensus_agree_next_global_id(void)
+{
+	MNConsensusMessage	   *msg;
+	long					max_next_wait_ms;
+
+	current_global_id++;
+
+	msg = consensus_make_message(MNCONSENSUS_MSG_KIND_RESERVE_ID,
+								 current_session_id,
+								 current_global_id);
+	consensus_broadcast_message(msg);
+
+	in_global_id_voting = true;
+
+	msg = consensus_make_message(MNCONSENSUS_MSG_KIND_RESERVE_ID_ACCEPT,
+								 current_session_id,
+								 current_global_id);
+	consensus_received_global_id_response(MyNodeId, true, current_global_id);
+
+	/* XXX */
+	for (;;)
+	{
+		CHECK_FOR_INTERRUPTS();
+
+		if (!in_global_id_voting)
+			return;
+
+		msgb_receive_messages(false);
+	}
+}
+
 /*
  * Start a batch of consensus proposals to be delivered as a unit
  * when consensus_end_batch() is called.
@@ -648,7 +749,9 @@ consensus_begin_enqueue(void)
 	BeginTransactionBlock();
 	CommitTransactionCommand();
 	consensus_started_txn = MyNodeId;
-	current_global_id++;
+	current_session_id++;
+
+	consensus_agree_next_global_id();
 
 	return true;
 }
@@ -678,6 +781,7 @@ consensus_enqueue_proposal(MNConsensusProposal *proposal)
 	 */
 
 	msg = consensus_make_message(MNCONSENSUS_MSG_KIND_PROPOSAL,
+								 current_session_id,
 								 current_global_id);
 	msg->proposal = proposal;
 
@@ -711,10 +815,10 @@ consensus_finish_enqueue(void)
 	 * have been submitted to the broker for sending to peers. Prepare the
 	 * transaction locally.
 	 */
-	consensus_received_prepare_response(MyNodeId,
-										consensus_prepare_transaction());
+	consensus_prepare_transaction();
 
 	msg = consensus_make_message(MNCONSENSUS_MSG_KIND_PREPARE,
+								 current_session_id,
 								 current_global_id);
 	consensus_broadcast_message(msg);
 
@@ -805,14 +909,13 @@ consensus_xact_callback(XactEvent event, void *arg)
  * Create message skelton for specific message kind.
  */
 static MNConsensusMessage *
-consensus_make_message(MNConsensusMessageKind kind, uint64 global_id)
+consensus_make_message(MNConsensusMessageKind kind, uint64 session_id,
+					   uint64 global_id)
 {
 	MNConsensusMessage *msg = palloc0(sizeof(MNConsensusMessage));
-	pg_atomic_uint64   *mew_msgnum = &localMsgNumberSequece;
 
 	msg->sender_nodeid = MyNodeId;
-	msg->sender_local_msgnum = pg_atomic_fetch_add_u64(mew_msgnum, 1);
-	msg->sender_lsn = GetXLogWriteRecPtr();
+	msg->sender_session_id = session_id;
 	msg->sender_timestamp = GetCurrentTimestamp();
 	msg->global_id = global_id;
 	msg->msg_kind = kind;

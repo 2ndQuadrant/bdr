@@ -363,5 +363,11 @@ msgb_receiver_message_cb(MQPoolConn *mqconn, void *data, Size len)
 void
 msgb_wakeup_receive(void)
 {
-	shm_mq_pooler_work();
+	shm_mq_pooler_work(true);
+}
+
+void
+msgb_receive_messages(bool nowait)
+{
+	shm_mq_pooler_work(nowait);
 }

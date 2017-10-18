@@ -420,10 +420,11 @@ shm_mq_pool_attach_connection(MQPool *mqpool, MQPoolConn *mqconn)
  * TODO: locking
  */
 void
-shm_mq_pooler_work(void)
+shm_mq_pooler_work(bool nowait)
 {
 	int			pi;
 	MQPooler   *pooler;
+	bool		gotwork = false;
 
 	/*
 	 * If MQPoolerDsaArea is empty, nobody registered any pool in this
@@ -434,6 +435,7 @@ shm_mq_pooler_work(void)
 
 	pooler = dsa_get_address(MQPoolerDsaArea, MQPoolerCtx->pooler);
 
+retry:
 	for (pi = 0; pi < pooler->npools; pi++)
 	{
 		MQPool	   *mqpool = dsa_get_address(MQPoolerDsaArea,
@@ -507,13 +509,36 @@ shm_mq_pooler_work(void)
 
 					SetLatch(&proc->procLatch);
 				}
+
+				gotwork = true;
 			}
 
 			if (result != SHM_MQ_SUCCESS)
 				continue;
 
 			mqpool->message_cb(mqconn, data, nbytes);
+
+			gotwork = true;
 		}
+	}
+
+	if (!gotwork && !nowait)
+	{
+		int		rc;
+
+		CHECK_FOR_INTERRUPTS();
+
+		/* Retry after maximum of 10s. */
+		rc = WaitLatch(&MyProc->procLatch,
+					   WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH, 10000L,
+					   PG_WAIT_EXTENSION);
+		ResetLatch(&MyProc->procLatch);
+
+		/* emergency bailout if postmaster has died */
+		if (rc & WL_POSTMASTER_DEATH)
+			proc_exit(1);
+
+		goto retry;
 	}
 }
 

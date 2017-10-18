@@ -75,9 +75,6 @@ typedef struct BdrMessage
      */
     TimestampTz		originator_propose_time;
 
-    /* Same here for the LSN */
-    XLogRecPtr		originator_propose_lsn;
-
     /* Did this message require all-nodes consensus or just majority? */
     bool			majority_consensus_ok;
 

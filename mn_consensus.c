@@ -437,7 +437,7 @@ mn_consensus_wakeup(struct WaitEvent *events, int nevents,
 	 * This is a good chance for us to check if we've had any new messages
 	 * submitted to us for processing.
 	 */
-	shm_mq_pooler_work();
+	shm_mq_pooler_work(true);
 
 	/*
 	 * Now process any consensus messages, and do any underlying
@@ -525,9 +525,8 @@ void
 mn_serialize_consensus_proposal_msg(MNConsensusMessage *msg,
 									StringInfo s)
 {
+	pq_sendint64(s, msg->sender_session_id);
 	pq_sendint(s, msg->sender_nodeid, 4);
-	pq_sendint64(s, msg->sender_local_msgnum);
-	pq_sendint64(s, msg->sender_lsn);
 	pq_sendint64(s, msg->sender_timestamp);
 	pq_sendint64(s, msg->global_id);
 	pq_sendint(s, msg->msg_kind, 4);
@@ -557,9 +556,8 @@ mn_deserialize_consensus_proposal_msg(const char *data, Size len)
 	error_context_stack = &myerrcontext;
 
 	memset(msg, 0, sizeof(MNConsensusMessage));
+	msg->sender_session_id = pq_getmsgint64(&s);
 	msg->sender_nodeid = pq_getmsgint(&s, 4);
-	msg->sender_local_msgnum = pq_getmsgint64(&s);
-	msg->sender_lsn = pq_getmsgint64(&s);
 	msg->sender_timestamp = pq_getmsgint64(&s);
 	msg->global_id = pq_getmsgint64(&s);
 	msg->msg_kind = pq_getmsgint(&s, 4);

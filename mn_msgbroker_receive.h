@@ -9,5 +9,6 @@ extern void msgb_startup_receive(char *channel, uint32 local_node_id,
 extern void msgb_shutdown_receive(void);
 
 extern void msgb_wakeup_receive(void);
+extern void msgb_receive_messages(bool nowait);
 
 #endif

@@ -408,7 +408,6 @@ msg_deserialize_proposal(MNConsensusMessage *in)
 	out->global_consensus_no = in->global_id;
 	out->originator_id = in->sender_nodeid;
 	out->originator_propose_time = in->sender_timestamp;
-	out->originator_propose_lsn = in->sender_lsn;
 	/* TODO: support majority consensus */
 	out->majority_consensus_ok = false;
 	out->message = NULL;

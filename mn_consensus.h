@@ -10,17 +10,22 @@
 
 typedef enum MNConsensusMessageKind
 {
-	MNCONSENSUS_MSG_KIND_PROPOSAL,
-	MNCONSENSUS_MSG_KIND_PROPOSAL_OK,
-	MNCONSENSUS_MSG_KIND_PROPOSAL_FAIL,
-	MNCONSENSUS_MSG_KIND_PREPARE,
-	MNCONSENSUS_MSG_KIND_PREPARE_OK,
-	MNCONSENSUS_MSG_KIND_PREPARE_FAIL,
-	MNCONSENSUS_MSG_KIND_COMMIT,
-	MNCONSENSUS_MSG_KIND_COMMIT_OK,
-	MNCONSENSUS_MSG_KIND_COMMIT_FAIL,	/* COMMIT can only FAIL if we get unknown
-										 * global_proposal_id. */
-	MNCONSENSUS_MSG_KIND_ROLLBACK
+	MNCONSENSUS_MSG_KIND_RESERVE_ID,			/* Reserve new global_id for a vote. */
+	MNCONSENSUS_MSG_KIND_RESERVE_ID_ACCEPT,		/* Accept the reservation request. */
+	MNCONSENSUS_MSG_KIND_RESERVE_ID_ADJUST,		/* Suggest different id. */
+	MNCONSENSUS_MSG_KIND_PROPOSAL,				/* Send proposal. */
+	MNCONSENSUS_MSG_KIND_PROPOSAL_OK,			/* ACK proposal. */
+	MNCONSENSUS_MSG_KIND_PROPOSAL_FAIL,			/* NACK proposal. */
+	MNCONSENSUS_MSG_KIND_PREPARE,				/* Prepare to commit proposals. */
+	MNCONSENSUS_MSG_KIND_PREPARE_OK,			/* ACK prepare. */
+	MNCONSENSUS_MSG_KIND_PREPARE_FAIL,			/* NACK prepare. */
+	MNCONSENSUS_MSG_KIND_COMMIT,				/* COMMIT the prepared proposals. */
+	MNCONSENSUS_MSG_KIND_COMMIT_OK,				/* Confirm as committed. */
+	MNCONSENSUS_MSG_KIND_COMMIT_FAIL,			/* Report failure on COMMIT.
+												 * This can only happen when
+												 * there is violation of the
+												 * protocol. */
+	MNCONSENSUS_MSG_KIND_ROLLBACK				/* Rollback prepard proposals. */
 } MNConsensusMessageKind;
 
 typedef struct MNConsensusProposal
@@ -29,17 +34,36 @@ typedef struct MNConsensusProposal
 	char	   *payload;
 } MNConsensusProposal;
 
-typedef struct MNConsensusMessage {
+typedef struct MNConsensusMessage
+{
+	/*
+	 * Session id of this conversation (used to identify interleaving
+	 * conversations).
+	 */
+	uint64		sender_session_id;		/* Voting session identifier. */
+
+	/* Identifier for the node sending the message. */
 	uint32		sender_nodeid;
-	uint64		sender_local_msgnum;
-	XLogRecPtr	sender_lsn;
+
+	/* Timestamp of the message. */
 	TimestampTz	sender_timestamp;
-	uint64		global_id;				/* Id of the proposal group (same for all proposals between begin enqueue and finish enqueue). */
+
+	/*
+	 * Proposed/agreed proposal group identifier (same for all proposals in
+	 * a single conversation).
+	 * NB: has to be sortable
+	 */
+	uint64		global_id;
+
+	/* Kind of message being sent. */
 	MNConsensusMessageKind msg_kind;
-	MNConsensusProposal	*proposal;		/* Only set for MNCONSENSUS_MSG_KIND_PROPOSAL */
+
+	/* Proposal payload, only set when msg_kind is MNCONSENSUS_MSG_KIND_PROPOSAL */
+	MNConsensusProposal	*proposal;
 } MNConsensusMessage;
 
-typedef enum MNConsensusStatus {
+typedef enum MNConsensusStatus
+{
 	MNCONSENSUS_IN_PROGRESS,
 	MNCONSENSUS_ACCEPTED,
 	MNCONSENSUS_FAILED
