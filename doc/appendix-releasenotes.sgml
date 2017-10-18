@@ -18,12 +18,18 @@
  <sect1 id="release-1.0.3">
   <title>Release 1.0.3</title>
 
-  <para><emphasis>Mon Jul 30, 2017</emphasis></para>
+  <para><emphasis>Tue Oct 24, 2017</emphasis></para>
 
   <para>
-   This BDR 1.0.3 maintenance release fixes a minor bug where DDL lock strength
-   was sometimes higher than required. It also improves some error messages to
-   make diagnosis of table structure mismatches easier. 
+   Fixes and improvements:
+   <itemizedlist>
+    <listitem><para>Add new <link linkend="function-bdr-wait-slot-confirm-lsn"><literal>bdr.wait_slot_confirm_lsn</literal></link> function for node synchronisation</></>
+    <listitem><para>Fix possible hang in apply worker that required a full database restart to recover from</></>
+    <listitem><para>Fix <literal>apply_delay</literal> for remote commit timestamps that are in the local node's future due to clock skew</para></listitem>
+    <listitem><para>Support compilation against PostgreSQL 10's <literal>libpq</literal>, for Debian derivative packaging</para></listitem>
+    <listitem><para>Fix an issue where DDL lock strenght was sometimes higher than required</para></listitem>
+    <listitem><para>Improve some error messages to make diagnosis of structure matches easier</para></listitem>
+   </itemizedlist>
   </para>
 
  </sect1>
