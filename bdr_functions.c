@@ -1030,6 +1030,23 @@ bdr_wait_for_join_completion(PG_FUNCTION_ARGS)
 		/* Increase backoff */
 		sleep_ms = Min(sleep_ms * 1.5, max_sleep_ms);
 
+		if (cur_state.current == BDR_NODE_STATE_PROMOTING)
+		{
+			/*
+			 * Poke the manager to make sure it pays attention. This is a bit of a
+			 * hack, but a harmless one.
+			 */
+			PGLogicalWorker *manager;
+			LWLockAcquire(PGLogicalCtx->lock, LW_SHARED);
+			manager = pglogical_manager_find(MyDatabaseId, NULL);
+			if (manager && manager->proc)
+			{
+				/* Signal the manager worker */
+				SetLatch(&manager->proc->procLatch);
+				kill(manager->proc->pid, SIGUSR1);
+			}
+			LWLockRelease(PGLogicalCtx->lock);
+		}
 	}
 
 	state_name = bdr_node_state_name_abbrev(cur_state.current);
