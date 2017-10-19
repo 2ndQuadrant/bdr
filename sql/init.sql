@@ -155,6 +155,8 @@ ORDER BY appname;
 SELECT subscription_name, status, provider_node, slot_name, replication_sets
 FROM pglogical.show_subscription_status();
 
+SELECT bdr.request_replay_progress_update();
+
 \c :node1_dsn
 
 SELECT

@@ -255,7 +255,6 @@ bdr_handle_replay_progress_msg(StringInfo msgdata, uint32 sender_nodeid,
 
 	if (txn_started)
 		CommitTransactionCommand();
-		
 }
 
 
