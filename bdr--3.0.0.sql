@@ -173,6 +173,12 @@ RETURNS bool CALLED ON NULL INPUT VOLATILE LANGUAGE c AS 'MODULE_PATHNAME', 'bdr
 CREATE FUNCTION bdr.gen_slot_name(dbname text, nodegroup_name text, origin_node_name text, target_node_name text)
 RETURNS text STRICT STABLE LANGUAGE c AS 'MODULE_PATHNAME','bdr_gen_slot_name_sql';
 
+CREATE FUNCTION bdr.request_replay_progress_update()
+RETURNS void VOLATILE LANGUAGE c AS 'MODULE_PATHNAME','bdr_request_replay_progress_update';
+
+COMMENT ON FUNCTION bdr.request_replay_progress_update() IS
+'Request immediate writing of a replay progress update WAL message';
+
 /*
  * Interface for BDR message broker
  */

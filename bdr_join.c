@@ -90,9 +90,13 @@ struct BdrJoinProgress
 	 * The wait-event set that wait_event_pos is part of.
 	 */
 	WaitEventSet *wait_set;
+
+	TimestampTz last_replay_progress_update;
 };
 
-struct BdrJoinProgress join = { NULL, NULL, false, NULL, -1, NULL};
+static const int CATCHUP_REPLAY_PROGRESS_UPDATE_FREQUENCY_MS = 1000;
+
+struct BdrJoinProgress join = { NULL, NULL, false, NULL, -1, NULL, 0};
 
 static void bdr_create_local_slot(BdrNodeInfo *local, BdrNodeInfo *remote);
 static void bdr_create_subscription(BdrNodeInfo *local, BdrNodeInfo *remote,
@@ -1032,6 +1036,8 @@ finish_get_remote_node_info(PGconn *conn)
 	res = PQgetResult(join.conn);
 	Assert(res == NULL);
 
+	join.query_result_pending = false;
+
 	return remote;
 }
 
@@ -1293,6 +1299,8 @@ bdr_join_continue_get_catchup_lsn(BdrStateEntry *cur_state, BdrNodeInfo *local)
 		 */
 		res = PQgetResult(join.conn);
 		Assert(res == NULL);
+
+		join.query_result_pending = false;
 	}
 }
 
@@ -1994,6 +2002,35 @@ bdr_join_continue_create_peer_slots(BdrStateEntry *cur_state, BdrNodeInfo *local
 	state_transition(cur_state, BDR_NODE_STATE_JOIN_WAIT_STANDBY_REPLAY, NULL);
 }
 
+static void
+bdr_join_request_replay_progress_update(void)
+{
+	TimestampTz now = GetCurrentTimestamp();
+
+	if (TimestampDifferenceExceeds(join.last_replay_progress_update,
+		now, CATCHUP_REPLAY_PROGRESS_UPDATE_FREQUENCY_MS))
+	{
+		int ret;
+
+		Assert(!join.query_result_pending);
+
+		ret = PQsendQuery(join.conn,
+			"SELECT bdr.request_replay_progress_update()");
+
+		if (!ret)
+		{
+			ereport(WARNING,
+					(errmsg("failed to submit request for replay progress update - couldn't send query"),
+					 errdetail("libpq: %s", PQerrorMessage(join.conn))));
+			bdr_join_reset_connection();
+		}
+
+		join.query_result_pending = true;
+
+		join.last_replay_progress_update = now;
+	}
+}
+
 /*
  * Wait for catchup replay to pass the minmimum startpoint for all replication
  * slots on all peers, i.e. their creation-time confirmed_flush_lsn.
@@ -2007,6 +2044,15 @@ bdr_join_continue_create_peer_slots(BdrStateEntry *cur_state, BdrNodeInfo *local
  *
  * So wait until all local origins pass the creation LSNs of slots on all
  * peers.
+ *
+ * Because some peers might be idle and not generating rows we'll see via
+ * catchup, their origins won't advance locally. We aren't yet connected to the
+ * peer yet, our own subscriptions aren't active. But our join target is
+ * replaying from them directly so its origins get advanced due to keepalives,
+ * empty transactions, etc. We can ask our join target to tell us its own
+ * replay positions, and because we clone everything from the join target we
+ * can trust that we also have the same local data. So we'll periodically
+ * poke the join target for a position update.
  */
 static void
 bdr_join_continue_wait_standby_replay(BdrStateEntry *cur_state, BdrNodeInfo *local)
@@ -2018,6 +2064,33 @@ bdr_join_continue_wait_standby_replay(BdrStateEntry *cur_state, BdrNodeInfo *loc
 	Assert(cur_state->current == BDR_NODE_STATE_JOIN_WAIT_STANDBY_REPLAY);
 
 	nodes = bdr_get_nodes_info(local->bdr_node_group->id);
+
+	/*
+	 * Is there an in-flight replay progress update request we need to clear
+	 * off the libpq connection?
+	 */
+	if (check_for_query_result())
+	{
+		PGresult *res;
+
+		res = PQgetResult(join.conn);
+		Assert(res != NULL);
+
+		if (PQresultStatus(res) != PGRES_TUPLES_OK)
+		{
+			const char *msg = pstrdup(PQresultErrorMessage(res));
+			ereport(ERROR,
+					(errmsg("failed to request replay progress update from peer"),
+					 errdetail("libpq: %s: %s", PQresStatus(PQresultStatus(res)), msg)));
+		}
+
+		PQclear(res);
+
+		res = PQgetResult(join.conn);
+		Assert(res == NULL);
+
+		join.query_result_pending = false;
+	}
 
 	foreach (lc, nodes)
 	{
@@ -2092,6 +2165,14 @@ bdr_join_continue_wait_standby_replay(BdrStateEntry *cur_state, BdrNodeInfo *loc
 	/* Ready to tell the world we're a standby */
 	if (catchup_complete)
 		state_transition(cur_state, BDR_NODE_STATE_SEND_STANDBY_READY, NULL);
+	else
+	{
+		/*
+		 * Do we need to ask for a new replay progress update from our
+		 * join target? 
+		 */
+		bdr_join_request_replay_progress_update();
+	}
 }
 
 /*

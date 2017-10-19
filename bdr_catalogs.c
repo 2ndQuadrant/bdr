@@ -1221,6 +1221,8 @@ bdr_upsert_join_catchup_minimum(JoinCatchupMinimum *jcm)
 		/* UPDATE */
 		bool replaces[Natts_join_catchup_minimum];
 		memset(replaces, true, sizeof(replaces));
+		replaces[Anum_join_catchup_minimum_node_id - 1] = 0;
+		replaces[Anum_join_catchup_minimum_slot_name - 1] = 0;
 		bdr_join_catchup_make_tuple(jcm, values, nulls);
 		newtup = heap_modify_tuple(oldtup, tupDesc, values, nulls, replaces);
 

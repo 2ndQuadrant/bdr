@@ -26,6 +26,7 @@ OBJS = \
 	bdr_shmem.o \
 	bdr_state.o \
 	bdr_sync.o \
+	bdr_wal_messaging.o \
 	bdr_worker.o
 
 REGRESS = preseed init simple views part

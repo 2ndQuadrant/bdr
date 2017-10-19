@@ -36,6 +36,7 @@
 #include "bdr_manager.h"
 #include "bdr_shmem.h"
 #include "bdr_worker.h"
+#include "bdr_wal_messaging.h"
 
 int bdr_max_nodes;
 
@@ -167,7 +168,6 @@ bdr_manager_check_startup_needed(void)
 	(void) MemoryContextSwitchTo(old_ctx);
 }
 
-
 /*
  * Intercept pglogical's main loop during wait-event processing
  */
@@ -184,6 +184,8 @@ bdr_manager_wait_event(struct WaitEvent *events, int nevents,
 	bdr_join_wait_event(events, nevents, max_next_wait_msecs);
 
 	bdr_state_dispatch(max_next_wait_msecs);
+
+	bdr_maybe_write_replay_progress_update();
 }
 
 void

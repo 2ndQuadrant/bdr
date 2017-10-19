@@ -84,4 +84,5 @@ extern void bdr_join_wait_event(struct WaitEvent *events, int nevents, long *max
 
 extern void bdr_join_wait_event_set_recreated(struct WaitEventSet *new_set);
 
+
 #endif

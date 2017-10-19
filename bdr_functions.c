@@ -40,6 +40,7 @@
 #include "bdr_join.h"
 #include "bdr_shmem.h"
 #include "bdr_state.h"
+#include "bdr_wal_messaging.h"
 #include "bdr_worker.h"
 
 /*
@@ -1051,5 +1052,19 @@ bdr_wait_for_join_completion(PG_FUNCTION_ARGS)
 
 	state_name = bdr_node_state_name_abbrev(cur_state.current);
 
+	elog(LOG, "XXX returning %s", state_name);
+
 	PG_RETURN_TEXT_P(cstring_to_text(state_name));
+}
+
+PG_FUNCTION_INFO_V1(bdr_request_replay_progress_update);
+
+Datum
+bdr_request_replay_progress_update(PG_FUNCTION_ARGS)
+{
+	(void) bdr_check_local_node(false);
+
+	bdr_write_replay_progress_update();
+
+	PG_RETURN_VOID();
 }

@@ -25,6 +25,7 @@
 #include "bdr_state.h"
 #include "bdr_version.h"
 #include "bdr_worker.h"
+#include "bdr_wal_messaging.h"
 #include "bdr_apply.h"
 
 /*
@@ -47,6 +48,8 @@ bdr_receiver_writer_start(void)
 	bdr_sub = bdr_get_subscription(MyPGLogicalWorker->subid, true);
 	(void) MemoryContextSwitchTo(old_ctx);
 	CommitTransactionCommand();
+
+	bdr_wal_messaging_register();
 }
 
 /*

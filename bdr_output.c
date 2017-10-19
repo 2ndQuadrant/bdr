@@ -35,6 +35,7 @@
 #include "bdr_output.h"
 #include "bdr_state.h"
 #include "bdr_version.h"
+#include "bdr_wal_messaging.h"
 #include "bdr_worker.h"
 
 static BdrSubscriptionMode sub_mode = BDR_SUBSCRIPTION_MODE_NONE;
@@ -360,6 +361,8 @@ bdr_output_start(struct LogicalDecodingContext * ctx, struct OutputPluginOptions
 		PGL_decode_origin_filter_hook = bdr_origin_filter_hook;
 		hook_registered = true;
 	}
+
+	bdr_wal_messaging_register();
 
 	bdrorigincache_init(ctx->context);
 }
