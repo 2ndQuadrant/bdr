@@ -141,14 +141,15 @@ ALTER EXTENSION bdr UPDATE TO '1.0.1.0';
 ALTER EXTENSION bdr UPDATE TO '1.0.2.0';
 ALTER EXTENSION bdr UPDATE TO '1.0.3.0';
 ALTER EXTENSION bdr UPDATE TO '1.0.3.1';
+ALTER EXTENSION bdr UPDATE TO '1.0.4.0';
 -- Should never have to do anything: You missed adding the new version above.
 ALTER EXTENSION bdr UPDATE;
-NOTICE:  version "1.0.3.1" of extension "bdr" is already installed
+NOTICE:  version "1.0.4.0" of extension "bdr" is already installed
 \dx bdr
                       List of installed extensions
  Name | Version |   Schema   |                Description                
 ------+---------+------------+-------------------------------------------
- bdr  | 1.0.3.1 | pg_catalog | Bi-directional replication for PostgreSQL
+ bdr  | 1.0.4.0 | pg_catalog | Bi-directional replication for PostgreSQL
 (1 row)
 
 \c postgres
