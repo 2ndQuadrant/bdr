@@ -419,12 +419,13 @@ PG_FUNCTION_INFO_V1(bdr_internal_submit_join_request);
 Datum
 bdr_internal_submit_join_request(PG_FUNCTION_ARGS)
 {
-	BdrNodeInfo *local;
-	char handle_str[MAX_DIGITS_INT64];
-	uint64 handle;
-	BdrMsgJoinRequest jreq;
+	BdrNodeInfo		   *local;
+	MNConsensusStatus	status;
+	BdrMsgJoinRequest	jreq;
 
 	memset(&jreq, 0, sizeof(BdrMsgJoinRequest));
+
+	jreq.msg.message_type = BDR_MSG_NODE_JOIN_REQUEST;
 
 	if (PG_ARGISNULL(0))
 		jreq.nodegroup_name = NULL;
@@ -500,11 +501,12 @@ bdr_internal_submit_join_request(PG_FUNCTION_ARGS)
 	jreq.join_target_node_name = local->pgl_node->name;
 	jreq.join_target_node_id = local->pgl_node->id;
 
-	bdr_cache_local_nodeinfo();
-	handle = bdr_consensus_enqueue_proposal(BDR_MSG_NODE_JOIN_REQUEST, &jreq);
+	jreq.msg.origin_id = jreq.joining_node_id;
 
-	snprintf(handle_str, MAX_DIGITS_INT64, UINT64_FORMAT, handle);
-	PG_RETURN_TEXT_P(cstring_to_text(handle_str));
+	bdr_cache_local_nodeinfo();
+	status = bdr_consensus_request((BdrMessage *)&jreq);
+
+	PG_RETURN_TEXT_P(cstring_to_text(mn_consensus_status_to_str(status)));
 }
 
 PG_FUNCTION_INFO_V1(bdr_replication_set_add_table);
@@ -877,43 +879,18 @@ PG_FUNCTION_INFO_V1(bdr_submit_comment);
 Datum
 bdr_submit_comment(PG_FUNCTION_ARGS)
 {
-	const char *dummy_payload = text_to_cstring(PG_GETARG_TEXT_P(0));
-	uint64 handle;
-	char handle_str[33];
+	BdrMessage			commentmsg;
+	BdrNodeInfo		   *local;
+	MNConsensusStatus	status;
 
-	(void) bdr_check_local_node(false);
+	local = bdr_check_local_node(false);
 
-	handle = bdr_consensus_enqueue_proposal(BDR_MSG_COMMENT,
-											(void *) dummy_payload);
-	if (handle == 0)
-		/*
-		 * TODO: block
-		 */
-		elog(WARNING, "manager couldn't enqueue message, try again later");
-	else
-		elog(INFO, "manager enqueued message with handle "UINT64_FORMAT, handle);
+	commentmsg.message_type = BDR_MSG_COMMENT;
+	commentmsg.origin_id = local->pgl_node->id;
 
-	snprintf(&handle_str[0], 33, UINT64_FORMAT, handle);
-	PG_RETURN_TEXT_P(cstring_to_text(handle_str));
-}
+	status = bdr_consensus_request(&commentmsg);
 
-PG_FUNCTION_INFO_V1(bdr_consensus_message_outcome);
-
-Datum
-bdr_consensus_message_outcome(PG_FUNCTION_ARGS)
-{
-	const char * handle_str = text_to_cstring(PG_GETARG_TEXT_P(0));
-	uint64 handle;
-	MNConsensusStatus status;
-
-	(void) bdr_check_local_node(false);
-
-	if (sscanf(handle_str, UINT64_FORMAT, &handle) != 1)
-		elog(ERROR, "could not parse %s as uint64", handle_str);
-
-	status = mn_consensus_status(handle);
-
-	PG_RETURN_INT32((int32) status);
+	PG_RETURN_TEXT_P(cstring_to_text(mn_consensus_status_to_str(status)));
 }
 
 PG_FUNCTION_INFO_V1(bdr_replicate_ddl_command);
@@ -937,7 +914,7 @@ bdr_replicate_ddl_command(PG_FUNCTION_ARGS)
 				 errmsg("cannot replicate null DDL string")));
 
 	query = text_to_cstring(PG_GETARG_TEXT_PP(0));
-	
+
 	if (PG_ARGISNULL(1))
 		replication_sets = NIL;
 	else

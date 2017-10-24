@@ -7,24 +7,22 @@
 
 #include "mn_consensus.h"
 
-struct WaitEvent;
+struct RaftServer;
+typedef struct RaftServer RaftServer;
 
-extern void consensus_add_or_update_node(uint32 nodeid, const char *dsn,
-				  bool update_if_exists);
-extern void consensus_remove_node(uint32 nodeid);
+extern RaftServer *raft_new_server(uint32 node_id,
+				consensus_execute_request_cb execute_request_cb,
+				consensus_execute_query_cb execute_query_cb);
+extern void raft_received_message(RaftServer *server, uint32 origin,
+					  MNConsensusMessageKind msgkind,
+					  StringInfo message);
+extern void raft_wakeup(RaftServer *server, int msec_elapsed, long *max_next_wait_ms);
+extern bool raft_add_node(RaftServer *server, uint32 node_id);
+extern void raft_remove_node(RaftServer *server, uint32 node_id);
 
-extern void consensus_startup(uint32 local_node_id, const char *journal_schema,
-				  const char *journal_relation, MNConsensusCallbacks *cbs);
-extern void consensus_shutdown(void);
-extern void consensus_wakeup(struct WaitEvent *occurred_events, int nevents,
-				 long *max_next_wait_ms);
+extern uint32 raft_get_leader(RaftServer *server);
 
-extern bool consensus_begin_enqueue(void);
-extern uint64 consensus_enqueue_proposal(MNConsensusProposal *proposal);
-extern uint64 consensus_finish_enqueue(void);
-
-extern enum MNConsensusStatus consensus_proposals_status(uint64 handle);
-
-extern uint32 consensus_active_nodeid(void);
+extern void raft_request(RaftServer *server, MNConsensusRequest *req);
+extern void raft_query(RaftServer *server, MNConsensusQuery *query);
 
 #endif		/* MN_CONSENSUS_IMPL_H */

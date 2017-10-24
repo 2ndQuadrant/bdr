@@ -256,6 +256,12 @@ FROM pglogical.show_subscription_status();
  bdrgroup_node1    | replicating | node1         | bdr_postgres_bdrgroup_node1_node2 | {bdrgroup}
 (1 row)
 
+SELECT bdr.request_replay_progress_update();
+ request_replay_progress_update 
+--------------------------------
+ 
+(1 row)
+
 \c :node1_dsn
 SELECT
     state_counter, state, state_name, peer_id, peer_name,
@@ -283,30 +289,31 @@ SELECT
 	regexp_replace(extra_data, '[[:xdigit:]]{1,8}/[[:xdigit:]]{8}', 'X/XXXXXXXX'),
 	 '[[:digit:]]', 'n', 'g') AS extra_data_masked
 FROM bdr.state_journal_details;
- state_counter | state |          state_name          |  peer_id   | peer_name |         extra_data_masked          
----------------+-------+------------------------------+------------+-----------+------------------------------------
+ state_counter | state |          state_name          |  peer_id   | peer_name |        extra_data_masked        
+---------------+-------+------------------------------+------------+-----------+---------------------------------
              1 |     1 | CREATED                      |          0 |           | 
              2 |  1000 | JOIN_START                   | 1148549230 | node1     | node group name: bdrgroup
-             3 |  1010 | JOIN_WAIT_CONFIRM            | 1148549230 | node1     | global consensus message handle: n
-             4 |  1020 | JOIN_COPY_REMOTE_NODES       | 1148549230 | node1     | 
-             5 |  1025 | JOIN_CREATE_TARGET_SLOT      | 1148549230 | node1     | 
-             6 |  1040 | JOIN_SUBSCRIBE_JOIN_TARGET   | 1148549230 | node1     | 
-             7 |  1050 | JOIN_WAIT_SUBSCRIBE_COMPLETE | 1148549230 | node1     | 
-             8 |  1080 | JOIN_COPY_REPSET_MEMBERSHIPS | 1148549230 | node1     | 
-             9 |  1055 | JOIN_CREATE_SUBSCRIPTIONS    | 1148549230 | node1     | 
-            10 |  1060 | JOIN_GET_CATCHUP_LSN         | 1148549230 | node1     | 
-            11 |  1070 | JOIN_WAIT_CATCHUP            | 1148549230 | node1     | minimum catchup lsn: X/XXXXXXXX
-            12 |  1090 | JOIN_CREATE_PEER_SLOTS       | 1148549230 | node1     | 
-            13 |  1100 | JOIN_WAIT_STANDBY_REPLAY     | 1148549230 | node1     | 
-            14 |  1110 | SEND_STANDBY_READY           | 1148549230 | node1     | 
+             3 |  1020 | JOIN_COPY_REMOTE_NODES       | 1148549230 | node1     | 
+             4 |  1025 | JOIN_CREATE_TARGET_SLOT      | 1148549230 | node1     | 
+             5 |  1040 | JOIN_SUBSCRIBE_JOIN_TARGET   | 1148549230 | node1     | 
+             6 |  1050 | JOIN_WAIT_SUBSCRIBE_COMPLETE | 1148549230 | node1     | 
+             7 |  1080 | JOIN_COPY_REPSET_MEMBERSHIPS | 1148549230 | node1     | 
+             8 |  1055 | JOIN_CREATE_SUBSCRIPTIONS    | 1148549230 | node1     | 
+             9 |  1060 | JOIN_GET_CATCHUP_LSN         | 1148549230 | node1     | 
+            10 |  1070 | JOIN_WAIT_CATCHUP            | 1148549230 | node1     | minimum catchup lsn: X/XXXXXXXX
+            11 |  1090 | JOIN_CREATE_PEER_SLOTS       | 1148549230 | node1     | 
+            12 |  1100 | JOIN_WAIT_STANDBY_REPLAY     | 1148549230 | node1     | 
+            13 |  1110 | SEND_STANDBY_READY           | 1148549230 | node1     | sending
+            14 |  1110 | SEND_STANDBY_READY           | 1148549230 | node1     | executed
             15 |  2000 | STANDBY                      | 1148549230 | node1     | 
             16 |  2005 | PROMOTING                    | 1148549230 | node1     | 
             17 |  2010 | REQUEST_GLOBAL_SEQ_ID        | 1148549230 | node1     | 
-            18 |  2020 | WAIT_GLOBAL_SEQ_ID           | 1148549230 | node1     | global consensus message handle: n
+            18 |  2020 | WAIT_GLOBAL_SEQ_ID           | 1148549230 | node1     | 
             19 |  2030 | CREATE_LOCAL_SLOTS           | 1148549230 | node1     | 
-            20 |  2040 | SEND_ACTIVE_ANNOUNCE         | 1148549230 | node1     | 
-            21 |  5000 | ACTIVE                       |          0 |           | 
-(21 rows)
+            20 |  2040 | SEND_ACTIVE_ANNOUNCE         | 1148549230 | node1     | sending
+            21 |  2040 | SEND_ACTIVE_ANNOUNCE         | 1148549230 | node1     | executed
+            22 |  5000 | ACTIVE                       |          0 |           | 
+(22 rows)
 
 SELECT pn.node_name, jcp.min_slot_lsn IS NOT NULL, jcp.passed_min_slot_lsn
 FROM bdr.join_catchup_minimum jcp JOIN pglogical.node pn ON jcp.node_id = pn.node_id

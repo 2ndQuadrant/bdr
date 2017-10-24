@@ -74,19 +74,19 @@ state_has_extradata(BdrNodeState new_state)
 		case BDR_NODE_STATE_JOIN_COPY_REPSET_MEMBERSHIPS:
 		case BDR_NODE_STATE_JOIN_CREATE_PEER_SLOTS:
 		case BDR_NODE_STATE_JOIN_WAIT_STANDBY_REPLAY:
-		case BDR_NODE_STATE_SEND_STANDBY_READY:
 		case BDR_NODE_STATE_JOIN_CREATE_SUBSCRIPTIONS:
 		case BDR_NODE_STATE_STANDBY:
 		case BDR_NODE_STATE_PROMOTING:
 		case BDR_NODE_STATE_CREATE_LOCAL_SLOTS:
-		case BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE:
 		case BDR_NODE_STATE_REQUEST_GLOBAL_SEQ_ID:
+		case BDR_NODE_STATE_WAIT_GLOBAL_SEQ_ID:
 			return false;
 		case BDR_NODE_STATE_JOIN_START:
 		case BDR_NODE_STATE_JOIN_WAIT_CONFIRM:
 		case BDR_NODE_STATE_JOIN_WAIT_CATCHUP:
-		case BDR_NODE_STATE_WAIT_GLOBAL_SEQ_ID:
 		case BDR_NODE_STATE_JOIN_FAILED:
+		case BDR_NODE_STATE_SEND_STANDBY_READY:
+		case BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE:
 			return true;
 		case BDR_NODE_STATE_JOIN_CAN_START_CONSENSUS:
 		case BDR_NODE_STATE_JOIN_RANGE_END:
@@ -251,6 +251,14 @@ state_extradata_deserialize(StringInfo in, BdrNodeState state)
 			return extra;
 		}
 
+		case BDR_NODE_STATE_SEND_STANDBY_READY:
+		case BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE:
+		{
+			ExtraDataConsensusReq *extra = palloc(sizeof(ExtraDataConsensusReq));
+			extra->executed = pq_getmsgint(in, 1);
+			return extra;
+		}
+
 		default:
 			/*
 			 * We shouldn't error here, since new states could be added
@@ -309,6 +317,14 @@ state_extradata_serialize(StringInfo out, BdrNodeState new_state,
 		{
 			struct ExtraDataJoinFailure *extra = extradata;
 			pq_sendstring(out, extra->reason);
+			break;
+		}
+
+		case BDR_NODE_STATE_SEND_STANDBY_READY:
+		case BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE:
+		{
+			ExtraDataConsensusReq *extra = extradata;
+			pq_sendint(out, extra->executed, 1);
 			break;
 		}
 
@@ -376,6 +392,14 @@ state_stringify_extradata(BdrStateEntry *state)
 			break;
 		}
 
+		case BDR_NODE_STATE_SEND_STANDBY_READY:
+		case BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE:
+		{
+			ExtraDataConsensusReq *extra = state->extra_data;
+			appendStringInfoString(&si, extra->executed ? "executed" : "sending");
+			break;
+		}
+
 		default:
 			appendStringInfo(&si, "unhandled state %d",
 				state->current);
@@ -436,12 +460,13 @@ state_transition_goal(BdrStateEntry *state, BdrNodeState new_state,
 	cur.global_consensus_no = consensus_id;
 	cur.extra_data = extradata;
 
-	Assert(state->current != cur.current);
-
-	elog(bdr_debug_level, "node %u state transition #%u, %s => %s",
-		 bdr_get_local_nodeid(), cur.counter,
-		 bdr_node_state_name(state->current),
-		 bdr_node_state_name(cur.current));
+//	if (state->current != cur.current)
+	{
+		elog(bdr_debug_level, "node %u state transition #%u, %s => %s",
+			 bdr_get_local_nodeid(), cur.counter,
+			 bdr_node_state_name(state->current),
+			 bdr_node_state_name(cur.current));
+	}
 
 	state_push(&cur);
 

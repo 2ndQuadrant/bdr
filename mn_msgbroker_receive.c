@@ -88,7 +88,7 @@ msgb_connect(PG_FUNCTION_ARGS)
 
 	Assert(MQPoolerCtx != NULL);
 
-	snprintf(pool_name, sizeof(pool_name), "%s%d", channel, MyDatabaseId);
+	snprintf(pool_name, sizeof(pool_name), "%s%d", channel, destination_node);
 	mqpool = shm_mq_pool_get_pool(pool_name);
 	if (!mqpool)
 		ereport(ERROR, (errmsg("could not get pool for channel \"%s\"",
@@ -202,7 +202,7 @@ msgb_startup_receive(char *channel, uint32 local_node_id, Size recv_queue_size,
 	MyNodeId = local_node_id;
 
 	/* Create the pool. */
-	snprintf(pool_name, sizeof(pool_name), "%s%d", channel, MyDatabaseId);
+	snprintf(pool_name, sizeof(pool_name), "%s%d", channel, MyNodeId);
 	MyMQPool = shm_mq_pooler_new_pool(pool_name, 100, recv_queue_size,
 									  NULL, NULL, msgb_receiver_message_cb);
 }

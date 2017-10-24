@@ -77,8 +77,6 @@ ConnIsEventDriven(MsgbConnection *conn)
 		   || conn->conn_status == MSGB_SEND_CONN_READY;
 }
 
-static mn_request_waitevents_fn	request_waitevents = NULL;
-
 /* The wait event set we maintain all our sockets in */
 static WaitEventSet *wait_set = NULL;
 
@@ -96,7 +94,7 @@ static char	   *MyChannel = NULL;
  * (sockets not created yet)?
  */
 static bool conns_polling = false;
-static bool request_waitevents_pending = false;
+static bool waitevents_rebuild_pending = false;
 
 static void msgb_remove_destination_by_index(int index, bool request_waitevents);
 static void msgb_start_connect(MsgbConnection *conn);
@@ -108,8 +106,6 @@ static int msgb_recv_pending(MsgbConnection *conn);
 static int msgb_idx_for_destination(uint32 destination, const char *errm_action);
 static int msgb_flush_conn(MsgbConnection *conn);
 static void msgb_conn_set_wait_flags(MsgbConnection *conn, int flags);
-
-static void msgb_request_waitevents(void);
 
 static void msgb_register_wait_event(MsgbConnection *conn);
 
@@ -205,7 +201,7 @@ msgb_status_invariant(MsgbConnection *conn)
 			 * event-driven connection. Or if we're still polling, we might not
 			 * have got around to setting one up yet.
 			 */
-			if (!request_waitevents_pending && !conns_polling)
+			if (!waitevents_rebuild_pending && !conns_polling)
 				Assert(conn->wait_set_index >= 0);
 			/*
 			 * An active connection must be waiting on receive and/or send.
@@ -255,13 +251,10 @@ msgb_status_invariant(MsgbConnection *conn)
  * maintained by future add/remove destination operations.
  */
 void
-msgb_startup_send(char *channel, uint32 local_node_id,
-				  mn_request_waitevents_fn request_waitevents_fn)
+msgb_startup_send(char *channel, uint32 local_node_id)
 {
 	int i;
 #define INITIAL_MAX_CONNS 10
-
-	Assert(request_waitevents_fn != NULL);
 
 	if (msgbuf_context != NULL)
 		ereport(ERROR,
@@ -272,8 +265,7 @@ msgb_startup_send(char *channel, uint32 local_node_id,
 	MyNodeId = local_node_id;
 	nconns = INITIAL_MAX_CONNS;
 
-	request_waitevents = request_waitevents_fn;
-	msgb_request_waitevents();
+	waitevents_rebuild_pending = true;
 
 	msgbuf_context = AllocSetContextCreate(TopMemoryContext,
 										   "msgbroker context",
@@ -328,7 +320,7 @@ msgb_clear_bad_connection(MsgbConnection *conn)
 
 	if (conn->wait_set_index != -1)
 	{
-		msgb_request_waitevents();
+		waitevents_rebuild_pending = true;
 		/*
 		 * The recreate may not be immediate, but we can safely abandon
 		 * the wait-set entry knowing the whole set will get recreated.
@@ -580,7 +572,7 @@ msgb_register_wait_event(MsgbConnection *conn)
 	 * If we're currently busy doing event processing and have asked for the
 	 * wait-event set to be re-created there's no point doing this.
 	 */
-	if (!request_waitevents_pending)
+	if (!waitevents_rebuild_pending)
 	{
 		conn->wait_set_index = AddWaitEventToSet(wait_set,
 												 conn->wait_flags,
@@ -1265,7 +1257,7 @@ msgb_remove_destination_by_index(int index, bool request_waitevents)
 			 * If we're currently in event processing it'll be re-created when
 			 * we exit the event loop.
 			 */
-			msgb_request_waitevents();
+			waitevents_rebuild_pending = true;
 	}
 
 	Assert(conn->wait_set_index == -1);
@@ -1310,7 +1302,7 @@ msgb_shutdown_send(void)
 	}
 
 	/* Re-create the event set without any of our events in it */
-	msgb_request_waitevents();
+	waitevents_rebuild_pending = true;
 
 	/* Don't free the wait event set, it was passed in by caller */
 	wait_set = NULL;
@@ -1431,8 +1423,20 @@ msgb_idx_for_destination(uint32 destination_id, const char *errm_action)
  * is driving our event loop to re-create the set next time it's out of the
  * loop and tell us about it here.
  */
-static void
-msgb_wait_event_set_fill(WaitEventSet *new_wait_set)
+bool
+msgb_want_waitevent_rebuild(void)
+{
+	return waitevents_rebuild_pending;
+}
+
+int
+msgb_wait_event_count(void)
+{
+	return nconns;
+}
+
+void
+msgb_add_events(WaitEventSet *weset, int nevents)
 {
 	int i;
 
@@ -1440,9 +1444,9 @@ msgb_wait_event_set_fill(WaitEventSet *new_wait_set)
 	if (conns == NULL)
 		return;
 
-	wait_set = new_wait_set;
+	wait_set = weset;
 
-	for (i = 0; i < nconns; i++)
+	for (i = 0; i < nconns && i < nevents; i++)
 	{
 		MsgbConnection *conn = &conns[i];
 		msgb_status_invariant(conn);
@@ -1455,19 +1459,5 @@ msgb_wait_event_set_fill(WaitEventSet *new_wait_set)
 		msgb_status_invariant(conn);
 	}
 
-	request_waitevents_pending = false;
-}
-
-static void
-msgb_request_waitevents(void)
-{
-	request_waitevents_pending = true;
-	if (request_waitevents != NULL)
-		request_waitevents(nconns, msgb_wait_event_set_fill);
-}
-
-int
-msgb_get_wait_event_space_needed(void)
-{
-	return nconns;
+	waitevents_rebuild_pending = false;
 }

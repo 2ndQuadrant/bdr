@@ -54,13 +54,12 @@ static void msgb_atexit(int code, Datum arg);
 
 void
 msgb_startup(char *channel, uint32 local_node_id,
-			 mn_request_waitevents_fn request_waitevents,
 			 msgb_receive_cb receive_cb, Size recv_queue_size)
 {
 	if (!atexit_registered)
 		before_shmem_exit(msgb_atexit, (Datum)0);
 
-	msgb_startup_send(channel, local_node_id, request_waitevents);
+	msgb_startup_send(channel, local_node_id);
 	msgb_startup_receive(channel, local_node_id, recv_queue_size, receive_cb);
 	elog(DEBUG1, "BDR msgbroker: started");
 }

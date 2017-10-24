@@ -35,57 +35,19 @@
 #include "shm_mq_pool.h"
 #include "mn_consensus.h"
 #include "mn_consensus_impl.h"
+#include "mn_msgbroker.h"
+#include "mn_msgbroker_receive.h"
+#include "mn_msgbroker_send.h"
 
 #define recv_queue_size 1024
 
-typedef enum MNConsensusRequestType
-{
-	MNRT_UNKNOWN_REQUEST = 0,
-	MNRT_START_ENQUEUE,
-	MNRT_ENQUEUE_PROPOSAL,
-	MNRT_FINISH_ENQUEUE,
-	MNRT_QUERY_STATUS,
-} MNConsensusRequestType;
+typedef struct RequestConn {
+	dlist_node		node;
+	uint64			req_id;
+	MQPoolConn	   *mqconn;
+} RequestConn;
 
-typedef enum MNConsensusResponseType
-{
-	MNRT_UNKNOWN_RESPONSE = 0,
-	MNRT_START_ENQUEUE_RESULT,
-	MNRT_ENQUEUE_PROPOSAL_RESULT,
-	MNRT_FINISH_ENQUEUE_RESULT,
-	MNRT_QUERY_STATUS_RESULT
-} MNConsensusResponseType;
-
-/*
- * A request carried on the submission queues.
- *
- * Used for enqueuing messages, getting response statuses, etc.
- *
- * (We do NOT need this for getting committed message payloads to other
- * backends, since they're available from the DB.)
- */
-typedef struct MNConsensusRequest
-{
-	MNConsensusRequestType req_type;
-	union {
-		uint64				req_handle;
-		MNConsensusProposal *proposal;
-	} payload;
-} MNConsensusRequest;
-
-/*
- * Reply for the request above, written into the reply queue.
- */
-typedef struct MNConsensusResponse
-{
-	MNConsensusResponseType res_type;
-	union {
-		uint64				req_handle;
-		bool				req_result;
-		MNConsensusStatus	req_status;
-	} payload;
-} MNConsensusResponse;
-
+static dlist_head	reqconns = DLIST_STATIC_INIT(reqconns);
 
 /* Pool in the receiver server proccess. */
 static MQPool	   *MyMQPool = NULL;
@@ -94,105 +56,135 @@ static bool			am_server = false;
 /* Connection to pool in backend. */
 static MQPoolConn  *MyMQConn = NULL;
 
-static void mn_consensus_request_cb(MQPoolConn *mqconn, void *data, Size len);
+/* local RAFT server. */
+static RaftServer  *MyRaftServer = NULL;
+
+static uint32		MyNodeId = 0;
+
+static void mn_consensus_local_message_cb(MQPoolConn *mqconn, void *data, Size len);
+static void mn_consensus_message_cb(uint32 origin, const char *payload, Size payload_size);
+
+static void mn_consensus_local_disconnect(MQPoolConn *mqconn);
+static MQPoolConn *mn_pop_conn_for_request(uint64 req_id);
+static void mn_add_conn_for_request(uint64 req_id, MQPoolConn *mqconn);
+
 
 void
 mn_consensus_start(uint32 local_node_id, const char *journal_schema,
 				   const char *journal_relation, MNConsensusCallbacks *cbs)
 {
 	char	pool_name[128];
+	MemoryContext	oldctx;
+
+	oldctx = MemoryContextSwitchTo(TopMemoryContext);
 
 	am_server = true;
-	snprintf(pool_name, sizeof(pool_name), "%s%d", "mn_consensus", MyDatabaseId);
+	MyNodeId = local_node_id;
+	snprintf(pool_name, sizeof(pool_name), "%s%d", "mn_consensus", MyNodeId);
 	MyMQPool = shm_mq_pooler_new_pool(pool_name, 100, recv_queue_size,
-									  NULL, NULL, mn_consensus_request_cb);
+									  NULL, mn_consensus_local_disconnect,
+									  mn_consensus_local_message_cb);
 
-	consensus_startup(local_node_id, journal_schema, journal_relation,cbs);
+	msgb_startup("mn_consensus_msg", local_node_id, mn_consensus_message_cb,
+				 recv_queue_size);
+
+	MyRaftServer = raft_new_server(local_node_id, cbs->execute_request,
+								   cbs->execute_query);
+	MemoryContextSwitchTo(oldctx);
 }
 
 void
 mn_consensus_shutdown(void)
 {
-	consensus_shutdown();
+	/* TODO */
 }
 
-static Size
-mn_consensus_proposal_size(MNConsensusProposal *proposal)
+void
+mn_consensus_serialize_request(StringInfo s, MNConsensusRequest *req)
 {
-	return sizeof(proposal->payload_length) + proposal->payload_length;
+	pq_sendint64(s, req->req_id);
+	pq_sendint(s, req->origin_id, 4);
+	pq_sendint64(s, req->payload_length);
+
+	if (req->payload_length)
+		pq_sendbytes(s, req->payload, req->payload_length);
 }
 
-static Size
-mn_consensus_request_len(MNConsensusRequest *req)
+void
+mn_consensus_deserialize_request(StringInfo s, MNConsensusRequest *req)
 {
-	switch (req->req_type)
+	req->req_id = pq_getmsgint64(s);
+	req->origin_id = pq_getmsgint(s, 4);
+	req->payload_length = pq_getmsgint64(s);
+
+	if (req->payload_length)
 	{
-		case MNRT_START_ENQUEUE:
-		case MNRT_FINISH_ENQUEUE:
-		case MNRT_QUERY_STATUS:
-			return sizeof(MNConsensusRequest);
-		case MNRT_ENQUEUE_PROPOSAL:
-			return sizeof(MNConsensusRequest) + mn_consensus_proposal_size(req->payload.proposal);
-		default:
-			elog(ERROR, "unrecognized consensus request type %u",
-				 req->req_type);
+		req->payload = palloc(req->payload_length);
+		pq_copymsgbytes(s, req->payload, req->payload_length);
 	}
+	else
+		req->payload = NULL;
 }
+
+void
+mn_consensus_serialize_response(StringInfo s, MNConsensusResponse *res)
+{
+	pq_sendint64(s, res->req_id);
+	pq_sendint(s, res->status, 4);
+	pq_sendint64(s, res->payload_length);
+
+	if (res->payload_length)
+		pq_sendbytes(s, res->payload, res->payload_length);
+}
+
+void
+mn_consensus_deserialize_response(StringInfo s, MNConsensusResponse *res)
+{
+	res->req_id = pq_getmsgint64(s);
+	res->status = pq_getmsgint(s, 4);
+	res->payload_length = pq_getmsgint64(s);
+
+	if (res->payload_length)
+	{
+		res->payload = palloc(res->payload_length);
+		pq_copymsgbytes(s, res->payload, res->payload_length);
+	}
+	else
+		res->payload = NULL;}
+
+void
+mn_consensus_serialize_query(StringInfo s, MNConsensusQuery *query)
+{
+	mn_consensus_serialize_request(s, query);
+}
+
+void
+mn_consensus_deserialize_query(StringInfo s, MNConsensusQuery *query)
+{
+	mn_consensus_deserialize_request(s, query);
+}
+
+void
+mn_consensus_serialize_result(StringInfo s, MNConsensusResult *res)
+{
+	mn_consensus_serialize_response(s, res);
+}
+
+void
+mn_consensus_deserialize_result(StringInfo s, MNConsensusResult *res)
+{
+	mn_consensus_deserialize_response(s, res);
+}
+
 
 static void
-mn_serialize_response(StringInfo s, MNConsensusResponse *res)
-{
-	pq_sendbytes(s, (char *) res, sizeof(MNConsensusResponse));
-}
-
-static MNConsensusResponse *
-mn_deserialize_response(StringInfo s)
-{
-	MNConsensusResponse *res;
-	res = palloc0(sizeof(MNConsensusResponse));
-
-	pq_copymsgbytes(s, (char *) res, sizeof(MNConsensusResponse));
-
-	return res;
-}
-
-static void
-mn_serialize_request(StringInfo s, MNConsensusRequest *req)
-{
-	pq_sendbytes(s, (char *) req, sizeof(MNConsensusRequest));
-	if (req->req_type == MNRT_ENQUEUE_PROPOSAL)
-	{
-		pq_sendint64(s, req->payload.proposal->payload_length);
-		pq_sendbytes(s, req->payload.proposal->payload,
-					 req->payload.proposal->payload_length);
-	}
-}
-
-static MNConsensusRequest *
-mn_deserialize_request(StringInfo s)
-{
-	MNConsensusRequest *req;
-	req = palloc0(sizeof(MNConsensusRequest));
-
-	pq_copymsgbytes(s, (char *) req, sizeof(MNConsensusRequest));
-	if (req->req_type == MNRT_ENQUEUE_PROPOSAL)
-	{
-		req->payload.proposal->payload_length = pq_getmsgint64(s);
-		req->payload.proposal->payload = palloc0(req->payload.proposal->payload_length);
-		pq_copymsgbytes(s, req->payload.proposal->payload,
-						req->payload.proposal->payload_length);
-	}
-
-	return req;
-}
-
-static void
-mn_consensus_send_response(MQPoolConn *mqconn, MNConsensusResponse *res)
+mn_consensus_send_local_response(MQPoolConn *mqconn, MNConsensusResponse *res)
 {
 	StringInfoData	s;
 
 	initStringInfo(&s);
-	mn_serialize_response(&s, res);
+	pq_sendint(&s, MNCONSENSUS_MSG_KIND_RESPONSE, 4);
+	mn_consensus_serialize_response(&s, res);
 
 	if (!shm_mq_pool_write(mqconn, &s))
 		ereport(ERROR,
@@ -202,87 +194,69 @@ mn_consensus_send_response(MQPoolConn *mqconn, MNConsensusResponse *res)
 	pfree(s.data);
 }
 
-/*
- * We got a message from a peer in the manager and need to dispatch a reply
- * once we've acted on it.
- */
-static void
-mn_consensus_request_cb(MQPoolConn *mqconn, void *data, Size len)
+void
+mn_consensus_send_response(uint64 node_id, MNConsensusResponse *res)
 {
-	MNConsensusRequest *request;
-	MNConsensusResponse	response = { MNRT_UNKNOWN_RESPONSE };
-	StringInfoData		s;
+	StringInfoData	s;
 
-	/*
-	 * Unpack the message and decide what the sender wants to do.
-	 *
-	 * Since the message structure is from the same postgres instance and hasn't
-	 * gone over the wire, we can just access it directly.
-	 */
-	wrapInStringInfo(&s, (char *) data, len);
- 	request = mn_deserialize_request(&s);
+	initStringInfo(&s);
+	mn_consensus_serialize_response(&s, res);
 
-	Assert(len == mn_consensus_request_len(request));
+	mn_consensus_send_message(node_id,
+							  MNCONSENSUS_MSG_KIND_RESPONSE, s.data,
+							  s.len);
 
-	/* Proccess the message and construct reply as needed. */
-	switch(request->req_type)
-	{
-		case MNRT_START_ENQUEUE:
-		{
-			bool ret = consensus_begin_enqueue();
-			response.res_type = MNRT_START_ENQUEUE_RESULT;
-			response.payload.req_result = ret;
-			break;
-		}
-		case MNRT_ENQUEUE_PROPOSAL:
-		{
-			uint64				handle;
-			/*
-			 * TODO: error reporting to peers on submit failure
-			 */
-			handle = consensus_enqueue_proposal(request->payload.proposal);
-			response.res_type = MNRT_ENQUEUE_PROPOSAL_RESULT;
-			response.payload.req_handle = handle;
-			break;
-		}
-		case MNRT_FINISH_ENQUEUE:
-		{
-			uint64 handle = consensus_finish_enqueue();
-			response.res_type = MNRT_FINISH_ENQUEUE_RESULT;
-			response.payload.req_handle = handle;
-			break;
-		}
-		case MNRT_QUERY_STATUS:
-		{
-			MNConsensusStatus status;
-			status = consensus_proposals_status(request->payload.req_handle);
-			response.res_type = MNRT_QUERY_STATUS_RESULT;
-			response.payload.req_status = status;
-			break;
-		}
-		default:
-			elog(ERROR, "peer sent unsupported message type %u to manager, shmem protocol violation",
-				 request->req_type);
-	}
+	pfree(s.data);
+}
 
-	/* Send reply. */
-	Assert(response.res_type != MNRT_UNKNOWN_RESPONSE);
-	mn_consensus_send_response(mqconn, &response);
+static void
+mn_consensus_send_local_result(MQPoolConn *mqconn, MNConsensusResult *res)
+{
+	StringInfoData	s;
+
+	initStringInfo(&s);
+	pq_sendint(&s, MNCONSENSUS_MSG_KIND_RESULT, 4);
+	mn_consensus_serialize_result(&s, res);
+
+	if (!shm_mq_pool_write(mqconn, &s))
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("peer appears to have disconnected")));
+
+	pfree(s.data);
+}
+
+void
+mn_consensus_send_result(uint64 node_id, MNConsensusResult *res)
+{
+	StringInfoData	s;
+
+	initStringInfo(&s);
+	mn_consensus_serialize_result(&s, res);
+
+	mn_consensus_send_message(node_id,
+							  MNCONSENSUS_MSG_KIND_RESULT, s.data,
+							  s.len);
+
+	pfree(s.data);
 }
 
 /*
- * From a non-manager backend, submit a message to the manager
- * and return the manager's reply.
+ * From a non-consensus backend, submit a message to the consensus
+ * and optionally return the consensus's reply.
  */
-static MNConsensusResponse*
-mn_consensus_send_request(MNConsensusRequest *req)
+static MNConsensusStatus
+mn_consensus_send_local_request(MQPoolConn *mqconn, MNConsensusRequest *req,
+								bool nowait)
 {
 	StringInfoData			s;
-	MNConsensusResponse	   *response;
+	MNConsensusResponse		response;
+	MNConsensusMessageKind	msgkind;
 
 	initStringInfo(&s);
-	mn_serialize_request(&s, req);
-	if (!shm_mq_pool_write(MyMQConn, &s))
+	pq_sendint(&s, MNCONSENSUS_MSG_KIND_REQUEST, 4);
+	mn_consensus_serialize_request(&s, req);
+	if (!shm_mq_pool_write(mqconn, &s))
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("manager appears to have exited")));
@@ -290,7 +264,10 @@ mn_consensus_send_request(MNConsensusRequest *req)
 	pfree(s.data);
 	initStringInfo(&s);
 
-	if (!shm_mq_pool_receive(MyMQConn, &s, false))
+	if (nowait)
+		return MNCONSENSUS_IN_PROGRESS;
+
+	if (!shm_mq_pool_receive(mqconn, &s, false))
 			ereport(ERROR,
 					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 					 errmsg("manager appears to have exited")));
@@ -299,23 +276,370 @@ mn_consensus_send_request(MNConsensusRequest *req)
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("unexpected zero length reply")));
-	response = mn_deserialize_response(&s);
 
-	return response;
+	msgkind = pq_getmsgint(&s, 4);
+	Assert(msgkind == MNCONSENSUS_MSG_KIND_RESPONSE);
+
+	mn_consensus_deserialize_response(&s, &response);
+	Assert(response.req_id == req->req_id);
+
+	return response.status;
 }
 
-bool
-mn_consensus_begin_enqueue(void)
+/*
+ * From a non-consensus backend, submit a message to the consensus
+ * and return the consensus's reply.
+ */
+static MNConsensusResult*
+mn_consensus_send_local_query(MQPoolConn *mqconn, MNConsensusQuery *query)
+{
+	StringInfoData			s;
+	MNConsensusResult	   *result;
+	MNConsensusMessageKind	msgkind;
+
+	initStringInfo(&s);
+	pq_sendint(&s, MNCONSENSUS_MSG_KIND_QUERY, 4);
+	mn_consensus_serialize_query(&s, query);
+	if (!shm_mq_pool_write(mqconn, &s))
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("manager appears to have exited")));
+
+	pfree(s.data);
+	initStringInfo(&s);
+
+	if (!shm_mq_pool_receive(mqconn, &s, false))
+			ereport(ERROR,
+					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+					 errmsg("manager appears to have exited")));
+
+	if (s.len == 0)
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("unexpected zero length reply")));
+
+	msgkind = pq_getmsgint(&s, 4);
+	Assert(msgkind == MNCONSENSUS_MSG_KIND_RESULT);
+
+	result = palloc(sizeof(MNConsensusResult));
+	mn_consensus_deserialize_result(&s, result);
+
+	return result;
+}
+
+/*
+ * We got a message from a backend in the manager.
+ */
+static void
+mn_consensus_local_message_cb(MQPoolConn *mqconn, void *data, Size len)
+{
+	StringInfoData		s;
+	uint32				raft_leader_node;
+	uint64				req_id;
+	MNConsensusRequest	request;
+	MNConsensusQuery	query;
+	MNConsensusMessageKind	msgkind;
+
+	raft_leader_node = raft_get_leader(MyRaftServer);
+
+	wrapInStringInfo(&s, (char *) data, len);
+	msgkind = pq_getmsgint(&s, 4);
+
+	switch (msgkind)
+	{
+		case MNCONSENSUS_MSG_KIND_REQUEST:
+		{
+			mn_consensus_deserialize_request(&s, &request);
+			req_id = request.req_id;
+
+			break;
+		}
+		case MNCONSENSUS_MSG_KIND_QUERY:
+		{
+			mn_consensus_deserialize_query(&s, &query);
+			req_id = request.req_id;
+
+			break;
+		}
+		default:
+			elog(ERROR, "unexpected message kind %u", msgkind);
+			return; /* Quiet compiler. */
+	}
+
+
+	/* When there is no leader available, bail. */
+	if (raft_leader_node == 0)
+	{
+		if (msgkind == MNCONSENSUS_MSG_KIND_REQUEST)
+		{
+			MNConsensusResponse	res = {0};
+			res.req_id = req_id;
+			res.status = MNCONSENSUS_NO_LEADER;
+			mn_consensus_send_local_response(mqconn, &res);
+		}
+		else /* Has to be MNCONSENSUS_MSG_KIND_QUERY. */
+		{
+			MNConsensusResult	res = {0};
+			res.req_id = req_id;
+			res.status = MNCONSENSUS_NO_LEADER;
+			mn_consensus_send_local_result(mqconn, &res);
+		}
+	}
+	/* If the leader is the local ndoe we can just call it directly. */
+	else if (MyNodeId == raft_leader_node)
+	{
+		mn_add_conn_for_request(req_id, mqconn);
+
+		if (msgkind == MNCONSENSUS_MSG_KIND_REQUEST)
+			raft_request(MyRaftServer, &request);
+		else /* Has to be MNCONSENSUS_MSG_KIND_QUERY. */
+			raft_query(MyRaftServer, &query);
+	}
+	/* Otherwise forward it to the leader. */
+	else
+	{
+		mn_add_conn_for_request(req_id, mqconn);
+		msgb_queue_message(raft_leader_node, data, len);
+	}
+}
+
+void
+mn_consensus_wakeup(struct WaitEvent *events, int nevents,
+					long *max_next_wait_ms)
+{
+	static TimestampTz last_wakeup_ts = 0;
+
+	msgb_wakeup_receive();
+
+	/*
+	 * This is a good chance for us to check if we've had any new messages
+	 * submitted to us for processing.
+	 */
+	shm_mq_pooler_work(true);
+
+	/* Also let RAFT do it's processing */
+	if (MyRaftServer)
+	{
+		TimestampTz current_ts = GetCurrentTimestamp() / 1000; /* miliseconds. */
+		raft_wakeup(MyRaftServer, current_ts - last_wakeup_ts,
+					max_next_wait_ms);
+		last_wakeup_ts = current_ts;
+	}
+
+	/* And finally do any message processing. */
+	msgb_wakeup_send(events, nevents, max_next_wait_ms);
+}
+
+void
+mn_consensus_add_or_update_node(uint32 nodeid, const char *dsn, bool update_if_exists)
+{
+	if (!raft_add_node(MyRaftServer, nodeid))
+	{
+		if (update_if_exists)
+			msgb_update_peer(nodeid, dsn);
+		else
+			elog(ERROR, "node %u already exists", nodeid);
+	}
+	else
+		msgb_add_peer(nodeid, dsn);
+
+}
+
+void
+mn_consensus_remove_node(uint32 nodeid)
+{
+	raft_remove_node(MyRaftServer, nodeid);
+}
+
+void
+mn_consensus_send_remote_message(uint32 target, MNConsensusMessageKind msgkind,
+								 const char *data, Size len)
+{
+	StringInfoData			s;
+
+	initStringInfo(&s);
+
+	pq_sendint(&s, msgkind, 4);
+	pq_sendbytes(&s, data, len);
+
+	msgb_queue_message(target, s.data, s.len);
+
+	pfree(s.data);
+}
+
+static void
+mn_consensus_process_message(uint32 origin, MNConsensusMessageKind msgkind,
+							 StringInfo s)
+{
+	switch (msgkind)
+	{
+		case MNCONSENSUS_MSG_KIND_REQUEST:
+		{
+			MNConsensusRequest		request;
+
+			mn_consensus_deserialize_request(s, &request);
+
+			/*
+			 * Note RAFT will handle the situation correctly if this node
+			 * is not leader.
+			 */
+			raft_request(MyRaftServer, &request);
+
+			break;
+		}
+		case MNCONSENSUS_MSG_KIND_RESPONSE:
+		{
+			MNConsensusResponse		response;
+			MQPoolConn			   *mqconn;
+
+			mn_consensus_deserialize_response(s, &response);
+			mqconn = mn_pop_conn_for_request(response.req_id);
+
+			/* Bail if client is no longer listening for answer? */
+			if (!mqconn)
+				return;
+
+			mn_consensus_send_local_response(mqconn, &response);
+			break;
+		}
+
+		case MNCONSENSUS_MSG_KIND_QUERY:
+		{
+			MNConsensusQuery		query;
+
+			mn_consensus_deserialize_query(s, &query);
+			/*
+			 * Note RAFT will handle the situation correctly if this node
+			 * is not leader.
+			 */
+			raft_query(MyRaftServer, &query);
+
+			break;
+		}
+		case MNCONSENSUS_MSG_KIND_RESULT:
+		{
+			MNConsensusResult		result;
+			MQPoolConn			   *mqconn;
+
+			mn_consensus_deserialize_result(s, &result);
+			mqconn = mn_pop_conn_for_request(result.req_id);
+
+			/* Bail if client is no longer listening for answer? */
+			if (!mqconn)
+				return;
+
+			mn_consensus_send_local_result(mqconn, &result);
+			break;
+		}
+
+		/* Let RAFT handle RAFT messages. */
+		case MN_CONSENSUS_MSG_RAFT_REQUEST_VOTE:
+		case MN_CONSENSUS_MSG_RAFT_REQUEST_VOTE_RES:
+		case MN_CONSENSUS_MSG_RAFT_APPEND_ENTRIES:
+		case MN_CONSENSUS_MSG_RAFT_APPEND_ENTRIES_RES:
+			raft_received_message(MyRaftServer, origin, msgkind, s);
+			break;
+		default:
+			elog(ERROR, "unknown message kind %u", msgkind);
+	}
+}
+
+static void
+mn_consensus_message_cb(uint32 origin, const char *data, Size len)
+{
+	StringInfoData		s;
+	MNConsensusMessageKind	msgkind;
+
+	if (len < 4)
+		elog(ERROR, "expected message size of at least 4 bytes, got %zu",
+			 len);
+
+	wrapInStringInfo(&s, (char *) data, len);
+
+	msgkind = pq_getmsgint(&s, 4);
+
+	mn_consensus_process_message(origin, msgkind, &s);
+}
+
+void
+mn_consensus_send_message(uint32 target, MNConsensusMessageKind msgkind,
+						  const char *data, Size len)
+{
+	if (target == MyNodeId)
+	{
+		StringInfoData		s;
+		wrapInStringInfo(&s, (char *) data, len);
+		mn_consensus_process_message(MyNodeId, msgkind, &s);
+	}
+	else
+	{
+		mn_consensus_send_remote_message(target, msgkind, data, len);
+	}
+}
+
+static void
+mn_consensus_local_disconnect(MQPoolConn *mqconn)
+{
+	dlist_mutable_iter iter;
+
+	dlist_foreach_modify(iter, &reqconns)
+	{
+		RequestConn	   *reqconn = dlist_container(RequestConn, node, iter.cur);
+
+		if (reqconn->mqconn == mqconn)
+		{
+			dlist_delete(iter.cur);
+			pfree(reqconn);
+		}
+	}
+}
+
+static MQPoolConn *
+mn_pop_conn_for_request(uint64 req_id)
+{
+	dlist_mutable_iter	iter;
+	MQPoolConn		   *mqconn;
+
+	dlist_foreach_modify(iter, &reqconns)
+	{
+		RequestConn	   *reqconn = dlist_container(RequestConn, node, iter.cur);
+
+		if (reqconn->req_id == req_id)
+		{
+			mqconn = reqconn->mqconn;
+			dlist_delete(iter.cur);
+			return mqconn;
+		}
+	}
+
+	return NULL;
+}
+
+static void
+mn_add_conn_for_request(uint64 req_id, MQPoolConn *mqconn)
+{
+	RequestConn	   *reqconn = palloc(sizeof(RequestConn));
+
+	reqconn->req_id = req_id;
+	reqconn->mqconn = mqconn;
+
+	dlist_push_tail(&reqconns, &reqconn->node);
+}
+
+/*
+ * Send request to the consensus module
+ *
+ * This is blocking API.
+ */
+MNConsensusStatus
+mn_consensus_request(uint32 origin_id, char *data, Size len)
 {
 	MQPool				   *mqpool;
 	MNConsensusRequest		req;
-	MNConsensusResponse	   *res;
-	char	pool_name[128];
+	MNConsensusStatus		status;
+	char    pool_name[128];
 
-	if (am_server)
-		return consensus_begin_enqueue();
-
-	snprintf(pool_name, sizeof(pool_name), "%s%d", "mn_consensus", MyDatabaseId);
+	snprintf(pool_name, sizeof(pool_name), "%s%d", "mn_consensus", origin_id);
 	mqpool = shm_mq_pool_get_pool(pool_name);
 	if (!mqpool)
 		ereport(ERROR, (errmsg("could not get mn_consensus pool")));
@@ -323,255 +647,121 @@ mn_consensus_begin_enqueue(void)
 	if (!MyMQConn)
 		ereport(ERROR, (errmsg("could not get mn_consensus connection")));
 
-	req.req_type = MNRT_START_ENQUEUE;
-	res = mn_consensus_send_request(&req);
-	Assert(res->res_type == MNRT_START_ENQUEUE_RESULT);
+	/* TODO */
+	req.req_id = random();
+	req.origin_id = origin_id;
+	req.payload = data;
+	req.payload_length = len;
 
-	return res->payload.req_result;
-}
-
-/*
- * Enqueue a message for processing on other peers. The message data, if passed,
- * must match the type and be recognised by msg_serialize_proposal /
- * msg_deserialize_proposal.
- *
- * Returns a handle that can be used to determine when the final message in the
- * set is finalized and what the outcome was. Use bdr_msg_get_outcome(...)
- * to look up the status.
- */
-uint64
-mn_consensus_enqueue(MNConsensusProposal *proposal)
-{
-	uint64					handle;
-	MNConsensusRequest		req;
-	MNConsensusResponse	   *res;
-
-	if (am_server)
-		return consensus_enqueue_proposal(proposal);
-
-	Assert(MyMQConn);
-
-	req.req_type = MNRT_ENQUEUE_PROPOSAL;
-	req.payload.proposal = proposal;
-	res = mn_consensus_send_request(&req);
-
-	Assert(res->res_type == MNRT_ENQUEUE_PROPOSAL_RESULT);
-	handle = res->payload.req_handle;
-
-	return handle;
-}
-
-uint64
-mn_consensus_finish_enqueue(void)
-{
-	uint64					handle;
-	MNConsensusRequest		req;
-	MNConsensusResponse	   *res;
-
-	if (am_server)
-		return consensus_finish_enqueue();
-
-	Assert(MyMQConn);
-
-	req.req_type = MNRT_FINISH_ENQUEUE;
-	res = mn_consensus_send_request(&req);
-	Assert(res->res_type == MNRT_FINISH_ENQUEUE_RESULT);
-	handle = res->payload.req_handle;
-
-	shm_mq_pool_disconnect(MyMQConn);
-	MyMQConn = NULL;
-
-	return handle;
-}
-
-/*
- * Given a handle from bdr_proposals_enqueue, look up whether
- * a message is committed or not.
- */
-MNConsensusStatus
-mn_consensus_status(uint64 msg_handle)
-{
-	MQPool			   *mqpool;
-	MNConsensusRequest		req;
-	MNConsensusResponse	   *res;
-	MNConsensusStatus		status;
-	bool					conected = false;
-
-	if (am_server)
-		return consensus_proposals_status(msg_handle);
-
-	if (!MyMQConn)
-	{
-		char	pool_name[128];
-
-		snprintf(pool_name, sizeof(pool_name), "%s%d", "mn_consensus", MyDatabaseId);
-		mqpool = shm_mq_pool_get_pool(pool_name);
-		if (!mqpool)
-			ereport(ERROR, (errmsg("could not get mn_consensus pool")));
-		MyMQConn = shm_mq_pool_get_connection(mqpool, false);
-		if (!MyMQConn)
-			ereport(ERROR, (errmsg("could not get mn_consensus connection")));
-
-		conected = true;
-	}
-
-	req.req_type = MNRT_QUERY_STATUS;
-	res = mn_consensus_send_request(&req);
-	Assert(res->res_type == MNRT_QUERY_STATUS_RESULT);
-	status = res->payload.req_status;
-
-	if (conected)
-	{
-		shm_mq_pool_disconnect(MyMQConn);
-		MyMQConn = NULL;
-	}
+	status = mn_consensus_send_local_request(MyMQConn, &req, false);
 
 	return status;
 }
 
+/*
+ * Send request to the consensus module
+ *
+ * This is non-blocking API.
+ */
 void
-mn_consensus_wakeup(struct WaitEvent *events, int nevents,
-					long *max_next_wait_ms)
+mn_consensus_request_enqueue(uint32 origin_id, char *data, Size len)
 {
-	/*
-	 * This is a good chance for us to check if we've had any new messages
-	 * submitted to us for processing.
-	 */
-	shm_mq_pooler_work(true);
+	MQPool				   *mqpool;
+	MNConsensusRequest		req;
+	char    pool_name[128];
 
-	/*
-	 * Now process any consensus messages, and do any underlying
-	 * message broker communication required.
-	 */
-	consensus_wakeup(events, nevents, max_next_wait_ms);
+	snprintf(pool_name, sizeof(pool_name), "%s%d", "mn_consensus", origin_id);
+	mqpool = shm_mq_pool_get_pool(pool_name);
+	if (!mqpool)
+		ereport(ERROR, (errmsg("could not get mn_consensus pool")));
+	MyMQConn = shm_mq_pool_get_connection(mqpool, false);
+	if (!MyMQConn)
+		ereport(ERROR, (errmsg("could not get mn_consensus connection")));
 
+	req.req_id = random(); /* TODO */
+	req.origin_id = origin_id;
+	req.payload = data;
+	req.payload_length = len;
+
+	mn_consensus_send_local_request(MyMQConn, &req, true);
+}
+
+MNConsensusResult *
+mn_consensus_query(uint32 origin_id, char *data, Size len)
+{
+	MQPool				   *mqpool;
+	MNConsensusQuery			query;
+	MNConsensusResult	   *res;
+	char    pool_name[128];
+
+	snprintf(pool_name, sizeof(pool_name), "%s%d", "mn_consensus", origin_id);
+	mqpool = shm_mq_pool_get_pool(pool_name);
+	if (!mqpool)
+		ereport(ERROR, (errmsg("could not get mn_consensus pool")));
+	MyMQConn = shm_mq_pool_get_connection(mqpool, false);
+	if (!MyMQConn)
+		ereport(ERROR, (errmsg("could not get mn_consensus connection")));
+
+	/* TODO */
+	query.req_id = random();
+	query.origin_id = origin_id;
+	query.payload = data;
+	query.payload_length = len;
+
+	res = mn_consensus_send_local_query(MyMQConn, &query);
+
+	return res;
+}
+
+char *
+mn_consensus_status_to_str(MNConsensusStatus status)
+{
+	switch (status)
+	{
+		case MNCONSENSUS_IN_PROGRESS:
+			return "IN_RPOGRESS";
+		case MNCONSENSUS_EXECUTED:
+			return "EXECUTED";
+		case MNCONSENSUS_FAILED:
+			return "FAILED";
+		case MNCONSENSUS_NO_LEADER:
+			return "NO_LEADER";
+		default:
+			elog(ERROR, "unknown status %u", status);
+			return NULL;
+	}
+}
+
+MNConsensusStatus
+mn_consensus_status_from_str(const char *status)
+{
+	if (strcmp(status, "IN_PROGRESS") == 0)
+		return MNCONSENSUS_IN_PROGRESS;
+	if (strcmp(status, "EXECUTED") == 0)
+		return MNCONSENSUS_EXECUTED;
+	if (strcmp(status, "FAILED") == 0)
+		return MNCONSENSUS_FAILED;
+	if (strcmp(status, "NO_LEADER") == 0)
+		return MNCONSENSUS_NO_LEADER;
+
+	elog(ERROR, "unknown status %s", status);
+	return MNCONSENSUS_FAILED;
+}
+
+bool
+mn_consensus_want_waitevent_rebuild(void)
+{
+	return msgb_want_waitevent_rebuild();
+}
+
+int
+mn_consensus_wait_event_count(void)
+{
+	return msgb_wait_event_count();
 }
 
 void
-mn_consensus_add_or_update_node(uint32 nodeid, const char *dsn, bool update_if_exists)
+mn_consensus_add_events(WaitEventSet *weset, int nevents)
 {
-	consensus_add_or_update_node(nodeid, dsn, update_if_exists);
-}
-
-void
-mn_consensus_remove_node(uint32 nodeid)
-{
-	consensus_remove_node(nodeid);
-}
-
-struct mn_msg_errcontext {
-	const char	   *msgtype;
-	StringInfo		msgdata;
-};
-
-static void
-deserialize_mn_msg_errcontext_callback(void *arg)
-{
-	struct mn_msg_errcontext *ctx = arg;
-	char * hexmsg = palloc(ctx->msgdata->len * 2 + 1);
-
-	hex_encode(ctx->msgdata->data, ctx->msgdata->len, hexmsg);
-	hexmsg[ctx->msgdata->len * 2] = '\0';
-
-	/*
-	 * This errcontext is only used when we're deserializing messages, so it's
-	 * OK for it to be pretty verbose.
-	 */
-	errcontext("while deserialising %s message of length %d at cursor %d with data %s",
-			   ctx->msgtype, ctx->msgdata->len, ctx->msgdata->cursor, hexmsg);
-
-	pfree(hexmsg);
-}
-
-void
-mn_serialize_consensus_proposal(MNConsensusProposal *proposal,
-								StringInfo s)
-{
-	pq_sendint64(s, proposal->payload_length);
-	pq_sendbytes(s, (char *) proposal->payload, proposal->payload_length);
-}
-
-MNConsensusProposal *
-mn_deserialize_consensus_proposal(const char *data, Size len)
-{
-	StringInfoData		s;
-	MNConsensusProposal *proposal = palloc0(sizeof(MNConsensusProposal));
-	ErrorContextCallback myerrcontext;
-	struct mn_msg_errcontext ctxinfo;
-
-	/*
-	 * We are not going to change the data but the StringInfo contains char,
-	 * not const char...
-	 */
-	wrapInStringInfo(&s, (char *) data, len);
-
-	ctxinfo.msgtype = "consensus proposal";
-	ctxinfo.msgdata = &s;
-	myerrcontext.callback = deserialize_mn_msg_errcontext_callback;
-	myerrcontext.arg = &ctxinfo;
-	myerrcontext.previous = error_context_stack;
-	error_context_stack = &myerrcontext;
-
-	proposal->payload_length = pq_getmsgint64(&s);
-	proposal->payload = palloc(proposal->payload_length);
-	pq_copymsgbytes(&s, proposal->payload, proposal->payload_length);
-
-	error_context_stack = myerrcontext.previous;
-
-	return proposal;
-}
-
-void
-mn_serialize_consensus_proposal_msg(MNConsensusMessage *msg,
-									StringInfo s)
-{
-	pq_sendint64(s, msg->sender_session_id);
-	pq_sendint(s, msg->sender_nodeid, 4);
-	pq_sendint64(s, msg->sender_timestamp);
-	pq_sendint64(s, msg->global_id);
-	pq_sendint(s, msg->msg_kind, 4);
-	if (msg->msg_kind == MNCONSENSUS_MSG_KIND_PROPOSAL)
-		mn_serialize_consensus_proposal(msg->proposal, s);
-}
-
-MNConsensusMessage *
-mn_deserialize_consensus_proposal_msg(const char *data, Size len)
-{
-	StringInfoData		s;
-	MNConsensusMessage *msg = palloc0(sizeof(MNConsensusMessage));
-	ErrorContextCallback myerrcontext;
-	struct mn_msg_errcontext ctxinfo;
-
-	/*
-	 * We are not going to change the data but the StringInfo contains char,
-	 * not const char...
-	 */
-	wrapInStringInfo(&s, (char *) data, len);
-
-	ctxinfo.msgtype = "consensus proposal message";
-	ctxinfo.msgdata = &s;
-	myerrcontext.callback = deserialize_mn_msg_errcontext_callback;
-	myerrcontext.arg = &ctxinfo;
-	myerrcontext.previous = error_context_stack;
-	error_context_stack = &myerrcontext;
-
-	memset(msg, 0, sizeof(MNConsensusMessage));
-	msg->sender_session_id = pq_getmsgint64(&s);
-	msg->sender_nodeid = pq_getmsgint(&s, 4);
-	msg->sender_timestamp = pq_getmsgint64(&s);
-	msg->global_id = pq_getmsgint64(&s);
-	msg->msg_kind = pq_getmsgint(&s, 4);
-	if (msg->msg_kind == MNCONSENSUS_MSG_KIND_PROPOSAL)
-		msg->proposal = mn_deserialize_consensus_proposal(&s.data[s.cursor],
-														  len - s.cursor);
-
-	error_context_stack = myerrcontext.previous;
-
-	return msg;
-}
-
-uint32
-mn_consensus_active_nodeid(void)
-{
-	return consensus_active_nodeid();
+	return msgb_add_events(weset, nevents);
 }

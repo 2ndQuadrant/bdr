@@ -46,6 +46,14 @@ typedef struct ExtraDataJoinFailure
 	const char * reason;
 } ExtraDataJoinFailure;
 
+/*
+ * State for consensus replicated request.
+ */
+typedef struct ExtraDataConsensusReq
+{
+	bool executed;
+} ExtraDataConsensusReq;
+
 extern BdrNodeInfo * get_remote_node_info(PGconn *conn);
 
 extern PGconn *bdr_join_connect_remote(BdrNodeInfo *local,

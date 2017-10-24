@@ -88,19 +88,23 @@ CREATE TABLE bdr.node_part_progress
 
 REVOKE ALL ON bdr.node_part_progress FROM public;
 
-CREATE TABLE bdr.distributed_message_journal
+CREATE TABLE bdr.global_consensus_journal
 (
-	global_consensus_no bigint NOT NULL PRIMARY KEY,
-	originator_id oid NOT NULL,
-	originator_state_no integer NOT NULL,
-	UNIQUE(originator_id, originator_state_no),
-	originator_sendtime_lsn pg_lsn NOT NULL,
-	consensus_majority_ok boolean NOT NULL,
-	message_type "char" NOT NULL,
-	message bytea NOT NULL
+	log_index bigint NOT NULL PRIMARY KEY,
+	term bigint NOT NULL,
+	req bytea NOT NULL
 );
 
-REVOKE ALL ON bdr.distributed_message_journal FROM public;
+REVOKE ALL ON bdr.global_consensus_journal FROM public;
+
+CREATE TABLE bdr.local_consensus_state
+(
+	node_id oid NOT NULL PRIMARY KEY,
+	current_term bigint NOT NULL,
+	voted_for oid NOT NULL
+);
+
+REVOKE ALL ON bdr.global_consensus_journal FROM public;
 
 CREATE FUNCTION bdr.decode_message_payload(message_type "char", message_payload bytea)
 RETURNS text LANGUAGE c AS 'MODULE_PATHNAME','bdr_decode_message_payload';
@@ -191,12 +195,6 @@ CREATE FUNCTION bdr.msgb_deliver_message(destination_node oid, message_id bigint
 RETURNS void LANGUAGE c AS 'MODULE_PATHNAME','msgb_deliver_message';
 
 REVOKE ALL ON FUNCTION bdr.msgb_deliver_message(oid,bigint,bytea) FROM public;
-
-/*
- * Consensus messaging status lookup. The argument is actually a uint64.
- */
-CREATE FUNCTION bdr.consensus_message_outcome(handle text)
-RETURNS integer STRICT LANGUAGE c AS 'MODULE_PATHNAME','bdr_consensus_message_outcome';
 
 /*
  * Functions used to query remote node info. Don't change these without caution,

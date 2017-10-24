@@ -363,28 +363,28 @@ backend_sleep_conn(int millis, PGconn *conn)
  *
  * Returns 0 until result successfully read.
  */
-static uint64
+static MNConsensusStatus
 bdr_join_submit_get_result(void)
 {
-	uint64 handle = 0;
+	MNConsensusStatus outcome;
+	Assert(sizeof(MNConsensusStatus) == sizeof(int));
+
+	Assert(join.query_result_pending);
 
 	if (check_for_query_result())
 	{
 		PGresult *res = PQgetResult(join.conn);
-		const char * val;
 
 		if (PQresultStatus(res) != PGRES_TUPLES_OK)
 		{
 			const char *msg = pstrdup(PQresultErrorMessage(res));
 			PQclear(res);
 			ereport(ERROR,
-					(errmsg("failed to submit join request on join target"),
+					(errmsg("failed to submit join request outcome query on join target"),
 					 errdetail("libpq: %s", msg)));
 		}
 
-		val = PQgetvalue(res, 0, 0);
-		if (sscanf(val, UINT64_FORMAT, &handle) != 1)
-			elog(ERROR, "could not parse consensus message handle from remote");
+		outcome = mn_consensus_status_from_str(PQgetvalue(res, 0, 0));
 
 		PQclear(res);
 
@@ -399,7 +399,7 @@ bdr_join_submit_get_result(void)
 		join.query_result_pending = false;
 	}
 
-	return handle;
+	return outcome;
 }
 
 /*
@@ -418,7 +418,6 @@ bdr_join_submit_get_result(void)
 static void
 bdr_join_continue_join_start(BdrStateEntry *cur_state, BdrNodeInfo *local)
 {
-	uint64 handle = 0;
 	ExtraDataJoinStart *extra;
 
 	Assert(cur_state->current == BDR_NODE_STATE_JOIN_START);
@@ -434,15 +433,44 @@ bdr_join_continue_join_start(BdrStateEntry *cur_state, BdrNodeInfo *local)
 	/* wait for server to reply with progress handle for join */
 	if (check_for_query_result())
 	{
-		handle = bdr_join_submit_get_result();
+		MNConsensusStatus outcome;
 
-		if (handle != 0)
+		outcome = bdr_join_submit_get_result();
+
+		switch (outcome)
 		{
-			/* join request submitted successfully */
-			ExtraDataConsensusWait new_extra;
-			new_extra.request_message_handle = handle;
-			state_transition(cur_state, BDR_NODE_STATE_JOIN_WAIT_CONFIRM,
-				&new_extra);
+			case MNCONSENSUS_EXECUTED:
+			{
+				/* join request submitted successfully */
+				state_transition(cur_state, BDR_NODE_STATE_JOIN_COPY_REMOTE_NODES,
+					NULL);
+				break;
+			}
+			case MNCONSENSUS_FAILED:
+			{
+				/*
+				 * TODO: we should be able to transition back to
+				 * BDR_NODE_STATE_JOIN_START if the request fails to achieve
+				 * consensus, and retry. This will be important once we support
+				 * majority consensus.
+				 */
+				ExtraDataJoinFailure fail_extra;
+				fail_extra.reason = "join target could not achieve consensus on join request";
+				state_transition(cur_state, BDR_NODE_STATE_JOIN_FAILED,
+					&fail_extra);
+				ereport(WARNING,
+						(errmsg("BDR node join has failed - could not achieve consensus on join")));
+
+				break;
+			}
+			case MNCONSENSUS_NO_LEADER:
+			{
+				/* No leader, we'll need to resubmit the request. */
+				join.query_result_pending = false;
+				break;
+			}
+			default:
+				elog(ERROR, "unexpected outcome %u", outcome);
 		}
 	}
 }
@@ -457,15 +485,23 @@ bdr_join_continue_join_start(BdrStateEntry *cur_state, BdrNodeInfo *local)
 void
 bdr_join_handle_join_proposal(BdrMessage *msg)
 {
-	BdrMsgJoinRequest *req = msg->message;
-	BdrNodeGroup *local_nodegroup;
-	BdrNode bnode;
-	PGLogicalNode pnode;
-	PGlogicalInterface pnodeif;
-	BdrStateEntry cur_state;
+	BdrMsgJoinRequest  *req = (BdrMsgJoinRequest *) msg;
+	BdrNodeInfo		   *local;
+	BdrNodeGroup	   *local_nodegroup;
+	BdrNode				bnode;
+	PGLogicalNode		pnode;
+	PGlogicalInterface	pnodeif;
+	BdrStateEntry		cur_state;
 
-	Assert(is_bdr_manager());
 	Assert(msg->message_type == BDR_MSG_NODE_JOIN_REQUEST);
+
+	/*
+	 * We might be replaying our own join request, if that's the case
+	 * return.
+	 */
+	local = bdr_get_local_node_info(false, true);
+	if (local->bdr_node->node_id == req->joining_node_id)
+		return;
 
 	/* FIXME RM#1118: This is bogus, any node active in messaging could get this */
 	state_get_expected(&cur_state, true, true, BDR_NODE_STATE_ACTIVE);
@@ -538,40 +574,6 @@ bdr_join_handle_join_proposal(BdrMessage *msg)
 }
 
 /*
- * Send a query to find out whether the join proposal
- * consensus request was accepted by the remote peer yet.
- */
-static void
-bdr_join_submit_outcome_request(uint64 handle)
-{
-	Oid paramTypes[1] = {TEXTOID};
-	const char *paramValues[1];
-	char handle_txt[MAX_DIGITS_INT64];
-	int ret;
-	BdrNodeInfo *local = bdr_get_cached_local_node_info();
-
-	Assert(local->pgl_interface != NULL);
-	Assert(!join.query_result_pending);
-
-	snprintf(handle_txt, MAX_DIGITS_INT64, UINT64_FORMAT, handle);
-	paramValues[0] = handle_txt;
-
-	ret = PQsendQueryParams(join.conn,
-							"SELECT bdr.consensus_message_outcome($1)",
-							1, paramTypes, paramValues, NULL, NULL, 0);
-
-	if (!ret)
-	{
-		ereport(WARNING,
-				(errmsg("failed to submit consensus message outcome request - couldn't send query"),
-				 errdetail("libpq: %s", PQerrorMessage(join.conn))));
-		bdr_join_reset_connection();
-	}
-
-	join.query_result_pending = true;
-}
-
-/*
  * Get the reply to the query from bdr_join_submit_request, with
  * a handle we can use to track progress of our consensus message
  * on the join target.
@@ -589,7 +591,6 @@ bdr_join_submit_outcome_get_result(void)
 	if (check_for_query_result())
 	{
 		PGresult *res = PQgetResult(join.conn);
-		const char *val;
 
 		if (PQresultStatus(res) != PGRES_TUPLES_OK)
 		{
@@ -600,9 +601,7 @@ bdr_join_submit_outcome_get_result(void)
 					 errdetail("libpq: %s", msg)));
 		}
 
-		val = PQgetvalue(res, 0, 0);
-		if (sscanf(val, "%d", (int*)(&outcome)) != 1)
-			elog(ERROR, "could not parse consensus message outcome from remote");
+		outcome = mn_consensus_status_from_str(PQgetvalue(res, 0, 0));
 
 		PQclear(res);
 
@@ -621,74 +620,6 @@ bdr_join_submit_outcome_get_result(void)
 }
 
 /*
- * Continue the join process in BDR_NODE_STATE_JOIN_WAIT_CONFIRM state.
- *
- * We've submitted a join request, got a handle for it, and now we're waiting
- * for the outcome.
- *
- * Much like bdr_join_continue_submit, this asynchronously fires a request to
- * the join target to ask it the outcome of our request, then waits for a
- * reply. It repeats until we get a conclusive success or failure.
- */
-static void
-bdr_join_continue_wait_confirm(BdrStateEntry *cur_state, BdrNodeInfo *local)
-{
-	ExtraDataConsensusWait *extra;
-	MNConsensusStatus outcome;
-	Assert(cur_state->current == BDR_NODE_STATE_JOIN_WAIT_CONFIRM);
-	extra = cur_state->extra_data;
-
-	if (!join.query_result_pending)
-	{
-		/* send join request query to server */
-		bdr_join_submit_outcome_request(extra->request_message_handle);
-		join.query_result_pending = true;
-	}
-
-	/* wait for server to reply with progress handle for join */
-	if (check_for_query_result())
-	{
-		outcome = bdr_join_submit_outcome_get_result();
-
-		switch (outcome)
-		{
-			case MNCONSENSUS_ACCEPTED:
-			{
-				/* join request submitted successfully */
-				state_transition(cur_state, BDR_NODE_STATE_JOIN_COPY_REMOTE_NODES,
-					NULL);
-				break;
-			}
-			case MNCONSENSUS_FAILED:
-			{
-				/*
-				 * TODO: we should be able to transition back to
-				 * BDR_NODE_STATE_JOIN_START if the request fails to achieve
-				 * consensus, and retry. This will be important once we support
-				 * majority consensus.
-				 */
-				ExtraDataJoinFailure new_extra;
-				new_extra.reason = "join target could not achieve consensus on join request";
-				state_transition(cur_state, BDR_NODE_STATE_JOIN_FAILED,
-					&new_extra);
-				ereport(WARNING,
-						(errmsg("BDR node join has failed - could not achieve consensus on join")));
-
-				break;
-			}
-			case MNCONSENSUS_IN_PROGRESS:
-			{
-				/*
-				 * Peer hasn't got everyone to agree yet, so we'll just re-enter
-				 * the loop next time around and submit a new query.
-				 */
-				/* TODO: back-off, or maybe blocking request on other end? */
-			}
-		}
-	}
-}
-
-/*
  * A peer node says it wants to go into catchup mode and sent us a
  * BDR_MSG_NODE_STANDBY_READY.
  *
@@ -701,7 +632,6 @@ bdr_join_handle_standby_proposal(BdrMessage *msg)
 {
 	BdrNodeInfo		   *local;
 
-	Assert(is_bdr_manager());
 	Assert(msg->message_type == BDR_MSG_NODE_STANDBY_READY);
 
 	/*
@@ -710,7 +640,7 @@ bdr_join_handle_standby_proposal(BdrMessage *msg)
 	 */
 	local = bdr_get_local_node_info(false, false);
 
-	if (local->bdr_node->node_id != msg->originator_id)
+	if (local->bdr_node->node_id != msg->origin_id)
 	{
 		BdrStateEntry	cur_state;
 		BdrNode		   *peer;
@@ -719,7 +649,7 @@ bdr_join_handle_standby_proposal(BdrMessage *msg)
 		state_get_expected(&cur_state, true, false,
 			BDR_NODE_STATE_ACTIVE);
 
-		peer = bdr_get_node(msg->originator_id, false);
+		peer = bdr_get_node(msg->origin_id, false);
 		if (peer->local_state != BDR_PEER_STATE_JOINING)
 			elog(WARNING, "unexpected peer node state on %u: %s during catchup proposal, expected %s",
 				 peer->node_id,
@@ -732,7 +662,7 @@ bdr_join_handle_standby_proposal(BdrMessage *msg)
 				 bdr_peer_state_name(BDR_PEER_STATE_STANDBY));
 
 		peer->local_state = BDR_PEER_STATE_STANDBY;
-			 
+
 		bdr_modify_node(peer);
 
 		bdr_consensus_refresh_nodes(cur_state.current);
@@ -785,7 +715,6 @@ bdr_join_handle_active_proposal(BdrMessage *msg)
 	BdrNodeInfo		   *local, *remote;
 	BdrStateEntry		cur_state;
 
-	Assert(is_bdr_manager());
 	Assert(msg->message_type == BDR_MSG_NODE_ACTIVE);
 
 	/*
@@ -794,7 +723,7 @@ bdr_join_handle_active_proposal(BdrMessage *msg)
 	 */
 
 	local = bdr_get_local_node_info(false, false);
-	remote = bdr_get_node_info(msg->originator_id, false);
+	remote = bdr_get_node_info(msg->origin_id, false);
 
 	if (local->bdr_node->node_id != remote->bdr_node->node_id)
 	{
@@ -1047,8 +976,6 @@ finish_get_remote_node_info(PGconn *conn)
 BdrNodeInfo *
 get_remote_node_info(PGconn *conn)
 {
-	Assert(!is_bdr_manager());
-
 	if (!start_get_remote_node_info(conn))
 		ereport(ERROR,
 				(errmsg("unable to send bdr.local_node_info query to remote"),
@@ -1668,22 +1595,35 @@ bdr_join_continue_create_subscriptions(BdrStateEntry *cur_state, BdrNodeInfo *lo
 static void
 bdr_join_continue_send_standby_ready(BdrStateEntry *cur_state, BdrNodeInfo *local)
 {
-	uint64 handle;
+	BdrMessage			msg;
+	MNConsensusStatus	status;
+	ExtraDataConsensusReq *extra;
 
 	Assert(cur_state->current == BDR_NODE_STATE_SEND_STANDBY_READY);
-	Assert(IsTransactionState());
-	CommitTransactionCommand();
+
+	extra = cur_state->extra_data;
+	if (extra->executed)
+		return;
 
 	/*
 	 * Local processing of this message via bdr_join_handle_catchup_proposal
 	 * will transition us to BDR_NODE_STATE_STANDBY, which is how we exit
 	 * this state.
 	 */
-	handle = bdr_consensus_enqueue_proposal(BDR_MSG_NODE_STANDBY_READY, NULL);
-	if (handle == 0)
-		elog(ERROR, "failed to submit BDR_MSG_NODE_STANDBY_READY consensus message");
+	msg.message_type = BDR_MSG_NODE_STANDBY_READY;
+	msg.origin_id = local->pgl_node->id;
+	status = bdr_consensus_request(&msg);
 
-	elog(WARNING, "waiting for all nodes to confirm catchup ready not yet implemented");
+	/* Leader not available, we'll have to retry. */
+	if (status == MNCONSENSUS_NO_LEADER)
+		return;
+
+	/* Check if success. */
+	if (status != MNCONSENSUS_EXECUTED)
+		elog(ERROR, "failed to transition to STANDBY_READY state");
+
+	extra->executed = true;
+	state_transition(cur_state, BDR_NODE_STATE_SEND_STANDBY_READY, &extra);
 }
 
 static void
@@ -1727,9 +1667,6 @@ bdr_join_continue_promote(BdrStateEntry *cur_state, BdrNodeInfo *local)
 static void
 bdr_join_continue_request_global_seq_id(BdrStateEntry *cur_state, BdrNodeInfo *local)
 {
-	uint64 handle = 0;
-	ExtraDataConsensusWait extra;
-
 	Assert(cur_state->current == BDR_NODE_STATE_REQUEST_GLOBAL_SEQ_ID);
 
 	/*
@@ -1740,17 +1677,13 @@ bdr_join_continue_request_global_seq_id(BdrStateEntry *cur_state, BdrNodeInfo *l
 
 	elog(WARNING, "requesting global sequence ID assignment not implemented");
 
-	extra.request_message_handle = handle;
-	state_transition(cur_state, BDR_NODE_STATE_WAIT_GLOBAL_SEQ_ID, &extra);
+	state_transition(cur_state, BDR_NODE_STATE_WAIT_GLOBAL_SEQ_ID, NULL);
 }
 
 static void
 bdr_join_continue_wait_global_seq_id(BdrStateEntry *cur_state, BdrNodeInfo *local)
 {
-	ExtraDataConsensusWait *extra;
 	Assert(cur_state->current == BDR_NODE_STATE_WAIT_GLOBAL_SEQ_ID);
-
- 	extra = cur_state->extra_data;
 
 	elog(WARNING, "waiting for global sequence ID assignment not implemented");
 
@@ -2118,7 +2051,7 @@ bdr_join_continue_wait_standby_replay(BdrStateEntry *cur_state, BdrNodeInfo *loc
 			remote->pgl_node->id, local->bdr_node_group->id, false);
 		sub = get_subscription(bsub->pglogical_subscription_id);
 		Assert(sub->target->id == bdr_get_local_nodeid());
-				
+
 		if (jcm.slot_min_lsn == InvalidXLogRecPtr)
 		{
 			/*
@@ -2164,12 +2097,17 @@ bdr_join_continue_wait_standby_replay(BdrStateEntry *cur_state, BdrNodeInfo *loc
 
 	/* Ready to tell the world we're a standby */
 	if (catchup_complete)
-		state_transition(cur_state, BDR_NODE_STATE_SEND_STANDBY_READY, NULL);
+	{
+		ExtraDataConsensusReq extra;
+
+		extra.executed = false;
+		state_transition(cur_state, BDR_NODE_STATE_SEND_STANDBY_READY, &extra);
+	}
 	else
 	{
 		/*
 		 * Do we need to ask for a new replay progress update from our
-		 * join target? 
+		 * join target?
 		 */
 		bdr_join_request_replay_progress_update();
 	}
@@ -2244,26 +2182,46 @@ bdr_join_continue_create_local_slots(BdrStateEntry *cur_state, BdrNodeInfo *loca
 		}
 	}
 
-	state_transition(cur_state, BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE, NULL);
+	{
+		ExtraDataConsensusReq extra;
+
+		extra.executed = false;
+		state_transition(cur_state, BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE, &extra);
+	}
 }
 
 static void
 bdr_join_continue_send_active_announce(BdrStateEntry *cur_state, BdrNodeInfo *local)
 {
-	uint64 handle;
+	BdrMessage	msg;
+	MNConsensusStatus	status;
+	ExtraDataConsensusReq *extra;
 
 	Assert(cur_state->current == BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE);
-	Assert(IsTransactionState());
-	CommitTransactionCommand();
+
+	extra = cur_state->extra_data;
+	if (extra->executed)
+		return;
 
 	bdr_consensus_refresh_nodes(cur_state->current);
 
-	handle = bdr_consensus_enqueue_proposal(BDR_MSG_NODE_ACTIVE, NULL);
-	if (handle == 0)
-		elog(ERROR, "failed to submit BDR_MSG_NODE_ACTIVE consensus message");
+	msg.message_type = BDR_MSG_NODE_ACTIVE;
+	msg.origin_id = local->pgl_node->id;
+	status = bdr_consensus_request(&msg);
+
+	/* Leader not available, we'll have to retry. */
+	if (status == MNCONSENSUS_NO_LEADER)
+		return;
+
+	/* Check if success. */
+	if (status != MNCONSENSUS_EXECUTED)
+		elog(ERROR, "failed to transition to NODE_ACTIVE state");
 
 	/* TODO: wait for consensus in an extra state phase here */
 	elog(WARNING, "not waiting for consensus on active announce, not implemented");
+
+	extra->executed = true;
+	state_transition(cur_state, BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE, &extra);
 }
 
 /*
@@ -2474,7 +2432,7 @@ bdr_join_continue(BdrNodeState cur_state,
 				break;
 
 			case BDR_NODE_STATE_JOIN_WAIT_CONFIRM:
-				bdr_join_continue_wait_confirm(&locked_state, local);
+				elog(ERROR, "unexpected state");
 				break;
 
 			case BDR_NODE_STATE_JOIN_COPY_REMOTE_NODES:
@@ -2556,15 +2514,7 @@ bdr_join_continue(BdrNodeState cur_state,
 	}
 
 	if (IsTransactionState())
-	{
-		/*
-		 * One of the above may have committed the transaction we started at
-		 * the beginning of this call in order to submit a consensus message
-		 * instead. If that's the case we'd better not try to commit it.
-		 */
-		if (mn_consensus_active_nodeid() == 0)
-			CommitTransactionCommand();
-	}
+		CommitTransactionCommand();
 
 	/*
 	 * HACK HACK HACK

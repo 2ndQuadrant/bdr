@@ -19,7 +19,14 @@
 
 #include "access/xact.h"
 
+#include "miscadmin.h"
+
+#include "pgstat.h"
+
+#include "storage/proc.h"
+
 #include "utils/builtins.h"
+#include "utils/memutils.h"
 
 #include "pglogical_plugins.h"
 
@@ -32,23 +39,14 @@
 #include "bdr_state.h"
 #include "bdr_worker.h"
 
-static mn_waitevents_fill_cb		waitevents_fill_cb = NULL;
-static int							waitevents_requested = 0;
+void bdr_consensus_main(Datum main_arg);
 
-static bool bdr_proposal_receive(MNConsensusMessage *msg);
-static bool bdr_proposals_prepare(List *requests);
-static void bdr_proposals_commit(List *requests);
-static void bdr_proposals_rollback(void);
-static void bdr_consensus_request_waitevents(int nwaitevents,
-											 mn_waitevents_fill_cb cb);
-
+static void bdr_consensus_execute_request(MNConsensusRequest *request, MNConsensusResponse *res);
+static bool bdr_consensus_execute_query(MNConsensusQuery *query, MNConsensusResult *res);
 
 static MNConsensusCallbacks consensus_callbacks = {
-	bdr_proposal_receive,
-	bdr_proposals_prepare,
-	bdr_proposals_commit,
-	bdr_proposals_rollback,
-	bdr_consensus_request_waitevents
+	bdr_consensus_execute_request,
+	bdr_consensus_execute_query
 };
 
 typedef void (*msg_serialize_fn)(StringInfo outmsgdata, void *msg);
@@ -82,6 +80,8 @@ static const MNMessageFuncs message_funcs[] = {
 	{BDR_MSG_NOOP, NULL, NULL, NULL}
 };
 
+static void bdr_consensus_worker_refresh_nodes(void);
+
 static const MNMessageFuncs*
 message_funcs_lookup(BdrMessageType msgtype)
 {
@@ -105,7 +105,7 @@ struct bdr_msg_errcontext {
 static void
 deserialize_msg_errcontext_callback(void *arg)
 {
-	struct bdr_msg_errcontext *ctx = arg;	
+	struct bdr_msg_errcontext *ctx = arg;
 	char * hexmsg = palloc(ctx->msgdata->len * 2 + 1);
 
 	hex_encode(ctx->msgdata->data, ctx->msgdata->len, hexmsg);
@@ -126,7 +126,8 @@ deserialize_msg_errcontext_callback(void *arg)
 void
 bdr_start_consensus(BdrNodeState cur_state)
 {
-	bool txn_started = false;
+	BackgroundWorker	bgw;
+	BackgroundWorkerHandle *bgw_handle;
 
 	/*
 	 * Node isn't ready for consensus manager startup yet. If it's during join,
@@ -135,32 +136,123 @@ bdr_start_consensus(BdrNodeState cur_state)
 	if (cur_state < BDR_NODE_STATE_JOIN_CAN_START_CONSENSUS)
 		return;
 
-	if (!IsTransactionState())
+	memset(&bgw, 0, sizeof(bgw));
+	bgw.bgw_flags =	BGWORKER_SHMEM_ACCESS |
+		BGWORKER_BACKEND_DATABASE_CONNECTION;
+	bgw.bgw_start_time = BgWorkerStart_RecoveryFinished;
+	snprintf(bgw.bgw_library_name, BGW_MAXLEN,
+			 "bdr");
+	snprintf(bgw.bgw_function_name, BGW_MAXLEN,
+			 "bdr_consensus_main");
+	snprintf(bgw.bgw_name, BGW_MAXLEN,
+			 "bdr consensus worker");
+	bgw.bgw_restart_time = BGW_NEVER_RESTART;
+	bgw.bgw_notify_pid = MyProcPid;
+	bgw.bgw_main_arg = UInt32GetDatum(MyDatabaseId);
+
+	if (!RegisterDynamicBackgroundWorker(&bgw, &bgw_handle))
 	{
-		txn_started = true;
-		StartTransactionCommand();
+		ereport(ERROR,
+			(errcode(ERRCODE_CONFIGURATION_LIMIT_EXCEEDED),
+			 errmsg("worker registration failed, increase max_worker_processes setting")));
 	}
+}
+
+static WaitEventSet *
+bdr_consensus_rebuild_waitevents(void)
+{
+	WaitEventSet   *weset;
+	int				nevents = mn_consensus_wait_event_count();
+
+	weset = CreateWaitEventSet(TopMemoryContext, nevents + 2);
+
+	AddWaitEventToSet(weset, WL_LATCH_SET, PGINVALID_SOCKET,
+					  &MyProc->procLatch, NULL);
+	AddWaitEventToSet(weset, WL_POSTMASTER_DEATH, PGINVALID_SOCKET,
+					  NULL, NULL);
+
+	mn_consensus_add_events(weset, nevents);
+
+	return weset;
+}
+
+void
+bdr_consensus_main(Datum main_arg)
+{
+	WaitEventSet   *mainloop_waits = NULL;
+	Oid				dboid = DatumGetUInt32(main_arg);
+	long			max_next_sleep = 60000; /* 60s wait. */
+
+	BackgroundWorkerUnblockSignals();
+
+	BackgroundWorkerInitializeConnectionByOid(dboid, InvalidOid);
+
+	StartTransactionCommand();
+
+	bdr_refresh_cache_local_nodeinfo();
 
 	mn_consensus_start(bdr_get_local_nodeid(), BDR_SCHEMA_NAME,
 					   BDR_MSGJOURNAL_REL_NAME, &consensus_callbacks);
 
-	if (txn_started)
+	bdr_consensus_worker_refresh_nodes();
+
+	CurrentResourceOwner = ResourceOwnerCreate(NULL, "bdr consensus worker");
+
+	CommitTransactionCommand();
+
+	mainloop_waits = bdr_consensus_rebuild_waitevents();
+
+	for (;;)
+	{
+		WaitEvent	event;
+		int			nevents;
+
+		nevents = WaitEventSetWait(mainloop_waits, max_next_sleep, &event,
+								   1, PG_WAIT_EXTENSION);
+
+		ResetLatch(&MyProc->procLatch);
+
+		if (event.events & WL_POSTMASTER_DEATH)
+			proc_exit(1);
+
+		CHECK_FOR_INTERRUPTS();
+
+		if (!bdr_is_active_db())
+			return;
+
+		/* TODO: optimize. */
+		StartTransactionCommand();
+		bdr_consensus_worker_refresh_nodes();
 		CommitTransactionCommand();
+
+		max_next_sleep = 60000;
+		mn_consensus_wakeup(&event, nevents, &max_next_sleep);
+
+		if (mn_consensus_want_waitevent_rebuild())
+		{
+			FreeWaitEventSet(mainloop_waits);
+			mainloop_waits = bdr_consensus_rebuild_waitevents();
+		}
+	}
 }
 
 void
 bdr_consensus_refresh_nodes(BdrNodeState cur_state)
 {
-	bool txn_started = false;
-	List	   *nodes;
-	ListCell   *lc;
-
 	/*
 	 * Node isn't ready for consensus manager yet. If it's during join, the
 	 * join process will start and refresh later on.
 	 */
 	if (cur_state < BDR_NODE_STATE_JOIN_CAN_START_CONSENSUS)
 		return;
+}
+
+static void
+bdr_consensus_worker_refresh_nodes(void)
+{
+	bool txn_started = false;
+	List	   *nodes;
+	ListCell   *lc;
 
 	if (!IsTransactionState())
 	{
@@ -195,165 +287,104 @@ bdr_shutdown_consensus(void)
 	mn_consensus_shutdown();
 }
 
-uint64
-bdr_consensus_enqueue_proposal(BdrMessageType message_type, void *message)
+MNConsensusStatus
+bdr_consensus_request(BdrMessage *msg)
 {
-	uint64				handle;
-	uint64				handle2 PG_USED_FOR_ASSERTS_ONLY;
 	StringInfoData		s;
-	MNConsensusProposal	proposal;
+	MNConsensusStatus	status;
 
-	if (!mn_consensus_begin_enqueue())
-		return 0;
+	elog(bdr_debug_level, "%u sending consensus request %s",
+		 bdr_get_local_nodeid(), bdr_message_type_to_string(msg->message_type));
 
 	initStringInfo(&s);
-	msg_serialize_proposal(&s, message_type, message);
+	bdr_serialize_message(&s, msg);
 
-	elog(bdr_debug_level, "%u enqueuing consensus proposal %s of size %d",
-		 bdr_get_local_nodeid(), bdr_message_type_to_string(message_type),
-		 s.len);
+	status = mn_consensus_request(bdr_get_local_nodeid(), s.data, s.len);
 
-	proposal.payload = s.data;
-	proposal.payload_length = s.len;
+	elog(bdr_debug_level, "%u request result %s",
+		 bdr_get_local_nodeid(), mn_consensus_status_to_str(status));
 
-	handle = mn_consensus_enqueue(&proposal);
-	handle2 = mn_consensus_finish_enqueue();
-	Assert(handle2 == handle);
+	pfree(s.data);
 
-	return handle;
-}
-
-static bool
-bdr_proposal_receive(MNConsensusMessage *cmsg)
-{
-	BdrMessage *bmsg;
-	const MNMessageFuncs *funcs;
-	const char *msgdetail;
-
-	bmsg = msg_deserialize_proposal(cmsg);
-
-	if (!bmsg)
-	{
-		/*
-		 * Bad message. TODO: abort txn
-		 */
-		return false;
-	}
-
-	funcs = message_funcs_lookup(bmsg->message_type);
-	if (funcs != NULL && bmsg->message != NULL)
-	{
-		StringInfoData msgbody;
-		initStringInfo(&msgbody);
-		funcs->stringify(&msgbody, bmsg->message);
-		msgdetail = msgbody.data;
-	}
-	else
-		msgdetail = "(no payload)";
-
-	elog(bdr_debug_level, "%u %s proposal from %u: %s",
-		 bdr_get_local_nodeid(),
-		 bdr_message_type_to_string(bmsg->message_type),
-		 request->sender_nodeid,
-		 msgdetail);
-
-	/* TODO: can nack messages here to abort consensus txn early */
-	return true;
-}
-
-static bool
-bdr_proposals_prepare(List *requests)
-{
-	ListCell *lc;
-
-	elog(bdr_debug_level, "%u (%s) handling CONSENSUS PREPARE for %d message transaction",
-		 bdr_get_local_nodeid(),
-		 mn_consensus_active_nodeid() == bdr_get_local_nodeid() ? "self" : "peer",
-		 list_length(requests));
-
-	foreach (lc, requests)
-	{
-		MNConsensusMessage *cmsg = lfirst(lc);
-		BdrMessage		   *bmsg;
-
-		bmsg = msg_deserialize_proposal(cmsg);
-
-		elog(bdr_debug_level, "%u dispatching prepare of proposal %s from %u",
-			 bdr_get_local_nodeid(),
-			 bdr_message_type_to_string(bmsg->message_type),
-			 bmsg->originator_id);
-
-		/*
-		 * TODO: should dispatch message processing via the local node state
-		 * machine, but for now we'll do it directly here.
-		 */
-		switch (bmsg->message_type)
-		{
-			case BDR_MSG_COMMENT:
-				break;
-			case BDR_MSG_NODE_JOIN_REQUEST:
-				bdr_join_handle_join_proposal(bmsg);
-				break;
-			case BDR_MSG_NODE_STANDBY_READY:
-				bdr_join_handle_standby_proposal(bmsg);
-				break;
-			case BDR_MSG_NODE_ACTIVE:
-				bdr_join_handle_active_proposal(bmsg);
-				break;
-			default:
-				elog(ERROR, "unhandled message type %u in prepare proposal",
-					 bmsg->message_type);
-		}
-	}
-
-    /* TODO: can nack messages here too */
-    return true;
-}
-
-static void
-bdr_proposals_commit(List *requests)
-{
-	elog(LOG, "XXX CONSENSUS COMMIT"); /* TODO */
-
-    /* TODO: here's where we allow state changes to take effect */
-}
-
-/* TODO add message-id ranges rejected */
-static void
-bdr_proposals_rollback(void)
-{
-	elog(LOG, "XXX CONSENSUS ROLLBACK"); /* TODO */
-
-    /* TODO: here's where we wind back any temporary state changes */
+	return status;
 }
 
 void
-bdr_consensus_wait_event_set_recreated(WaitEventSet *new_set)
+bdr_consensus_request_enqueue(BdrMessage *msg)
 {
-	if (!bdr_is_active_db())
-		return;
+	StringInfoData		s;
 
-	/*
-	 * This can be called from other requestor before we initialized the
-	 * waitevents_fill_cb.
-	 */
-	if (waitevents_fill_cb)
-		waitevents_fill_cb(new_set);
+	elog(bdr_debug_level, "%u enqueuing consensus request %s",
+		 bdr_get_local_nodeid(), bdr_message_type_to_string(msg->message_type));
+
+	initStringInfo(&s);
+	bdr_serialize_message(&s, msg);
+
+	mn_consensus_request_enqueue(bdr_get_local_nodeid(), s.data, s.len);
+
+	pfree(s.data);
 }
 
-int
-bdr_consensus_get_wait_event_space_needed(void)
+MNConsensusResult *
+bdr_consensus_query(BdrMessage *msg)
 {
-	return waitevents_requested;
+	StringInfoData		s;
+	MNConsensusResult  *res;
+
+	elog(bdr_debug_level, "%u sending consensus query %s",
+		 bdr_get_local_nodeid(), bdr_message_type_to_string(msg->message_type));
+
+	initStringInfo(&s);
+	bdr_serialize_message(&s, msg);
+
+	res = mn_consensus_query(bdr_get_local_nodeid(), s.data, s.len);
+
+	pfree(s.data);
+
+	return res;
 }
 
 static void
-bdr_consensus_request_waitevents(int nwaitevents, mn_waitevents_fill_cb cb)
+bdr_consensus_execute_request(MNConsensusRequest *request, MNConsensusResponse *res)
 {
-	waitevents_requested = nwaitevents;
-	waitevents_fill_cb = cb;
+	BdrMessage	   *bmsg;
+	StringInfoData	s;
 
-	pglogical_manager_recreate_wait_event_set();
+	/* Start transaction early to keep all allocations local. */
+	StartTransactionCommand();
+
+	wrapInStringInfo(&s, request->payload, request->payload_length);
+
+	bmsg = msg_deserialize_message(&s);
+
+	switch (bmsg->message_type)
+	{
+		case BDR_MSG_COMMENT:
+			break;
+		case BDR_MSG_NODE_JOIN_REQUEST:
+			bdr_join_handle_join_proposal(bmsg);
+			break;
+		case BDR_MSG_NODE_STANDBY_READY:
+			bdr_join_handle_standby_proposal(bmsg);
+			break;
+		case BDR_MSG_NODE_ACTIVE:
+			bdr_join_handle_active_proposal(bmsg);
+			break;
+		default:
+			elog(ERROR, "unhandled message type %u in prepare proposal",
+				 bmsg->message_type);
+			break;
+	}
+
+	CommitTransactionCommand();
+
+	res->status = MNCONSENSUS_EXECUTED;
+}
+
+static bool
+bdr_consensus_execute_query(MNConsensusQuery *query, MNConsensusResult *res)
+{
+	return false;
 }
 
 /*
@@ -364,7 +395,7 @@ bdr_consensus_request_waitevents(int nwaitevents, mn_waitevents_fill_cb cb)
 #define SizeOfBdrMsgHeader (sizeof(uint32))
 
 /*
- * Serialize a BDR message proposal for submission to the consensus
+ * Serialize a BDR message for submission to the consensus
  * system or over shmem. This is the BDR specific header that'll
  * be added to consensus messages before the payload.
  *
@@ -372,21 +403,20 @@ bdr_consensus_request_waitevents(int nwaitevents, mn_waitevents_fill_cb cb)
  * message payload will provide length information.
  */
 void
-msg_serialize_proposal(StringInfo out, BdrMessageType message_type,
-					   void *message)
+bdr_serialize_message(StringInfo out, BdrMessage *msg)
 {
 	const MNMessageFuncs *funcs;
 
 	resetStringInfo(out);
 	Assert(out->len == 0);
 
-	pq_sendint(out, message_type, 4);
-	Assert(out->len == SizeOfBdrMsgHeader);
+	funcs = message_funcs_lookup(msg->message_type);
 
-	funcs = message_funcs_lookup(message_type);
-	Assert( (message == NULL) == (funcs == NULL) );
-	if (message != NULL)
-		funcs->serialize(out, message);
+	pq_sendint(out, msg->message_type, 4);
+	pq_sendint(out, msg->origin_id, 4);
+
+	if (funcs != NULL)
+		funcs->serialize(out, msg);
 }
 
 /*
@@ -394,52 +424,50 @@ msg_serialize_proposal(StringInfo out, BdrMessageType message_type,
  * came from into the BdrMessage header, so it needs more than the
  * ConsensusMessage's payload.
  *
- * Thus this isn't an exact mirror of msg_serialize_proposal.
+ * Thus this isn't an exact mirror of bdr_serialize_message.
  */
-BdrMessage*
-msg_deserialize_proposal(MNConsensusMessage *in)
+BdrMessage *
+msg_deserialize_message(StringInfo s)
 {
-	BdrMessage *out;
-	StringInfoData si;
+	BdrMessageType	message_type;
+	uint32			origin_id;
+	BdrMessage	   *out;
 	const MNMessageFuncs *funcs;
 
-	out = palloc(sizeof(BdrMessage));
-
-	out->global_consensus_no = in->global_id;
-	out->originator_id = in->sender_nodeid;
-	out->originator_propose_time = in->sender_timestamp;
-	/* TODO: support majority consensus */
-	out->majority_consensus_ok = false;
-	out->message = NULL;
-
-	if (in->proposal->payload_length < 4)
+	if (s->len < 4)
 	{
-		elog(LOG, "ignored bad bdr message: consensus message from %u missing payload",
-			 out->originator_id);
+		elog(LOG, "ignored bad bdr message: consensus message missing payload");
 		return NULL;
 	}
 
-	wrapInStringInfo(&si, in->proposal->payload, in->proposal->payload_length);
-	out->message_type = pq_getmsgint(&si, 4);
+	message_type = pq_getmsgint(s, 4);
+	origin_id = pq_getmsgint(s, 4);
 
-	funcs = message_funcs_lookup(out->message_type);
+	funcs = message_funcs_lookup(message_type);
 
-	if (funcs != NULL)
+	if (funcs == NULL)
+	{
+		out = palloc(sizeof(BdrMessage));
+	}
+	else
 	{
 		ErrorContextCallback myerrcontext;
 		struct bdr_msg_errcontext ctxinfo;
 
-		ctxinfo.msgtype = out->message_type;
-		ctxinfo.msgdata = &si;
+		ctxinfo.msgtype = message_type;
+		ctxinfo.msgdata = s;
 		myerrcontext.callback = deserialize_msg_errcontext_callback;
 		myerrcontext.arg = &ctxinfo;
 		myerrcontext.previous = error_context_stack;
 		error_context_stack = &myerrcontext;
 
-		out->message = funcs->deserialize(&si);
+		out = funcs->deserialize(s);
 
 		error_context_stack = myerrcontext.previous;
 	}
+
+	out->message_type = message_type;
+	out->origin_id = origin_id;
 
 	return out;
 }

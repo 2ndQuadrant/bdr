@@ -3,8 +3,7 @@
 
 #include "mn_msgbroker.h"
 
-extern void msgb_startup_send(char *channel, uint32 local_node_id,
-				  mn_request_waitevents_fn request_waitevents_fn);
+extern void msgb_startup_send(char *channel, uint32 local_node_id);
 extern void msgb_shutdown_send(void);
 
 typedef enum MsgbSendStatus
@@ -28,10 +27,6 @@ typedef enum MsgbSendStatus
  */
 typedef void (*msgb_request_recreate_wait_event_set_hook_type)(WaitEventSet *old_set);
 
-extern msgb_request_recreate_wait_event_set_hook_type msgb_request_recreate_wait_event_set_hook;
-extern int msgb_get_wait_event_space_needed(void);
-extern void msgb_wait_event_set_recreated(WaitEventSet *new_wait_set);
-
 extern int msgb_queue_message(uint32 destination, const char * payload, Size payload_size);
 
 extern MsgbSendStatus msgb_message_status(uint32 destination, uint64 msgid);
@@ -41,5 +36,9 @@ extern void msgb_wakeup_send(WaitEvent *occurred_events, int nevents, long *max_
 extern void msgb_add_send_peer(uint32 destination_id, const char *dsn);
 extern void msgb_remove_send_peer(uint32 destination_id);
 extern void msgb_update_send_peer(uint32 peer_id, const char *dsn);
+
+extern bool msgb_want_waitevent_rebuild(void);
+extern int msgb_wait_event_count(void);
+extern void msgb_add_events(WaitEventSet *weset, int nevents);
 
 #endif
