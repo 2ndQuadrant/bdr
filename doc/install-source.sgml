@@ -67,35 +67,8 @@
    </para>
 
    <para>
-    The source for &bdr; is maintained at
-    <ulink url="https://github.com/2ndQuadrant/bdr">https://github.com/2ndQuadrant/bdr</ulink>.
-    There are actually two independent source trees in this repository - one
-    tree for the &bdr; plugin, and one for the modified version of PostgreSQL
-    &pgmajorversion; that it requires to run. At the time of writing the main
-    branches are:
-    <itemizedlist>
-     <listitem><para><filename>bdr-plugin/RELX_Y_STABLE</filename>:
-        the stable releases of the &bdr; plugin (for example
-        <filename>bdr-plugin/REL0_9_STABLE</filename> is latest source of 0.9.x).</para></listitem>
-     <listitem><para><filename>bdr-plugin/next</filename>:
-        the in-progress development version of the &bdr; plugin</para></listitem>
-     <listitem><para><filename>bdr-pg/REL9_4_STABLE</filename>:
-        the current stable release of the modified PostgreSQL that &bdr; requires.</para></listitem>
-    </itemizedlist>
-   </para>
-
-   <para>
-    There are also tags for each &bdr; release, e.g. <filename>bdr-plugin/0.8.0</filename>.
-   </para>
-
-   <para>
-    To clone the source code using <application>git</application> you will
-    need to run two clones, one for the &bdr; plugin sources and one for the
-    patched PostgreSQL sources, e.g. (for the 0.9.x version of &bdr;):
-    <programlisting>
-     git clone -b bdr-pg/REL9_4_STABLE https://github.com/2ndQuadrant/bdr.git postgresql-bdr
-     git clone -b bdr-plugin/REL0_9_STABLE https://github.com/2ndQuadrant/bdr.git bdr-plugin
-    </programlisting>
+    Instructions for getting the sources can be found at
+    <ulink url="https://www.2ndquadrant.com/en/resources/bdr/">https://www.2ndquadrant.com/en/resources/bdr/</ulink>.
    </para>
 
    <para>
