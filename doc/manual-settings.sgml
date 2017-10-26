@@ -211,42 +211,42 @@
      </term>
      <listitem>
       <para>
-       This boolean option controls whether
-       the <varname>synchronous_commit</varname> setting
-       in &bdr; apply workers is enabled. It defaults
-       to <literal>off</literal>.  If set to <literal>off</literal>,
-       &bdr; apply workers will perform
-       asynchronous commits,
-       allowing &postgres; to
-       considerably improve throughput.
+	   This boolean option controls whether the
+	   <varname>synchronous_commit</varname> setting in &bdr; apply workers is
+	   enabled. It defaults to <literal>off</literal>.  If set to
+	   <literal>off</literal>, &bdr; apply workers will perform asynchronous
+	   commits, allowing &postgres; to considerably improve throughput for
+	   apply, at the cost of delaying sending of replay confirmations to the
+	   upstream.
       </para>
       <para>
-       It it always is safe to set in the sense that it'll never
-       cause transactions to not be replayed. If it's important that
-       nodes replicate data as soon as possible, so loss of a node causes
-       minimal loss of data that's still only on that node, you should
-       set this to <literal>on</literal> and configure &postgres;'s synchronous
-       replication.
+	   It it always is safe to have <literal>bdr.synchronous_commit =
+	   off</literal>. It'll never cause transactions to be lost or skipped.  It
+	   <emphasis>only</emphasis> controls how promptly replicated data is
+	   flushed to disk on the downstream node and confirmations are sent to the
+	   upstream node. If it's off (default), BDR delays sending replay flush
+	   confirmations for commits to the upstream until the needed commits get
+	   flushed to disk by an unrelated commit, checkpoint, or other periodic
+	   work. This usually doesn't matter, but if the upstream has this
+	   downstream listed in <literal>synchronous_standby_names</literal>,
+	   setting <literal>bdr.synchronous_commit = off</literal> on the
+	   downstream will cause synchronous commits on the upstream to take
+	   <emphasis>much</emphasis> longer to report success to the client. So 
+	   in this case you should set it to on.
       </para>
       <note>
        <para>
-        Using synchronous commit and synchronous replication will
-        <emphasis>not</emphasis> prevent the apply conflicts that
-        arise with multi-master use of BDR. There is still no
-        locking between nodes and no global snapshot management
-        so concurrent transactions on different nodes can still
-        change the same tuple. See the <xref linkend="overview">.
+		Using <literal>bdr.synchronous_commit = on</literal> and putting bdr
+		nodes in <literal>synchronous_standby_names</literal> will
+		<emphasis>not</emphasis> prevent the replication conflicts that arise
+		with multi-master use of BDR. There is still no locking between nodes
+		and no global snapshot management so concurrent transactions on
+		different nodes can still change the same tuple. Transactions still
+		only start to replicate after they commit on the upstream node.
+		Synchronous commit does <emphasis>not</emphasis> make BDR an
+		always-consistent system. See the <xref linkend="overview">.
        </para>
       </note>
-      <para>
-       Enabling PostgreSQL's synchronous replication but leaving
-       <varname>bdr.synchronous_commit</varname> disabled is
-       not generally adviseable. It will noticeably increase the
-       time until a transaction is confirmed to have been
-       replicated. That's because it can only be reported as having
-       safely committed once the <acronym>WAL</acronym> is flushed
-       on the receiving side.
-      </para>
      </listitem>
     </varlistentry>
 
