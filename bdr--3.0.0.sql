@@ -118,6 +118,7 @@ CREATE TABLE bdr.state_journal
     goal_state oid NOT NULL,
     entered_time timestamptz NOT NULL,
     peer_id oid NOT NULL,
+	consensus_strength smallint NOT NULL,
     global_consensus_no bigint NOT NULL,
     state_extra_data bytea
 ) WITH (user_catalog_table=true);
@@ -247,7 +248,7 @@ COMMENT ON VIEW bdr.node_group_replication_sets IS
 'BDR replication sets for local node groups';
 
 CREATE FUNCTION bdr.decode_state_entry(entry bdr.state_journal)
-RETURNS TABLE (state_name text, goal_state_name text, extra_data text)
+RETURNS TABLE (state_name text, goal_state_name text, consensus_strength text, extra_data text)
 STRICT VOLATILE
 LANGUAGE c AS 'MODULE_PATHNAME','bdr_decode_state';
 
@@ -265,6 +266,7 @@ SELECT
   j.peer_id,
   n.node_name AS peer_name,
   d.extra_data,
+  d.consensus_strength AS consensus_strength_name,
   j.global_consensus_no
 FROM bdr.state_journal j
   CROSS JOIN LATERAL bdr.decode_state_entry(j) d
@@ -350,6 +352,8 @@ SELECT
     ns.interface_connstr, 
     sj.state_name AS cur_state_journal_state,
     sj.goal_state_name AS goal_state_journal_state,
+    sj.consensus_strength_name,
+    sj.global_consensus_no,
     ns.peer_state_name,
     ns.node_seq_id, 
     ns.node_local_dbname, 
@@ -362,7 +366,11 @@ SELECT
 FROM       pglogical.local_node l 
 INNER JOIN bdr.node_summary ns ON (l.node_id = ns.node_id)
 CROSS JOIN ( 
-    SELECT   state_name, goal_state_name
+    SELECT
+        state_name,
+        goal_state_name,
+        consensus_strength_name,
+        global_consensus_no
     FROM     bdr.state_journal_details 
     ORDER BY state_counter DESC
 	LIMIT 1

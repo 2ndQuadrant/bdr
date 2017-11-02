@@ -49,6 +49,7 @@
 
 #include "utils/memutils.h"
 
+#include "bdr_consensus.h"
 #include "bdr_catalogs.h"
 #include "bdr_catcache.h"
 #include "bdr_join.h"
@@ -71,22 +72,19 @@ state_has_extradata(BdrNodeState new_state)
 		case BDR_NODE_STATE_JOIN_WAIT_SUBSCRIBE_COMPLETE:
 		case BDR_NODE_STATE_JOIN_GET_CATCHUP_LSN:
 		case BDR_NODE_STATE_JOIN_CREATE_TARGET_SLOT:
-		case BDR_NODE_STATE_JOIN_COPY_REPSET_MEMBERSHIPS:
 		case BDR_NODE_STATE_JOIN_CREATE_PEER_SLOTS:
 		case BDR_NODE_STATE_JOIN_WAIT_STANDBY_REPLAY:
+		case BDR_NODE_STATE_SEND_STANDBY_READY:
 		case BDR_NODE_STATE_JOIN_CREATE_SUBSCRIPTIONS:
 		case BDR_NODE_STATE_STANDBY:
 		case BDR_NODE_STATE_PROMOTING:
 		case BDR_NODE_STATE_CREATE_LOCAL_SLOTS:
+		case BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE:
 		case BDR_NODE_STATE_REQUEST_GLOBAL_SEQ_ID:
-		case BDR_NODE_STATE_WAIT_GLOBAL_SEQ_ID:
 			return false;
 		case BDR_NODE_STATE_JOIN_START:
-		case BDR_NODE_STATE_JOIN_WAIT_CONFIRM:
 		case BDR_NODE_STATE_JOIN_WAIT_CATCHUP:
 		case BDR_NODE_STATE_JOIN_FAILED:
-		case BDR_NODE_STATE_SEND_STANDBY_READY:
-		case BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE:
 			return true;
 		case BDR_NODE_STATE_JOIN_CAN_START_CONSENSUS:
 		case BDR_NODE_STATE_JOIN_RANGE_END:
@@ -122,8 +120,6 @@ bdr_node_state_name(BdrNodeState state)
 			return CppAsString2(BDR_NODE_STATE_JOIN_GET_CATCHUP_LSN);
 		case BDR_NODE_STATE_JOIN_CREATE_TARGET_SLOT:
 			return CppAsString2(BDR_NODE_STATE_JOIN_CREATE_TARGET_SLOT);
-		case BDR_NODE_STATE_JOIN_COPY_REPSET_MEMBERSHIPS:
-			return CppAsString2(BDR_NODE_STATE_JOIN_COPY_REPSET_MEMBERSHIPS);
 		case BDR_NODE_STATE_JOIN_CREATE_PEER_SLOTS:
 			return CppAsString2(BDR_NODE_STATE_JOIN_CREATE_PEER_SLOTS);
 		case BDR_NODE_STATE_JOIN_WAIT_STANDBY_REPLAY:
@@ -144,12 +140,8 @@ bdr_node_state_name(BdrNodeState state)
 			return CppAsString2(BDR_NODE_STATE_REQUEST_GLOBAL_SEQ_ID);
 		case BDR_NODE_STATE_JOIN_START:
 			return CppAsString2(BDR_NODE_STATE_JOIN_START);
-		case BDR_NODE_STATE_JOIN_WAIT_CONFIRM:
-			return CppAsString2(BDR_NODE_STATE_JOIN_WAIT_CONFIRM);
 		case BDR_NODE_STATE_JOIN_WAIT_CATCHUP:
 			return CppAsString2(BDR_NODE_STATE_JOIN_WAIT_CATCHUP);
-		case BDR_NODE_STATE_WAIT_GLOBAL_SEQ_ID:
-			return CppAsString2(BDR_NODE_STATE_WAIT_GLOBAL_SEQ_ID);
 		case BDR_NODE_STATE_JOIN_FAILED:
 			return CppAsString2(BDR_NODE_STATE_JOIN_FAILED);
 		case BDR_NODE_STATE_JOIN_CAN_START_CONSENSUS:
@@ -229,14 +221,6 @@ state_extradata_deserialize(StringInfo in, BdrNodeState state)
 			return extra;
 		}
 
-		case BDR_NODE_STATE_JOIN_WAIT_CONFIRM:
-		case BDR_NODE_STATE_WAIT_GLOBAL_SEQ_ID:
-		{
-			struct ExtraDataConsensusWait *extra = palloc(sizeof(struct ExtraDataConsensusWait));
-			extra->request_message_handle = pq_getmsgint64(in);
-			return extra;
-		}
-
 		case BDR_NODE_STATE_JOIN_WAIT_CATCHUP:
 		{
 			struct ExtraDataJoinWaitCatchup *extra = palloc(sizeof(struct ExtraDataJoinWaitCatchup));
@@ -248,14 +232,6 @@ state_extradata_deserialize(StringInfo in, BdrNodeState state)
 		{
 			struct ExtraDataJoinFailure *extra = palloc(sizeof(struct ExtraDataJoinFailure));
 			extra->reason = pq_getmsgstring(in);
-			return extra;
-		}
-
-		case BDR_NODE_STATE_SEND_STANDBY_READY:
-		case BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE:
-		{
-			ExtraDataConsensusReq *extra = palloc(sizeof(ExtraDataConsensusReq));
-			extra->executed = pq_getmsgint(in, 1);
 			return extra;
 		}
 
@@ -298,14 +274,6 @@ state_extradata_serialize(StringInfo out, BdrNodeState new_state,
 			break;
 		}
 
-		case BDR_NODE_STATE_JOIN_WAIT_CONFIRM:
-		case BDR_NODE_STATE_WAIT_GLOBAL_SEQ_ID:
-		{
-			struct ExtraDataConsensusWait *extra = extradata;
-			pq_sendint64(out, extra->request_message_handle);
-			break;
-		}
-
 		case BDR_NODE_STATE_JOIN_WAIT_CATCHUP:
 		{
 			struct ExtraDataJoinWaitCatchup *extra = extradata;
@@ -317,14 +285,6 @@ state_extradata_serialize(StringInfo out, BdrNodeState new_state,
 		{
 			struct ExtraDataJoinFailure *extra = extradata;
 			pq_sendstring(out, extra->reason);
-			break;
-		}
-
-		case BDR_NODE_STATE_SEND_STANDBY_READY:
-		case BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE:
-		{
-			ExtraDataConsensusReq *extra = extradata;
-			pq_sendint(out, extra->executed, 1);
 			break;
 		}
 
@@ -363,15 +323,6 @@ state_stringify_extradata(BdrStateEntry *state)
 			break;
 		}
 
-		case BDR_NODE_STATE_JOIN_WAIT_CONFIRM:
-		case BDR_NODE_STATE_WAIT_GLOBAL_SEQ_ID:
-		{
-			struct ExtraDataConsensusWait *extra = state->extra_data;
-			appendStringInfo(&si, "global consensus message handle: "UINT64_FORMAT,
-				extra->request_message_handle);
-			break;
-		}
-
 		case BDR_NODE_STATE_JOIN_WAIT_CATCHUP:
 		{
 			struct ExtraDataJoinWaitCatchup *extra = state->extra_data;
@@ -389,14 +340,6 @@ state_stringify_extradata(BdrStateEntry *state)
 				appendStringInfoString(&si, extra->reason);
 			else
 				appendStringInfoString(&si, "(NULL)");
-			break;
-		}
-
-		case BDR_NODE_STATE_SEND_STANDBY_READY:
-		case BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE:
-		{
-			ExtraDataConsensusReq *extra = state->extra_data;
-			appendStringInfoString(&si, extra->executed ? "executed" : "sending");
 			break;
 		}
 
@@ -437,8 +380,8 @@ state_transition_check(BdrStateEntry *state, BdrNodeState new_state)
  */
 void
 state_transition_goal(BdrStateEntry *state, BdrNodeState new_state,
-	BdrNodeState new_goal, uint64 consensus_id,
-	uint32 peer_id, void *extradata)
+	BdrNodeState new_goal, MNConsensusStrength consensus_strength,
+	uint64 consensus_id, uint32 peer_id, void *extradata)
 {
 	BdrStateEntry cur;
 
@@ -451,21 +394,38 @@ state_transition_goal(BdrStateEntry *state, BdrNodeState new_state,
 		elog(ERROR, "attempt to push out of sequence state counter; last committed was %u but we have %u",
 			 cur.counter, state->counter);
 
+	/* MN_CONSENSUS_STR_NONE can't have a consensus msg id */
+	Assert(consensus_strength != MN_CONSENSUS_STR_NONE || consensus_id == 0);
+
 	state_transition_check(state, new_state);
 
 	cur.counter = cur.counter + 1;
 	cur.current = new_state;
 	cur.goal = new_goal;
 	cur.peer_id = peer_id;
+	cur.consensus_strength = consensus_strength;
 	cur.global_consensus_no = consensus_id;
 	cur.extra_data = extradata;
 
-//	if (state->current != cur.current)
+	if (state->current == cur.current
+			 && state->global_consensus_no == 0
+			 && cur.global_consensus_no != 0)
 	{
-		elog(bdr_debug_level, "node %u state transition #%u, %s => %s",
+		elog(bdr_debug_level, "node %u state transition #%u, %s consensus proposal #"UINT64_FORMAT" executed",
 			 bdr_get_local_nodeid(), cur.counter,
 			 bdr_node_state_name(state->current),
-			 bdr_node_state_name(cur.current));
+			 cur.global_consensus_no);
+	}
+	else
+	{
+		/* Identity transitions only permitted for consensus no updates */
+		Assert(state->current != cur.current);
+
+		elog(bdr_debug_level, "node %u state transition #%u, %s => %s%s",
+			 bdr_get_local_nodeid(), cur.counter,
+			 bdr_node_state_name(state->current),
+			 bdr_node_state_name(cur.current),
+			 cur.consensus_strength > MN_CONSENSUS_STR_NONE ? " (pending consensus)" : "");
 	}
 
 	state_push(&cur);
@@ -480,14 +440,29 @@ state_transition_goal(BdrStateEntry *state, BdrNodeState new_state,
 
 /*
  * Simplified state transition function for when we're not changing the goal
- * state, peer ID or consensus number.
+ * state or peer ID and aren't setting a consensus number.
+ *
+ * This clears any previously recorded consensus number in the prior state.
  */
 void
 state_transition(BdrStateEntry *state, BdrNodeState new_state,
-	void *extradata)
+	MNConsensusStrength consensus_strength, void *extradata)
 {
 	state_transition_goal(state, new_state, state->goal,
-		state->global_consensus_no, state->peer_id, extradata);
+		consensus_strength, 0, state->peer_id, extradata);
+}
+
+/*
+ * A state that required global consensus achieved it. Record the associated
+ * global consensus number showing we executed it, change nothing else.
+ */
+void
+state_transition_consensus_executed(BdrStateEntry *state, uint64 consensus_no)
+{
+	Assert(state->consensus_strength > MN_CONSENSUS_STR_NONE);
+	state_transition_goal(state, state->current, state->goal,
+		state->consensus_strength, consensus_no, state->peer_id,
+		state->extra_data);
 }
 
 /*
@@ -527,6 +502,7 @@ bdr_state_insert_initial(BdrNodeState initial)
 	state_initial.current = initial;
 	state_initial.goal = initial;
 	state_initial.peer_id = 0;
+	state_initial.consensus_strength = MN_CONSENSUS_STR_NONE;
 	state_initial.global_consensus_no = 0;
 	state_initial.extra_data = NULL;
 	/* state->entered_time will be set by state_push */
@@ -574,21 +550,18 @@ bdr_state_dispatch(long *max_next_wait_msecs)
 		 * Transitional states during the node join process.
 		 */
 		case BDR_NODE_STATE_JOIN_START:
-		case BDR_NODE_STATE_JOIN_WAIT_CONFIRM:
 		case BDR_NODE_STATE_JOIN_COPY_REMOTE_NODES:
 		case BDR_NODE_STATE_JOIN_SUBSCRIBE_JOIN_TARGET:
 		case BDR_NODE_STATE_JOIN_WAIT_SUBSCRIBE_COMPLETE:
 		case BDR_NODE_STATE_JOIN_GET_CATCHUP_LSN:
 		case BDR_NODE_STATE_JOIN_WAIT_CATCHUP:
 		case BDR_NODE_STATE_JOIN_CREATE_TARGET_SLOT:
-		case BDR_NODE_STATE_JOIN_COPY_REPSET_MEMBERSHIPS:
 		case BDR_NODE_STATE_JOIN_CREATE_PEER_SLOTS:
 		case BDR_NODE_STATE_JOIN_WAIT_STANDBY_REPLAY:
 		case BDR_NODE_STATE_SEND_STANDBY_READY:
 		case BDR_NODE_STATE_PROMOTING:
 		case BDR_NODE_STATE_JOIN_CREATE_SUBSCRIPTIONS:
 		case BDR_NODE_STATE_REQUEST_GLOBAL_SEQ_ID:
-		case BDR_NODE_STATE_WAIT_GLOBAL_SEQ_ID:
 		case BDR_NODE_STATE_CREATE_LOCAL_SLOTS:
 		case BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE:
 			bdr_join_continue(cur.current, max_next_wait_msecs);

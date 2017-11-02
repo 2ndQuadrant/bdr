@@ -22,15 +22,6 @@ typedef struct ExtraDataJoinStart
 } ExtraDataJoinStart;
 
 /*
- * State journal extradata for BDR_NODE_STATE_JOIN_WAIT_CONFIRM
- * and BDR_NODE_STATE_WAIT_GLOBAL_SEQ_ID
- */
-typedef struct ExtraDataConsensusWait
-{
-	uint64 request_message_handle;
-} ExtraDataConsensusWait;
-
-/*
  * State journal extradata fro BDR_NODE_STATE_JOIN_WAIT_CATCHUP
  */
 typedef struct ExtraDataJoinWaitCatchup
@@ -45,14 +36,6 @@ typedef struct ExtraDataJoinFailure
 {
 	const char * reason;
 } ExtraDataJoinFailure;
-
-/*
- * State for consensus replicated request.
- */
-typedef struct ExtraDataConsensusReq
-{
-	bool executed;
-} ExtraDataConsensusReq;
 
 extern BdrNodeInfo * get_remote_node_info(PGconn *conn);
 

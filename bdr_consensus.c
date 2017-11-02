@@ -611,6 +611,7 @@ bdr_message_type_to_string(BdrMessageType msgtype)
 			return CppAsString2(BDR_MSG_DDL_LOCK_RELEASE);
 	}
 
+	/* We MUST fail gracefully here due to downgrades etc */
 	initStringInfo(&si);
 	appendStringInfo(&si, "(unrecognised BDR message type %d)", msgtype);
 	return si.data;

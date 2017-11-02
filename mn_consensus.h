@@ -26,6 +26,22 @@ typedef enum MNConsensusMessageKind
 	MN_CONSENSUS_MSG_RAFT_APPEND_ENTRIES_RES
 } MNConsensusMessageKind;
 
+/*
+ * Required consensus strength for a given communication.
+ *
+ * Currently this is mostly a stub and we assume MN_CONSENSUS_STR_ALL for
+ * everything. It's mainly here so we can record it in the state journal and
+ * don't have to change the structure later when we add majority and
+ * peer-node-only modes.
+ */
+typedef enum MNConsensusStrength
+{
+	MN_CONSENSUS_STR_NONE,		/* no consensus, unilateral */
+	MN_CONSENSUS_STR_PEER,		/* nominated peer id must agree */
+	MN_CONSENSUS_STR_MAJORITY,	/* majority of nodes must agree */
+	MN_CONSENSUS_STR_ALL		/* all nodes must agree */
+} MNConsensusStrength;
+
 typedef struct MNConsensusRequest
 {
 	/* Unique request id. */
@@ -130,6 +146,7 @@ wrapInStringInfo(StringInfo si, char *data, Size length)
 
 extern char *mn_consensus_status_to_str(MNConsensusStatus status);
 extern MNConsensusStatus mn_consensus_status_from_str(const char *status);
+extern const char *mn_consensus_strength_to_str(MNConsensusStrength str);
 
 /* Client API */
 extern MNConsensusStatus mn_consensus_request(uint32 origin_id, char *data, Size len);

@@ -90,18 +90,20 @@ typedef struct StateTuple
 	Oid			goal;
 	TimestampTz entered_time;
 	Oid			peer_id;
+	int16		consensus_strength;
 	uint64		global_consensus_no;
 	/* After this point use heap_getattr */
 } StateTuple;
 
-#define Natts_state						7
+#define Natts_state						8
 #define Anum_state_counter				1
 #define Anum_state_current				2
 #define Anum_state_goal					3
 #define Anum_state_entered_time			4
 #define Anum_state_peer_id				5
-#define Anum_state_global_consensus_no	6
-#define Anum_state_extra_data			7
+#define Anum_state_consensus_strength	6
+#define Anum_state_global_consensus_no	7
+#define Anum_state_extra_data			8
 
 typedef struct SubscriptionTuple
 {
@@ -923,6 +925,7 @@ state_fromtuple(BdrStateEntry *state, HeapTuple tuple, TupleDesc tupDesc,
 	state->goal = (BdrNodeState)stup->goal;
 	state->entered_time = stup->entered_time;
 	state->peer_id = stup->peer_id;
+	state->consensus_strength = (MNConsensusStrength)stup->consensus_strength;
 	state->global_consensus_no = stup->global_consensus_no;
 
 	if (fetch_extradata)
@@ -985,6 +988,7 @@ state_push(BdrStateEntry *state)
 	values[Anum_state_goal - 1] = ObjectIdGetDatum((Oid)state->goal);
 	values[Anum_state_entered_time - 1] = TimestampTzGetDatum(state->entered_time);
 	values[Anum_state_peer_id - 1] = ObjectIdGetDatum(state->peer_id);
+	values[Anum_state_consensus_strength - 1] = Int16GetDatum((int16)state->consensus_strength);
 	values[Anum_state_global_consensus_no - 1] = UInt64GetDatum(state->global_consensus_no);
 
 	if (state->extra_data != NULL)

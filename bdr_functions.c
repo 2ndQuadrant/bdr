@@ -233,7 +233,7 @@ bdr_create_node_group_sql(PG_FUNCTION_ARGS)
 	 * state.
 	 */
 	state_transition_goal(&cur_state, BDR_NODE_STATE_ACTIVE,
-		BDR_NODE_STATE_ACTIVE, 0, 0, NULL);
+		BDR_NODE_STATE_ACTIVE, MN_CONSENSUS_STR_NONE, 0, 0, NULL);
 
 	/*
 	 * We need to update our bdr.node entry too, so that when we
@@ -344,7 +344,8 @@ bdr_join_node_group_sql(PG_FUNCTION_ARGS)
 
 		extra.group_name = node_group_name;
 		state_transition_goal(&cur_state, BDR_NODE_STATE_JOIN_START,
-			goal_state, 0, remote->pgl_node->id, &extra);
+			goal_state, MN_CONSENSUS_STR_NONE, 0, remote->pgl_node->id,
+			&extra);
 
 		Assert(local->bdr_node->local_state == BDR_PEER_STATE_CREATED);
 		elog(bdr_debug_level, "%s updating local_state from %s to %s",
@@ -392,7 +393,8 @@ bdr_promote_node_sql(PG_FUNCTION_ARGS)
 	state_get_expected(&cur_state, true, false, BDR_NODE_STATE_STANDBY);
 
 	state_transition_goal(&cur_state, BDR_NODE_STATE_PROMOTING,
-		BDR_NODE_STATE_ACTIVE, 0, cur_state.peer_id, NULL);
+		BDR_NODE_STATE_ACTIVE, MN_CONSENSUS_STR_NONE, 0, cur_state.peer_id,
+		NULL);
 
 	LWLockAcquire(PGLogicalCtx->lock, LW_SHARED);
 	manager = pglogical_manager_find(MyDatabaseId, NULL);
@@ -827,9 +829,9 @@ bdr_decode_state(PG_FUNCTION_ARGS)
 	BdrStateEntry		state;
 	TupleDesc			tupdesc;
 	HeapTuple			htup;
-	Datum				values[3];
-	bool				nulls[3] = {false, false, false};
-	const char		   *state_name, *goal_state_name;
+	Datum				values[4];
+	bool				nulls[4] = {false, false, false, false};
+	const char		   *state_name, *goal_state_name, *consensus_str_name;
 
 	if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
 		ereport(ERROR,
@@ -847,10 +849,16 @@ bdr_decode_state(PG_FUNCTION_ARGS)
 	goal_state_name = bdr_node_state_name_abbrev(state.goal);
 	values[1] = CStringGetTextDatum(goal_state_name);
 
+	consensus_str_name = mn_consensus_strength_to_str(state.consensus_strength);
+	Assert(strncmp(consensus_str_name, "MN_CONSENSUS_STR_",
+		strlen("MN_CONSENSUS_STR_")) == 0);
+	consensus_str_name += strlen("MN_CONSENSUS_STR_");
+	values[2] = CStringGetTextDatum(consensus_str_name);
+
 	if (state.extra_data == NULL)
-		nulls[2] = true;
+		nulls[3] = true;
 	else
-		values[2] = CStringGetTextDatum(state_stringify_extradata(&state));
+		values[3] = CStringGetTextDatum(state_stringify_extradata(&state));
 
 	htup = heap_form_tuple(tupdesc, values, nulls);
 

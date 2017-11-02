@@ -408,10 +408,6 @@ bdr_join_submit_get_result(void)
  * Asynchronously connect to the remote peer, submit a
  * join request query, want wait for the query result.
  *
- * This just submits a join request and gets a completion
- * handle for the remote's consensus processing then
- * transitions to BDR_NODE_STATE_JOIN_WAIT_CONFIRM.
- *
  * This function will be called repeatedly until it transitions
  * the system to the next state.
  */
@@ -442,8 +438,9 @@ bdr_join_continue_join_start(BdrStateEntry *cur_state, BdrNodeInfo *local)
 			case MNCONSENSUS_EXECUTED:
 			{
 				/* join request submitted successfully */
-				state_transition(cur_state, BDR_NODE_STATE_JOIN_COPY_REMOTE_NODES,
-					NULL);
+				state_transition(cur_state,
+					BDR_NODE_STATE_JOIN_COPY_REMOTE_NODES,
+					MN_CONSENSUS_STR_NONE, NULL);
 				break;
 			}
 			case MNCONSENSUS_FAILED:
@@ -457,7 +454,7 @@ bdr_join_continue_join_start(BdrStateEntry *cur_state, BdrNodeInfo *local)
 				ExtraDataJoinFailure fail_extra;
 				fail_extra.reason = "join target could not achieve consensus on join request";
 				state_transition(cur_state, BDR_NODE_STATE_JOIN_FAILED,
-					&fail_extra);
+					MN_CONSENSUS_STR_NONE, &fail_extra);
 				ereport(WARNING,
 						(errmsg("BDR node join has failed - could not achieve consensus on join")));
 
@@ -574,52 +571,6 @@ bdr_join_handle_join_proposal(BdrMessage *msg)
 }
 
 /*
- * Get the reply to the query from bdr_join_submit_request, with
- * a handle we can use to track progress of our consensus message
- * on the join target.
- *
- * Returns 0 until result successfully read.
- */
-static MNConsensusStatus
-bdr_join_submit_outcome_get_result(void)
-{
-	MNConsensusStatus outcome;
-	Assert(sizeof(MNConsensusStatus) == sizeof(int));
-
-	Assert(join.query_result_pending);
-
-	if (check_for_query_result())
-	{
-		PGresult *res = PQgetResult(join.conn);
-
-		if (PQresultStatus(res) != PGRES_TUPLES_OK)
-		{
-			const char *msg = pstrdup(PQresultErrorMessage(res));
-			PQclear(res);
-			ereport(ERROR,
-					(errmsg("failed to submit join request outcome query on join target"),
-					 errdetail("libpq: %s", msg)));
-		}
-
-		outcome = mn_consensus_status_from_str(PQgetvalue(res, 0, 0));
-
-		PQclear(res);
-
-		/*
-		 * We know there's only one result set, so this really shouldn't
-		 * block for long. It's a bit naughty to check it here without
-		 * testing if we'll block first, but it really should be safe...
-		 */
-		res = PQgetResult(join.conn);
-		Assert(res == NULL);
-
-		join.query_result_pending = false;
-	}
-
-	return outcome;
-}
-
-/*
  * A peer node says it wants to go into catchup mode and sent us a
  * BDR_MSG_NODE_STANDBY_READY.
  *
@@ -679,6 +630,8 @@ bdr_join_handle_standby_proposal(BdrMessage *msg)
 
 		state_get_expected(&cur_state, true, false,
 			BDR_NODE_STATE_SEND_STANDBY_READY);
+		Assert(cur_state.consensus_strength >= MN_CONSENSUS_STR_MAJORITY);
+		Assert(cur_state.global_consensus_no != 0);
 
 		bdr_consensus_refresh_nodes(cur_state.current);
 
@@ -697,7 +650,7 @@ bdr_join_handle_standby_proposal(BdrMessage *msg)
 		bdr_modify_node(local->bdr_node);
 
 		state_transition(&cur_state, BDR_NODE_STATE_STANDBY,
-			NULL);
+			MN_CONSENSUS_STR_NONE, NULL);
 	}
 }
 
@@ -745,6 +698,10 @@ bdr_join_handle_active_proposal(BdrMessage *msg)
 		 * We're not a standby yet so we can allow it to promote without
 		 * breaking any promises. We just have to go back to the slot creation
 		 * phase and make a slot for it, then repeat the catchup phase.
+		 *
+		 * (Note that we won't have received this proposal directly via consensus
+		 *  messaging, rather we'll be replaying it from another active peer's
+		 *  consensus message journal.)
 		 */
 		if (cur_state.current > BDR_NODE_STATE_JOIN_CREATE_PEER_SLOTS
 			&& cur_state.current < BDR_NODE_STATE_STANDBY)
@@ -753,7 +710,9 @@ bdr_join_handle_active_proposal(BdrMessage *msg)
 			elog(bdr_debug_level,
 				 "peer %s went active, going back to CREATE_PEER_SLOTS state",
 				 remote->pgl_node->name);
-			state_transition(&cur_state, BDR_NODE_STATE_JOIN_CREATE_PEER_SLOTS, NULL);
+			state_transition(&cur_state,
+				BDR_NODE_STATE_JOIN_CREATE_PEER_SLOTS, 
+				MN_CONSENSUS_STR_NONE, NULL);
 		}
 
 
@@ -774,6 +733,8 @@ bdr_join_handle_active_proposal(BdrMessage *msg)
 
 		state_get_expected(&cur_state, true, true,
 			BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE);
+		Assert(cur_state.consensus_strength >= MN_CONSENSUS_STR_MAJORITY);
+		Assert(cur_state.global_consensus_no != 0);
 
 		/*
 		 * Switch the catchup mode subscription we used for join to normal
@@ -812,7 +773,7 @@ bdr_join_handle_active_proposal(BdrMessage *msg)
 		/* Enter fully joined steady state */
 		Assert(cur_state.goal == BDR_NODE_STATE_ACTIVE);
 		state_transition_goal(&cur_state, BDR_NODE_STATE_ACTIVE,
-			cur_state.goal, 0, 0, NULL);
+			cur_state.goal, MN_CONSENSUS_STR_NONE, 0, 0, NULL);
 	}
 
 	if (remote->bdr_node->local_state != BDR_PEER_STATE_STANDBY)
@@ -1170,7 +1131,7 @@ bdr_join_continue_copy_remote_nodes(BdrStateEntry *cur_state, BdrNodeInfo *local
 		bdr_join_finish_copy_remote_nodes(local);
 
 		state_transition(cur_state, BDR_NODE_STATE_JOIN_CREATE_TARGET_SLOT,
-			NULL);
+			MN_CONSENSUS_STR_NONE, NULL);
 	}
 }
 
@@ -1217,7 +1178,7 @@ bdr_join_continue_get_catchup_lsn(BdrStateEntry *cur_state, BdrNodeInfo *local)
 
 		PQclear(res);
 		state_transition(cur_state, BDR_NODE_STATE_JOIN_WAIT_CATCHUP,
-			&extra);
+			MN_CONSENSUS_STR_NONE, &extra);
 
 		/*
 		 * We know there's only one result set, so this really shouldn't
@@ -1476,8 +1437,9 @@ bdr_join_continue_subscribe_join_target(BdrStateEntry *cur_state, BdrNodeInfo *l
 		bdr_start_consensus(cur_state->current);
 		bdr_consensus_refresh_nodes(cur_state->current);
 
-		state_transition(cur_state, BDR_NODE_STATE_JOIN_WAIT_SUBSCRIBE_COMPLETE,
-			NULL);
+		state_transition(cur_state,
+			BDR_NODE_STATE_JOIN_WAIT_SUBSCRIBE_COMPLETE,
+			MN_CONSENSUS_STR_NONE, NULL);
 	}
 }
 
@@ -1508,8 +1470,9 @@ bdr_join_continue_wait_subscribe_complete(BdrStateEntry *cur_state, BdrNodeInfo 
 	sync = get_subscription_sync_status(sub->id, true);
 	if (sync && sync->status == SYNC_STATUS_READY)
 	{
-		state_transition(cur_state, BDR_NODE_STATE_JOIN_COPY_REPSET_MEMBERSHIPS,
-			NULL);
+		state_transition(cur_state,
+			BDR_NODE_STATE_JOIN_CREATE_SUBSCRIPTIONS,
+			MN_CONSENSUS_STR_NONE, NULL);
 	}
 
 }
@@ -1542,24 +1505,13 @@ bdr_join_continue_wait_catchup(BdrStateEntry *cur_state, BdrNodeInfo *local)
 			 bdr_get_local_nodeid(),
 			 (uint32)(extra->min_catchup_lsn>>32), (uint32)extra->min_catchup_lsn);
 		state_transition(cur_state, BDR_NODE_STATE_JOIN_CREATE_PEER_SLOTS,
-			NULL);
+			MN_CONSENSUS_STR_NONE, NULL);
 	}
 	else
 		elog(bdr_debug_level, "%u waiting for origin '%s' to replay past %X/%08X; currently %X/%08X",
 			 bdr_get_local_nodeid(), sub->slot_name,
 			 (uint32)(extra->min_catchup_lsn>>32), (uint32)extra->min_catchup_lsn,
 			 (uint32)(cur_progress>>32), (uint32)cur_progress);
-}
-
-static void
-bdr_join_continue_copy_repset_memberships(BdrStateEntry *cur_state, BdrNodeInfo *local)
-{
-	Assert(cur_state->current == BDR_NODE_STATE_JOIN_COPY_REPSET_MEMBERSHIPS);
-
-	elog(WARNING, "replication set memberships copy not implemented");
-
-	state_transition(cur_state, BDR_NODE_STATE_JOIN_CREATE_SUBSCRIPTIONS,
-		NULL);
 }
 
 static void
@@ -1589,7 +1541,7 @@ bdr_join_continue_create_subscriptions(BdrStateEntry *cur_state, BdrNodeInfo *lo
 	bdr_consensus_refresh_nodes(cur_state->current);
 
 	state_transition(cur_state, BDR_NODE_STATE_JOIN_GET_CATCHUP_LSN,
-		NULL);
+		MN_CONSENSUS_STR_NONE, NULL);
 }
 
 static void
@@ -1597,12 +1549,10 @@ bdr_join_continue_send_standby_ready(BdrStateEntry *cur_state, BdrNodeInfo *loca
 {
 	BdrMessage			msg;
 	MNConsensusStatus	status;
-	ExtraDataConsensusReq *extra;
 
 	Assert(cur_state->current == BDR_NODE_STATE_SEND_STANDBY_READY);
 
-	extra = cur_state->extra_data;
-	if (extra->executed)
+	if (cur_state->global_consensus_no != 0)
 		return;
 
 	/*
@@ -1622,8 +1572,7 @@ bdr_join_continue_send_standby_ready(BdrStateEntry *cur_state, BdrNodeInfo *loca
 	if (status != MNCONSENSUS_EXECUTED)
 		elog(ERROR, "failed to transition to STANDBY_READY state");
 
-	extra->executed = true;
-	state_transition(cur_state, BDR_NODE_STATE_SEND_STANDBY_READY, &extra);
+	state_transition_consensus_executed(cur_state, 1); /* FIXME: get actual state number from consensus journal */
 }
 
 static void
@@ -1642,7 +1591,8 @@ bdr_join_continue_standby(BdrStateEntry *cur_state, BdrNodeInfo *local)
 	else if (cur_state->goal == BDR_NODE_STATE_ACTIVE)
 	{
 		/* Time to start up as a full member */
-		state_transition(cur_state, BDR_NODE_STATE_PROMOTING, NULL);
+		state_transition(cur_state, BDR_NODE_STATE_PROMOTING,
+			MN_CONSENSUS_STR_NONE, NULL);
 	}
 	else
 	{
@@ -1661,7 +1611,9 @@ bdr_join_continue_promote(BdrStateEntry *cur_state, BdrNodeInfo *local)
 {
 	Assert(cur_state->current == BDR_NODE_STATE_PROMOTING);
 
-	state_transition(cur_state, BDR_NODE_STATE_REQUEST_GLOBAL_SEQ_ID, NULL);
+	/* TODO: this should be a MAJORITY consensus operation when de-stubbed */
+	state_transition(cur_state, BDR_NODE_STATE_REQUEST_GLOBAL_SEQ_ID,
+		MN_CONSENSUS_STR_NONE, NULL);
 }
 
 static void
@@ -1677,17 +1629,8 @@ bdr_join_continue_request_global_seq_id(BdrStateEntry *cur_state, BdrNodeInfo *l
 
 	elog(WARNING, "requesting global sequence ID assignment not implemented");
 
-	state_transition(cur_state, BDR_NODE_STATE_WAIT_GLOBAL_SEQ_ID, NULL);
-}
-
-static void
-bdr_join_continue_wait_global_seq_id(BdrStateEntry *cur_state, BdrNodeInfo *local)
-{
-	Assert(cur_state->current == BDR_NODE_STATE_WAIT_GLOBAL_SEQ_ID);
-
-	elog(WARNING, "waiting for global sequence ID assignment not implemented");
-
-	state_transition(cur_state, BDR_NODE_STATE_CREATE_LOCAL_SLOTS, NULL);
+	state_transition(cur_state, BDR_NODE_STATE_CREATE_LOCAL_SLOTS,
+		MN_CONSENSUS_STR_NONE, NULL);
 }
 
 static void
@@ -1857,7 +1800,8 @@ bdr_join_continue_create_target_slot(BdrStateEntry *cur_state, BdrNodeInfo *loca
 		 
 	bdr_create_remote_slot(local, join.target);
 
-	state_transition(cur_state, BDR_NODE_STATE_JOIN_SUBSCRIBE_JOIN_TARGET, NULL);
+	state_transition(cur_state, BDR_NODE_STATE_JOIN_SUBSCRIBE_JOIN_TARGET,
+		MN_CONSENSUS_STR_NONE, NULL);
 }
 
 /*
@@ -1932,7 +1876,8 @@ bdr_join_continue_create_peer_slots(BdrStateEntry *cur_state, BdrNodeInfo *local
 		}
 	}
 
-	state_transition(cur_state, BDR_NODE_STATE_JOIN_WAIT_STANDBY_REPLAY, NULL);
+	state_transition(cur_state, BDR_NODE_STATE_JOIN_WAIT_STANDBY_REPLAY,
+		MN_CONSENSUS_STR_NONE, NULL);
 }
 
 static void
@@ -2056,16 +2001,17 @@ bdr_join_continue_wait_standby_replay(BdrStateEntry *cur_state, BdrNodeInfo *loc
 		{
 			/*
 			 * Because of possible crashes etc, it's possible we could've created slots on
-			 * a peer during BDR_NODE_STATE_JOIN_CREATE_PEER_SLOTS but not recorded the minimum
-			 * LSN at which the slot becomes valid. We must look up such entries
-			 * in the peer's pg_replication_slots and update our local state, so we know
-			 * when local replay has passed that point and it's safe to enter standby
-			 * or promote to active.
+			 * a peer during BDR_NODE_STATE_JOIN_CREATE_PEER_SLOTS but not
+			 * recorded the minimum LSN at which the slot becomes valid. We
+			 * must look up such entries in the peer's pg_replication_slots and
+			 * update our local bdr.join_catchup_minimum entries for the peer
+			 * so we know when local replay has passed that point and it's safe
+			 * to enter standby or promote to active.
 			 *
 			 * To deal with this we just bail back to slot creation.
 			 */
 			state_transition(cur_state, BDR_NODE_STATE_JOIN_CREATE_PEER_SLOTS,
-							 NULL);
+							 MN_CONSENSUS_STR_NONE, NULL);
 			return;
 		}
 
@@ -2098,10 +2044,8 @@ bdr_join_continue_wait_standby_replay(BdrStateEntry *cur_state, BdrNodeInfo *loc
 	/* Ready to tell the world we're a standby */
 	if (catchup_complete)
 	{
-		ExtraDataConsensusReq extra;
-
-		extra.executed = false;
-		state_transition(cur_state, BDR_NODE_STATE_SEND_STANDBY_READY, &extra);
+		state_transition(cur_state, BDR_NODE_STATE_SEND_STANDBY_READY,
+			MN_CONSENSUS_STR_MAJORITY, NULL);
 	}
 	else
 	{
@@ -2182,12 +2126,8 @@ bdr_join_continue_create_local_slots(BdrStateEntry *cur_state, BdrNodeInfo *loca
 		}
 	}
 
-	{
-		ExtraDataConsensusReq extra;
-
-		extra.executed = false;
-		state_transition(cur_state, BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE, &extra);
-	}
+	state_transition(cur_state, BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE,
+		MN_CONSENSUS_STR_MAJORITY, NULL);
 }
 
 static void
@@ -2195,12 +2135,10 @@ bdr_join_continue_send_active_announce(BdrStateEntry *cur_state, BdrNodeInfo *lo
 {
 	BdrMessage	msg;
 	MNConsensusStatus	status;
-	ExtraDataConsensusReq *extra;
 
 	Assert(cur_state->current == BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE);
 
-	extra = cur_state->extra_data;
-	if (extra->executed)
+	if (cur_state->global_consensus_no != 0)
 		return;
 
 	bdr_consensus_refresh_nodes(cur_state->current);
@@ -2217,11 +2155,7 @@ bdr_join_continue_send_active_announce(BdrStateEntry *cur_state, BdrNodeInfo *lo
 	if (status != MNCONSENSUS_EXECUTED)
 		elog(ERROR, "failed to transition to NODE_ACTIVE state");
 
-	/* TODO: wait for consensus in an extra state phase here */
-	elog(WARNING, "not waiting for consensus on active announce, not implemented");
-
-	extra->executed = true;
-	state_transition(cur_state, BDR_NODE_STATE_SEND_ACTIVE_ANNOUNCE, &extra);
+	state_transition_consensus_executed(cur_state, 1); /* TODO: get real consensus number */
 }
 
 /*
@@ -2431,10 +2365,6 @@ bdr_join_continue(BdrNodeState cur_state,
 				bdr_join_continue_join_start(&locked_state, local);
 				break;
 
-			case BDR_NODE_STATE_JOIN_WAIT_CONFIRM:
-				elog(ERROR, "unexpected state");
-				break;
-
 			case BDR_NODE_STATE_JOIN_COPY_REMOTE_NODES:
 				bdr_join_continue_copy_remote_nodes(&locked_state, local);
 				break;
@@ -2449,10 +2379,6 @@ bdr_join_continue(BdrNodeState cur_state,
 
 			case BDR_NODE_STATE_JOIN_WAIT_SUBSCRIBE_COMPLETE:
 				bdr_join_continue_wait_subscribe_complete(&locked_state, local);
-				break;
-
-			case BDR_NODE_STATE_JOIN_COPY_REPSET_MEMBERSHIPS:
-				bdr_join_continue_copy_repset_memberships(&locked_state, local);
 				break;
 
 			case BDR_NODE_STATE_JOIN_CREATE_SUBSCRIPTIONS:
@@ -2491,10 +2417,6 @@ bdr_join_continue(BdrNodeState cur_state,
 
 			case BDR_NODE_STATE_REQUEST_GLOBAL_SEQ_ID:
 				bdr_join_continue_request_global_seq_id(&locked_state, local);
-				break;
-
-			case BDR_NODE_STATE_WAIT_GLOBAL_SEQ_ID:
-				bdr_join_continue_wait_global_seq_id(&locked_state, local);
 				break;
 
 			case BDR_NODE_STATE_CREATE_LOCAL_SLOTS:

@@ -748,6 +748,24 @@ mn_consensus_status_from_str(const char *status)
 	return MNCONSENSUS_FAILED;
 }
 
+const char *
+mn_consensus_strength_to_str(MNConsensusStrength str)
+{
+	switch (str)
+	{
+		case MN_CONSENSUS_STR_NONE:
+			return CppAsString2(MN_CONSENSUS_STR_NONE);
+		case MN_CONSENSUS_STR_ALL:
+			return CppAsString2(MN_CONSENSUS_STR_ALL);
+		case MN_CONSENSUS_STR_MAJORITY:
+			return CppAsString2(MN_CONSENSUS_STR_MAJORITY);
+		case MN_CONSENSUS_STR_PEER:
+			return CppAsString2(MN_CONSENSUS_STR_PEER);
+	}
+
+	return "(unrecognised consensus strength)";
+}
+
 bool
 mn_consensus_want_waitevent_rebuild(void)
 {

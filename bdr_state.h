@@ -39,13 +39,6 @@ typedef enum BdrNodeState
 	BDR_NODE_STATE_JOIN_START = 1000,
 
 	/*
-	 * Join request submitted to remote node. We're waiting for it to approve
-	 * the request so we know for sure that we got our node id and name
-	 * reserved by the node group.
-	 */
-	BDR_NODE_STATE_JOIN_WAIT_CONFIRM = 1010,
-
-	/*
 	 * The remote node has OK'd our join request, and we need to copy its
 	 * nodes entries.
 	 */
@@ -96,12 +89,6 @@ typedef enum BdrNodeState
 	BDR_NODE_STATE_JOIN_WAIT_CATCHUP = 1070,
 
 	/*
-	 * Copy replication set memberships from upstream tables to the
-	 * downstream node.
-	 */
-	BDR_NODE_STATE_JOIN_COPY_REPSET_MEMBERSHIPS = 1080,
-
-	/*
 	 * Create replication slots on peer nodes
 	 */
 	BDR_NODE_STATE_JOIN_CREATE_PEER_SLOTS = 1090,
@@ -132,15 +119,6 @@ typedef enum BdrNodeState
 	 * global sequences.
 	 */
 	BDR_NODE_STATE_REQUEST_GLOBAL_SEQ_ID = 2010,
-
-	/*
-	 * We've requested a global sequence ID and obtained a request handle.
-	 * Now we're waiting for the ID to be assigned.
-	 *
-	 * We can go back to BDR_NODE_STATE_REQUEST_GLOBAL_SEQ_ID on nack
-	 * to try again or continue to BDR_NODE_STATE_CREATE_LOCAL_SLOTS.
-	 */
-	BDR_NODE_STATE_WAIT_GLOBAL_SEQ_ID = 2020,
 
 	/*
 	 * We've been promoted and are going active.
@@ -189,7 +167,12 @@ typedef struct BdrStateEntry
 	BdrNodeState	current;
 	BdrNodeState	goal;
 	TimestampTz		entered_time;
-	/* if this state is associated with a global consensus operation */
+	/* Does this message need consensus and if so what kind? */
+	MNConsensusStrength consensus_strength;
+	/*
+	 * This needs-consensus state was successfully confirmed by a consensus
+	 * proposal numbered:
+	 */
 	uint64			global_consensus_no;
 	/* If this is state is associated with a join operation, the join target id */
 	uint32			peer_id;
@@ -202,11 +185,14 @@ extern const char * bdr_node_state_name(BdrNodeState state);
 extern const char * bdr_node_state_name_abbrev(BdrNodeState state);
 
 extern void state_transition_goal(BdrStateEntry *state, BdrNodeState new_state,
-	BdrNodeState new_goal, uint64 consensus_no, uint32 peer_id,
-	void *extradata);
+	BdrNodeState new_goal, MNConsensusStrength consensus_strength,
+	uint64 consensus_no, uint32 peer_id, void *extradata);
 
 extern void state_transition(BdrStateEntry *state, BdrNodeState new_state,
-	void *extradata);
+	MNConsensusStrength consensus_strength, void *extradata);
+
+extern void state_transition_consensus_executed(BdrStateEntry *state,
+	uint64 consensus_no);
 
 extern void state_extradata_serialize(StringInfo out, BdrNodeState new_state,
 	void *extradata);
