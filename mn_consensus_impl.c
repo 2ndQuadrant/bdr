@@ -49,8 +49,6 @@
 
 #define RAFT_TIMEOUT 10000				/* 10s */
 
-#define MIN(A, B) ((B)<(A)?(B):(A))
-
 typedef enum RaftState {
 	RAFT_FOLLOWER,
 	RAFT_CANDIDATE,
@@ -909,7 +907,7 @@ raft_recv_appendentries(RaftServer *server, RaftNode *target,
 
     if (server->commit_index < appe->leader_commit)
     {
-		server->commit_index = MIN(appe->leader_commit,
+		server->commit_index = Min(appe->leader_commit,
 								   server->last_log_index);
     }
 
@@ -957,7 +955,7 @@ raft_recv_appendentries_response(RaftServer *server, RaftNode *target,
 	if (!res->success)
 	{
 		if (res->current_index < target->next_index - 1)
-			target->next_index = MIN(res->current_index + 1, server->last_log_index);
+			target->next_index = Min(res->current_index + 1, server->last_log_index);
 		else
 			target->next_index--;
 
