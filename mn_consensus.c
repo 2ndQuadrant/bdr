@@ -56,7 +56,7 @@ static bool			am_server = false;
 /* Connection to pool in backend. */
 static MQPoolConn  *MyMQConn = NULL;
 
-/* local RAFT server. */
+/* local Raft server. */
 static RaftServer  *MyRaftServer = NULL;
 
 static uint32		MyNodeId = 0;
@@ -417,7 +417,7 @@ mn_consensus_wakeup(struct WaitEvent *events, int nevents,
 	 */
 	shm_mq_pooler_work(true);
 
-	/* Also let RAFT do it's processing */
+	/* Also let Raft do it's processing */
 	if (MyRaftServer)
 	{
 		TimestampTz current_ts = GetCurrentTimestamp() / 1000; /* miliseconds. */
@@ -480,7 +480,7 @@ mn_consensus_process_message(uint32 origin, MNConsensusMessageKind msgkind,
 			mn_consensus_deserialize_request(s, &request);
 
 			/*
-			 * Note RAFT will handle the situation correctly if this node
+			 * Note Raft will handle the situation correctly if this node
 			 * is not leader.
 			 */
 			raft_request(MyRaftServer, &request);
@@ -509,7 +509,7 @@ mn_consensus_process_message(uint32 origin, MNConsensusMessageKind msgkind,
 
 			mn_consensus_deserialize_query(s, &query);
 			/*
-			 * Note RAFT will handle the situation correctly if this node
+			 * Note Raft will handle the situation correctly if this node
 			 * is not leader.
 			 */
 			raft_query(MyRaftServer, &query);
@@ -532,7 +532,7 @@ mn_consensus_process_message(uint32 origin, MNConsensusMessageKind msgkind,
 			break;
 		}
 
-		/* Let RAFT handle RAFT messages. */
+		/* Let Raft handle Raft messages. */
 		case MN_CONSENSUS_MSG_RAFT_REQUEST_VOTE:
 		case MN_CONSENSUS_MSG_RAFT_REQUEST_VOTE_RES:
 		case MN_CONSENSUS_MSG_RAFT_APPEND_ENTRIES:

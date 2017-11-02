@@ -9,7 +9,7 @@
 #include "mn_msgbroker.h"
 
 /*
- * TODO : these should be split between consensus "connection pool" and RAFT.
+ * TODO : these should be split between consensus "connection pool" and Raft.
  */
 typedef enum MNConsensusMessageKind
 {
@@ -19,7 +19,7 @@ typedef enum MNConsensusMessageKind
 	MNCONSENSUS_MSG_KIND_QUERY,
 	MNCONSENSUS_MSG_KIND_RESULT,
 
-	/* RAFT */
+	/* Raft */
 	MN_CONSENSUS_MSG_RAFT_REQUEST_VOTE,
 	MN_CONSENSUS_MSG_RAFT_REQUEST_VOTE_RES,
 	MN_CONSENSUS_MSG_RAFT_APPEND_ENTRIES,
@@ -47,10 +47,10 @@ typedef enum MNConsensusStatus
 	MNCONSENSUS_NO_LEADER,					/* There is no leader, retry
 											   later. */
 	MNCONSENSUS_EXECUTED,					/* Executed - this really means
-											   it was commited in RAFT terms
+											   it was commited in Raft terms
 											   and applied on leader). */
 	MNCONSENSUS_FAILED						/* Failed execution - commited in
-											   RAFT terms but apply has failed
+											   Raft terms but apply has failed
 											   on leader. */
 } MNConsensusStatus;
 

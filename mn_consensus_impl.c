@@ -1,7 +1,7 @@
 /*-------------------------------------------------------------------------
  *
  * mn_consensus_impl.c
- * 		Implementation of consensus using RAFT algorithm.
+ * 		Implementation of consensus using Raft algorithm.
  *
  * Copyright (c) 2017, PostgreSQL Global Development Group
  *
@@ -699,7 +699,7 @@ raft_recv_requestvote(RaftServer *server, RaftNode *target,
 
 	StartTransactionCommand();
 
-	/* RAFT leader vote decition. */
+	/* Raft leader vote decition. */
 	if (server->current_term > req->term)
 	{
 		res.vote_granted = false;
