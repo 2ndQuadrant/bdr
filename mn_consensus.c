@@ -719,7 +719,7 @@ mn_consensus_status_to_str(MNConsensusStatus status)
 	switch (status)
 	{
 		case MNCONSENSUS_IN_PROGRESS:
-			return "IN_RPOGRESS";
+			return "IN_PROGRESS";
 		case MNCONSENSUS_EXECUTED:
 			return "EXECUTED";
 		case MNCONSENSUS_FAILED:
