@@ -12,6 +12,11 @@
  */
 #include "postgres.h"
 
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <dirent.h>
+
 #include "bdr.h"
 #include "bdr_internal.h"
 #include "miscadmin.h"
@@ -45,6 +50,7 @@
 #include "replication/slot.h"
 #include "replication/walsender_private.h"
 
+#include "storage/fd.h"
 #include "storage/proc.h"
 
 #include "utils/builtins.h"
@@ -113,6 +119,8 @@ static void pg_decode_message(LogicalDecodingContext *ctx,
 static void write_rel(StringInfo out, Relation rel);
 static void write_tuple(BdrOutputData *data, StringInfo out, Relation rel,
 						HeapTuple tuple);
+
+static void pglReorderBufferCleanSerializedTXNs(const char *slotname);
 
 /* specify output plugin callbacks */
 void
@@ -480,6 +488,20 @@ pg_decode_startup(LogicalDecodingContext * ctx, OutputPluginOptions *opt, bool i
 							elem->defname,
 							elem->arg ? strVal(elem->arg) : "(null)")));
 		}
+	}
+
+	if (!is_init)
+	{
+		/*
+		 * There's a potential corruption bug in PostgreSQL 10.1, 9.6.6, 9.5.10
+		 * and 9.4.15 that can cause reorder buffers to accumulate duplicated
+		 * transactions. See
+		 *   https://www.postgresql.org/message-id/CAMsr+YHdX=XECbZshDZ2CZNWGTyw-taYBnzqVfx4JzM4ExP5xg@mail.gmail.com
+		 *
+		 * We can defend against this by doing our own cleanup of any serialized
+		 * txns in the reorder buffer on startup.
+		 */
+		pglReorderBufferCleanSerializedTXNs(NameStr(MyReplicationSlot->data.name));
 	}
 
 	/*
@@ -1112,4 +1134,45 @@ pg_decode_message(LogicalDecodingContext *ctx,
 	pq_sendint(ctx->out, sz, 4);
 	pq_sendbytes(ctx->out, message, sz);
 	OutputPluginWrite(ctx, true);
+}
+
+/*
+ * Clone of ReorderBufferCleanSerializedTXNs; see
+ * https://www.postgresql.org/message-id/CAMsr+YHdX=XECbZshDZ2CZNWGTyw-taYBnzqVfx4JzM4ExP5xg@mail.gmail.com
+ */
+static void
+pglReorderBufferCleanSerializedTXNs(const char *slotname)
+{
+	DIR		   *spill_dir = NULL;
+	struct dirent *spill_de;
+	struct stat statbuf;
+	char		path[MAXPGPATH * 2 + 12];
+
+	sprintf(path, "pg_replslot/%s", slotname);
+
+	/* we're only handling directories here, skip if it's not our's */
+	if (lstat(path, &statbuf) == 0 && !S_ISDIR(statbuf.st_mode))
+		return;
+
+	spill_dir = AllocateDir(path);
+	while ((spill_de = ReadDir(spill_dir, path)) != NULL)
+	{
+		if (strcmp(spill_de->d_name, ".") == 0 ||
+			strcmp(spill_de->d_name, "..") == 0)
+			continue;
+
+		/* only look at names that can be ours */
+		if (strncmp(spill_de->d_name, "xid", 3) == 0)
+		{
+			sprintf(path, "pg_replslot/%s/%s", slotname,
+					spill_de->d_name);
+
+			if (unlink(path) != 0)
+				ereport(PANIC,
+						(errcode_for_file_access(),
+						 errmsg("could not remove file \"%s\": %m",
+								path)));
+		}
+	}
+	FreeDir(spill_dir);
 }
