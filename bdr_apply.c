@@ -2107,6 +2107,7 @@ read_tuple_parts(StringInfo s, BDRRelation *rel, BDRTupleData *tup)
 	int			i;
 	int			rnatts;
 	char		action;
+	bool		atts_ok;
 
 	action = pq_getmsgbyte(s);
 
@@ -2118,7 +2119,45 @@ read_tuple_parts(StringInfo s, BDRRelation *rel, BDRTupleData *tup)
 
 	rnatts = pq_getmsgint(s, 4);
 
-	if (desc->natts != rnatts)
+	if (desc->natts == rnatts)
+	{
+		atts_ok = true;
+	}
+	else
+	{
+		/*
+		 * Hotfix for #61148 and other schema de-sync issues.
+		 */
+		if (desc->natts > rnatts)
+		{
+			/*
+			 * If the missing attribute(s) are dropped or nullable, we can
+			 * right-pad the local tuple with nulls. Attnos can never be
+			 * *inserted* in a Pg table only *appended* so this is ... fairly
+			 * safe. You could get in situations where the same attno meant
+			 * something different on different nodes, but you can do the same
+			 * when the attno count matches, so it's no worse doing the right
+			 * padding than any other time.
+			 */
+			int i;
+			for (i = rnatts; i < desc->natts; i++)
+			{
+				Form_pg_attribute att = desc->attrs[i];
+				if (!att->attisdropped && att->attnotnull)
+				{
+					elog(WARNING, "cannot right-pad mismatched attributes; attno %u is missing in remote data and local attribute is not-dropped and not nullable",
+						 i);
+					break;
+				}
+			}
+
+			/* All missing attrs were nullable and/or dropped */
+			atts_ok = true;
+		}
+	}
+
+	if (!atts_ok)
+	{
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("remote tuple has different column count to local table"),
@@ -2129,15 +2168,37 @@ read_tuple_parts(StringInfo s, BDRRelation *rel, BDRTupleData *tup)
 							rnatts,
 							origin_sysid, origin_timeline, origin_dboid, EMPTY_REPLICATION_NAME),
 				 errhint("This error arises if the number of columns on two nodes differ. This is most commonly caused by unsafe use of the bdr.skip_ddl_replication and/or bdr.skip_ddl_locking settings.")));
+	}
 
 	/* FIXME: unaligned data accesses */
 
 	for (i = 0; i < desc->natts; i++)
 	{
 		Form_pg_attribute att = desc->attrs[i];
-		char		kind = pq_getmsgbyte(s);
+		char		kind;
 		const char *data;
 		int			len;
+
+		/* Are we right-padding for missing attributes? */
+		if (i >= rnatts)
+		{
+			/*
+			 * We checked earlier that if we're right-padding missing cols,
+			 * the local att must be nullable or dropped.
+			 */
+			Assert(att->attisdropped || !att->attnotnull);
+
+			/*
+			 * Flag it null, and put some garbage in so we crash clearly if we
+			 * try to use it anyway.
+			 */
+			tup->isnull[i] = true;
+			tup->values[i] = 0xdeadbeef;
+
+			continue;
+		}
+
+		kind = pq_getmsgbyte(s);
 
 		switch (kind)
 		{
@@ -2212,6 +2273,8 @@ read_tuple_parts(StringInfo s, BDRRelation *rel, BDRTupleData *tup)
 		if (att->attisdropped && !tup->isnull[i])
 			elog(ERROR, "data for dropped column");
 	}
+
+	/* Don't test pq_getmsgend, there might be another message chunk */
 }
 
 static BDRRelation *
