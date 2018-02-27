@@ -271,14 +271,13 @@ find_pkey_tuple(ScanKey skey, BDRRelation *rel, Relation idxrel,
 	TransactionId xwait;
 
 	InitDirtySnapshot(snap);
+
+retry:
+	found = false;
 	scan = index_beginscan(rel->rel, idxrel,
 						   &snap,
 						   RelationGetNumberOfAttributes(idxrel),
 						   0);
-
-retry:
-	found = false;
-
 	index_rescan(scan, skey, RelationGetNumberOfAttributes(idxrel), NULL, 0);
 
 	if ((scantuple = index_getnext(scan, ForwardScanDirection)) != NULL)
@@ -288,12 +287,12 @@ retry:
 		ExecStoreTuple(scantuple, slot, InvalidBuffer, false);
 		ExecMaterializeSlot(slot);
 
-		xwait = TransactionIdIsValid(snap.xmin) ?
-			snap.xmin : snap.xmax;
+		xwait = TransactionIdIsValid(snap.xmin) ?  snap.xmin : snap.xmax;
 
 		if (TransactionIdIsValid(xwait))
 		{
 			XactLockTableWait(xwait, NULL, NULL, XLTW_None);
+			index_endscan(scan);
 			goto retry;
 		}
 	}
@@ -327,6 +326,7 @@ retry:
 				ereport(LOG,
 						(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
 						 errmsg("concurrent update, retrying")));
+				index_endscan(scan);
 				goto retry;
 			default:
 				elog(ERROR, "unexpected HTSU_Result after locking: %u", res);
