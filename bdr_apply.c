@@ -2355,6 +2355,16 @@ bdr_process_remote_action(StringInfo s)
 			elog(ERROR, "unknown action of type %c", action);
 	}
 	Assert(CurrentMemoryContext == MessageContext);
+
+	if (action == 'C')
+	{
+		/*
+		 * We clobber MessageContext on commit. It doesn't matter much when we
+		 * do it so long as we do so periodically, to prevent the context from
+		 * growing too much.
+		 */
+		MemoryContextReset(MessageContext);
+	}
 }
 
 
@@ -2810,6 +2820,7 @@ bdr_apply_work(PGconn* streamConn)
 				bdr_apply_reload_config();
 			}
 		}
+
 		MemoryContextResetAndDeleteChildren(MessageContext);
 	}
 }
