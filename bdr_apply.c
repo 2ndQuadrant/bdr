@@ -290,6 +290,7 @@ process_remote_begin(StringInfo s)
 	{
 		char remote_ident[256];
 		NameData replication_name;
+		MemoryContext old_ctx;
 
 		if (remote_origin_sysid == GetSystemIdentifier()
 			&& remote_origin_timeline_id == ThisTimeLineID
@@ -318,9 +319,11 @@ process_remote_begin(StringInfo s)
 				remote_origin_sysid, remote_origin_timeline_id, remote_origin_dboid, MyDatabaseId,
 				NameStr(replication_name));
 
+		old_ctx = CurrentMemoryContext;
 		StartTransactionCommand();
 		remote_origin_id = GetReplicationIdentifier(remote_ident, false);
 		CommitTransactionCommand();
+		(void) MemoryContextSwitchTo(old_ctx);
 	}
 
 	if (bdr_trace_replay)
@@ -475,12 +478,14 @@ process_remote_commit(StringInfo s)
 		BdrFlushPosition *flushpos;
 
 		CommitTransactionCommand();
+		(void) MemoryContextSwitchTo(MessageContext);
 
 		/*
 		 * Associate the end of the remote commit lsn with the local end of
 		 * the commit record.
 		 */
-		flushpos = (BdrFlushPosition *) palloc(sizeof(BdrFlushPosition));
+		flushpos = (BdrFlushPosition *)
+			MemoryContextAlloc(TopMemoryContext, sizeof(BdrFlushPosition));
 		flushpos->local_end = XactLastCommitEnd;
 		flushpos->remote_end = end_lsn;
 
@@ -815,6 +820,7 @@ process_remote_insert(StringInfo s)
 		if (oldxid != GetTopTransactionId())
 		{
 			CommitTransactionCommand();
+			(void) MemoryContextSwitchTo(MessageContext);
 			started_transaction = false;
 		}
 	}
