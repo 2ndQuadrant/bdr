@@ -387,6 +387,7 @@ bdr_locks_startup()
 	HeapTuple		tuple;
 	XLogRecPtr		lsn;
 	StringInfoData	s;
+	MemoryContext	old_ctx;
 
 	Assert(IsUnderPostmaster);
 	Assert(!IsTransactionState());
@@ -421,6 +422,7 @@ bdr_locks_startup()
 	XLogFlush(lsn);
 
 	/* reacquire all old ddl locks in table */
+	old_ctx = CurrentMemoryContext;
 	StartTransactionCommand();
 	snap = RegisterSnapshot(GetLatestSnapshot());
 	rel = heap_open(BdrLocksRelid, RowExclusiveLock);
@@ -496,6 +498,7 @@ bdr_locks_startup()
 	heap_close(rel, NoLock);
 
 	CommitTransactionCommand();
+	(void) MemoryContextSwitchTo(old_ctx);
 
 	elog(DEBUG2, "global locking startup completed, local DML enabled");
 
@@ -841,13 +844,16 @@ check_is_my_origin_node(uint64 sysid, TimeLineID tli, Oid datid)
 	uint64 replay_sysid;
 	TimeLineID replay_tli;
 	Oid replay_datid;
+	MemoryContext	old_ctx;
 
 	Assert(!IsTransactionState());
 
+	old_ctx = CurrentMemoryContext;
 	StartTransactionCommand();
 	bdr_fetch_sysid_via_node_id(replication_origin_id, &replay_sysid,
 								&replay_tli, &replay_datid);
 	CommitTransactionCommand();
+	(void) MemoryContextSwitchTo(old_ctx);
 
 	if (sysid != replay_sysid ||
 		tli != replay_tli ||
@@ -992,6 +998,7 @@ bdr_process_acquire_ddl_lock(uint64 sysid, TimeLineID tli, Oid datid, BDRLockTyp
 {
 	StringInfoData	s;
 	const char *lock_name = bdr_lock_type_to_name(lock_type);
+	MemoryContext	old_ctx;
 
 	Assert(!IsTransactionState());
 	Assert(bdr_worker_type == BDR_WORKER_APPLY);
@@ -1024,6 +1031,7 @@ bdr_process_acquire_ddl_lock(uint64 sysid, TimeLineID tli, Oid datid, BDRLockTyp
 			 LOCKTRACE "no prior global lock found, acquiring global lock locally");
 
 		/* Add a row to bdr_locks */
+		old_ctx = CurrentMemoryContext;
 		StartTransactionCommand();
 
 		memset(nulls, 0, sizeof(nulls));
@@ -1058,6 +1066,7 @@ bdr_process_acquire_ddl_lock(uint64 sysid, TimeLineID tli, Oid datid, BDRLockTyp
 			ForceSyncCommit(); /* async commit would be too complicated */
 			heap_close(rel, NoLock);
 			CommitTransactionCommand();
+			(void) MemoryContextSwitchTo(old_ctx);
 		}
 		PG_CATCH();
 		{
@@ -1066,6 +1075,7 @@ bdr_process_acquire_ddl_lock(uint64 sysid, TimeLineID tli, Oid datid, BDRLockTyp
 				elog(ddl_lock_log_level(DDL_LOCK_TRACE_DEBUG),
 					 LOCKTRACE "declining global lock because a conflicting global lock exists in bdr_global_locks");
 				AbortOutOfAnyTransaction();
+				(void) MemoryContextSwitchTo(old_ctx);
 				goto decline;
 			}
 			else
@@ -1139,6 +1149,7 @@ bdr_process_acquire_ddl_lock(uint64 sysid, TimeLineID tli, Oid datid, BDRLockTyp
 			 LOCKTRACE "prior lesser lock from same lock holder, upgrading the global lock locally");
 
 		Assert(!IsTransactionState());
+		old_ctx = CurrentMemoryContext;
 		StartTransactionCommand();
 		bdr_fetch_sysid_via_node_id(bdr_my_locks_database->lock_holder,
 									&replay_sysid, &replay_tli,
@@ -1182,6 +1193,7 @@ bdr_process_acquire_ddl_lock(uint64 sysid, TimeLineID tli, Oid datid, BDRLockTyp
 		heap_close(rel, NoLock);
 
 		CommitTransactionCommand();
+		(void) MemoryContextSwitchTo(old_ctx);
 
 		LWLockRelease(bdr_locks_ctl->lock);
 
@@ -1257,11 +1269,13 @@ decline:
 		bdr_prepare_message(&s, BDR_MESSAGE_DECLINE_LOCK);
 
 		Assert(!IsTransactionState());
+		old_ctx = CurrentMemoryContext;
 		StartTransactionCommand();
 		bdr_fetch_sysid_via_node_id(bdr_my_locks_database->lock_holder,
 									&replay_sysid, &replay_tli,
 									&replay_datid);
 		CommitTransactionCommand();
+		(void) MemoryContextSwitchTo(old_ctx);
 
 		pq_sendint64(&s, replay_sysid); /* sysid */
 		pq_sendint(&s, replay_tli, 4); /* tli */
@@ -1292,6 +1306,7 @@ bdr_process_release_ddl_lock(uint64 origin_sysid, TimeLineID origin_tli, Oid ori
 	bool			found = false;
 	Latch		   *latch;
 	StringInfoData	s;
+	MemoryContext	old_ctx;
 
 	Assert(bdr_worker_type == BDR_WORKER_APPLY);
 
@@ -1312,6 +1327,7 @@ bdr_process_release_ddl_lock(uint64 origin_sysid, TimeLineID origin_tli, Oid ori
 	 * Remove row from bdr_locks *before* releasing the in memory lock. If we
 	 * crash we'll replay the event again.
 	 */
+	old_ctx = CurrentMemoryContext;
 	StartTransactionCommand();
 	snap = RegisterSnapshot(GetLatestSnapshot());
 	rel = heap_open(BdrLocksRelid, RowExclusiveLock);
@@ -1330,6 +1346,7 @@ bdr_process_release_ddl_lock(uint64 origin_sysid, TimeLineID origin_tli, Oid ori
 	UnregisterSnapshot(snap);
 	heap_close(rel, NoLock);
 	CommitTransactionCommand();
+	(void) MemoryContextSwitchTo(old_ctx);
 
 	/*
 	 * Note that it's not unexpected to receive release requests for locks
@@ -1513,6 +1530,7 @@ bdr_send_confirm_lock(void)
 	Oid				replay_datid;
 	StringInfoData	s;
 	bool			found = false;
+	MemoryContext	old_ctx;
 
 	initStringInfo(&s);
 
@@ -1523,6 +1541,7 @@ bdr_send_confirm_lock(void)
 	bdr_prepare_message(&s, BDR_MESSAGE_CONFIRM_LOCK);
 
 	Assert(!IsTransactionState());
+	old_ctx = CurrentMemoryContext;
 	StartTransactionCommand();
 	bdr_fetch_sysid_via_node_id(bdr_my_locks_database->lock_holder,
 								&replay_sysid, &replay_tli,
@@ -1579,6 +1598,7 @@ bdr_send_confirm_lock(void)
 	heap_close(rel, NoLock);
 
 	CommitTransactionCommand();
+	(void) MemoryContextSwitchTo(old_ctx);
 }
 
 /*
@@ -1655,6 +1675,7 @@ bdr_locks_process_remote_startup(uint64 sysid, TimeLineID tli, Oid datid)
 	SysScanDesc scan;
 	HeapTuple tuple;
 	StringInfoData s;
+	MemoryContext	old_ctx;
 
 	Assert(bdr_worker_type == BDR_WORKER_APPLY);
 
@@ -1666,6 +1687,7 @@ bdr_locks_process_remote_startup(uint64 sysid, TimeLineID tli, Oid datid)
 		 LOCKTRACE "got startup message from node ("BDR_LOCALID_FORMAT"), clearing any locks it held",
 		 sysid, tli, datid, "");
 
+	old_ctx = CurrentMemoryContext;
 	StartTransactionCommand();
 	snap = RegisterSnapshot(GetLatestSnapshot());
 	rel = heap_open(BdrLocksRelid, RowExclusiveLock);
@@ -1701,6 +1723,7 @@ bdr_locks_process_remote_startup(uint64 sysid, TimeLineID tli, Oid datid)
 	UnregisterSnapshot(snap);
 	heap_close(rel, NoLock);
 	CommitTransactionCommand();
+	(void) MemoryContextSwitchTo(old_ctx);
 }
 
 /*
