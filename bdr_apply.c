@@ -2107,13 +2107,28 @@ check_bdr_wakeups(BDRRelation *rel)
 }
 
 static void
+read_tuple_parts_error_badatts(BDRRelation *rel, TupleDesc desc, int rnatts)
+{
+	ereport(ERROR,
+			(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+			 errmsg("remote tuple has different column count to local table"),
+			 errdetail("Table \"%s\".\"%s\" (oid %u) has %u columns on local node "BDR_LOCALID_FORMAT" vs %u on remote node "BDR_LOCALID_FORMAT,
+				 get_namespace_name(RelationGetNamespace(rel->rel)), RelationGetRelationName(rel->rel),
+				 RelationGetRelid(rel->rel),
+				 desc->natts,
+				 BDR_LOCALID_FORMAT_ARGS,
+				 rnatts,
+				 origin_sysid, origin_timeline, origin_dboid, EMPTY_REPLICATION_NAME),
+			 errhint("This error arises if the number of columns on two nodes differ. This is most commonly caused by unsafe use of the bdr.skip_ddl_replication and/or bdr.skip_ddl_locking settings.")));
+}
+
+static void
 read_tuple_parts(StringInfo s, BDRRelation *rel, BDRTupleData *tup)
 {
 	TupleDesc	desc = RelationGetDescr(rel->rel);
 	int			i;
 	int			rnatts;
 	char		action;
-	bool		atts_ok;
 
 	action = pq_getmsgbyte(s);
 
@@ -2125,84 +2140,15 @@ read_tuple_parts(StringInfo s, BDRRelation *rel, BDRTupleData *tup)
 
 	rnatts = pq_getmsgint(s, 4);
 
-	if (desc->natts == rnatts)
-	{
-		atts_ok = true;
-	}
-	else
-	{
-		/*
-		 * Hotfix for #61148 and other schema de-sync issues.
-		 */
-		if (desc->natts > rnatts)
-		{
-			/*
-			 * If the missing attribute(s) are dropped or nullable, we can
-			 * right-pad the local tuple with nulls. Attnos can never be
-			 * *inserted* in a Pg table only *appended* so this is ... fairly
-			 * safe. You could get in situations where the same attno meant
-			 * something different on different nodes, but you can do the same
-			 * when the attno count matches, so it's no worse doing the right
-			 * padding than any other time.
-			 */
-			int i;
-			for (i = rnatts; i < desc->natts; i++)
-			{
-				Form_pg_attribute att = desc->attrs[i];
-				if (!att->attisdropped && att->attnotnull)
-				{
-					elog(WARNING, "cannot right-pad mismatched attributes; attno %u is missing in remote data and local attribute is not-dropped and not nullable",
-						 i);
-					break;
-				}
-			}
-
-			/* All missing attrs were nullable and/or dropped */
-			atts_ok = true;
-		}
-	}
-
-	if (!atts_ok)
-	{
-		ereport(ERROR,
-				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("remote tuple has different column count to local table"),
-				 errdetail("Table \"%s\".\"%s\" has %u columns on local node "BDR_LOCALID_FORMAT" vs %u on remote node "BDR_LOCALID_FORMAT,
-							get_namespace_name(RelationGetNamespace(rel->rel)), RelationGetRelationName(rel->rel),
-							desc->natts,
-							BDR_LOCALID_FORMAT_ARGS,
-							rnatts,
-							origin_sysid, origin_timeline, origin_dboid, EMPTY_REPLICATION_NAME),
-				 errhint("This error arises if the number of columns on two nodes differ. This is most commonly caused by unsafe use of the bdr.skip_ddl_replication and/or bdr.skip_ddl_locking settings.")));
-	}
-
 	/* FIXME: unaligned data accesses */
 
-	for (i = 0; i < desc->natts; i++)
+	/* Consume remote data as long as there's a local column to put it in */
+	for (i = 0; i < Min(desc->natts, rnatts); i++)
 	{
 		Form_pg_attribute att = desc->attrs[i];
 		char		kind;
 		const char *data;
 		int			len;
-
-		/* Are we right-padding for missing attributes? */
-		if (i >= rnatts)
-		{
-			/*
-			 * We checked earlier that if we're right-padding missing cols,
-			 * the local att must be nullable or dropped.
-			 */
-			Assert(att->attisdropped || !att->attnotnull);
-
-			/*
-			 * Flag it null, and put some garbage in so we crash clearly if we
-			 * try to use it anyway.
-			 */
-			tup->isnull[i] = true;
-			tup->values[i] = 0xdeadbeef;
-
-			continue;
-		}
 
 		kind = pq_getmsgbyte(s);
 
@@ -2278,6 +2224,88 @@ read_tuple_parts(StringInfo s, BDRRelation *rel, BDRTupleData *tup)
 
 		if (att->attisdropped && !tup->isnull[i])
 			elog(ERROR, "data for dropped column");
+	}
+
+	/*
+	 * Handle some remote rows that are narrower than the local table. Hotfix
+	 * for RT#61148 and other schema de-sync issues; see RM#2814
+	 */
+	for (i = rnatts; i < desc->natts; i++)
+	{
+		Form_pg_attribute att = desc->attrs[i];
+
+		/*
+		 * If the remote-missing attribute(s) are locally dropped or nullable,
+		 * we can right-pad the local tuple with nulls. Attnos can never be
+		 * *inserted* in a Pg table only *appended* so this is ... fairly safe.
+		 * You could get in situations where the same attno meant something
+		 * different on different nodes, but you can do the same when the attno
+		 * count matches, so it's no worse doing the right padding than any
+		 * other time.
+		 */
+		if (!att->attisdropped && att->attnotnull)
+		{
+			/*
+			 * Theoretically we could fill DEFAULTs for NOT NULL local columns
+			 * here too, at least with bdr.ignore_mismatched_rows enabled. See
+			 * pglogical's `fill_missing_defaults` for how. But it's not meant
+			 * to be necessary anyway, so we don't. The user can recover by
+			 * ALTERing the table to be NULLable with a non-replicated DDL.
+			 */
+			elog(WARNING, "cannot right-pad mismatched attributes; attno %u is missing in remote data and local attribute is not-dropped and not nullable",
+				 i);
+			read_tuple_parts_error_badatts(rel, desc, rnatts);
+		}
+
+		/*
+		 * Flag it null, and put some garbage in so we crash clearly if we
+		 * try to use it anyway.
+		 */
+		tup->isnull[i] = true;
+		tup->values[i] = 0xdeadbeef;
+	}
+
+	/*
+	 * Discard trailing nulls on a too-wide remote tuple. See RM#2814.
+	 *
+	 * There are too many attributes in the incoming tuple. We can accept
+	 * this if we can confirm that the incoming attributes are all null,
+	 * since we're not discarding anything interesting then, and the outcome
+	 * will be the same when the missing col is added locally since we disallow
+	 * table rewrites like ALTER TABLE ... ADD COLUMN ... DEFAULT .
+	 *
+	 * Note that there's no storage for this attribute in 'tup' since it's only
+	 * as wide as the local table. As far as the caller is concerned the extra
+	 * values were never there.
+	 */
+	for (i = desc->natts; i < rnatts; i++)
+	{
+		char		kind;
+
+		kind = pq_getmsgbyte(s);
+		if (kind != 'n' && bdr_discard_mismatched_row_attributes)
+		{
+			/*
+			 * User has overridden behaviour and forced discarding of row data.
+			 * This can be useful to recover from broken replication, but it's
+			 * a bad idea since it results in divergence on these values.
+			 *
+			 * LOG is stronger than WARNING for server log and this is
+			 * important to record. Log flooding could be an issue, but this
+			 * shouldn't be used anyway, and we really want to be able to
+			 * diagnose it.
+			 */
+			elog(LOG, "WARNING: discarding non-null remote value for attribute %u on relation \"%s\".\"%s\" (%u) due to bdr.discard_mismatched_row_attributes setting. Remote natts = %u, local natts = %u",
+				 i, get_namespace_name(RelationGetNamespace(rel->rel)),
+				 RelationGetRelationName(rel->rel), RelationGetRelid(rel->rel),
+				 rnatts, desc->natts);
+		}
+		else if (kind != 'n')
+		{
+			elog(WARNING, "cannot right-pad mismatched attributes; attno %u is missing in local table and remote row has non-null, non-dropped value for this attribute",
+				 i);
+			read_tuple_parts_error_badatts(rel, desc, rnatts);
+		}
 	}
 
 	/* Don't test pq_getmsgend, there might be another message chunk */

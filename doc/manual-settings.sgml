@@ -482,6 +482,34 @@
       </listitem>
      </varlistentry>
 
+     <varlistentry id="guc-bdr-discard-mismatched-row-attributes" xreflabel="bdr.discard_mismatched_row_attributes">
+      <term><varname>bdr.discard_mismatched_row_attributes</varname> (<type>boolean</type>)
+       <indexterm>
+        <primary><varname>bdr.discard_mismatched_row_attributes</varname> configuration parameter</primary>
+       </indexterm>
+      </term>
+      <listitem>
+       <para>
+        This parameter is intended for specialist use only. It is only useful when
+        a problem has arisen where rows on the incoming replication stream have
+        more columns than the local table, and the remote rows have non-null values
+        in them. This setting overrides the error
+	<literal>cannot right-pad mismatched attributes; attno %u is missing in local table and remote row has non-null, non-dropped value for this attribute</literal>
+        and allows data divergence to arise to let replication continue. It is
+	better to fix the schema mismatch locally instead with a non-replicated
+        schema change, so the remote rows can apply.
+       </para>
+       <warning>
+        <para>
+         Inconsiderate usage of this option easily allows to break
+         replication setups.
+        </para>
+       </warning>
+      </listitem>
+     </varlistentry>
+
+bdr.discard_mismatched_row_attributes
+
      <varlistentry id="guc-bdr-trace-replay" xreflabel="bdr.trace_replay">
       <term><varname>bdr.trace_replay</varname> (<type>boolean</type>)
        <indexterm>
