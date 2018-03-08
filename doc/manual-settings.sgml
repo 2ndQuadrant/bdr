@@ -508,8 +508,6 @@
       </listitem>
      </varlistentry>
 
-bdr.discard_mismatched_row_attributes
-
      <varlistentry id="guc-bdr-trace-replay" xreflabel="bdr.trace_replay">
       <term><varname>bdr.trace_replay</varname> (<type>boolean</type>)
        <indexterm>

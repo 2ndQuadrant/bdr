@@ -15,7 +15,38 @@
   See also: <xref linkend="upgrade">.
  </para>
 
+ <sect1 id="release-1.0.5">
+
+  <title>Release 1.0.5</title>
+
+  <para><emphasis>Thu Mar 8, 2018</emphasis></para>
+
+  <para>
+   Fixes and improvements:
+   <itemizedlist>
+    <listitem><para>Work around a core postgres reorderbuffer corruption bug with a change in the BDR output plugin. See <ulink url="https://www.postgresql.org/message-id/CAMsr+YHdX=XECbZshDZ2CZNWGTyw-taYBnzqVfx4JzM4ExP5xg@mail.gmail.com">the mailing list discussion</ulink> of the issue, and commit <literal>10e659bf4a7</literal> for the workaround.</para></listitem>
+    <listitem><para>Ignore column-count mismatches if the mismatched columns are all nullable or dropped. This makes recovery from some kinds of operator errors simpler, and with sufficient care can be used to bypass DDL locking for adding new nullable columns to tables.</para></listitem>
+    <listitem><para>Fix possible deadlock in the apply worker in the <literal>find_pkey_tuple()</literal> function.</para></listitem>
+    <listitem><para>Be stricter about memory context handling and leak prevention during apply. In particular be careful not to fall back to <literal>TopMemoryContext</literal>. May help some possible memory leak issues.</para></listitem>
+    <listitem><para>Reset the apply worker memory context on every commit, not just when all messages have been consumed. May help with some possible memory leak issues.</para></listitem>
+    <listitem><para>Skip BDR 1.0.4 and bump the version straight to 1.0.5 to match BDR2</para></listitem>
+   </itemizedlist>
+  </para>
+
+ </sect1>
+
+ <sect1 id="release-1.0.4">
+
+  <title>Release 1.0.4</title>
+
+  <para><emphasis>Skipped</emphasis></para>
+
+  <para>Version number 1.0.4 was deliberately skipped over to synchronize BDR1 and BDR2 minor versions.</para>
+
+</sect1>
+
  <sect1 id="release-1.0.3">
+
   <title>Release 1.0.3</title>
 
   <para><emphasis>Tue Oct 24, 2017</emphasis></para>
