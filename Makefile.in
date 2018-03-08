@@ -337,7 +337,7 @@ additional-maintainer-clean: clean
 installcheck: ;
 
 
-check: regresscheck isolationcheck
+check: regresscheck noisolationcheck
 DDLREGRESSCHECKS=ddl/enable_ddl ddl/create ddl/alter_table ddl/extension ddl/function \
 				 ddl/grant ddl/mixed ddl/namespace ddl/read_only ddl/replication_set \
 				 ddl/sequence ddl/view ddl/disable_ddl
@@ -393,6 +393,10 @@ regresscheck: all install
 	./run_tests --config $(bdr_abs_srcdir)/$(REGRESSCONFIG) \
 		--testbinary src/test/regress/pg_regress \
 		$(REGRESSCHECKS)
+
+noisolationcheck:
+	@echo "Isolation tests are now skipped by default even on 9.4"
+	@echo "Use 'make isolationcheck' to run them"
 
 isolationcheck: all install
 	mkdir -p results/isolation
