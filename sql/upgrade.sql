@@ -182,6 +182,10 @@ ALTER EXTENSION bdr UPDATE TO '1.0.5.0';
 -- Should never have to do anything: You missed adding the new version above.
 ALTER EXTENSION bdr UPDATE;
 
+-- BDR version in code should match
+select (regexp_matches(bdr.bdr_version(), '([0-9]+\.[0-9]+\.[0-9]+)-'))[1];
+
+
 \dx bdr
 
 \c postgres
