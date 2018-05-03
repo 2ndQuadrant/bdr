@@ -905,7 +905,10 @@ cancel_conflicting_transactions(void)
 		PGXACT	   *pgxact;
 
 		if (pgproc == NULL)
+		{
+			conflict++;
 			continue;
+		}
 
 		pgxact = &ProcGlobal->allPgXact[pgproc->pgprocno];
 
