@@ -783,7 +783,7 @@ CREATE TABLE tbl_showfillfactor (name char(500), unique (name) with (fillfactor=
 --------+----------------+-----------+----------+--------------+-------------
  name   | character(500) |           | extended |              | 
 Indexes:
-    "tbl_showfillfactor_name_key" UNIQUE CONSTRAINT, btree (name) WITH (fillfactor=65)
+    "tbl_showfillfactor_name_key" UNIQUE CONSTRAINT, btree (name) WITH (fillfactor='65')
 Triggers:
     truncate_trigger AFTER TRUNCATE ON tbl_showfillfactor FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 Options: fillfactor=75
@@ -802,7 +802,7 @@ SELECT pg_xlog_wait_remote_apply(pg_current_xlog_location(), pid) FROM pg_stat_r
 --------+----------------+-----------+----------+--------------+-------------
  name   | character(500) |           | extended |              | 
 Indexes:
-    "tbl_showfillfactor_name_key" UNIQUE CONSTRAINT, btree (name) WITH (fillfactor=65)
+    "tbl_showfillfactor_name_key" UNIQUE CONSTRAINT, btree (name) WITH (fillfactor='65')
 Triggers:
     truncate_trigger AFTER TRUNCATE ON tbl_showfillfactor FOR EACH STATEMENT EXECUTE PROCEDURE bdr.queue_truncate()
 Options: fillfactor=75
