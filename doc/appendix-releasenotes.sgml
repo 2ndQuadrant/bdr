@@ -5,7 +5,7 @@
  </indexterm>
 
  <para>
-  Signficant changes to the &bdr; extension (including &udr;) are documented
+  Signficant changes to the &bdr; extension are documented
   in the release notes. Please read the release notes for all versions between
   yours and the version to plan to upgrade to before performing an upgrade,
   as there may be version-specific upgrade steps.
@@ -14,6 +14,31 @@
  <para>
   See also: <xref linkend="upgrade">.
  </para>
+
+ <sect1 id="release-0.9.4">
+  <title>Release 0.9.4</title>
+
+  <para>
+   Version 0.9.4 is minor update adding upgrade compatibility for BDR 1.0.3+.
+  </para>
+
+  <para>
+   Significant improvements to &bdr in this release include:
+   <itemizedlist>
+    <listitem><para>Support (and require) upgrading to BDR 1.0.3 and newer. Upgrades to 1.0.2 are no longer supported.</para></listitem>
+    <listitem><para>Don't acquire the global DDL lock when creating indexes on temporary tables (Michael Allen)</para></listitem>
+    <listitem><para>Elide DDL locking on DROPs of temporary relations in some cases (Michael Allen)</para></listitem>
+    <listitem><para>Skip acquiring the global DDL lock when dropping indexes on temporary tables (Michael Allen)</para></listitem>
+    <listitem><para>Fix crash on insert into a table with an expression index</para></listitem>
+    <listitem><para>Fix recovery after postmaster self-restart crash recovery (fixes "FATAL: mismatch in worker state" errors)</para></listitem>
+    <listitem><para>Fix vacuumdb -a and other commands that touch all databases</para></listitem>
+    <listitem><para>Dist tarball generation improvements</para></listitem>
+    <listitem><para>Improve error message for natts mismatch. Errors like <literal>ERROR: XX000: tuple natts mismatch, 15 vs 16</literal> instead now name the table and clearly identify remote vs local columns</literal></para></listitem>
+    <listitem><para>Backport bdr 2.0 bdr_init_copy to 0.9.x to improve reliability</para></listitem>
+   </itemizedlist>
+  </para>
+
+ </sect1>
 
  <sect1 id="release-0.9.3">
   <title>Release 0.9.3</title>
