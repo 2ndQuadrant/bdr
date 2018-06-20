@@ -1643,6 +1643,7 @@ bdr_execute_ddl_command(char *cmdstr, char *perpetrator, bool tx_just_started)
 	bool		isTopLevel;
 	MemoryContext oldcontext;
 	ErrorContextCallback errcallback;
+	int			guc_nestlevel;
 
 	oldcontext = MemoryContextSwitchTo(MessageContext);
 
@@ -1652,6 +1653,8 @@ bdr_execute_ddl_command(char *cmdstr, char *perpetrator, bool tx_just_started)
 	error_context_stack = &errcallback;
 
 	commands = pg_parse_query(cmdstr);
+
+	guc_nestlevel = NewGUCNestLevel();
 
 	MemoryContextSwitchTo(oldcontext);
 
@@ -1678,8 +1681,7 @@ bdr_execute_ddl_command(char *cmdstr, char *perpetrator, bool tx_just_started)
 
 		/*
 		 * Set the current role to the user that executed the command on the
-		 * origin server.  NB: there is no need to reset this afterwards, as
-		 * the value will be gone with our transaction.
+		 * origin server.
 		 */
 		SetConfigOption("role", perpetrator, PGC_INTERNAL, PGC_S_OVERRIDE);
 
@@ -1717,6 +1719,9 @@ bdr_execute_ddl_command(char *cmdstr, char *perpetrator, bool tx_just_started)
 	/* protect against stack resets during CONCURRENTLY processing */
 	if (error_context_stack == &errcallback)
 		error_context_stack = errcallback.previous;
+
+	/* Restore the old GUCs */
+	AtEOXact_GUC(false, guc_nestlevel);
 }
 
 
