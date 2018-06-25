@@ -15,6 +15,31 @@
   See also: <xref linkend="upgrade">.
  </para>
 
+ <sect1 id="release-1.0.6">
+
+  <title>Release 1.0.6</title>
+
+  <para><emphasis>Mon Jun 25, 2018</emphasis></para>
+
+  <para>
+   Fixes and improvements:
+   <itemizedlist>
+    <listitem>
+     <para>
+       Fix "permission denied for relation bdr_conflict_handlers" errors during
+       apply when a user procedure executed during apply sets the current user
+       and doesn't restore it on exit. The error logs will show:
+       <programlisting>
+         apply ERROR:  permission denied for relation bdr_conflict_handlers
+         apply CONTEXT:  SQL statement "SELECT ch_fun::regprocedure, ch_type::text ch_type, ch_timeframe FROM bdr.bdr_conflict_handlers   WHERE ch_reloid = $1 ORDER BY ch_type, ch_name"
+       </programlisting>
+       for such a case.
+     </para></listitem>
+   </itemizedlist>
+  </para>
+
+ </sect1>
+
  <sect1 id="release-1.0.5">
 
   <title>Release 1.0.5</title>
