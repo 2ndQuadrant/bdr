@@ -55,14 +55,14 @@
 
     <programlisting>
      # RHEL/CentOS users only:
-     sudo yum install http://packages.2ndquadrant.com/postgresql-bdr94-2ndquadrant/yum-repo-rpms/postgresql-bdr94-2ndquadrant-redhat-latest.noarch.rpm
+     sudo yum install https://rpm.2ndquadrant.com/site/content/2ndquadrant-repo-bdr9.4-1-1.el7.noarch.rpm
     </programlisting>
 
-    Fedora users should download and install the Fedora RPM for Fedora 19 and 20, or run:
+    Fedora users should download and install the Fedora RPM for Fedora 27, or run:
 
     <programlisting>
      # Fedora users only
-     sudo yum install http://packages.2ndquadrant.com/postgresql-bdr94-2ndquadrant/yum-repo-rpms/postgresql-bdr94-2ndquadrant-fedora-latest.noarch.rpm
+     sudo yum install https://rpm.2ndquadrant.com/site/content/2ndquadrant-repo-bdr9.4-1-1.fc27.noarch.rpm
     </programlisting>
    </para>
 
@@ -154,7 +154,7 @@
      Once &bdr; is installed you will need to initdb a new database,
      make any required changes to <filename>postgresql.conf</filename>
      and <filename>pg_hba.conf</filename>, etc, as per any new
-     PostgreSQl install. See
+     PostgreSQL install. See
      <filename>/usr/share/doc/postgresql-bdr94/README.rpm-dist</filename>
      for details.
     </para>
@@ -175,7 +175,7 @@
 
   <para>
    Packages for Debian and Ubuntu are available from
-   <ulink url="http://packages.2ndquadrant.com/bdr/apt/">http://packages.2ndquadrant.com/bdr/apt/</ulink>.
+   <ulink url="https://apt.2ndquadrant.com/">https://apt.2ndquadrant.com/</ulink>.
   </para>
 
   <sect3>
@@ -193,29 +193,29 @@
    </para>
 
    <para>
-    Next, create <filename>/etc/apt/sources.list.d/2ndquadrant.list</> with the
-    repository URL below, changing <replaceable>wheezy</replaceable> to the codename
-    of the Debian/Ubuntu version you are using, as obtained with <literal>lsb_release -c</literal>:
+    If not already present, install the apt-transport-https package:
     <programlisting>
-      deb http://packages.2ndquadrant.com/bdr/apt/ <replaceable>wheezy</replaceable>-2ndquadrant main
+      sudo apt-get install apt-transport-https
     </programlisting>
    </para>
 
    <para>
-    Import the repository key from <ulink url="http://packages.2ndquadrant.com/bdr/apt/AA7A6805.asc">http://packages.2ndquadrant.com/bdr/apt/AA7A6805.asc</ulink>,
-    update the package lists, and start installing packages:
+    Next, create <filename>/etc/apt/sources.list.d/2ndquadrant.list</> with the
+    repository URL below, changing <replaceable>wheezy</replaceable> to the codename
+    of the Debian/Ubuntu version you are using, as obtained with <literal>lsb_release -c</literal>:
     <programlisting>
-     wget --quiet -O - http://packages.2ndquadrant.com/bdr/apt/AA7A6805.asc | sudo apt-key add -
-     sudo apt-get update
+      deb https://apt.2ndquadrant.com/ <replaceable>wheezy</replaceable>-2ndquadrant main
     </programlisting>
    </para>
 
-   <note>
-    <para>
-     The package signing key is signed with 2ndQuadrant's master packaging/releases
-     signing key. See <xref linkend="appendix-signatures">.
-    </para>
-   </note>
+   <para>
+    Import the repository key, update the package lists, and start installing packages:
+    <programlisting>
+     sudo apt-get install curl ca-certificates
+     curl https://apt.2ndquadrant.com/site/keys/9904CD4BD6BAF0C3.asc | sudo apt-key add -
+     sudo apt-get update
+    </programlisting>
+   </para>
 
   </sect3>
 
