@@ -26,11 +26,12 @@ $MAKE clean
 rm -rf html
 $MAKE JADEFLAGS="-V website-build"
 
-echo "***Confirm that the bdrversion generated matches this git branch $(git rev-parse --abbrev-ref HEAD)***"
-read -p "Enter to configure, control-C to cancel: " DISCARD
+echo "***Confirm that the bdrversion <$rev> generated matches this git branch $(git rev-parse --abbrev-ref HEAD)***"
+cat version.sgml
+read -p "Enter to upload, control-C to cancel: " DISCARD
 
 echo -n "Uploading... "
 RSYNC_RSH="ssh -o StrictHostKeyChecking=no" rsync \
-  -r --delete html/ \
+  -r --delete html/ -v \
   $DOCHOST:$DOCDIR/$rev/
 echo "done"
