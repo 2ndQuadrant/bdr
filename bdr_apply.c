@@ -33,6 +33,8 @@
 #include "catalog/namespace.h"
 #include "catalog/pg_type.h"
 
+#include "commands/async.h"
+
 #include "executor/spi.h"
 
 #include "libpq/pqformat.h"
@@ -542,6 +544,17 @@ process_remote_commit(StringInfo s)
 		/* Stop gracefully */
 		proc_exit(0);
 	}
+
+	/*
+	 * Ensure any pending signals/self-notifies are sent out.
+	 *
+	 * Note that there is a possibility that this will result in an ERROR,
+	 * which will result in the apply worker being killed and restarted. As
+	 * the notification queues have already been flushed, the same error won't
+	 * occur again, however if errors continue, they will dramatically slow
+	 * down - but not stop - replication.
+	 */
+	ProcessCompletedNotifies();
 
 	if (error_context_stack == &errcallback)
 		error_context_stack = errcallback.previous;
