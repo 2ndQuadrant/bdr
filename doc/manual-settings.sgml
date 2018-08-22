@@ -325,7 +325,7 @@
      </varlistentry>
 
      <varlistentry id="guc-bdr-trace-ddl-locks-level" xreflabel="bdr.trace_ddl_locks_level">
-      <term><varname>bdr.trace_ddl_locks_level</varname> (<type>boolean</type>)
+      <term><varname>bdr.trace_ddl_locks_level</varname> (<type>enum</type>)
        <indexterm>
         <primary><varname>bdr.trace_ddl_locks_level</varname> configuration parameter</primary>
        </indexterm>
