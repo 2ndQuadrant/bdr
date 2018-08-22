@@ -287,10 +287,10 @@
       </listitem>
      </varlistentry>
 
-     <varlistentry id="guc-bdr-ddl-lock-timeout" xreflabel="bdr.ddl_lock_timeout">
-      <term><varname>bdr.ddl_lock_timeout</varname> (<type>milliseconds</type>)
+     <varlistentry id="guc-bdr-ddl-lock-timeout" xreflabel="bdr.bdr_ddl_lock_timeout">
+      <term><varname>bdr.bdr_ddl_lock_timeout</varname> (<type>milliseconds</type>)
        <indexterm>
-        <primary><varname>bdr.ddl_lock_timeout</varname> configuration parameter</primary>
+        <primary><varname>bdr.bdr_ddl_lock_timeout</varname> configuration parameter</primary>
        </indexterm>
       </term>
       <listitem>
