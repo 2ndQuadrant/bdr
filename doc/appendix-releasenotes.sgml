@@ -15,6 +15,27 @@
   See also: <xref linkend="upgrade">.
  </para>
 
+ <sect1 id="release-1.0.7">
+
+  <title>Release 1.0.7</title>
+
+  <para><emphasis>Friday, November 16, 2018</emphasis></para>
+
+  <para>
+   Fixes and improvements:
+   <itemizedlist>
+    <listitem>
+     <para>
+      Deliver asynchronous notifications from <literal>ENABLE ALWAYS</literal> triggers
+      in a timely and reliable way.
+     </para>
+    </listitem>
+   </itemizedlist>
+  </para>
+
+ </sect1>
+
+
  <sect1 id="release-1.0.6">
 
   <title>Release 1.0.6</title>
