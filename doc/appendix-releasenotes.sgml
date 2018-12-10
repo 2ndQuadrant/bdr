@@ -21,6 +21,8 @@
 
   <para><emphasis>Friday, November 16, 2018</emphasis></para>
 
+  <para><emphasis>Upgrading to 1.0.7 from 0.9.x requires that all nodes be running 0.9.4 (exactly, not newer) before any node is updated to 1.0.7</emphasis></para>
+
   <para>
    Fixes and improvements:
    <itemizedlist>
@@ -41,6 +43,8 @@
   <title>Release 1.0.6</title>
 
   <para><emphasis>Mon Jun 25, 2018</emphasis></para>
+
+  <para><emphasis>Upgrading to 1.0.6 from 0.9.x requires that all nodes be running 0.9.4 (exactly, not newer) before any node is updated to 1.0.6</emphasis></para>
 
   <para>
    Fixes and improvements:
@@ -66,6 +70,8 @@
   <title>Release 1.0.5</title>
 
   <para><emphasis>Thu Mar 8, 2018</emphasis></para>
+
+  <para><emphasis>Upgrading to 1.0.5 from 0.9.x requires that all nodes be running 0.9.4 (exactly, not newer) before any node is updated to 1.0.5</emphasis></para>
 
   <para>
    Fixes and improvements:
@@ -97,6 +103,8 @@
 
   <para><emphasis>Tue Oct 24, 2017</emphasis></para>
 
+  <para><emphasis>Upgrading to 1.0.3 from 0.9.x requires that all nodes be running 0.9.4 (exactly, not newer) before any node is updated to 1.0.3</emphasis></para>
+
   <para>
    Fixes and improvements:
    <itemizedlist>
@@ -116,6 +124,8 @@
   <title>Release 1.0.2</title>
 
   <para><emphasis>Mon Nov 14, 2016</></>
+
+  <para><emphasis>Upgrading to 1.0.2 from 0.9.x requires that all nodes be running 0.9.3 (exactly, not newer) before any node is updated to 1.0.2</emphasis></para>
 
   <para>
    The BDR 1.0.2 maintenance release fixes an intermittent failure in
