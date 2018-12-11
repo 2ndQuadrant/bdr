@@ -35,9 +35,9 @@
 $ mkdir -p ~/src/
 $ cd ~/src/
 # checkout the sourcecode of postgres 9.4 with bdr patches added
-$ git clone -b bdr-pg/REL9_4_STABLE git://git.postgresql.org/git/2ndquadrant_bdr.git postgresql-bdr
+$ git clone -b bdr-pg/REL9_4_STABLE https://github.com/2ndQuadrant/bdr.git postgresql-bdr 
 # checkout the sourcecode of the bdr plugin
-$ git clone -b bdr-plugin/next git://git.postgresql.org/git/2ndquadrant_bdr.git bdr-plugin
+$ git clone -b bdr-plugin/next https://github.com/2ndQuadrant/bdr.git bdr-plugin
 
 # ==  build postgres ==
 $ cd postgresql-bdr
