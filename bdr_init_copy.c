@@ -1963,7 +1963,7 @@ find_other_exec_or_die(const char *argv0, const char *target, const char *versio
 			die(_("The program \"%s\" was found by \"%s\"\n"
 						   "but was not the same version as %s.\n"
 						   "Check your installation.\n"),
-						 target, full_path, progname);
+						 found_path, full_path, progname);
 	}
 	else if (!versionstr)
 	{
@@ -1976,7 +1976,7 @@ find_other_exec_or_die(const char *argv0, const char *target, const char *versio
 			die(_("The program \"%s\" was found by \"%s\"\n"
 						   "but was not the same version as %s.\n"
 						   "Check your installation.\n"),
-						 target, full_path, progname);
+						 found_path, full_path, progname);
 
 	}
 
