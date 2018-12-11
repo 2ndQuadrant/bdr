@@ -3639,7 +3639,7 @@ deparse_CreateSeqStmt(Oid objectId, Node *parsetree)
 	elems = lappend(elems, deparse_Seq_Maxvalue(createSeq, seqdata));
 	elems = lappend(elems, deparse_Seq_Startwith(createSeq, seqdata));
 	elems = lappend(elems, deparse_Seq_Restart(createSeq, seqdata));
-	/* we purposefully do not emit OWNED BY here */
+	elems = lappend(elems, deparse_Seq_OwnedBy(createSeq, objectId));
 
 	append_array_object(createSeq, "definition", elems);
 
