@@ -28,6 +28,10 @@ while (($i < ${#argv[*]})); do
 		echo "bdr_initial_load (PostgreSQL PG_VERSION, BDR BDR_VERSION)"
 		exit
 	;;
+	--version)
+		echo "bdr_initial_load (PostgreSQL PG_VERSION, BDR BDR_VERSION)"
+		exit
+	;;
 	--snapshot)
 		((i++)); SNAPSHOT="${argv[$i]}"
 	;;
