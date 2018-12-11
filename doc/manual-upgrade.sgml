@@ -5,27 +5,55 @@
  </indexterm>
 
  <sect1>
+
+  <title>Upgrading BDR 1.x to BDR 2.x or BDR 3.x </title>
+
+  <para>
+   Contact 2ndQuadrant support for advice on upgrading from BDR 1 to later
+   versions.
+  </para>
+
+ </sect1>
+
+ <sect1>
   <title>Upgrading BDR 0.9.x to 1.0</title>
 
   <para>
-   Upgrading BDR 0.9.x to 1.0 may be done without a full outage maintenance
-   window <emphasis>if the 0.9.x nodes are first all updated to the latest
-   0.9.x version and restarted</emphasis>. Each node will need to be restarted, but this can be done with
-   rolling restarts to preserve system availability. Normal loads may continue
-   to run on the nodes, but DDL should be avoided since the global DDL lock
-   may not be acquired while one or more nodes are unreachable.
+   Upgrading BDR 0.9.x to 1.0 in-place may be done without a full outage
+   maintenance window. Each node will need to be restarted, but the restarts
+   can be done in a rolling manner to preseve availability.
   </para>
 
   <para>
-   BDR 1.0.7 cannot join a BDR 0.9.4 group, so upgrades may <emphasis>not</emphasis>
-   be performed
-   by adding new nodes and retiring the old ones. Attempting to join 1.0.7 to
-   a 0.9.4 node will fail.
+   BDR 1.0.7 can join a BDR 0.9.4 group, so upgrades may instead be performed
+   by adding new nodes and retiring the old ones. In-place upgrade is generally
+   the best option and there's little reason to upgrade this way instead.
   </para>
 
   <para>
    BDR cannot be downgraded from 1.0.x to a 0.9.x release since the BDR
-   extension catalogs have changed.
+   extension catalogs have changed. Once one node is upgraded, the node group
+   as a whole is committed to the upgrade.
+  </para>
+
+  <sect2>
+  <title>In-place upgrade</title>
+
+  <para>
+   BDR 0.9.x may be upgraded to BDR 1.0.x in-place, by upgrading each node
+   one by one.
+  </para>
+  
+  <para>
+   It is strongly recommended that all 0.9.x nodes should be first upgraded to
+   the latest 0.9.x version then restarted before any are upgraded to 1.0.x.
+   You will need to restart the nodes again after the update to 1.0.x, so there
+   are two restarts per node in total. The restarts can be rolling, so the node
+   group as a whole remains up. Most loads may continue to run on the nodes,
+   but DDL should be avoided since the global DDL lock may not be acquired
+   while one or more nodes are unreachable.  Avoid attempts to execute DDL if
+   at all possible, and try to keep the window during which the nodes have
+   different versions short.
   </para>
 
   <para>
@@ -35,35 +63,6 @@
    make sure to install the latest <literal>bdr-pg/REL9_4_STABLE</literal>
    branch (at least as new as tag <literal>bdr-pg/REL9_4_13-1</literal>).
    Downloading and installing the latest bdr-pg tarball will be fine.
-  </para>
-
-  <para>
-   To upgrade 0.9.4 to 1.0.7 the database
-   server must be restarted after new packages are installed. This will automatically update the BDR extension in the system
-   catalogs. If you are doing a rolling update where nodes stay online while
-   being updated you <emphasis>must</emphasis> update all nodes to the latest
-   0.9.x and restart them <emphasis>before</emphasis> updating any to 1.0.x.
-  </para>
-
-  <para>
-   Update steps for <emphasis>offline update where all nodes are stopped at once</emphasis> are:
-   <itemizedlist>
-    <listitem><para>Stop every node</para></listitem>
-    <listitem><para>If each node is not yet running at least BDR-postgres 9.4.13 install BDR-postgres 9.4.13</para></listitem>
-    <listitem><para>Install the BDR 1.0 extension from packages or source code</para></listitem>
-    <listitem><para>Start the node by starting PostgreSQL again</para></listitem>
-   </itemizedlist>
-  </para>
-
-  <para>
-   Update steps for rolling update where nodes are updated and restarted one-by-one are:
-   <itemizedlist>
-    <listitem><para>If each node is not yet running at least BDR-postgres 9.4.13 and bdr 0.9.4, install BDR-postgres 9.4.13 or newer and bdr 0.9.4 or newer and <emphasis>restart the nodes</emphasis>. This can be done one-by-one, but should be done promptly. Do not leave some nodes on a different version of bdr to other nodes for an extended period.</para></listitem>
-	<listitem><para>Then, for each node in turn:</para></listitem>
-	<listitem><para>Stop the node</para></listitem>
-    <listitem><para>Install the BDR 1.0.6 or newer extension from packages or source code</para></listitem>
-    <listitem><para>Start the node by starting PostgreSQL again</para></listitem>
-   </itemizedlist>
   </para>
 
   <note>
@@ -89,6 +88,31 @@
    No post-upgrade steps are required.
   </para>
 
+  </sect2>
+
+  <sect2>
+  <title>Upgrade by joining new nodes</title>
+
+  <para>
+   You can join new 1.0.x nodes to a 0.9.x cluster, then once all 1.0.x nodes are joined,
+   part and retire the 0.9.x nodes.
+  </para>
+
+  <para>
+   Test this in a QA environment before you do it live, and beware that it's very version
+   sensitive. See the BDR 1 release notes for the exact 0.9.x version you need to be
+   running for this to work.
+  </para>
+
+  <para>
+   An in-place upgrade is strongly recommended instead.
+  </para>
+
+  </sect2>
+
+  <sect2>
+   <title>Checking the upgrade</title>
+
   <para>
    To check that the upgrade has completed successfully, on each node:
    <programlisting>
@@ -103,6 +127,8 @@
    (1 row)
    </programlisting>
   </para>
+
+  </sect2>
 
  </sect1>
 
