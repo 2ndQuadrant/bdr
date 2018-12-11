@@ -190,7 +190,7 @@ bdr_nodes_get_local_info(uint64 sysid, TimeLineID tli, Oid dboid)
 		if (!isnull)
 			node->init_from_dsn = pstrdup(TextDatumGetCString(dsn));
 
-		node->read_only = DatumGetBool(fastgetattr(tuple, 8, desc, &isnull));
+		node->read_only = DatumGetBool(heap_getattr(tuple, 8, desc, &isnull));
 		/* Readonly will be null on upgrade from an older BDR */
 		if (isnull)
 			node->read_only = false;
