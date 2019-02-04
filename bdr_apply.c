@@ -302,10 +302,25 @@ process_remote_begin(StringInfo s)
 			 * This might not have to be an error condition, but we don't cope
 			 * with it for now and it shouldn't arise for use of catchup mode
 			 * for init_replica.
+			 *
+			 * We have to explicitly give the remote_origin id here because
+			 * it hasn't yet been turned into a replorigin id and stored in
+			 * remote_origin_id for use in the errcontext callback. It's fine
+			 * for this error to be verbose as we should never hit it.
 			 */
 			ereport(ERROR,
 					(errmsg("Replication loop in catchup mode"),
-					 errdetail("Received a transaction from the remote node that originated on this node")));
+					 errdetail("Received a transaction from catchup-origin node "
+					 		   BDR_LOCALID_FORMAT" that it says originated on node "
+							   BDR_LOCALID_FORMAT" in a transaction committed before "
+							   "%X/%X. The reported origin is the same as the local node's id "
+							   BDR_LOCALID_FORMAT" meaning a loop has occurred.",
+							   origin_sysid, origin_timeline, origin_dboid,"",
+							   remote_origin_sysid, remote_origin_timeline_id, remote_origin_dboid,"",
+							   (uint32)(remote_origin_lsn>>32),
+							   (uint32)remote_origin_lsn,
+							   BDR_LOCALID_FORMAT_ARGS
+					)));
 		}
 
 		/* replication_name is currently unused in bdr */
