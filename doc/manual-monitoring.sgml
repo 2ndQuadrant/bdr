@@ -122,8 +122,8 @@
     (sysid,timeline,dboid,)</literal>), and other status information:
     <programlisting>
     SELECT * FROM pg_stat_replication;
-      pid  | usesysid | usename |              application_name              | client_addr | client_hostname | client_port |         backend_start         | backend_xmin |   state   | sent_location | write_location | flush_location | replay_location | sync_priority | sync_state
-    -------+----------+---------+--------------------------------------------+-------------+-----------------+-------------+-------------------------------+--------------+-----------+---------------+----------------+----------------+-----------------+---------------+------------
+      pid  | usesysid | usename   |              application_name              | client_addr | client_hostname | client_port |         backend_start         | backend_xmin |   state   | sent_location | write_location | flush_location | replay_location | sync_priority | sync_state
+    -------+----------+-----------+--------------------------------------------+-------------+-----------------+-------------+-------------------------------+--------------+-----------+---------------+----------------+----------------+-----------------+---------------+------------
      29045 |    16385 | myadmin   | bdr (6127682459268878512,1,16386,):receive |             |                 |          -1 | 2015-03-18 21:03:28.717175+00 |              | streaming | 0/189D3B8     | 0/189D3B8      | 0/189D3B8      | 0/189D3B8       |             0 | async
      29082 |    16385 | myadmin   | bdr (6127682494973391064,1,16386,):receive |             |                 |          -1 | 2015-03-18 21:03:44.665272+00 |              | streaming | 0/189D3B8     | 0/189D3B8      | 0/189D3B8      | 0/189D3B8       |             0 | async
     </programlisting>
@@ -214,7 +214,7 @@
    </para>
 
    <para>
-    Retained <acronym>WAL</acronym> isn't additive; if you have three peers, who
+    Retained <acronym>WAL</acronym> isn't additive; if you have three peers, two
     of which require 500KB of <acronym>WAL</acronym> to be retained and one that
     requires 8MB, only 8MB is retained.  It's like a dynamic version of the
     <literal>wal_keep_segments</literal> setting (or, in 9.5,
@@ -226,7 +226,7 @@
    <para>
     It is normal for <literal>pg_replication_slots.restart_lsn</literal> not to
     advance as soon as <literal>pg_stat_replication.flush_location</literal>
-    advances on an active connection. The slot restat position does
+    advances on an active connection. The slot restart position does
     <emphasis>not</emphasis> indicate how old the data you will see on a peer
     node is.
    </para>
@@ -260,7 +260,7 @@
    The other nodes will all have single-row entries like:
    <programlisting>
 bdr_testdb=# select * from bdr.bdr_global_locks ;
-locktype |    owning_sysid     | owning_timeline | owning_datid | owner_created_lock_at |   acquired_sysid    | acquired_timeline | acquired_datid | acquired_lock_at |  state   
+ locktype |    owning_sysid     | owning_timeline | owning_datid | owner_created_lock_at |   acquired_sysid    | acquired_timeline | acquired_datid | acquired_lock_at |  state   
 ----------+---------------------+-----------------+--------------+-----------------------+---------------------+-------------------+----------------+------------------+----------
  ddl_lock | 6313760379784308337 |               1 |        16385 | 1DC11/2CEB874C        | 6313760193895071967 |                 1 |          16385 |                  | acquired
  (1 row)
