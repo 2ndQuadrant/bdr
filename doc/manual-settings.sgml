@@ -398,6 +398,18 @@
        </indexterm>
       </term>
       <listitem>
+       <warning>
+        <para>
+         <emphasis>
+          Do not use this setting unless you know exactly what you are doing.
+          DDL locking exists for a reason. See <xref linkend="ddl-replication">.
+          You will break replication, possibly unrecoverably. This setting exists
+          for internal use and for emergency repair. There are a few ways it may
+          be used as an optimisation, but many more where you'll break everything
+          instead. Do not use this.
+         </emphasis>
+        </para>
+       </warning>
        <para>
         Only affects &bdr;. Prevents acquisiton of the the global
         DDL lock when executing DDL statement. This is mainly
@@ -420,6 +432,20 @@
        </indexterm>
       </term>
       <listitem>
+       <warning>
+        <para>
+         <emphasis>
+          Do not use this setting unless you know exactly what you are doing.
+          DDL replication exists for a reason, so does DDL locking and the command
+          filter. See <xref linkend="ddl-replication"> and particularly
+          <xref linkend="ddl-replication-restricted-commands">.
+          You will break replication, possibly unrecoverably. This setting exists
+          for internal use and for emergency repair. There are a few ways it may
+          be used as an optimisation, but many more where you'll break everything
+          instead. Do not use this.
+         </emphasis>
+        </para>
+       </warning>
        <para>
         Only affects &bdr;. Permits execution of schema
         changes that cannot safely be replicated. This is primarily
@@ -443,6 +469,18 @@
        </indexterm>
       </term>
       <listitem>
+       <warning>
+        <para>
+         <emphasis>
+          Do not use this setting unless you know exactly what you are doing.
+          DDL replication exists for a reason. See <xref linkend="ddl-replication">.
+          You will break replication, possibly unrecoverably. This setting exists
+          for internal use and for emergency repair. There are a few ways it may
+          be used as an optimisation, but many more where you'll break everything
+          instead. Do not use this.
+         </emphasis>
+        </para>
+       </warning>
        <para>
         Only affects &bdr;. Skips replication of DDL changes
         made in a session where this option is set to other systems.
@@ -471,12 +509,15 @@
        <para>
         This parameter is intended for internal use only. Changes made in a
         transaction with this parameter set will not be queued for replication
-        to other nodes.
+        to other nodes. This setting may only be enabled at backend start via
+        <literal>PGOPTIONS</literal> or the <literal>options='-c ...'</literal>
+        connection-string argument.
        </para>
        <warning>
         <para>
          Inconsiderate usage of this option easily allows to break
-         replication setups.
+         replication setups. You will create inconsistent data, possibly
+         unrecoverably so.
         </para>
        </warning>
       </listitem>
