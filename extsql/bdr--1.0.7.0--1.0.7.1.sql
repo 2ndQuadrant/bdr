@@ -198,6 +198,44 @@ END;
 $$;
 
 
+CREATE VIEW bdr.replication_set_tables AS
+WITH
+  bn(node_name) AS (SELECT bdr.bdr_get_local_node_name()),
+  m(nspname, relname, memberships) AS (
+        SELECT n.nspname, c.relname, b.memberships
+        FROM pg_class c
+        INNER JOIN pg_namespace n ON c.relnamespace = n.oid
+        CROSS JOIN LATERAL bdr.table_get_replication_sets(c.oid::regclass) AS b(memberships)
+        WHERE c.relkind = 'r' AND c.relpersistence = 'p'
+        AND n.nspname !~ ANY (ARRAY['^pg_catalog$', '^bdr$', '^information_schema$', '^pg_temp.*'])
+    ),
+  rcm(nspname, relname, memberships, replicate_inserts, replicate_updates, replicate_deletes) AS (
+    SELECT m.nspname, m.relname, m.memberships,
+      coalesce(bool_or(rc.replicate_inserts), 't'),
+      coalesce(bool_or(rc.replicate_updates), 't'),
+      coalesce(bool_or(rc.replicate_deletes), 't')
+    FROM m
+    LEFT JOIN bdr.bdr_replication_set_config rc
+      ON (rc.set_name = ANY (m.memberships))
+    GROUP BY m.nspname, m.relname, m.memberships
+  )
+SELECT bn.node_name, rcm.*
+FROM bn CROSS JOIN rcm;
+
+REVOKE ALL ON TABLE bdr.replication_set_tables FROM public;
+
+CREATE VIEW bdr.replication_set_nodes AS
+SELECT
+  n.node_name, c.conn_replication_sets, o.node_name AS origin_node_name
+FROM bdr.bdr_nodes n
+INNER JOIN bdr.bdr_connections c
+  ON (n.node_sysid, n.node_timeline, n.node_dboid) = (c.conn_sysid, c.conn_timeline, c.conn_dboid)
+LEFT JOIN bdr.bdr_nodes o
+  ON (c.conn_origin_sysid, c.conn_origin_timeline, c.conn_origin_dboid) = (o.node_sysid, o.node_timeline, o.node_dboid)
+WHERE n.node_status != 'k';
+
+REVOKE ALL ON TABLE bdr.replication_set_nodes FROM public;
+
 RESET bdr.permit_unsafe_ddl_commands;
 RESET bdr.skip_ddl_replication;
 RESET search_path;

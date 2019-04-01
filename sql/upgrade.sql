@@ -186,6 +186,8 @@ ALTER EXTENSION bdr UPDATE TO '1.0.4.0';
 ALTER EXTENSION bdr UPDATE TO '1.0.5.0';
 ALTER EXTENSION bdr UPDATE TO '1.0.6.0';
 ALTER EXTENSION bdr UPDATE TO '1.0.7.0';
+ALTER EXTENSION bdr UPDATE TO '1.0.7.1';
+ALTER EXTENSION bdr UPDATE TO '1.0.8.0';
 
 -- Should never have to do anything: You missed adding the new version above.
 ALTER EXTENSION bdr UPDATE;
