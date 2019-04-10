@@ -661,6 +661,9 @@ bdr_make_apply_conflict(BdrConflictType conflict_type,
 	conflict->remote_txid = remote_txid;
 	conflict->remote_commit_lsn = replication_origin_lsn;
 
+	conflict->local_tuple_null = true;
+	conflict->local_tuple = (Datum) 0;
+	conflict->local_tuple_xmin = InvalidTransactionId;
 	if (local_tuple != NULL)
 	{
 		/* Log local tuple xmin even if actual tuple value logging is off */
@@ -673,12 +676,6 @@ bdr_make_apply_conflict(BdrConflictType conflict_type,
 			conflict->local_tuple = ExecFetchSlotTupleDatum(local_tuple);
 			conflict->local_tuple_null = false;
 		}
-	}
-	else
-	{
-		conflict->local_tuple_null = true;
-		conflict->local_tuple = (Datum) 0;
-		conflict->local_tuple_xmin = InvalidTransactionId;
 	}
 
 	if (local_tuple_origin_id != InvalidRepNodeId)
