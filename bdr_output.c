@@ -242,7 +242,6 @@ bdr_req_param(const char *param)
 static void
 bdr_ensure_node_ready(BdrOutputData *data)
 {
-	int spi_ret;
 	const uint64 sysid = GetSystemIdentifier();
 	char our_status;
 	char remote_status;
@@ -261,9 +260,6 @@ bdr_ensure_node_ready(BdrOutputData *data)
 	 * Refuse to begin replication if the local node isn't yet ready to
 	 * send data. Check the status in bdr.bdr_nodes.
 	 */
-	spi_ret = SPI_connect();
-	if (spi_ret != SPI_OK_CONNECT)
-		elog(ERROR, "Local SPI connect failed; shouldn't happen");
 	our_node = bdr_nodes_get_local_info(sysid, ThisTimeLineID, MyDatabaseId,
 										CurrentMemoryContext);
 	remote_node = bdr_nodes_get_local_info(data->remote_sysid,
@@ -275,8 +271,6 @@ bdr_ensure_node_ready(BdrOutputData *data)
 	remote_status = remote_node == NULL ? '\0' : remote_node->status;
 	bdr_bdr_node_free(our_node);
 	bdr_bdr_node_free(remote_node);
-
-	SPI_finish();
 
 	if (remote_status == 'k')
 	{

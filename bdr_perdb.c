@@ -758,20 +758,13 @@ bdr_perdb_worker_main(Datum main_arg)
 	bdr_locks_startup();
 
 	{
-		int				spi_ret;
 		BDRNodeInfo	   *local_node;
 
 		/*
 		 * Check the local bdr.bdr_nodes table to see if there's an entry for
 		 * our node.
-		 *
-		 * Note that we don't have to explicitly SPI_finish(...) on error paths;
-		 * that's taken care of for us.
 		 */
 		StartTransactionCommand();
-		spi_ret = SPI_connect();
-		if (spi_ret != SPI_OK_CONNECT)
-			elog(ERROR, "SPI already connected; this shouldn't be possible");
 
 		local_node = bdr_nodes_get_local_info(GetSystemIdentifier(), ThisTimeLineID,
 										  MyDatabaseId, CacheMemoryContext);
@@ -781,7 +774,6 @@ bdr_perdb_worker_main(Datum main_arg)
 					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 					 errmsg("local node record not found")));
 
-		SPI_finish();
 		CommitTransactionCommand();
 
 		/*
