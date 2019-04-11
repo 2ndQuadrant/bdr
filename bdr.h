@@ -561,7 +561,7 @@ extern int bdr_parse_version(const char * bdr_version_str, int *o_major,
 extern char bdr_nodes_get_local_status(uint64 sysid, TimeLineID tli,
 									   Oid dboid);
 extern BDRNodeInfo * bdr_nodes_get_local_info(uint64 sysid, TimeLineID tli,
-										  Oid dboid);
+										  Oid dboid, MemoryContext context);
 extern void bdr_bdr_node_free(BDRNodeInfo *node);
 extern void bdr_nodes_set_local_status(char status);
 extern List* bdr_read_connection_configs(void);

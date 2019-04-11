@@ -115,7 +115,6 @@ bdr_nodecache_lookup(BDRNodeId nodeid, bool missing_ok)
 	BDRNodeInfo	   *entry,
 				   *nodeinfo;
 	bool			found;
-	MemoryContext	saved_ctx;
 
 	/* potentially need to access syscaches */
 	Assert(IsTransactionState());
@@ -137,11 +136,10 @@ bdr_nodecache_lookup(BDRNodeId nodeid, bool missing_ok)
 		   0,
 		   sizeof(BDRNodeInfo) - offsetof(BDRNodeInfo, valid));
 
-	saved_ctx = MemoryContextSwitchTo(TopMemoryContext);
 	nodeinfo = bdr_nodes_get_local_info(nodeid.sysid,
 										nodeid.timeline,
-										nodeid.dboid);
-	MemoryContextSwitchTo(saved_ctx);
+										nodeid.dboid,
+										CacheMemoryContext);
 
 	if (nodeinfo == NULL)
 	{

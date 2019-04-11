@@ -759,7 +759,6 @@ bdr_perdb_worker_main(Datum main_arg)
 
 	{
 		int				spi_ret;
-		MemoryContext	saved_ctx;
 		BDRNodeInfo	   *local_node;
 
 		/*
@@ -774,10 +773,8 @@ bdr_perdb_worker_main(Datum main_arg)
 		if (spi_ret != SPI_OK_CONNECT)
 			elog(ERROR, "SPI already connected; this shouldn't be possible");
 
-		saved_ctx = MemoryContextSwitchTo(TopMemoryContext);
 		local_node = bdr_nodes_get_local_info(GetSystemIdentifier(), ThisTimeLineID,
-										  MyDatabaseId);
-		MemoryContextSwitchTo(saved_ctx);
+										  MyDatabaseId, CacheMemoryContext);
 
 		if (local_node == NULL)
 			ereport(ERROR,

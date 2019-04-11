@@ -264,10 +264,13 @@ bdr_ensure_node_ready(BdrOutputData *data)
 	spi_ret = SPI_connect();
 	if (spi_ret != SPI_OK_CONNECT)
 		elog(ERROR, "Local SPI connect failed; shouldn't happen");
+	our_node = bdr_nodes_get_local_info(sysid, ThisTimeLineID, MyDatabaseId,
+										CurrentMemoryContext);
+	remote_node = bdr_nodes_get_local_info(data->remote_sysid,
+										   data->remote_timeline,
+										   data->remote_dboid,
+										   CurrentMemoryContext);
 
-	our_node = bdr_nodes_get_local_info(sysid, ThisTimeLineID, MyDatabaseId);
-	remote_node = bdr_nodes_get_local_info(
-		data->remote_sysid, data->remote_timeline, data->remote_dboid);
 	our_status = our_node == NULL ? '\0' : our_node->status;
 	remote_status = remote_node == NULL ? '\0' : remote_node->status;
 	bdr_bdr_node_free(our_node);

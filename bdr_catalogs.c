@@ -130,12 +130,14 @@ bdr_nodes_get_local_status(uint64 sysid, TimeLineID tli, Oid dboid)
  * Get the bdr.bdr_nodes record for the specififed node from the local
  * bdr.bdr_nodes table via SPI.
  *
- * Returns the status value, or NULL if no such row exists.
+ * Returns the status value, allocated in the given memory context, or NULL if
+ * no such row exists.
  *
  * SPI must be initialized, and you must be in a running transaction.
  */
 BDRNodeInfo *
-bdr_nodes_get_local_info(uint64 sysid, TimeLineID tli, Oid dboid)
+bdr_nodes_get_local_info(uint64 sysid, TimeLineID tli, Oid dboid,
+						 MemoryContext context)
 {
 	BDRNodeInfo *node = NULL;
 	char		sysid_str[33];
@@ -144,6 +146,7 @@ bdr_nodes_get_local_info(uint64 sysid, TimeLineID tli, Oid dboid)
 	RangeVar   *rv;
 	SysScanDesc scan;
 	ScanKeyData	key[3];
+	MemoryContext oldcxt;
 
 	snprintf(sysid_str, sizeof(sysid_str), UINT64_FORMAT, sysid);
 	sysid_str[sizeof(sysid_str)-1] = '\0';
@@ -174,6 +177,8 @@ bdr_nodes_get_local_info(uint64 sysid, TimeLineID tli, Oid dboid)
 		TupleDesc	desc = RelationGetDescr(rel);
 		Datum		dsn;
 
+		oldcxt = MemoryContextSwitchTo(context);
+
 		node = palloc0(sizeof(BDRNodeInfo));
 		node->id.sysid = sysid;
 		node->id.timeline = tli;
@@ -195,6 +200,8 @@ bdr_nodes_get_local_info(uint64 sysid, TimeLineID tli, Oid dboid)
 		if (isnull)
 			node->read_only = false;
 		node->valid = true;
+
+		MemoryContextSwitchTo(oldcxt);
 	}
 
 	systable_endscan(scan);
