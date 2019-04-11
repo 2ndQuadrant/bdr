@@ -184,11 +184,11 @@ bdr_nodes_get_local_info(uint64 sysid, TimeLineID tli, Oid dboid)
 
 		dsn = fastgetattr(tuple, 6, desc, &isnull);
 		if (!isnull)
-			node->local_dsn = pstrdup(TextDatumGetCString(dsn));
+			node->local_dsn = TextDatumGetCString(dsn);
 
 		dsn = fastgetattr(tuple, 7, desc, &isnull);
 		if (!isnull)
-			node->init_from_dsn = pstrdup(TextDatumGetCString(dsn));
+			node->init_from_dsn = TextDatumGetCString(dsn);
 
 		node->read_only = DatumGetBool(heap_getattr(tuple, 8, desc, &isnull));
 		/* Readonly will be null on upgrade from an older BDR */
