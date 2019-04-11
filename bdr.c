@@ -386,6 +386,7 @@ bdr_create_slot(PGconn *streamConn, Name slot_name,
 {
 	StringInfoData query;
 	PGresult   *res;
+	MemoryContext	cxt = CurrentMemoryContext;
 
 	initStringInfo(&query);
 
@@ -417,6 +418,7 @@ bdr_create_slot(PGconn *streamConn, Name slot_name,
 
 	/* now commit local identifier */
 	CommitTransactionCommand();
+	MemoryContextSwitchTo(cxt);
 	CurrentResourceOwner = bdr_saved_resowner;
 	elog(DEBUG1, "created replication identifier %u", *replication_identifier);
 
@@ -440,6 +442,7 @@ bdr_bgworker_init(uint32 worker_arg, BdrWorkerType worker_type)
 	uint16	worker_generation;
 	uint16	worker_idx;
 	char   *dbname;
+	MemoryContext	cxt;
 
 	Assert(IsBackgroundWorker);
 
@@ -494,9 +497,11 @@ bdr_bgworker_init(uint32 worker_arg, BdrWorkerType worker_type)
 
 	/* make sure BDR extension is up2date */
 	bdr_executor_always_allow_writes(true);
+	cxt = CurrentMemoryContext;
 	StartTransactionCommand();
 	bdr_maintain_schema(true);
 	CommitTransactionCommand();
+	MemoryContextSwitchTo(cxt);
 	bdr_executor_always_allow_writes(false);
 
 	/* always work in our own schema */
@@ -570,6 +575,7 @@ bdr_establish_connection_and_slot(const char *dsn,
 	bool		tx_started = false;
 	NameData	appname;
 	char		*remote_ident;
+	MemoryContext	cxt;
 
 	/*
 	 * Make sure the local and remote nodes aren't the same node.
@@ -598,12 +604,16 @@ bdr_establish_connection_and_slot(const char *dsn,
 
 	if (!IsTransactionState())
 	{
+		cxt = CurrentMemoryContext;
 		tx_started = true;
 		StartTransactionCommand();
 	}
 	*out_replication_identifier = GetReplicationIdentifier(remote_ident, true);
 	if (tx_started)
+	{
 		CommitTransactionCommand();
+		MemoryContextSwitchTo(cxt);
+	}
 
 	if (OidIsValid(*out_replication_identifier))
 	{

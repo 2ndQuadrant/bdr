@@ -832,6 +832,7 @@ bdr_commandfilter(Node *parsetree,
 	/* check for read-only mode */
 	{
 		const char * tag = NULL;
+
 		if (bdr_local_node_read_only() && !allowed_on_read_only_node(parsetree, &tag))
 			ereport(ERROR,
 					(errcode(ERRCODE_READ_ONLY_SQL_TRANSACTION),

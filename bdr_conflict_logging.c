@@ -66,6 +66,7 @@ void
 bdr_conflict_logging_startup()
 {
 	Oid schema_oid;
+	MemoryContext	cxt = CurrentMemoryContext;
 
 	conflict_log_context = AllocSetContextCreate(CurrentMemoryContext,
 		"bdr_log_conflict_ctx", ALLOCSET_DEFAULT_MINSIZE,
@@ -87,6 +88,7 @@ bdr_conflict_logging_startup()
 		ObjectIdGetDatum(schema_oid));
 
 	CommitTransactionCommand();
+	MemoryContextSwitchTo(cxt);
 }
 
 /*

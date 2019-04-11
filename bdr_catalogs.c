@@ -299,6 +299,7 @@ bdr_nodes_set_local_status(char status)
 	char		sysid_str[33];
 	bool		tx_started = false;
 	bool		spi_pushed;
+	MemoryContext	cxt = CurrentMemoryContext;
 
 	Assert(status != '\0'); /* Cannot pass \0 */
 	/* Cannot have replication apply state set in this tx */
@@ -339,7 +340,10 @@ bdr_nodes_set_local_status(char status)
 	SPI_finish();
 	SPI_pop_conditional(spi_pushed);
 	if (tx_started)
+	{
 		CommitTransactionCommand();
+		MemoryContextSwitchTo(cxt);
+	}
 }
 
 /*

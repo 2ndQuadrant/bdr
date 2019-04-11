@@ -133,6 +133,7 @@ bdr_supervisor_rescan_dbs()
 	SysScanDesc scan;
 	HeapTuple	secTuple;
 	int			n_new_workers = 0, bdr_dbs = 0;
+	MemoryContext	cxt = CurrentMemoryContext;
 
 	elog(DEBUG1, "Supervisor scanning for BDR-enabled databases");
 
@@ -244,6 +245,7 @@ bdr_supervisor_rescan_dbs()
 	heap_close(secrel, RowShareLock);
 
 	CommitTransactionCommand();
+	MemoryContextSwitchTo(cxt);
 
 	elog(DEBUG2, "Finished scanning for BDR-enabled databases");
 

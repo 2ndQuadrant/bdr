@@ -2692,7 +2692,6 @@ bdr_apply_reload_config()
 			elog(DEBUG1, "Apply worker exiting to apply new replication set configuration");
 			proc_exit(1);
 		}
-
 	}
 }
 
@@ -2904,6 +2903,7 @@ bdr_apply_main(Datum main_arg)
 	XLogRecPtr	start_from;
 	NameData	slot_name;
 	char		status;
+	MemoryContext	cxt;
 
 	bdr_bgworker_init(DatumGetInt32(main_arg), BDR_WORKER_APPLY);
 
@@ -2929,6 +2929,7 @@ bdr_apply_main(Datum main_arg)
 	LWLockRelease(BdrWorkerCtl->lock);
 
 	/* Check if we decided to kill off this connection */
+	cxt = CurrentMemoryContext;
 	StartTransactionCommand();
 	SPI_connect();
 	status = bdr_nodes_get_local_status(
@@ -2937,6 +2938,7 @@ bdr_apply_main(Datum main_arg)
 		bdr_apply_worker->remote_dboid);
 	SPI_finish();
 	CommitTransactionCommand();
+	MemoryContextSwitchTo(cxt);
 	if (status == 'k')
 	{
 		elog(LOG, "unregistering worker, node has been killed");
